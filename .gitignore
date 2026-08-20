@@ -1,0 +1,39 @@
+# Models and runtime binaries
+models/
+runtime/llama.cpp/
+runtime/*.zip
+runtime/llama-server-help.txt
+
+# Application data
+data/
+logs/
+*.db
+*.db-journal
+
+# Secrets
+.env
+.env.local
+secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+backend/.venv/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Test artifacts
+tests/output/
+desktop.ini

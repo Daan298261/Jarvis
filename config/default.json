@@ -1,0 +1,31 @@
+{
+  "bind_host": "127.0.0.1",
+  "bind_port": 4780,
+  "lan_access": false,
+  "auth_required": false,
+  "inference": {
+    "backend": "llama.cpp",
+    "host": "127.0.0.1",
+    "port": 8088,
+    "profile": "balanced",
+    "context_size": 32768,
+    "flash_attn": "auto",
+    "fit": true,
+    "fit_target_mib": 1024,
+    "cache_type_k": "q8_0",
+    "cache_type_v": "q8_0",
+    "threads": 0,
+    "auto_load": true
+  },
+  "autonomy": "trusted",
+  "default_timeout_seconds": 1800,
+  "retry_limit": 4,
+  "logging_level": "INFO",
+  "backup_enabled": true,
+  "browser": {
+    "headless": false,
+    "timeout_ms": 30000
+  },
+  "allowed_directories": [],
+  "mcp_servers": []
+}
