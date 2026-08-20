@@ -16,10 +16,14 @@ export type Task = {
   prompt: string
   status: string
   stage: string
+  execution_mode?: string
+  task_class?: string
+  acceptance_criteria?: string
   current_action: string
   current_tool: string
   result: string
   error: string
+  verification?: string
   retries: number
   duration_seconds: number
   created_at: string

@@ -24,6 +24,8 @@ class Task(Base):
     stage: Mapped[str] = mapped_column(String(64), default="queued")
     autonomy: Mapped[str] = mapped_column(String(32), default="trusted")
     profile: Mapped[str] = mapped_column(String(32), default="balanced")
+    execution_mode: Mapped[str] = mapped_column(String(32), default="balanced")
+    task_class: Mapped[str] = mapped_column(String(64), default="")
     acceptance_criteria: Mapped[str] = mapped_column(Text, default="")
     plan_json: Mapped[str] = mapped_column(Text, default="[]")
     summary: Mapped[str] = mapped_column(Text, default="")

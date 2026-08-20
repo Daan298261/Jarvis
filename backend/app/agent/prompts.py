@@ -56,3 +56,18 @@ If verification fails, fix it, then report.
 STOP_AND_REPORT = """The requested files or actions appear to already exist. Do not call more tools. Write the final report now covering what was done, what changed, what was verified, and anything unresolved."""
 
 CONTINUE_PROMPT = """Continue the existing task. Recover from saved state. Do not restart from scratch unless the previous work is invalid. Verify the current world state first, then complete remaining acceptance criteria."""
+
+CRITIC_PROMPT = """Critique the plan before doing more work.
+
+Check for:
+- missing inspection of the actual files, apps, or environment
+- steps that are less deterministic than an API, CLI, or library
+- likely failure points and a recovery path
+- a safer first action
+
+Then continue with the improved plan. Use tools now. Do not wait for the user."""
+
+VERIFY_REQUIRED_PROMPT = """Verification is required before completion.
+
+Inspect the actual result with a tool (read the file, re-run the command, reopen the page, or equivalent).
+Do not declare success from memory. After the inspection, write the final report."""

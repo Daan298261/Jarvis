@@ -59,9 +59,14 @@ class PythonTool(Tool):
 
     def _python_bin(self, venv_path: str | None) -> str:
         if venv_path:
-            candidate = Path(venv_path) / "Scripts" / "python.exe"
-            if candidate.exists():
-                return str(candidate)
+            root = Path(venv_path)
+            for candidate in (
+                root / "Scripts" / "python.exe",
+                root / "bin" / "python",
+                root / "bin" / "python3",
+            ):
+                if candidate.exists():
+                    return str(candidate)
         return "python"
 
     async def execute(self, **kwargs: Any) -> ToolResult:

@@ -70,11 +70,14 @@ export function ChatPage() {
             <div className="kv">
               <b>Task</b><span>{task.title}</span>
               <b>Status</b><span className={`badge ${task.status}`}>{task.status}</span>
+              <b>Mode</b><span>{task.execution_mode || "balanced"}</span>
+              <b>Class</b><span>{task.task_class || "—"}</span>
               <b>Stage</b><span>{task.stage}</span>
               <b>Action</b><span>{task.current_action || "—"}</span>
               <b>Tool</b><span>{task.current_tool || "—"}</span>
               <b>Elapsed</b><span className="stat">{elapsed || Math.round(task.duration_seconds || 0)}s</span>
               <b>Retries</b><span>{task.retries}</span>
+              <b>Verified</b><span>{task.verification ? "yes" : "pending"}</span>
             </div>
           ) : (
             <p className="lede">No active task.</p>

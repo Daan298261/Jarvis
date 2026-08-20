@@ -2,6 +2,8 @@
 
 Self-hosted local desktop agent. The model is **Qwen3.5-27B** running entirely on this computer through llama.cpp. The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations.
 
+Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. That file is the persistent architecture, current state, and development queue.
+
 ## Hardware this install was tuned for
 
 - Windows 11 Pro

@@ -20,6 +20,7 @@ class SettingsUpdate(BaseModel):
     bind_port: int | None = None
     backup_enabled: bool | None = None
     profile: str | None = None
+    execution_mode: str | None = None
     browser_headless: bool | None = None
 
 
@@ -53,6 +54,8 @@ async def update_settings(body: SettingsUpdate):
         settings.backup_enabled = body.backup_enabled
     if body.profile is not None:
         settings.inference.profile = body.profile
+    if body.execution_mode is not None:
+        settings.execution_mode = body.execution_mode
     if body.browser_headless is not None:
         settings.browser.headless = body.browser_headless
     save_settings(settings)

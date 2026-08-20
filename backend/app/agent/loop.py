@@ -9,19 +9,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
-
 from ..config import AppSettings, load_settings
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
-from ..providers.base import ChatMessage, parse_tool_arguments
+from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
-from .prompts import CONTINUE_PROMPT, PLAN_PROMPT, STOP_AND_REPORT, SYSTEM_PROMPT, VERIFY_PROMPT
+from .planning import WorkingState, classify_task, parse_plan_block, resolve_execution_policy
+from .prompts import (
+    CONTINUE_PROMPT,
+    CRITIC_PROMPT,
+    PLAN_PROMPT,
+    STOP_AND_REPORT,
+    SYSTEM_PROMPT,
+    VERIFY_PROMPT,
+    VERIFY_REQUIRED_PROMPT,
+)
 
 
 def _environment_block(settings: AppSettings) -> str:
@@ -55,8 +62,15 @@ class AgentRuntime:
         self._tasks: dict[str, asyncio.Task] = {}
         self._cancel = set()
 
-    async def create_task(self, prompt: str, autonomy: str | None = None, profile: str | None = None) -> Task:
+    async def create_task(
+        self,
+        prompt: str,
+        autonomy: str | None = None,
+        profile: str | None = None,
+        execution_mode: str | None = None,
+    ) -> Task:
         settings = load_settings()
+        mode = execution_mode or settings.execution_mode or "balanced"
         task = Task(
             id=str(uuid.uuid4()),
             title=prompt.strip().splitlines()[0][:120],
@@ -65,6 +79,8 @@ class AgentRuntime:
             stage="queued",
             autonomy=autonomy or settings.autonomy,
             profile=profile or settings.inference.profile,
+            execution_mode=mode,
+            task_class=classify_task(prompt),
         )
         async with SessionLocal() as session:
             session.add(task)
@@ -129,6 +145,19 @@ class AgentRuntime:
                 task.duration_seconds = (task.finished_at - task.started_at).total_seconds()
             await session.commit()
 
+    async def _complete(self, task_id: str, messages: list[ChatMessage], content: str, verification: str) -> None:
+        await self._update(
+            task_id,
+            status="completed",
+            stage="completed",
+            result=content,
+            conversation_json=serialize_messages(messages),
+            verification=verification,
+            current_action="Completed",
+            current_tool="",
+        )
+        await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+
     async def _run(
         self,
         task_id: str,
@@ -154,7 +183,14 @@ class AgentRuntime:
             prompt = task.prompt
             autonomy = task.autonomy
             profile_name = task.profile
+            execution_mode = task.execution_mode or settings.execution_mode or "balanced"
             existing = deserialize_messages(task.conversation_json)
+            working = WorkingState.loads(task.compact_memory)
+            if not working.goal:
+                working.goal = prompt.strip().splitlines()[0][:240]
+            if not working.task_class:
+                working.task_class = task.task_class or classify_task(prompt)
+        policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
@@ -175,8 +211,9 @@ class AgentRuntime:
             ]
 
         recent_hashes: list[str] = []
-        max_steps = 28
+        max_steps = policy.max_steps
         verifying = False
+        critic_done = False
         tools_used = False
         consecutive_failures = 0
         tool_rounds = 0
@@ -195,60 +232,87 @@ class AgentRuntime:
                     content=result_text,
                 )
             )
+            tools_used = True
 
         try:
-            for step in range(max_steps):
+            for _step in range(max_steps):
                 if task_id in self._cancel:
                     await self._update(task_id, status="cancelled", stage="cancelled", current_action="Cancelled")
                     await BUS.publish(task_id, "cancelled", "Task cancelled")
                     return
-                await self._update(task_id, stage="act" if not verifying else "verify", current_action="Waiting on model")
-                await BUS.publish(task_id, "model", "Writing final report" if force_final else ("Model is thinking" if profile.thinking else "Model is responding"), stage="act")
+                await self._update(
+                    task_id,
+                    stage="verify" if verifying else "act",
+                    current_action="Waiting on model",
+                    compact_memory=working.dumps(),
+                    execution_mode=execution_mode,
+                    task_class=working.task_class,
+                )
+                await BUS.publish(
+                    task_id,
+                    "model",
+                    "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if profile.thinking else "Model is responding")),
+                    stage="verify" if verifying else "act",
+                )
                 messages = compact_history(messages)
                 try:
-                    result = await asyncio.wait_for(
+                    result: ChatResult = await asyncio.wait_for(
                         provider.chat(
                             messages,
                             tools=None if force_final else REGISTRY.openai_tools(),
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
-                            thinking=False if force_final else (profile.thinking and not verifying),
+                            thinking=False if force_final or verifying else (profile.thinking and not verifying),
                             max_tokens=400 if force_final else 1024,
                         ),
                         timeout=90 if force_final else 180,
                     )
                 except TimeoutError:
-                    content = "The model timed out while writing the final report. Actions already executed are in the activity log; the requested files should be verified from that log."
+                    if tools_used and verifying:
+                        content = (
+                            "The model timed out while writing the final report. "
+                            "Actions already executed are in the activity log; verify files from that log."
+                        )
+                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.")
+                        return
+                    content = "The model timed out before verification completed."
                     await self._update(
                         task_id,
-                        status="completed" if tools_used else "failed",
-                        stage="completed" if tools_used else "failed",
+                        status="failed",
+                        stage="failed",
                         result=content,
-                        current_action="Completed with timeout",
+                        error=content,
+                        current_action="Failed: model timeout before verification",
                         current_tool="",
                     )
-                    await BUS.publish(task_id, "completed" if tools_used else "failed", "Task ended after model timeout", content, stage="completed")
-                    return
-                await MANAGER.record_timings(result.timings)
-                if force_final:
-                    content = (result.content or "").strip() or "Task finished. The tool log contains the actions that were taken and verified."
-                    messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
-                    await self._update(
-                        task_id,
-                        status="completed",
-                        stage="completed",
-                        result=content,
-                        conversation_json=serialize_messages(messages),
-                        verification="Forced final report after sufficient tool evidence.",
-                        current_action="Completed",
-                        current_tool="",
-                    )
-                    await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+                    await BUS.publish(task_id, "failed", "Task ended after model timeout", content, stage="failed")
                     return
                 await MANAGER.record_timings(result.timings)
                 if result.reasoning:
                     await BUS.publish(task_id, "progress", "Reasoning complete", result.reasoning[-1500:], stage="act")
+
+                if force_final:
+                    content = (result.content or "").strip() or (
+                        "Task finished. The tool log contains the actions that were taken and verified."
+                    )
+                    messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
+                    working.verified = True
+                    await self._update(task_id, compact_memory=working.dumps())
+                    await self._complete(task_id, messages, content, content)
+                    return
+
+                parsed = parse_plan_block(result.content or "")
+                if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
+                    working.apply_plan(parsed, prompt)
+                    await self._update(
+                        task_id,
+                        acceptance_criteria="\n".join(working.acceptance_criteria),
+                        plan_json=json.dumps(working.plan),
+                        compact_memory=working.dumps(),
+                        summary=working.goal,
+                    )
+
                 if result.tool_calls:
                     tools_used = True
                     tool_rounds += 1
@@ -277,6 +341,7 @@ class AgentRuntime:
                             observation = "Repeated identical failing/identical tool call blocked. Choose a different strategy."
                             await BUS.publish(task_id, "retry", "Blocked identical retry", observation, stage="diagnose")
                             messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
+                            working.note_tool(name, observation, False)
                             continue
                         recent_hashes.append(signature)
                         tool_meta = REGISTRY.tools.get(name)
@@ -290,18 +355,21 @@ class AgentRuntime:
                                 confirmation_payload=json.dumps({"id": call["id"], "name": name, "arguments": arguments}),
                                 current_action=f"Waiting for confirmation: {name}",
                                 conversation_json=serialize_messages(messages),
+                                compact_memory=working.dumps(),
                             )
                             await BUS.publish(task_id, "confirm", f"Confirmation required for {name}", json.dumps(arguments)[:1500], stage="act")
                             return
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
                         observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
-                        if "ERROR:" in observation or observation.lower().startswith("error"):
+                        failed = "ERROR:" in observation or observation.lower().startswith("error")
+                        if failed:
                             consecutive_failures += 1
                             await BUS.publish(task_id, "error", f"{name} failed", observation[:1500], stage="diagnose")
                         else:
                             consecutive_failures = 0
                             await BUS.publish(task_id, "observation", f"{name} finished", observation[:1500], stage="observe")
+                        working.note_tool(name, observation, not failed)
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
                             messages.append(_image_message(attach))
@@ -312,38 +380,59 @@ class AgentRuntime:
                                 content="Multiple consecutive tool failures. Inspect the errors, change strategy, and do not repeat the same command.",
                             )
                         )
-                    elif verifying and verify_tool_rounds >= 2:
-                        messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))
-                    elif same_tool_streak >= 3:
+                    elif verifying and verify_tool_rounds >= policy.max_verify_tools:
                         force_final = True
                         messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))
-                    elif tool_rounds >= 8 and not verifying:
-                        force_final = True
-                        messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))
+                    elif not verifying and tool_rounds >= policy.force_verify_after:
+                        verifying = True
+                        working.next_action = "independent verification"
+                        await self._update(task_id, stage="verify", current_action="Independent verification")
+                        await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
+                        messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
+                    elif same_tool_streak >= 3 and not verifying:
+                        verifying = True
+                        await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
+                        messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
                     await self._update(
                         task_id,
                         conversation_json=serialize_messages(messages),
                         retries=consecutive_failures,
+                        compact_memory=working.dumps(),
                         current_action=f"Ran {primary}" if primary else "Observed tools",
                     )
                     continue
 
                 content = (result.content or "").strip()
                 messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
-                await self._update(task_id, conversation_json=serialize_messages(messages), result=content)
-                if not tools_used:
-                    messages.append(ChatMessage(role="user", content="Now execute the plan with tools. Do not conclude until the end state exists on disk or in the environment."))
+                await self._update(task_id, conversation_json=serialize_messages(messages), result=content, compact_memory=working.dumps())
+
+                if policy.critic_pass and not critic_done and not verifying:
+                    critic_done = True
+                    await BUS.publish(task_id, "stage", "Critiquing plan", stage="plan")
+                    messages.append(ChatMessage(role="user", content=CRITIC_PROMPT))
                     continue
-                await self._update(
-                    task_id,
-                    status="completed",
-                    stage="completed",
-                    result=content,
-                    verification="Completed after tool execution; model returned a final report without further tool calls.",
-                    current_action="Completed",
-                    current_tool="",
-                )
-                await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+                if not tools_used:
+                    messages.append(
+                        ChatMessage(
+                            role="user",
+                            content="Now execute the plan with tools. Do not conclude until the end state exists on disk or in the environment.",
+                        )
+                    )
+                    continue
+                if not verifying:
+                    verifying = True
+                    working.next_action = "independent verification"
+                    await self._update(task_id, stage="verify", current_action="Independent verification", compact_memory=working.dumps())
+                    await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
+                    messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
+                    continue
+                if policy.require_verify_tools and verify_tool_rounds == 0:
+                    messages.append(ChatMessage(role="user", content=VERIFY_REQUIRED_PROMPT))
+                    continue
+                working.verified = True
+                verification = content or "Independent verification pass completed; acceptance criteria checked."
+                await self._update(task_id, compact_memory=working.dumps(), verification=verification)
+                await self._complete(task_id, messages, content or verification, verification)
                 return
             await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification")
             await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
@@ -383,7 +472,9 @@ class AgentRuntime:
             await session.commit()
         attach = None
         if isinstance(result.data, dict):
-            attach = result.data.get("attach_image") or result.data.get("path") if name in {"screenshot", "browser"} and result.data.get("attach_image") else result.data.get("attach_image")
+            attach = result.data.get("attach_image") or (
+                result.data.get("path") if name in {"screenshot", "browser"} and result.data.get("attach_image") else result.data.get("attach_image")
+            )
         return result.text(), attach
 
 

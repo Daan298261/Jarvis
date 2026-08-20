@@ -20,6 +20,7 @@
   "autonomy": "trusted",
   "default_timeout_seconds": 1800,
   "retry_limit": 4,
+  "execution_mode": "balanced",
   "logging_level": "INFO",
   "backup_enabled": true,
   "browser": {

@@ -72,6 +72,7 @@ class AppSettings(BaseModel):
     autonomy: str = "trusted"
     default_timeout_seconds: int = 1800
     retry_limit: int = 4
+    execution_mode: str = "balanced"
     logging_level: str = "INFO"
     backup_enabled: bool = True
     browser: BrowserSettings = Field(default_factory=BrowserSettings)

@@ -21,6 +21,13 @@ export function SettingsPage() {
             <option value="autonomous">Autonomous</option>
           </select>
         </label>
+        <label>Execution mode
+          <select value={settings.execution_mode || "balanced"} onChange={(e) => save({ execution_mode: e.target.value })}>
+            <option value="fast">Fast</option>
+            <option value="balanced">Balanced</option>
+            <option value="reliable">Reliable</option>
+          </select>
+        </label>
         <label>Default timeout (seconds)
           <input type="number" value={settings.default_timeout_seconds} onChange={(e) => save({ default_timeout_seconds: Number(e.target.value) })} />
         </label>

@@ -19,6 +19,7 @@ class TaskCreate(BaseModel):
     prompt: str
     autonomy: str | None = None
     profile: str | None = None
+    execution_mode: str | None = None
 
 
 class ContinueBody(BaseModel):
@@ -35,6 +36,9 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "stage": task.stage,
         "autonomy": task.autonomy,
         "profile": task.profile,
+        "execution_mode": getattr(task, "execution_mode", None) or "balanced",
+        "task_class": getattr(task, "task_class", None) or "",
+        "acceptance_criteria": task.acceptance_criteria,
         "current_action": task.current_action,
         "current_tool": task.current_tool,
         "result": task.result,
@@ -53,7 +57,7 @@ def _task_dict(task: Task) -> dict[str, Any]:
 
 @router.post("")
 async def create_task(body: TaskCreate):
-    task = await AGENT.create_task(body.prompt, body.autonomy, body.profile)
+    task = await AGENT.create_task(body.prompt, body.autonomy, body.profile, body.execution_mode)
     return _task_dict(task)
 
 

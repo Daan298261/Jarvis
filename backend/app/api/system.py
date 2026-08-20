@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from ..config import load_settings
 from ..hardware import hardware_dict
 from ..inference.manager import MANAGER
-from ..config import load_settings
+from ..tools.capabilities import capability_snapshot
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -21,5 +22,7 @@ async def system_info():
         "bind_port": settings.bind_port,
         "lan_access": settings.lan_access,
         "autonomy": settings.autonomy,
+        "execution_mode": settings.execution_mode,
         "allowed_directories": settings.allowed_directories,
+        "capabilities": capability_snapshot(),
     }
