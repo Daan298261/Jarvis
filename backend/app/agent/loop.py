@@ -57,6 +57,14 @@ def _image_message(path: str, prompt: str = "Inspect this image and use it to de
     )
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 class AgentRuntime:
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task] = {}
@@ -140,9 +148,12 @@ class AgentRuntime:
             task.updated_at = utcnow()
             if not task.started_at and fields.get("status") == "running":
                 task.started_at = utcnow()
-            if task.started_at and fields.get("status") in {"completed", "failed", "cancelled"}:
-                task.finished_at = utcnow()
-                task.duration_seconds = (task.finished_at - task.started_at).total_seconds()
+            if _as_utc(task.started_at) and fields.get("status") in {"completed", "failed", "cancelled"}:
+                finished = utcnow()
+                task.finished_at = finished
+                started = _as_utc(task.started_at)
+                if started:
+                    task.duration_seconds = (finished - started).total_seconds()
             await session.commit()
 
     async def _complete(self, task_id: str, messages: list[ChatMessage], content: str, verification: str) -> None:

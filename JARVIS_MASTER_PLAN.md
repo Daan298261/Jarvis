@@ -1873,10 +1873,10 @@ Date: 2026-08-20 (this session)
 Tests performed:
 
 - Repository audit against this plan
-- Unit tests: planning, safety, filesystem, verification loop, persistence checkpoint
-- Windows live model e2e: **not run** (no GPU/GGUF in this environment)
+- Unit tests (`python -m pytest tests -q`): planning, safety, filesystem sandbox, capability catalog, verification loop, Reliable-mode tool-backed verification, SQLite persistence checkpoint
+- Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: recorded after the unit-test run in this session.
+Results: **12 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -1902,7 +1902,7 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 
 - [x] Verification loop
   - Acceptance: task cannot be marked successful without an independent verification pass.
-  - Status: VERIFIED in unit tests with a scripted model
+  - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
 
 - [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
   - Acceptance: model loads, API responds, tool calls work, vision projector loads.

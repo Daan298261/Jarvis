@@ -69,14 +69,19 @@ def resolve_execution_policy(name: str | None) -> ExecutionPolicy:
 
 def classify_task(prompt: str) -> str:
     text = (prompt or "").lower()
-    hits = [name for name, keywords in TASK_CATEGORIES if any(k in text for k in keywords)]
-    if len(hits) >= 3:
-        return "long-horizon autonomous"
-    if len(hits) >= 2:
+    scored: list[tuple[int, str]] = []
+    for name, keywords in TASK_CATEGORIES:
+        score = sum(1 for keyword in keywords if keyword in text)
+        if score:
+            scored.append((score, name))
+    if not scored:
         return "mixed"
-    if hits:
-        return hits[0]
-    return "mixed"
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if len(scored) >= 3:
+        return "long-horizon autonomous"
+    if len(scored) >= 2 and scored[0][0] == scored[1][0]:
+        return "mixed"
+    return scored[0][1]
 
 
 def parse_plan_block(text: str) -> dict[str, Any]:
