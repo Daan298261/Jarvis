@@ -2,20 +2,30 @@
 
 Jarvis is a powerful local agent. Treat it like a logged-in user on this PC.
 
-## Network
+## Network & Remote Exposure
 
 - Default bind: `127.0.0.1:4780` (web) and `127.0.0.1:8088` (llama-server)
-- Not exposed to the internet
-- LAN access is off by default
-- Enabling LAN access in Settings sets bind host to `0.0.0.0` and **requires** `JARVIS_AUTH_TOKEN`
+- LAN / Remote exposure: When enabled, binds to `0.0.0.0`
+- **Private Key Authentication**: When enabled (`auth_required: true` or `lan_access: true`), every request to `/api` and WebSocket connections must present the valid private key.
 
-Set the token in the user environment, not in git:
+### Supplying the Private Key
+
+Clients can authenticate with any of the following:
+1. `X-Jarvis-Key: <private_key>` header
+2. `Authorization: Bearer <private_key>` header
+3. `?key=<private_key>` query parameter (e.g. for WebSockets or URL bookmarks)
+
+Set the private key in your environment or generate one in Settings:
 
 ```powershell
-setx JARVIS_AUTH_TOKEN "a-long-random-value"
+setx JARVIS_PRIVATE_KEY "jarvis_pk_your_custom_secret_key"
 ```
 
-Clients must send `Authorization: Bearer <token>` or `X-Jarvis-Token: <token>`.
+Or pass it at startup:
+
+```powershell
+.\start-jarvis.ps1 -LanAccess -PrivateKey "jarvis_pk_secret"
+```
 
 ## Secrets
 

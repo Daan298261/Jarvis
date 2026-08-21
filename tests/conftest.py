@@ -29,6 +29,7 @@ async def jarvis_env(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("app.agent.loop.load_settings", lambda: settings)
     monkeypatch.setattr("app.config.load_settings", lambda: settings)
+    monkeypatch.setattr("app.agent.queue_watcher.data_dir", lambda: tmp_path)
 
     from app.inference.manager import MANAGER
     from app.tools.registry import REGISTRY

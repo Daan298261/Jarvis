@@ -46,6 +46,30 @@ The GGUFs are Unsloth quantizations of the official `Qwen/Qwen3.5-27B` weights, 
 
 This verifies dependencies, builds the frontend if needed, starts the API, loads the model, and opens [http://127.0.0.1:4780](http://127.0.0.1:4780).
 
+### Launch with prompt or batch queue
+You can trigger execution immediately on launch or feed tasks via a file:
+
+```powershell
+# Execute a single prompt on start and wait for completion
+.\start-jarvis.ps1 -Prompt "Inspect directory and generate project report" -Wait
+
+# Or pass a prompt JSON / text file
+.\start-jarvis.ps1 -PromptFile .\tasks\sample_task.json -Wait
+```
+
+You can also drop `.json` or `.prompt` files into `data/queue/pending/` at any time; Jarvis watches this directory and automatically processes queued tasks.
+
+### Remote exposure & Private Key Authentication
+
+Expose Jarvis to your LAN or remote network securely:
+
+```powershell
+# Run with LAN access and an enforced private key
+.\start-jarvis.ps1 -LanAccess -PrivateKey "jarvis_pk_secret123"
+```
+
+Every query from remote devices must supply `X-Jarvis-Key`, `Authorization: Bearer <key>`, or `?key=<key>`.
+
 Skip opening a browser:
 
 ```powershell

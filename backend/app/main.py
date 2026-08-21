@@ -11,7 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import mcp, memory, model, settings, system, tasks, tools, voice
+from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
+from .api import auth, mcp, memory, model, queue, settings, system, tasks, tools, voice
+from .auth import authenticate_request, authenticate_websocket
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
 from .db import init_db
 from .events import BUS
@@ -27,7 +29,13 @@ logging.getLogger().addHandler(console)
 
 app = FastAPI(title="Jarvis", version="1.0.0")
 settings_obj = load_settings()
-origins = [f"http://127.0.0.1:{settings_obj.bind_port}", f"http://localhost:{settings_obj.bind_port}", "http://127.0.0.1:5173", "http://localhost:5173"]
+origins = [
+    f"http://127.0.0.1:{settings_obj.bind_port}",
+    f"http://localhost:{settings_obj.bind_port}",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "*",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -36,7 +44,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(tasks.router)
+app.include_router(queue.router)
 app.include_router(system.router)
 app.include_router(model.router)
 app.include_router(tools.router)
@@ -50,16 +60,13 @@ frontend_dist = repo_root() / "frontend" / "dist"
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    current = load_settings()
-    if current.lan_access and current.auth_required:
-        host = request.client.host if request.client else ""
-        local = host in {"127.0.0.1", "::1", "localhost"}
-        if not local and request.url.path.startswith("/api"):
-            token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-            header = request.headers.get("x-jarvis-token", "").strip()
-            expected = current.auth_token
-            if not expected or (token != expected and header != expected):
-                return JSONResponse({"detail": "Authentication required for LAN access"}, status_code=401)
+    if not authenticate_request(request):
+        return JSONResponse(
+            {
+                "detail": "Authentication required. Provide a valid private key via Authorization: Bearer, X-Jarvis-Key header, or ?key= query parameter."
+            },
+            status_code=401,
+        )
     return await call_next(request)
 
 
@@ -81,6 +88,28 @@ async def startup() -> None:
     if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
         asyncio.create_task(_autoload_model(current))
 
+    # Check for startup launch prompt passed via environment
+    launch_prompt = os.environ.get("JARVIS_LAUNCH_PROMPT")
+    if launch_prompt:
+        enqueue_prompt_file(launch_prompt)
+
+    launch_prompt_file = os.environ.get("JARVIS_LAUNCH_PROMPT_FILE")
+    if launch_prompt_file and Path(launch_prompt_file).exists():
+        try:
+            content = Path(launch_prompt_file).read_text(encoding="utf-8")
+            enqueue_prompt_file(content)
+        except Exception:
+            logging.exception("Failed to read JARVIS_LAUNCH_PROMPT_FILE %s", launch_prompt_file)
+
+    # Start the background launch queue watcher
+    QUEUE_WATCHER.start()
+    await QUEUE_WATCHER.process_pending()
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    QUEUE_WATCHER.stop()
+
 
 async def _autoload_model(current) -> None:
     try:
@@ -96,16 +125,19 @@ async def health():
 
 @app.websocket("/api/ws")
 async def websocket_endpoint(ws: WebSocket):
+    if not authenticate_websocket(ws):
+        await ws.close(code=4401, reason="Unauthorized: invalid private key")
+        return
     await ws.accept()
-    queue = BUS.subscribe()
+    queue_bus = BUS.subscribe()
     try:
         while True:
-            event = await queue.get()
+            event = await queue_bus.get()
             await ws.send_json(event)
     except WebSocketDisconnect:
         pass
     finally:
-        BUS.unsubscribe(queue)
+        BUS.unsubscribe(queue_bus)
 
 
 if frontend_dist.exists():

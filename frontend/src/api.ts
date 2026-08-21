@@ -1,11 +1,51 @@
+export function getPrivateKey(): string {
+  try {
+    return localStorage.getItem("jarvis_private_key") || ""
+  } catch {
+    return ""
+  }
+}
+
+export function setPrivateKey(key: string): void {
+  try {
+    if (key) {
+      localStorage.setItem("jarvis_private_key", key.trim())
+    } else {
+      localStorage.removeItem("jarvis_private_key")
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function getAuthUrl(path: string): string {
+  const key = getPrivateKey()
+  if (!key) return path
+  const sep = path.includes("?") ? "&" : "?"
+  return `${path}${sep}key=${encodeURIComponent(key)}`
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) }
+  const key = getPrivateKey()
+  if (key && !headers["Authorization"] && !headers["X-Jarvis-Key"]) {
+    headers["X-Jarvis-Key"] = key
+  }
+
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
     ...init,
+    headers,
   })
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(text || response.statusText)
+    let errorDetail = text
+    try {
+      const parsed = JSON.parse(text)
+      errorDetail = parsed.detail || text
+    } catch {
+      // not JSON
+    }
+    throw new Error(errorDetail || response.statusText)
   }
   return response.json() as Promise<T>
 }

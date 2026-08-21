@@ -1855,6 +1855,8 @@ This development session:
 - Live status shows execution mode, task class, and verification
 - Memory page lists skills and trajectories with promote / enable controls
 - Tools/System pages list optional workers as unavailable instead of crashing
+- Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
+- Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
 - Voice: `POST /api/voice/command` accepts already-transcribed text only
 
 ### Known Problems
@@ -1873,11 +1875,11 @@ Date: 2026-08-21
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning, safety, filesystem sandbox, capability catalog, verification loop, Reliable-mode tool-backed verification, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion
+- Unit tests (`python -m pytest tests -q`): planning, safety, filesystem sandbox, capability catalog, verification loop, Reliable-mode tool-backed verification, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion, private key authentication, launch queue watcher
 - Frontend (`npm run build`): TypeScript build clean; `oxlint` reports only pre-existing style warnings
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **51 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **56 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -2019,6 +2021,14 @@ Fast/Balanced/Reliable change planning/verification. Fast/Balanced/Quality model
 Reason:
 
 A cheap model profile can still run a Reliable agent loop, and a Quality model can run a Fast loop for a rename.
+
+Decision: private key authentication covers all query vectors
+
+When remote or LAN exposure is active, authentication is required on every `/api` REST call, WebSocket live feed, and batch queue trigger via header (`X-Jarvis-Key`, `Authorization: Bearer`) or query param (`?key=`).
+
+Reason:
+
+Remote exposure without query-level authentication allows anyone on the local network or public internet to run arbitrary commands on the host machine. Private keys stored in `data/private_key.sec` or environment variables provide zero-leakage security.
 
 Decision: a skill requires repetition, not a single success
 

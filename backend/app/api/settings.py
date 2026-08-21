@@ -16,6 +16,8 @@ class SettingsUpdate(BaseModel):
     retry_limit: int | None = None
     logging_level: str | None = None
     lan_access: bool | None = None
+    auth_required: bool | None = None
+    private_key: str | None = None
     bind_host: str | None = None
     bind_port: int | None = None
     backup_enabled: bool | None = None
@@ -48,7 +50,18 @@ async def update_settings(body: SettingsUpdate):
     if body.lan_access is not None:
         settings.lan_access = body.lan_access
         settings.bind_host = "0.0.0.0" if body.lan_access else "127.0.0.1"
-        settings.auth_required = bool(body.lan_access)
+        settings.auth_required = bool(body.lan_access or settings.auth_required)
+    if body.auth_required is not None:
+        settings.auth_required = body.auth_required
+    if body.private_key is not None:
+        key = body.private_key.strip()
+        settings.auth_token = key
+        from ..auth import private_key_file_path
+
+        try:
+            private_key_file_path().write_text(key + "\n", encoding="utf-8")
+        except Exception:
+            pass
     if body.bind_host is not None:
         settings.bind_host = body.bind_host
     if body.bind_port is not None:

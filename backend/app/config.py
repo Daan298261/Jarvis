@@ -30,6 +30,12 @@ def models_dir() -> Path:
     return path
 
 
+def queue_dir() -> Path:
+    path = data_dir() / "queue"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def runtime_dir() -> Path:
     return repo_root() / "runtime" / "llama.cpp"
 
@@ -98,7 +104,18 @@ def load_settings() -> AppSettings:
     if settings_path().exists():
         payload = _deep_merge(payload, json.loads(settings_path().read_text(encoding="utf-8")))
 
-    token = os.environ.get("JARVIS_AUTH_TOKEN", payload.get("auth_token", ""))
+    token = (
+        os.environ.get("JARVIS_PRIVATE_KEY")
+        or os.environ.get("JARVIS_API_KEY")
+        or os.environ.get("JARVIS_AUTH_TOKEN")
+        or payload.get("auth_token", "")
+    )
+    key_file = data_dir() / "private_key.sec"
+    if not token and key_file.exists():
+        try:
+            token = key_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
     payload["auth_token"] = token
     host = os.environ.get("JARVIS_BIND_HOST")
     port = os.environ.get("JARVIS_BIND_PORT")

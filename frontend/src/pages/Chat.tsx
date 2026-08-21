@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { api, type Task } from "../api"
+import { api, getPrivateKey, setPrivateKey, type Task } from "../api"
 
 export function ChatPage() {
   const { id } = useParams()
@@ -9,15 +9,23 @@ export function ChatPage() {
   const [task, setTask] = useState<Task | null>(null)
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  const [keyInput, setKeyInput] = useState<string>(getPrivateKey())
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false)
 
   useEffect(() => {
     if (!id) return
     let timer: number
     const load = async () => {
-      const data = await api<Task>(`/api/tasks/${id}`)
-      setTask(data)
+      try {
+        const data = await api<Task>(`/api/tasks/${id}`)
+        setTask(data)
+      } catch (err: any) {
+        if (err.message && err.message.toLowerCase().includes("authentication required")) {
+          setShowAuthModal(true)
+        }
+      }
     }
-    load().catch(console.error)
+    load()
     timer = window.setInterval(() => load().catch(() => undefined), 2000)
     return () => clearInterval(timer)
   }, [id])
@@ -25,7 +33,10 @@ export function ChatPage() {
   useEffect(() => {
     if (!task || !["running", "queued", "waiting"].includes(task.status)) return
     const started = Date.now()
-    const timer = window.setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000) + Math.round(task.duration_seconds || 0)), 1000)
+    const timer = window.setInterval(
+      () => setElapsed(Math.round((Date.now() - started) / 1000) + Math.round(task.duration_seconds || 0)),
+      1000,
+    )
     return () => clearInterval(timer)
   }, [task?.status, task?.id])
 
@@ -36,8 +47,22 @@ export function ChatPage() {
       const created = await api<Task>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt }) })
       setPrompt("")
       navigate(`/tasks/${created.id}`)
+    } catch (err: any) {
+      if (err.message && err.message.toLowerCase().includes("authentication required")) {
+        setShowAuthModal(true)
+      } else {
+        alert(err.message)
+      }
     } finally {
       setBusy(false)
+    }
+  }
+
+  function handleSaveKey() {
+    setPrivateKey(keyInput)
+    setShowAuthModal(false)
+    if (id) {
+      api<Task>(`/api/tasks/${id}`).then(setTask).catch(() => undefined)
     }
   }
 
@@ -51,16 +76,44 @@ export function ChatPage() {
     <div>
       <h1>Command</h1>
       <p className="lede">Give Jarvis an end state. It will plan, use tools, recover from errors, and verify the result.</p>
+
+      {showAuthModal && (
+        <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--bad)", padding: "16px" }}>
+          <h3>Private Key Authentication Required</h3>
+          <p className="lede">This Jarvis instance requires a private key for all queries.</p>
+          <div className="row" style={{ gap: 8, marginTop: 10 }}>
+            <input
+              type="password"
+              placeholder="Enter Private Key (jarvis_pk_...)"
+              value={keyInput}
+              style={{ fontFamily: "monospace", flex: 1 }}
+              onChange={(e) => setKeyInput(e.target.value)}
+            />
+            <button className="btn" onClick={handleSaveKey}>Save Key</button>
+          </div>
+        </div>
+      )}
+
       <div className="grid two">
         <div className="card">
-          <textarea className="command" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Organize these files, fix this project, research a topic, control the browser..." />
+          <textarea
+            className="command"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Organize these files, fix this project, research a topic, control the browser..."
+          />
           <div className="row" style={{ marginTop: 12 }}>
             <button className="btn" disabled={busy} onClick={submit}>Run task</button>
             {task && (task.status === "running" || task.status === "waiting") && (
               <button className="btn secondary" onClick={() => api(`/api/tasks/${task.id}/cancel`, { method: "POST" })}>Cancel</button>
             )}
             {task && task.status !== "running" && (
-              <button className="btn secondary" onClick={() => api(`/api/tasks/${task.id}/continue`, { method: "POST", body: JSON.stringify({ prompt: "Continue this." }) })}>Continue this</button>
+              <button
+                className="btn secondary"
+                onClick={() => api(`/api/tasks/${task.id}/continue`, { method: "POST", body: JSON.stringify({ prompt: "Continue this." }) })}
+              >
+                Continue this
+              </button>
             )}
           </div>
         </div>
