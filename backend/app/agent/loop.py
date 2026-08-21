@@ -21,6 +21,7 @@ from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
 from .planning import WorkingState, classify_task, parse_plan_block, resolve_execution_policy
 from .recovery import recovery_hint
+from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .prompts import (
     CONTINUE_PROMPT,
     CRITIC_PROMPT,
@@ -157,7 +158,14 @@ class AgentRuntime:
                     task.duration_seconds = (finished - started).total_seconds()
             await session.commit()
 
-    async def _complete(self, task_id: str, messages: list[ChatMessage], content: str, verification: str) -> None:
+    async def _complete(
+        self,
+        task_id: str,
+        messages: list[ChatMessage],
+        content: str,
+        verification: str,
+        working: WorkingState | None = None,
+    ) -> None:
         await self._update(
             task_id,
             status="completed",
@@ -168,6 +176,8 @@ class AgentRuntime:
             current_action="Completed",
             current_tool="",
         )
+        if working is not None:
+            await record_trajectory(task_id, working, "completed")
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
 
     async def _run(
@@ -217,8 +227,13 @@ class AgentRuntime:
             else:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
+            system_prompt = SYSTEM_PROMPT + _environment_block(settings)
+            lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
+            if lessons:
+                system_prompt += "\n\n" + lessons
+                await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
             messages = [
-                ChatMessage(role="system", content=SYSTEM_PROMPT + _environment_block(settings)),
+                ChatMessage(role="system", content=system_prompt),
                 ChatMessage(role="user", content=prompt + "\n\n" + PLAN_PROMPT),
             ]
 
@@ -287,7 +302,7 @@ class AgentRuntime:
                             "The model timed out while writing the final report. "
                             "Actions already executed are in the activity log; verify files from that log."
                         )
-                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.")
+                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working)
                         return
                     content = "The model timed out before verification completed."
                     await self._update(
@@ -299,6 +314,7 @@ class AgentRuntime:
                         current_action="Failed: model timeout before verification",
                         current_tool="",
                     )
+                    await record_trajectory(task_id, working, "failed")
                     await BUS.publish(task_id, "failed", "Task ended after model timeout", content, stage="failed")
                     return
                 await MANAGER.record_timings(result.timings)
@@ -312,7 +328,7 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
                     working.verified = True
                     await self._update(task_id, compact_memory=working.dumps())
-                    await self._complete(task_id, messages, content, content)
+                    await self._complete(task_id, messages, content, content, working)
                     return
 
                 parsed = parse_plan_block(result.content or "")
@@ -447,15 +463,17 @@ class AgentRuntime:
                 working.verified = True
                 verification = content or "Independent verification pass completed; acceptance criteria checked."
                 await self._update(task_id, compact_memory=working.dumps(), verification=verification)
-                await self._complete(task_id, messages, content or verification, verification)
+                await self._complete(task_id, messages, content or verification, verification, working)
                 return
             await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification")
+            await record_trajectory(task_id, working, "failed")
             await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
         except asyncio.CancelledError:
             await self._update(task_id, status="cancelled", stage="cancelled")
             raise
         except Exception as exc:
             await self._update(task_id, status="failed", stage="failed", error=str(exc))
+            await record_trajectory(task_id, working, "failed")
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
 
     async def _execute_tool(

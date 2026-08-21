@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import mcp, model, settings, system, tasks, tools, voice
+from .api import mcp, memory, model, settings, system, tasks, tools, voice
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
 from .db import init_db
 from .events import BUS
@@ -42,6 +42,7 @@ app.include_router(model.router)
 app.include_router(tools.router)
 app.include_router(settings.router)
 app.include_router(mcp.router)
+app.include_router(memory.router)
 app.include_router(voice.router)
 
 frontend_dist = repo_root() / "frontend" / "dist"

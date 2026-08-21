@@ -94,6 +94,51 @@ class Checkpoint(Base):
     task: Mapped[Task] = relationship(back_populates="checkpoints")
 
 
+class Trajectory(Base):
+    """An actionable summary of how a task actually went.
+
+    Stores tool/worker choices, failures, and recoveries so later tasks can
+    reuse what worked. Never stores hidden reasoning.
+    """
+
+    __tablename__ = "trajectories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    task_class: Mapped[str] = mapped_column(String(64), default="")
+    goal: Mapped[str] = mapped_column(Text, default="")
+    outcome: Mapped[str] = mapped_column(String(32), default="")
+    tools_json: Mapped[str] = mapped_column(Text, default="[]")
+    steps_json: Mapped[str] = mapped_column(Text, default="[]")
+    failures: Mapped[str] = mapped_column(Text, default="")
+    recovery: Mapped[str] = mapped_column(Text, default="")
+    verification: Mapped[str] = mapped_column(Text, default="")
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0)
+    reuse_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Skill(Base):
+    """A reusable workflow promoted from repeated successful trajectories."""
+
+    __tablename__ = "skills"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    task_class: Mapped[str] = mapped_column(String(64), default="")
+    parameters_json: Mapped[str] = mapped_column(Text, default="[]")
+    tools_json: Mapped[str] = mapped_column(Text, default="[]")
+    steps_json: Mapped[str] = mapped_column(Text, default="[]")
+    verification: Mapped[str] = mapped_column(Text, default="")
+    recovery: Mapped[str] = mapped_column(Text, default="")
+    origin: Mapped[str] = mapped_column(String(32), default="promoted")
+    times_used: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
