@@ -265,7 +265,7 @@ class AgentRuntime:
                     "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if profile.thinking else "Model is responding")),
                     stage="verify" if verifying else "act",
                 )
-                messages = compact_history(messages)
+                messages = compact_history(messages, working_state_block=working.as_prompt_block())
                 try:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(

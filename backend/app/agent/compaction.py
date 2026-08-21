@@ -5,28 +5,93 @@ from typing import Any
 
 from ..providers.base import ChatMessage
 
+SUMMARY_MARKER = "Compacted earlier task memory:"
+WORKING_STATE_MARKER = "Compact working state:"
 
-def compact_history(messages: list[ChatMessage], keep_last: int = 8) -> list[ChatMessage]:
-    if len(messages) <= keep_last + 2:
-        return messages
-    head = messages[:2]
-    middle = messages[2:-keep_last]
-    tail = messages[-keep_last:]
-    summary_bits: list[str] = []
+
+def _text_of(message: ChatMessage) -> str:
+    if isinstance(message.content, str):
+        return message.content
+    return json.dumps(message.content)
+
+
+def _tail_start(messages: list[ChatMessage], keep_last: int) -> int:
+    """Start the kept tail on a message that does not orphan a tool result.
+
+    A `tool` message is only valid when the assistant message carrying its
+    tool_calls is still present, so walk backwards past any leading tool
+    results until that assistant turn is included.
+    """
+    start = max(len(messages) - keep_last, 0)
+    while start > 0 and messages[start].role == "tool":
+        start -= 1
+    return start
+
+
+def _summarize(middle: list[ChatMessage], max_entries: int, snippet: int) -> list[str]:
+    bits: list[str] = []
     for message in middle:
         if message.role == "tool":
-            text = message.content if isinstance(message.content, str) else json.dumps(message.content)
-            summary_bits.append(f"- tool {message.name or ''}: {text[:400]}")
+            bits.append(f"- tool {message.name or ''}: {_text_of(message)[:snippet]}")
         elif message.role == "assistant" and message.tool_calls:
-            names = [c.get("function", {}).get("name") for c in message.tool_calls]
-            summary_bits.append(f"- called {', '.join(filter(None, names))}")
-        elif message.role == "assistant" and isinstance(message.content, str) and message.content.strip():
-            summary_bits.append(f"- assistant: {message.content[:300]}")
-    summary = ChatMessage(
-        role="system",
-        content="Compacted earlier task memory:\n" + "\n".join(summary_bits[:80]),
-    )
-    return head + [summary] + tail
+            names = [call.get("function", {}).get("name") for call in message.tool_calls]
+            bits.append(f"- called {', '.join(filter(None, names))}")
+        elif message.role == "assistant":
+            text = _text_of(message).strip()
+            if text:
+                bits.append(f"- assistant: {text[:snippet]}")
+        elif message.role == "user":
+            text = _text_of(message).strip()
+            if text and not text.startswith(WORKING_STATE_MARKER):
+                bits.append(f"- instruction: {text[:200]}")
+    if len(bits) <= max_entries:
+        return bits
+    # Keep the oldest few for origin and the most recent for continuity.
+    head = max_entries // 3
+    return bits[:head] + [f"- ...{len(bits) - max_entries} earlier steps omitted..."] + bits[head - max_entries :]
+
+
+def compact_history(
+    messages: list[ChatMessage],
+    keep_last: int = 8,
+    working_state_block: str | None = None,
+    max_summary_entries: int = 40,
+    snippet: int = 400,
+) -> list[ChatMessage]:
+    """Keep the prompt small without dropping what the model needs to continue.
+
+    Old turns collapse into a structured summary. The caller's compact working
+    state, when supplied, is refreshed on every pass so the model always sees
+    current goal, criteria, plan, and known failures.
+    """
+    # Earlier passes injected their own summary and working-state blocks. Drop
+    # them so they are rebuilt from current data instead of nesting.
+    cleaned = [message for message in messages if not _is_generated(message)]
+    head = cleaned[:2]
+    extra: list[ChatMessage] = []
+
+    start = _tail_start(cleaned, keep_last)
+    if start <= len(head):
+        tail = cleaned[len(head) :]
+    else:
+        middle = cleaned[len(head) : start]
+        tail = cleaned[start:]
+        bits = _summarize(middle, max_summary_entries, snippet)
+        if bits:
+            extra.append(ChatMessage(role="system", content=SUMMARY_MARKER + "\n" + "\n".join(bits)))
+
+    if working_state_block:
+        extra.append(ChatMessage(role="system", content=working_state_block))
+
+    return head + extra + tail
+
+
+def _is_generated(message: ChatMessage) -> bool:
+    """Drop previously injected summaries so they do not nest on each pass."""
+    if message.role != "system":
+        return False
+    text = _text_of(message)
+    return text.startswith(SUMMARY_MARKER) or text.startswith(WORKING_STATE_MARKER)
 
 
 def serialize_messages(messages: list[ChatMessage]) -> str:
