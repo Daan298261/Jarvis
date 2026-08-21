@@ -20,7 +20,7 @@ STOPWORDS = {
 MAX_PROMPT_ENTRIES = 3
 
 
-def _keywords(text: str) -> set[str]:
+def keywords(text: str) -> set[str]:
     words = re.findall(r"[a-z0-9][a-z0-9._-]{2,}", (text or "").lower())
     return {word for word in words if word not in STOPWORDS}
 
@@ -29,7 +29,7 @@ def _score(row: Trajectory, task_class: str, goal_keywords: set[str]) -> float:
     score = 0.0
     if row.task_class and row.task_class == task_class:
         score += 2.0
-    overlap = _keywords(row.goal) & goal_keywords
+    overlap = keywords(row.goal) & goal_keywords
     score += float(len(overlap))
     if row.outcome == "completed":
         score += 1.5
@@ -85,7 +85,7 @@ async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -
 
 
 async def relevant_trajectories(task_class: str, goal: str, limit: int = MAX_PROMPT_ENTRIES) -> list[Trajectory]:
-    goal_keywords = _keywords(goal)
+    goal_keywords = keywords(goal)
     async with SessionLocal() as session:
         rows = (
             await session.execute(select(Trajectory).order_by(Trajectory.created_at.desc()).limit(200))

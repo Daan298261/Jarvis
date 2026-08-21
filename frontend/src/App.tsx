@@ -2,6 +2,7 @@ import { NavLink, Navigate, Route, Routes } from "react-router-dom"
 import { useEffect, useState } from "react"
 import { ChatPage } from "./pages/Chat"
 import { HistoryPage } from "./pages/History"
+import { MemoryPage } from "./pages/Memory"
 import { ModelPage } from "./pages/Model"
 import { ToolsPage } from "./pages/Tools"
 import { McpPage } from "./pages/Mcp"
@@ -29,6 +30,7 @@ export default function App() {
         <nav>
           <NavLink to="/" end>Command</NavLink>
           <NavLink to="/history">History</NavLink>
+          <NavLink to="/memory">Memory</NavLink>
           <NavLink to="/model">Model</NavLink>
           <NavLink to="/tools">Tools</NavLink>
           <NavLink to="/mcp">MCP</NavLink>
@@ -48,6 +50,7 @@ export default function App() {
           <Route path="/" element={<ChatPage />} />
           <Route path="/tasks/:id" element={<ChatPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/memory" element={<MemoryPage />} />
           <Route path="/model" element={<ModelPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/mcp" element={<McpPage />} />

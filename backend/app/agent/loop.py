@@ -21,6 +21,8 @@ from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
 from .planning import WorkingState, classify_task, parse_plan_block, resolve_execution_policy
 from .recovery import recovery_hint
+from .skills import as_prompt_block as skills_prompt_block
+from .skills import promote_from_trajectories, relevant_skills
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .prompts import (
     CONTINUE_PROMPT,
@@ -178,6 +180,8 @@ class AgentRuntime:
         )
         if working is not None:
             await record_trajectory(task_id, working, "completed")
+            for skill in await promote_from_trajectories():
+                await BUS.publish(task_id, "progress", f"Promoted reusable skill: {skill.name}", skill.description[:800])
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
 
     async def _run(
@@ -228,6 +232,10 @@ class AgentRuntime:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
             system_prompt = SYSTEM_PROMPT + _environment_block(settings)
+            skills = skills_prompt_block(await relevant_skills(working.task_class, working.goal))
+            if skills:
+                system_prompt += "\n\n" + skills
+                await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
             lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
             if lessons:
                 system_prompt += "\n\n" + lessons
