@@ -20,6 +20,7 @@ from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
 from .planning import WorkingState, classify_task, parse_plan_block, resolve_execution_policy
+from .recovery import recovery_hint
 from .prompts import (
     CONTINUE_PROMPT,
     CRITIC_PROMPT,
@@ -227,6 +228,7 @@ class AgentRuntime:
         critic_done = False
         tools_used = False
         consecutive_failures = 0
+        failures_by_tool: dict[str, int] = {}
         tool_rounds = 0
         verify_tool_rounds = 0
         last_tool_name = ""
@@ -331,6 +333,7 @@ class AgentRuntime:
                         verify_tool_rounds += 1
                     names = [c.get("function", {}).get("name") or "" for c in result.tool_calls]
                     primary = names[0] if names else ""
+                    hints: list[str] = []
                     if primary == last_tool_name:
                         same_tool_streak += 1
                     else:
@@ -376,21 +379,22 @@ class AgentRuntime:
                         failed = "ERROR:" in observation or observation.lower().startswith("error")
                         if failed:
                             consecutive_failures += 1
+                            failures_by_tool[name] = failures_by_tool.get(name, 0) + 1
+                            hints.append(recovery_hint(name, observation, failures_by_tool[name]))
                             await BUS.publish(task_id, "error", f"{name} failed", observation[:1500], stage="diagnose")
                         else:
                             consecutive_failures = 0
+                            failures_by_tool.pop(name, None)
                             await BUS.publish(task_id, "observation", f"{name} finished", observation[:1500], stage="observe")
                         working.note_tool(name, observation, not failed)
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
                             messages.append(_image_message(attach))
-                    if consecutive_failures >= 3:
-                        messages.append(
-                            ChatMessage(
-                                role="user",
-                                content="Multiple consecutive tool failures. Inspect the errors, change strategy, and do not repeat the same command.",
-                            )
-                        )
+                    if hints:
+                        guidance = "\n\n".join(hints)
+                        working.next_action = "recover with a different strategy"
+                        await BUS.publish(task_id, "retry", "Choosing a recovery strategy", guidance[:1500], stage="diagnose")
+                        messages.append(ChatMessage(role="user", content=guidance))
                     elif verifying and verify_tool_rounds >= policy.max_verify_tools:
                         force_final = True
                         messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))
