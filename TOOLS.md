@@ -16,6 +16,14 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
 
+## Memory and skills
+
+Finished tasks write a trajectory: the ordered tools, which step failed and why, which tool worked instead, and the verification result. A later similar task gets those lessons in its system prompt.
+
+When the same task class succeeds three or more times with the same tool sequence, the workflow is promoted to a skill and offered to matching tasks up front. Inspect, promote, enable, or disable from the **Memory** page, or via `/api/memory/trajectories` and `/api/memory/skills`.
+
+Hidden reasoning is never stored — only tool choices, outcomes, and error summaries.
+
 ## MCP
 
 Configure servers in the MCP page or `data/settings.json` → `mcp_servers`. Example:

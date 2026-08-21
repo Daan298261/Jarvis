@@ -48,7 +48,15 @@ Task state is checkpointed in SQLite after every tool call. `POST /api/tasks/{id
 
 ## Context compaction
 
-Older tool traces are summarized so long tasks do not dump the full history back into the 32K window.
+Older tool traces are summarized so long tasks do not dump the full history back into the 32K window. The kept tail always starts on a message that leaves each tool result paired with the assistant turn that requested it, and the compact working state (goal, criteria, plan, known failures) is rebuilt on every pass instead of accumulating.
+
+## Memory
+
+`trajectories` records how each task actually went; `skills` holds workflows that succeeded repeatedly with the same tool sequence. Both are injected into the system prompt of similar later tasks. See `TOOLS.md`.
+
+## Recovery
+
+`backend/app/agent/recovery.py` classifies a tool failure and names alternatives ordered by determinism, so a failed COM or GUI path is answered with a library or CLI suggestion rather than a retry. Permission and blocked-command failures get no alternative.
 
 ## Autonomy
 

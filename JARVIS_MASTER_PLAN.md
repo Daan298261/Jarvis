@@ -226,7 +226,7 @@ Prefer a local OpenAI-compatible API.
 
 The rest of Jarvis must not depend tightly on one particular inference server.
 
-Current implementation note: chat goes through `ModelProvider` / `OpenAICompatProvider`. Process management is still llama.cpp-specific (`llama-server.exe`). Keep the provider interface; extract a real `InferenceBackend` before adding Ollama/LM Studio/vLLM.
+Current implementation: chat goes through `ModelProvider` / `OpenAICompatProvider`; server lifecycle goes through `InferenceBackend` (`backend/app/inference/backends.py`). `LlamaCppBackend` owns the local process. Everything else OpenAI-compatible resolves to `RemoteOpenAICompatibleBackend`, which only health-checks. Adding LM Studio, Ollama, vLLM, or SGLang as first-class backends means subclassing here, not touching agent code.
 
 ---
 
@@ -1799,11 +1799,11 @@ This development session:
 
 - Model: Qwen3.5-27B (Unsloth GGUF of `Qwen/Qwen3.5-27B`, plus `mmproj-F16.gguf`)
 - Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
-- Backend: llama.cpp `llama-server.exe` managed by `InferenceManager`; chat via OpenAI-compatible `/v1`
+- Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
 - Context: 16K fast, 32K balanced/quality; load failure retries at 16K
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
-- Status: **code present, Windows runtime not verified this session**
+- Status: **code present and unit-tested, Windows runtime not verified this session**
 
 ### Core Application
 
@@ -1836,31 +1836,32 @@ This development session:
 
 - Task storage: SQLite, including conversation JSON and tool-call records
 - Resume: `POST /api/tasks/{id}/continue` reloads compacted conversation
-- Context compaction: older tool traces summarized; compact working state stored in `tasks.compact_memory`
+- Context compaction: older turns collapse into a structured summary that cannot orphan a tool result from its assistant `tool_calls` turn; the compact working state is refreshed (not stacked) on every pass
+- Trajectory memory: `trajectories` table stores ordered tools, failure kinds, the recovery that worked, and verification. Similar new tasks get those lessons injected. No hidden reasoning is stored.
+- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence.
 
 ### Reliability
 
-- Retry engine: identical-call blocking plus consecutive-failure strategy hint
+- Retry engine: identical-call blocking plus per-tool failure counting
 - Verification engine: **implemented** — a task cannot complete until an independent verification pass runs; Reliable mode requires a verification tool call
-- Failure recovery: partial (blocked identical retries, failure hints); no alternate-worker routing yet
+- Failure recovery: **implemented** — failures are classified (permission, missing capability, not found, timeout, usage, network, blocked) and answered with alternatives ordered by determinism; permission/blocked failures deliberately suggest no alternative tool
 - Fast/Balanced/Reliable modes: **agent execution modes implemented** (separate from model Fast/Balanced/Quality profiles)
-- Task classification: keyword classifier stored on the task
+- Task classification: keyword-scored classifier stored on the task
 - Acceptance criteria / plan: parsed from the first planning turn and persisted
 
 ### Portal / API
 
-- Command, History, Model, Tools, MCP, Settings, System pages exist
-- Live status now shows execution mode, task class, and verification
+- Command, History, Memory, Model, Tools, MCP, Settings, System pages exist
+- Live status shows execution mode, task class, and verification
+- Memory page lists skills and trajectories with promote / enable controls
 - Tools/System pages list optional workers as unavailable instead of crashing
 - Voice: `POST /api/voice/command` accepts already-transcribed text only
 
 ### Known Problems
 
-- Live Qwen3.5-27B load, tool-calling, and Windows e2e suite were not run in this session
-- `InferenceManager` still shells out to `llama-server.exe`; LAN OpenAI-compatible endpoints work for chat, but local process management is llama.cpp-only
+- Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
 - Best-of-N planning is not implemented (Reliable mode has a single critic pass)
-- No trajectory-memory table for cross-task reuse
-- No reusable skills
+- Skill promotion records the tool sequence, not parameterized steps, so a skill guides rather than executes
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
@@ -1868,15 +1869,15 @@ This development session:
 
 ### Last End-to-End Test
 
-Date: 2026-08-20 (this session)
+Date: 2026-08-21
 
 Tests performed:
 
-- Repository audit against this plan
-- Unit tests (`python -m pytest tests -q`): planning, safety, filesystem sandbox, capability catalog, verification loop, Reliable-mode tool-backed verification, SQLite persistence checkpoint
+- Unit tests (`python -m pytest tests -q`): planning, safety, filesystem sandbox, capability catalog, verification loop, Reliable-mode tool-backed verification, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion
+- Frontend (`npm run build`): TypeScript build clean; `oxlint` reports only pre-existing style warnings
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **12 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **51 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -1918,17 +1919,17 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
   - Acceptance: Tools/System UI shows Browser Use/UFO/Cua/OpenHands/OI as unavailable rather than crashing.
   - Status: VERIFIED (code + API)
 
-- [ ] Strengthen failure recovery (alternate tool/worker, not only identical-call blocking)
-  - Acceptance: a failed browser path can fall back to Playwright/web_fetch without repeating the same call.
-  - Status: TODO
+- [x] Strengthen failure recovery (alternate tool/worker, not only identical-call blocking)
+  - Acceptance: a failed browser path can fall back to web_fetch/library without repeating the same call.
+  - Status: VERIFIED in unit tests (`test_recovery.py`, `test_recovery_loop.py`)
 
-- [ ] Context compaction quality
-  - Acceptance: long tasks keep a compact working-state block and do not dump full tool traces.
-  - Status: TODO (basic compaction exists)
+- [x] Context compaction quality
+  - Acceptance: long tasks keep a compact working-state block, do not dump full tool traces, and never orphan a tool result.
+  - Status: VERIFIED in unit tests (`test_compaction.py`)
 
-- [ ] Extract `InferenceBackend` from `InferenceManager`
-  - Acceptance: llama.cpp process manager is one backend; remote OpenAI-compatible remains a provider.
-  - Status: TODO
+- [x] Extract `InferenceBackend` from `InferenceManager`
+  - Acceptance: llama.cpp process manager is one backend; any other OpenAI-compatible server is health-checked only.
+  - Status: VERIFIED in unit tests (`test_inference_backends.py`); live LAN endpoint untested
 
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
@@ -1948,8 +1949,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 
 ### P2
 
-- [ ] Reusable skills
-- [ ] Trajectory memory (cross-task)
+- [x] Reusable skills — VERIFIED (`test_skills.py`); promotion needs 3 repeats of the same tool sequence
+- [x] Trajectory memory (cross-task) — VERIFIED (`test_trajectory.py`)
+- [ ] Parameterized skill execution (skills currently guide, they do not run themselves)
 - [ ] Best-of-N planning for Reliable mode
 - [ ] Model benchmark UI (persist tok/s, VRAM, success rates)
 - [ ] Office COM coverage when Office is installed
@@ -2017,6 +2019,22 @@ Fast/Balanced/Reliable change planning/verification. Fast/Balanced/Quality model
 Reason:
 
 A cheap model profile can still run a Reliable agent loop, and a Quality model can run a Fast loop for a rename.
+
+Decision: a skill requires repetition, not a single success
+
+A workflow is promoted only after the same task class succeeds several times with the same tool sequence.
+
+Reason:
+
+The plan explicitly warns against creating skills indiscriminately. One success is often luck or a one-off path; repetition is the evidence that a workflow is stable.
+
+Decision: permission failures do not get an alternative tool
+
+Recovery routing suggests alternatives for missing capabilities, timeouts, and not-found errors, but stays silent for sandbox and blocked-command failures.
+
+Reason:
+
+Switching tools does not grant more rights. Suggesting one would only teach the agent to probe the safety boundary.
 
 Decision: optional workers are displayed even when absent
 
