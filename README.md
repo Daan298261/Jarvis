@@ -85,7 +85,15 @@ Invoke-RestMethod -Method POST http://127.0.0.1:4780/api/model/load -ContentType
 - **Balanced**: Q4_K_M, thinking on, 32K context
 - **Quality**: Q5_K_M, thinking on, more CPU offload
 
-To point Jarvis at another OpenAI-compatible server later, change `inference.host` / `inference.port` in `data/settings.json`. The agent talks only to the abstract provider.
+## Move inference to another machine
+
+Jarvis talks to an `InferenceBackend`. `llama.cpp` is the local one Jarvis starts and supervises; anything else OpenAI-compatible (a LAN GPU box, LM Studio, Ollama, vLLM, SGLang) is a `remote` backend Jarvis only health-checks.
+
+```powershell
+Invoke-RestMethod -Method PUT http://127.0.0.1:4780/api/settings -ContentType application/json -Body '{"inference_backend":"remote","inference_host":"192.168.1.50","inference_port":8088}'
+```
+
+No agent, tool, or portal code changes are needed. Set the backend back to `llama.cpp` to run locally again.
 
 ## Add an MCP server
 

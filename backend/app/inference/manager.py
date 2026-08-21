@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
 import psutil
 
-from ..config import AppSettings, runtime_dir
-from ..hardware import detect_hardware
+from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
+from .backends import InferenceBackend, resolve_backend
 from .profiles import ModelProfile, model_paths, resolve_profile
 
 
@@ -25,6 +23,7 @@ class InferenceState:
     model_path: str = ""
     mmproj_path: str = ""
     backend: str = "llama.cpp"
+    manages_process: bool = True
     host: str = "127.0.0.1"
     port: int = 8088
     context_size: int = 32768
@@ -40,166 +39,84 @@ class InferenceState:
     llama_version: str = ""
 
 
+def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
+    return ModelProfile(
+        name=profile.name,
+        label=profile.label,
+        quant=profile.quant,
+        filename=profile.filename,
+        thinking=profile.thinking,
+        context_size=context_size,
+        temperature=profile.temperature,
+        top_p=profile.top_p,
+        top_k=profile.top_k,
+        presence_penalty=profile.presence_penalty,
+        description=profile.description,
+    )
+
+
 class InferenceManager:
+    """Owns model lifecycle. Process control is delegated to an InferenceBackend."""
+
     def __init__(self) -> None:
         self.state = InferenceState()
-        self._process: asyncio.subprocess.Process | None = None
-        self._log_handle = None
+        self.backend: InferenceBackend | None = None
         self._lock = asyncio.Lock()
         self.provider: OpenAICompatProvider | None = None
 
     def base_url(self, settings: AppSettings) -> str:
         return f"http://{settings.inference.host}:{settings.inference.port}/v1"
 
-    def llama_server_path(self) -> Path:
-        return runtime_dir() / "llama-server.exe"
-
-    def build_args(self, settings: AppSettings, profile: ModelProfile) -> list[str]:
-        hw = detect_hardware()
-        paths = model_paths()
-        model = paths["root"] / profile.filename
-        mmproj = paths["mmproj"]
-        threads = settings.inference.threads or hw.cpu_cores
-        args = [
-            str(self.llama_server_path()),
-            "--model",
-            str(model),
-            "--alias",
-            "Qwen3.5-27B",
-            "--host",
-            settings.inference.host,
-            "--port",
-            str(settings.inference.port),
-            "--ctx-size",
-            str(profile.context_size if profile.context_size else settings.inference.context_size),
-            "--flash-attn",
-            settings.inference.flash_attn,
-            "--jinja",
-            "--reasoning-format",
-            "deepseek",
-            "--reasoning",
-            "on" if profile.thinking else "off",
-            "--cache-type-k",
-            settings.inference.cache_type_k,
-            "--cache-type-v",
-            settings.inference.cache_type_v,
-            "--threads",
-            str(threads),
-            "--temp",
-            str(profile.temperature),
-            "--top-p",
-            str(profile.top_p),
-            "--top-k",
-            str(profile.top_k),
-            "--min-p",
-            "0",
-            "--prio",
-            "3",
-            "--metrics",
-            "--image-min-tokens",
-            "1024",
-        ]
-        if settings.inference.fit:
-            args.extend(["--fit", "on", "--fit-target", str(settings.inference.fit_target_mib)])
-        else:
-            args.extend(["--n-gpu-layers", "99"])
-        if mmproj.exists():
-            args.extend(["--mmproj", str(mmproj)])
-        return args
-
     async def load(self, settings: AppSettings, profile_name: str | None = None) -> InferenceState:
         async with self._lock:
             profile = resolve_profile(profile_name or settings.inference.profile)
+            backend = resolve_backend(settings)
             paths = model_paths()
             model = paths["root"] / profile.filename
-            if not model.exists():
-                raise FileNotFoundError(f"Model file missing: {model}")
-            exe = self.llama_server_path()
-            if not exe.exists():
-                raise FileNotFoundError(f"llama-server missing at {exe}")
 
-            if self._process and self.state.loaded and self.state.profile == profile.name:
+            missing = backend.missing_requirements(profile)
+            if missing:
+                self.state.last_error = "; ".join(missing)
+                raise FileNotFoundError(self.state.last_error)
+
+            if self.backend and self.state.loaded and self.state.profile == profile.name and self.backend.name == backend.name:
                 return self.state
 
+            self._apply_profile_state(settings, profile, backend, model, paths)
+
+            # Adopt a server that is already answering when we did not start one.
             existing = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
-            if await existing.health() and not self._process:
+            already_running = (self.backend is None or self.backend.pid is None) and await existing.health()
+            if already_running:
+                self.backend = backend
                 self.provider = existing
                 self.state.loaded = True
                 self.state.loading = False
-                self.state.profile = profile.name
-                self.state.quant = profile.quant
-                self.state.model_path = str(model)
-                self.state.mmproj_path = str(paths["mmproj"]) if paths["mmproj"].exists() else ""
-                self.state.host = settings.inference.host
-                self.state.port = settings.inference.port
-                self.state.context_size = profile.context_size
-                self.state.backend = "llama.cpp"
+                self.state.pid = backend.pid
                 await self.refresh_resources()
                 return self.state
 
-            await self._stop_locked()
+            if self.backend:
+                await self.backend.stop()
+            self.backend = backend
             self.state.loading = True
             self.state.last_error = ""
-            self.state.profile = profile.name
-            self.state.quant = profile.quant
-            self.state.model_path = str(model)
-            self.state.mmproj_path = str(paths["mmproj"]) if paths["mmproj"].exists() else ""
-            self.state.host = settings.inference.host
-            self.state.port = settings.inference.port
-            self.state.context_size = profile.context_size
-            self.state.backend = "llama.cpp"
-            args = self.build_args(settings, profile)
-            from ..config import logs_dir
-
-            log_file = logs_dir() / "llama-server.log"
             started = time.time()
-            if self._log_handle:
-                try:
-                    self._log_handle.close()
-                except Exception:
-                    pass
-            self._log_handle = open(log_file, "ab", buffering=0)
-            env = os.environ.copy()
-            env["CUDA_MODULE_LOADING"] = "LAZY"
-            self._process = await asyncio.create_subprocess_exec(
-                *args,
-                cwd=str(runtime_dir()),
-                stdout=self._log_handle,
-                stderr=self._log_handle,
-                env=env,
-            )
-            self.state.pid = self._process.pid
-            ready = await self._wait_ready(settings, timeout=300)
-            if not ready:
-                await self._stop_locked()
-                fallback_profile = ModelProfile(
-                    name=profile.name,
-                    label=profile.label,
-                    quant=profile.quant,
-                    filename=profile.filename,
-                    thinking=profile.thinking,
-                    context_size=16384,
-                    temperature=profile.temperature,
-                    top_p=profile.top_p,
-                    top_k=profile.top_k,
-                    presence_penalty=profile.presence_penalty,
-                    description=profile.description,
-                )
-                args = self.build_args(settings, fallback_profile)
-                self._process = await asyncio.create_subprocess_exec(
-                    *args,
-                    cwd=str(runtime_dir()),
-                    stdout=self._log_handle,
-                    stderr=self._log_handle,
-                    env=env,
-                )
-                self.state.pid = self._process.pid
-                self.state.context_size = 16384
-                ready = await self._wait_ready(settings, timeout=240)
+
+            ready = await backend.start(profile, timeout=300)
+            if not ready and backend.manages_process:
+                # Most first-load failures on a 16 GB card are context pressure.
+                fallback = _with_context(profile, 16384)
+                ready = await backend.start(fallback, timeout=240)
+                if ready:
+                    self.state.context_size = fallback.context_size
+            self.state.pid = backend.pid
             if not ready:
                 self.state.loading = False
-                self.state.last_error = "llama-server did not become ready"
-                raise RuntimeError(self.state.last_error + f". See {log_file}")
+                self.state.last_error = f"{backend.name} did not become ready"
+                detail = f". See {logs_dir() / 'llama-server.log'}" if backend.manages_process else f" at {self.base_url(settings)}"
+                raise RuntimeError(self.state.last_error + detail)
+
             self.state.loaded = True
             self.state.loading = False
             self.state.load_time_seconds = round(time.time() - started, 2)
@@ -207,44 +124,33 @@ class InferenceManager:
             await self.refresh_resources()
             return self.state
 
-    async def _wait_ready(self, settings: AppSettings, timeout: float) -> bool:
-        url = f"http://{settings.inference.host}:{settings.inference.port}/health"
-        deadline = time.time() + timeout
-        async with httpx.AsyncClient(timeout=3) as client:
-            while time.time() < deadline:
-                if self._process and self._process.returncode is not None:
-                    return False
-                try:
-                    response = await client.get(url)
-                    if response.status_code < 500:
-                        return True
-                except Exception:
-                    await asyncio.sleep(1.2)
-                    continue
-                await asyncio.sleep(0.8)
-        return False
+    def _apply_profile_state(
+        self,
+        settings: AppSettings,
+        profile: ModelProfile,
+        backend: InferenceBackend,
+        model: Path,
+        paths: dict[str, Path],
+    ) -> None:
+        self.state.profile = profile.name
+        self.state.quant = profile.quant
+        self.state.model_path = str(model) if backend.requires_local_files else ""
+        self.state.mmproj_path = str(paths["mmproj"]) if paths["mmproj"].exists() else ""
+        self.state.host = settings.inference.host
+        self.state.port = settings.inference.port
+        self.state.context_size = profile.context_size
+        self.state.backend = backend.name
+        self.state.manages_process = backend.manages_process
 
     async def unload(self) -> InferenceState:
         async with self._lock:
-            await self._stop_locked()
+            if self.backend:
+                await self.backend.stop()
+            self.provider = None
+            self.state.loaded = False
+            self.state.loading = False
+            self.state.pid = None
             return self.state
-
-    async def _stop_locked(self) -> None:
-        if self._process and self._process.returncode is None:
-            try:
-                self._process.terminate()
-                try:
-                    await asyncio.wait_for(self._process.wait(), timeout=8)
-                except TimeoutError:
-                    self._process.kill()
-                    await self._process.wait()
-            except Exception:
-                pass
-        self._process = None
-        self.provider = None
-        self.state.loaded = False
-        self.state.loading = False
-        self.state.pid = None
 
     async def refresh_resources(self) -> None:
         try:
@@ -284,6 +190,7 @@ class InferenceManager:
             "profile": self.state.profile,
             "context_size": self.state.context_size or profile.context_size,
             "inference_backend": self.state.backend,
+            "manages_process": self.state.manages_process,
             "gpu_layers": "auto (--fit on)" if settings.inference.fit else "99",
             "flash_attn": settings.inference.flash_attn,
             "host": settings.inference.host,

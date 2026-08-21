@@ -21,6 +21,9 @@ class SettingsUpdate(BaseModel):
     backup_enabled: bool | None = None
     profile: str | None = None
     execution_mode: str | None = None
+    inference_backend: str | None = None
+    inference_host: str | None = None
+    inference_port: int | None = None
     browser_headless: bool | None = None
 
 
@@ -56,6 +59,12 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.profile = body.profile
     if body.execution_mode is not None:
         settings.execution_mode = body.execution_mode
+    if body.inference_backend is not None:
+        settings.inference.backend = body.inference_backend
+    if body.inference_host is not None:
+        settings.inference.host = body.inference_host
+    if body.inference_port is not None:
+        settings.inference.port = body.inference_port
     if body.browser_headless is not None:
         settings.browser.headless = body.browser_headless
     save_settings(settings)
