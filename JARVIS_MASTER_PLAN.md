@@ -1338,7 +1338,19 @@ Unavailable optional tools should be clearly indicated rather than crashing Jarv
 
 ---
 
-## 42. Settings
+## 42. Workflows & Instructions Guide Tab
+
+Provide an interactive guide and workflow launcher tab in the Web Portal.
+
+Capabilities:
+1. **Instructions Guide**: Clear step-by-step operating instructions for how to interact with Jarvis (Command bar, Execution modes, Private key setup, Launch queue, and Memory/Skills).
+2. **Pre-built Workflow Library**: Curated, ready-to-load example workflows for common tasks (e.g. codebase debugging, research to summary/spreadsheet, web scrapers, batch file organization, multi-step maintenance jobs).
+3. **Interactive Workflow Editor**: Allow users to load any template into an editable builder, customize parameters (e.g., target paths, URLs, criteria, execution mode, autonomy level), chain sub-prompts or sequential events, and run them with one click.
+4. **Custom Workflow Presets**: Enable saving edited custom workflows locally to `data/workflows/` or database for rapid repeat execution.
+
+---
+
+## 43. Settings
 
 Provide settings for:
 
@@ -1933,6 +1945,10 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
   - Acceptance: llama.cpp process manager is one backend; any other OpenAI-compatible server is health-checked only.
   - Status: VERIFIED in unit tests (`test_inference_backends.py`); live LAN endpoint untested
 
+- [ ] Interactive Guide & Workflow Launcher Tab (Instructions, Example Library & Custom Event Chains)
+  - Acceptance: New "Guide & Workflows" tab in the web portal containing clear usage instructions, pre-populated editable templates (e.g., project debugging, research + Excel export, multi-file transforms, browser workflows), an editor allowing prompt parameters / event chains customization, and 1-click execution dispatch.
+  - Status: TODO
+
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
   - Status: TODO (Windows e2e)
@@ -2053,6 +2069,14 @@ The Tools and System pages list Browser Use, UFO, Cua, Open Interpreter, and Ope
 Reason:
 
 Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions.
+
+Decision: editable workflow templates with chained prompt dispatch
+
+Provide pre-built and editable chained workflow recipes in the UI to facilitate rapid task launching without manual prompt crafting.
+
+Reason:
+
+Improves ease of use and low-maintenance UX by letting users load, customize parameters for, and fire complex multi-stage tasks directly from the web portal.
 
 ---
 
