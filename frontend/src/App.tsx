@@ -8,6 +8,7 @@ import { ToolsPage } from "./pages/Tools"
 import { McpPage } from "./pages/Mcp"
 import { SettingsPage } from "./pages/Settings"
 import { SystemPage } from "./pages/System"
+import { WorkflowsPage } from "./pages/Workflows"
 import { api } from "./api"
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
         <nav>
           <NavLink to="/" end>Command</NavLink>
           <NavLink to="/history">History</NavLink>
+          <NavLink to="/workflows">Guide & Workflows</NavLink>
           <NavLink to="/memory">Memory</NavLink>
           <NavLink to="/model">Model</NavLink>
           <NavLink to="/tools">Tools</NavLink>
@@ -50,6 +52,7 @@ export default function App() {
           <Route path="/" element={<ChatPage />} />
           <Route path="/tasks/:id" element={<ChatPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/model" element={<ModelPage />} />
           <Route path="/tools" element={<ToolsPage />} />

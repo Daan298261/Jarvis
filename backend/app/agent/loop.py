@@ -19,7 +19,17 @@ from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
-from .planning import WorkingState, classify_task, parse_plan_block, resolve_execution_policy
+from .planning import (
+    WorkingState,
+    best_of_n_plan_prompt,
+    best_of_n_select_prompt,
+    classify_task,
+    format_selected_plan,
+    parse_plan_block,
+    parse_plan_candidates,
+    resolve_execution_policy,
+    select_best_plan,
+)
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
@@ -218,6 +228,7 @@ class AgentRuntime:
                 working.task_class = task.task_class or classify_task(prompt)
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
+        plan_prompt = best_of_n_plan_prompt(policy.best_of_n) if policy.best_of_n > 1 else PLAN_PROMPT
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
             await MANAGER.load(settings, profile_name)
@@ -257,7 +268,7 @@ class AgentRuntime:
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
             messages = [
                 ChatMessage(role="system", content=system_prompt),
-                ChatMessage(role="user", content=prompt + "\n\n" + PLAN_PROMPT),
+                ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
             ]
             for skill in matched_skills:
                 bound = bind_parameters(skill, working.goal)
@@ -411,18 +422,30 @@ class AgentRuntime:
                     return
 
                 parsed = parse_plan_block(result.content or "")
-                if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
-                    working.apply_plan(parsed, prompt)
-                    await self._update(
-                        task_id,
-                        acceptance_criteria="\n".join(working.acceptance_criteria),
-                        plan_json=json.dumps(working.plan),
-                        compact_memory=working.dumps(),
-                        summary=working.goal,
-                    )
+                if best_of_n_complete and not awaiting_plan_selection:
+                    if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
+                        working.apply_plan(parsed, prompt)
+                        await self._update(
+                            task_id,
+                            acceptance_criteria="\n".join(working.acceptance_criteria),
+                            plan_json=json.dumps(working.plan),
+                            compact_memory=working.dumps(),
+                            summary=working.goal,
+                        )
 
                 if result.tool_calls:
                     tools_used = True
+                    best_of_n_complete = True
+                    awaiting_plan_selection = False
+                    if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
+                        working.apply_plan(parsed, prompt)
+                        await self._update(
+                            task_id,
+                            acceptance_criteria="\n".join(working.acceptance_criteria),
+                            plan_json=json.dumps(working.plan),
+                            compact_memory=working.dumps(),
+                            summary=working.goal,
+                        )
                     tool_rounds += 1
                     if verifying:
                         verify_tool_rounds += 1
@@ -515,6 +538,56 @@ class AgentRuntime:
                 content = (result.content or "").strip()
                 messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
                 await self._update(task_id, conversation_json=serialize_messages(messages), result=content, compact_memory=working.dumps())
+
+                if not best_of_n_complete and not awaiting_plan_selection:
+                    plan_candidates = parse_plan_candidates(result.content or "")
+                    if len(plan_candidates) >= 2:
+                        awaiting_plan_selection = True
+                        await self._update(task_id, stage="plan", current_action="Comparing candidate plans")
+                        await BUS.publish(
+                            task_id,
+                            "stage",
+                            "Comparing candidate plans",
+                            f"{len(plan_candidates)} strategies",
+                            stage="plan",
+                        )
+                        messages.append(ChatMessage(role="user", content=best_of_n_select_prompt(plan_candidates)))
+                        continue
+                    best_of_n_complete = True
+                    if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
+                        working.apply_plan(parsed, prompt)
+                        await self._update(
+                            task_id,
+                            acceptance_criteria="\n".join(working.acceptance_criteria),
+                            plan_json=json.dumps(working.plan),
+                            compact_memory=working.dumps(),
+                            summary=working.goal,
+                        )
+
+                if awaiting_plan_selection:
+                    chosen = select_best_plan(plan_candidates, result.content or "")
+                    working.apply_plan(chosen.as_parsed(), prompt)
+                    awaiting_plan_selection = False
+                    best_of_n_complete = True
+                    critic_done = True
+                    await self._update(
+                        task_id,
+                        acceptance_criteria="\n".join(working.acceptance_criteria),
+                        plan_json=json.dumps(working.plan),
+                        compact_memory=working.dumps(),
+                        summary=working.goal,
+                        stage="plan",
+                        current_action=f"Selected plan {chosen.label}",
+                    )
+                    await BUS.publish(
+                        task_id,
+                        "stage",
+                        f"Selected plan {chosen.label}",
+                        format_selected_plan(chosen)[:1500],
+                        stage="plan",
+                    )
+                    messages.append(ChatMessage(role="user", content=format_selected_plan(chosen)))
+                    continue
 
                 if policy.critic_pass and not critic_done and not verifying:
                     critic_done = True
