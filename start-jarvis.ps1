@@ -24,7 +24,7 @@ $q4 = Join-Path $Root "models\Qwen3.5-27B-GGUF\Qwen3.5-27B-Q4_K_M.gguf"
 $mmproj = Join-Path $Root "models\Qwen3.5-27B-GGUF\mmproj-F16.gguf"
 
 if (-not (Test-Path $llama)) { throw "llama-server.exe missing at $llama" }
-if (-not (Test-Path $q4)) { throw "Qwen3.5-27B Q4_K_M GGUF missing. See README.md to download." }
+if (-not (Test-Path $q4)) { throw "Qwen3.5-27B Q4_K_M GGUF missing. See docs/INSTALL.md to download." }
 if (-not (Test-Path $mmproj)) { throw "Vision projector mmproj-F16.gguf missing." }
 Write-Host "Python: $python"
 Write-Host "Node: $node"

@@ -1875,6 +1875,10 @@ This development session:
 - Task classification: keyword-scored classifier stored on the task
 - Acceptance criteria / plan: parsed from the first planning turn and persisted
 
+### Documentation
+
+- Operator + contributor guides for the current tree: `docs/INSTALL.md` (Windows install, llama.cpp, GGUFs, start/stop, LAN auth) and `docs/DEVELOPMENT.md` (repo map, API, agent loop, tools, tests). `README.md` is the landing page and points at those files.
+
 ### Portal / API
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
@@ -1907,7 +1911,7 @@ Tests performed:
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** after merging both QA branches plus AGENTS.md. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 

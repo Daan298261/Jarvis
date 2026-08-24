@@ -15,7 +15,7 @@ Jarvis is a Windows-tuned local desktop agent (FastAPI backend + React/Vite port
 - Backend (dev): `JARVIS_SKIP_MODEL=1 PYTHONPATH=backend python3 -m uvicorn app.main:app --host 127.0.0.1 --port 4780 --app-dir backend`. `JARVIS_SKIP_MODEL=1` skips the llama.cpp auto-load (which cannot succeed here); without it the API still starts but logs a model-load failure.
 - Frontend (dev): `npm --prefix frontend run dev` → Vite on `http://localhost:5173`. Vite binds to `localhost` (IPv6 `::1`); use `localhost`, not `127.0.0.1`. Its `/api` proxy targets the backend on `:4780`.
 - Single-URL portal: after `npm --prefix frontend run build`, the backend serves the built SPA at `http://127.0.0.1:4780`. The build step is intentionally NOT in the startup script.
-- Tests: `python3 -m pytest` (see `pytest.ini`; `pythonpath=backend`). These use an in-process scripted model provider, so no real model is needed.
+- Tests: `python3 -m pytest` (see `pytest.ini`; `pythonpath=backend`). These use an in-process scripted model provider, so no real model is needed. Contributor notes: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 - Frontend lint: `npm --prefix frontend run lint` (oxlint; it emits warnings but exits 0).
 
 ### Running the full agent loop without the 27B model
