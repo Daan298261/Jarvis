@@ -4,6 +4,8 @@ Self-hosted local desktop agent. The model is **Qwen3.5-27B** running on this co
 
 Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. That file is the persistent architecture, current state, and development queue. Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode) is specified in sections 64–85 and is not implemented yet.
 
+Detailed P2+ swarm role, node placement, resource-control, and universal-UI requirements are maintained separately in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md). The master plan remains authoritative for priority and implementation status.
+
 ## Documentation
 
 | Document | Contents |
@@ -11,6 +13,7 @@ Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVI
 | **[docs/INSTALL.md](docs/INSTALL.md)** | Full Windows install: Python, Node, llama.cpp, GGUFs, start options, LAN auth, updates |
 | **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** | Repo map, dev servers, API, agent loop, adding tools, tests |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Control plane, compaction, memory, autonomy |
+| [SWARM_ARCHITECTURE.md](SWARM_ARCHITECTURE.md) | P2–P4 node roles, placement, resources, swarm UI, multi-node and resilience requirements |
 | [TOOLS.md](TOOLS.md) | Native tools, MCP, trajectories, skills |
 | [SECURITY.md](SECURITY.md) | Bind address, private keys, filesystem policy |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Unloaded model, CUDA, Playwright, Office, Docker |
