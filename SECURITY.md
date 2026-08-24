@@ -54,3 +54,10 @@ Autonomous mode still stops before:
 - changing account credentials
 - disabling core security controls
 - sending money, purchases, or unsolicited external communications
+
+## Future swarm boundary
+
+The current private-key/LAN mechanism protects the existing single-control-plane API; it is **not** a complete trust or pairing protocol for a future multi-node swarm. P3 remote-node work must define authenticated pairing and least-privilege node/worker access before remote execution is enabled. See `SWARM_ARCHITECTURE.md`.
+
+Security/SIEM/Sentinel/forensics mentioned in the swarm specification are future specialized roles only. Do not implement those subsystems from this note; they will be separately specified and promoted later.
+

@@ -24,6 +24,12 @@ When the same task class succeeds three or more times with the same tool sequenc
 
 Hidden reasoning is never stored — only tool choices, outcomes, and error summaries.
 
+## Swarm placement (future P2+)
+
+The current tool registry is process-local. `SWARM_ARCHITECTURE.md` requires future placement to keep **tool/worker selection** separate from **Node placement**. A software Worker or tool capability may advertise requirements (OS, GPU/VRAM, desktop session, local files, etc.); the Orchestrator then selects an eligible Node subject to role policy, resource budgets/leases, data locality, and current load.
+
+P2 must preserve current one-machine behavior: the only eligible Node may be `localhost`. P3 adds remote execution. Do not rename existing software workers to `SeniorWorker` / `JuniorWorker`; those labels are node execution classes in the swarm spec.
+
 ## MCP
 
 Configure servers in the MCP page or `data/settings.json` → `mcp_servers`. Example:

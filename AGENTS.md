@@ -1,10 +1,20 @@
 # AGENTS.md
 
-Read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. It is the persistent architecture, current state, and development queue. Jarvis 1.x is sections 1–63. Jarvis 2.0 (Away Mode) is sections 64–85; do not start 2.0 implementation instead of Windows P0 unless the user asked for it.
+Read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. It is the persistent priority, current-state, and development queue source of truth. Detailed P2+ swarm role/placement/resource/UI requirements live separately in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md).
+
+Read `SWARM_ARCHITECTURE.md` before changing Node/Worker abstractions, scheduling or placement, host resource controls, role policies, universal UI architecture, distributed execution, discovery/pairing, or Orchestrator/Leader behavior. Do not duplicate the full swarm spec into the master plan.
+
+Priority rule: finish/progress the active P0/P1 work before starting P2 swarm implementation unless the user explicitly requests swarm work. P2 makes the existing PC a one-node swarm first; P3 adds multi-node execution; P4 adds resilience. Security/SIEM/forensics mentioned by the swarm spec remain deferred until separately specified and explicitly promoted.
 
 ## Cursor Cloud specific instructions
 
-Jarvis is a Windows-tuned local desktop agent (FastAPI backend + React/Vite portal) whose model is a 27B GGUF served by llama.cpp on an NVIDIA GPU. The Cloud VM is headless Linux with no GPU, so the model and the Windows-only tools do not run here, but the backend, portal, tool system, and test suite all run fine for development.
+Jarvis is a Windows-tuned local desktop agent (FastAPI backend + React/Vite portal). The currently implemented model path is a 27B GGUF served by llama.cpp on an NVIDIA GPU; the active P0 plan is to benchmark/migrate normal operation to a fully GPU-resident 9B primary model while retaining 27B as an expert escalation model. The Cloud VM is headless Linux with no GPU, so the model and the Windows-only tools do not run here, but the backend, portal, tool system, and test suite all run fine for development.
+
+### Swarm terminology for future work
+- `Node` = participating physical/virtual machine or device.
+- `Worker` = software execution service/agent that runs on an eligible Node.
+- Orchestrator = control plane. Leader = strongest general-purpose execution Node, not automatically the Orchestrator.
+- Product labels Senior Worker / Junior Worker describe Node classes in the swarm specification; avoid introducing conflicting software-worker classes with those names.
 
 ### Environment (already handled by the startup update script)
 - Python deps install into the user site with `python3 -m pip install --break-system-packages` (the base image has no `python3-venv`/`ensurepip`, so there is no virtualenv). Console scripts land in `~/.local/bin`, which may not be on `PATH` — invoke tools as `python3 -m pytest`, `python3 -m uvicorn`, etc.

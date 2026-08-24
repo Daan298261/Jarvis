@@ -8,9 +8,9 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 **Jarvis 2.0** (sections 64–85) is the long-term Autonomous Operator / Away Mode specification: event-driven, multi-worker, policy-bounded, remotely supervised. It is specified here so future sessions do not lose the product target. Do not treat 2.0 items as the current-session P0 unless the Development Queue has promoted them or the user explicitly asked for 2.0 work.
 
-This file replaces the need to repeatedly provide large architectural prompts to Cursor.
+This file remains the overall source of truth for priorities, current state, and development status. Detailed swarm requirements intentionally live in the separate [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md) specification so this master plan does not duplicate a large evolving subsystem design.
 
-Every development session must read this file before making substantial changes.
+Every development session must read this file before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`.
 
 Cursor is responsible for keeping this document accurate.
 
@@ -558,7 +558,7 @@ Model permissiveness must remain separate from operational authorization.
 
 
 
-## P0.13 — Hardware Purchasing Gate
+## P0.12 — Hardware Purchasing Gate
 
 Do not recommend or depend on additional hardware until the new benchmark suite has run on the actual desktop.
 
@@ -587,7 +587,7 @@ Hardware purchases should be driven by measured bottlenecks.
 
 ---
 
-## P0.14 — Success Target
+## P0.13 — Success Target
 
 The model migration is considered successful when:
 
@@ -621,8 +621,9 @@ The current P0 queue should now be ordered:
 8. **Run 20-task comparison: 9B Q8 vs 9B Q6 vs current 27B Q4.**
 9. **Select default Fast/Balanced/Stable configurations from measured results.**
 10. **Implement automatic 9B → 27B Expert escalation.**
-11. **Add Professional/Forensic Audit Mode.**
-12. **Only after these tests, reassess whether hardware upgrades are necessary.**
+11. **Only after these tests, reassess whether hardware upgrades are necessary.**
+
+Security/SIEM/forensics implementation is intentionally deferred. The swarm architecture may reserve future roles for those capabilities, but they must be separately respecified and explicitly promoted before implementation.
 
 This optimization effort takes priority over Browser Use, UFO, Cua, OpenHands, voice, phone clients, and other P1/P2/P3 functionality unless one of those is required to complete the benchmark suite.
 
@@ -3464,22 +3465,18 @@ Refactor incrementally.
 
 Priority order:
 
-1. stable Jarvis core;
-2. reliable local Qwen inference;
-3. task orchestration;
-4. state persistence;
-5. verification/recovery;
-6. deterministic filesystem/shell/Python;
-7. Playwright/browser;
-8. Browser Use integration;
-9. Windows computer control;
-10. UFO/Cua adapters;
-11. OpenHands/Open Interpreter adapters;
-12. reusable skills;
-13. trajectory memory;
-14. advanced benchmarking;
-15. voice/phone features;
-16. Jarvis 2.0 Phase A (event intake, software-engineering worker, isolated worktrees, verified PRs) — only after Windows P0, or when a session is explicitly for 2.0.
+1. stable Jarvis core and mandatory verification/recovery;
+2. P0 fast/reliable local-model migration, Windows inference verification, and benchmarking;
+3. dynamic context/tool/thinking behavior and model escalation;
+4. P1 autonomous software-development worker routing, Cursor ACP, isolated self-development, and the one-day trial;
+5. P2 swarm-ready abstractions from `SWARM_ARCHITECTURE.md` on the existing single machine;
+6. deterministic filesystem/shell/Python and Playwright reliability;
+7. Browser Use and Windows semantic-computer-control improvements;
+8. optional specialist workers such as OpenHands/Open Interpreter/UFO/Cua where they materially improve reliability;
+9. reusable skills, trajectory learning, and operational benchmarking improvements;
+10. P3 multi-node swarm only after the P2 single-node placement abstractions are sound;
+11. voice/phone and other product capabilities according to the active Development Queue;
+12. P4 swarm resilience and deferred specialized infrastructure only when explicitly promoted.
 
 ---
 
@@ -3625,7 +3622,7 @@ This development session:
 ### Jarvis 2.0
 
 - Specification: **appended** as sections 64–85 (Autonomous Operator / Away Mode)
-- Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers, `WorkerNode` / GPU scheduler: **not implemented**
+- Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers, `Node` registry / Worker placement / GPU scheduler: **not implemented**
 - Flagship benchmark `Away Mode — Autonomous Bug Fix`: **not implemented**
 - Hardware Stage 1 remains the existing desktop; no new GPU is required to continue development
 
@@ -3691,7 +3688,7 @@ Results: **75 passed** on the merged tree (re-run after updating onto latest `cu
 
 Statuses: TODO, IN PROGRESS, BLOCKED, VERIFIED
 
-Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvement, P3 future.
+Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/foundation or useful improvement, P3 multi-node/future capability, P4 resilience/advanced long-term infrastructure.
 
 ### P0
 
@@ -3711,9 +3708,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
   - Acceptance: task cannot be marked successful without an independent verification pass.
   - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
 
-- [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
-  - Acceptance: model loads, API responds, tool calls work, vision projector loads.
-  - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`.
+- [ ] Reliable P0 model stack on the Windows desktop
+  - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
+  - Status: TODO / IN PROGRESS by plan (current code still reflects the 27B implementation path; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must validate the new model stack and run `tests/run_e2e.py`.
 
 ### P1
 
@@ -3768,6 +3765,21 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [ ] Office COM coverage when Office is installed
 - [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
 
+#### P2 — Swarm-ready foundation (`SWARM_ARCHITECTURE.md`)
+
+These items make the existing machine a one-node swarm first. They must not require a second computer. Detailed role/resource/UI semantics live in `SWARM_ARCHITECTURE.md`.
+
+- [ ] Introduce first-class `Node` identity/state separate from software Worker abstractions.
+- [ ] Preserve software workers (`LocalJarvisCodingWorker`, `CursorACPWorker`, browser/media workers, etc.) as services that execute on eligible Nodes.
+- [ ] Separate Orchestrator (control plane) from Leader (strongest general-purpose execution Node).
+- [ ] Generalize capability registration so Nodes and Workers advertise capabilities and requirements.
+- [ ] Implement node role/class policy: `AUTO`, `PREFERRED`, `FORCED`, `AVOID`, `DISABLED`, including persistence and failover intent without implementing distributed failover yet.
+- [ ] Implement host resource budgets, hard/soft caps, reserved capacity, task priority, and resource-lease representation (CPU/RAM/GPU/VRAM/storage/network where meaningful).
+- [ ] Implement a single-node placement scheduler that selects an eligible Node from requirements even when only `localhost` exists.
+- [ ] Keep intelligence selection separate from physical placement: choose the Worker/model first or jointly, then select the eligible Node based on capability, policy, locality, load, and resource availability.
+- [ ] Add model/worker warm-state and data-locality signals to placement scoring so the scheduler does not cause pointless model reloads or large transfers.
+- [ ] Extend the existing React portal toward the universal dynamic UI contract and add a Swarm settings surface without creating OS-specific frontends.
+
 ### P3
 
 - [ ] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
@@ -3777,6 +3789,24 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [ ] Cua adapter
 - [ ] Open Interpreter adapter
 - [ ] Browser workflow promotion (BrowserCode-style skills)
+
+#### P3 — Multi-node swarm (`SWARM_ARCHITECTURE.md`)
+
+- [ ] Secure node discovery and pairing.
+- [ ] Remote worker execution and authenticated node protocol.
+- [ ] Heartbeats, node health, capability/resource telemetry, and node-loss handling.
+- [ ] Cross-node placement using resource availability, transfer cost/data locality, warm models/workers, user role policy, battery/thermal/network state, and task priority.
+- [ ] Swarm UI for Nodes, Roles, Resources, Network, and Failover configuration.
+- [ ] Universal conceptual installer/join flow across supported operating systems.
+- [ ] Dynamic role recommendations and re-evaluation while respecting hard user policy.
+
+### P4 — Swarm resilience / advanced infrastructure
+
+- [ ] Active/passive standby Orchestrator support.
+- [ ] Restart-safe Orchestrator state replication and controlled failover.
+- [ ] Affinity/anti-affinity and advanced placement constraints.
+- [ ] Optional separation/replication of database, memory, storage, edge, and other specialized services only when separately specified and justified.
+- [ ] Security/SIEM/forensics remain deferred until a dedicated specification explicitly promotes them.
 
 ### Jarvis 2.0 — specified, not implemented
 
@@ -3800,7 +3830,7 @@ Phase D — Business Operator: marketing, analytics, content publishing, support
 
 Phase E — Creative Operator: `NovelProject`, editorial workers, multimedia pipeline.
 
-Phase F — Distributed Jarvis: `WorkerNode` registry, model/GPU scheduler, cloud fallback.
+Phase F — Distributed Jarvis: implement the P2/P3/P4 swarm roadmap from `SWARM_ARCHITECTURE.md` (first-class Nodes, software Workers placed on Nodes, resource-aware scheduling, multi-node execution, and later resilience) plus cloud fallback where explicitly authorized.
 
 ---
 
@@ -3813,6 +3843,38 @@ External frameworks such as OpenHands, UFO and Browser Use are execution workers
 Reason:
 
 Maintains a single persistent agent architecture while allowing specialized mature tooling.
+
+Decision: swarm architecture remains a separate authoritative specification
+
+Detailed role, placement, resource-control, node-management, and universal-UI requirements live in `SWARM_ARCHITECTURE.md`. The master plan references that file and owns priority/status rather than duplicating the full swarm specification.
+
+Reason:
+
+The swarm design is large and will evolve independently; keeping one detailed spec prevents the master plan from becoming contradictory or excessively duplicated.
+
+Decision: Orchestrator and Leader are distinct roles
+
+The Orchestrator owns coordination/control-plane responsibilities. The Leader is the strongest general-purpose execution Node and may disappear without taking the control plane down.
+
+Reason:
+
+Control-plane availability must not depend on the most powerful GPU workstation.
+
+Decision: Node and Worker are distinct concepts
+
+A Node is a physical/virtual participating device. A Worker is a software execution service/agent that can run on an eligible Node. Product labels such as Senior Worker and Junior Worker are node execution classes in the swarm spec and should not become competing software-worker types.
+
+Reason:
+
+The existing code already uses worker to mean software agents. Separating placement from execution prevents scheduler and type-system ambiguity.
+
+Decision: one-node swarm first
+
+P2 introduces Node/capability/resource/placement abstractions on the existing desktop before P3 adds discovery, pairing, and remote execution.
+
+Reason:
+
+This makes multi-device support an extension rather than a rewrite while keeping current development focused and testable.
 
 Decision: deterministic tools first
 
@@ -3920,7 +3982,7 @@ The 1.x local-first principle is not relaxed by 2.0. Cloud is a capability, not 
 
 Decision: do not require new hardware before continuing development
 
-Stage 1 is the existing desktop. Stage 2/3 GPUs are worker nodes added later. Hardware should plug in as `WorkerNode`s without redesigning Jarvis.
+Stage 1 is the existing desktop. Stage 2/3 GPUs are Nodes added later. Hardware should register as a Node exposing capabilities and eligible software Workers without redesigning Jarvis.
 
 Reason:
 
@@ -4116,7 +4178,7 @@ When a new Cursor session starts and the instruction is simply:
 
 Perform the following automatically:
 
-1. Read this entire file, including Jarvis 2.0 (sections 64–85).
+1. Read this entire file, including Jarvis 2.0 (sections 64–85). If the selected work touches nodes, placement, resource control, distributed execution, role policy, or universal UI architecture, also read `SWARM_ARCHITECTURE.md` before changing code.
 2. Inspect Git status.
 3. Inspect relevant current code.
 4. Check the Current State section.
@@ -4966,77 +5028,29 @@ Jarvis should automatically manage GPU-heavy pipelines by:
 
 ---
 
-## 77. Distributed Worker Node Architecture
+## 77. Distributed Node / Worker Architecture
 
-Jarvis should support multiple computers as execution/inference workers.
+The authoritative specification for this subsystem is [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md). Do not duplicate its full role, placement, resource, failover, or UI requirements here.
 
-Implement a first-class:
+Core integration requirements:
 
-`WorkerNode`
+- `Node` means a physical or virtual participating machine/device.
+- `Worker` means a software execution service or agent placed on an eligible Node.
+- The Orchestrator is the control plane; the Leader is the strongest general-purpose execution Node and is not inherently the Orchestrator.
+- Jarvis must behave as a valid one-node swarm before remote-node transport exists.
+- P2 introduces Node identity, capability/resource representation, role policy, resource leases, and local placement.
+- P3 adds discovery, secure pairing, remote workers, telemetry, and cross-node placement.
+- P4 adds standby Orchestrators and advanced resilience.
 
-Suggested properties:
+The existing `InferenceBackend` split remains useful: a remote inference endpoint is one capability that a Node may expose. Swarm scheduling generalizes this from a single configured endpoint into many possible Nodes and Workers without making inference transport the definition of a Node.
 
-- `id`
-- `hostname`
-- `ip`
-- `operating_system`
-- `cpu`
-- `cpu_threads`
-- `ram_total`
-- `ram_free`
-- `gpu`
-- `gpu_count`
-- `vram_total`
-- `vram_free`
-- `cuda_version`
-- `models_available`
-- `capabilities`
-- `current_tasks`
-- `current_load`
-- `health`
-- `last_heartbeat`
-- `power_state`
-- `priority`
-- `tags`
-
-### Worker capabilities
-
-Examples:
-
-- `general_inference`
-- `coding`
-- `vision`
-- `video_generation`
-- `image_generation`
-- `tts`
-- `stt`
-- `browser`
-- `windows_desktop`
-- `docker`
-- `build_server`
-
-Jarvis should automatically schedule work according to:
-
-- required capability;
-- VRAM;
-- RAM;
-- current load;
-- estimated task duration;
-- model availability;
-- machine availability;
-- energy/cost constraints.
-
-Example:
-
-"Coding model requires 28 GB VRAM. Desktop has 9 GB available. AI-NODE-01 has 31 GB available. Dispatching coding task to AI-NODE-01."
-
-This extends the 1.x `InferenceBackend` split (local llama.cpp vs remote OpenAI-compatible). A remote backend is one node; 2.0 needs a registry of many nodes with capability-aware scheduling.
+Security/SIEM/forensics are reserved future specialized roles only until separately specified and promoted.
 
 ---
 
 ## 78. Model / GPU Scheduler
 
-Implement automatic model lifecycle management.
+Implement automatic model lifecycle management as a specialized part of the broader placement/resource scheduler defined in `SWARM_ARCHITECTURE.md`. Model selection, software Worker selection, physical Node placement, and resource leasing are distinct decisions even when one scheduler coordinates them.
 
 Jarvis should know:
 
@@ -5193,11 +5207,13 @@ Use cases:
 - simultaneous planner/verifier;
 - heavy media workloads.
 
-Hardware should be added as worker nodes without redesigning Jarvis.
+Hardware should be added as Nodes exposing capabilities without redesigning Jarvis.
 
 ---
 
 ## 81. Security Requirements for High Autonomy
+
+**Status: DEFERRED / placeholder only.** Do not implement or expand this subsystem until the user separately respecifies and explicitly promotes security/forensics work. The bullets below preserve earlier long-term intent only.
 
 As Jarvis gains authority, security requirements increase substantially.
 
@@ -5208,7 +5224,7 @@ Implement:
 - per-worker permissions;
 - per-tool permissions;
 - network segmentation;
-- authenticated worker nodes;
+- authenticated Nodes;
 - TLS where appropriate;
 - signed worker requests;
 - immutable audit logging;
@@ -5295,7 +5311,7 @@ Jarvis should learn:
 - successful creative patterns;
 - manuscript style/continuity rules;
 - machine-specific behavior;
-- worker-node performance.
+- node/worker placement performance.
 
 This memory should improve task routing and execution over time.
 
@@ -5388,8 +5404,8 @@ Jarvis can manage long-running book and multimedia projects while preserving pro
 
 Implement:
 
-- worker-node registry;
-- model/GPU scheduler;
+- Node registry;
+- Worker placement and model/GPU scheduler;
 - multiple simultaneous models;
 - dedicated AI worker hardware;
 - distributed task execution;
