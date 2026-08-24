@@ -1339,6 +1339,455 @@ benchmark
         ▼
 candidate branch
 
+# 13. Self-Development Isolation
+
+When starting autonomous self-development:
+
+1. Confirm trusted source revision.
+2. Create a dedicated branch/worktree.
+3. Record the starting commit SHA.
+4. Never modify the trusted running installation.
+5. Give the worker access only to the experimental worktree where practical.
+6. Develop there.
+7. Commit incremental checkpoints.
+8. Run tests.
+9. Record benchmark results.
+10. Produce a final candidate branch.
+
+Example branch:
+
+`jarvis/autonomous-trial-2026-08-24`
+
+A broken experimental branch must never prevent the trusted Jarvis instance from starting.
+
+---
+
+# 14. No Autonomous Merge During Initial Trials
+
+During early self-development trials, Jarvis may:
+
+- edit;
+- test;
+- commit;
+- create branches;
+- create candidate pull requests where authorized;
+- compare results.
+
+Jarvis must NOT automatically:
+
+- merge its experimental branch into trusted main;
+- overwrite the trusted installation;
+- deploy a new Jarvis version over itself;
+- delete the known-good branch.
+
+The user should review the first trial results.
+
+Later, automated promotion may be considered after sufficient reliability data exists.
+
+---
+
+# 15. One-Day Autonomous Development Trial
+
+Create an explicit test mode:
+
+`AUTONOMOUS_DEVELOPMENT_TRIAL`
+
+Duration target:
+
+Up to approximately one working day or a configured time budget.
+
+Purpose:
+
+Determine whether Jarvis is genuinely capable of managing software development.
+
+Test environment:
+
+Dedicated Jarvis fork/worktree.
+
+At trial start:
+
+1. Snapshot source commit.
+2. Ensure clean Git state.
+3. Create experiment branch.
+4. Run baseline tests.
+5. Record baseline metrics.
+
+Then Jarvis should work autonomously through appropriate items in `JARVIS_MASTER_PLAN.md`.
+
+Jarvis should:
+
+- choose a task;
+- determine acceptance criteria;
+- select a coding worker;
+- implement;
+- run tests;
+- inspect failures;
+- recover;
+- escalate models when justified;
+- verify;
+- commit successful increments;
+- continue to the next task.
+
+Do NOT repeatedly ask the user what to work on.
+
+Use the highest-value eligible backlog item.
+
+---
+
+# 16. Trial Task Restrictions
+
+For the first autonomous self-development trial, prefer tasks that are:
+
+- testable;
+- reversible;
+- isolated;
+- clearly specified.
+
+Suitable examples:
+
+- benchmark instrumentation;
+- model-profile improvements;
+- dynamic tool exposure;
+- context optimizations;
+- UI improvements;
+- worker adapters;
+- test coverage;
+- documentation;
+- performance telemetry.
+
+Avoid initially:
+
+- destructive database migrations;
+- deleting major architecture;
+- replacing the entire orchestrator;
+- security-boundary removal;
+- automatic production deployment.
+
+---
+
+# 17. Trial Budget
+
+Self-development must have configurable limits.
+
+Example:
+
+Maximum duration:
+12 hours
+
+Maximum paid AI spend:
+user-defined
+
+Maximum paid worker invocations:
+configurable
+
+Maximum consecutive failures:
+configurable
+
+Maximum branch size/change volume:
+warning threshold
+
+Jarvis must stop escalating paid models if the configured financial limit is reached.
+
+Continue with local work where possible.
+
+---
+
+# 18. Kill Switch
+
+Provide an immediate stop mechanism.
+
+Examples:
+
+Portal:
+
+`STOP AUTONOMOUS DEVELOPMENT`
+
+API:
+
+Cancel supervisor job.
+
+Local file:
+
+`data/STOP_JARVIS`
+
+or similarly simple emergency stop mechanism.
+
+When activated:
+
+- stop new worker dispatch;
+- cancel active coding workers where practical;
+- preserve current files;
+- preserve logs;
+- preserve Git state;
+- do not attempt cleanup that could destroy useful work.
+
+---
+
+# 19. Independent Verification
+
+Jarvis must not trust Cursor's final response.
+
+After Cursor says:
+
+> Implemented and tests pass.
+
+Jarvis should independently execute relevant verification.
+
+At minimum:
+
+- inspect Git diff;
+- run unit tests;
+- run relevant integration tests;
+- run build;
+- inspect errors;
+- ensure acceptance criteria are satisfied.
+
+For changes affecting Jarvis runtime, where practical launch the experimental instance on alternate ports and test it separately.
+
+Example:
+
+Trusted Jarvis:
+`127.0.0.1:4780`
+
+Experimental Jarvis:
+`127.0.0.1:4781`
+
+Then Jarvis can test its candidate replacement without killing itself.
+
+---
+
+# 20. Self-Development Regression Gate
+
+A candidate change may only be considered successful when:
+
+NEW TESTS PASS  
+AND  
+OLD TESTS PASS  
+AND  
+RELEVANT E2E TESTS PASS  
+AND  
+NO UNEXPLAINED REGRESSION EXISTS
+
+If performance-related, compare against baseline.
+
+Example:
+
+Before:
+median task time = 94 s
+
+After:
+median task time = 61 s
+
+Task success:
+unchanged
+
+Result:
+accept improvement.
+
+But:
+
+Before:
+success = 95%
+
+After:
+success = 75%
+
+Result:
+reject even if faster.
+
+---
+
+# 21. Development Learning
+
+Record each delegated coding task in trajectory memory.
+
+Store:
+
+- task class;
+- task complexity;
+- worker;
+- model;
+- duration;
+- cost;
+- first-attempt success;
+- retries;
+- verification result;
+- regression count.
+
+Use these results to improve future routing.
+
+Example:
+
+After enough tasks Jarvis might learn:
+
+> Local Qwen succeeds on Python unit-test additions 93% of the time.
+
+Then route those locally.
+
+Or:
+
+> Local Qwen fails most React state-management changes.
+
+Then route those directly to Composer.
+
+This should evolve from static thresholds into evidence-based routing.
+
+---
+
+# 22. Self-Development Reporting
+
+At the end of an autonomous development session produce a concise report.
+
+Include:
+
+Duration:
+Worker time:
+Models used:
+Estimated paid cost:
+Tasks attempted:
+Tasks completed:
+Tasks failed:
+Commits created:
+Tests before:
+Tests after:
+Regressions:
+Performance changes:
+Human intervention:
+Recommended merge candidates:
+
+Also produce:
+
+- experiment branch name;
+- starting commit;
+- ending commit;
+- concise diff summary.
+
+The purpose of the first one-day trial is measurement, not blind trust.
+
+---
+
+# 23. Success Criteria for Initial Trial
+
+The autonomous development system will be considered promising if Jarvis can spend a full trial period working on its own fork and achieve:
+
+- multiple useful commits;
+- no damage to trusted Jarvis;
+- clean/recoverable Git state;
+- no uncontrolled spending;
+- correct worker escalation;
+- tests passing after successful changes;
+- meaningful backlog progress;
+- low human intervention.
+
+Measure:
+
+`verified useful work per hour`
+
+and:
+
+`verified useful work per euro`
+
+These are more important than raw tokens generated.
+
+---
+
+# 24. Implementation Priority
+
+Add the following to the active development queue.
+
+P0/P1:
+
+1. Implement `SoftwareDevelopmentWorker` abstraction.
+2. Implement `CursorACPWorker`.
+3. Verify local Cursor authentication.
+4. Verify `agent acp` lifecycle.
+5. Add persistent Cursor session IDs.
+6. Implement Composer/Grok model routing.
+7. Implement worker escalation.
+8. Add cost/usage telemetry where available.
+9. Implement Self-Development Mode.
+10. Implement isolated Git worktree/fork management.
+11. Implement experimental alternate-port Jarvis launch.
+12. Implement self-development verification gate.
+13. Implement spend/time/failure limits.
+14. Implement emergency kill switch.
+15. Implement end-of-run development report.
+16. Run first one-day autonomous-development experiment.
+
+Do not prioritize GUI mouse automation of Cursor.
+
+ACP is the preferred primary integration.
+
+MCP should complement ACP by allowing Cursor to access Jarvis-managed tools and context.
+
+---
+
+# 25. Desired End-State Example
+
+Event:
+
+Jarvis discovers a P1 backlog item:
+
+> Implement Browser Use worker adapter.
+
+Jarvis:
+
+1. Inspects requirement.
+2. Estimates complexity = 65.
+3. Sees no strong local trajectory.
+4. Selects Composer 2.5.
+5. Creates isolated branch/worktree.
+6. Launches Cursor through ACP.
+7. Sends requirement and acceptance criteria.
+8. Monitors Cursor.
+9. Automatically answers routine Cursor planning questions.
+10. Cursor implements adapter.
+11. Cursor reports success.
+12. Jarvis runs tests independently.
+13. A test fails.
+14. Jarvis sends the exact failure back to the same Cursor session.
+15. Cursor repairs it.
+16. Jarvis retests.
+17. Tests pass.
+18. Jarvis launches experimental Jarvis.
+19. Runs relevant E2E test.
+20. Verifies behavior.
+21. Commits candidate.
+22. Records Composer success/cost/duration.
+23. Moves to the next backlog item.
+
+If Composer repeatedly fails:
+
+Jarvis packages the current state and escalates to:
+
+`Grok 4.6`
+
+The user does not need to supervise this routine loop.
+
+---
+
+# 26. Core Principle
+
+Jarvis should not attempt to become the world's best programmer using one small local model.
+
+Jarvis should become a competent engineering manager.
+
+Its job is to:
+
+- identify work;
+- estimate difficulty;
+- choose the right intelligence;
+- control cost;
+- provide context;
+- supervise execution;
+- detect failure;
+- escalate intelligently;
+- verify results;
+- remember what worked.
+
+The long-term objective is:
+
+**Use local intelligence whenever it is sufficient and paid frontier intelligence only when it materially increases the probability of successful completion.**
 
 from here on are the regular requirements
 ## 1. Core Goal
