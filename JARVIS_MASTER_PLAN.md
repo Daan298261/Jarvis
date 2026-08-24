@@ -3608,15 +3608,15 @@ This development session:
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
 - PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
 - Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
-- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
-- Playwright: native backend present
+- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs) via `BrowserBackend`; optional Browser Use `task` action when `browser-use` is installed
+- Playwright: default deterministic `BrowserBackend`
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
 - Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
 
 ### Optional Workers
 
-- Browser Use: **not integrated** (catalog shows `not_integrated`)
+- Browser Use: **adapter integrated** (`BrowserUseBackend` behind `BrowserBackend`; catalog shows `ready` when `browser-use` is installed, else `missing`)
 - UFO: **not integrated**
 - Cua: **not integrated**
 - Open Interpreter: **not integrated**
@@ -3745,9 +3745,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
   - Status: TODO (Windows e2e)
 
-- [ ] Browser Use adapter
+- [x] Browser Use adapter
   - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
-  - Status: TODO
+  - Status: VERIFIED in unit tests (`test_browser_backends.py`); live Browser Use + local LLM untested on Windows desktop
 
 - [ ] Windows semantic UI automation hardening
   - Acceptance: named-control interaction works for at least one native app; coordinate click remains last resort.

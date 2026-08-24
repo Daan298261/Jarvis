@@ -5,6 +5,9 @@ import platform
 import shutil
 from typing import Any
 
+from ..config import load_settings
+from .browser_backends import browser_use_available
+
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -97,14 +100,18 @@ def native_capabilities() -> list[dict[str, Any]]:
 
 
 def optional_workers() -> list[dict[str, Any]]:
+    browser_use_installed = browser_use_available()
     return [
         {
             "id": "browser-use",
             "name": "Browser Use",
             "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Intelligent browser discovery worker. Playwright remains the deterministic backend.",
+            "available": browser_use_installed,
+            "status": "ready" if browser_use_installed else "missing",
+            "detail": (
+                "Intelligent browser discovery worker behind BrowserBackend. "
+                "Playwright remains the deterministic default."
+            ),
         },
         {
             "id": "ufo",
@@ -144,8 +151,21 @@ def optional_workers() -> list[dict[str, Any]]:
 def capability_snapshot() -> dict[str, Any]:
     native = native_capabilities()
     optional = optional_workers()
+    settings = load_settings()
     return {
         "native": native,
         "optional_workers": optional,
+        "browser_backends": [
+            {
+                "backend": "playwright",
+                "available": _module_available("playwright"),
+                "default": (settings.browser.backend or "playwright").lower() in {"playwright", "default", "deterministic"},
+            },
+            {
+                "backend": "browser-use",
+                "available": browser_use_available(),
+                "default": (settings.browser.backend or "playwright").lower() in {"browser-use", "browser_use", "browseruse", "intelligent"},
+            },
+        ],
         "all": native + optional,
     }
