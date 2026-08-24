@@ -1159,7 +1159,7 @@ A skill may include:
 - verification criteria;
 - recovery guidance.
 
-Repeated successful workflows may eventually be promoted into skills.
+Repeated successful workflows may eventually be promoted into skills. When the recorded tool arguments differ across those successes, they become parameters and the skill executes the bound steps itself instead of only advising the model.
 
 Do not create skills indiscriminately.
 
@@ -1304,7 +1304,8 @@ Display:
 - VRAM usage;
 - RAM usage;
 - tokens/sec;
-- load status.
+- load status;
+- persisted benchmark history (tok/s, VRAM, RAM, task success rate).
 
 Support profiles:
 
@@ -1828,7 +1829,7 @@ This development session:
 ### Working Tools
 
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported)
+- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
 - Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
 - Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
 - Playwright: native backend present
@@ -1850,7 +1851,7 @@ This development session:
 - Resume: `POST /api/tasks/{id}/continue` reloads compacted conversation
 - Context compaction: older turns collapse into a structured summary that cannot orphan a tool result from its assistant `tool_calls` turn; the compact working state is refreshed (not stacked) on every pass
 - Trajectory memory: `trajectories` table stores ordered tools, failure kinds, the recovery that worked, and verification. Similar new tasks get those lessons injected. No hidden reasoning is stored.
-- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence.
+- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
 
 ### Reliability
 
@@ -1866,10 +1867,10 @@ This development session:
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
+- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
 - Live status shows execution mode, task class, and verification
-- Live elapsed time uses `started_at` so reopening a running task does not reset the clock
-- Live status shows execution mode, task class, and verification
-- Memory page lists skills and trajectories with promote / enable controls
+- Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
+- Memory page lists skills and trajectories with promote / enable / run controls
 - Tools/System pages list optional workers as unavailable instead of crashing
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
@@ -1879,11 +1880,10 @@ This development session:
 
 - Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
-- Skill promotion records the tool sequence, not parameterized steps, so a skill guides rather than executes
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell; Linux-only environments should use `shell=bash`
+- Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
 
 ### Last End-to-End Test
 
@@ -1891,11 +1891,11 @@ Date: 2026-08-24
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection, failure classification and recovery routing, trajectory record/recall, skill promotion, private key authentication, launch queue watcher, workflow templates/save/run
-- Frontend (`npm run build`): TypeScript build clean
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **68 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **merged both QA branches; re-run pytest after merge**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -1975,10 +1975,10 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [x] Trajectory memory (cross-task) — VERIFIED (`test_trajectory.py`)
 - [x] Best-of-N planning for Reliable mode — VERIFIED (`test_best_of_n.py`, `test_planning.py`); three labeled candidates, critic selects one, only that plan is executed
 - [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
-- [ ] Parameterized skill execution (skills currently guide, they do not run themselves)
-- [ ] Model benchmark UI (persist tok/s, VRAM, success rates)
+- [x] Parameterized skill execution — VERIFIED (`test_skills.py`); bound steps run on matching tasks and via `POST /api/memory/skills/{id}/run`
+- [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
 - [ ] Office COM coverage when Office is installed
-- [ ] Long-running process inspection (PID still alive)
+- [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
 
 ### P3
 
@@ -2057,6 +2057,14 @@ A workflow is promoted only after the same task class succeeds several times wit
 Reason:
 
 The plan explicitly warns against creating skills indiscriminately. One success is often luck or a one-off path; repetition is the evidence that a workflow is stable.
+
+Decision: parameterized skills execute themselves
+
+When repeated successes record tool arguments, values that differed become `{parameters}` and a matching later task runs those bound steps, then verifies. Skills without recorded arguments still only guide.
+
+Reason:
+
+A skill that only appears in the system prompt is advice. The queue required skills to run, not merely remind the model of a tool order.
 
 Decision: permission failures do not get an alternative tool
 

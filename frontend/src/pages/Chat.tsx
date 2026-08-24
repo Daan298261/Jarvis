@@ -31,16 +31,20 @@ export function ChatPage() {
   }, [id])
 
   useEffect(() => {
-    if (!task || !["running", "queued", "waiting"].includes(task.status)) {
-      setElapsed(Math.round(task?.duration_seconds || 0))
-      return
+    if (!task) return
+    const startedMs = task.started_at ? Date.parse(task.started_at) : Date.now()
+    const tick = () => {
+      if (["running", "queued", "waiting"].includes(task.status) && !Number.isNaN(startedMs)) {
+        setElapsed(Math.max(0, Math.round((Date.now() - startedMs) / 1000)))
+      } else {
+        setElapsed(Math.round(task.duration_seconds || 0))
+      }
     }
-    const origin = task.started_at ? Date.parse(task.started_at) : Date.now()
-    const tick = () => setElapsed(Math.max(0, Math.round((Date.now() - origin) / 1000)))
     tick()
+    if (!["running", "queued", "waiting"].includes(task.status)) return
     const timer = window.setInterval(tick, 1000)
     return () => clearInterval(timer)
-  }, [task?.status, task?.id, task?.started_at])
+  }, [task?.status, task?.id, task?.started_at, task?.duration_seconds])
 
   async function submit() {
     if (!prompt.trim()) return
