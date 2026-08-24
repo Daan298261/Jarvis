@@ -1,4 +1,13 @@
-from app.tools.terminal import TerminalTool, _python_args
+import sys
+
+from app.tools.terminal import TerminalTool, _python_args, default_shell
+
+
+def test_default_shell_is_native_for_the_os():
+    if sys.platform == "win32":
+        assert default_shell() == "powershell"
+    else:
+        assert default_shell() in {"bash", "python"}
 
 
 def test_python_shell_uses_dash_c_for_snippets():

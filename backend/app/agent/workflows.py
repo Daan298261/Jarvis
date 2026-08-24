@@ -236,7 +236,8 @@ GUIDE_SECTIONS: list[dict[str, str]] = [
         "body": (
             "When LAN or remote access is on, every API call needs X-Jarvis-Key, "
             "Authorization: Bearer, or ?key=. Generate or paste the key on Settings. "
-            "The portal stores the client copy in this browser only."
+            "The portal stores the client copy in this browser only. "
+            "On a phone, open /phone, Add to Home screen, and paste the same key there."
         ),
     },
     {

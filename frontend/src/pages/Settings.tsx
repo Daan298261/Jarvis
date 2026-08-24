@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 
 export function SettingsPage() {
@@ -154,6 +155,17 @@ export function SettingsPage() {
           <input type="checkbox" checked={settings.backup_enabled} onChange={(e) => save({ backup_enabled: e.target.checked })} />
           Create backups before overwriting files
         </label>
+      </div>
+
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Phone / Android</h2>
+        <p className="lede">
+          The portal is an installable PWA. On the PC enable LAN access, then open <a href="/phone">/phone</a> from Android Chrome and Add to Home screen.
+          Pairing details never include the private key.
+        </p>
+        <div className="row">
+          <Link className="btn" to="/phone">Open phone client</Link>
+        </div>
       </div>
 
       {queueStatus && (

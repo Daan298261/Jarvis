@@ -1,6 +1,6 @@
 # Jarvis
 
-Self-hosted local desktop agent. The model is **Qwen3.5-27B** running on this computer through llama.cpp (or any OpenAI-compatible server you point at). The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
+Self-hosted local desktop agent. The model is **Qwen3.5-27B** running on this computer through llama.cpp (or any OpenAI-compatible server you point at). The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; `/phone` is the installable Android PWA against the same local API. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
 
 Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. That file is the persistent architecture, current state, and development queue. Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode) is specified in sections 64–85 and is not implemented yet.
 
