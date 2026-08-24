@@ -247,6 +247,9 @@ class AgentRuntime:
         last_tool_name = ""
         same_tool_streak = 0
         force_final = False
+        plan_candidates: list = []
+        awaiting_plan_selection = False
+        best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
 
         if existing and continue_existing:
@@ -329,6 +332,8 @@ class AgentRuntime:
                     tools_used = True
                     verifying = True
                     skill_requires_verify = True
+                    best_of_n_complete = True
+                    awaiting_plan_selection = False
                     working.next_action = "independent verification"
                     await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
                     messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
