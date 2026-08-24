@@ -5,6 +5,10 @@ import platform
 import shutil
 from typing import Any
 
+from ..workers.browser import BrowserUseBackend
+from ..workers.code import OpenHandsBackend
+from ..workers.voice import voice_status
+
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -51,7 +55,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": _module_available("playwright"),
             "status": "ready" if _module_available("playwright") else "missing",
-            "detail": "Deterministic browser backend.",
+            "detail": "Deterministic browser backend (default). Browser Use is optional for unfamiliar sites.",
         },
         {
             "id": "windows_ui",
@@ -93,19 +97,13 @@ def native_capabilities() -> list[dict[str, Any]]:
             "status": "ready" if shutil.which("docker") else "unavailable",
             "detail": "Optional. Jarvis continues without it.",
         },
+        voice_status(),
     ]
 
 
 def optional_workers() -> list[dict[str, Any]]:
     return [
-        {
-            "id": "browser-use",
-            "name": "Browser Use",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Intelligent browser discovery worker. Playwright remains the deterministic backend.",
-        },
+        BrowserUseBackend().probe(),
         {
             "id": "ufo",
             "name": "Microsoft UFO",
@@ -130,14 +128,7 @@ def optional_workers() -> list[dict[str, Any]]:
             "status": "not_integrated",
             "detail": "Optional code/shell worker behind an adapter.",
         },
-        {
-            "id": "openhands",
-            "name": "OpenHands",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Optional software-engineering worker. Jarvis still verifies results.",
-        },
+        OpenHandsBackend().probe(),
     ]
 
 

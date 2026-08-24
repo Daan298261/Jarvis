@@ -188,9 +188,13 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | POST | `/api/workflows` | Save a preset under `data/workflows/` |
 | DELETE | `/api/workflows/{id}` | Delete a saved preset (not a builtin) |
 | POST | `/api/workflows/run` | Fill placeholders, compose stages, create a task |
+| GET | `/api/voice/status` | Local Whisper STT / TTS probe (`stt_ready`, `tts_ready`) |
 | POST | `/api/voice/command` | `{ text, autonomy? }` — already-transcribed speech |
+| POST | `/api/voice/listen` | multipart `audio` — local Whisper, then create a task |
+| POST | `/api/voice/transcribe` | multipart `audio` — transcript only |
+| POST | `/api/voice/speak` | `{ text }` — local TTS WAV |
 
-Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from text.
+Voice stays on this machine. If Whisper is missing, type on Command as usual. Windows SAPI / espeak-ng / pyttsx3 provide TTS.
 
 ---
 
@@ -206,7 +210,7 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 6. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
 7. Reliable mode also requires a verification **tool** call and a critic pass
 8. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
-9. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence
+9. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence. Differing arguments become parameters; a later matching task can **run those bound steps**, then verify.
 
 Execution modes (`planning.POLICIES`) are **not** model profiles:
 
@@ -238,7 +242,7 @@ Context compaction (`agent/compaction.py`) must keep tool results paired with th
 
 MCP tools do not need a Python class: configure servers via the MCP page or `mcp_servers` in settings. They appear as `mcp_*` functions through `MCPProxyTool`.
 
-Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend.
+Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend. Browser Use and OpenHands adapters live in `backend/app/workers/` and register `browser_use` / `code_worker` tools that return "not installed" until the optional packages are present.
 
 ---
 
@@ -314,9 +318,10 @@ Current unit coverage (no GPU required):
 | `test_inference_backends.py` | llama.cpp vs remote selection and CLI flags |
 | `test_recovery.py` / `test_recovery_loop.py` | Failure class → alternative tool |
 | `test_trajectory.py` | Record / recall |
-| `test_skills.py` | Promotion needs 3 repeats |
+| `test_skills.py` | Promotion needs 3 repeats; parameterized steps run on match / `POST /skills/{id}/run` |
 | `test_auth.py` | 401 without key; header / bearer / query |
 | `test_queue.py` | File-drop watcher |
+| `test_workers.py` | Browser Use / OpenHands adapters; voice listen/command; docker `run` needs an image |
 
 `conftest.py` fixture `jarvis_env` points SQLite at a temp path, marks the model loaded, and applies autonomous settings.
 
@@ -349,9 +354,7 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Skills guide the prompt; they do not execute a parameterized workflow themselves (Guide & Workflows templates compose one prompt)
-- Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
-- Whisper STT / local TTS are not wrapped around `/api/voice/command`
+- Browser Use and OpenHands adapters are integrated; they report `missing` until those packages are installed. UFO, Cua, and Open Interpreter remain `not_integrated`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
 
 ---

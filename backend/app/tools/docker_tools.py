@@ -29,6 +29,10 @@ class DockerTool(Tool):
         if not shutil.which("docker"):
             return ToolResult(False, "", error="Docker is not installed on this machine")
         action = kwargs.get("action")
+        if action == "run" and not (kwargs.get("image") or "").strip():
+            return ToolResult(False, "", error="image is required")
+        if action == "build" and not (kwargs.get("path") or "").strip():
+            return ToolResult(False, "", error="path is required")
         mapping = {
             "ps": ["ps", "-a"],
             "images": ["images"],

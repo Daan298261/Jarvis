@@ -9,7 +9,7 @@ Browser (localhost:4780)
 FastAPI backend
   ├── Task store (SQLite)
   ├── Agent runtime (plan → act → observe → recover → verify)
-  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP)
+  ├── Tool registry (filesystem, terminal, python, browser, browser_use, code_worker, desktop, office, git, docker, web_fetch, screenshot, MCP)
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
@@ -69,9 +69,9 @@ Live model timings (tok/s, VRAM, RAM, load time) and task success rates are pers
 
 The portal is React + TypeScript + Vite, built into `frontend/dist` and served by FastAPI so there is a single local URL. Pages: Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System. Guide & Workflows loads templates from `/api/workflows`, lets you edit parameters and chained stages, saves presets to `data/workflows/`, and dispatches one task via `POST /api/workflows/run`.
 
-## Voice-ready API
+## Voice
 
-`POST /api/voice/command` accepts already-transcribed text. Whisper STT and local TTS can wrap this later without changing the agent.
+`GET /api/voice/status` reports local STT/TTS. `POST /api/voice/command` still accepts already-transcribed text. `POST /api/voice/listen` transcribes uploaded audio with local Whisper when installed. `POST /api/voice/speak` returns WAV from Windows SAPI, espeak-ng, or pyttsx3. Cloud speech APIs are not used. The Command page has a Speak button and an optional Speak-results toggle.
 
 ## Jarvis 2.0 target
 

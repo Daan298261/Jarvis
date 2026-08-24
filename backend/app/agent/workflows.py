@@ -249,6 +249,16 @@ GUIDE_SECTIONS: list[dict[str, str]] = [
         ),
     },
     {
+        "id": "voice",
+        "title": "Voice",
+        "body": (
+            "Command has a Speak button. Audio is transcribed locally with Whisper when installed "
+            "(faster-whisper, whisper.cpp, or a model in models/whisper/). "
+            "Spoken results use Windows SAPI, espeak-ng, or pyttsx3. "
+            "Nothing is sent to a cloud speech API. If STT is missing, type the command as usual."
+        ),
+    },
+    {
         "id": "memory",
         "title": "Memory and skills",
         "body": (
