@@ -15,6 +15,7 @@ class ExecutionPolicy:
     critic_pass: bool
     require_verify_tools: bool
     description: str
+    best_of_n: int = 1
 
 
 POLICIES: dict[str, ExecutionPolicy] = {
@@ -43,7 +44,8 @@ POLICIES: dict[str, ExecutionPolicy] = {
         force_verify_after=12,
         critic_pass=True,
         require_verify_tools=True,
-        description="Stronger planning, a critic pass, and tool-backed verification.",
+        description="Stronger planning, best-of-N plan selection, a critic pass, and tool-backed verification.",
+        best_of_n=3,
     ),
 }
 
@@ -117,6 +119,149 @@ def parse_plan_block(text: str) -> dict[str, Any]:
         "acceptance_criteria": [c for c in criteria if c],
         "plan": [p for p in plan if p],
     }
+
+
+_CANDIDATE_HEADER = re.compile(
+    r"^(?:#{1,3}\s*)?(?:PLAN|CANDIDATE|OPTION)\s+([A-Z]|[1-9])\b\s*:?\s*(.*)$",
+    re.IGNORECASE,
+)
+_SELECT_PLAN = re.compile(
+    r"(?:SELECTED|CHOICE|PICK(?:ED)?)\s*[:\-]\s*(?:PLAN|CANDIDATE|OPTION)?\s*([A-Z]|[1-9])\b"
+    r"|best\s+(?:plan|candidate|option)\s+(?:is\s+)?([A-Z]|[1-9])\b"
+    r"|I\s+(?:choose|pick|select)\s+(?:plan|candidate|option)?\s*([A-Z]|[1-9])\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class PlanCandidate:
+    label: str
+    end_state: str = ""
+    acceptance_criteria: list[str] = field(default_factory=list)
+    plan: list[str] = field(default_factory=list)
+    raw: str = ""
+
+    def as_parsed(self) -> dict[str, Any]:
+        return {
+            "end_state": self.end_state,
+            "acceptance_criteria": list(self.acceptance_criteria),
+            "plan": list(self.plan),
+        }
+
+
+def parse_plan_candidates(text: str) -> list[PlanCandidate]:
+    """Split a best-of-N planning reply into labeled PLAN A/B/C candidates."""
+    blocks: list[tuple[str, list[str]]] = []
+    current_label: str | None = None
+    current_lines: list[str] = []
+    for raw in (text or "").splitlines():
+        match = _CANDIDATE_HEADER.match(raw.strip())
+        if match:
+            if current_label is not None:
+                blocks.append((current_label, current_lines))
+            current_label = match.group(1).upper()
+            rest = (match.group(2) or "").strip()
+            current_lines = [rest] if rest else []
+            continue
+        if current_label is not None:
+            current_lines.append(raw)
+    if current_label is not None:
+        blocks.append((current_label, current_lines))
+
+    candidates: list[PlanCandidate] = []
+    for label, lines in blocks:
+        body = "\n".join(lines).strip()
+        parsed = parse_plan_block(body)
+        if not parsed["plan"] and not parsed["end_state"]:
+            steps = [re.sub(r"^[-*\d.\s]+", "", line.strip()) for line in lines if line.strip()]
+            parsed["plan"] = [step for step in steps if step]
+        candidates.append(
+            PlanCandidate(
+                label=label,
+                end_state=parsed["end_state"],
+                acceptance_criteria=parsed["acceptance_criteria"],
+                plan=parsed["plan"],
+                raw=body,
+            )
+        )
+    return candidates
+
+
+def score_plan_candidate(candidate: PlanCandidate) -> tuple[int, ...]:
+    """Prefer inspect-first, verifiable, deterministic plans when the critic is unclear."""
+    text = " ".join(candidate.plan).lower()
+    first = (candidate.plan[0] if candidate.plan else "").lower()
+    inspect = 1 if any(word in first for word in ("inspect", "read", "list", "check", "look", "stat")) else 0
+    visual = 1 if any(word in first for word in ("click", "screenshot", "mouse", "coordinate")) else 0
+    verify = 1 if "verif" in text else 0
+    backup = 1 if ("backup" in text or first.startswith("copy") or "preserve" in text) else 0
+    criteria = min(len(candidate.acceptance_criteria), 6)
+    length_penalty = min(len(candidate.plan), 20)
+    return (inspect, verify, backup, -visual, criteria, -length_penalty)
+
+
+def select_best_plan(candidates: list[PlanCandidate], critic_text: str) -> PlanCandidate:
+    """Pick the critic's chosen plan, or the highest-scoring candidate if the choice is unclear."""
+    if not candidates:
+        raise ValueError("no plan candidates")
+    by_label = {candidate.label.upper(): candidate for candidate in candidates}
+    match = _SELECT_PLAN.search(critic_text or "")
+    if match:
+        label = next((group for group in match.groups() if group), "").upper()
+        if label in by_label:
+            return by_label[label]
+        if label.isdigit():
+            index = int(label) - 1
+            if 0 <= index < len(candidates):
+                return candidates[index]
+    return max(candidates, key=score_plan_candidate)
+
+
+def best_of_n_plan_prompt(n: int) -> str:
+    count = max(2, min(int(n or 3), 5))
+    labels = ", ".join(f"PLAN {chr(ord('A') + i)}" for i in range(count))
+    return (
+        f"Before using tools, propose {count} distinct candidate strategies labeled {labels}.\n"
+        "Each candidate MUST use this shape:\n"
+        "PLAN A\n"
+        "END STATE:\n"
+        "...\n"
+        "ACCEPTANCE CRITERIA:\n"
+        "- ...\n"
+        "PLAN:\n"
+        "1. ...\n\n"
+        "The candidates must differ in strategy (for example library vs CLI vs GUI, "
+        "or inspect-first vs change-first). Do not execute yet. Do not call tools yet."
+    )
+
+
+def best_of_n_select_prompt(candidates: list[PlanCandidate]) -> str:
+    summaries = []
+    for candidate in candidates:
+        steps = "; ".join(candidate.plan[:6]) or "(no steps parsed)"
+        summaries.append(f"- PLAN {candidate.label}: {candidate.end_state or 'same end state'} | {steps}")
+    listed = "\n".join(summaries)
+    return (
+        "Critique these candidate plans. Prefer the most deterministic path "
+        "(API, library, or CLI before GUI or vision). Do not execute several complete attempts.\n"
+        f"{listed}\n\n"
+        "Then output exactly:\n"
+        "SELECTED: <letter>\n"
+        "REASON: <one paragraph>\n\n"
+        "Do not call tools yet."
+    )
+
+
+def format_selected_plan(candidate: PlanCandidate) -> str:
+    criteria = "\n".join(f"- {item}" for item in candidate.acceptance_criteria) or "- (same as the request)"
+    steps = "\n".join(f"{i}. {step}" for i, step in enumerate(candidate.plan, 1)) or "(execute toward the end state)"
+    return (
+        f"The selected plan is PLAN {candidate.label}. Execute this plan with tools now. "
+        "Do not wait for the user.\n\n"
+        f"END STATE: {candidate.end_state or '(same as the user request)'}\n"
+        f"ACCEPTANCE CRITERIA:\n{criteria}\n"
+        f"PLAN:\n{steps}"
+    )
 
 
 @dataclass

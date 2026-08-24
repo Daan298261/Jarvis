@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
-import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,17 +11,163 @@ from .base import RiskLevel, Tool, ToolResult
 from .safety import resolve_allowed_path
 
 
+_TEXT_SAMPLE = 4096
+_DIFF_LINE_LIMIT = 200
+
+
 def _allowed(context: dict[str, Any]) -> list[str]:
     return list(context.get("allowed_directories") or [])
+
+
+def _is_probably_text(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    sample = path.read_bytes()[:_TEXT_SAMPLE]
+    if b"\x00" in sample:
+        return False
+    try:
+        sample.decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
+def _file_digest(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _mtime_iso(path: Path) -> str:
+    return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+
+
+def compare_paths(left: Path, right: Path) -> str:
+    """Compare two files or directories. Text files get a unified diff; binaries get hashes."""
+    if not left.exists():
+        raise FileNotFoundError(f"Missing {left}")
+    if not right.exists():
+        raise FileNotFoundError(f"Missing {right}")
+    if left.is_dir() or right.is_dir():
+        if not left.is_dir() or not right.is_dir():
+            return f"Type mismatch: {left} is {'dir' if left.is_dir() else 'file'}, {right} is {'dir' if right.is_dir() else 'file'}"
+        left_names = {p.name for p in left.iterdir()}
+        right_names = {p.name for p in right.iterdir()}
+        only_left = sorted(left_names - right_names)
+        only_right = sorted(right_names - left_names)
+        shared = sorted(left_names & right_names)
+        lines = [
+            f"Directory compare\n{left}\n{right}",
+            f"shared={len(shared)} only_left={len(only_left)} only_right={len(only_right)}",
+        ]
+        if only_left:
+            lines.append("Only in left: " + ", ".join(only_left[:40]))
+        if only_right:
+            lines.append("Only in right: " + ", ".join(only_right[:40]))
+        return "\n".join(lines)
+    left_hash = _file_digest(left)
+    right_hash = _file_digest(right)
+    left_size = left.stat().st_size
+    right_size = right.stat().st_size
+    header = (
+        f"left={left} size={left_size} mtime={_mtime_iso(left)} sha256={left_hash}\n"
+        f"right={right} size={right_size} mtime={_mtime_iso(right)} sha256={right_hash}"
+    )
+    if left_hash == right_hash:
+        return header + "\nidentical=true"
+    if not _is_probably_text(left) or not _is_probably_text(right):
+        return header + "\nidentical=false\nbinary_or_non_utf8=true"
+    left_lines = left.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+    right_lines = right.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+    diff = list(
+        difflib.unified_diff(
+            left_lines,
+            right_lines,
+            fromfile=str(left),
+            tofile=str(right),
+            n=3,
+        )
+    )
+    if len(diff) > _DIFF_LINE_LIMIT:
+        omitted = len(diff) - _DIFF_LINE_LIMIT
+        diff = diff[:_DIFF_LINE_LIMIT] + [f"...[{omitted} more diff lines omitted]...\n"]
+    return header + "\nidentical=false\n" + "".join(diff)
+
+
+def recent_versions(path: Path, limit: int = 40) -> list[dict[str, Any]]:
+    """Find backup copies and recently modified siblings of a file."""
+    if path.exists() and path.is_dir():
+        entries = [item for item in path.iterdir() if item.is_file()]
+        entries.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+        return [
+            {
+                "path": str(item),
+                "size": item.stat().st_size,
+                "mtime": _mtime_iso(item),
+                "kind": "recent_in_directory",
+            }
+            for item in entries[:limit]
+        ]
+
+    parent = path.parent if path.name else path
+    if not parent.exists() or not parent.is_dir():
+        return []
+    name = path.name
+    stem = path.stem
+    suffix = path.suffix
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    if path.exists() and path.is_file():
+        found.append(
+            {
+                "path": str(path),
+                "size": path.stat().st_size,
+                "mtime": _mtime_iso(path),
+                "kind": "current",
+            }
+        )
+        seen.add(str(path.resolve()))
+
+    for item in parent.iterdir():
+        if not item.is_file():
+            continue
+        key = str(item.resolve())
+        if key in seen:
+            continue
+        n = item.name
+        is_backup = (
+            n == f"{name}.bak"
+            or n.startswith(f"{name}.bak-")
+            or n.startswith(f"{name}.bak.")
+            or n == f"{stem}.bak{suffix}"
+            or (n.startswith(f"{stem}.bak-") and n.endswith(suffix))
+        )
+        if not is_backup:
+            continue
+        seen.add(key)
+        found.append(
+            {
+                "path": str(item),
+                "size": item.stat().st_size,
+                "mtime": _mtime_iso(item),
+                "kind": "backup",
+            }
+        )
+    found.sort(key=lambda row: row["mtime"], reverse=True)
+    return found[:limit]
 
 
 class FilesystemTool(Tool):
     name = "filesystem"
     description = (
         "Inspect and modify files and directories. Actions: list, search, read, write, edit, "
-        "copy, move, rename, mkdir, delete, hash, stat. Use this for organizing files, creating "
-        "documents, and inspecting project trees. Prefer write/edit over delete. Binary files "
-        "are supported via hash/stat/copy; read returns a note for large binaries."
+        "copy, move, rename, mkdir, delete, hash, stat, compare, recent. Use this for organizing "
+        "files, creating documents, and inspecting project trees. Prefer write/edit over delete. "
+        "compare shows a unified diff (or hashes for binaries). recent lists backup copies and "
+        "recent versions next to a file. Binary files are supported via hash/stat/copy; read "
+        "returns a note for large binaries."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -29,10 +175,25 @@ class FilesystemTool(Tool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list", "search", "read", "write", "edit", "copy", "move", "rename", "mkdir", "delete", "hash", "stat"],
+                "enum": [
+                    "list",
+                    "search",
+                    "read",
+                    "write",
+                    "edit",
+                    "copy",
+                    "move",
+                    "rename",
+                    "mkdir",
+                    "delete",
+                    "hash",
+                    "stat",
+                    "compare",
+                    "recent",
+                ],
             },
             "path": {"type": "string", "description": "Primary path"},
-            "destination": {"type": "string"},
+            "destination": {"type": "string", "description": "Second path for compare, or copy/move/rename target"},
             "content": {"type": "string"},
             "pattern": {"type": "string", "description": "Glob or substring for search"},
             "recursive": {"type": "boolean", "default": True},
@@ -128,6 +289,21 @@ class FilesystemTool(Tool):
                     f"mode={oct(st.st_mode)}"
                 )
                 return ToolResult(True, info)
+            if action == "compare":
+                other_raw = kwargs.get("destination") or kwargs.get("other") or ""
+                if not other_raw:
+                    return ToolResult(False, "", error="compare requires destination (the second path)")
+                other = self._path(other_raw)
+                return ToolResult(True, compare_paths(path, other), data={"left": str(path), "right": str(other)})
+            if action == "recent":
+                versions = recent_versions(path)
+                if not versions:
+                    return ToolResult(True, f"No recent versions or backups found next to {path}")
+                lines = [
+                    f"{row['kind']:18} {row['size']:10} {row['mtime']}  {row['path']}"
+                    for row in versions
+                ]
+                return ToolResult(True, "\n".join(lines), data={"versions": versions})
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))
