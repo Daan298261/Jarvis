@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. It is the persistent architecture, current state, and development queue.
+Read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. It is the persistent architecture, current state, and development queue. Jarvis 1.x is sections 1–63. Jarvis 2.0 (Away Mode) is sections 64–85; do not start 2.0 implementation instead of Windows P0 unless the user asked for it.
 
 ## Cursor Cloud specific instructions
 

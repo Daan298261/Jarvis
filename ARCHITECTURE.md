@@ -72,3 +72,7 @@ The portal is React + TypeScript + Vite, built into `frontend/dist` and served b
 ## Voice-ready API
 
 `POST /api/voice/command` accepts already-transcribed text. Whisper STT and local TTS can wrap this later without changing the agent.
+
+## Jarvis 2.0 target
+
+The 1.x control plane above is the foundation. Jarvis 2.0 (see `JARVIS_MASTER_PLAN.md` sections 64–85) adds event-driven intake, a `SoftwareEngineeringWorker` under Jarvis orchestration, isolated worktrees, a policy engine, remote approvals, and eventually distributed `WorkerNode`s. None of that is implemented yet. Do not redesign the FastAPI + SQLite core to get there.
