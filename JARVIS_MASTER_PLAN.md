@@ -17,7 +17,1330 @@ Cursor is responsible for keeping this document accurate.
 The user should not be expected to manually maintain technical state, architecture notes, implementation status, or development priorities.
 
 ---
+# TOP PRIORITY — FAST, LOW-REFUSAL LOCAL MODEL STACK
 
+Status: P0 — highest current development priority.
+
+The current Qwen3.5-27B Q4_K_M configuration is too slow for normal Jarvis operation on the target RTX 5070 Ti 16 GB because the model, vision projector, KV cache, and runtime overhead cannot all remain inside VRAM.
+
+Jarvis must be redesigned around a fast, fully GPU-resident primary model while retaining the larger 27B model as an optional escalation model.
+
+The goal is not maximum benchmark intelligence.
+
+The goal is:
+
+> Highest successful autonomous task completion rate per minute, with minimal refusals, minimal human intervention, and reliable tool execution.
+
+The user prefers a task that completes correctly in 20 minutes over a faster sequence of failed attempts requiring repeated correction.
+
+For professional use, the model should also avoid unnecessary refusals when analyzing legitimate security, forensic, investigative, technical, or otherwise sensitive material.
+
+---
+
+## P0.1 — Primary Model Migration
+
+Change the default Jarvis model from:
+
+Qwen3.5-27B Q4_K_M
+
+to:
+
+**Qwen3.5-9B Abliterated**
+
+Preferred source model:
+
+`wangzhang/Qwen3.5-9B-abliterated`
+
+Preferred GGUF:
+
+**Q8_0**
+
+Fallback:
+
+**Q6_K**
+
+The model must run entirely or essentially entirely on the RTX 5070 Ti 16 GB without routine CPU layer offload.
+
+Do NOT use a highly degraded quant merely to fit the model.
+
+Q8_0 is preferred because the 9B model is small enough that high quantization quality should fit while still leaving VRAM available for:
+
+- KV cache;
+- CUDA workspace;
+- vision support when required;
+- normal Windows GPU overhead.
+
+Acceptance criteria:
+
+- model downloads automatically or through the existing model setup process;
+- Jarvis recognizes the new model;
+- Q8_0 loads successfully;
+- model layers remain GPU-resident during ordinary operation;
+- no routine CPU model-layer spill;
+- tool calling works;
+- reasoning works;
+- normal Jarvis workflows execute correctly;
+- measured speed is displayed in the Model/System interface.
+
+---
+
+## P0.2 — Preserve Qwen3.5-27B as Expert/Escalation Model
+
+Do NOT remove Qwen3.5-27B.
+
+Keep:
+
+Qwen3.5-27B Q4_K_M
+
+as an optional high-quality escalation model.
+
+It should NOT remain loaded for ordinary Jarvis work.
+
+Jarvis should eventually be able to escalate automatically when the primary model determines that a problem requires substantially deeper reasoning.
+
+Example:
+
+9B agent
+→ encounters genuinely difficult problem
+→ saves compact task state
+→ unloads 9B
+→ loads 27B
+→ requests expert analysis/plan
+→ saves result
+→ unloads 27B
+→ reloads 9B
+→ continues execution.
+
+The 27B model should primarily be used for:
+
+- difficult architecture decisions;
+- complex debugging after repeated failure;
+- difficult reasoning;
+- long-form analytical work where quality matters more than speed;
+- second-opinion criticism;
+- escalation after the primary model cannot solve a task.
+
+Do NOT use 27B for trivial actions such as:
+
+- reading files;
+- running commands;
+- selecting obvious tools;
+- renaming files;
+- simple browser interaction;
+- basic Git operations.
+
+---
+
+## P0.3 — New Model Profiles
+
+Replace the current model-profile assumptions with:
+
+### FAST
+
+Model:
+Qwen3.5-9B Abliterated
+
+Quant:
+Q6_K or Q8_0 depending benchmark results.
+
+Context:
+8K–16K.
+
+Thinking:
+Off by default.
+
+Purpose:
+
+- simple tool calls;
+- filesystem work;
+- routine automation;
+- basic shell operations;
+- simple browser tasks;
+- classification;
+- quick responses.
+
+Primary objective:
+maximum responsiveness without materially reducing successful task completion.
+
+---
+
+### BALANCED — DEFAULT
+
+Model:
+Qwen3.5-9B Abliterated
+
+Quant:
+Q8_0.
+
+Context:
+approximately 16K initially.
+
+Thinking:
+Selective.
+
+Use reasoning for:
+
+- initial planning;
+- ambiguous choices;
+- errors;
+- recovery;
+- consequential decisions.
+
+Do NOT enable lengthy thinking for every trivial tool call.
+
+Purpose:
+
+Default Jarvis operation.
+
+This should be the model/profile used for most autonomous work.
+
+---
+
+### RELIABLE
+
+Model:
+Qwen3.5-9B Abliterated Q8_0.
+
+Context:
+16K–32K depending measured VRAM use.
+
+Thinking:
+Enabled where useful.
+
+Agent behavior:
+
+- stronger planning;
+- best-of-N planning where appropriate;
+- critic pass;
+- recovery;
+- independent verification;
+- additional checks before declaring success.
+
+Important:
+
+Reliable mode should primarily increase AGENT EFFORT rather than automatically loading a much larger model.
+
+---
+
+### EXPERT
+
+Model:
+Qwen3.5-27B Q4_K_M.
+
+Purpose:
+
+- escalation;
+- difficult reasoning;
+- specialist analysis;
+- second opinion.
+
+This profile may use CPU/RAM offload and therefore may be considerably slower.
+
+It should not be the normal operating profile.
+
+---
+
+## P0.4 — Dynamic Thinking
+
+Current behavior should be changed so expensive reasoning is NOT applied indiscriminately.
+
+Jarvis should distinguish between:
+
+### Actions that normally do NOT require deep thinking
+
+Examples:
+
+- filesystem.read;
+- filesystem.list;
+- git status;
+- run test;
+- open URL;
+- query running processes;
+- call known deterministic skill;
+- execute already-selected command.
+
+### Actions that SHOULD trigger stronger reasoning
+
+Examples:
+
+- initial complex plan;
+- choosing between several repair strategies;
+- diagnosing an unexpected failure;
+- repeated tool failure;
+- interpreting ambiguous evidence;
+- architecture decisions;
+- selecting a recovery strategy;
+- final verification of consequential work.
+
+The goal is to reduce generated reasoning tokens without sacrificing task quality.
+
+---
+
+## P0.5 — Lazy Vision Loading
+
+Do not reserve substantial VRAM for multimodal/vision components when they are not being used.
+
+Current normal text/tool operation should run without the vision projector where technically practical.
+
+Desired behavior:
+
+text/shell/filesystem task
+→ text-only model configuration
+
+Need screenshot interpretation
+→ activate/load vision capability
+→ inspect screenshot
+→ release unnecessary vision resources when practical.
+
+If hot loading/unloading the projector is impractical with the selected inference backend, benchmark whether:
+
+- maintaining vision loaded;
+- switching profiles;
+- or using a separate small vision model
+
+produces the best real-world result.
+
+Do not sacrifice several GB of useful VRAM permanently for occasional screenshot analysis without benchmarking the cost.
+
+---
+
+## P0.6 — Dynamic Context Size
+
+Do not use 32K context for every task simply because the model supports it.
+
+Select context according to task requirements.
+
+Suggested starting policy:
+
+Simple:
+8K.
+
+Normal:
+16K.
+
+Long:
+32K.
+
+Exceptional:
+larger only when required.
+
+The agent's existing context compaction and persistent task memory should reduce the need for enormous live context windows.
+
+Prefer:
+
+structured persistent state
++
+compact active context
+
+over:
+
+sending the entire task history every model turn.
+
+---
+
+## P0.7 — Dynamic Tool Exposure
+
+Do NOT send every Jarvis tool definition to the model on every inference call.
+
+Jarvis already classifies tasks.
+
+Use that classification to expose only tools relevant to the current task.
+
+Examples:
+
+Filesystem task:
+
+- filesystem;
+- Python if required.
+
+Software development:
+
+- filesystem;
+- terminal;
+- Python;
+- Git;
+- coding worker.
+
+Browser research:
+
+- browser;
+- web;
+- filesystem;
+- spreadsheet/document tool when needed.
+
+Windows application task:
+
+- desktop;
+- screenshot;
+- relevant application adapter.
+
+This should reduce:
+
+- prompt processing;
+- context usage;
+- model confusion;
+- incorrect tool selection;
+- latency.
+
+There must still be an escape mechanism allowing Jarvis to request another capability if the initial tool set proves insufficient.
+
+---
+
+## P0.8 — Performance Benchmark Harness
+
+Before buying hardware, Jarvis must benchmark the actual Windows desktop.
+
+Create an automated local benchmark suite.
+
+Measure at minimum:
+
+- model load time;
+- time to first token;
+- prompt-processing speed;
+- output tokens/second;
+- VRAM usage;
+- RAM usage;
+- GPU utilization;
+- CPU utilization;
+- context size;
+- tool-call latency;
+- total autonomous task duration.
+
+Benchmark model/configuration combinations including:
+
+1. Qwen3.5-9B Abliterated Q8_0
+2. Qwen3.5-9B Abliterated Q6_K
+3. official Qwen3.5-9B Q8_0 if practical
+4. current Qwen3.5-27B Q4_K_M
+
+Test context sizes:
+
+- 8K
+- 16K
+- 32K
+
+Test vision:
+
+- disabled
+- enabled
+
+Test reasoning:
+
+- off
+- selective
+- enabled
+
+Do not select a winner based solely on tokens/sec.
+
+---
+
+## P0.9 — Real Jarvis Agent Benchmark
+
+Create a representative benchmark set of at least 20 realistic autonomous tasks.
+
+Examples should include:
+
+- filesystem organization;
+- broken Python project diagnosis;
+- Git repository modification;
+- PowerShell troubleshooting;
+- browser navigation;
+- unfamiliar website interaction;
+- deliberate tool failure and recovery;
+- screenshot interpretation;
+- multi-step research;
+- document processing;
+- multi-tool autonomous task;
+- verification after code modification.
+
+Record for every model/configuration:
+
+- task success/failure;
+- human intervention required;
+- total time;
+- model time;
+- tool time;
+- model calls;
+- tool calls;
+- retries;
+- tool-call/schema errors;
+- incorrect actions;
+- verification result.
+
+Primary performance metric:
+
+**successful autonomous tasks per unit of wall-clock time**
+
+Secondary metrics:
+
+- first-pass completion rate;
+- human interventions;
+- tool-call accuracy;
+- total task duration;
+- tokens/sec.
+
+Jarvis should automatically produce a benchmark report.
+
+---
+
+## P0.10 — Automatic Model Escalation
+
+Design model routing so Jarvis can eventually decide when 9B is insufficient.
+
+Do NOT escalate merely because a task is long.
+
+Potential escalation signals:
+
+- repeated reasoning failure;
+- multiple failed strategies;
+- critic confidence below threshold;
+- contradictory observations;
+- architecture-level task;
+- user explicitly requests maximum-quality analysis.
+
+Suggested escalation flow:
+
+1. Save compact task state.
+2. Record exact problem requiring escalation.
+3. Unload primary model if necessary.
+4. Load Expert 27B.
+5. Ask Expert for a focused analysis or plan.
+6. Store result.
+7. Reload primary 9B.
+8. Continue execution.
+
+Avoid sending enormous full trajectories to the Expert model.
+
+Send:
+
+- goal;
+- acceptance criteria;
+- important observations;
+- failed approaches;
+- relevant files/data;
+- precise unresolved problem.
+
+---
+
+## P0.11 — Low-Refusal Professional Model Requirement
+
+Jarvis may be used for legitimate professional security, forensic, investigative, defensive, technical, or analytical work.
+
+The primary reasoning model should therefore minimize unnecessary refusals when processing legitimate but potentially sensitive material.
+
+Examples may include analysis of:
+
+- malware;
+- attack techniques;
+- scripts;
+- suspicious PowerShell;
+- forensic artifacts;
+- logs;
+- criminal communications;
+- exploit evidence;
+- phishing;
+- credential-theft artifacts;
+- security vulnerabilities;
+- offensive-security tooling;
+- disturbing evidence;
+- illicit-market material;
+- other case-related technical evidence.
+
+The desired model behavior is:
+
+analyze the material accurately
+rather than
+refuse merely because the subject is sensitive.
+
+Model permissiveness must remain separate from operational authorization.
+
+---
+
+
+
+## P0.13 — Hardware Purchasing Gate
+
+Do not recommend or depend on additional hardware until the new benchmark suite has run on the actual desktop.
+
+Specifically, defer buying:
+
+- additional RAM;
+- old Tesla GPUs;
+- V100 GPUs;
+- NPUs;
+- additional inference hardware;
+
+until software/model optimization has been measured.
+
+After benchmarks, Jarvis should report:
+
+- current bottleneck;
+- whether GPU VRAM is saturated;
+- whether CPU offload occurs;
+- whether system RAM is constrained;
+- whether CPU inference is limiting;
+- whether model switching is costly;
+- estimated benefit of more VRAM;
+- estimated benefit of more RAM.
+
+Hardware purchases should be driven by measured bottlenecks.
+
+---
+
+## P0.14 — Success Target
+
+The model migration is considered successful when:
+
+1. Qwen3.5-9B Abliterated Q8_0 runs locally and reliably.
+2. Ordinary tasks remain entirely GPU-resident where practical.
+3. Jarvis is substantially more responsive than the current 27B configuration.
+4. Tool-call reliability remains acceptable.
+5. Autonomous task completion does not materially degrade.
+6. Refusals during legitimate professional analysis are rare.
+7. Vision works when requested.
+8. Reliable mode still performs robust planning/recovery/verification.
+9. Expert 27B escalation works.
+10. Benchmark data is stored and visible.
+11. A representative 20-task comparison against the old 27B configuration has been completed.
+
+The final decision between Q8_0, Q6_K, official 9B, and abliterated 9B must be based on actual Jarvis task performance rather than assumptions.
+
+---
+
+# UPDATED IMMEDIATE P0 DEVELOPMENT ORDER
+
+The current P0 queue should now be ordered:
+
+1. **Integrate Qwen3.5-9B Abliterated Q8_0.**
+2. **Verify full GPU residency on RTX 5070 Ti 16 GB.**
+3. **Create benchmark/performance instrumentation.**
+4. **Implement lazy vision loading or equivalent VRAM optimization.**
+5. **Implement dynamic context sizing.**
+6. **Implement task-specific tool exposure.**
+7. **Implement selective/dynamic thinking.**
+8. **Run 20-task comparison: 9B Q8 vs 9B Q6 vs current 27B Q4.**
+9. **Select default Fast/Balanced/Stable configurations from measured results.**
+10. **Implement automatic 9B → 27B Expert escalation.**
+11. **Add Professional/Forensic Audit Mode.**
+12. **Only after these tests, reassess whether hardware upgrades are necessary.**
+
+This optimization effort takes priority over Browser Use, UFO, Cua, OpenHands, voice, phone clients, and other P1/P2/P3 functionality unless one of those is required to complete the benchmark suite.
+
+# HIGH PRIORITY — AUTONOMOUS SOFTWARE DEVELOPMENT WORKER ROUTING
+
+Status: P0/P1 — implement after the fast primary-model migration and core benchmarking.
+
+Jarvis must be capable of developing software autonomously, including development of Jarvis itself.
+
+Jarvis must NOT depend on one coding model for every task.
+
+Instead, implement a software-development worker router that selects the cheapest sufficiently capable coding worker, escalates automatically when necessary, independently verifies the resulting work, and learns which workers perform well for which task classes.
+
+The target behavior is:
+
+User / event
+↓
+Jarvis Supervisor
+↓
+Classify software-development task
+↓
+Estimate complexity / risk / expected cost
+↓
+Select cheapest capable worker
+↓
+Worker performs implementation
+↓
+Jarvis independently tests/verifies
+↓
+PASS → complete
+FAIL → retry or escalate
+↓
+Record outcome for future routing
+
+The purpose is to minimize paid AI usage without sacrificing development quality.
+
+---
+
+## 1. Software Development Worker Interface
+
+Implement a common abstraction:
+
+`SoftwareDevelopmentWorker`
+
+Possible implementations:
+
+- `LocalJarvisCodingWorker`
+- `CursorACPWorker`
+- future `CodexWorker`
+- future `OpenHandsWorker`
+- future other external coding agents.
+
+The rest of Jarvis should not depend directly on Cursor-specific logic.
+
+Suggested conceptual interface:
+
+- start_task()
+- continue_task()
+- inspect_task()
+- cancel_task()
+- send_feedback()
+- get_changes()
+- get_status()
+- get_cost_usage()
+- get_model()
+- set_model()
+- verify_connection()
+
+Worker results should include:
+
+- files changed;
+- commands executed;
+- tests run;
+- worker-reported result;
+- errors;
+- session ID;
+- model used;
+- approximate usage/cost where available.
+
+Jarvis remains the supervisor.
+
+A worker claiming success does NOT constitute successful completion.
+
+---
+
+# 2. Coding Intelligence Determination Tree
+
+Jarvis must route coding work according to complexity, previous success, cost, and risk.
+
+The initial routing policy should be:
+
+## Tier 0 — Deterministic Tools
+
+Before invoking any coding model, determine whether the change can be performed deterministically.
+
+Examples:
+
+- update known JSON value;
+- bump known version;
+- run formatter;
+- rename file;
+- execute known build;
+- regenerate generated files;
+- run tests;
+- apply previously learned deterministic skill.
+
+Use native tools/scripts.
+
+Do not pay for an AI coding worker unnecessarily.
+
+---
+
+## Tier 1 — Local Coding Worker
+
+Primary model:
+
+Qwen3.5-9B low-refusal local model.
+
+Cost:
+
+effectively zero incremental AI cost.
+
+Use for:
+
+- documentation;
+- small configuration changes;
+- adding straightforward tests;
+- fixing simple exceptions;
+- basic API endpoint changes;
+- small isolated functions;
+- repetitive refactoring;
+- minor frontend changes;
+- simple dependency/configuration work;
+- investigating obvious test failures;
+- changes Jarvis has successfully performed before.
+
+Typical criteria:
+
+- small number of files;
+- clear acceptance criteria;
+- established architecture;
+- low ambiguity;
+- low blast radius;
+- existing tests available.
+
+Jarvis must independently test the result.
+
+If verification succeeds:
+
+STOP.
+
+Do not escalate merely because a paid model may produce prettier code.
+
+If local worker fails to produce a verified result after a reasonable number of attempts:
+
+escalate to Tier 2.
+
+Suggested default:
+
+maximum 2 meaningful local attempts.
+
+Do not repeat the same failed strategy.
+
+---
+
+## Tier 2 — Cursor Composer 2.5 Standard
+
+This should be the DEFAULT paid coding worker.
+
+Prefer:
+
+**Composer 2.5 STANDARD**
+
+Do NOT default to its Fast pricing tier for unattended development.
+
+Use for:
+
+- normal feature development;
+- multi-file implementation;
+- ordinary refactors;
+- test-driven fixes;
+- frontend/backend work;
+- database changes;
+- moderate debugging;
+- implementing items from `JARVIS_MASTER_PLAN.md`;
+- work where local 9B failed;
+- tasks requiring better repository understanding.
+
+Composer should be preferred over Grok 4.6 for routine software development because it is substantially cheaper and explicitly optimized for agentic coding, file editing, terminal usage, tool selection, and long-horizon coding work.
+
+Current relative standard pricing:
+
+Composer 2.5:
+- input: ~$0.50 / million tokens
+- cached input: ~$0.20 / million
+- output: ~$2.50 / million
+
+Grok 4.6:
+- input: ~$2.00 / million
+- cached input: ~$0.50 / million
+- output: ~$6.00 / million
+
+Therefore Grok must not be invoked simply because it is stronger.
+
+Use the cheapest model capable of producing a verified result.
+
+If Composer succeeds and Jarvis verification passes:
+
+STOP.
+
+If Composer repeatedly fails, stalls, contradicts itself, or cannot resolve the problem:
+
+escalate.
+
+---
+
+## Tier 2B — Optional Cheap Alternative
+
+Support optional low-cost third-party coding workers when they are available and economical.
+
+Examples may include models such as:
+
+- GPT-5.6 Luna;
+- Gemini Flash-class coding models;
+- future low-cost models that benchmark well.
+
+Do NOT hard-code these names permanently.
+
+Maintain a configurable worker/model catalog containing:
+
+- model identifier;
+- current price;
+- context window;
+- measured Jarvis coding success rate;
+- average task cost;
+- average task duration;
+- task classes where it performs well.
+
+The routing engine may choose one of these instead of Composer when empirical results show it is cheaper for equivalent success.
+
+Because Cursor usage pools differ between first-party Cursor models and third-party models, routing should account for remaining monthly pool balances where those values are available.
+
+---
+
+## Tier 3 — Cursor Grok 4.6
+
+Use Grok 4.6 STANDARD for genuinely difficult work.
+
+Do NOT use Grok 4.6 Fast by default.
+
+Suitable tasks:
+
+- difficult architectural implementation;
+- large multi-module changes;
+- complex debugging;
+- long-horizon development;
+- ambiguous failures;
+- substantial new subsystems;
+- tasks where Composer failed;
+- tasks with complex interactions between multiple components;
+- difficult migrations;
+- subtle concurrency/state problems.
+
+Start with an appropriate effort level rather than automatically using maximum effort.
+
+Suggested:
+
+medium/high for difficult work.
+
+Reserve xhigh for unusually difficult cases.
+
+If Grok produces a solution:
+
+Jarvis must still independently:
+
+- inspect diff;
+- run tests;
+- run build;
+- exercise relevant functionality;
+- check repository state;
+- check acceptance criteria.
+
+---
+
+## Tier 4 — Frontier Specialist
+
+Only use the most expensive available coding/reasoning model when:
+
+- lower tiers failed;
+- task risk is unusually high;
+- task requires difficult architecture reasoning;
+- repeated contradictory failures exist;
+- user explicitly requests maximum quality.
+
+Possible workers may include:
+
+- high-end OpenAI coding/reasoning model;
+- Claude Sonnet/Opus-class worker;
+- future frontier models.
+
+These workers are expensive exceptions.
+
+They must not become the default development path.
+
+---
+
+# 3. Initial Complexity Router
+
+Implement an initial software-task complexity score from 0–100.
+
+This does not need to be perfect.
+
+Use signals such as:
+
+- expected number of files affected;
+- repository size;
+- test availability;
+- ambiguity of request;
+- architecture impact;
+- database/schema impact;
+- external API changes;
+- security relevance;
+- previous attempts;
+- previous successful trajectory;
+- dependency changes;
+- estimated blast radius.
+
+Initial routing:
+
+0–20:
+deterministic/local tools.
+
+21–40:
+local Qwen coding worker.
+
+41–70:
+Cursor Composer 2.5.
+
+71–90:
+Cursor Grok 4.6.
+
+91–100:
+strongest suitable specialist.
+
+However:
+
+Historical measured success should override static thresholds.
+
+Example:
+
+If local Qwen has successfully completed 8 similar tasks with 95% verification success:
+
+route the next similar task locally even if its static score would normally select Composer.
+
+---
+
+# 4. Escalation Policy
+
+Escalation must be evidence-based.
+
+Example:
+
+Local Qwen
+↓
+attempt
+↓
+tests fail
+↓
+analyze failure
+↓
+second materially different attempt
+↓
+tests fail
+↓
+ESCALATE
+
+Composer
+↓
+receives:
+- original goal
+- acceptance criteria
+- relevant repository state
+- local worker changes
+- tests
+- exact errors
+- strategies already attempted
+↓
+continue work
+
+Do NOT simply send the entire raw conversation to the next model.
+
+Pass a compact escalation package.
+
+Suggested:
+
+`EscalationContext`
+
+containing:
+
+- goal;
+- acceptance criteria;
+- task class;
+- relevant files;
+- current diff;
+- failing tests;
+- important logs;
+- attempted strategies;
+- reason for escalation.
+
+---
+
+# 5. Cost-Aware Routing
+
+Jarvis must treat paid coding intelligence as a limited resource.
+
+Track where technically possible:
+
+- model;
+- worker;
+- input tokens;
+- cached tokens;
+- output tokens;
+- estimated cost;
+- monthly accumulated cost;
+- task cost;
+- successful task cost.
+
+Important metric:
+
+**cost per verified successful software task**
+
+Do NOT optimize only:
+
+cost per token.
+
+A cheap model that fails repeatedly may be more expensive than a stronger model.
+
+Future routing should use historical data such as:
+
+Local Qwen:
+€0
+success on task class: 82%
+
+Composer:
+average €0.34
+success: 96%
+
+Grok:
+average €1.40
+success: 98%
+
+This allows Jarvis to make rational routing decisions.
+
+---
+
+# 6. Cursor Integration — Use ACP
+
+Jarvis must integrate directly with Cursor Agent.
+
+Primary protocol:
+
+**ACP — Agent Client Protocol**
+
+Do NOT make screen/mouse control of the Cursor IDE the primary integration.
+
+Cursor CLI can run as an ACP server:
+
+`agent acp`
+
+ACP communicates over:
+
+- stdio;
+- JSON-RPC 2.0;
+- newline-delimited messages.
+
+Jarvis should implement:
+
+`CursorACPWorker`
+
+that starts and supervises the Cursor Agent process.
+
+Conceptual architecture:
+
+Jarvis
+↓
+SoftwareDevelopmentWorker
+↓
+CursorACPWorker
+↓
+ACP JSON-RPC
+↓
+Cursor Agent
+↓
+repository/worktree
+
+The actual Cursor graphical IDE does not need to be open.
+
+This is preferable to GUI control because it is:
+
+- deterministic;
+- machine-readable;
+- resumable;
+- observable;
+- less fragile;
+- easier to automate.
+
+---
+
+# 7. ACP Session Lifecycle
+
+Implement the supported ACP lifecycle approximately as:
+
+1. start `agent acp`;
+2. initialize connection;
+3. authenticate if required;
+4. create or load Cursor session;
+5. send task;
+6. receive streaming session updates;
+7. handle Cursor requests;
+8. monitor completion;
+9. collect results;
+10. persist Cursor session ID;
+11. allow follow-up instructions;
+12. terminate or retain worker as appropriate.
+
+Jarvis must persist enough information to reconnect/resume after restart.
+
+---
+
+# 8. Cursor Blocking Requests
+
+Cursor ACP may issue blocking requests such as:
+
+- `cursor/ask_question`
+- `cursor/create_plan`
+
+Jarvis should be capable of answering these automatically when permitted.
+
+Example:
+
+Cursor asks:
+
+"Should I add a migration or modify the existing schema?"
+
+Jarvis:
+↓
+consult task goal / architecture / master plan
+↓
+answer autonomously.
+
+If the question involves a genuinely consequential product decision:
+
+escalate to user.
+
+Plan-approval requests should normally be handled automatically during autonomous development when:
+
+- work is isolated;
+- acceptance criteria are clear;
+- repository is disposable/recoverable;
+- no production action is involved.
+
+Do not wake the user merely for routine Cursor planning approvals.
+
+---
+
+# 9. Cursor Model Selection
+
+Jarvis must be able to select the Cursor model used for a development task.
+
+Do not rely on whatever model happened to be selected in the graphical IDE.
+
+Use supported Cursor CLI/ACP model configuration.
+
+Model selection must be driven by the determination tree.
+
+Typical mapping:
+
+routine external work:
+Composer 2.5 standard
+
+difficult work:
+Grok 4.6 standard
+
+specialized expensive work:
+configured frontier specialist.
+
+Do not use Fast variants unless latency is specifically worth the increased cost.
+
+Model identifiers must be configurable because Cursor may change available models.
+
+At startup, where feasible:
+
+query available models rather than assuming permanent identifiers.
+
+---
+
+# 10. ACP vs MCP
+
+Use the correct protocol direction.
+
+## Jarvis → Cursor
+
+Use:
+
+**ACP**
+
+Purpose:
+
+Jarvis acts as a custom client controlling Cursor Agent.
+
+## Cursor → Jarvis / External Tools
+
+Use:
+
+**MCP**
+
+Purpose:
+
+Cursor can call tools/services exposed by Jarvis.
+
+Therefore implement both directions eventually:
+
+Jarvis
+ ├── ACP client → Cursor Agent
+ │
+ └── MCP server ← Cursor Agent
+
+This enables:
+
+Jarvis supervising Cursor
+
+while simultaneously allowing Cursor to use:
+
+- Jarvis memory;
+- Jarvis task context;
+- BlackGrid Multimedia;
+- internal APIs;
+- specialized tools;
+- system state.
+
+Do not confuse the roles of ACP and MCP.
+
+---
+
+# 11. Jarvis MCP Server for Cursor
+
+Expose a limited Jarvis MCP server that Cursor can use during development.
+
+Potential read-oriented tools/resources:
+
+- get_master_plan
+- get_current_task
+- get_acceptance_criteria
+- get_known_architecture
+- get_relevant_trajectory
+- get_previous_failure
+- get_environment_info
+
+Potential controlled actions:
+
+- request_verification
+- report_worker_result
+- request_specialized_tool
+- query_Jarvis_status
+
+Do not expose unrestricted recursive self-control by default.
+
+Avoid:
+
+Cursor → Jarvis → Cursor → Jarvis
+
+loops.
+
+Every delegated development task must have a single supervisor:
+
+Jarvis.
+
+---
+
+# 12. Self-Development Mode
+
+Jarvis must eventually be able to modify Jarvis.
+
+This requires a special mode:
+
+`SELF_DEVELOPMENT`
+
+Never allow experimental self-development directly against the trusted production/trunk working tree.
+
+Create an isolated development environment.
+
+Recommended architecture:
+
+trusted Jarvis installation
+        │
+        ▼
+Self-Development Supervisor
+        │
+        ▼
+dedicated Git worktree/fork
+        │
+        ▼
+local Qwen / Cursor
+        │
+        ▼
+modify
+        │
+        ▼
+test
+        │
+        ▼
+benchmark
+        │
+        ▼
+candidate branch
+
+
+from here on are the regular requirements
 ## 1. Core Goal
 
 Build a local "Jarvis"-style AI system that can receive a high-level instruction such as:
