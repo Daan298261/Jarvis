@@ -66,6 +66,7 @@ export type Task = {
   verification?: string
   retries: number
   duration_seconds: number
+  started_at?: string | null
   created_at: string
   waiting_for_confirmation: boolean
   events?: { kind: string; title: string; detail: string; stage: string; created_at: string }[]

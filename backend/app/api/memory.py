@@ -4,13 +4,23 @@ import json
 
 import uuid
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from ..agent.skills import promote_from_trajectories
+from ..agent.skills import (
+    bind_parameters,
+    execute_bound_skill,
+    instantiate_steps,
+    normalize_parameters,
+    promote_from_trajectories,
+    steps_are_executable,
+)
 from ..db.models import Skill, Trajectory
 from ..db.session import SessionLocal
+from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -19,27 +29,35 @@ class SkillIn(BaseModel):
     name: str
     description: str = ""
     task_class: str = ""
-    parameters: list[str] = []
+    parameters: list[Any] = []
     tools: list[str] = []
-    steps: list[str] = []
+    steps: list[Any] = []
     verification: str = ""
     recovery: str = ""
 
 
+class SkillRunIn(BaseModel):
+    goal: str = ""
+    parameters: dict = {}
+
+
 def _skill_dict(skill: Skill) -> dict:
+    steps = json.loads(skill.steps_json or "[]")
+    executable = steps_are_executable([step for step in steps if isinstance(step, dict)])
     return {
         "id": skill.id,
         "name": skill.name,
         "description": skill.description,
         "task_class": skill.task_class,
-        "parameters": json.loads(skill.parameters_json or "[]"),
+        "parameters": normalize_parameters(skill.parameters_json),
         "tools": json.loads(skill.tools_json or "[]"),
-        "steps": json.loads(skill.steps_json or "[]"),
+        "steps": steps,
         "verification": skill.verification,
         "recovery": skill.recovery,
         "origin": skill.origin,
         "times_used": skill.times_used,
         "enabled": skill.enabled,
+        "executable": executable,
         "created_at": skill.created_at.isoformat() if skill.created_at else None,
     }
 
@@ -103,6 +121,45 @@ async def create_skill(body: SkillIn):
 async def promote_skills():
     created = await promote_from_trajectories()
     return {"created": [skill.name for skill in created]}
+
+
+@router.post("/skills/{skill_id}/run")
+async def run_skill(skill_id: str, body: SkillRunIn | None = None):
+    body = body or SkillRunIn()
+    async with SessionLocal() as session:
+        skill = await session.get(Skill, skill_id)
+        if not skill:
+            raise HTTPException(404, "Skill not found")
+        if not skill.enabled:
+            raise HTTPException(400, "Skill is disabled")
+        bound = bind_parameters(skill, body.goal, body.parameters)
+        if bound is None:
+            raise HTTPException(400, "Could not bind skill parameters from the goal. Pass them explicitly.")
+        steps = instantiate_steps(skill, bound)
+        if not steps_are_executable(steps):
+            raise HTTPException(400, "This skill still only guides the model; it has no executable parameterized steps.")
+        skill.times_used += 1
+        await session.commit()
+
+    async def _run(name: str, arguments: dict):
+        return await REGISTRY.execute(name, arguments)
+
+    results = await execute_bound_skill(steps, _run)
+    success = bool(results) and all(item.get("success") for item in results)
+    return {
+        "ok": success,
+        "skill": skill.name,
+        "parameters": bound,
+        "results": [
+            {
+                "tool": item.get("tool"),
+                "success": item.get("success"),
+                "output": (item.get("output") or "")[:4000],
+                "error": item.get("error") or "",
+            }
+            for item in results
+        ],
+    }
 
 
 @router.post("/skills/{skill_id}/{state}")

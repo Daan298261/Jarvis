@@ -52,7 +52,9 @@ Older tool traces are summarized so long tasks do not dump the full history back
 
 ## Memory
 
-`trajectories` records how each task actually went; `skills` holds workflows that succeeded repeatedly with the same tool sequence. Both are injected into the system prompt of similar later tasks. See `TOOLS.md`.
+`trajectories` records how each task actually went; `skills` holds workflows that succeeded repeatedly with the same tool sequence. Parameterized skills execute their bound tool steps instead of only injecting advice. Both are injected into the system prompt of similar later tasks. See `TOOLS.md`.
+
+Live model timings (tok/s, VRAM, RAM, load time) and task success rates are persisted in `benchmark_samples` and shown on the Model page.
 
 ## Recovery
 

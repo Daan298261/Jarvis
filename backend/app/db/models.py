@@ -139,6 +139,27 @@ class Skill(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class BenchmarkSample(Base):
+    """Persisted model/agent operational metrics for the Model page."""
+
+    __tablename__ = "benchmark_samples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile: Mapped[str] = mapped_column(String(32), default="")
+    quantization: Mapped[str] = mapped_column(String(32), default="")
+    context_size: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_tps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    generation_tps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vram_used_mib: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ram_used_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    load_time_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    task_success_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tasks_completed: Mapped[int] = mapped_column(Integer, default=0)
+    tasks_failed: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(32), default="timing")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 

@@ -5,16 +5,20 @@ import re
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, Callable, Iterable
 
 from sqlalchemy import select
 
-from ..db.models import Skill, Trajectory, utcnow
+from ..db.models import Skill, ToolCallRecord, Trajectory, utcnow
 from ..db.session import SessionLocal
+from ..tools.base import ToolResult
 from .trajectory import keywords
 
 MIN_REPEATS = 3
 MAX_PROMPT_SKILLS = 2
+_PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|/)[^\s\"']+")
+_FILE_RE = re.compile(r"\b[\w.-]+\.[A-Za-z0-9]{1,5}\b")
 
 
 @dataclass
@@ -23,6 +27,7 @@ class SkillCandidate:
     tools: tuple[str, ...]
     goals: list[str] = field(default_factory=list)
     verifications: list[str] = field(default_factory=list)
+    task_ids: list[str] = field(default_factory=list)
 
     @property
     def occurrences(self) -> int:
@@ -40,12 +45,247 @@ def _skill_name(goals: Iterable[str], task_class: str) -> str:
     return slug[:80] or "reusable_workflow"
 
 
+def _looks_like_path(value: str) -> bool:
+    text = value or ""
+    return bool(_PATH_RE.search(text) or "\\" in text or text.startswith("/") or _FILE_RE.fullmatch(text.strip()))
+
+
+def _param_kind(key: str, values: list[Any]) -> str:
+    if key in {"path", "destination", "working_directory", "file", "filename"}:
+        return "path"
+    strings = [v for v in values if isinstance(v, str)]
+    if strings and all(_looks_like_path(v) for v in strings):
+        return "path"
+    return "string"
+
+
+def _param_name(key: str, used: set[str]) -> str:
+    base = re.sub(r"[^a-z0-9_]+", "_", (key or "value").lower()).strip("_") or "value"
+    name = base
+    index = 2
+    while name in used:
+        name = f"{base}_{index}"
+        index += 1
+    used.add(name)
+    return name
+
+
+def parameterize_call_sequences(sequences: list[list[dict[str, Any]]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Turn aligned tool-call sequences into templated steps plus parameter specs."""
+    if not sequences:
+        return [], []
+    length = len(sequences[0])
+    if length == 0 or any(len(seq) != length for seq in sequences):
+        return [], []
+    for index in range(length):
+        tools = {seq[index].get("tool") for seq in sequences}
+        if len(tools) != 1:
+            return [], []
+
+    used_names: set[str] = set()
+    parameters: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
+
+    for index in range(length):
+        tool = sequences[0][index].get("tool") or ""
+        keys: set[str] = set()
+        for seq in sequences:
+            args = seq[index].get("arguments") or {}
+            if isinstance(args, dict):
+                keys.update(args.keys())
+        templated: dict[str, Any] = {}
+        for key in sorted(keys):
+            values = []
+            for seq in sequences:
+                args = seq[index].get("arguments") or {}
+                values.append(args.get(key) if isinstance(args, dict) else None)
+            comparable = [json.dumps(v, sort_keys=True, default=str) for v in values]
+            if len(set(comparable)) <= 1:
+                templated[key] = values[0]
+                continue
+            name = _param_name(str(key), used_names)
+            kind = _param_kind(str(key), values)
+            examples = []
+            for value in values:
+                text = value if isinstance(value, str) else json.dumps(value, default=str)
+                if text and text not in examples:
+                    examples.append(text[:400])
+            parameters.append({"name": name, "kind": kind, "examples": examples[:6], "step": index, "key": key})
+            templated[key] = "{" + name + "}"
+        steps.append({"tool": tool, "arguments": templated})
+    return steps, parameters
+
+
+def parse_steps(raw: str | None) -> list[Any]:
+    try:
+        data = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def normalize_parameters(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            out.append({"name": item.strip(), "kind": "string", "examples": []})
+        elif isinstance(item, dict) and item.get("name"):
+            out.append(item)
+    return out
+
+
+def extract_goal_tokens(goal: str) -> list[str]:
+    found: list[str] = []
+    for match in re.finditer(r'"([^"]+)"|\'([^\']+)\'', goal or ""):
+        token = match.group(1) or match.group(2)
+        if token and token not in found:
+            found.append(token)
+    for match in _PATH_RE.finditer(goal or ""):
+        token = match.group(0)
+        if token not in found:
+            found.append(token)
+    for match in _FILE_RE.finditer(goal or ""):
+        token = match.group(0)
+        if token not in found:
+            found.append(token)
+    return found
+
+
+def bind_parameters(skill: Skill, goal: str, extra: dict[str, Any] | None = None) -> dict[str, str] | None:
+    params = normalize_parameters(skill.parameters_json)
+    bound: dict[str, str] = {}
+    for key, value in (extra or {}).items():
+        if value is None or value == "":
+            continue
+        bound[str(key)] = value if isinstance(value, str) else json.dumps(value, default=str)
+    if not params:
+        return bound
+    tokens = extract_goal_tokens(goal)
+    for param in params:
+        name = str(param["name"])
+        if name in bound:
+            continue
+        kind = param.get("kind") or "string"
+        picked = None
+        if kind == "path":
+            picked = next((token for token in tokens if _looks_like_path(token)), None)
+        if picked is None and tokens:
+            picked = tokens[0]
+        if picked is None:
+            return None
+        if picked in tokens:
+            tokens.remove(picked)
+        bound[name] = picked
+    return bound
+
+
+def substitute(value: Any, bound: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        def repl(match: re.Match[str]) -> str:
+            name = match.group(1)
+            return bound[name] if name in bound else match.group(0)
+
+        return _PLACEHOLDER.sub(repl, value)
+    if isinstance(value, dict):
+        return {key: substitute(item, bound) for key, item in value.items()}
+    if isinstance(value, list):
+        return [substitute(item, bound) for item in value]
+    return value
+
+
+def placeholders_in(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, str):
+        found.update(_PLACEHOLDER.findall(value))
+    elif isinstance(value, dict):
+        for item in value.values():
+            found.update(placeholders_in(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(placeholders_in(item))
+    return found
+
+
+def instantiate_steps(skill: Skill, bound: dict[str, str] | None) -> list[dict[str, Any]]:
+    steps = parse_steps(skill.steps_json)
+    templated = [step for step in steps if isinstance(step, dict) and step.get("tool")]
+    if not templated:
+        return []
+    return substitute(templated, bound or {})
+
+
+def steps_are_executable(steps: list[dict[str, Any]]) -> bool:
+    if not steps:
+        return False
+    if any(placeholders_in(step) for step in steps):
+        return False
+    return any(isinstance(step.get("arguments"), dict) and step.get("arguments") for step in steps)
+
+
+async def execute_bound_skill(
+    steps: list[dict[str, Any]],
+    runner: Callable[..., Any],
+) -> list[dict[str, Any]]:
+    """Run templated skill steps with an async (tool, arguments) -> ToolResult callback."""
+    results: list[dict[str, Any]] = []
+    for step in steps:
+        name = step.get("tool") or ""
+        arguments = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
+        result = await runner(name, arguments)
+        if isinstance(result, ToolResult):
+            payload = {"tool": name, "arguments": arguments, "success": result.success, "output": result.text(), "error": result.error}
+        elif isinstance(result, tuple) and len(result) >= 1:
+            observation = result[0]
+            failed = "ERROR:" in str(observation) or str(observation).lower().startswith("error")
+            payload = {
+                "tool": name,
+                "arguments": arguments,
+                "success": not failed,
+                "output": observation,
+                "attach": result[1] if len(result) > 1 else None,
+            }
+        else:
+            payload = {"tool": name, "arguments": arguments, "success": False, "output": str(result), "error": "unexpected skill runner result"}
+        results.append(payload)
+        if not payload.get("success"):
+            break
+    return results
+
+
+async def _successful_calls(session, task_id: str) -> list[dict[str, Any]]:
+    rows = (
+        await session.execute(
+            select(ToolCallRecord)
+            .where(ToolCallRecord.task_id == task_id, ToolCallRecord.success.is_(True))
+            .order_by(ToolCallRecord.id)
+        )
+    ).scalars().all()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            arguments = json.loads(row.arguments_json or "{}")
+        except json.JSONDecodeError:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            arguments = {}
+        out.append({"tool": row.tool_name, "arguments": arguments})
+    return out
+
+
 async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skill]:
     """Turn repeated, stable, successful workflows into skills.
 
     A workflow only becomes a skill once the same task class has been solved
     with the same tool sequence several times. One-off successes stay as
-    trajectory memory.
+    trajectory memory. When the underlying tool arguments are recorded,
+    differing values become parameters so the skill can run itself later.
     """
     created: list[Skill] = []
     async with SessionLocal() as session:
@@ -63,12 +303,21 @@ async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skil
             candidate = groups[key]
             candidate.task_class, candidate.tools = key
             candidate.goals.append(row.goal)
+            candidate.task_ids.append(row.task_id)
             if row.verification:
                 candidate.verifications.append(row.verification)
 
         for key, candidate in groups.items():
             if candidate.occurrences < min_repeats or key in known:
                 continue
+            sequences = [await _successful_calls(session, task_id) for task_id in candidate.task_ids]
+            templated, parameters = parameterize_call_sequences(sequences)
+            if templated:
+                steps_payload: list[Any] = templated
+            else:
+                steps_payload = [f"use {tool}" for tool in candidate.tools]
+                parameters = sorted(keywords(" ".join(candidate.goals)))[:6]
+
             name = _skill_name(candidate.goals, candidate.task_class)
             if name in used_names:
                 name = f"{name}_{len(used_names) + 1}"
@@ -81,9 +330,9 @@ async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skil
                     f"with {', '.join(candidate.tools)}. Example goal: {candidate.goals[0][:200]}"
                 ),
                 task_class=candidate.task_class,
-                parameters_json=json.dumps(sorted(keywords(" ".join(candidate.goals)))[:6]),
+                parameters_json=json.dumps(parameters),
                 tools_json=json.dumps(list(candidate.tools)),
-                steps_json=json.dumps([f"use {tool}" for tool in candidate.tools]),
+                steps_json=json.dumps(steps_payload),
                 verification=(candidate.verifications[0] if candidate.verifications else "")[:1000],
                 recovery="Fall back to the alternatives suggested for the failing tool.",
                 origin="promoted",
@@ -114,15 +363,36 @@ async def relevant_skills(task_class: str, goal: str, limit: int = MAX_PROMPT_SK
         return picked
 
 
+async def get_skill(skill_id: str) -> Skill | None:
+    async with SessionLocal() as session:
+        return await session.get(Skill, skill_id)
+
+
 def as_prompt_block(skills: Iterable[Skill]) -> str:
     entries = []
     for skill in skills:
-        steps = ", ".join(json.loads(skill.steps_json or "[]"))
+        raw_steps = parse_steps(skill.steps_json)
+        rendered: list[str] = []
+        for step in raw_steps:
+            if isinstance(step, str):
+                rendered.append(step)
+            elif isinstance(step, dict):
+                tool = step.get("tool") or "tool"
+                arguments = step.get("arguments") or {}
+                if arguments:
+                    rendered.append(f"{tool}({json.dumps(arguments, ensure_ascii=False)})")
+                else:
+                    rendered.append(f"use {tool}")
+        params = normalize_parameters(skill.parameters_json)
         line = f"- {skill.name}: {skill.description}"
-        if steps:
-            line += f"\n  Steps: {steps}"
+        if params:
+            line += "\n  Parameters: " + ", ".join(f"{{{item['name']}}}" for item in params)
+        if rendered:
+            line += f"\n  Steps: {', '.join(rendered)}"
         if skill.verification:
             line += f"\n  Verify: {skill.verification[:200]}"
+        if any(isinstance(step, dict) and step.get("arguments") for step in raw_steps):
+            line += "\n  This skill can run itself once parameters are bound. Prefer executing it over rediscovering the workflow."
         entries.append(line)
     if not entries:
         return ""

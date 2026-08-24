@@ -52,6 +52,16 @@ async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -
         ordered_tools: list[str] = []
         for call in calls:
             entry: dict[str, Any] = {"tool": call.tool_name, "ok": bool(call.success)}
+            try:
+                arguments = json.loads(call.arguments_json or "{}")
+            except json.JSONDecodeError:
+                arguments = {}
+            if isinstance(arguments, dict) and arguments:
+                compact = {}
+                for key, value in arguments.items():
+                    text = value if isinstance(value, str) else json.dumps(value, default=str)
+                    compact[key] = text[:240]
+                entry["arguments"] = compact
             if not call.success:
                 entry["problem"] = classify_failure(call.error or call.output)
             steps.append(entry)
