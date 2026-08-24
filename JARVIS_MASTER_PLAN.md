@@ -1907,7 +1907,7 @@ Tests performed:
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **merged both QA branches; re-run pytest after merge**. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **75 passed** after merging both QA branches plus AGENTS.md. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
