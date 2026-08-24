@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from ..config import load_settings, save_settings
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
+from ..inference.harness import harness_status, run_harness, run_harness_background
 from ..inference.manager import MANAGER
 from ..inference.profiles import available_profiles
 
@@ -13,6 +14,11 @@ router = APIRouter(prefix="/api/model", tags=["model"])
 
 class LoadBody(BaseModel):
     profile: str | None = None
+
+
+class HarnessBody(BaseModel):
+    live: bool = False
+    background: bool = False
 
 
 @router.get("")
@@ -86,3 +92,24 @@ async def unload_model():
     await MANAGER.unload()
     settings = load_settings()
     return await MANAGER.snapshot(settings)
+
+
+@router.get("/harness")
+async def get_harness():
+    return harness_status()
+
+
+@router.post("/harness")
+async def start_harness(body: HarnessBody | None = None):
+    live = bool(body.live) if body else False
+    background = bool(body.background) if body else False
+    status = harness_status()
+    if status["running"]:
+        return {"ok": True, "running": True, "report": status.get("report")}
+    if background:
+        import asyncio
+
+        asyncio.create_task(run_harness_background(live=live))
+        return {"ok": True, "running": True}
+    report = run_harness(live=live)
+    return {"ok": True, "running": False, "report": report}

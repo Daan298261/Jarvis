@@ -18,7 +18,13 @@ from ..inference.profiles import resolve_profile
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
-from .compaction import compact_history, deserialize_messages, serialize_messages
+from .compaction import (
+    SUMMARY_MARKER,
+    compact_history,
+    deserialize_messages,
+    estimate_prompt_tokens,
+    serialize_messages,
+)
 from .planning import (
     WorkingState,
     best_of_n_plan_prompt,
@@ -43,6 +49,8 @@ from .prompts import (
     VERIFY_PROMPT,
     VERIFY_REQUIRED_PROMPT,
 )
+from .context_policy import initial_context_size, next_context_size
+from .escalation import consult_expert, expert_packet, should_escalate
 
 
 def _environment_block(settings: AppSettings) -> str:
@@ -232,6 +240,15 @@ class AgentRuntime:
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
             await MANAGER.load(settings, profile_name)
+        target_ctx = initial_context_size(working.task_class, profile)
+        live_ctx = await MANAGER.apply_context(settings, target_ctx, allow_shrink=True)
+        if live_ctx != profile.context_size:
+            await BUS.publish(
+                task_id,
+                "progress",
+                f"Using {live_ctx} context (profile cap {profile.context_size})",
+                stage="model",
+            )
         provider = MANAGER.provider
         assert provider is not None
 
@@ -251,6 +268,8 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
+        already_escalated = bool(getattr(working, "escalated", False))
+        critic_rejected = False
 
         if existing and continue_existing:
             messages = existing
@@ -357,6 +376,21 @@ class AgentRuntime:
             )
             tools_used = True
 
+        pre = should_escalate(prompt=prompt, task_class=working.task_class, already_escalated=already_escalated)
+        if pre.should_escalate and pre.reason.startswith("user requested"):
+            already_escalated = True
+            working.escalated = True
+            await BUS.publish(task_id, "stage", "Escalating to Expert 27B", pre.reason, stage="plan")
+            analysis = await consult_expert(
+                settings,
+                expert_packet(working, pre.reason),
+                profile_name or profile.name,
+                provider=provider,
+            )
+            messages.append(ChatMessage(role="user", content="Expert analysis:\n" + analysis))
+            provider = MANAGER.provider or provider
+            await self._update(task_id, compact_memory=working.dumps(), current_action="Expert consult complete")
+
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel:
@@ -378,6 +412,21 @@ class AgentRuntime:
                     stage="verify" if verifying else "act",
                 )
                 messages = compact_history(messages, working_state_block=working.as_prompt_block())
+                compacted = any(
+                    isinstance(message.content, str) and message.content.startswith(SUMMARY_MARKER)
+                    for message in messages
+                )
+                needed = next_context_size(
+                    int(MANAGER.state.context_size or profile.context_size),
+                    profile.context_size,
+                    estimate_prompt_tokens(messages),
+                    compacted=compacted,
+                )
+                if needed:
+                    grown = await MANAGER.apply_context(settings, needed, allow_shrink=False)
+                    if grown >= needed:
+                        await BUS.publish(task_id, "progress", f"Expanded context to {grown}", stage="act")
+                        provider = MANAGER.provider or provider
                 try:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
@@ -518,6 +567,34 @@ class AgentRuntime:
                         working.next_action = "recover with a different strategy"
                         await BUS.publish(task_id, "retry", "Choosing a recovery strategy", guidance[:1500], stage="diagnose")
                         messages.append(ChatMessage(role="user", content=guidance))
+                        if policy.critic_pass and critic_done and consecutive_failures >= 2:
+                            critic_rejected = True
+                        decision = should_escalate(
+                            prompt=prompt,
+                            task_class=working.task_class,
+                            consecutive_failures=consecutive_failures,
+                            distinct_failed_tools=len(failures_by_tool),
+                            critic_rejected=critic_rejected,
+                            observations=working.observations + working.known_failures,
+                            already_escalated=already_escalated,
+                        )
+                        if decision.should_escalate:
+                            already_escalated = True
+                            working.escalated = True
+                            await BUS.publish(task_id, "stage", "Escalating to Expert 27B", decision.reason, stage="diagnose")
+                            analysis = await consult_expert(
+                                settings,
+                                expert_packet(working, decision.reason),
+                                profile_name or profile.name,
+                                provider=provider,
+                            )
+                            messages.append(
+                                ChatMessage(
+                                    role="user",
+                                    content="Expert analysis:\n" + analysis + "\n\nApply this plan with tools now.",
+                                )
+                            )
+                            provider = MANAGER.provider or provider
                     elif verifying and verify_tool_rounds >= policy.max_verify_tools:
                         force_final = True
                         messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))

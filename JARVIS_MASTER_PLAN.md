@@ -3590,10 +3590,11 @@ This development session:
 - Model: Qwen3.5-27B (Unsloth GGUF of `Qwen/Qwen3.5-27B`, plus `mmproj-F16.gguf`)
 - Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
 - Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
-- Context: 16K fast, 32K balanced/quality; load failure retries at 16K
+- Context: 16K fast, 32K balanced/quality (profile cap). Tasks start at 8K (simple) or 16K (normal/long) and expand to the cap only when the live prompt is under pressure.
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
 - Status: **code present and unit-tested, Windows runtime not verified this session**
+- Escalation: Expert 27B consult profile exists. Difficulty signals trigger a compact second-opinion turn. Live 9B unload → 27B load is not exercised here.
 
 ### Core Application
 
@@ -3656,6 +3657,7 @@ This development session:
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
 - Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
+- Model page can preview the local benchmark harness (`GET/POST /api/model/harness`) and load the Expert consult profile
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
@@ -3679,11 +3681,11 @@ Date: 2026-08-24
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **dynamic context policy, Expert escalation, benchmark harness + 20-task catalog, docker image requirement, browser close reset**
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **96 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3710,6 +3712,22 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [x] Verification loop
   - Acceptance: task cannot be marked successful without an independent verification pass.
   - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
+
+- [x] Dynamic context size (P0.6)
+  - Acceptance: simple tasks start at 8K, normal/long tasks start at 16K, expand to the profile cap only when the live prompt is under pressure. Compaction remains the first response to long histories.
+  - Status: VERIFIED (`test_context_policy.py`); llama.cpp reload is skipped when Jarvis does not own the process.
+
+- [x] Performance benchmark harness (P0.8)
+  - Acceptance: automated suite covers 9B Q8/Q6, official 9B Q8, 27B Q4, 8K/16K/32K, vision on/off, thinking off/selective/on. Missing GGUFs are skipped. Report is JSON + markdown under `data/benchmarks/`.
+  - Status: VERIFIED (`test_harness.py`); live tok/s/VRAM on the Windows GPU remains the next desktop-session measurement.
+
+- [x] Real Jarvis agent benchmark catalog (P0.9)
+  - Acceptance: at least 20 realistic autonomous tasks covering filesystem, Python diagnosis, Git, shell, browser, recovery, screenshot, research, documents, multi-tool, and verification.
+  - Status: VERIFIED catalog + report runner (`test_harness.py`). Live model/configuration scoring is **BLOCKED in this environment** (no GPU/GGUF).
+
+- [x] Automatic Expert 27B escalation (P0.10)
+  - Acceptance: escalate on repeated failure, multiple failed strategies, critic rejection, contradictions, architecture tasks, or an explicit user request. Expert receives a compact packet, not the full trajectory. Primary profile is restored when a GGUF swap happened.
+  - Status: VERIFIED (`test_escalation.py`). Live 9B→27B unload/load is **BLOCKED here** (this branch still defaults to 27B; a GGUF swap is a no-op when both profiles share the same file).
 
 - [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
   - Acceptance: model loads, API responds, tool calls work, vision projector loads.
@@ -3965,6 +3983,30 @@ Generate three labeled strategies, have the same model critique them, then execu
 Reason:
 
 The master plan asks for best-of-N on initial planning and consequential decisions. Executing every candidate would waste tools and risk conflicting file changes.
+
+Decision: context starts small and only grows mid-task
+
+Simple tasks start at 8K, everything else at 16K, even when the loaded profile cap is 32K. Expansion happens only when the compacted live prompt is filling the current window. Shrinking is allowed at task start, not in the middle of a task.
+
+Reason:
+
+Prompt-processing cost and VRAM grow with context. Compaction plus persistent working state should absorb most long tasks. Reloading llama.cpp to grow context is expensive, so it is a last resort after compaction.
+
+Decision: Expert consults use a compact packet, not a model swap by default
+
+Escalation is triggered by difficulty signals, not task length. The Expert model receives goal, criteria, observations, failed approaches, and the unresolved problem. When the Expert GGUF is the same file as the primary (current 27B default), Jarvis keeps the loaded server and only changes the consult prompt.
+
+Reason:
+
+Unloading a working model to reload the same weights wastes minutes. The 9B→27B swap remains the target once the 9B primary lands; the consult packet is the part that must work on every profile.
+
+Decision: the benchmark harness never swaps models mid-run
+
+The configuration matrix lists every planned 9B/27B × context × thinking × vision combination. Missing GGUFs are skipped. Live mode records metrics only for the currently loaded configuration.
+
+Reason:
+
+An hourly automation or a running desktop session must not thrash VRAM by loading every quant. Measuring the loaded model plus skipping the rest still produces a comparable report.
 
 ---
 

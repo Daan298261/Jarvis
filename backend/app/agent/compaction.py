@@ -86,6 +86,16 @@ def compact_history(
     return head + extra + tail
 
 
+def estimate_prompt_tokens(messages: list[ChatMessage]) -> int:
+    """Cheap char/4 estimate so we can grow context before llama.cpp starts spilling."""
+    total = 0
+    for message in messages:
+        total += len(_text_of(message))
+        if message.tool_calls:
+            total += len(json.dumps(message.tool_calls))
+    return max(1, total // 4)
+
+
 def _is_generated(message: ChatMessage) -> bool:
     """Drop previously injected summaries so they do not nest on each pass."""
     if message.role != "system":

@@ -174,6 +174,10 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | GET | `/api/model` | Load state + available profiles |
 | POST | `/api/model/load` | `{ profile? }` |
 | POST | `/api/model/unload` | Stop llama-server if Jarvis owns it |
+| GET | `/api/model/benchmarks` | Persisted tok/s / VRAM samples |
+| POST | `/api/model/benchmarks/snapshot` | Capture current resource snapshot |
+| GET | `/api/model/harness` | Last benchmark report + 20-task catalog |
+| POST | `/api/model/harness` | `{ live?, background? }` — dry-run matrix by default; live measures the loaded model only |
 | GET | `/api/tools`, `/api/tools/catalog` | Registry + optional-worker catalog |
 | POST | `/api/tools/{name}/enable` / `disable` | Persist `disabled_tools` |
 | GET/PUT | `/api/settings` | Full settings dump / patch |
@@ -274,6 +278,8 @@ Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `b
 - Remote: `RemoteOpenAICompatibleBackend` only waits on `/health`. Aliases include `remote`, `lmstudio`, `ollama`, `vllm`, `sglang`, `openai-compatible`.
 - Unknown backend name + non-localhost host is treated as remote.
 - `InferenceManager.load` will adopt a server that is already healthy so a second Jarvis process does not spawn another llama-server.
+- Task context starts at 8K/16K via `agent/context_policy.py` and only expands to the profile cap when the compacted prompt is under pressure (`InferenceManager.apply_context`).
+- Expert consults live in `agent/escalation.py`. The harness is `inference/harness.py` plus a 20-task catalog in `inference/agent_bench.py`.
 
 When changing CLI flags, extend `tests/test_inference_backends.py` rather than relying on a live GPU.
 
@@ -315,8 +321,11 @@ Current unit coverage (no GPU required):
 | `test_recovery.py` / `test_recovery_loop.py` | Failure class → alternative tool |
 | `test_trajectory.py` | Record / recall |
 | `test_skills.py` | Promotion needs 3 repeats |
-| `test_auth.py` | 401 without key; header / bearer / query |
-| `test_queue.py` | File-drop watcher |
+| `test_benchmarks.py` | Persist tok/s samples |
+| `test_context_policy.py` | 8K/16K start; mid-task expand; no mid-task shrink |
+| `test_escalation.py` | Expert consult signals + loop injection |
+| `test_harness.py` | 20-task catalog + config matrix + dry-run report |
+| `test_docker.py` | `docker run` needs an image; browser `close` clears pages |
 
 `conftest.py` fixture `jarvis_env` points SQLite at a temp path, marks the model loaded, and applies autonomous settings.
 
@@ -349,10 +358,11 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Skills guide the prompt; they do not execute a parameterized workflow themselves (Guide & Workflows templates compose one prompt)
+- Parameterized skills execute bound steps after 3 matching successes (`POST /api/memory/skills/{id}/run`)
 - Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
 - Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
+- Live GPU measurement of every harness configuration requires the Windows desktop GGUFs
 
 ---
 

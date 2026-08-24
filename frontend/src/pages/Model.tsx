@@ -18,6 +18,18 @@ type Benchmark = {
   created_at: string | null
 }
 
+type HarnessReport = {
+  created_at?: string
+  live?: boolean
+  measured?: number
+  skipped?: number
+  agent_catalog_size?: number
+  primary_metric?: string
+  notes?: string[]
+  configurations?: { id: string; status: string; skip_reason?: string; context_size?: number }[]
+  agent_tasks?: { id: string; category: string; status: string; skip_reason?: string }[]
+}
+
 type ModelStatus = {
   active_model?: string
   quantization?: string
@@ -31,6 +43,7 @@ type ModelStatus = {
   load_time_seconds?: number
   loaded?: boolean
   loading?: boolean
+  context_policy?: { live?: number; profile_cap?: number; note?: string }
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
 }
@@ -42,10 +55,16 @@ function pct(value: number | null | undefined) {
 
 export function ModelPage() {
   const [model, setModel] = useState<ModelStatus | null>(null)
+  const [harness, setHarness] = useState<{ running?: boolean; report?: HarnessReport | null; matrix_size?: number } | null>(null)
   const [busy, setBusy] = useState(false)
 
   async function refresh() {
-    setModel(await api("/api/model"))
+    const [status, harnessStatus] = await Promise.all([
+      api<ModelStatus>("/api/model"),
+      api<{ running?: boolean; report?: HarnessReport | null; matrix_size?: number }>("/api/model/harness"),
+    ])
+    setModel(status)
+    setHarness(harnessStatus)
   }
   useEffect(() => { refresh() }, [])
 
@@ -69,19 +88,33 @@ export function ModelPage() {
     }
   }
 
+  async function runHarness(live: boolean) {
+    setBusy(true)
+    try {
+      await api("/api/model/harness", { method: "POST", body: JSON.stringify({ live, background: false }) })
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const outcomes = model?.outcomes
   const samples = model?.benchmarks || []
+  const report = harness?.report
+  const configPreview = (report?.configurations || []).slice(0, 8)
+  const catalogPreview = (report?.agent_tasks || []).slice(0, 8)
 
   return (
     <div>
       <h1>Model</h1>
-      <p className="lede">Local Qwen3.5-27B served by llama.cpp. Profiles change quantization and thinking mode, not the model family. Benchmarks persist tok/s, VRAM, RAM, and task success so you can compare loads over time.</p>
+      <p className="lede">Local Qwen3.5-27B served by llama.cpp. Tasks start at 8K or 16K context and expand only when the live prompt is under pressure. Expert is a compact 27B consult, not the everyday loop. Benchmarks persist tok/s, VRAM, RAM, and task success so you can compare loads over time.</p>
       <div className="grid two">
         <div className="card">
           <div className="kv">
             <b>Active</b><span>{model?.active_model || "unloaded"}</span>
             <b>Quantization</b><span>{model?.quantization}</span>
             <b>Context</b><span>{model?.context_size}</span>
+            <b>Context cap</b><span>{model?.context_policy?.profile_cap ?? "n/a"}</span>
             <b>Backend</b><span>{model?.inference_backend}</span>
             <b>GPU layers</b><span>{model?.gpu_layers}</span>
             <b>VRAM</b><span>{model?.vram_used_mib ? `${model.vram_used_mib} MiB` : "n/a"}</span>
@@ -99,15 +132,60 @@ export function ModelPage() {
             <button className="btn" disabled={busy} onClick={() => load("fast")}>Fast</button>
             <button className="btn" disabled={busy} onClick={() => load("balanced")}>Balanced</button>
             <button className="btn" disabled={busy} onClick={() => load("quality")}>Quality</button>
+            <button className="btn" disabled={busy} onClick={() => load("expert")}>Expert</button>
             <button className="btn secondary" disabled={busy} onClick={() => api("/api/model/unload", { method: "POST" }).then(refresh)}>Unload</button>
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
           </div>
           <p className="lede" style={{ marginTop: 16 }}>
-            Fast: Q4_K_M, thinking off, 16K context.<br />
-            Balanced: Q4_K_M, thinking on, 32K context.<br />
-            Quality: Q5_K_M, thinking on, hybrid GPU/CPU.
+            Fast: Q4_K_M, thinking off, 16K cap; tasks often start at 8K.<br />
+            Balanced: Q4_K_M, thinking on, 32K cap; tasks start at 16K.<br />
+            Quality: Q5_K_M, thinking on, hybrid GPU/CPU.<br />
+            Expert: compact 27B consult used when the primary agent is stuck.
           </p>
         </div>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2>Local benchmark harness</h2>
+        <p className="lede">
+          {harness?.matrix_size || 0} model configurations × {report?.agent_catalog_size || 20} realistic agent tasks.
+          Missing GGUFs are skipped. Live mode measures only the currently loaded configuration so it will not swap models.
+        </p>
+        <div className="row" style={{ marginBottom: 12 }}>
+          <button className="btn" disabled={busy || harness?.running} onClick={() => runHarness(false)}>Preview matrix</button>
+          <button className="btn secondary" disabled={busy || harness?.running} onClick={() => runHarness(true)}>Measure loaded model</button>
+        </div>
+        {report && (
+          <div className="kv">
+            <b>Last run</b><span>{report.created_at?.replace("T", " ").slice(0, 19) || "—"}</span>
+            <b>Measured</b><span>{report.measured ?? 0} measured / {report.skipped ?? 0} skipped</span>
+            <b>Primary metric</b><span>{report.primary_metric || "successful autonomous tasks per minute"}</span>
+          </div>
+        )}
+        {configPreview.length > 0 && (
+          <table style={{ marginTop: 12 }}>
+            <thead>
+              <tr>
+                <th>Configuration</th>
+                <th>Status</th>
+                <th>Skip</th>
+              </tr>
+            </thead>
+            <tbody>
+              {configPreview.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.id}</td>
+                  <td>{row.status}</td>
+                  <td>{row.skip_reason || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {catalogPreview.length > 0 && (
+          <p className="lede" style={{ marginTop: 12 }}>
+            Agent catalog sample: {catalogPreview.map((row) => row.id).join(", ")}
+          </p>
+        )}
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Benchmark history</h2>

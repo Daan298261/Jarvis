@@ -21,6 +21,22 @@ class ModelProfile:
     description: str
 
 
+def with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
+    return ModelProfile(
+        name=profile.name,
+        label=profile.label,
+        quant=profile.quant,
+        filename=profile.filename,
+        thinking=profile.thinking,
+        context_size=int(context_size),
+        temperature=profile.temperature,
+        top_p=profile.top_p,
+        top_k=profile.top_k,
+        presence_penalty=profile.presence_penalty,
+        description=profile.description,
+    )
+
+
 PROFILES: dict[str, ModelProfile] = {
     "fast": ModelProfile(
         name="fast",
@@ -61,6 +77,19 @@ PROFILES: dict[str, ModelProfile] = {
         presence_penalty=0.0,
         description="Higher-quality Q5_K_M hybrid GPU/CPU profile.",
     ),
+    "expert": ModelProfile(
+        name="expert",
+        label="Expert",
+        quant="Q4_K_M",
+        filename="Qwen3.5-27B-Q4_K_M.gguf",
+        thinking=True,
+        context_size=16384,
+        temperature=0.4,
+        top_p=0.9,
+        top_k=20,
+        presence_penalty=0.0,
+        description="Escalation consult profile: compact 27B analysis, not everyday tool work.",
+    ),
 }
 
 
@@ -96,6 +125,15 @@ def resolve_profile(name: str) -> ModelProfile:
     profile = PROFILES[key]
     paths = model_paths()
     gguf = paths["root"] / profile.filename
-    if not gguf.exists() and key == "quality":
+    if not gguf.exists() and key in {"quality", "expert"}:
         return PROFILES["balanced"]
     return profile
+
+
+def expert_profile() -> ModelProfile:
+    """Prefer Q5 when present; otherwise the dedicated Expert 27B Q4 consult profile."""
+    paths = model_paths()
+    quality = PROFILES["quality"]
+    if (paths["root"] / quality.filename).exists():
+        return with_context(quality, 16384)
+    return PROFILES["expert"]
