@@ -142,7 +142,7 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
 th { color: var(--muted); font-weight: 500; }
 
-input[type="text"], input[type="number"], select, textarea.field {
+input[type="text"], input[type="number"], input[type="password"], select, textarea.field {
   width: 100%;
   background: #0c1015;
   border: 1px solid var(--line);

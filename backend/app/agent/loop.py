@@ -32,7 +32,7 @@ from .planning import (
 )
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
-from .skills import promote_from_trajectories, relevant_skills
+from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .prompts import (
     CONTINUE_PROMPT,
@@ -235,27 +235,6 @@ class AgentRuntime:
         provider = MANAGER.provider
         assert provider is not None
 
-        if existing and continue_existing:
-            messages = existing
-            if extra_prompt:
-                messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT + "\n\n" + extra_prompt))
-            else:
-                messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
-        else:
-            system_prompt = SYSTEM_PROMPT + _environment_block(settings)
-            skills = skills_prompt_block(await relevant_skills(working.task_class, working.goal))
-            if skills:
-                system_prompt += "\n\n" + skills
-                await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
-            lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
-            if lessons:
-                system_prompt += "\n\n" + lessons
-                await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
-            messages = [
-                ChatMessage(role="system", content=system_prompt),
-                ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
-            ]
-
         recent_hashes: list[str] = []
         max_steps = policy.max_steps
         verifying = False
@@ -268,9 +247,98 @@ class AgentRuntime:
         last_tool_name = ""
         same_tool_streak = 0
         force_final = False
-        plan_candidates: list = []
-        awaiting_plan_selection = False
-        best_of_n_complete = policy.best_of_n <= 1
+        skill_requires_verify = False
+
+        if existing and continue_existing:
+            messages = existing
+            if extra_prompt:
+                messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT + "\n\n" + extra_prompt))
+            else:
+                messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
+        else:
+            system_prompt = SYSTEM_PROMPT + _environment_block(settings)
+            matched_skills = await relevant_skills(working.task_class, working.goal)
+            skills = skills_prompt_block(matched_skills)
+            if skills:
+                system_prompt += "\n\n" + skills
+                await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
+            lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
+            if lessons:
+                system_prompt += "\n\n" + lessons
+                await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
+            messages = [
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
+            ]
+            for skill in matched_skills:
+                bound = bind_parameters(skill, working.goal)
+                if bound is None:
+                    continue
+                steps = instantiate_steps(skill, bound)
+                if not steps_are_executable(steps):
+                    continue
+                blocked = False
+                for step in steps:
+                    tool_meta = REGISTRY.tools.get(step.get("tool") or "")
+                    risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
+                    command = (step.get("arguments") or {}).get("command") if isinstance(step.get("arguments"), dict) else None
+                    if needs_confirmation(autonomy, risk, command):
+                        blocked = True
+                        break
+                if blocked:
+                    continue
+                await BUS.publish(
+                    task_id,
+                    "progress",
+                    f"Running skill {skill.name}",
+                    json.dumps({"parameters": bound, "steps": [s.get("tool") for s in steps]})[:1500],
+                    stage="act",
+                )
+                skill_ok = True
+                for index, step in enumerate(steps):
+                    name = step.get("tool") or ""
+                    arguments = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
+                    call_id = f"skill-{skill.name}-{index}"
+                    messages.append(
+                        ChatMessage(
+                            role="assistant",
+                            content="",
+                            tool_calls=[
+                                {
+                                    "id": call_id,
+                                    "type": "function",
+                                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                                }
+                            ],
+                        )
+                    )
+                    await self._update(task_id, current_tool=name, current_action=f"Skill {skill.name}: {name}")
+                    await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
+                    observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
+                    failed = "ERROR:" in observation or observation.lower().startswith("error")
+                    working.note_tool(name, observation, not failed)
+                    messages.append(ChatMessage(role="tool", name=name, tool_call_id=call_id, content=observation))
+                    if attach:
+                        messages.append(_image_message(attach))
+                    if failed:
+                        skill_ok = False
+                        await BUS.publish(task_id, "error", f"Skill {skill.name} failed at {name}", observation[:1500], stage="diagnose")
+                        break
+                    await BUS.publish(task_id, "observation", f"{name} finished", observation[:1500], stage="observe")
+                if skill_ok:
+                    tools_used = True
+                    verifying = True
+                    skill_requires_verify = True
+                    working.next_action = "independent verification"
+                    await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
+                    messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
+                    await self._update(
+                        task_id,
+                        conversation_json=serialize_messages(messages),
+                        compact_memory=working.dumps(),
+                        current_action=f"Ran skill {skill.name}",
+                    )
+                    break
 
         if pending_tool:
             result_text = await self._execute_tool(task_id, pending_tool["name"], pending_tool["arguments"], autonomy, settings)
@@ -541,7 +609,7 @@ class AgentRuntime:
                     await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
                     messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
                     continue
-                if policy.require_verify_tools and verify_tool_rounds == 0:
+                if (policy.require_verify_tools or skill_requires_verify) and verify_tool_rounds == 0:
                     messages.append(ChatMessage(role="user", content=VERIFY_REQUIRED_PROMPT))
                     continue
                 working.verified = True

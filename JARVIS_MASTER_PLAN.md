@@ -1159,7 +1159,7 @@ A skill may include:
 - verification criteria;
 - recovery guidance.
 
-Repeated successful workflows may eventually be promoted into skills.
+Repeated successful workflows may eventually be promoted into skills. When the recorded tool arguments differ across those successes, they become parameters and the skill executes the bound steps itself instead of only advising the model.
 
 Do not create skills indiscriminately.
 
@@ -1304,7 +1304,8 @@ Display:
 - VRAM usage;
 - RAM usage;
 - tokens/sec;
-- load status.
+- load status;
+- persisted benchmark history (tok/s, VRAM, RAM, task success rate).
 
 Support profiles:
 
@@ -1827,8 +1828,9 @@ This development session:
 
 ### Working Tools
 
+
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported)
+- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
 - Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
 - Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
 - Playwright: native backend present
@@ -1850,7 +1852,7 @@ This development session:
 - Resume: `POST /api/tasks/{id}/continue` reloads compacted conversation
 - Context compaction: older turns collapse into a structured summary that cannot orphan a tool result from its assistant `tool_calls` turn; the compact working state is refreshed (not stacked) on every pass
 - Trajectory memory: `trajectories` table stores ordered tools, failure kinds, the recovery that worked, and verification. Similar new tasks get those lessons injected. No hidden reasoning is stored.
-- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence.
+- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
 
 ### Reliability
 
@@ -1887,7 +1889,7 @@ This development session:
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell; Linux-only environments should use `shell=bash`
+- Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
 
 ### Last End-to-End Test
 
@@ -1977,6 +1979,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 
 - [x] Reusable skills — VERIFIED (`test_skills.py`); promotion needs 3 repeats of the same tool sequence
 - [x] Trajectory memory (cross-task) — VERIFIED (`test_trajectory.py`)
+- [x] Parameterized skill execution — VERIFIED (`test_skills.py`); bound steps run on matching tasks and via `POST /api/memory/skills/{id}/run`
+- [ ] Best-of-N planning for Reliable mode
+- [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
+- [ ] Office COM coverage when Office is installed
+- [ ] Compare-files / recent-version filesystem helpers
+- [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
 - [x] Best-of-N planning for Reliable mode — VERIFIED (`test_best_of_n.py`, `test_planning.py`); three labeled candidates, critic selects one, only that plan is executed
 - [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
 - [ ] Parameterized skill execution (skills currently guide, they do not run themselves)
@@ -2061,6 +2069,14 @@ A workflow is promoted only after the same task class succeeds several times wit
 Reason:
 
 The plan explicitly warns against creating skills indiscriminately. One success is often luck or a one-off path; repetition is the evidence that a workflow is stable.
+
+Decision: parameterized skills execute themselves
+
+When repeated successes record tool arguments, values that differed become `{parameters}` and a matching later task runs those bound steps, then verifies. Skills without recorded arguments still only guide.
+
+Reason:
+
+A skill that only appears in the system prompt is advice. The queue required skills to run, not merely remind the model of a tool order.
 
 Decision: permission failures do not get an alternative tool
 

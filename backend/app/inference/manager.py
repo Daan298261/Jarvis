@@ -217,6 +217,22 @@ class InferenceManager:
             self.state.generation_tps = round(float(predicted), 2)
         if isinstance(prompt, (int, float)):
             self.state.prompt_tps = round(float(prompt), 2)
+        try:
+            from .benchmarks import record_benchmark_sample
+
+            await record_benchmark_sample(
+                profile=self.state.profile,
+                quantization=self.state.quant,
+                context_size=self.state.context_size,
+                prompt_tps=self.state.prompt_tps,
+                generation_tps=self.state.generation_tps,
+                vram_used_mib=self.state.vram_used_mib,
+                ram_used_gb=self.state.ram_used_gb,
+                load_time_seconds=self.state.load_time_seconds,
+                source="timing",
+            )
+        except Exception:
+            pass
 
 
 MANAGER = InferenceManager()
