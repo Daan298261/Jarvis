@@ -1827,7 +1827,7 @@ This development session:
 
 ### Working Tools
 
-- Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat, backups, allowed-directory sandbox)
+- Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
 - PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported)
 - Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
 - Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
@@ -1858,12 +1858,16 @@ This development session:
 - Verification engine: **implemented** — a task cannot complete until an independent verification pass runs; Reliable mode requires a verification tool call
 - Failure recovery: **implemented** — failures are classified (permission, missing capability, not found, timeout, usage, network, blocked) and answered with alternatives ordered by determinism; permission/blocked failures deliberately suggest no alternative tool
 - Fast/Balanced/Reliable modes: **agent execution modes implemented** (separate from model Fast/Balanced/Quality profiles)
+- Reliable mode also generates three candidate plans and a critic selects one before execution
 - Task classification: keyword-scored classifier stored on the task
 - Acceptance criteria / plan: parsed from the first planning turn and persisted
 
 ### Portal / API
 
-- Command, History, Memory, Model, Tools, MCP, Settings, System pages exist
+- Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
+- Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
+- Live status shows execution mode, task class, and verification
+- Live elapsed time uses `started_at` so reopening a running task does not reset the clock
 - Live status shows execution mode, task class, and verification
 - Memory page lists skills and trajectories with promote / enable controls
 - Tools/System pages list optional workers as unavailable instead of crashing
@@ -1874,7 +1878,7 @@ This development session:
 ### Known Problems
 
 - Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
-- Best-of-N planning is not implemented (Reliable mode has a single critic pass)
+- Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Skill promotion records the tool sequence, not parameterized steps, so a skill guides rather than executes
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
@@ -1883,15 +1887,15 @@ This development session:
 
 ### Last End-to-End Test
 
-Date: 2026-08-21
+Date: 2026-08-24
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning, safety, filesystem sandbox, capability catalog, verification loop, Reliable-mode tool-backed verification, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion, private key authentication, launch queue watcher
-- Frontend (`npm run build`): TypeScript build clean; `oxlint` reports only pre-existing style warnings
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection, failure classification and recovery routing, trajectory record/recall, skill promotion, private key authentication, launch queue watcher, workflow templates/save/run
+- Frontend (`npm run build`): TypeScript build clean
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **56 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **68 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -1945,9 +1949,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
   - Acceptance: llama.cpp process manager is one backend; any other OpenAI-compatible server is health-checked only.
   - Status: VERIFIED in unit tests (`test_inference_backends.py`); live LAN endpoint untested
 
-- [ ] Interactive Guide & Workflow Launcher Tab (Instructions, Example Library & Custom Event Chains)
+- [x] Interactive Guide & Workflow Launcher Tab (Instructions, Example Library & Custom Event Chains)
   - Acceptance: New "Guide & Workflows" tab in the web portal containing clear usage instructions, pre-populated editable templates (e.g., project debugging, research + Excel export, multi-file transforms, browser workflows), an editor allowing prompt parameters / event chains customization, and 1-click execution dispatch.
-  - Status: TODO
+  - Status: VERIFIED (portal tab + `/api/workflows` + unit tests)
 
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
@@ -1969,11 +1973,11 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 
 - [x] Reusable skills — VERIFIED (`test_skills.py`); promotion needs 3 repeats of the same tool sequence
 - [x] Trajectory memory (cross-task) — VERIFIED (`test_trajectory.py`)
+- [x] Best-of-N planning for Reliable mode — VERIFIED (`test_best_of_n.py`, `test_planning.py`); three labeled candidates, critic selects one, only that plan is executed
+- [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
 - [ ] Parameterized skill execution (skills currently guide, they do not run themselves)
-- [ ] Best-of-N planning for Reliable mode
 - [ ] Model benchmark UI (persist tok/s, VRAM, success rates)
 - [ ] Office COM coverage when Office is installed
-- [ ] Compare-files / recent-version filesystem helpers
 - [ ] Long-running process inspection (PID still alive)
 
 ### P3
@@ -2077,6 +2081,14 @@ Provide pre-built and editable chained workflow recipes in the UI to facilitate 
 Reason:
 
 Improves ease of use and low-maintenance UX by letting users load, customize parameters for, and fire complex multi-stage tasks directly from the web portal.
+
+Decision: Reliable mode uses best-of-N for planning, not for full retries
+
+Generate three labeled strategies, have the same model critique them, then execute only the winner. Do not run several complete attempts in parallel.
+
+Reason:
+
+The master plan asks for best-of-N on initial planning and consequential decisions. Executing every candidate would waste tools and risk conflicting file changes.
 
 ---
 

@@ -39,6 +39,15 @@ async def test_filesystem_compare_identical_and_diff(tmp_path):
     assert "+gamma" in diff.output
 
 
+async def test_filesystem_compare_rejects_outside_destination(tmp_path):
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    inside = tmp_path / "inside.txt"
+    inside.write_text("ok", encoding="utf-8")
+    result = await tool.execute(action="compare", path=str(inside), destination="/etc/passwd")
+    assert result.success is False
+    assert "outside allowed directories" in result.error
+
+
 async def test_filesystem_compare_requires_destination(tmp_path):
     tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
     path = tmp_path / "only.txt"

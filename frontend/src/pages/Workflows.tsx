@@ -110,7 +110,7 @@ export function WorkflowsPage() {
       }
       const saved = await api<Workflow>("/api/workflows", { method: "POST", body: JSON.stringify(payload) })
       await refresh()
-      openEditor(saved)
+      setDraft(cloneWorkflow(saved))
       setMessage("Saved to data/workflows/.")
     } catch (err: any) {
       setMessage(err.message || "Could not save")

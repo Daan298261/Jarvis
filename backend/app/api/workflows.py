@@ -50,6 +50,25 @@ async def guide():
     return {"sections": GUIDE_SECTIONS}
 
 
+@router.post("/run")
+async def run_workflow(body: WorkflowRun):
+    if body.workflow is not None:
+        workflow = workflow_from_dict(body.workflow.model_dump(), builtin=False)
+    elif body.id:
+        workflow = get_workflow(body.id)
+        if not workflow:
+            raise HTTPException(404, "Workflow not found")
+    else:
+        raise HTTPException(400, "Provide a workflow id or a workflow body")
+    if not workflow.steps:
+        raise HTTPException(400, "A workflow needs at least one step")
+    values = merge_parameter_values(workflow, body.parameters)
+    prompt = compose_prompt(workflow, values)
+    mode = body.execution_mode or workflow.execution_mode or "balanced"
+    task = await AGENT.create_task(prompt, body.autonomy, body.profile, mode)
+    return {"task": _task_dict(task), "prompt": prompt, "workflow_id": workflow.id}
+
+
 @router.get("")
 async def list_all():
     return [item.to_dict() for item in list_workflows()]
@@ -81,22 +100,3 @@ async def remove(workflow_id: str):
     if not deleted:
         raise HTTPException(404, "Workflow not found")
     return {"ok": True}
-
-
-@router.post("/run")
-async def run_workflow(body: WorkflowRun):
-    if body.workflow is not None:
-        workflow = workflow_from_dict(body.workflow.model_dump(), builtin=False)
-    elif body.id:
-        workflow = get_workflow(body.id)
-        if not workflow:
-            raise HTTPException(404, "Workflow not found")
-    else:
-        raise HTTPException(400, "Provide a workflow id or a workflow body")
-    if not workflow.steps:
-        raise HTTPException(400, "A workflow needs at least one step")
-    values = merge_parameter_values(workflow, body.parameters)
-    prompt = compose_prompt(workflow, values)
-    mode = body.execution_mode or workflow.execution_mode or "balanced"
-    task = await AGENT.create_task(prompt, body.autonomy, body.profile, mode)
-    return {"task": _task_dict(task), "prompt": prompt, "workflow_id": workflow.id}

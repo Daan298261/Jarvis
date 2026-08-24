@@ -33,16 +33,17 @@ Swap by pointing `inference.host`/`port` at any OpenAI-compatible `/v1` endpoint
 
 1. Understand the requested end state
 2. Capture acceptance criteria (model + prompt)
-3. Inspect with tools
-4. Plan
-5. Execute the next tool call
-6. Persist the observation
-7. Classify success vs failure
-8. Diagnose
-9. Choose a different strategy (identical retries are blocked)
-10. Repeat until criteria can be checked
-11. Independent verification prompt with tools still available
-12. Final report only after that pass
+3. In Reliable mode, generate three candidate plans and select one
+4. Inspect with tools
+5. Plan
+6. Execute the next tool call
+7. Persist the observation
+8. Classify success vs failure
+9. Diagnose
+10. Choose a different strategy (identical retries are blocked)
+11. Repeat until criteria can be checked
+12. Independent verification prompt with tools still available
+13. Final report only after that pass
 
 Task state is checkpointed in SQLite after every tool call. `POST /api/tasks/{id}/continue` reloads compacted conversation state.
 
@@ -64,7 +65,7 @@ Older tool traces are summarized so long tasks do not dump the full history back
 
 ## Frontend
 
-React + TypeScript + Vite, built into `frontend/dist` and served by FastAPI so there is a single local URL.
+The portal is React + TypeScript + Vite, built into `frontend/dist` and served by FastAPI so there is a single local URL. Pages: Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System. Guide & Workflows loads templates from `/api/workflows`, lets you edit parameters and chained stages, saves presets to `data/workflows/`, and dispatches one task via `POST /api/workflows/run`.
 
 ## Voice-ready API
 

@@ -369,6 +369,15 @@ class AgentRuntime:
                     tools_used = True
                     best_of_n_complete = True
                     awaiting_plan_selection = False
+                    if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
+                        working.apply_plan(parsed, prompt)
+                        await self._update(
+                            task_id,
+                            acceptance_criteria="\n".join(working.acceptance_criteria),
+                            plan_json=json.dumps(working.plan),
+                            compact_memory=working.dumps(),
+                            summary=working.goal,
+                        )
                     tool_rounds += 1
                     if verifying:
                         verify_tool_rounds += 1
