@@ -1,4 +1,4 @@
-from app.tools.terminal import TerminalTool, _python_args
+from app.tools.terminal import TerminalTool, _python_args, default_shell
 
 
 def test_python_shell_uses_dash_c_for_snippets():
@@ -50,3 +50,12 @@ async def test_wait_collects_output_from_a_started_process(tmp_path):
     assert waited.success
     assert waited.data["alive"] is False
     assert "hello-from-bg" in (waited.data.get("stdout") or waited.output)
+
+
+def test_linux_default_shell_is_not_powershell():
+    import sys
+
+    if sys.platform == "win32":
+        assert default_shell() == "powershell"
+    else:
+        assert default_shell() in {"bash", "python"}

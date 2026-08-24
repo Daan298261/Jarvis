@@ -1,3 +1,3 @@
-from . import mcp, model, settings, system, tasks, tools, voice, workflows
+from . import mcp, model, self_dev, settings, system, tasks, tools, voice, workflows
 
-__all__ = ["mcp", "model", "settings", "system", "tasks", "tools", "voice", "workflows"]
+__all__ = ["mcp", "model", "self_dev", "settings", "system", "tasks", "tools", "voice", "workflows"]

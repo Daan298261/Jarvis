@@ -27,6 +27,11 @@ class SettingsUpdate(BaseModel):
     inference_host: str | None = None
     inference_port: int | None = None
     browser_headless: bool | None = None
+    self_dev_max_duration_hours: float | None = None
+    self_dev_max_paid_spend_eur: float | None = None
+    self_dev_max_paid_invocations: int | None = None
+    self_dev_max_consecutive_failures: int | None = None
+    self_dev_experimental_port: int | None = None
 
 
 @router.get("")
@@ -80,6 +85,16 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.port = body.inference_port
     if body.browser_headless is not None:
         settings.browser.headless = body.browser_headless
+    if body.self_dev_max_duration_hours is not None:
+        settings.self_dev.max_duration_hours = body.self_dev_max_duration_hours
+    if body.self_dev_max_paid_spend_eur is not None:
+        settings.self_dev.max_paid_spend_eur = body.self_dev_max_paid_spend_eur
+    if body.self_dev_max_paid_invocations is not None:
+        settings.self_dev.max_paid_invocations = body.self_dev_max_paid_invocations
+    if body.self_dev_max_consecutive_failures is not None:
+        settings.self_dev.max_consecutive_failures = body.self_dev_max_consecutive_failures
+    if body.self_dev_experimental_port is not None:
+        settings.self_dev.experimental_port = body.self_dev_experimental_port
     save_settings(settings)
     REGISTRY.apply_settings(settings)
     return settings.model_dump()

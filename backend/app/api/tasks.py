@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent.loop import AGENT
+from ..agent.self_dev import KillSwitchActive
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
@@ -57,7 +58,10 @@ def _task_dict(task: Task) -> dict[str, Any]:
 
 @router.post("")
 async def create_task(body: TaskCreate):
-    task = await AGENT.create_task(body.prompt, body.autonomy, body.profile, body.execution_mode)
+    try:
+        task = await AGENT.create_task(body.prompt, body.autonomy, body.profile, body.execution_mode)
+    except KillSwitchActive as exc:
+        raise HTTPException(409, str(exc)) from exc
     return _task_dict(task)
 
 
@@ -100,6 +104,8 @@ async def continue_task(task_id: str, body: ContinueBody | None = None):
         else:
             task = await AGENT.continue_task(task_id, body.prompt)
         return _task_dict(task)
+    except KillSwitchActive as exc:
+        raise HTTPException(409, str(exc)) from exc
     except KeyError:
         raise HTTPException(404, "Task not found")
 

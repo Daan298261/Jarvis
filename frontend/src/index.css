@@ -117,6 +117,7 @@ h2 { font-size: 18px; margin: 0 0 12px; }
   cursor: pointer;
 }
 .btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn.danger { background: var(--bad); color: #160c0b; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .stat { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); }

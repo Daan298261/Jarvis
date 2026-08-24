@@ -47,6 +47,8 @@ backend/app/
     trajectory.py         Cross-task lessons (no hidden reasoning)
     skills.py             Promote after 3 identical successful tool sequences
     queue_watcher.py      data/queue/pending file drop
+    worktrees.py          Isolated git worktrees for self-development
+    self_dev.py           Trial budget, kill switch, verification gate, reports
     prompts.py            System / plan / verify / critic prompts
   inference/
     manager.py            Load/unload, adopt already-running server
@@ -129,7 +131,7 @@ On Linux you can still:
 - Run pytest for non-Windows modules
 - Build the frontend (`npm run build`)
 
-You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal default is PowerShell; on Linux the agent should use `shell=bash`.
+You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal default is PowerShell on Windows and bash on Linux.
 
 ---
 
@@ -188,6 +190,15 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | POST | `/api/workflows` | Save a preset under `data/workflows/` |
 | DELETE | `/api/workflows/{id}` | Delete a saved preset (not a builtin) |
 | POST | `/api/workflows/run` | Fill placeholders, compose stages, create a task |
+| GET | `/api/self-dev` | Isolated trial status, budget, kill switch, worktrees |
+| POST | `/api/self-dev/start` | Create a dedicated worktree/branch from a repo (never the running checkout) |
+| POST | `/api/self-dev/stop` | Emergency kill switch (`data/STOP_JARVIS`); cancels tasks, preserves Git |
+| POST | `/api/self-dev/resume` | Clear the kill switch |
+| POST | `/api/self-dev/worktrees/{id}/checkpoint` | Commit only inside the isolated worktree |
+| POST | `/api/self-dev/worktrees/{id}/verify` | Independent pytest gate; never auto-merges |
+| POST | `/api/self-dev/worktrees/{id}/discard` | Remove the experimental worktree only |
+| POST | `/api/self-dev/report` | End-of-run development report |
+| POST | `/api/self-dev/merge` | Always 403 during trials |
 | POST | `/api/voice/command` | `{ text, autonomy? }` — already-transcribed speech |
 
 Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from text.
