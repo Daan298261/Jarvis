@@ -30,6 +30,13 @@ from .planning import (
     resolve_execution_policy,
     select_best_plan,
 )
+from .coding_workers import (
+    complete_coding_route,
+    format_route_prompt,
+    record_coding_route,
+    route_software_task,
+    should_route,
+)
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
@@ -192,6 +199,7 @@ class AgentRuntime:
             await record_trajectory(task_id, working, "completed")
             for skill in await promote_from_trajectories():
                 await BUS.publish(task_id, "progress", f"Promoted reusable skill: {skill.name}", skill.description[:800])
+        await complete_coding_route(task_id, "completed", verification)
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
 
     async def _run(
@@ -226,6 +234,19 @@ class AgentRuntime:
                 working.goal = prompt.strip().splitlines()[0][:240]
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
+        coding_route = None
+        if not continue_existing and should_route(working.task_class, prompt):
+            coding_route = route_software_task(prompt, task_class=working.task_class)
+            working.coding_worker = coding_route.selected_worker
+            working.coding_tier = coding_route.tier_name
+            await record_coding_route(task_id, coding_route)
+            await BUS.publish(
+                task_id,
+                "progress",
+                f"Coding worker: {coding_route.selected_worker} (tier {coding_route.tier})",
+                coding_route.reason[:1500],
+                stage="understand",
+            )
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         plan_prompt = best_of_n_plan_prompt(policy.best_of_n) if policy.best_of_n > 1 else PLAN_PROMPT
@@ -269,6 +290,8 @@ class AgentRuntime:
             if lessons:
                 system_prompt += "\n\n" + lessons
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
+            if coding_route is not None:
+                system_prompt += "\n\n" + format_route_prompt(coding_route)
             messages = [
                 ChatMessage(role="system", content=system_prompt),
                 ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
@@ -410,6 +433,7 @@ class AgentRuntime:
                         current_tool="",
                     )
                     await record_trajectory(task_id, working, "failed")
+                    await complete_coding_route(task_id, "failed", content)
                     await BUS.publish(task_id, "failed", "Task ended after model timeout", content, stage="failed")
                     return
                 await MANAGER.record_timings(result.timings)
@@ -624,13 +648,16 @@ class AgentRuntime:
                 return
             await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification")
             await record_trajectory(task_id, working, "failed")
+            await complete_coding_route(task_id, "failed", "Step limit reached before verification")
             await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
         except asyncio.CancelledError:
             await self._update(task_id, status="cancelled", stage="cancelled")
+            await complete_coding_route(task_id, "cancelled")
             raise
         except Exception as exc:
             await self._update(task_id, status="failed", stage="failed", error=str(exc))
             await record_trajectory(task_id, working, "failed")
+            await complete_coding_route(task_id, "failed", str(exc))
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
 
     async def _execute_tool(

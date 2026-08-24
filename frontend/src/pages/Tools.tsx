@@ -5,6 +5,7 @@ type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
   optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
+  coding_workers?: { id: string; name: string; available: boolean; status: string; detail: string; tier?: number }[]
 }
 
 export function ToolsPage() {
@@ -50,6 +51,21 @@ export function ToolsPage() {
           </div>
         ))}
       </div>
+      {!!catalog.coding_workers?.length && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Software-development workers</h2>
+          <p className="lede">Jarvis routes coding work to the cheapest capable worker. Paid Cursor workers stay listed when they are not configured. A worker claiming success is never completion.</p>
+          {catalog.coding_workers.map((worker) => (
+            <div className="toggle" key={worker.id}>
+              <div>
+                <strong>{worker.name}</strong>
+                <div className="lede" style={{ margin: "4px 0 0" }}>{worker.detail}</div>
+              </div>
+              <span className={`badge ${worker.available ? "completed" : "queued"}`}>{worker.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

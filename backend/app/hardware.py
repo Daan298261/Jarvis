@@ -3,11 +3,15 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import psutil
+
+_CACHE: tuple[float, "HardwareInfo"] | None = None
+_CACHE_TTL_SECONDS = 30.0
 
 
 @dataclass
@@ -94,7 +98,17 @@ def _office_installed() -> bool:
     return False
 
 
-def detect_hardware() -> HardwareInfo:
+def detect_hardware(*, force: bool = False) -> HardwareInfo:
+    global _CACHE
+    now = time.monotonic()
+    if not force and _CACHE and (now - _CACHE[0]) < _CACHE_TTL_SECONDS:
+        return _CACHE[1]
+    info = _probe_hardware()
+    _CACHE = (now, info)
+    return info
+
+
+def _probe_hardware() -> HardwareInfo:
     vm = psutil.virtual_memory()
     disk = shutil.disk_usage(str(Path.home().anchor or "C:\\"))
     cpu = platform.processor() or "Unknown CPU"

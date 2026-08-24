@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from ..agent.coding_workers import coding_worker_catalog, list_coding_routes, route_software_task
 from ..config import load_settings, save_settings
 from ..tools.capabilities import capability_snapshot
 from ..tools.registry import REGISTRY
@@ -22,6 +23,15 @@ async def tool_catalog():
     REGISTRY.apply_settings(settings)
     caps = capability_snapshot()
     return {"tools": REGISTRY.list_tools(), **caps}
+
+
+@router.get("/coding-workers")
+async def coding_workers(prompt: str = "", task_class: str = ""):
+    catalog = coding_worker_catalog()
+    payload: dict = {"workers": catalog, "recent_routes": await list_coding_routes(limit=20)}
+    if prompt:
+        payload["route"] = route_software_task(prompt, task_class=task_class).as_dict()
+    return payload
 
 
 @router.post("/{tool_name}/enable")

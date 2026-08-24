@@ -5,6 +5,8 @@ import platform
 import shutil
 from typing import Any
 
+from ..agent.coding_workers import coding_worker_catalog
+
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -144,8 +146,10 @@ def optional_workers() -> list[dict[str, Any]]:
 def capability_snapshot() -> dict[str, Any]:
     native = native_capabilities()
     optional = optional_workers()
+    coding = coding_worker_catalog()
     return {
         "native": native,
         "optional_workers": optional,
+        "coding_workers": coding,
         "all": native + optional,
     }

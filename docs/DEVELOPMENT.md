@@ -38,9 +38,11 @@ backend/app/
   events.py               In-process event bus for WS + SSE
   hardware.py             CPU/RAM/GPU probe (nvidia-smi)
   api/                    REST routers (prefix /api/…)
-  agent/
+    agent/
     loop.py               AgentRuntime — create/continue/cancel, verification
     planning.py           ExecutionPolicy, task classification, best-of-N plan parse/select
+    coding_workers.py     Software-dev worker router (complexity 0–100, cheapest capable worker)
+    agent_benchmark.py    P0.9 20-task representative suite + scoring
     workflows.py          Guide copy + editable templates + compose_prompt
     recovery.py           Failure classes → alternative tools
     compaction.py         History summary that cannot orphan tool results
@@ -52,6 +54,8 @@ backend/app/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
     profiles.py           fast / balanced / quality GGUF profiles
+    benchmarks.py         Persist tok/s / VRAM / task success
+    hardware_gate.py      P0.12 purchase gate (defer until desktop suite runs)
   providers/              OpenAI-compatible chat + tool-call parsing
   tools/                  Native tools + MCP proxy
   db/                     SQLAlchemy models, aiosqlite session, light migrations
@@ -171,10 +175,14 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | POST | `/api/tasks/{id}/cancel` | Cooperative cancel |
 | GET | `/api/tasks/{id}/events` | SSE stream |
 | GET/POST | `/api/queue`, `/enqueue`, `/process` | File-drop queue |
-| GET | `/api/model` | Load state + available profiles |
+| GET | `/api/model` | Load state + profiles + hardware gate + agent suite |
+| GET | `/api/model/hardware-gate` | P0.12 purchase recommendation (always defer until desktop evidence) |
+| GET | `/api/model/agent-suite` | P0.9 20-task catalog + recent results |
+| POST | `/api/model/agent-suite/run` | `{ case_id, simulate_success? }` prepare/score one case |
 | POST | `/api/model/load` | `{ profile? }` |
 | POST | `/api/model/unload` | Stop llama-server if Jarvis owns it |
 | GET | `/api/tools`, `/api/tools/catalog` | Registry + optional-worker catalog |
+| GET | `/api/tools/coding-workers` | Software-dev worker catalog; `?prompt=` returns a route |
 | POST | `/api/tools/{name}/enable` / `disable` | Persist `disabled_tools` |
 | GET/PUT | `/api/settings` | Full settings dump / patch |
 | GET/POST/DELETE | `/api/mcp`, `/api/mcp/{id}`, `/refresh` | MCP servers |
@@ -351,6 +359,8 @@ From the current master-plan state:
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
 - Skills guide the prompt; they do not execute a parameterized workflow themselves (Guide & Workflows templates compose one prompt)
 - Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
+- Paid coding workers (Composer 2.5, Grok 4.6, frontier) are catalogued `not_configured`; routing uses native tools or the local worker
+- The 20-task agent suite is fixtures + scoring only until the Windows GPU comparison runs
 - Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
 

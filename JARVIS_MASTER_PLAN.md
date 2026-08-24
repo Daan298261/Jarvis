@@ -3618,6 +3618,7 @@ This development session:
 - Cua: **not integrated**
 - Open Interpreter: **not integrated**
 - OpenHands: **not integrated**
+- Local Jarvis coding worker: **ready** (in-process supervisor loop). Cursor Composer / Grok / frontier specialists are catalogued as `not_configured`; software tasks are complexity-scored and routed to native tools or the local worker until paid workers are wired. Worker-reported success is never treated as completion.
 
 ### Jarvis 2.0
 
@@ -3653,10 +3654,12 @@ This development session:
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
 - Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
+- Model page also shows the P0.12 hardware purchasing gate (`GET /api/model/hardware-gate`) and the P0.9 20-task agent suite catalog (`GET /api/model/agent-suite`)
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
 - Tools/System pages list optional workers as unavailable instead of crashing
+- Tools page lists software-development workers (local ready; paid Cursor workers not configured)
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
 - Voice: `POST /api/voice/command` accepts already-transcribed text only
@@ -3666,6 +3669,9 @@ This development session:
 - Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
+- Paid coding workers (Composer 2.5, Grok 4.6, frontier) are catalogued but not connected; routing falls back to the local worker
+- The 20-task agent suite exists as fixtures + scoring; live 9B vs 27B comparison has not run
+- Hardware purchases remain gated until that desktop comparison exists
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
 - Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
@@ -3676,11 +3682,11 @@ Date: 2026-08-24
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): previous coverage plus P0.9 20-task agent suite fixtures/scoring, P0.12 hardware purchasing gate, software-development worker routing, and API endpoints for those surfaces
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **96 passed** on this branch. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3712,6 +3718,14 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
   - Status: TODO / IN PROGRESS by plan (current code still reflects the 27B implementation path; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must validate the new model stack and run `tests/run_e2e.py`.
 
+- [x] Representative 20-task agent benchmark suite (P0.9 dataset + scoring)
+  - Acceptance: at least 20 realistic autonomous tasks with prepare/check fixtures and the P0.9 metric set (success, intervention, timings, model/tool calls, retries, schema errors, incorrect actions, verification). Primary metric is successful autonomous tasks per minute.
+  - Status: VERIFIED in unit tests (`test_agent_benchmark.py`). Live 9B Q8 vs 9B Q6 vs 27B Q4 comparison remains blocked (no GPU/GGUF).
+
+- [x] Hardware purchasing gate (P0.12)
+  - Acceptance: Jarvis reports bottleneck signals from hardware + stored samples and does not recommend extra RAM/Tesla/V100/NPU hardware until the desktop suite has run.
+  - Status: VERIFIED in unit tests (`test_hardware_gate.py`) and Model page (`GET /api/model/hardware-gate`). Decision is `defer_purchase` until Windows evidence exists.
+
 ### P1
 
 - [x] Fast / Balanced / Reliable agent execution modes
@@ -3737,6 +3751,10 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Interactive Guide & Workflow Launcher Tab (Instructions, Example Library & Custom Event Chains)
   - Acceptance: New "Guide & Workflows" tab in the web portal containing clear usage instructions, pre-populated editable templates (e.g., project debugging, research + Excel export, multi-file transforms, browser workflows), an editor allowing prompt parameters / event chains customization, and 1-click execution dispatch.
   - Status: VERIFIED (portal tab + `/api/workflows` + unit tests)
+
+- [x] Software-development worker router (local + catalog)
+  - Acceptance: complexity 0–100 selects deterministic native tools, local Jarvis coding worker, or a paid Cursor/frontier worker; unavailable paid workers fall back locally; independent verification is always required; a worker claiming success is never completion.
+  - Status: VERIFIED in unit tests (`test_coding_workers.py`). Composer/Grok/frontier remain `not_configured`.
 
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
