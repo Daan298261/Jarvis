@@ -61,6 +61,8 @@ class InferenceSettings(BaseModel):
     cache_type_v: str = "q8_0"
     threads: int = 0
     auto_load: bool = True
+    api_key: str = ""
+    remote_model: str = ""
 
 
 class BrowserSettings(BaseModel):
@@ -117,6 +119,13 @@ def load_settings() -> AppSettings:
         except Exception:
             pass
     payload["auth_token"] = token
+    inference_key = os.environ.get("JARVIS_INFERENCE_API_KEY")
+    if inference_key:
+        inference = payload.get("inference")
+        if not isinstance(inference, dict):
+            inference = {}
+            payload["inference"] = inference
+        inference["api_key"] = inference_key
     host = os.environ.get("JARVIS_BIND_HOST")
     port = os.environ.get("JARVIS_BIND_PORT")
     if host:

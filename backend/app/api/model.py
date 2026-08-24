@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..config import load_settings, save_settings
+from ..inference.backends import probe_remote_server
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
 from ..inference.manager import MANAGER
 from ..inference.profiles import available_profiles
@@ -33,6 +34,24 @@ async def model_status():
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
     return snapshot
+
+
+@router.get("/probe")
+async def probe_inference():
+    settings = load_settings()
+    probe = await probe_remote_server(
+        settings.inference.host,
+        settings.inference.port,
+        settings.inference.api_key,
+        timeout=8,
+    )
+    return {
+        "backend": settings.inference.backend,
+        "host": settings.inference.host,
+        "port": settings.inference.port,
+        "base_url": f"http://{settings.inference.host}:{settings.inference.port}/v1",
+        **probe,
+    }
 
 
 @router.get("/benchmarks")

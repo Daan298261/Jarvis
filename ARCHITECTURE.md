@@ -9,12 +9,12 @@ Browser (localhost:4780)
 FastAPI backend
   ├── Task store (SQLite)
   ├── Agent runtime (plan → act → observe → recover → verify)
-  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP)
+  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP, code_worker)
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
-llama-server (localhost:8088)
-  Qwen3.5-27B GGUF + mmproj
+llama-server (localhost:8088)  or  LAN GPU / Ollama / LM Studio / vLLM / SGLang
+  Qwen3.5-27B GGUF + mmproj     or  whatever that server advertises
 ```
 
 ## Model provider
@@ -25,7 +25,7 @@ llama-server (localhost:8088)
 - another machine on the LAN
 - a dedicated multi-GPU server
 
-Swap by pointing `inference.host`/`port` at any OpenAI-compatible `/v1` endpoint. No agent code changes.
+Swap by pointing `inference.host`/`port` at any OpenAI-compatible `/v1` endpoint, or pick `ollama` / `lmstudio` / `vllm` / `sglang` / `remote` on Settings. `GET /api/model/probe` lists advertised models. No agent code changes.
 
 ## Agent lifecycle
 
@@ -53,7 +53,7 @@ Older tool traces are summarized so long tasks do not dump the full history back
 
 ## Memory
 
-`trajectories` records how each task actually went; `skills` holds workflows that succeeded repeatedly with the same tool sequence. Parameterized skills execute their bound tool steps instead of only injecting advice. Both are injected into the system prompt of similar later tasks. See `TOOLS.md`.
+`trajectories` records how each task actually went; `skills` holds workflows that succeeded repeatedly with the same tool sequence. Parameterized skills execute their bound tool steps instead of only injecting advice. Repeated stable browser procedures become BrowserCode-style skills. Both are injected into the system prompt of similar later tasks. See `TOOLS.md`.
 
 Live model timings (tok/s, VRAM, RAM, load time) and task success rates are persisted in `benchmark_samples` and shown on the Model page.
 

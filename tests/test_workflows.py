@@ -12,7 +12,7 @@ from app.agent.workflows import (
 
 def test_builtins_cover_requested_templates():
     ids = {item.id for item in builtin_workflows()}
-    assert {"debug-project", "research-spreadsheet", "organize-files", "browser-extract", "maintenance-job"} <= ids
+    assert {"debug-project", "research-spreadsheet", "organize-files", "browser-extract", "browser-form", "browser-procedure", "maintenance-job"} <= ids
     debug = get_workflow("debug-project")
     assert debug is not None
     assert debug.builtin

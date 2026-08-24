@@ -54,6 +54,13 @@ def test_hint_names_an_alternative_and_forbids_the_same_call():
     assert "missing on this machine" in hint
 
 
+def test_code_worker_falls_back_to_native_python():
+    options = [item.tool for item in alternatives_for("code_worker", UNAVAILABLE)]
+    assert options[0] == "python"
+    hint = recovery_hint("code_worker", "ERROR: Open Interpreter is not installed")
+    assert "python" in hint
+
+
 def test_hint_escalates_after_repeated_failures():
     first = recovery_hint("terminal", "ERROR: command not found", attempt=1)
     third = recovery_hint("terminal", "ERROR: command not found", attempt=3)

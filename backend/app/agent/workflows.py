@@ -171,6 +171,49 @@ def builtin_workflows() -> list[Workflow]:
             ],
         ),
         Workflow(
+            id="browser-form",
+            name="Fill a web form",
+            description="Open a page, fill named fields, submit, and save confirmation.",
+            category="browser",
+            execution_mode="balanced",
+            builtin=True,
+            parameters=[
+                _param("url", "Form URL", placeholder="https://example.com/contact"),
+                _param("fields", "Fields to fill", default="name, email, message — use the values given in the task"),
+                _param("submit", "Submit control name", default="Submit"),
+                _param("output", "Confirmation notes", placeholder="C:\\Users\\...\\Desktop\\form-result.txt"),
+            ],
+            steps=[
+                _step("Open", "Open {{url}} in the browser. Wait until the form is visible."),
+                _step("Fill", "Fill these fields using accessible names or CSS selectors, not snapshot element ids: {{fields}}."),
+                _step("Submit", "Click the control named {{submit}}. Confirm the page responded."),
+                _step("Save", "Write what was submitted and the resulting page title/URL to {{output}}."),
+                _step("Verify", "Re-read {{output}} and reopen {{url}} only if confirmation is missing."),
+            ],
+        ),
+        Workflow(
+            id="browser-procedure",
+            name="Repeat a known browser procedure",
+            description="Replay a structured web procedure (named clicks and fills) instead of rediscovering the UI.",
+            category="browser",
+            execution_mode="balanced",
+            builtin=True,
+            parameters=[
+                _param("url", "Starting URL", placeholder="https://example.com/app"),
+                _param("procedure", "Procedure", default="open the editor, fill title and body, publish"),
+                _param("title", "Title / name", placeholder="Weekly notes"),
+                _param("content", "Body / payload", placeholder="The text to publish or save"),
+                _param("output", "Result notes", placeholder="C:\\Users\\...\\Desktop\\browser-procedure.txt"),
+            ],
+            steps=[
+                _step("Open", "Open {{url}}. If a matching browser skill exists, run that skill instead of exploring."),
+                _step("Replay", "Carry out: {{procedure}}. Use title={{title}} and content={{content}}. Click by accessible name or CSS selector. Do not rediscover the layout if named controls work."),
+                _step("Confirm", "Read the resulting page and confirm the procedure actually completed."),
+                _step("Save", "Write URL, what changed, and how it was verified to {{output}}."),
+                _step("Verify", "Re-read {{output}} and, if possible, reopen the result page to confirm the change is still there."),
+            ],
+        ),
+        Workflow(
             id="web-scrape-save",
             name="Collect pages into notes",
             description="Fetch several related pages and save a structured notes file.",
@@ -254,7 +297,9 @@ GUIDE_SECTIONS: list[dict[str, str]] = [
         "body": (
             "Finished tasks store a trajectory (tools, failures, recovery) — never hidden reasoning. "
             "A workflow is promoted to a skill only after the same task class succeeds three or more times "
-            "with the same tool sequence. Enable or disable skills on Memory."
+            "with the same tool sequence. Browser procedures that click named controls or CSS selectors "
+            "(not snapshot ids like e12) become BrowserCode-style skills and replay instead of rediscovering the page. "
+            "Enable, disable, or run skills on Memory."
         ),
     },
     {

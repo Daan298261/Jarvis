@@ -5,6 +5,8 @@ import platform
 import shutil
 from typing import Any
 
+from ..workers.code import open_interpreter_status
+
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -122,14 +124,7 @@ def optional_workers() -> list[dict[str, Any]]:
             "status": "not_integrated",
             "detail": "Computer-use worker. Not required for Jarvis to run.",
         },
-        {
-            "id": "open-interpreter",
-            "name": "Open Interpreter",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Optional code/shell worker behind an adapter.",
-        },
+        open_interpreter_status(),
         {
             "id": "openhands",
             "name": "OpenHands",

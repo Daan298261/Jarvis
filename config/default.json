@@ -15,7 +15,9 @@
     "cache_type_k": "q8_0",
     "cache_type_v": "q8_0",
     "threads": 0,
-    "auto_load": true
+    "auto_load": true,
+    "api_key": "",
+    "remote_model": ""
   },
   "autonomy": "trusted",
   "default_timeout_seconds": 1800,

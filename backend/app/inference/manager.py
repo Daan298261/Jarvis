@@ -10,7 +10,7 @@ import psutil
 
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
-from .backends import InferenceBackend, resolve_backend
+from .backends import InferenceBackend, probe_remote_server, resolve_backend
 from .profiles import ModelProfile, model_paths, resolve_profile
 
 
@@ -37,6 +37,9 @@ class InferenceState:
     ram_used_gb: float | None = None
     last_error: str = ""
     llama_version: str = ""
+    advertised_models: list[str] | None = None
+    health_path: str = ""
+    remote_model: str = ""
 
 
 def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
@@ -67,6 +70,24 @@ class InferenceManager:
     def base_url(self, settings: AppSettings) -> str:
         return f"http://{settings.inference.host}:{settings.inference.port}/v1"
 
+    def provider_model(self, settings: AppSettings, advertised: list[str] | None = None) -> str:
+        chosen = (settings.inference.remote_model or "").strip()
+        if chosen:
+            return chosen
+        if advertised:
+            return advertised[0]
+        return "Qwen3.5-27B"
+
+    def provider_api_key(self, settings: AppSettings) -> str:
+        return (settings.inference.api_key or "").strip() or "local"
+
+    def _make_provider(self, settings: AppSettings, advertised: list[str] | None = None) -> OpenAICompatProvider:
+        return OpenAICompatProvider(
+            self.base_url(settings),
+            api_key=self.provider_api_key(settings),
+            model=self.provider_model(settings, advertised),
+        )
+
     async def load(self, settings: AppSettings, profile_name: str | None = None) -> InferenceState:
         async with self._lock:
             profile = resolve_profile(profile_name or settings.inference.profile)
@@ -84,12 +105,21 @@ class InferenceManager:
 
             self._apply_profile_state(settings, profile, backend, model, paths)
 
+            advertised: list[str] = []
             # Adopt a server that is already answering when we did not start one.
-            existing = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
-            already_running = (self.backend is None or self.backend.pid is None) and await existing.health()
+            probe = await probe_remote_server(
+                settings.inference.host,
+                settings.inference.port,
+                settings.inference.api_key,
+                timeout=6,
+            )
+            already_running = (self.backend is None or self.backend.pid is None) and bool(probe.get("ok"))
             if already_running:
+                advertised = list(probe.get("models") or [])
+                self._record_probe(probe, settings)
                 self.backend = backend
-                self.provider = existing
+                self.backend.last_probe = probe
+                self.provider = self._make_provider(settings, advertised)
                 self.state.loaded = True
                 self.state.loading = False
                 self.state.pid = backend.pid
@@ -117,10 +147,12 @@ class InferenceManager:
                 detail = f". See {logs_dir() / 'llama-server.log'}" if backend.manages_process else f" at {self.base_url(settings)}"
                 raise RuntimeError(self.state.last_error + detail)
 
+            advertised = list((backend.last_probe or {}).get("models") or [])
+            self._record_probe(backend.last_probe or {}, settings)
             self.state.loaded = True
             self.state.loading = False
             self.state.load_time_seconds = round(time.time() - started, 2)
-            self.provider = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
+            self.provider = self._make_provider(settings, advertised)
             await self.refresh_resources()
             return self.state
 
@@ -141,6 +173,12 @@ class InferenceManager:
         self.state.context_size = profile.context_size
         self.state.backend = backend.name
         self.state.manages_process = backend.manages_process
+        self.state.remote_model = settings.inference.remote_model
+
+    def _record_probe(self, probe: dict[str, Any], settings: AppSettings) -> None:
+        self.state.advertised_models = list(probe.get("models") or [])
+        self.state.health_path = str(probe.get("health_path") or "")
+        self.state.remote_model = self.provider_model(settings, self.state.advertised_models)
 
     async def unload(self) -> InferenceState:
         async with self._lock:
@@ -184,7 +222,7 @@ class InferenceManager:
             "loaded": self.state.loaded,
             "loading": self.state.loading,
             "healthy": healthy,
-            "active_model": "Qwen3.5-27B" if self.state.loaded else None,
+            "active_model": (self.provider.model if self.provider else self.provider_model(settings, self.state.advertised_models)) if self.state.loaded else None,
             "official_model": "Qwen/Qwen3.5-27B",
             "quantization": self.state.quant or profile.quant,
             "profile": self.state.profile,
@@ -196,6 +234,10 @@ class InferenceManager:
             "host": settings.inference.host,
             "port": settings.inference.port,
             "base_url": self.base_url(settings),
+            "advertised_models": self.state.advertised_models or [],
+            "health_path": self.state.health_path,
+            "remote_model": self.state.remote_model or settings.inference.remote_model,
+            "api_key_configured": bool((settings.inference.api_key or "").strip()),
             "vram_used_mib": self.state.vram_used_mib,
             "ram_used_gb": self.state.ram_used_gb,
             "tokens_per_second": self.state.generation_tps,

@@ -240,8 +240,10 @@ On first boot Jarvis copies defaults from `config/default.json` into `data/setti
 | --- | --- | --- |
 | `bind_host` / `bind_port` | `127.0.0.1` / `4780` | Portal + API |
 | `lan_access` / `auth_required` | `false` | LAN bind and private-key gate |
-| `inference.backend` | `llama.cpp` | `llama.cpp` (Jarvis starts the process) or `remote` |
+| `inference.backend` | `llama.cpp` | `llama.cpp` (Jarvis starts the process), `remote`, `ollama`, `lmstudio`, `vllm`, `sglang` |
 | `inference.host` / `port` | `127.0.0.1` / `8088` | OpenAI-compatible `/v1` endpoint |
+| `inference.api_key` | empty | Optional bearer token for the inference server |
+| `inference.remote_model` | empty | Model id to send in `/v1/chat/completions`; blank uses the first advertised model |
 | `inference.profile` | `balanced` | Model Fast / Balanced / Quality |
 | `inference.auto_load` | `true` | Load GGUF on API startup |
 | `autonomy` | `trusted` | Confirmation policy |
@@ -255,6 +257,7 @@ Environment variables (copy `.env.example` to `.env`; never commit secrets):
 | `JARVIS_PRIVATE_KEY` | Private key (also `JARVIS_API_KEY` or `JARVIS_AUTH_TOKEN`) |
 | `JARVIS_BIND_HOST` / `JARVIS_BIND_PORT` | Override bind address |
 | `JARVIS_SKIP_MODEL` | Skip auto-load (`1`) |
+| `JARVIS_INFERENCE_API_KEY` | Optional bearer token for a remote inference server |
 | `JARVIS_LAUNCH_PROMPT` | Enqueue this prompt at startup |
 | `JARVIS_LAUNCH_PROMPT_FILE` | Enqueue the contents of this file at startup |
 
@@ -277,17 +280,33 @@ If the first load OOMs, Jarvis retries at 16K context. You can also set `"contex
 
 ---
 
-## 10. Remote inference (optional)
+## 10. Remote / dedicated LAN inference (optional)
 
-Jarvis always chats through an OpenAI-compatible `/v1` client. `llama.cpp` is the local backend Jarvis starts and supervises. Anything else (LAN GPU box, LM Studio, Ollama, vLLM, SGLang) is a `remote` backend that is only health-checked.
+Jarvis always chats through an OpenAI-compatible `/v1` client. `llama.cpp` is the local backend Jarvis starts and supervises. A dedicated GPU box, LM Studio, Ollama, vLLM, or SGLang is only probed (`/health`, `/v1/models`, Ollama `/api/tags`) and never spawned by Jarvis.
+
+On **Settings → Inference server**, pick the backend, host, port, optional remote model name, and optional API key. Switching to Ollama/LM Studio/vLLM/SGLang from a stock port (8088, 11434, 1234, 8000, 30000) also sets that family's default port.
 
 ```powershell
 Invoke-RestMethod -Method PUT http://127.0.0.1:4780/api/settings `
   -ContentType application/json `
-  -Body '{"inference_backend":"remote","inference_host":"192.168.1.50","inference_port":8088}'
+  -Body '{"inference_backend":"ollama","inference_host":"192.168.1.50","inference_port":11434,"inference_remote_model":"qwen3.5:9b"}'
+```
+
+Probe without loading a GGUF:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:4780/api/model/probe
 ```
 
 Set `inference_backend` back to `llama.cpp` to run locally again. No agent, tool, or portal code changes.
+
+On the GPU box itself, bind llama.cpp to the LAN:
+
+```powershell
+.\llama-server.exe --host 0.0.0.0 --port 8088 --model <gguf> --jinja --alias Qwen3.5-27B
+```
+
+Then point this PC's Jarvis at that host. Local `models/` files are not required for a `remote` / `ollama` / `lmstudio` / `vllm` / `sglang` backend.
 
 ---
 

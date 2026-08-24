@@ -3589,7 +3589,7 @@ This development session:
 
 - Model: Qwen3.5-27B (Unsloth GGUF of `Qwen/Qwen3.5-27B`, plus `mmproj-F16.gguf`)
 - Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
-- Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
+- Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `OllamaBackend` / `LMStudioBackend` / `VLLMBackend` / `SGLangBackend` / `RemoteOpenAICompatibleBackend` probe `/health`, `/v1/models`, and Ollama `/api/tags`, list advertised models, and accept an optional API key plus remote model name. Selectable via `inference_backend` / `inference_host` / `inference_port` / `inference_api_key` / `inference_remote_model` on `PUT /api/settings`, or the Settings → Inference server card. `GET /api/model/probe` checks the configured endpoint without loading a GGUF.
 - Context: 16K fast, 32K balanced/quality; load failure retries at 16K
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
@@ -3619,7 +3619,7 @@ This development session:
 - Browser Use: **not integrated** (catalog shows `not_integrated`)
 - UFO: **not integrated**
 - Cua: **not integrated**
-- Open Interpreter: **not integrated**
+- Open Interpreter: **adapter present** (`code_worker` / `OpenInterpreterBackend`). Catalog is `ready` when the `open-interpreter` package or `interpreter` CLI is installed, otherwise `missing`. Forced onto Jarvis's local OpenAI-compatible endpoint. Jarvis still verifies. Native python/terminal/filesystem remain the default.
 - OpenHands: **not integrated**
 
 ### Jarvis 2.0
@@ -3635,7 +3635,7 @@ This development session:
 - Resume: `POST /api/tasks/{id}/continue` reloads compacted conversation
 - Context compaction: older turns collapse into a structured summary that cannot orphan a tool result from its assistant `tool_calls` turn; the compact working state is refreshed (not stacked) on every pass
 - Trajectory memory: `trajectories` table stores ordered tools, failure kinds, the recovery that worked, and verification. Similar new tasks get those lessons injected. No hidden reasoning is stored.
-- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
+- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. Browser procedures that use named controls or CSS selectors (not snapshot ids) promote as BrowserCode-style skills (`origin=browser_promoted`) and are replayed instead of rediscovering the page. Password-like fields are parameterized with no stored examples and do not auto-run. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
 
 ### Reliability
 
@@ -3654,8 +3654,9 @@ This development session:
 ### Portal / API
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
-- Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
-- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
+- Guide & Workflows has operating instructions, eight editable templates (including browser-form and browser-procedure), parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
+- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`). It also shows the inference host/port, advertised models, and a Probe server button (`GET /api/model/probe`).
+- Settings has an Inference server card (backend, host, port, remote model name, optional API key).
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
@@ -3668,7 +3669,8 @@ This development session:
 
 - Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
-- Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
+- Browser Use / UFO / Cua / OpenHands adapters are absent (`not_integrated`)
+- Open Interpreter adapter is present; the package is optional (`missing` until installed)
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
 - Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
@@ -3679,11 +3681,11 @@ Date: 2026-08-24
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection (llama.cpp / remote / Ollama / LM Studio) and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, BrowserCode-style browser promotion (stable named controls vs ephemeral snapshot ids), Open Interpreter adapter, docker run requires an image, snapshot LAN fields, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
 - Frontend (`npm run build`): TypeScript build
-- Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
+- Portal: Command, Tools (`code_worker`, Open Interpreter `missing`), Guide (`browser-form` / `browser-procedure`), Settings Inference card (Ollama port 11434), Model Probe, System backends
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **88 passed** in this environment. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3772,11 +3774,17 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 
 - [ ] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
 - [ ] Phone / Android client against the local API
-- [ ] Dedicated LAN inference server
+- [x] Dedicated LAN inference server
+  - Acceptance: remote/Ollama/LM Studio/vLLM/SGLang backends probe health and advertised models; Settings and Model pages can point Jarvis at a LAN GPU box without local GGUF files.
+  - Status: VERIFIED in unit tests (`test_inference_backends.py`); live LAN endpoint untested in this environment
 - [ ] UFO adapter
 - [ ] Cua adapter
-- [ ] Open Interpreter adapter
-- [ ] Browser workflow promotion (BrowserCode-style skills)
+- [x] Open Interpreter adapter
+  - Acceptance: optional `code_worker` behind `OpenInterpreterBackend`; catalog `missing`/`ready`; native tools remain default; Jarvis still verifies.
+  - Status: VERIFIED in unit tests (`test_workers.py`, `test_capabilities.py`)
+- [x] Browser workflow promotion (BrowserCode-style skills)
+  - Acceptance: repeated stable browser procedures (named controls / CSS / URLs) promote and replay; snapshot-id clicks do not.
+  - Status: VERIFIED in unit tests (`test_skills.py`) plus Guide templates `browser-form` and `browser-procedure`
 
 ### Jarvis 2.0 — specified, not implemented
 
@@ -3944,7 +3952,7 @@ Switching tools does not grant more rights. Suggesting one would only teach the 
 
 Decision: optional workers are displayed even when absent
 
-The Tools and System pages list Browser Use, UFO, Cua, Open Interpreter, and OpenHands as `not_integrated`.
+The Tools and System pages list Browser Use, UFO, Cua, and OpenHands as `not_integrated`. Open Interpreter is listed as `missing` or `ready` depending on whether the package is installed.
 
 Reason:
 
