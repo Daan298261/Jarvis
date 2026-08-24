@@ -53,7 +53,30 @@ def test_llama_cpp_command_reflects_profile_and_settings():
     assert args[args.index("--reasoning") + 1] == "on"
     assert args[args.index("--fit-target") + 1] == "2048"
     assert "--jinja" in args
+    assert "--mmproj" not in args
+    assert "--image-min-tokens" not in args
 
     fast = LlamaCppBackend(_settings(fit=False)).build_args(resolve_profile("fast"))
     assert fast[fast.index("--reasoning") + 1] == "off"
     assert fast[fast.index("--n-gpu-layers") + 1] == "99"
+
+
+def test_llama_cpp_omits_vision_flags_until_requested(tmp_path, monkeypatch):
+    mmproj = tmp_path / "mmproj-F16.gguf"
+    mmproj.write_bytes(b"fake")
+    monkeypatch.setattr(
+        "app.inference.backends.model_paths",
+        lambda: {"root": tmp_path, "mmproj": mmproj},
+    )
+    monkeypatch.setattr(
+        "app.inference.backends.LlamaCppBackend.model_path",
+        lambda self, profile: tmp_path / profile.filename,
+    )
+    backend = LlamaCppBackend(_settings())
+    plain = backend.build_args(resolve_profile("balanced"), vision=False)
+    assert "--mmproj" not in plain
+    assert "--image-min-tokens" not in plain
+    with_vision = backend.build_args(resolve_profile("balanced"), vision=True)
+    assert "--mmproj" in with_vision
+    assert with_vision[with_vision.index("--mmproj") + 1] == str(mmproj)
+    assert "--image-min-tokens" in with_vision

@@ -74,6 +74,21 @@ class BrowserTool(Tool):
             headless = bool((settings.get("browser") or {}).get("headless", False))
         async with _lock:
             try:
+                if action == "close":
+                    global _playwright, _browser, _context, _page, _pages
+                    if _page is None and _context is None:
+                        _pages = []
+                        return ToolResult(True, "Browser was not open")
+                    if _context:
+                        await _context.close()
+                    if _playwright:
+                        await _playwright.stop()
+                    _context = None
+                    _playwright = None
+                    _page = None
+                    _browser = None
+                    _pages = []
+                    return ToolResult(True, "Browser closed")
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs.get("url")
@@ -119,7 +134,11 @@ class BrowserTool(Tool):
                     out.parent.mkdir(parents=True, exist_ok=True)
                     await page.screenshot(path=str(out), full_page=False)
                     encoded = base64.b64encode(out.read_bytes()).decode("ascii")
-                    return ToolResult(True, f"Saved screenshot to {out}", data={"path": str(out), "image_base64": encoded[:80] + "..."})
+                    return ToolResult(
+                        True,
+                        f"Saved screenshot to {out}",
+                        data={"path": str(out), "attach_image": str(out), "image_base64": encoded[:80] + "..."},
+                    )
                 if action == "tabs":
                     pages = page.context.pages
                     listing = "\n".join(f"{i}: {p.url}" for i, p in enumerate(pages))
@@ -136,16 +155,6 @@ class BrowserTool(Tool):
                 if action == "upload":
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
-                if action == "close":
-                    global _playwright, _browser, _context, _page
-                    if _context:
-                        await _context.close()
-                    if _playwright:
-                        await _playwright.stop()
-                    _context = None
-                    _playwright = None
-                    _page = None
-                    return ToolResult(True, "Browser closed")
                 return ToolResult(False, "", error=f"Unknown action {action}")
             except Exception as exc:
                 return ToolResult(False, "", error=str(exc))

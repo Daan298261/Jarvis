@@ -19,6 +19,7 @@ from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
+from .forensic import professional_prompt_block
 from .planning import (
     WorkingState,
     best_of_n_plan_prompt,
@@ -33,6 +34,7 @@ from .planning import (
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
+from .thinking import should_think
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .prompts import (
     CONTINUE_PROMPT,
@@ -229,9 +231,12 @@ class AgentRuntime:
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         plan_prompt = best_of_n_plan_prompt(policy.best_of_n) if policy.best_of_n > 1 else PLAN_PROMPT
+        vision_needed = working.task_class == "multimodal" or settings.inference.vision == "always"
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-            await MANAGER.load(settings, profile_name)
+            await MANAGER.load(settings, profile_name, vision=vision_needed)
+        elif vision_needed:
+            await MANAGER.ensure_vision(settings, True)
         provider = MANAGER.provider
         assert provider is not None
 
@@ -245,6 +250,7 @@ class AgentRuntime:
         tool_rounds = 0
         verify_tool_rounds = 0
         last_tool_name = ""
+        last_tool_action = ""
         same_tool_streak = 0
         force_final = False
         plan_candidates: list = []
@@ -260,6 +266,10 @@ class AgentRuntime:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
             system_prompt = SYSTEM_PROMPT + _environment_block(settings)
+            audit = professional_prompt_block(prompt, settings.professional_mode)
+            if audit:
+                system_prompt += "\n\n" + audit
+                await BUS.publish(task_id, "progress", "Professional / Forensic Audit Mode", audit[:800], stage="understand")
             matched_skills = await relevant_skills(working.task_class, working.goal)
             skills = skills_prompt_block(matched_skills)
             if skills:
@@ -323,6 +333,7 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="tool", name=name, tool_call_id=call_id, content=observation))
                     if attach:
                         messages.append(_image_message(attach))
+                        await MANAGER.ensure_vision(settings, True)
                     if failed:
                         skill_ok = False
                         await BUS.publish(task_id, "error", f"Skill {skill.name} failed at {name}", observation[:1500], stage="diagnose")
@@ -363,6 +374,19 @@ class AgentRuntime:
                     await self._update(task_id, status="cancelled", stage="cancelled", current_action="Cancelled")
                     await BUS.publish(task_id, "cancelled", "Task cancelled")
                     return
+                think = should_think(
+                    profile_thinking=profile.thinking,
+                    execution_mode=execution_mode,
+                    force_final=force_final,
+                    verifying=verifying,
+                    tools_used=tools_used,
+                    consecutive_failures=consecutive_failures,
+                    last_tool=last_tool_name,
+                    last_action=last_tool_action,
+                    awaiting_plan_selection=awaiting_plan_selection,
+                    critic_pending=policy.critic_pass and not critic_done and not verifying and tools_used,
+                    task_class=working.task_class,
+                )
                 await self._update(
                     task_id,
                     stage="verify" if verifying else "act",
@@ -374,7 +398,8 @@ class AgentRuntime:
                 await BUS.publish(
                     task_id,
                     "model",
-                    "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if profile.thinking else "Model is responding")),
+                    "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if think.enabled else "Model is responding")),
+                    think.reason,
                     stage="verify" if verifying else "act",
                 )
                 messages = compact_history(messages, working_state_block=working.as_prompt_block())
@@ -386,7 +411,7 @@ class AgentRuntime:
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
-                            thinking=False if force_final or verifying else (profile.thinking and not verifying),
+                            thinking=think.enabled,
                             max_tokens=400 if force_final else 1024,
                         ),
                         timeout=90 if force_final else 180,
@@ -456,6 +481,9 @@ class AgentRuntime:
                         verify_tool_rounds += 1
                     names = [c.get("function", {}).get("name") or "" for c in result.tool_calls]
                     primary = names[0] if names else ""
+                    if result.tool_calls:
+                        first_args = parse_tool_arguments(result.tool_calls[0]["function"].get("arguments") or "{}")
+                        last_tool_action = str(first_args.get("action") or "")
                     hints: list[str] = []
                     if primary == last_tool_name:
                         same_tool_streak += 1
@@ -513,6 +541,7 @@ class AgentRuntime:
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
                             messages.append(_image_message(attach))
+                            await MANAGER.ensure_vision(settings, True)
                     if hints:
                         guidance = "\n\n".join(hints)
                         working.next_action = "recover with a different strategy"
@@ -662,9 +691,10 @@ class AgentRuntime:
             await session.commit()
         attach = None
         if isinstance(result.data, dict):
-            attach = result.data.get("attach_image") or (
-                result.data.get("path") if name in {"screenshot", "browser"} and result.data.get("attach_image") else result.data.get("attach_image")
-            )
+            attach = result.data.get("attach_image")
+            if not attach and result.data.get("path"):
+                if name == "screenshot" or (name == "browser" and arguments.get("action") == "screenshot"):
+                    attach = result.data.get("path")
         return result.text(), attach
 
 

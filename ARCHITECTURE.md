@@ -14,7 +14,7 @@ FastAPI backend
             │  OpenAI-compatible HTTP
             ▼
 llama-server (localhost:8088)
-  Qwen3.5-27B GGUF + mmproj
+  Qwen3.5-27B GGUF; mmproj loaded lazily when a screenshot needs interpreting
 ```
 
 ## Model provider
@@ -55,7 +55,7 @@ Older tool traces are summarized so long tasks do not dump the full history back
 
 `trajectories` records how each task actually went; `skills` holds workflows that succeeded repeatedly with the same tool sequence. Parameterized skills execute their bound tool steps instead of only injecting advice. Both are injected into the system prompt of similar later tasks. See `TOOLS.md`.
 
-Live model timings (tok/s, VRAM, RAM, load time) and task success rates are persisted in `benchmark_samples` and shown on the Model page.
+Live model timings (tok/s, VRAM, RAM, load time) and task success rates are persisted in `benchmark_samples` and shown on the Model page. llama.cpp starts without the vision projector unless vision mode is `always` or a screenshot is attached. Balanced/Quality profiles keep the reasoning parser available and toggle `enable_thinking` per turn.
 
 ## Recovery
 

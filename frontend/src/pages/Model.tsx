@@ -31,6 +31,9 @@ type ModelStatus = {
   load_time_seconds?: number
   loaded?: boolean
   loading?: boolean
+  vision?: string
+  vision_loaded?: boolean
+  thinking?: boolean
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
 }
@@ -89,6 +92,8 @@ export function ModelPage() {
             <b>tok/s</b><span>{model?.tokens_per_second ?? "n/a"}</span>
             <b>Prompt tok/s</b><span>{model?.prompt_tokens_per_second ?? "n/a"}</span>
             <b>Load time</b><span>{model?.load_time_seconds ? `${model.load_time_seconds}s` : "n/a"}</span>
+            <b>Vision</b><span>{model?.vision_loaded ? "projector loaded" : (model?.vision || "lazy")}</span>
+            <b>Thinking</b><span>{model?.thinking ? "profile allows (selective per turn)" : "off"}</span>
             <b>Task success</b><span>{pct(outcomes?.task_success_rate)} ({outcomes?.tasks_completed || 0} ok / {outcomes?.tasks_failed || 0} failed)</span>
             <b>State</b><span>{model?.loaded ? "loaded" : model?.loading ? "loading" : "unloaded"}</span>
           </div>
@@ -104,8 +109,9 @@ export function ModelPage() {
           </div>
           <p className="lede" style={{ marginTop: 16 }}>
             Fast: Q4_K_M, thinking off, 16K context.<br />
-            Balanced: Q4_K_M, thinking on, 32K context.<br />
-            Quality: Q5_K_M, thinking on, hybrid GPU/CPU.
+            Balanced: Q4_K_M, selective thinking, 32K context. Simple list/read/status turns skip reasoning tokens.<br />
+            Quality: Q5_K_M, selective thinking, hybrid GPU/CPU.<br />
+            Vision projector is lazy by default so ordinary text/tool work does not reserve VRAM for mmproj.
           </p>
         </div>
       </div>
