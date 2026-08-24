@@ -337,7 +337,7 @@ Invoke-RestMethod http://127.0.0.1:4780/api/model
 
 Health should be `{ "ok": true }`. Model should show `loaded: true` after auto-load finishes (watch `logs/llama-server.log` if it stays unloaded).
 
-Open [http://127.0.0.1:4780](http://127.0.0.1:4780) and submit a small Command-page task (for example: create a folder on the Desktop and write a text file).
+Open [http://127.0.0.1:4780](http://127.0.0.1:4780). **Command** is the main prompt box. **Guide & Workflows** has operating instructions plus six editable templates (debug a project, research to spreadsheet, organize files, browser extract, collect pages, multi-step maintenance). Fill parameters and run; that creates one normal task.
 
 Full live suite (Windows desktop + loaded model, several minutes):
 
@@ -399,6 +399,7 @@ Remove with `Unregister-ScheduledTask -TaskName "Jarvis Local Agent"`.
 | `data/settings.json` | non-secret preferences |
 | `data/private_key.sec` | generated private key |
 | `data/queue/` | launch queue |
+| `data/workflows/` | saved Guide & Workflows presets |
 | `data/browser-profile/` | Playwright profile |
 
 Stop Jarvis before copying `data/jarvis.db`. If the portal opens but the model stays unloaded, read [TROUBLESHOOTING.md](../TROUBLESHOOTING.md).

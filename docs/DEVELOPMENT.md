@@ -40,7 +40,8 @@ backend/app/
   api/                    REST routers (prefix /api/…)
   agent/
     loop.py               AgentRuntime — create/continue/cancel, verification
-    planning.py           ExecutionPolicy + task classification
+    planning.py           ExecutionPolicy, task classification, best-of-N plan parse/select
+    workflows.py          Guide copy + editable templates + compose_prompt
     recovery.py           Failure classes → alternative tools
     compaction.py         History summary that cannot orphan tool results
     trajectory.py         Cross-task lessons (no hidden reasoning)
@@ -55,9 +56,9 @@ backend/app/
   tools/                  Native tools + MCP proxy
   db/                     SQLAlchemy models, aiosqlite session, light migrations
 frontend/src/
-  App.tsx                 Routes: Command, History, Memory, Model, Tools, MCP, Settings, System
+  App.tsx                 Routes: Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System
   api.ts                  fetch helper + X-Jarvis-Key from localStorage
-  pages/                  One page per portal tab
+  pages/                  One page per portal tab (Workflows.tsx is Guide & Workflows)
 config/default.json       Checked-in defaults (copied into data/settings.json)
 tests/                    pytest unit tests; run_e2e.py / smoke_task.py against a live API
 start-jarvis.ps1          Operator start (Windows)
@@ -181,6 +182,12 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | GET/POST/DELETE | `/api/memory/skills` | Skills; `POST /skills/promote` |
 | POST | `/api/memory/skills/{id}/enable` or `disable` | Toggle skill |
 | GET | `/api/system` | Hardware + model + capabilities |
+| GET | `/api/workflows/guide` | Operating-instruction copy for the portal tab |
+| GET | `/api/workflows` | Builtin + saved templates |
+| GET | `/api/workflows/{id}` | One template |
+| POST | `/api/workflows` | Save a preset under `data/workflows/` |
+| DELETE | `/api/workflows/{id}` | Delete a saved preset (not a builtin) |
+| POST | `/api/workflows/run` | Fill placeholders, compose stages, create a task |
 | POST | `/api/voice/command` | `{ text, autonomy? }` — already-transcribed speech |
 
 Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from text.
@@ -193,7 +200,7 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 
 1. Classifies (`planning.classify_task`) and stores `task_class`
 2. Injects matching skills and trajectories into the system prompt
-3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`)
+3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
 4. Executes tool calls until the policy budget is spent
 5. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
 6. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
@@ -203,11 +210,11 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 
 Execution modes (`planning.POLICIES`) are **not** model profiles:
 
-| Mode | max_steps | Critic | Must use a verify tool |
-| --- | --- | --- | --- |
-| fast | 16 | no | no |
-| balanced | 28 | no | no |
-| reliable | 40 | yes | yes |
+| Mode | max_steps | Critic | Must use a verify tool | Best-of-N plans |
+| --- | --- | --- | --- | --- |
+| fast | 16 | no | no | 1 |
+| balanced | 28 | no | no | 1 |
+| reliable | 40 | yes | yes | 3 (critic picks one; it does not run three full attempts) |
 
 Model profiles (`inference/profiles.py`): Fast / Balanced / Quality change quant, thinking, and context.
 
@@ -243,7 +250,19 @@ Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary
 4. Add a React page under `frontend/src/pages/`, a `<NavLink>` + `<Route>` in `App.tsx`, and calls through `api()` in `frontend/src/api.ts` (it attaches `X-Jarvis-Key` from `localStorage`).
 5. Rebuild or use Vite HMR.
 
-Keep the portal low-maintenance: Command is the main surface; History, Memory, Model, Tools, MCP, Settings, and System already exist.
+Keep the portal low-maintenance: Command is the main surface; History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, and System already exist.
+
+### Guide & Workflows
+
+`backend/app/agent/workflows.py` plus `backend/app/api/workflows.py` and `frontend/src/pages/Workflows.tsx`.
+
+- `GET /api/workflows/guide` — operating-instruction sections for the tab
+- `GET /api/workflows` / `GET /api/workflows/{id}` — builtin templates merged with `data/workflows/*.json` presets
+- `POST /api/workflows` — save an edited preset (cannot overwrite builtin ids; saves a copy)
+- `DELETE /api/workflows/{id}` — delete a saved preset only
+- `POST /api/workflows/run` — fill `{{parameter}}` placeholders, concatenate stages into one prompt, `AGENT.create_task(...)`
+
+Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `browser-extract`, `web-scrape-save`, `maintenance-job`. Placeholders use `{{key}}`. Running a workflow is still **one task**; stages are prompt structure, not separate orchestrator jobs.
 
 ---
 
@@ -284,9 +303,11 @@ Current unit coverage (no GPU required):
 
 | File | What it locks in |
 | --- | --- |
-| `test_planning.py` | Execution modes, task classification |
+| `test_planning.py` | Execution modes, task classification, Reliable `best_of_n=3` |
+| `test_best_of_n.py` | Parse labeled plans; critic selection |
 | `test_safety.py` | Blocked commands / confirmation |
-| `test_filesystem.py` | Allowed-directory sandbox |
+| `test_filesystem.py` | Allowed-directory sandbox; `compare` / `recent` |
+| `test_workflows.py` | Builtin templates, save/run, prompt composition |
 | `test_capabilities.py` | Catalog includes missing workers as unavailable |
 | `test_verification_loop.py` | Cannot complete without verification; Reliable needs a verify tool |
 | `test_compaction.py` | Tool results stay paired |
@@ -327,10 +348,9 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 
 From the current master-plan state:
 
-- Best-of-N planning is not implemented (Reliable has a single critic pass)
-- Skills guide the prompt; they do not execute a parameterized workflow themselves
+- Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
+- Skills guide the prompt; they do not execute a parameterized workflow themselves (Guide & Workflows templates compose one prompt)
 - Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
-- Guide & Workflows portal tab is specified, not built
 - Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
 
