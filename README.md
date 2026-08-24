@@ -1,8 +1,19 @@
 # Jarvis
 
-Self-hosted local desktop agent. The model is **Qwen3.5-27B** running entirely on this computer through llama.cpp. The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
+Self-hosted local desktop agent. The model is **Qwen3.5-27B** running on this computer through llama.cpp (or any OpenAI-compatible server you point at). The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
 
-Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. That file is the persistent architecture, current state, and development queue.
+Cursor and other development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. That file is the persistent architecture, current state, and development queue.
+
+## Documentation
+
+| Document | Contents |
+| --- | --- |
+| **[docs/INSTALL.md](docs/INSTALL.md)** | Full Windows install: Python, Node, llama.cpp, GGUFs, start options, LAN auth, updates |
+| **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** | Repo map, dev servers, API, agent loop, adding tools, tests |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Control plane, compaction, memory, autonomy |
+| [TOOLS.md](TOOLS.md) | Native tools, MCP, trajectories, skills |
+| [SECURITY.md](SECURITY.md) | Bind address, private keys, filesystem policy |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Unloaded model, CUDA, Playwright, Office, Docker |
 
 ## Hardware this install was tuned for
 
@@ -14,9 +25,7 @@ Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVI
 
 Q4_K_M (~16.7 GB) does not fully fit in 16 GB VRAM together with the vision projector and KV cache, so Jarvis uses llama.cpp `--fit on` to offload as many layers as possible to the GPU and keep the rest in system RAM.
 
-## Install
-
-From the repository root (already done on this machine):
+## Quick start (already cloned on this machine)
 
 ```powershell
 python -m pip install -r backend\requirements.txt
@@ -25,146 +34,74 @@ cd frontend
 npm install
 npm run build
 cd ..
-```
-
-llama.cpp CUDA binaries live in `runtime/llama.cpp`. Models live in `models/Qwen3.5-27B-GGUF`.
-
-If the GGUF files are missing:
-
-```powershell
-$env:HF_XET_HIGH_PERFORMANCE = "1"
-python -m huggingface_hub.cli.hf download unsloth/Qwen3.5-27B-GGUF --include "Qwen3.5-27B-Q4_K_M.gguf" --include "Qwen3.5-27B-Q5_K_M.gguf" --include "mmproj-F16.gguf" --local-dir models\Qwen3.5-27B-GGUF
-```
-
-The GGUFs are Unsloth quantizations of the official `Qwen/Qwen3.5-27B` weights, including the multimodal projector.
-
-## Start
-
-```powershell
 .\start-jarvis.ps1
 ```
 
-This verifies dependencies, builds the frontend if needed, starts the API, loads the model, and opens [http://127.0.0.1:4780](http://127.0.0.1:4780).
+New machine, missing GGUFs, or llama.cpp not extracted: follow **[docs/INSTALL.md](docs/INSTALL.md)** instead of this block.
 
-### Launch with prompt or batch queue
-You can trigger execution immediately on launch or feed tasks via a file:
+llama.cpp CUDA binaries live in `runtime/llama.cpp`. Models live in `models/Qwen3.5-27B-GGUF`.
 
-```powershell
-# Execute a single prompt on start and wait for completion
-.\start-jarvis.ps1 -Prompt "Inspect directory and generate project report" -Wait
-
-# Or pass a prompt JSON / text file
-.\start-jarvis.ps1 -PromptFile .\tasks\sample_task.json -Wait
-```
-
-You can also drop `.json` or `.prompt` files into `data/queue/pending/` at any time; Jarvis watches this directory and automatically processes queued tasks.
-
-### Remote exposure & Private Key Authentication
-
-Expose Jarvis to your LAN or remote network securely:
+## Daily use
 
 ```powershell
-# Run with LAN access and an enforced private key
-.\start-jarvis.ps1 -LanAccess -PrivateKey "jarvis_pk_secret123"
-```
-
-Every query from remote devices must supply `X-Jarvis-Key`, `Authorization: Bearer <key>`, or `?key=<key>`.
-
-Skip opening a browser:
-
-```powershell
-.\start-jarvis.ps1 -NoBrowser
-```
-
-## Stop
-
-```powershell
+.\start-jarvis.ps1
 .\stop-jarvis.ps1
 ```
 
-## Update
+`start-jarvis.ps1` verifies dependencies, builds the frontend if needed, starts the API, loads the model, and opens the portal.
 
 ```powershell
-git pull
-python -m pip install -r backend\requirements.txt
-cd frontend
-npm install
-npm run build
-cd ..
+# One prompt on launch, wait until the task finishes
+.\start-jarvis.ps1 -Prompt "Inspect directory and generate project report" -Wait
+
+# From a JSON or text file
+.\start-jarvis.ps1 -PromptFile .\tasks\sample_task.json -Wait
+
+# LAN bind + private key on every API request
+.\start-jarvis.ps1 -LanAccess -PrivateKey "jarvis_pk_secret123"
+
+.\start-jarvis.ps1 -NoBrowser
 ```
 
-To update llama.cpp, download a newer `llama-b*-bin-win-cuda-13.3-x64.zip` plus matching `cudart` zip from [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) into `runtime/` and extract over `runtime/llama.cpp`.
+Drop `.json` or `.prompt` files into `data/queue/pending/` at any time; Jarvis processes them automatically. Remote clients must send `X-Jarvis-Key`, `Authorization: Bearer <key>`, or `?key=<key>`.
 
-## Change model profile
+## Model profiles
 
-In the portal: **Model → Fast / Balanced / Quality**.
-
-Or via API:
+Portal: **Model → Fast / Balanced / Quality**, or:
 
 ```powershell
-Invoke-RestMethod -Method POST http://127.0.0.1:4780/api/model/load -ContentType application/json -Body '{"profile":"quality"}'
+Invoke-RestMethod -Method POST http://127.0.0.1:4780/api/model/load `
+  -ContentType application/json -Body '{"profile":"quality"}'
 ```
 
 - **Fast**: Q4_K_M, thinking off, 16K context
 - **Balanced**: Q4_K_M, thinking on, 32K context
 - **Quality**: Q5_K_M, thinking on, more CPU offload
 
-## Move inference to another machine
+Agent execution modes (Fast / Balanced / Reliable) are separate — they change planning and verification, not the GGUF.
 
-Jarvis talks to an `InferenceBackend`. `llama.cpp` is the local one Jarvis starts and supervises; anything else OpenAI-compatible (a LAN GPU box, LM Studio, Ollama, vLLM, SGLang) is a `remote` backend Jarvis only health-checks.
-
-```powershell
-Invoke-RestMethod -Method PUT http://127.0.0.1:4780/api/settings -ContentType application/json -Body '{"inference_backend":"remote","inference_host":"192.168.1.50","inference_port":8088}'
-```
-
-No agent, tool, or portal code changes are needed. Set the backend back to `llama.cpp` to run locally again.
-
-## Add an MCP server
-
-Portal: **MCP**. Example stdio filesystem server:
-
-```
-name: filesystem
-transport: stdio
-command: npx
-args: -y @modelcontextprotocol/server-filesystem C:\Users\daanv\Desktop
-```
-
-Or POST `/api/mcp`. Do not put secrets in source; use environment variables referenced by the MCP process.
-
-## Inspect logs
-
-- `logs/backend.log` — FastAPI
-- `logs/backend.err.log` — uvicorn stderr
-- `logs/llama-server.log` — llama.cpp
-- `logs/jarvis.log` — application logger
-- `data/jarvis.db` — tasks, events, tool calls
-
-## Recover from a broken model/backend
-
-1. `.\stop-jarvis.ps1`
-2. Confirm no leftover `llama-server.exe` in Task Manager
-3. Read `logs/llama-server.log`
-4. If VRAM OOM, Jarvis already retries with 16K context; you can also set `"context_size": 8192` under `inference` in `data/settings.json`
-5. If the GGUF is corrupt, delete `models/Qwen3.5-27B-GGUF/Qwen3.5-27B-Q4_K_M.gguf` and download again
-6. `.\start-jarvis.ps1`
-
-## Optional auto-start after login
-
-Not enabled by default. To register a login task:
+## Move inference off this PC
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-WindowStyle Hidden -File `"$PWD\start-jarvis.ps1`" -NoBrowser"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -TaskName "Jarvis Local Agent" -Action $action -Trigger $trigger
+Invoke-RestMethod -Method PUT http://127.0.0.1:4780/api/settings `
+  -ContentType application/json `
+  -Body '{"inference_backend":"remote","inference_host":"192.168.1.50","inference_port":8088}'
 ```
 
-Remove it with `Unregister-ScheduledTask -TaskName "Jarvis Local Agent"`.
+No agent, tool, or portal code changes. Set the backend back to `llama.cpp` to run locally again.
 
 ## Tests
 
-With Jarvis running:
+Unit tests (no GPU):
+
+```powershell
+python -m pytest tests -q
+```
+
+Live desktop suite (Jarvis running with the model loaded):
 
 ```powershell
 python tests\run_e2e.py
 ```
+
+Contributor workflow: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).

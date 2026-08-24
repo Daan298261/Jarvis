@@ -1862,6 +1862,10 @@ This development session:
 - Task classification: keyword-scored classifier stored on the task
 - Acceptance criteria / plan: parsed from the first planning turn and persisted
 
+### Documentation
+
+- Operator + contributor guides for the current tree: `docs/INSTALL.md` (Windows install, llama.cpp, GGUFs, start/stop, LAN auth) and `docs/DEVELOPMENT.md` (repo map, API, agent loop, tools, tests). `README.md` is the landing page and points at those files.
+
 ### Portal / API
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
