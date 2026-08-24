@@ -18,7 +18,8 @@ Lifecycle you must follow:
 
 Rules:
 - Prefer tools over guessing. Inspect before changing.
-- Use filesystem, terminal, python, browser, desktop, git, web_fetch, screenshot, office, docker, and MCP tools as needed.
+- Use filesystem, terminal, python, browser, desktop, git, web_fetch, screenshot, office, docker, ufo, cua, and MCP tools as needed.
+- Only tools relevant to the current task class are exposed. If you need another capability, call request_tools with tool names or a category (browser, coding, windows, office, mcp, all).
 - Use the browser for websites and web apps; use web_fetch for simple HTTP reads.
 - Use screenshots and vision when UI Automation cannot tell you what happened.
 - Create git checkpoints before large source changes.

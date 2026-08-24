@@ -200,13 +200,14 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 
 1. Classifies (`planning.classify_task`) and stores `task_class`
 2. Injects matching skills and trajectories into the system prompt
-3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
-4. Executes tool calls until the policy budget is spent
-5. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
-6. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
-7. Reliable mode also requires a verification **tool** call and a critic pass
-8. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
-9. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence
+3. Exposes only tools for that class (`agent/tool_exposure.py`) plus `request_tools`; mixed/long-horizon tasks still get the full set
+4. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
+5. Executes tool calls until the policy budget is spent
+6. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
+7. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
+8. Reliable mode also requires a verification **tool** call and a critic pass
+9. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
+10. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence
 
 Execution modes (`planning.POLICIES`) are **not** model profiles:
 
@@ -238,7 +239,7 @@ Context compaction (`agent/compaction.py`) must keep tool results paired with th
 
 MCP tools do not need a Python class: configure servers via the MCP page or `mcp_servers` in settings. They appear as `mcp_*` functions through `MCPProxyTool`.
 
-Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend.
+Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend. UFO and Cua are `ComputerUseBackend` adapters (`backend/app/workers/computer.py`) that probe for a local install and otherwise report `missing`.
 
 ---
 
@@ -349,8 +350,8 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Skills guide the prompt; they do not execute a parameterized workflow themselves (Guide & Workflows templates compose one prompt)
-- Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
+- Parameterized skills execute bound tool steps on matching tasks, then verify
+- UFO and Cua adapters are integrated and report `missing` until the packages are installed; Browser Use, OpenHands, and Open Interpreter remain `not_integrated`
 - Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
 

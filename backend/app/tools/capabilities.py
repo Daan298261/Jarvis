@@ -5,6 +5,8 @@ import platform
 import shutil
 from typing import Any
 
+from ..workers.computer import CuaBackend, UFOBackend
+
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -106,22 +108,8 @@ def optional_workers() -> list[dict[str, Any]]:
             "status": "not_integrated",
             "detail": "Intelligent browser discovery worker. Playwright remains the deterministic backend.",
         },
-        {
-            "id": "ufo",
-            "name": "Microsoft UFO",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Windows HostAgent/AppAgent worker. Native UI Automation is the current fallback.",
-        },
-        {
-            "id": "cua",
-            "name": "Cua",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Computer-use worker. Not required for Jarvis to run.",
-        },
+        UFOBackend().probe(),
+        CuaBackend().probe(),
         {
             "id": "open-interpreter",
             "name": "Open Interpreter",

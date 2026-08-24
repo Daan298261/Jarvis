@@ -9,7 +9,7 @@ Browser (localhost:4780)
 FastAPI backend
   ├── Task store (SQLite)
   ├── Agent runtime (plan → act → observe → recover → verify)
-  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP)
+  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP, request_tools, UFO, Cua)
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼

@@ -3608,17 +3608,18 @@ This development session:
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
 - PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
 - Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
-- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
+- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs). `close` tears down the persistent context without launching Chromium and clears `_pages`.
 - Playwright: native backend present
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
 - Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
+- Tool exposure: task class selects a small schema (`agent/tool_exposure.py`); `request_tools` expands it. Mixed and long-horizon tasks still receive every enabled tool.
 
 ### Optional Workers
 
 - Browser Use: **not integrated** (catalog shows `not_integrated`)
-- UFO: **not integrated**
-- Cua: **not integrated**
+- UFO: **adapter present** — probes for a local `ufo`/`ufo2` install; reports `missing` here and falls back to the native `desktop` tool
+- Cua: **adapter present** — probes for a local `cua` install; reports `missing` here and falls back to the native `desktop` tool
 - Open Interpreter: **not integrated**
 - OpenHands: **not integrated**
 
@@ -3668,7 +3669,7 @@ This development session:
 
 - Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
-- Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
+- Browser Use / OpenHands / Open Interpreter adapters are absent; UFO and Cua adapters are present and report `missing` until installed
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
 - Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
@@ -3679,11 +3680,11 @@ Date: 2026-08-24
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **dynamic tool exposure**, **UFO/Cua adapters**, docker `run` image requirement, browser `close` without launching Chromium
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **94 passed** on this tree (dynamic tool exposure, UFO/Cua adapters, docker/browser QA). Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3710,6 +3711,10 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [x] Verification loop
   - Acceptance: task cannot be marked successful without an independent verification pass.
   - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
+
+- [x] Dynamic tool exposure (P0.7)
+  - Acceptance: classification selects a small relevant tool set; `request_tools` can expand it; mixed/long-horizon tasks still receive every enabled tool.
+  - Status: VERIFIED (`test_tool_exposure.py`)
 
 - [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
   - Acceptance: model loads, API responds, tool calls work, vision projector loads.
@@ -3773,8 +3778,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [ ] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
 - [ ] Phone / Android client against the local API
 - [ ] Dedicated LAN inference server
-- [ ] UFO adapter
-- [ ] Cua adapter
+- [x] UFO adapter
+  - Acceptance: optional Windows HostAgent worker behind `ComputerUseBackend`; native UI Automation remains default; missing install reports `missing` and names the desktop fallback.
+  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
+- [x] Cua adapter
+  - Acceptance: optional computer-use worker behind `ComputerUseBackend`; missing install reports `missing` and names the desktop fallback.
+  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
 - [ ] Open Interpreter adapter
 - [ ] Browser workflow promotion (BrowserCode-style skills)
 
@@ -3944,11 +3953,27 @@ Switching tools does not grant more rights. Suggesting one would only teach the 
 
 Decision: optional workers are displayed even when absent
 
-The Tools and System pages list Browser Use, UFO, Cua, Open Interpreter, and OpenHands as `not_integrated`.
+The Tools and System pages list Browser Use, Open Interpreter, and OpenHands as `not_integrated`. UFO and Cua are listed as `missing` until a local install is detected.
 
 Reason:
 
-Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions.
+A blank Tools page looks like a crash. Listing unavailable workers makes graceful degradation visible.
+
+Decision: only expose tools the current task class needs
+
+Classification already exists. Filesystem work should not pay for browser, Office, UFO, and Docker schemas on every turn. `request_tools` is the escape hatch; mixed and long-horizon tasks still receive the full set.
+
+Reason:
+
+P0.7. Smaller schemas cut prompt tokens, latency, and incorrect tool selection.
+
+Decision: UFO and Cua are ComputerUseBackend workers, not the primary Windows path
+
+Native pywinauto stays first. UFO and Cua run only when installed; a missing package is an error that names the desktop tool, not a crash.
+
+Reason:
+
+Same orchestrator-plus-workers rule as Browser Use / OpenHands. UI Automation is more deterministic than a computer-use agent.
 
 Decision: editable workflow templates with chained prompt dispatch
 

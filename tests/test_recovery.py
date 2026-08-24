@@ -38,6 +38,13 @@ def test_browser_failure_routes_to_more_deterministic_tools():
     assert options.index("web_fetch") < options.index("screenshot")
 
 
+def test_ufo_failure_routes_to_native_desktop():
+    options = [item.tool for item in alternatives_for("ufo", UNAVAILABLE)]
+    assert options[0] == "desktop"
+    cua = [item.tool for item in alternatives_for("cua", UNAVAILABLE)]
+    assert cua[0] == "desktop"
+
+
 def test_permission_failures_do_not_suggest_another_tool():
     assert alternatives_for("filesystem", PERMISSION) == []
     assert alternatives_for("terminal", BLOCKED) == []

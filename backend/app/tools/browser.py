@@ -36,6 +36,22 @@ async def _ensure_page(headless: bool):
     return _page
 
 
+async def _close_browser():
+    global _playwright, _browser, _context, _page, _pages
+    if _context:
+        await _context.close()
+    elif _browser:
+        await _browser.close()
+    if _playwright:
+        await _playwright.stop()
+    _context = None
+    _browser = None
+    _playwright = None
+    _page = None
+    _pages = []
+    return ToolResult(True, "Browser closed")
+
+
 class BrowserTool(Tool):
     name = "browser"
     description = (
@@ -74,6 +90,8 @@ class BrowserTool(Tool):
             headless = bool((settings.get("browser") or {}).get("headless", False))
         async with _lock:
             try:
+                if action == "close":
+                    return await _close_browser()
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs.get("url")
@@ -136,16 +154,6 @@ class BrowserTool(Tool):
                 if action == "upload":
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
-                if action == "close":
-                    global _playwright, _browser, _context, _page
-                    if _context:
-                        await _context.close()
-                    if _playwright:
-                        await _playwright.stop()
-                    _context = None
-                    _playwright = None
-                    _page = None
-                    return ToolResult(True, "Browser closed")
                 return ToolResult(False, "", error=f"Unknown action {action}")
             except Exception as exc:
                 return ToolResult(False, "", error=str(exc))

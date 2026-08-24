@@ -58,6 +58,7 @@ export type Task = {
   stage: string
   execution_mode?: string
   task_class?: string
+  exposed_tools?: string[]
   acceptance_criteria?: string
   current_action: string
   current_tool: string

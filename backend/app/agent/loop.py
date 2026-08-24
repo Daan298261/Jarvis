@@ -33,6 +33,7 @@ from .planning import (
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
+from .tool_exposure import allowed_tool_names, apply_request, exposure_prompt_block
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .prompts import (
     CONTINUE_PROMPT,
@@ -226,6 +227,8 @@ class AgentRuntime:
                 working.goal = prompt.strip().splitlines()[0][:240]
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
+            if not isinstance(working.extra_tools, list):
+                working.extra_tools = []
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         plan_prompt = best_of_n_plan_prompt(policy.best_of_n) if policy.best_of_n > 1 else PLAN_PROMPT
@@ -377,12 +380,17 @@ class AgentRuntime:
                     "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if profile.thinking else "Model is responding")),
                     stage="verify" if verifying else "act",
                 )
-                messages = compact_history(messages, working_state_block=working.as_prompt_block())
+                messages = compact_history(
+                    messages,
+                    working_state_block=working.as_prompt_block() + "\n" + exposure_prompt_block(working.task_class, working.extra_tools),
+                )
                 try:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
                             messages,
-                            tools=None if force_final else REGISTRY.openai_tools(),
+                            tools=None if force_final else REGISTRY.openai_tools(
+                                allowed_tool_names(working.task_class, working.extra_tools)
+                            ),
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
@@ -500,6 +508,16 @@ class AgentRuntime:
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
                         observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
                         failed = "ERROR:" in observation or observation.lower().startswith("error")
+                        if not failed and name == "request_tools":
+                            requested = arguments.get("names") if isinstance(arguments, dict) else []
+                            working.extra_tools = apply_request(working.extra_tools, requested)
+                            await BUS.publish(
+                                task_id,
+                                "progress",
+                                "Expanded tool set",
+                                ",".join(working.extra_tools)[:1500] or "all tools",
+                                stage="act",
+                            )
                         if failed:
                             consecutive_failures += 1
                             failures_by_tool[name] = failures_by_tool.get(name, 0) + 1

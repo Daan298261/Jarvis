@@ -278,6 +278,7 @@ class WorkingState:
     next_action: str = ""
     task_class: str = ""
     verified: bool = False
+    extra_tools: list[str] = field(default_factory=list)
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"
@@ -312,7 +313,8 @@ class WorkingState:
             f"Current state: {self.current_state or 'starting'}\n"
             f"Known failures:\n{failures}\n"
             f"Next action: {self.next_action or 'continue'}\n"
-            f"Verified: {self.verified}"
+            f"Verified: {self.verified}\n"
+            f"Requested extra tools: {', '.join(self.extra_tools) or 'none'}"
         )
 
     def dumps(self) -> str:
@@ -329,4 +331,11 @@ class WorkingState:
         if not isinstance(data, dict):
             return cls()
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-        return cls(**known)
+        state = cls(**known)
+        if not isinstance(state.extra_tools, list):
+            state.extra_tools = []
+        if not isinstance(state.acceptance_criteria, list):
+            state.acceptance_criteria = []
+        if not isinstance(state.plan, list):
+            state.plan = []
+        return state
