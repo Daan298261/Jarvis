@@ -33,6 +33,7 @@ from .planning import (
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
+from .tooling import apply_capability_request, expose_called_tool, schemas_for, should_enable_thinking, tools_for_task
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .prompts import (
     CONTINUE_PROMPT,
@@ -251,6 +252,7 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
+        exposed_tools = tools_for_task(working.task_class)
 
         if existing and continue_existing:
             messages = existing
@@ -371,10 +373,19 @@ class AgentRuntime:
                     execution_mode=execution_mode,
                     task_class=working.task_class,
                 )
+                think = should_enable_thinking(
+                    profile,
+                    force_final=force_final,
+                    verifying=verifying,
+                    turn_index=_step,
+                    consecutive_failures=consecutive_failures,
+                    awaiting_plan_selection=awaiting_plan_selection,
+                    best_of_n_complete=best_of_n_complete,
+                )
                 await BUS.publish(
                     task_id,
                     "model",
-                    "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if profile.thinking else "Model is responding")),
+                    "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if think else "Model is responding")),
                     stage="verify" if verifying else "act",
                 )
                 messages = compact_history(messages, working_state_block=working.as_prompt_block())
@@ -382,11 +393,11 @@ class AgentRuntime:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
                             messages,
-                            tools=None if force_final else REGISTRY.openai_tools(),
+                            tools=None if force_final else schemas_for(exposed_tools),
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
-                            thinking=False if force_final or verifying else (profile.thinking and not verifying),
+                            thinking=think,
                             max_tokens=400 if force_final else 1024,
                         ),
                         timeout=90 if force_final else 180,
@@ -498,8 +509,15 @@ class AgentRuntime:
                             return
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
-                        observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
-                        failed = "ERROR:" in observation or observation.lower().startswith("error")
+                        if name == "request_capability":
+                            exposed_tools, _added, observation = apply_capability_request(exposed_tools, arguments)
+                            attach = None
+                            failed = False
+                        else:
+                            if name in REGISTRY.tools and name not in exposed_tools:
+                                exposed_tools = expose_called_tool(exposed_tools, name)
+                            observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
+                            failed = "ERROR:" in observation or observation.lower().startswith("error")
                         if failed:
                             consecutive_failures += 1
                             failures_by_tool[name] = failures_by_tool.get(name, 0) + 1

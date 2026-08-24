@@ -10,7 +10,7 @@ import httpx
 
 from ..config import AppSettings, logs_dir, runtime_dir
 from ..hardware import detect_hardware
-from .profiles import ModelProfile, model_paths
+from .profiles import ModelProfile, mmproj_path, profile_gguf
 
 LLAMA_CPP_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
 REMOTE_ALIASES = {"remote", "openai", "openai-compat", "openai-compatible", "lan", "lmstudio", "ollama", "vllm", "sglang"}
@@ -91,7 +91,7 @@ class LlamaCppBackend(InferenceBackend):
         return runtime_dir() / "llama-server.exe"
 
     def model_path(self, profile: ModelProfile) -> Path:
-        return model_paths()["root"] / profile.filename
+        return profile_gguf(profile)
 
     def missing_requirements(self, profile: ModelProfile) -> list[str]:
         missing = []
@@ -105,15 +105,14 @@ class LlamaCppBackend(InferenceBackend):
     def build_args(self, profile: ModelProfile) -> list[str]:
         hardware = detect_hardware()
         inference = self.settings.inference
-        paths = model_paths()
-        mmproj = paths["mmproj"]
+        projector = mmproj_path(profile)
         threads = inference.threads or hardware.cpu_cores
         args = [
             str(self.server_path()),
             "--model",
             str(self.model_path(profile)),
             "--alias",
-            "Qwen3.5-27B",
+            profile.alias,
             "--host",
             inference.host,
             "--port",
@@ -151,8 +150,9 @@ class LlamaCppBackend(InferenceBackend):
             args.extend(["--fit", "on", "--fit-target", str(inference.fit_target_mib)])
         else:
             args.extend(["--n-gpu-layers", "99"])
-        if mmproj.exists():
-            args.extend(["--mmproj", str(mmproj)])
+        # P0.5: do not reserve VRAM for the projector unless vision is requested.
+        if inference.vision and projector.exists():
+            args.extend(["--mmproj", str(projector)])
         return args
 
     async def start(self, profile: ModelProfile, timeout: float = 300) -> bool:

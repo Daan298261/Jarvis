@@ -1,6 +1,6 @@
 # Architecture
 
-Jarvis is a local control plane around a Qwen3.5-27B llama.cpp server.
+Jarvis is a local control plane around llama.cpp. The default model is Qwen3.5-9B Abliterated; Qwen3.5-27B is the Expert escalation profile.
 
 ```
 Browser (localhost:4780)
@@ -14,7 +14,8 @@ FastAPI backend
             │  OpenAI-compatible HTTP
             ▼
 llama-server (localhost:8088)
-  Qwen3.5-27B GGUF + mmproj
+  Qwen3.5-9B Abliterated GGUF (default) or Qwen3.5-27B Expert
+  mmproj only when vision is enabled
 ```
 
 ## Model provider

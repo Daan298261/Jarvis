@@ -139,12 +139,17 @@ export function SettingsPage() {
           <select value={settings.inference?.profile} onChange={(e) => save({ profile: e.target.value })}>
             <option value="fast">Fast</option>
             <option value="balanced">Balanced</option>
-            <option value="quality">Quality</option>
+            <option value="quality">Quality (9B thinking on)</option>
+            <option value="expert">Expert (27B)</option>
           </select>
         </label>
         <label>Allowed directories (one per line)
           <textarea className="field" rows={4} defaultValue={(settings.allowed_directories || []).join("\n")}
             onBlur={(e) => save({ allowed_directories: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })} />
+        </label>
+        <label className="row">
+          <input type="checkbox" checked={!!settings.inference?.vision} onChange={(e) => save({ inference_vision: e.target.checked })} />
+          Load vision projector (uses extra VRAM; leave off for text/tool work)
         </label>
         <label className="row">
           <input type="checkbox" checked={settings.browser?.headless} onChange={(e) => save({ browser_headless: e.target.checked })} />

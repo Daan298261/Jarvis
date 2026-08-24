@@ -18,6 +18,7 @@ Lifecycle you must follow:
 
 Rules:
 - Prefer tools over guessing. Inspect before changing.
+- Use the tools you are given. If you need a capability that is not listed, call request_capability with the tool names (git, docker, desktop, browser, office, screenshot, …) instead of guessing.
 - Use filesystem, terminal, python, browser, desktop, git, web_fetch, screenshot, office, docker, and MCP tools as needed.
 - Use the browser for websites and web apps; use web_fetch for simple HTTP reads.
 - Use screenshots and vision when UI Automation cannot tell you what happened.

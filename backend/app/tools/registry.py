@@ -5,6 +5,7 @@ from typing import Any, Callable
 from ..config import AppSettings, default_allowed_directories
 from .base import Tool, ToolResult
 from .browser import BrowserTool
+from .capability import RequestCapabilityTool
 from .desktop import DesktopTool
 from .docker_tools import DockerTool
 from .filesystem import FilesystemTool
@@ -36,6 +37,7 @@ class ToolRegistry:
             DockerTool(),
             WebFetchTool(),
             ScreenshotTool(),
+            RequestCapabilityTool(),
             MCPProxyTool(),
         ]
         self.tools = {tool.name: tool for tool in items}
@@ -52,9 +54,14 @@ class ToolRegistry:
         for name, tool in self.tools.items():
             tool.enabled = name not in disabled
 
-    def openai_tools(self) -> list[dict[str, Any]]:
-        native = [tool.schema() for tool in self.tools.values() if tool.enabled]
-        return native + MCP.openai_tools()
+    def openai_tools(self, names: set[str] | None = None) -> list[dict[str, Any]]:
+        native = [
+            tool.schema()
+            for tool in self.tools.values()
+            if tool.enabled and (names is None or tool.name in names)
+        ]
+        include_mcp = names is None or "mcp" in names
+        return native + (MCP.openai_tools() if include_mcp else [])
 
     def list_tools(self) -> list[dict[str, Any]]:
         out = []

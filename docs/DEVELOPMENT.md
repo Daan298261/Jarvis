@@ -48,10 +48,10 @@ backend/app/
     skills.py             Promote after 3 identical successful tool sequences
     queue_watcher.py      data/queue/pending file drop
     prompts.py            System / plan / verify / critic prompts
-  inference/
+    inference/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
-    profiles.py           fast / balanced / quality GGUF profiles
+    profiles.py           fast / balanced / quality (9B) plus expert (27B)
   providers/              OpenAI-compatible chat + tool-call parsing
   tools/                  Native tools + MCP proxy
   db/                     SQLAlchemy models, aiosqlite session, light migrations
@@ -349,10 +349,11 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Skills guide the prompt; they do not execute a parameterized workflow themselves (Guide & Workflows templates compose one prompt)
+- Skills promote after 3 repeats and can execute parameterized steps
 - Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
 - Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
+- 9B Abliterated profiles are wired in code; GPU residency and tok/s must be measured on the RTX 5070 Ti
 
 ---
 

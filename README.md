@@ -1,6 +1,6 @@
 # Jarvis
 
-Self-hosted local desktop agent. The model is **Qwen3.5-27B** running on this computer through llama.cpp (or any OpenAI-compatible server you point at). The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
+Self-hosted local desktop agent. The default model is **Qwen3.5-9B Abliterated** running on this computer through llama.cpp (Qwen3.5-27B remains the Expert escalation model, or you can point at any OpenAI-compatible server). The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
 
 Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. That file is the persistent architecture, current state, and development queue. Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode) is specified in sections 64–85 and is not implemented yet.
 
@@ -23,7 +23,7 @@ Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVI
 - NVIDIA GeForce RTX 5070 Ti (16 GB VRAM, CUDA 13.0)
 - llama.cpp b10516, Windows CUDA 13.3 build
 
-Q4_K_M (~16.7 GB) does not fully fit in 16 GB VRAM together with the vision projector and KV cache, so Jarvis uses llama.cpp `--fit on` to offload as many layers as possible to the GPU and keep the rest in system RAM.
+The default 9B Q8_0 profile is meant to stay on the GPU. Expert 27B Q4_K_M (~16.7 GB) still uses llama.cpp `--fit on`. The vision projector is off unless you enable it.
 
 ## Quick start (already cloned on this machine)
 
@@ -39,7 +39,7 @@ cd ..
 
 New machine, missing GGUFs, or llama.cpp not extracted: follow **[docs/INSTALL.md](docs/INSTALL.md)** instead of this block.
 
-llama.cpp CUDA binaries live in `runtime/llama.cpp`. Models live in `models/Qwen3.5-27B-GGUF`.
+llama.cpp CUDA binaries live in `runtime/llama.cpp`. Primary weights live in `models/Qwen3.5-9B-abliterated-GGUF`. Expert 27B weights live in `models/Qwen3.5-27B-GGUF`.
 
 ## Daily use
 

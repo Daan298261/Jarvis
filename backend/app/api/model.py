@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from ..config import load_settings, save_settings
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
 from ..inference.manager import MANAGER
-from ..inference.profiles import available_profiles
+from ..inference.profiles import declared_profiles, profile_as_dict
 
 router = APIRouter(prefix="/api/model", tags=["model"])
 
@@ -19,17 +19,8 @@ class LoadBody(BaseModel):
 async def model_status():
     settings = load_settings()
     snapshot = await MANAGER.snapshot(settings)
-    snapshot["profiles"] = [
-        {
-            "name": p.name,
-            "label": p.label,
-            "quant": p.quant,
-            "thinking": p.thinking,
-            "context_size": p.context_size,
-            "description": p.description,
-        }
-        for p in available_profiles()
-    ]
+    if "profiles" not in snapshot:
+        snapshot["profiles"] = [profile_as_dict(p) for p in declared_profiles()]
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
     return snapshot

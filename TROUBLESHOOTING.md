@@ -7,8 +7,8 @@ The API started and auto-load failed. Open `logs/llama-server.log`.
 Common causes:
 
 - Another `llama-server` still bound to port 8088 — run `.\stop-jarvis.ps1`
-- GGUF path missing — files must be in `models/Qwen3.5-27B-GGUF/`
-- VRAM pressure from other apps — close Chrome/games, retry **Model → Balanced**
+- GGUF path missing — Fast/Balanced need `models/Qwen3.5-9B-abliterated-GGUF/`; Expert needs `models/Qwen3.5-27B-GGUF/`. Existing 27B installs still work: 9B profiles fall back to 27B Q4_K_M.
+- VRAM pressure from other apps — close Chrome/games, retry **Model → Fast** or **Balanced**. Leave vision off unless you need screenshots interpreted.
 
 Then `POST /api/model/load`.
 

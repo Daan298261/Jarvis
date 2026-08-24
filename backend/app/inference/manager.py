@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +11,7 @@ import psutil
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, resolve_backend
-from .profiles import ModelProfile, model_paths, resolve_profile
+from .profiles import ModelProfile, declared_profiles, mmproj_path, profile_as_dict, profile_gguf, resolve_profile
 
 
 @dataclass
@@ -26,7 +26,7 @@ class InferenceState:
     manages_process: bool = True
     host: str = "127.0.0.1"
     port: int = 8088
-    context_size: int = 32768
+    context_size: int = 0
     gpu_layers: str = "fit"
     flash_attn: str = "auto"
     pid: int | None = None
@@ -37,22 +37,14 @@ class InferenceState:
     ram_used_gb: float | None = None
     last_error: str = ""
     llama_version: str = ""
+    vision: bool = False
+    family: str = ""
+    alias: str = ""
+    thinking_mode: str = ""
 
 
 def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
-    return ModelProfile(
-        name=profile.name,
-        label=profile.label,
-        quant=profile.quant,
-        filename=profile.filename,
-        thinking=profile.thinking,
-        context_size=context_size,
-        temperature=profile.temperature,
-        top_p=profile.top_p,
-        top_k=profile.top_k,
-        presence_penalty=profile.presence_penalty,
-        description=profile.description,
-    )
+    return replace(profile, context_size=context_size)
 
 
 class InferenceManager:
@@ -71,21 +63,20 @@ class InferenceManager:
         async with self._lock:
             profile = resolve_profile(profile_name or settings.inference.profile)
             backend = resolve_backend(settings)
-            paths = model_paths()
-            model = paths["root"] / profile.filename
+            model = profile_gguf(profile)
 
             missing = backend.missing_requirements(profile)
             if missing:
                 self.state.last_error = "; ".join(missing)
                 raise FileNotFoundError(self.state.last_error)
 
-            if self.backend and self.state.loaded and self.state.profile == profile.name and self.backend.name == backend.name:
+            if self.backend and self.state.loaded and self.state.profile == profile.name and self.backend.name == backend.name and self.state.vision == bool(settings.inference.vision):
                 return self.state
 
-            self._apply_profile_state(settings, profile, backend, model, paths)
+            self._apply_profile_state(settings, profile, backend, model)
 
             # Adopt a server that is already answering when we did not start one.
-            existing = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
+            existing = OpenAICompatProvider(self.base_url(settings), model=profile.alias)
             already_running = (self.backend is None or self.backend.pid is None) and await existing.health()
             if already_running:
                 self.backend = backend
@@ -120,7 +111,7 @@ class InferenceManager:
             self.state.loaded = True
             self.state.loading = False
             self.state.load_time_seconds = round(time.time() - started, 2)
-            self.provider = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
+            self.provider = OpenAICompatProvider(self.base_url(settings), model=profile.alias)
             await self.refresh_resources()
             return self.state
 
@@ -130,17 +121,22 @@ class InferenceManager:
         profile: ModelProfile,
         backend: InferenceBackend,
         model: Path,
-        paths: dict[str, Path],
     ) -> None:
+        projector = mmproj_path(profile)
+        vision = bool(settings.inference.vision) and projector.exists()
         self.state.profile = profile.name
         self.state.quant = profile.quant
         self.state.model_path = str(model) if backend.requires_local_files else ""
-        self.state.mmproj_path = str(paths["mmproj"]) if paths["mmproj"].exists() else ""
+        self.state.mmproj_path = str(projector) if vision else ""
         self.state.host = settings.inference.host
         self.state.port = settings.inference.port
         self.state.context_size = profile.context_size
         self.state.backend = backend.name
         self.state.manages_process = backend.manages_process
+        self.state.vision = vision
+        self.state.family = profile.family
+        self.state.alias = profile.alias
+        self.state.thinking_mode = profile.thinking_mode
 
     async def unload(self) -> InferenceState:
         async with self._lock:
@@ -184,11 +180,14 @@ class InferenceManager:
             "loaded": self.state.loaded,
             "loading": self.state.loading,
             "healthy": healthy,
-            "active_model": "Qwen3.5-27B" if self.state.loaded else None,
-            "official_model": "Qwen/Qwen3.5-27B",
+            "active_model": (self.state.alias or profile.alias) if self.state.loaded else None,
+            "official_model": profile.repo,
+            "family": self.state.family or profile.family,
+            "thinking_mode": self.state.thinking_mode or profile.thinking_mode,
+            "vision": self.state.vision,
             "quantization": self.state.quant or profile.quant,
-            "profile": self.state.profile,
-            "context_size": self.state.context_size or profile.context_size,
+            "profile": self.state.profile or profile.name,
+            "context_size": self.state.context_size if self.state.loaded else profile.context_size,
             "inference_backend": self.state.backend,
             "manages_process": self.state.manages_process,
             "gpu_layers": "auto (--fit on)" if settings.inference.fit else "99",
@@ -206,6 +205,7 @@ class InferenceManager:
             "model_path": self.state.model_path,
             "mmproj_path": self.state.mmproj_path,
             "thinking": profile.thinking,
+            "profiles": [profile_as_dict(item) for item in declared_profiles()],
         }
 
     async def record_timings(self, timings: dict[str, Any]) -> None:

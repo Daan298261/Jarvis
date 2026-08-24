@@ -1,6 +1,6 @@
 # Install Jarvis
 
-Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal. Inference is **Qwen3.5-27B** through llama.cpp on this machine, or any OpenAI-compatible server you point at.
+Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal. Inference defaults to **Qwen3.5-9B Abliterated** through llama.cpp on this machine. **Qwen3.5-27B** remains an optional Expert/escalation model. You can also point Jarvis at any OpenAI-compatible server.
 
 The portal is [http://127.0.0.1:4780](http://127.0.0.1:4780). The same REST API can later drive voice, Android, or automations.
 
@@ -16,9 +16,7 @@ This is a **Windows** product. Startup scripts, Office COM, and desktop UI autom
 - NVIDIA GeForce RTX 5070 Ti (16 GB VRAM, CUDA 13.0)
 - llama.cpp **b10516**, Windows **CUDA 13.3** build
 
-Q4_K_M (~16.7 GB) does not fully fit in 16 GB VRAM together with the vision projector and KV cache. Jarvis starts llama.cpp with `--fit on` so as many layers as possible go to the GPU and the rest stay in system RAM.
-
-Smaller GPUs can still run the Fast profile (16K context) or a remote OpenAI-compatible backend. Do not substitute a tiny model just because it is easier to download.
+Qwen3.5-27B Q4_K_M (~16.7 GB) does not fully fit in 16 GB VRAM together with the vision projector and KV cache. The default 9B Q8_0 profile is intended to stay GPU-resident. Expert 27B still starts llama.cpp with `--fit on`. The vision projector is **not** loaded unless you enable vision in Settings.
 
 ---
 
@@ -134,36 +132,43 @@ Skip this section only if you will use a **remote** OpenAI-compatible server and
 
 ## 7. Model weights (GGUF)
 
-Jarvis loads Unsloth quantizations of official `Qwen/Qwen3.5-27B`, plus the multimodal projector.
+The default primary model is **Qwen3.5-9B Abliterated** (source `wangzhang/Qwen3.5-9B-abliterated`, GGUF `Abiray/Qwen3.5-9B-abliterated-GGUF`). Qwen3.5-27B stays available as the Expert profile.
 
-Required files under `models/Qwen3.5-27B-GGUF/`:
+Preferred files under `models/Qwen3.5-9B-abliterated-GGUF/`:
 
 | File | Used by |
 | --- | --- |
-| `Qwen3.5-27B-Q4_K_M.gguf` | Fast and Balanced profiles (required to start) |
-| `mmproj-F16.gguf` | Vision / screenshots (required to start) |
-| `Qwen3.5-27B-Q5_K_M.gguf` | Quality profile (optional; falls back to Balanced if missing) |
+| `Qwen3.5-9B-abliterated-Q8_0.gguf` | Balanced (default) and Quality |
+| `Qwen3.5-9B-abliterated-Q6_K.gguf` | Fast |
+| `mmproj-f16.gguf` | Optional. Loaded only when Settings → vision is on |
 
-Download (Hugging Face Hub is already in `backend/requirements.txt`):
+Download:
 
 ```powershell
 $env:HF_XET_HIGH_PERFORMANCE = "1"
-python -m huggingface_hub.cli.hf download unsloth/Qwen3.5-27B-GGUF `
-  --include "Qwen3.5-27B-Q4_K_M.gguf" `
-  --include "Qwen3.5-27B-Q5_K_M.gguf" `
-  --include "mmproj-F16.gguf" `
-  --local-dir models\Qwen3.5-27B-GGUF
+python -m huggingface_hub.cli.hf download Abiray/Qwen3.5-9B-abliterated-GGUF `
+  --include "Qwen3.5-9B-abliterated-Q8_0.gguf" `
+  --include "Qwen3.5-9B-abliterated-Q6_K.gguf" `
+  --include "mmproj-f16.gguf" `
+  --local-dir models\Qwen3.5-9B-abliterated-GGUF
 ```
 
-Equivalent with the `hf` CLI, if installed:
+Optional Expert 27B (keep the existing tree if you already downloaded it) under `models/Qwen3.5-27B-GGUF/`:
+
+| File | Used by |
+| --- | --- |
+| `Qwen3.5-27B-Q4_K_M.gguf` | Expert escalation |
+| `mmproj-F16.gguf` | Vision when Expert is loaded with vision enabled |
+| `Qwen3.5-27B-Q5_K_M.gguf` | Unused by current profiles; safe to keep |
 
 ```powershell
-hf download unsloth/Qwen3.5-27B-GGUF `
+python -m huggingface_hub.cli.hf download unsloth/Qwen3.5-27B-GGUF `
   --include "Qwen3.5-27B-Q4_K_M.gguf" `
-  --include "Qwen3.5-27B-Q5_K_M.gguf" `
   --include "mmproj-F16.gguf" `
   --local-dir models\Qwen3.5-27B-GGUF
 ```
+
+If the 9B GGUFs are missing, Fast/Balanced/Quality automatically fall back to Expert 27B Q4_K_M when that file is present. `start-jarvis.ps1` accepts either family. The vision projector is no longer required to start.
 
 Weights stay on this computer. Do not commit them.
 
