@@ -12,6 +12,7 @@ from ..config import data_dir
 from ..db.models import Node, NodeCapability, NodeWorker
 from ..db.session import SessionLocal
 from ..hardware import hardware_dict
+from .budgets import ensure_default_node_budget
 from .roles import ensure_localhost_role_assignments
 
 LOCALHOST_ALIAS = "localhost"
@@ -151,6 +152,7 @@ async def register_localhost_node() -> Node:
             await session.commit()
             await session.refresh(existing)
             await ensure_localhost_role_assignments(existing.id)
+            await ensure_default_node_budget(existing.id)
             return existing
 
         node = Node(
@@ -172,6 +174,7 @@ async def register_localhost_node() -> Node:
         await session.commit()
         await session.refresh(node)
         await ensure_localhost_role_assignments(node.id)
+        await ensure_default_node_budget(node.id)
         return node
 
 
