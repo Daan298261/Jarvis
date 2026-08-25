@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..agent.coding_workers import list_workers, route_coding_task, worker_stats
+from ..agent.coding_workers import coding_worker_catalog, list_coding_routes, route_software_task
 from ..config import load_settings, save_settings
 from ..tools.capabilities import capability_snapshot
 from ..tools.exposure import exposure_catalog, tools_for_task
@@ -38,6 +38,15 @@ async def tool_catalog():
         "example_software": sorted(tools_for_task("software engineering")),
         **caps,
     }
+
+
+@router.get("/coding-workers")
+async def coding_workers(prompt: str = "", task_class: str = ""):
+    catalog = coding_worker_catalog()
+    payload: dict = {"workers": catalog, "recent_routes": await list_coding_routes(limit=20)}
+    if prompt:
+        payload["route"] = route_software_task(prompt, task_class=task_class).as_dict()
+    return payload
 
 
 @router.post("/{tool_name}/enable")

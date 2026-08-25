@@ -5,7 +5,7 @@ type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
   optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
-  professional_analysis?: { analyze_sensitive_material: boolean; operational_authorization_separate: boolean; detail: string }
+  coding_workers?: { id: string; name: string; available: boolean; status: string; detail: string; tier?: number }[]
 }
 
 export function ToolsPage() {
@@ -92,82 +92,20 @@ export function ToolsPage() {
           </div>
         ))}
       </div>
-      {coding && (
-        <>
-          <div className="card" style={{ marginTop: 16 }}>
-            <h2>Software-development workers</h2>
-            <p className="lede">{coding.usage.note}</p>
-            {coding.workers.map((worker) => (
-              <div className="toggle" key={worker.id}>
-                <div>
-                  <strong>{worker.name}</strong>
-                  <div className="lede" style={{ margin: "4px 0 0" }}>{worker.detail}</div>
-                </div>
-                <span className={`badge ${worker.status === "ready" ? "completed" : "queued"}`}>{worker.status}</span>
+      {!!catalog.coding_workers?.length && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Software-development workers</h2>
+          <p className="lede">Jarvis routes coding work to the cheapest capable worker. Paid Cursor workers stay listed when they are not configured. A worker claiming success is never completion.</p>
+          {catalog.coding_workers.map((worker) => (
+            <div className="toggle" key={worker.id}>
+              <div>
+                <strong>{worker.name}</strong>
+                <div className="lede" style={{ margin: "4px 0 0" }}>{worker.detail}</div>
               </div>
-            ))}
-          </div>
-          <div className="card" style={{ marginTop: 16 }}>
-            <h2>Cursor model catalog</h2>
-            <p className="lede">{coding.models.note} Fast variants are {coding.models.allow_fast_variants ? "allowed" : "blocked"}.</p>
-            <div className="kv" style={{ marginBottom: 12 }}>
-              <b>ACP</b><span>{coding.models.status}</span>
-              <b>Composer</b><span>{coding.models.composer_model}</span>
-              <b>Grok</b><span>{coding.models.grok_model}</span>
+              <span className={`badge ${worker.available ? "completed" : "queued"}`}>{worker.status}</span>
             </div>
-            {coding.models.models.map((model) => (
-              <div className="toggle" key={model.id}>
-                <div>
-                  <strong>{model.label}</strong>
-                  <div className="lede" style={{ margin: "4px 0 0" }}>
-                    {model.detail} {model.role ? `· assigned as ${model.role}` : ""}
-                  </div>
-                </div>
-                <span className={`badge ${model.selectable ? "completed" : "queued"}`}>
-                  {model.selectable ? (model.variant === "fast" ? "fast" : "standard") : "blocked"}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="card" style={{ marginTop: 16 }}>
-            <h2>Coding cost telemetry</h2>
-            <div className="kv">
-              <b>Cost / verified success</b><span>{money(coding.usage.cost_per_verified_success_usd)}</span>
-              <b>Verified successes</b><span>{coding.usage.verified_successes}</span>
-              <b>Samples</b><span>{coding.usage.samples}</span>
-              <b>Total cost</b><span>{money(coding.usage.total_cost_usd)}</span>
-              <b>This month</b><span>{money(coding.usage.month_cost_usd)}</span>
-            </div>
-            {coding.usage.by_worker.length > 0 && (
-              <table style={{ marginTop: 12 }}>
-                <thead>
-                  <tr>
-                    <th>Worker</th>
-                    <th>Samples</th>
-                    <th>Success</th>
-                    <th>Cost / success</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {coding.usage.by_worker.map((row) => (
-                    <tr key={row.worker}>
-                      <td>{row.worker}</td>
-                      <td>{row.samples}</td>
-                      <td>{pct(row.success_rate)}</td>
-                      <td>{money(row.cost_per_verified_success)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {coding.usage.by_task_class.length > 0 && (
-              <p className="lede" style={{ marginTop: 12 }}>
-                Local success by class:{" "}
-                {coding.usage.by_task_class.map((row) => `${row.task_class} ${pct(row.local_success_rate)}`).join(" · ") || "none yet"}
-              </p>
-            )}
-          </div>
-        </>
+          ))}
+        </div>
       )}
     </div>
   )

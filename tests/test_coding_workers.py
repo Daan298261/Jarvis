@@ -1,135 +1,156 @@
-from dataclasses import replace
+from fastapi.testclient import TestClient
 
 from app.agent.coding_workers import (
-    ComposerWorker,
-    LocalJarvisCodingWorker,
-    compact_escalation,
-    record_coding_outcome,
-    route_coding_task,
+    coding_worker_catalog,
+    format_route_prompt,
+    list_coding_routes,
+    record_coding_route,
+    route_software_task,
     score_complexity,
-    worker_stats,
+    should_route,
+    tier_for_score,
 )
-from app.hardware import HardwareInfo, detect_hardware
-from app.inference.hardware_gate import evaluate_purchase_gate
+from app.agent.loop import AGENT
+from app.agent.planning import WorkingState
+from app.db.models import TaskEvent
+from app.db.session import SessionLocal
+from app.main import app
+from app.providers.base import ChatResult
+from sqlalchemy import select
+
+from tests.test_verification_loop import ScriptedProvider, _finished, _tool
 
 
-def test_complexity_keeps_trivial_work_on_deterministic_or_local():
-    assert score_complexity("bump version in package.json and run tests") <= 20
-    assert score_complexity("rename a helper and update the docstring") <= 40
-    assert score_complexity("implement a new distributed scheduler with schema migrations") >= 71
+def test_deterministic_work_stays_on_native_tools():
+    decision = route_software_task("Rename file config.json and bump version, then run tests.")
+    assert decision.score <= 20
+    assert decision.tier == 0
+    assert decision.selected_worker == "native-tools"
+    assert decision.independent_verification_required is True
+    assert decision.worker_success_is_insufficient is True
 
 
-async def test_router_falls_back_when_paid_workers_are_disconnected(jarvis_env):
-    decision = await route_coding_task(
-        "Implement a multi-file FastAPI feature and add tests for the new router."
-    )
-    assert decision["complexity"] >= 41
-    assert decision["complexity"] <= 70
-    assert decision["selected_worker"] == "composer"
-    assert decision["execute_worker"] == "local_jarvis"
-    assert decision["paid_worker_blocked"] is True
-    assert "not connected" in decision["reason"].lower() or "not connected" in str(decision["execute"]["status"])
-
-
-async def test_historical_local_success_overrides_static_composer(jarvis_env):
-    for index in range(4):
-        await record_coding_outcome(
-            task_id=f"hist-{index}",
-            task_class="software engineering",
-            worker_id="local_jarvis",
-            complexity=50,
-            outcome="verified_success",
-        )
-    decision = await route_coding_task(
-        "Add a FastAPI endpoint and a unit test for the existing router.",
+def test_local_worker_for_small_coding_changes():
+    decision = route_software_task(
+        "Add a docstring to the small config helper and a unit test.",
         task_class="software engineering",
+        files_hint=1,
+        has_tests=True,
     )
-    assert decision["execute_worker"] == "local_jarvis"
-    assert decision["historical"]["override"] is True
+    assert 21 <= decision.score <= 40
+    assert decision.selected_worker == "local-jarvis-coding"
+    assert decision.paid_worker_available is False
 
 
-async def test_composer_start_does_not_pretend_to_run():
-    result = await ComposerWorker().start_task("rewrite the agent loop")
-    assert result.success is False
-    assert "not connected" in result.errors[0].lower()
-    local = await LocalJarvisCodingWorker().start_task("fix a typo")
-    assert local.success is True
-
-
-def test_escalation_package_is_compact():
-    package = compact_escalation(
-        goal="fix flaky test",
-        acceptance_criteria=["pytest passes"],
+def test_paid_workers_are_catalogued_but_unavailable():
+    catalog = {item["id"]: item for item in coding_worker_catalog()}
+    assert catalog["local-jarvis-coding"]["available"] is True
+    assert catalog["local-jarvis-coding"]["status"] == "ready"
+    for key in ("cursor-composer-2.5", "cursor-grok-4.6", "frontier-specialist"):
+        assert catalog[key]["available"] is False
+        assert catalog[key]["status"] == "not_configured"
+    decision = route_software_task(
+        "Implement a multi-file feature with a database migration and new API endpoint.",
         task_class="software engineering",
-        reason="two local attempts failed",
-        attempted_strategies=["retry same patch", "increase timeout"],
-        current_diff="diff --git a/x.py",
-        failing_tests="FAILED tests/test_x.py",
+        files_hint=6,
+        architecture_impact=True,
     )
-    text = package.as_prompt_block()
-    assert "Escalation package" in text
-    assert "two local attempts failed" in text
-    assert "full trajectory" in text.lower()
+    assert decision.intended_worker in {"cursor-composer-2.5", "cursor-grok-4.6", "frontier-specialist"}
+    assert decision.selected_worker == "local-jarvis-coding"
+    assert "unavailable" in decision.reason
+    prompt = format_route_prompt(decision)
+    assert "Independent verification required: yes" in prompt
+    assert "Worker-reported success is not completion" in prompt
 
 
-async def test_cost_per_verified_task_metric(jarvis_env):
-    await record_coding_outcome(
-        task_id="a",
-        task_class="software engineering",
-        worker_id="composer",
-        complexity=50,
-        outcome="verified_success",
-        estimated_cost_usd=0.40,
+def test_complexity_tiers_cover_the_policy_ranges():
+    assert tier_for_score(10)["tier_name"] == "deterministic"
+    assert tier_for_score(30)["tier_name"] == "local"
+    assert tier_for_score(55)["tier_name"] == "composer"
+    assert tier_for_score(80)["tier_name"] == "grok"
+    assert tier_for_score(95)["tier_name"] == "frontier"
+    assert 0 <= score_complexity("hello") <= 100
+
+
+def test_should_route_software_engineering_prompts():
+    assert should_route("software engineering", "refactor the repository")
+    assert should_route("mixed", "please implement a pytest unit test")
+    assert not should_route("filesystem", "organize the desktop folders")
+
+
+async def test_coding_route_is_recorded_and_completed(jarvis_env):
+    tmp = jarvis_env["tmp"]
+    target = tmp / "config.json"
+    target.write_text('{"theme": "light"}', encoding="utf-8")
+    provider = ScriptedProvider(
+        [
+            ChatResult(
+                content=(
+                    "END STATE: theme is dark\n"
+                    "ACCEPTANCE CRITERIA:\n- config.json theme dark\n"
+                    "PLAN:\n1. edit the json\n2. read it back"
+                )
+            ),
+            ChatResult(
+                tool_calls=[
+                    _tool(
+                        "filesystem",
+                        {"action": "write", "path": str(target), "content": '{"theme": "dark"}', "create_backup": False},
+                        "c1",
+                    )
+                ]
+            ),
+            ChatResult(content="Updated the json."),
+            ChatResult(tool_calls=[_tool("filesystem", {"action": "read", "path": str(target)}, "c2")]),
+            ChatResult(content="Verified theme is dark."),
+        ]
     )
-    await record_coding_outcome(
-        task_id="b",
-        task_class="software engineering",
-        worker_id="composer",
-        complexity=50,
-        outcome="failed",
-        estimated_cost_usd=0.40,
+    jarvis_env["manager"].provider = provider
+    created = await AGENT.create_task(
+        f"Refactor this repository helper: set theme to dark in {target} and add a unit test later if needed.",
+        autonomy="autonomous",
+        profile="fast",
+        execution_mode="balanced",
     )
-    stats = {row["worker_id"]: row for row in await worker_stats()}
-    assert stats["composer"]["cost_per_verified_task"] == 0.8
+    task = await _finished(created.id)
+    assert task.status == "completed"
+    routes = await list_coding_routes()
+    assert routes
+    assert routes[0]["task_id"] == task.id
+    assert routes[0]["independent_verification_required"] is True
+    assert routes[0]["outcome"] == "completed"
+    assert routes[0]["selected_worker"] in {"native-tools", "local-jarvis-coding"}
+    async with SessionLocal() as session:
+        events = (await session.execute(select(TaskEvent).where(TaskEvent.task_id == task.id))).scalars().all()
+    assert any("Coding worker" in (event.title or "") for event in events)
 
 
-def test_hardware_gate_blocks_purchases_without_measurements():
-    hw = HardwareInfo(
-        os_name="Linux",
-        os_version="1",
-        architecture="x86_64",
-        cpu_name="test",
-        cpu_cores=4,
-        cpu_threads=8,
-        ram_total_gb=16,
-        ram_available_gb=12,
-        gpu_name=None,
-        vram_total_mib=None,
-        vram_free_mib=None,
-        nvidia_driver=None,
-        cuda_version=None,
-        disk_free_gb=100,
-        disk_total_gb=200,
-        python_version="3.12",
-        node_installed=True,
-        git_installed=True,
-        docker_installed=False,
-        office_installed=False,
-        wsl_available=False,
+async def test_record_coding_route_roundtrip(jarvis_env):
+    decision = route_software_task("Fix a simple exception in one file.")
+    row = await record_coding_route("task-abc", decision)
+    assert row.task_id == "task-abc"
+    stored = await list_coding_routes()
+    assert stored[0]["selected_worker"] == decision.selected_worker
+
+
+def test_working_state_keeps_coding_fields():
+    state = WorkingState(goal="fix", coding_worker="local-jarvis-coding", coding_tier="local")
+    loaded = WorkingState.loads(state.dumps())
+    assert loaded.coding_worker == "local-jarvis-coding"
+    assert loaded.coding_tier == "local"
+
+
+def test_coding_workers_endpoint(jarvis_env):
+    client = TestClient(app)
+    res = client.get("/api/tools/coding-workers")
+    assert res.status_code == 200
+    body = res.json()
+    ids = {item["id"] for item in body["workers"]}
+    assert "local-jarvis-coding" in ids
+    routed = client.get(
+        "/api/tools/coding-workers",
+        params={"prompt": "Implement a multi-file feature with a database migration", "task_class": "software engineering"},
     )
-    gate = evaluate_purchase_gate(hardware=hw, inference_samples=[], agent_results=[])
-    assert gate["purchase_allowed"] is False
-    assert "Do not buy hardware yet" in gate["recommendation"]
-    assert "V100 GPUs" in gate["deferred_until_measured"]
-
-
-def test_hardware_gate_opens_only_with_enough_samples():
-    hw = replace(detect_hardware())
-    samples = [
-        {"vram_used_mib": 8000, "tokens_per_second": 40, "gpu_layers": "all"}
-        for _ in range(3)
-    ]
-    results = [{"success": True, "profile": "balanced"} for _ in range(5)]
-    gate = evaluate_purchase_gate(hardware=hw, inference_samples=samples, agent_results=results)
-    assert gate["purchase_allowed"] is True
-    assert gate["signals"]["gpu_vram_saturated"] is False
+    assert routed.status_code == 200
+    assert routed.json()["route"]["independent_verification_required"] is True
+    assert routed.json()["route"]["selected_worker"] in {"local-jarvis-coding", "native-tools"}

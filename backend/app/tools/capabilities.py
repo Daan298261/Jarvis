@@ -5,7 +5,7 @@ import platform
 import shutil
 from typing import Any
 
-from ..workers.code import open_interpreter_status
+from ..agent.coding_workers import coding_worker_catalog
 
 
 def _module_available(name: str) -> bool:
@@ -188,22 +188,11 @@ def professional_analysis_policy() -> dict[str, Any]:
 def capability_snapshot() -> dict[str, Any]:
     native = native_capabilities()
     optional = optional_workers()
-    settings = load_settings()
+    coding = coding_worker_catalog()
     return {
         "native": native,
         "optional_workers": optional,
-        "browser_backends": [
-            {
-                "backend": "playwright",
-                "available": _module_available("playwright"),
-                "default": (settings.browser.backend or "playwright").lower() in {"playwright", "default", "deterministic"},
-            },
-            {
-                "backend": "browser-use",
-                "available": browser_use_available(),
-                "default": (settings.browser.backend or "playwright").lower() in {"browser-use", "browser_use", "browseruse", "intelligent"},
-            },
-        ],
+        "coding_workers": coding,
         "all": native + optional,
         "professional_analysis": professional_analysis_policy(),
     }

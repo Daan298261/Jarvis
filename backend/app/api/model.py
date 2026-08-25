@@ -3,11 +3,20 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..agent.agent_benchmark import TaskMetrics, build_report, list_suite, record_result, suite_coverage
-from ..config import load_settings, save_settings
-from ..inference.backends import probe_remote_server
+from ..agent.agent_benchmark import (
+    apply_expected_solution,
+    check_case,
+    format_prompt,
+    get_case,
+    list_results as list_agent_results,
+    list_suite,
+    prepare_case,
+    record_case_result,
+    empty_metrics,
+)
+from ..config import data_dir, load_settings, save_settings
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
-from ..inference.harness import HARNESS_CASES, run_harness
+from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.manager import MANAGER
 from ..inference.profiles import available_profiles
 
@@ -96,11 +105,60 @@ async def capture_benchmark():
     }}
 
 
-@router.post("/benchmarks/run")
-async def run_model_harness(body: HarnessBody | None = None):
-    live = bool(body.live) if body else False
-    report = await run_harness(live=live, persist=True)
-    return report.as_dict()
+@router.get("/hardware-gate")
+async def model_hardware_gate():
+    return await hardware_purchase_gate()
+
+
+@router.get("/agent-suite")
+async def model_agent_suite():
+    payload = list_suite()
+    payload["recent_results"] = await list_agent_results(limit=50)
+    return payload
+
+
+class AgentSuiteRunBody(BaseModel):
+    case_id: str
+    simulate_success: bool = False
+
+
+@router.post("/agent-suite/run")
+async def run_agent_suite_case(body: AgentSuiteRunBody):
+    """Prepare a suite case (and optionally mark a simulated fixture success).
+
+    Live model execution remains a Windows desktop job. This endpoint is the
+    dataset/harness path used by tests and the Model page.
+    """
+    try:
+        case = get_case(body.case_id)
+    except KeyError as exc:
+        raise HTTPException(404, f"Unknown case {body.case_id}") from exc
+    workspace = data_dir() / "agent-suite" / case.id
+    ctx = prepare_case(case, workspace)
+    if body.simulate_success:
+        apply_expected_solution(case, ctx)
+    ok, note = check_case(case, workspace, ctx)
+    metrics = empty_metrics()
+    metrics["success"] = ok
+    metrics["verification_result"] = note
+    settings = load_settings()
+    row = await record_case_result(
+        case=case,
+        metrics=metrics,
+        profile=settings.inference.profile,
+        source="simulate" if body.simulate_success else "fixture",
+        workspace=str(workspace),
+        notes=note,
+    )
+    return {
+        "ok": True,
+        "case": case.as_public_dict(),
+        "prompt": format_prompt(case, ctx),
+        "success": ok,
+        "note": note,
+        "workspace": str(workspace),
+        "result_id": row.id,
+    }
 
 
 @router.post("/load")

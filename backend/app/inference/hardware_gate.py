@@ -1,18 +1,16 @@
 """P0.12 — hardware purchasing gate.
 
-Do not recommend buying RAM, extra GPUs, NPUs, or inference boxes until the
-local benchmark suite has produced real measurements on this desktop.
+Do not recommend extra RAM, Tesla/V100 GPUs, NPUs, or other inference hardware
+until the desktop benchmark suite has actually run. This module turns current
+hardware + stored samples into a bottleneck report and a hard purchase gate.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..hardware import HardwareInfo, detect_hardware
-
-
-MIN_INFERENCE_SAMPLES = 3
-MIN_AGENT_RESULTS = 5
+from ..hardware import hardware_dict
+from .benchmarks import list_benchmarks, task_outcome_stats
 
 DEFERRED_PURCHASES = (
     "additional RAM",
@@ -22,102 +20,153 @@ DEFERRED_PURCHASES = (
     "additional inference hardware",
 )
 
-
-def _bottlenecks(hw: HardwareInfo, samples: list[dict[str, Any]]) -> list[str]:
-    found: list[str] = []
-    latest = samples[0] if samples else {}
-    vram_used = latest.get("vram_used_mib")
-    if hw.vram_total_mib and vram_used is not None:
-        headroom = hw.vram_total_mib - int(vram_used)
-        if headroom < 1024:
-            found.append("GPU VRAM is near capacity on the latest sample.")
-        elif int(vram_used) > 0:
-            found.append(f"GPU VRAM has about {headroom} MiB free on the latest sample.")
-    if hw.vram_total_mib is None:
-        found.append("No NVIDIA GPU was visible to nvidia-smi in this environment.")
-    if hw.ram_available_gb < 8:
-        found.append("System RAM available is under 8 GB right now.")
-    tps = latest.get("tokens_per_second") or latest.get("generation_tps")
-    if tps is not None and float(tps) < 8:
-        found.append("Generation tok/s is low; this may be CPU offload or an oversized model, not missing hardware.")
-    if not found:
-        found.append("No hardware bottleneck can be claimed until more benchmark samples exist.")
-    return found
+REQUIRED_BEFORE_PURCHASE = (
+    "Qwen3.5-9B Abliterated Q8_0 load on the Windows RTX 5070 Ti",
+    "Qwen3.5-9B Abliterated Q6_K comparison sample",
+    "current Qwen3.5-27B Q4_K_M baseline sample",
+    "context size sweep at 8K, 16K, and 32K",
+    "vision disabled vs enabled VRAM delta",
+    "reasoning off vs selective vs enabled",
+    "20-task agent suite on the desktop (successful tasks per minute)",
+)
 
 
-def evaluate_purchase_gate(
-    hardware: HardwareInfo | None = None,
-    inference_samples: list[dict[str, Any]] | None = None,
-    agent_results: list[dict[str, Any]] | None = None,
+def _latest_by_profile(samples: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for sample in samples:
+        key = str(sample.get("profile") or "")
+        if key and key not in out:
+            out[key] = sample
+    return out
+
+
+def analyze_hardware_gate(
+    hardware: dict[str, Any] | None = None,
+    samples: list[dict[str, Any]] | None = None,
+    *,
+    agent_suite_complete: bool = False,
+    outcomes: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    hw = hardware or detect_hardware()
-    samples = list(inference_samples or [])
-    agent = list(agent_results or [])
-    inference_ready = len(samples) >= MIN_INFERENCE_SAMPLES
-    agent_ready = len(agent) >= MIN_AGENT_RESULTS
-    allowed = inference_ready and agent_ready
+    hw = dict(hardware or {})
+    rows = list(samples or [])
+    gpu_name = hw.get("gpu_name")
+    vram_total = hw.get("vram_total_mib")
+    vram_free = hw.get("vram_free_mib")
+    ram_total = float(hw.get("ram_total_gb") or 0)
+    ram_available = float(hw.get("ram_available_gb") or 0)
 
-    bottlenecks = _bottlenecks(hw, samples)
-    latest = samples[0] if samples else {}
-    vram_used = latest.get("vram_used_mib")
-    vram_saturated = bool(
-        hw.vram_total_mib and vram_used is not None and (hw.vram_total_mib - int(vram_used)) < 1024
+    vram_used_now = None
+    vram_saturated = False
+    if isinstance(vram_total, int) and isinstance(vram_free, int):
+        vram_used_now = vram_total - vram_free
+        vram_saturated = vram_total > 0 and (vram_used_now / vram_total) >= 0.92
+
+    sample_vram = [int(s["vram_used_mib"]) for s in rows if s.get("vram_used_mib") is not None]
+    cpu_offload_likely = False
+    if vram_total and sample_vram:
+        cpu_offload_likely = any(value >= int(vram_total) - 256 for value in sample_vram)
+    ram_constrained = ram_available and ram_available < 4
+    has_tps = any(s.get("tokens_per_second") for s in rows)
+    profiles = {str(s.get("profile") or "") for s in rows if s.get("profile")}
+    live_gpu = bool(gpu_name) and bool(vram_total)
+    desktop_windows = str(hw.get("os_name") or "").lower() == "windows"
+
+    missing: list[str] = []
+    if not live_gpu:
+        missing.append("NVIDIA GPU metrics (nvidia-smi)")
+    if not desktop_windows:
+        missing.append("Windows desktop measurement (this environment is not the target PC)")
+    if "fast" not in profiles or "balanced" not in profiles:
+        missing.append("stored samples covering Fast and Balanced profiles")
+    if not has_tps:
+        missing.append("tokens/sec samples from a real model load")
+    if not agent_suite_complete:
+        missing.append("completed 20-task agent suite on the target desktop")
+    if not any((s.get("quantization") or "").upper().startswith("Q8") for s in rows):
+        missing.append("9B Q8_0 sample")
+    if not any("27B" in str(s.get("profile") or "") or (s.get("quantization") or "").upper().startswith("Q4") for s in rows):
+        missing.append("27B Q4_K_M baseline sample")
+
+    bottleneck = "insufficient_data"
+    if not live_gpu:
+        bottleneck = "no_gpu_metrics"
+    elif not has_tps:
+        bottleneck = "no_model_throughput_samples"
+    elif cpu_offload_likely and vram_saturated:
+        bottleneck = "gpu_vram"
+    elif ram_constrained:
+        bottleneck = "system_ram"
+    elif has_tps and live_gpu and not vram_saturated:
+        bottleneck = "software_or_unmeasured"
+    if missing:
+        bottleneck = bottleneck if bottleneck != "software_or_unmeasured" else "software_optimization_incomplete"
+
+    cpu_inference_limiting = None
+    if has_tps and cpu_offload_likely:
+        cpu_inference_limiting = True
+    elif has_tps and live_gpu and not cpu_offload_likely:
+        cpu_inference_limiting = False
+
+    purchase_recommended = False
+    decision = "defer_purchase"
+    reason = (
+        "Hardware purchases stay gated until the desktop benchmark suite has run. "
+        "Optimize the 9B primary / 27B expert stack first."
     )
-    cpu_offload = bool(latest.get("gpu_layers") not in (None, "", "all", "99", 99) and samples)
-    ram_constrained = hw.ram_available_gb < 8
-    cpu_limiting = bool((latest.get("tokens_per_second") or 0) and float(latest.get("tokens_per_second") or 0) < 8)
+    if missing:
+        reason = "Missing required evidence: " + "; ".join(missing) + ". " + reason
 
-    if not allowed:
-        recommendation = (
-            "Do not buy hardware yet. Run the local inference harness and the 20-task agent suite "
-            "on the Windows desktop, then re-evaluate from measured bottlenecks."
-        )
-    elif vram_saturated:
-        recommendation = (
-            "VRAM is saturated in measured samples. Software options (smaller primary model, "
-            "lazy vision, smaller context) must be compared before any purchase."
-        )
-    else:
-        recommendation = (
-            "Current measurements do not justify extra GPUs, RAM, NPUs, or a dedicated inference box."
-        )
+    estimated_vram = None
+    estimated_ram = None
+    if vram_saturated:
+        estimated_vram = "Possible VRAM benefit, but only after 9B Q8_0 vs Q6_K vs 27B Q4_K_M is measured on this GPU."
+    if ram_constrained:
+        estimated_ram = "System RAM is tight right now; still defer buying until model-offload cost is measured."
 
     return {
-        "purchase_allowed": allowed,
-        "reason": (
-            "Enough measured samples exist to discuss bottlenecks."
-            if allowed
-            else "Hardware purchases are gated on measured inference samples and agent-suite results."
-        ),
-        "deferred_until_measured": list(DEFERRED_PURCHASES),
-        "inference_samples": len(samples),
-        "agent_results": len(agent),
-        "minimum_inference_samples": MIN_INFERENCE_SAMPLES,
-        "minimum_agent_results": MIN_AGENT_RESULTS,
-        "bottlenecks": bottlenecks,
-        "signals": {
-            "gpu_vram_saturated": vram_saturated,
-            "cpu_offload_suspected": cpu_offload,
-            "system_ram_constrained": ram_constrained,
-            "cpu_inference_limiting": cpu_limiting,
-            "model_switching_cost_unknown": True,
-        },
-        "estimated_benefit_more_vram": (
-            "Unknown until 9B Q8 vs Q6 vs 27B Q4 task throughput is measured."
-            if not allowed
-            else "Only relevant if VRAM is the measured bottleneck after software optimization."
-        ),
-        "estimated_benefit_more_ram": (
-            "Unknown until RAM and CPU-offload samples exist."
-            if not allowed
-            else "Only relevant if system RAM is the measured bottleneck."
-        ),
-        "recommendation": recommendation,
-        "hardware_summary": {
-            "os_name": hw.os_name,
-            "cpu_name": hw.cpu_name,
-            "ram_total_gb": hw.ram_total_gb,
-            "gpu_name": hw.gpu_name,
-            "vram_total_mib": hw.vram_total_mib,
-        },
+        "decision": decision,
+        "purchase_recommended": purchase_recommended,
+        "reason": reason,
+        "bottleneck": bottleneck,
+        "gpu_name": gpu_name,
+        "gpu_present": bool(gpu_name),
+        "gpu_vram_saturated": bool(vram_saturated),
+        "vram_total_mib": vram_total,
+        "vram_free_mib": vram_free,
+        "vram_used_mib": vram_used_now,
+        "cpu_offload_likely": bool(cpu_offload_likely),
+        "system_ram_constrained": bool(ram_constrained),
+        "ram_total_gb": ram_total or None,
+        "ram_available_gb": ram_available or None,
+        "cpu_inference_limiting": cpu_inference_limiting,
+        "model_switching_costly": None,
+        "estimated_benefit_more_vram": estimated_vram,
+        "estimated_benefit_more_ram": estimated_ram,
+        "deferred_purchases": list(DEFERRED_PURCHASES),
+        "required_before_purchase": list(REQUIRED_BEFORE_PURCHASE),
+        "missing_evidence": missing,
+        "profiles_sampled": sorted(p for p in profiles if p),
+        "sample_count": len(rows),
+        "agent_suite_complete": agent_suite_complete,
+        "outcomes": outcomes or {},
+        "latest_by_profile": _latest_by_profile(rows),
     }
+
+
+async def hardware_purchase_gate() -> dict[str, Any]:
+    from ..agent.agent_benchmark import SUITE_ID, list_results
+
+    hardware = hardware_dict()
+    samples = await list_benchmarks(limit=80)
+    outcomes = await task_outcome_stats()
+    results = await list_results(limit=200)
+    suite_cases = {row["case_id"] for row in results if row.get("suite_id") == SUITE_ID and row.get("success")}
+    agent_suite_complete = len(suite_cases) >= 20
+    report = analyze_hardware_gate(
+        hardware,
+        samples,
+        agent_suite_complete=agent_suite_complete,
+        outcomes=outcomes,
+    )
+    report["agent_suite_successes"] = len(suite_cases)
+    return report

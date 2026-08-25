@@ -18,15 +18,31 @@ type Benchmark = {
   created_at: string | null
 }
 
-type HarnessCase = {
-  profile: string
-  context_size: number
-  vision: boolean
-  thinking: string
-  status: string
-  skip_reason?: string
-  time_to_first_token_seconds?: number | null
-  output_tokens_per_second?: number | null
+type HardwareGate = {
+  decision: string
+  purchase_recommended: boolean
+  reason: string
+  bottleneck: string
+  gpu_name?: string | null
+  gpu_vram_saturated: boolean
+  cpu_offload_likely: boolean
+  system_ram_constrained: boolean
+  cpu_inference_limiting: boolean | null
+  model_switching_costly: boolean | null
+  estimated_benefit_more_vram: string | null
+  estimated_benefit_more_ram: string | null
+  deferred_purchases: string[]
+  missing_evidence: string[]
+  agent_suite_complete: boolean
+  agent_suite_successes?: number
+}
+
+type SuiteCase = {
+  id: string
+  title: string
+  category: string
+  expected_tools: string[]
+  live_requires: string[]
 }
 
 type ModelStatus = {
@@ -53,8 +69,16 @@ type ModelStatus = {
   last_error?: string
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
-  harness_cases?: { profile: string; context_size: number; vision: boolean; thinking: string }[]
-  primary_metric?: string
+  hardware_gate?: HardwareGate
+  agent_suite?: {
+    suite_id: string
+    count: number
+    primary_metric: string
+    live_comparison_blocked: boolean
+    live_comparison_reason: string
+    cases: SuiteCase[]
+    recent_results: { case_id: string; success: boolean; source: string }[]
+  }
 }
 
 function pct(value: number | null | undefined) {
@@ -64,11 +88,20 @@ function pct(value: number | null | undefined) {
 
 export function ModelPage() {
   const [model, setModel] = useState<ModelStatus | null>(null)
+  const [gate, setGate] = useState<HardwareGate | null>(null)
+  const [suite, setSuite] = useState<ModelStatus["agent_suite"] | null>(null)
   const [busy, setBusy] = useState(false)
   const [probe, setProbe] = useState<any>(null)
 
   async function refresh() {
-    setModel(await api("/api/model"))
+    const [status, gateData, suiteData] = await Promise.all([
+      api<ModelStatus>("/api/model"),
+      api<HardwareGate>("/api/model/hardware-gate"),
+      api<NonNullable<ModelStatus["agent_suite"]>>("/api/model/agent-suite"),
+    ])
+    setModel(status)
+    setGate(gateData)
+    setSuite(suiteData)
   }
   useEffect(() => { refresh() }, [])
 
@@ -227,6 +260,57 @@ export function ModelPage() {
           </table>
         )}
       </div>
+      {gate && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Hardware purchasing gate</h2>
+          <p className="lede">{gate.reason}</p>
+          <div className="kv" style={{ marginTop: 12 }}>
+            <b>Decision</b><span>{gate.purchase_recommended ? "purchase may be justified" : "defer purchase"}</span>
+            <b>Bottleneck</b><span>{gate.bottleneck}</span>
+            <b>GPU</b><span>{gate.gpu_name || "not detected"}</span>
+            <b>VRAM saturated</b><span>{gate.gpu_vram_saturated ? "yes" : "no"}</span>
+            <b>CPU offload</b><span>{gate.cpu_offload_likely ? "likely" : "no"}</span>
+            <b>RAM constrained</b><span>{gate.system_ram_constrained ? "yes" : "no"}</span>
+            <b>CPU inference</b><span>{gate.cpu_inference_limiting == null ? "unmeasured" : gate.cpu_inference_limiting ? "limiting" : "not limiting"}</span>
+            <b>Model switching</b><span>{gate.model_switching_costly == null ? "unmeasured" : gate.model_switching_costly ? "costly" : "cheap"}</span>
+            <b>More VRAM</b><span>{gate.estimated_benefit_more_vram || "not estimated until desktop benchmarks exist"}</span>
+            <b>More RAM</b><span>{gate.estimated_benefit_more_ram || "not estimated until desktop benchmarks exist"}</span>
+            <b>Agent suite</b><span>{gate.agent_suite_complete ? "complete" : `${gate.agent_suite_successes || 0}/20 desktop successes`}</span>
+          </div>
+          <p className="lede" style={{ marginTop: 12 }}>Deferred until then: {(gate.deferred_purchases || []).join(", ")}.</p>
+          {!!gate.missing_evidence?.length && (
+            <p className="lede">Missing evidence: {gate.missing_evidence.join("; ")}.</p>
+          )}
+        </div>
+      )}
+      {suite && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>20-task agent suite</h2>
+          <p className="lede">
+            Primary metric: {suite.primary_metric}. {suite.live_comparison_reason}
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Category</th>
+                <th>Tools</th>
+                <th>Live needs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(suite.cases || []).map((row) => (
+                <tr key={row.id}>
+                  <td>{row.title}</td>
+                  <td>{row.category}</td>
+                  <td>{(row.expected_tools || []).join(", ")}</td>
+                  <td>{(row.live_requires || []).join(", ") || "none"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
