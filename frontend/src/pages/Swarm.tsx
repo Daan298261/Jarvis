@@ -8,6 +8,7 @@ import {
   listNodeLeases,
   listSwarmNodes,
   listSwarmRoles,
+  postSwarmPlacement,
   putNodeBudget,
   putNodeRolePolicy,
   releaseNodeLease,
@@ -21,6 +22,7 @@ import {
   type SwarmNodeHardware,
   type SwarmNodeResources,
   type SwarmResourceAmounts,
+  type SwarmPlacementResult,
   type SwarmRoleHolder,
   type SwarmRolePolicy,
   type SwarmRolesResponse,
@@ -156,6 +158,202 @@ function RoleCard({ title, holder }: { title: string; holder: SwarmRoleHolder | 
         </span>
         <b>Assignment</b><span>{holder.assignment}</span>
       </div>
+    </div>
+  )
+}
+
+function PlacementSection({
+  onPlaced,
+}: {
+  onPlaced: () => Promise<void>
+}) {
+  const [capabilities, setCapabilities] = useState("")
+  const [role, setRole] = useState("")
+  const [cpuThreads, setCpuThreads] = useState("")
+  const [ramGb, setRamGb] = useState("")
+  const [ttlSeconds, setTtlSeconds] = useState("300")
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [result, setResult] = useState<SwarmPlacementResult | null>(null)
+
+  async function handleSubmit() {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const capabilityList = capabilities
+        .split(/[,\s]+/)
+        .map((value) => value.trim())
+        .filter(Boolean)
+      const body: {
+        capabilities: string[]
+        role?: string
+        claim?: { cpu_threads?: number; ram_gb?: number }
+        ttl_seconds?: number
+      } = { capabilities: capabilityList }
+      if (role) body.role = role
+
+      const claim: { cpu_threads?: number; ram_gb?: number } = {}
+      if (cpuThreads.trim()) {
+        const value = Number(cpuThreads)
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("cpu_threads must be a positive number")
+        }
+        claim.cpu_threads = value
+      }
+      if (ramGb.trim()) {
+        const value = Number(ramGb)
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("ram_gb must be a positive number")
+        }
+        claim.ram_gb = value
+      }
+      if (Object.keys(claim).length) body.claim = claim
+
+      if (ttlSeconds.trim()) {
+        const ttl = Number(ttlSeconds)
+        if (!Number.isFinite(ttl) || ttl <= 0) {
+          throw new Error("ttl_seconds must be a positive number")
+        }
+        body.ttl_seconds = ttl
+      }
+
+      const placement = await postSwarmPlacement(body)
+      setResult(placement)
+      if (placement.accepted) {
+        await onPlaced()
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Placement request failed")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h2 style={{ marginTop: 0 }}>Placement</h2>
+      <p className="lede" style={{ margin: "0 0 12px" }}>
+        Request work placement via <code>POST /api/swarm/placement</code>. Empty capabilities place on localhost.
+      </p>
+      {submitError && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>
+          {submitError}
+        </p>
+      )}
+      <div className="grid" style={{ gap: 10, maxWidth: 520 }}>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>Capabilities</span>
+          <input
+            type="text"
+            value={capabilities}
+            disabled={submitting}
+            onChange={(e) => setCapabilities(e.target.value)}
+            placeholder="comma-separated (empty = localhost)"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>Role</span>
+          <select value={role} disabled={submitting} onChange={(e) => setRole(e.target.value)}>
+            <option value="">none</option>
+            {SWARM_ROLE_NAMES.map((value) => (
+              <option key={value} value={value}>{formatRoleLabel(value)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>CPU threads</span>
+          <input
+            type="number"
+            min={1}
+            value={cpuThreads}
+            disabled={submitting}
+            onChange={(e) => setCpuThreads(e.target.value)}
+            placeholder="optional claim"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>RAM (GB)</span>
+          <input
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={ramGb}
+            disabled={submitting}
+            onChange={(e) => setRamGb(e.target.value)}
+            placeholder="optional claim"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>TTL (seconds)</span>
+          <input
+            type="number"
+            min={1}
+            value={ttlSeconds}
+            disabled={submitting}
+            onChange={(e) => setTtlSeconds(e.target.value)}
+          />
+        </label>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn secondary" type="button" disabled={submitting} onClick={handleSubmit}>
+            {submitting ? "Placing…" : "Place work"}
+          </button>
+        </div>
+      </div>
+      {result && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: "12px 14px",
+            borderLeft: `4px solid ${result.accepted ? "var(--good)" : "var(--bad)"}`,
+            background: "var(--panel)",
+          }}
+        >
+          <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+            <strong>Last result</strong>
+            <span className={`badge ${result.accepted ? "completed" : "failed"}`}>
+              {result.accepted ? "Accepted" : "Rejected"}
+            </span>
+          </div>
+          {result.accepted ? (
+            <div className="kv">
+              <b>Reason</b><span>{result.reason}</span>
+              <b>Node</b>
+              <span>
+                <Link to={`/swarm/${result.node_id}`} className="stat">
+                  {result.hostname || result.node_id}
+                </Link>
+                <span className="stat" style={{ marginLeft: 8 }}>{result.node_id}</span>
+              </span>
+              <b>Worker</b>
+              <span>
+                {result.worker.name} ({result.worker.kind}) ·{" "}
+                <span className={`badge ${workerStatusBadgeClass(result.worker.status)}`}>
+                  {result.worker.status}
+                </span>
+                <span className="stat" style={{ marginLeft: 8 }}>{result.worker.id}</span>
+              </span>
+              {result.lease && (
+                <>
+                  <b>Lease</b>
+                  <span>
+                    <span className={`badge ${leaseStatusBadgeClass(result.lease.status)}`}>
+                      {result.lease.status}
+                    </span>
+                    {" · "}
+                    {formatLeaseClaim(result.lease.claim)}
+                    <span className="stat" style={{ marginLeft: 8 }}>{result.lease.id}</span>
+                  </span>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="kv">
+              <b>Code</b><span className="stat">{result.code}</span>
+              <b>Reason</b><span>{result.reason}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -769,6 +967,12 @@ export function SwarmPage() {
         )}
       </div>
       <RolesSection roles={roles} error={rolesError} loading={loading} />
+      <PlacementSection
+        onPlaced={async () => {
+          await refreshList()
+          if (nodeId) await loadDetail(nodeId)
+        }}
+      />
       {listError && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--warn)", padding: "12px 16px" }}>
           <strong>Nodes API unavailable</strong>

@@ -360,3 +360,43 @@ export async function releaseNodeLease(nodeId: string, leaseId: string): Promise
     { method: "DELETE" },
   )
 }
+
+export type SwarmPlacementRequest = {
+  capabilities?: string[]
+  role?: string
+  worker_id?: string
+  worker_kind?: string
+  claim?: SwarmLeaseClaim
+  ttl_seconds?: number
+}
+
+export type SwarmPlacementAccepted = {
+  accepted: true
+  node_id: string
+  hostname?: string
+  worker: SwarmWorker
+  reason: string
+  lease?: SwarmLease
+}
+
+export type SwarmPlacementRejected = {
+  accepted: false
+  code: string
+  reason: string
+}
+
+export type SwarmPlacementResult = SwarmPlacementAccepted | SwarmPlacementRejected
+
+export async function postSwarmPlacement(body: SwarmPlacementRequest): Promise<SwarmPlacementResult> {
+  const headers = authHeaders({ "Content-Type": "application/json" })
+  const response = await fetch("/api/swarm/placement", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (response.status === 409) {
+    return response.json() as Promise<SwarmPlacementRejected>
+  }
+  await throwIfNotOk(response)
+  return response.json() as Promise<SwarmPlacementAccepted>
+}
