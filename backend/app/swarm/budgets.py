@@ -399,6 +399,24 @@ async def list_node_leases(node_id: str) -> list[dict[str, Any]]:
         return [lease_to_dict(row) for row in rows]
 
 
+async def would_exceed_hard_cap(node_id: str, claim: dict[str, Any]) -> list[str]:
+    """Return resource keys that would violate HARD caps if claim were acquired."""
+    if not isinstance(claim, dict) or not claim:
+        raise ValueError("claim must be a non-empty object")
+
+    async with SessionLocal() as session:
+        node = await session.get(Node, node_id)
+        if node is None:
+            raise LookupError("Node not found")
+        budget_row = await session.get(NodeBudget, node_id)
+        if budget_row is None:
+            raise LookupError("Node budget not found")
+        budget = budget_to_dict(budget_row)
+        resources = _parse_json_dict(node.resources_json)
+        active = await _list_active_leases(session, node_id)
+        return _hard_cap_violations(resources, budget, active, claim)
+
+
 async def acquire_lease(
     node_id: str,
     claim: dict[str, Any],
