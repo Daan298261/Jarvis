@@ -59,6 +59,7 @@ or:
 - Replacing §57 Current State with a full re-audit
 - Editing `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, or `BLUE_TEAM.md` (Architect-only)
 - Adding Jarvis 2.0 / swarm / Browser Use / model-stack work unless that is the named ticket
+- Adding offensive / red / counter-response capability (tools, payloads, hack-back skills, enabling Red beyond the refuse-stub). **Hard guardrail:** only Taco (manual) or PolitieGPT (named LE bot, under the LE gate) may add it. Developers, PR fixer, CoS, generic cloud agents, and home Jarvis self-dev must not. See `SECURITY_AGENTS.md` §3.4.
 
 ---
 

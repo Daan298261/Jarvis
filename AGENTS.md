@@ -54,6 +54,7 @@ Implement and unit-test; leave P0 live-model items as `TODO` / desktop sign-off 
 - Edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`) — Jarvis Architect is the sole editor; spec-change requests come from Taco or Chief of Staff
 - Rewrite `JARVIS_MASTER_PLAN.md` wholesale or paste large design specs into it
 - Start swarm / Browser Use / P4–P5 / model-stack work unless that is the named ticket
+- Add offensive / red / counter-response capability. **Hard guardrail:** only Taco (manual) or PolitieGPT (named LE bot, under the LE gate) may add it. Developers, PR fixer, CoS, generic cloud agents, and home Jarvis self-dev must not. Home/product workers have no API to register offensive tools, payloads, or hack-back skills. See `SECURITY_AGENTS.md` §3.4.
 
 Design work belongs in **`docs/rfcs/`** ([template](docs/rfcs/TEMPLATE.md)).
 
