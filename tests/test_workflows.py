@@ -20,6 +20,13 @@ def test_builtins_cover_requested_templates():
     assert any("{{path}}" in step.prompt for step in debug.steps)
 
 
+def test_guide_includes_voice_and_command():
+    from app.agent.workflows import GUIDE_SECTIONS
+
+    ids = {item["id"] for item in GUIDE_SECTIONS}
+    assert {"command", "modes", "voice", "memory"} <= ids
+
+
 def test_render_and_compose_substitute_parameters():
     workflow = get_workflow("organize-files")
     assert workflow is not None

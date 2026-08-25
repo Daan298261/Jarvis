@@ -25,29 +25,55 @@ export function getAuthUrl(path: string): string {
   return `${path}${sep}key=${encodeURIComponent(key)}`
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) }
+function authHeaders(extra?: HeadersInit): Record<string, string> {
+  const headers: Record<string, string> = { ...(extra as Record<string, string> || {}) }
   const key = getPrivateKey()
   if (key && !headers["Authorization"] && !headers["X-Jarvis-Key"]) {
     headers["X-Jarvis-Key"] = key
   }
+  return headers
+}
 
+async function throwIfNotOk(response: Response): Promise<void> {
+  if (response.ok) return
+  const text = await response.text()
+  let errorDetail = text
+  try {
+    const parsed = JSON.parse(text)
+    errorDetail = parsed.detail || text
+  } catch {
+    // not JSON
+  }
+  throw new Error(errorDetail || response.statusText)
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
   const response = await fetch(path, {
     ...init,
     headers,
   })
-  if (!response.ok) {
-    const text = await response.text()
-    let errorDetail = text
-    try {
-      const parsed = JSON.parse(text)
-      errorDetail = parsed.detail || text
-    } catch {
-      // not JSON
-    }
-    throw new Error(errorDetail || response.statusText)
-  }
+  await throwIfNotOk(response)
   return response.json() as Promise<T>
+}
+
+export async function apiForm<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
+  const headers = authHeaders(init?.headers)
+  const response = await fetch(path, {
+    method: "POST",
+    ...init,
+    headers,
+    body,
+  })
+  await throwIfNotOk(response)
+  return response.json() as Promise<T>
+}
+
+export async function fetchAudio(path: string, init?: RequestInit): Promise<Blob> {
+  const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
+  const response = await fetch(path, { ...init, headers })
+  await throwIfNotOk(response)
+  return response.blob()
 }
 
 export type Task = {

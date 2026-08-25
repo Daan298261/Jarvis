@@ -13,7 +13,7 @@ Browser (localhost:4780)
 FastAPI backend / Orchestrator
   ├── Task store (SQLite)
   ├── Agent runtime (plan → act → observe → recover → verify)
-  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP, request_tools, UFO, Cua)
+  ├── Tool registry (filesystem, terminal, python, browser, browser_use, code_worker, desktop, office, git, docker, web_fetch, screenshot, MCP)
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
@@ -149,9 +149,9 @@ Security/SIEM/forensics are future specialized roles only. Their appearance in t
 
 The existing React + TypeScript + Vite portal is the basis of the universal UI. Do not create separate Windows/Linux/Pi frontends. Future desktop/mobile wrappers should reuse the same frontend and expose host-specific capabilities through APIs/bridges. Tauri is the preferred future desktop-shell candidate in the swarm specification, with Electron as an alternative.
 
-## Autonomy
+## Voice
 
-`interactive`, `trusted`, and `autonomous` modes remain policy boundaries for execution. Swarm placement must not grant a Worker/Node more authority than the task already has. A placement decision changes **where** authorized work runs, not **what** it is allowed to do.
+`GET /api/voice/status` reports local STT/TTS. `POST /api/voice/command` still accepts already-transcribed text. `POST /api/voice/listen` transcribes uploaded audio with local Whisper when installed. `POST /api/voice/speak` returns WAV from Windows SAPI, espeak-ng, or pyttsx3. Cloud speech APIs are not used. The Command page has a Speak button and an optional Speak-results toggle.
 
 ## Implementation rule
 

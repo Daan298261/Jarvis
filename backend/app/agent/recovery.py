@@ -46,6 +46,17 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("python", "call the site's API or parse the response with a library"),
         Alternative("screenshot", "look at the page only when the DOM cannot answer the question"),
     ),
+    "browser_use": (
+        Alternative("browser", "Playwright is the default deterministic backend; use it when selectors are known"),
+        Alternative("web_fetch", "read the page or its API directly when no JavaScript is needed"),
+        Alternative("python", "call the site's API or parse the response with a library"),
+    ),
+    "code_worker": (
+        Alternative("python", "make the change with a script instead of delegating to OpenHands"),
+        Alternative("filesystem", "inspect and edit the files directly"),
+        Alternative("git", "inspect the working tree, then apply a smaller native change"),
+        Alternative("terminal", "run tests or the project CLI yourself"),
+    ),
     "web_fetch": (
         Alternative("browser", "the endpoint needs a real session, cookies, or JavaScript"),
     ),

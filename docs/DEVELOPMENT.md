@@ -208,9 +208,13 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | POST | `/api/workflows` | Save a preset under `data/workflows/` |
 | DELETE | `/api/workflows/{id}` | Delete a saved preset (not a builtin) |
 | POST | `/api/workflows/run` | Fill placeholders, compose stages, create a task |
+| GET | `/api/voice/status` | Local Whisper STT / TTS probe (`stt_ready`, `tts_ready`) |
 | POST | `/api/voice/command` | `{ text, autonomy? }` — already-transcribed speech |
+| POST | `/api/voice/listen` | multipart `audio` — local Whisper, then create a task |
+| POST | `/api/voice/transcribe` | multipart `audio` — transcript only |
+| POST | `/api/voice/speak` | `{ text }` — local TTS WAV |
 
-Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from text.
+Voice stays on this machine. If Whisper is missing, type on Command as usual. Windows SAPI / espeak-ng / pyttsx3 provide TTS.
 
 ---
 
@@ -220,14 +224,13 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 
 1. Classifies (`planning.classify_task`) and stores `task_class`
 2. Injects matching skills and trajectories into the system prompt
-3. Exposes only tools for that class (`agent/tool_exposure.py`) plus `request_tools`; mixed/long-horizon tasks still get the full set
-4. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
-5. Executes tool calls until the policy budget is spent
-6. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
-7. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
-8. Reliable mode also requires a verification **tool** call and a critic pass
-9. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
-10. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence
+3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
+4. Executes tool calls until the policy budget is spent
+5. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
+6. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
+7. Reliable mode also requires a verification **tool** call and a critic pass
+8. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
+9. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence. Differing arguments become parameters; a later matching task can **run those bound steps**, then verify.
 
 Execution modes (`planning.POLICIES`) are **not** model profiles:
 
@@ -259,7 +262,7 @@ Context compaction (`agent/compaction.py`) must keep tool results paired with th
 
 MCP tools do not need a Python class: configure servers via the MCP page or `mcp_servers` in settings. They appear as `mcp_*` functions through `MCPProxyTool`.
 
-Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend. UFO and Cua are `ComputerUseBackend` adapters (`backend/app/workers/computer.py`) that probe for a local install and otherwise report `missing`.
+Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend. Browser Use and OpenHands adapters live in `backend/app/workers/` and register `browser_use` / `code_worker` tools that return "not installed" until the optional packages are present.
 
 ---
 
@@ -337,15 +340,10 @@ Current unit coverage (no GPU required):
 | `test_inference_backends.py` | llama.cpp vs remote/Ollama/LM Studio selection, CLI flags, model-list parsing |
 | `test_recovery.py` / `test_recovery_loop.py` | Failure class → alternative tool |
 | `test_trajectory.py` | Record / recall |
-| `test_skills.py` | Promotion needs 3 repeats; BrowserCode-style browser skills |
-| `test_workers.py` | Open Interpreter adapter / sandbox |
-| `test_docker.py` | `docker run` requires an image |
+| `test_skills.py` | Promotion needs 3 repeats; parameterized steps run on match / `POST /skills/{id}/run` |
 | `test_auth.py` | 401 without key; header / bearer / query |
 | `test_queue.py` | File-drop watcher |
-| `test_mcp_server.py` | Jarvis MCP for Cursor; recursive dispatch refused |
-| `test_escalation.py` | Compact EscalationContext persistence |
-| `test_acp.py` | ACP session persist + auto-answer policy |
-| `test_tool_qa.py` | Git checkpoint, docker targets, web_fetch scheme, Office info, shells |
+| `test_workers.py` | Browser Use / OpenHands adapters; voice listen/command; docker `run` needs an image |
 
 `conftest.py` fixture `jarvis_env` points SQLite at a temp path, marks the model loaded, and applies autonomous settings.
 
@@ -378,9 +376,7 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Parameterized skills execute bound tool steps on matching tasks, then verify
-- UFO and Cua adapters are integrated and report `missing` until the packages are installed; Browser Use, OpenHands, and Open Interpreter remain `not_integrated`
-- Whisper STT / local TTS are not wrapped around `/api/voice/command`
+- Browser Use and OpenHands adapters are integrated; they report `missing` until those packages are installed. UFO, Cua, and Open Interpreter remain `not_integrated`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
 
 ---

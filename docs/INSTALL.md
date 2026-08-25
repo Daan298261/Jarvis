@@ -40,7 +40,10 @@ Optional, depending on which tools you want the agent to use:
 - **Playwright Chromium** — installed in the next section; required for the browser tool
 - **Microsoft Office** — Word/Excel/PowerPoint COM (`office` tool). Without Office, the same tool uses python-docx / openpyxl / python-pptx
 - **Docker Desktop** — `docker` tool
-- **WSL** — extra `bash` shell; PowerShell is the default on Windows
+- **WSL** — extra `bash` shell; PowerShell is the default
+- **Browser Use** (`pip install browser-use`) — optional intelligent browser worker; Playwright remains the default
+- **OpenHands** — optional software-engineering worker (`code_worker`). Jarvis still verifies
+- **faster-whisper** plus a model in `models/whisper/` (or `JARVIS_WHISPER_MODEL`) — local voice input on Command. Windows SAPI speaks results without extra packages
 
 Confirm:
 

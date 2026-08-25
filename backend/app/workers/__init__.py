@@ -1,10 +1,12 @@
 """Optional worker adapters. Jarvis stays the orchestrator; these never replace native tools."""
 
-from .computer import CuaBackend, NativeWindowsBackend, UFOBackend, preferred_computer_backend
+from .browser import BrowserUseBackend, playwright_is_default
+from .code import OpenHandsBackend
+from .voice import voice_status
 
 __all__ = [
-    "CuaBackend",
-    "NativeWindowsBackend",
-    "UFOBackend",
-    "preferred_computer_backend",
+    "BrowserUseBackend",
+    "OpenHandsBackend",
+    "playwright_is_default",
+    "voice_status",
 ]

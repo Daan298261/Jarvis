@@ -118,6 +118,7 @@ h2 { font-size: 18px; margin: 0 0 12px; }
 }
 a.btn { color: #16120a; }
 .btn.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn.recording { background: var(--bad); color: #fff; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .stat { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); }

@@ -5,7 +5,9 @@ import platform
 import shutil
 from typing import Any
 
-from ..workers.computer import CuaBackend, UFOBackend
+from ..workers.browser import BrowserUseBackend
+from ..workers.code import OpenHandsBackend
+from ..workers.voice import voice_status
 
 
 def _module_available(name: str) -> bool:
@@ -62,7 +64,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": _module_available("playwright"),
             "status": "ready" if _module_available("playwright") else "missing",
-            "detail": "Deterministic browser backend.",
+            "detail": "Deterministic browser backend (default). Browser Use is optional for unfamiliar sites.",
         },
         {
             "id": "windows_ui",
@@ -112,6 +114,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "status": "ready" if shutil.which("docker") else "unavailable",
             "detail": "Optional. Jarvis continues without it.",
         },
+        voice_status(),
     ]
 
 
@@ -120,16 +123,22 @@ def optional_workers() -> list[dict[str, Any]]:
 
     acp = acp_status()
     return [
+        BrowserUseBackend().probe(),
         {
-            "id": "browser-use",
-            "name": "Browser Use",
+            "id": "ufo",
+            "name": "Microsoft UFO",
             "kind": "optional",
-            "available": browser_use_installed,
-            "status": "ready" if browser_use_installed else "missing",
-            "detail": (
-                "Intelligent browser discovery worker behind BrowserBackend. "
-                "Playwright remains the deterministic default."
-            ),
+            "available": False,
+            "status": "not_integrated",
+            "detail": "Windows HostAgent/AppAgent worker. Native UI Automation is the current fallback.",
+        },
+        {
+            "id": "cua",
+            "name": "Cua",
+            "kind": "optional",
+            "available": False,
+            "status": "not_integrated",
+            "detail": "Computer-use worker. Not required for Jarvis to run.",
         },
         UFOBackend().probe(),
         CuaBackend().probe(),
@@ -141,22 +150,7 @@ def optional_workers() -> list[dict[str, Any]]:
             "status": "not_integrated",
             "detail": "Optional code/shell worker behind an adapter.",
         },
-        {
-            "id": "openhands",
-            "name": "OpenHands",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Optional software-engineering worker. Jarvis still verifies results.",
-        },
-        {
-            "id": "cursor-acp",
-            "name": "Cursor ACP",
-            "kind": "coding",
-            "available": bool(acp.get("available")),
-            "status": acp.get("status") or "not_connected",
-            "detail": acp.get("detail") or "ACP JSON-RPC client. Live CLI is optional; session IDs persist.",
-        },
+        OpenHandsBackend().probe(),
     ]
 
 

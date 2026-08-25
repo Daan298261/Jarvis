@@ -24,7 +24,7 @@ export function ToolsPage() {
   return (
     <div>
       <h1>Tools</h1>
-      <p className="lede">Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing. The agent only receives the tools for the current task class; it can call <code>request_tools</code> to expand that set.</p>
+      <p className="lede">Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing. Browser Use and OpenHands adapters are present; they show as missing until those packages are installed. Playwright remains the default browser backend.</p>
       <div className="card">
         {catalog.tools.map((tool) => (
           <div className="toggle" key={tool.name}>

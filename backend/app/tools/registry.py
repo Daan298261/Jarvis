@@ -5,7 +5,8 @@ from typing import Any, Callable
 from ..config import AppSettings, default_allowed_directories
 from .base import Tool, ToolResult
 from .browser import BrowserTool
-from .computer_use import CuaTool, UFOTool
+from .browser_use import BrowserUseTool
+from .code_worker import CodeWorkerTool
 from .desktop import DesktopTool
 from .docker_tools import DockerTool
 from .exposure import REQUEST_CAPABILITY, ToolExposure
@@ -33,6 +34,7 @@ class ToolRegistry:
             TerminalTool(),
             PythonTool(),
             BrowserTool(getter),
+            BrowserUseTool(),
             CodeWorkerTool(getter),
             DesktopTool(),
             OfficeTool(getter),

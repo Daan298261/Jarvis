@@ -3611,8 +3611,9 @@ This development session:
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
 - PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
 - Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
-- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs). `close` tears down the persistent context without launching Chromium and clears `_pages`.
+- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs) — default `BrowserBackend`
 - Playwright: native backend present
+- Browser Use: **adapter integrated** (`browser_use` tool). Status is `missing` until the package is installed; Playwright remains default
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
 - Office: Word/Excel/PowerPoint. Windows COM when Office is installed; python-docx / openpyxl / python-pptx otherwise. Paths are sandboxed.
 - Git: status/diff/branch/log/search plus non-destructive `jarvis-checkpoint-*` backup branches (`checkpoint` / `list_checkpoints` / `restore`)
@@ -3620,15 +3621,15 @@ This development session:
 - Web fetch: HTTP GET/POST/HEAD with optional body, headers, and sandboxed download
 - Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
-- Tool exposure: task class selects a small schema (`agent/tool_exposure.py`); `request_tools` expands it. Mixed and long-horizon tasks still receive every enabled tool.
+- Voice: local Whisper STT (when installed) + Windows SAPI / espeak-ng / pyttsx3 TTS wrapping `/api/voice/command` and `/api/voice/listen`
 
 ### Optional Workers
 
-- Browser Use: **not integrated** (catalog shows `not_integrated`)
-- UFO: **adapter present** — probes for a local `ufo`/`ufo2` install; reports `missing` here and falls back to the native `desktop` tool
-- Cua: **adapter present** — probes for a local `cua` install; reports `missing` here and falls back to the native `desktop` tool
+- Browser Use: **adapter present** (catalog `missing`/`ready`; MIT; local OpenAI-compatible endpoint only)
+- UFO: **not integrated**
+- Cua: **not integrated**
 - Open Interpreter: **not integrated**
-- OpenHands: **not integrated**
+- OpenHands: **adapter present** (`code_worker`; catalog `missing`/`ready`; Jarvis still verifies)
 
 ### Jarvis 2.0
 
@@ -3668,18 +3669,17 @@ This development session:
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
-- Tools/System pages list optional workers as unavailable instead of crashing
-- Tools page lists software-development workers (local ready; paid Cursor workers not configured)
+- Tools/System pages list optional workers; Browser Use and OpenHands show `missing` until installed
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
-- Voice: `POST /api/voice/command` accepts already-transcribed text only
-- Coding workers: cost telemetry, Composer/Grok model catalog (Fast off by default), and evidence-based local-vs-paid routing (`GET /api/coding`). Cursor ACP stays `not_connected` until the CLI is on PATH.
+- Voice: Command Speak button; `POST /api/voice/listen` transcribes locally; `POST /api/voice/speak` returns WAV; JSON `/api/voice/command` still accepts text
 
 ### Known Problems
 
 - Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
-- Browser Use / OpenHands / Open Interpreter adapters are absent; UFO and Cua adapters are present and report `missing` until installed
+- Browser Use / OpenHands adapters are present but the optional packages are not installed in this environment
+- UFO / Cua / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
 - Cursor ACP CLI is not on PATH in this environment; the client is catalogued `not_connected`
@@ -3691,11 +3691,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **dynamic tool exposure**, **UFO/Cua adapters**, docker `run` image requirement, browser `close` without launching Chromium
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, Browser Use / OpenHands adapters, local voice STT/TTS wrap
 - Frontend (`npm run build`): TypeScript build
 - Portal: Command, Tools (`code_worker`, Open Interpreter `missing`), Guide (`browser-form` / `browser-procedure`), Settings Inference card (Ollama port 11434), Model Probe, System backends
 
-Results: **94 passed** on this tree (dynamic tool exposure, UFO/Cua adapters, docker/browser QA). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **87 passed** on this tree (unit tests; no GPU/GGUF). Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3757,25 +3757,21 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: New "Guide & Workflows" tab in the web portal containing clear usage instructions, pre-populated editable templates (e.g., project debugging, research + Excel export, multi-file transforms, browser workflows), an editor allowing prompt parameters / event chains customization, and 1-click execution dispatch.
   - Status: VERIFIED (portal tab + `/api/workflows` + unit tests)
 
-- [x] Software-development worker router (local + catalog)
-  - Acceptance: complexity 0–100 selects deterministic native tools, local Jarvis coding worker, or a paid Cursor/frontier worker; unavailable paid workers fall back locally; independent verification is always required; a worker claiming success is never completion.
-  - Status: VERIFIED in unit tests (`test_coding_workers.py`). Composer/Grok/frontier remain `not_configured`.
+- [x] Browser Use adapter
+  - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
+  - Status: VERIFIED in unit tests (`test_workers.py`); package optional — catalog shows `missing` until installed
 
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
   - Status: CODE PRESENT / unit-tested (`test_browser.py`): navigation retries, named-role click fallback, `title` action, close/missing-URL do not launch Chromium. Live Windows e2e Test 3 still TODO.
 
-- [x] Browser Use adapter
-  - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
-  - Status: VERIFIED in unit tests (`test_browser_backends.py`); live Browser Use + local LLM untested on Windows desktop
-
-- [x] Windows semantic UI named-control first
+- [ ] Windows semantic UI automation hardening
   - Acceptance: named-control interaction works for at least one native app; coordinate click remains last resort.
   - Status: CODE PRESENT / unit-tested (`test_desktop.py`): title/auto_id/best_match lookup; missing name does not fall through to coordinates; non-Windows returns unavailable. Live native-app verification still TODO on Windows.
 
-- [ ] OpenHands worker adapter
+- [x] OpenHands worker adapter
   - Acceptance: large repo tasks can be delegated; Jarvis still verifies.
-  - Status: TODO
+  - Status: VERIFIED in unit tests (`test_workers.py`); package optional — catalog shows `missing` until installed; native filesystem/python/git remain the fallback
 
 - [x] Jarvis MCP server for Cursor
   - Acceptance: Cursor can attach to a limited Jarvis MCP server for plan/task/architecture/trajectory context; recursive self-dispatch is refused.
@@ -3821,7 +3817,8 @@ These items make the existing machine a one-node swarm first. They must not requ
 
 ### P3
 
-- [ ] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
+- [x] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
+  - Status: VERIFIED (`test_workers.py` + Command Speak button). Optional packages; degrades to typed commands when Whisper is missing. Cloud speech APIs are not used.
 - [ ] Phone / Android client against the local API
 - [ ] Dedicated LAN inference server
 - [x] UFO adapter
@@ -4047,27 +4044,27 @@ Switching tools does not grant more rights. Suggesting one would only teach the 
 
 Decision: optional workers are displayed even when absent
 
-The Tools and System pages list Browser Use, Open Interpreter, and OpenHands as `not_integrated`. UFO and Cua are listed as `missing` until a local install is detected.
+The Tools and System pages list optional workers. Browser Use and OpenHands adapters are integrated and report `missing` until installed. UFO, Cua, and Open Interpreter remain `not_integrated`.
 
 Reason:
 
-A blank Tools page looks like a crash. Listing unavailable workers makes graceful degradation visible.
+Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions. Adapters must not pull those frameworks into the default install.
 
-Decision: only expose tools the current task class needs
+Decision: Browser Use and OpenHands stay optional and local-only
 
-Classification already exists. Filesystem work should not pay for browser, Office, UFO, and Docker schemas on every turn. `request_tools` is the escape hatch; mixed and long-horizon tasks still receive the full set.
-
-Reason:
-
-P0.7. Smaller schemas cut prompt tokens, latency, and incorrect tool selection.
-
-Decision: UFO and Cua are ComputerUseBackend workers, not the primary Windows path
-
-Native pywinauto stays first. UFO and Cua run only when installed; a missing package is an error that names the desktop tool, not a crash.
+Evaluate license (both MIT), Windows support, and local-model compatibility before integrating. Point worker LLMs at Jarvis's OpenAI-compatible endpoint. Do not add the packages to `requirements.txt`. Playwright remains the default browser backend. Jarvis still verifies OpenHands output.
 
 Reason:
 
-Same orchestrator-plus-workers rule as Browser Use / OpenHands. UI Automation is more deterministic than a computer-use agent.
+Section 24 forbids integrating a framework just because it exists. The adapters unlock the capability when the owner installs the package, without making the platform fragile.
+
+Decision: voice STT/TTS is local-only
+
+Whisper and SAPI/espeak/pyttsx3 wrap `/api/voice/command`. Do not use cloud speech APIs. The Command Speak button is optional; typed commands remain the primary path.
+
+Reason:
+
+Local-first. Voice must not delay core Jarvis functionality or send audio off-box.
 
 Decision: editable workflow templates with chained prompt dispatch
 
