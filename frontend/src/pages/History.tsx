@@ -10,7 +10,7 @@ export function HistoryPage() {
   return (
     <div>
       <h1>Task history</h1>
-      <p className="lede">Reopen a previous task and continue it from saved state.</p>
+      <p className="lede">Every past task. Recents in the left rail open the same chats.</p>
       <div className="card">
         <table>
           <thead>

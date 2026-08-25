@@ -47,7 +47,10 @@ export function SettingsPage() {
   return (
     <div>
       <h1>Settings</h1>
-      <p className="lede">Autonomy, remote security, timeouts, launch queue, and browser behavior.</p>
+      <p className="lede">
+        Preferences for this PC. To stop Jarvis entirely, use <strong>Stop</strong> on the Windows tray —
+        it is not in this window.
+      </p>
       
       {msg && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>

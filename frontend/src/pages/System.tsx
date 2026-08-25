@@ -41,7 +41,7 @@ export function SystemPage() {
           <h2>Self-development</h2>
           <p className="lede">
             Experimental work uses an isolated Git worktree. The trusted checkout is never modified or auto-merged.
-            Drop <code>data/STOP_JARVIS</code> or use the stop button for an emergency halt.
+            To quit Jarvis itself, use <strong>Stop</strong> on the Windows tray. The button below only halts this isolated trial.
           </p>
           <div className="kv" style={{ marginBottom: 12 }}>
             <b>Status</b><span className={`badge ${selfDev.status || "queued"}`}>{selfDev.status || "idle"}</span>
