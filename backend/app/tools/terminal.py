@@ -182,7 +182,13 @@ class TerminalTool(Tool):
         command = kwargs.get("command") or ""
         if not command.strip():
             return ToolResult(False, "", error="command is required for run/start")
-        shell = (kwargs.get("shell") or default_shell()).lower()
+        requested = kwargs.get("shell")
+        if requested:
+            shell = str(requested).lower()
+        elif os.name == "nt":
+            shell = "powershell"
+        else:
+            shell = "bash"
         cwd = kwargs.get("working_directory") or os.getcwd()
         timeout = int(kwargs.get("timeout_seconds") or 120)
         risk = classify_command(command)

@@ -19,6 +19,7 @@ class ModelProfile:
     top_k: int
     presence_penalty: float
     description: str
+    vision: bool = False
 
 
 PROFILES: dict[str, ModelProfile] = {

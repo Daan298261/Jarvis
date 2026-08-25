@@ -65,6 +65,13 @@ class DockerTool(Tool):
             return ToolResult(False, "", error="container or image is required for docker inspect")
         if not shutil.which("docker"):
             return ToolResult(False, "", error="Docker is not installed on this machine")
+        action = kwargs.get("action")
+        if action == "run" and not (kwargs.get("image") or "").strip():
+            return ToolResult(False, "", error="image is required for docker run")
+        if action == "logs" and not (kwargs.get("container") or "").strip():
+            return ToolResult(False, "", error="container is required for docker logs")
+        if action == "inspect" and not (kwargs.get("container") or kwargs.get("image") or "").strip():
+            return ToolResult(False, "", error="container or image is required for docker inspect")
         mapping = {
             "ps": ["ps", "-a"],
             "images": ["images"],

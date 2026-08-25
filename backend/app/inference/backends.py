@@ -11,6 +11,7 @@ import httpx
 from ..config import AppSettings, logs_dir, runtime_dir
 from ..hardware import detect_hardware
 from .profiles import ModelProfile, model_paths
+from .vision import mmproj_args
 
 LLAMA_CPP_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
 REMOTE_ALIASES = {"remote", "openai", "openai-compat", "openai-compatible", "lan", "lmstudio", "ollama", "vllm", "sglang"}
@@ -149,8 +150,7 @@ class LlamaCppBackend(InferenceBackend):
             args.extend(["--fit", "on", "--fit-target", str(inference.fit_target_mib)])
         else:
             args.extend(["--n-gpu-layers", "99"])
-        if vision and mmproj.exists():
-            args.extend(["--mmproj", str(mmproj), "--image-min-tokens", "1024"])
+        args.extend(mmproj_args(profile, mmproj))
         return args
 
     async def start(self, profile: ModelProfile, timeout: float = 300, vision: bool = False) -> bool:

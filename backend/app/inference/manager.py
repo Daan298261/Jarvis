@@ -12,6 +12,7 @@ from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, resolve_backend
 from .profiles import ModelProfile, model_paths, resolve_profile
+from .vision import with_vision
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
@@ -47,6 +48,7 @@ class InferenceState:
     ram_used_gb: float | None = None
     last_error: str = ""
     llama_version: str = ""
+    vision: bool = False
 
 
 def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
@@ -62,6 +64,7 @@ def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
         top_k=profile.top_k,
         presence_penalty=profile.presence_penalty,
         description=profile.description,
+        vision=profile.vision,
     )
 
 
@@ -81,10 +84,18 @@ class InferenceManager:
         self,
         settings: AppSettings,
         profile_name: str | None = None,
+        context_size: int | None = None,
         vision: bool | None = None,
     ) -> InferenceState:
         async with self._lock:
-            return await self._load_unlocked(settings, profile_name, vision=vision)
+            profile = resolve_profile(profile_name or settings.inference.profile)
+            if context_size:
+                profile = _with_context(profile, int(context_size))
+            if vision is not None:
+                profile = with_vision(profile, bool(vision))
+            backend = resolve_backend(settings)
+            paths = model_paths()
+            model = paths["root"] / profile.filename
 
     async def ensure_vision(self, settings: AppSettings, enabled: bool) -> InferenceState:
         """Restart llama.cpp with/without mmproj when Jarvis owns the process.
@@ -187,8 +198,8 @@ class InferenceManager:
         self.state.profile = profile.name
         self.state.quant = profile.quant
         self.state.model_path = str(model) if backend.requires_local_files else ""
-        self.state.mmproj_path = str(paths["mmproj"]) if vision and paths["mmproj"].exists() else ""
-        self.state.vision_loaded = bool(vision and paths["mmproj"].exists())
+        self.state.vision = bool(profile.vision)
+        self.state.mmproj_path = str(paths["mmproj"]) if profile.vision and paths["mmproj"].exists() else ""
         self.state.host = settings.inference.host
         self.state.port = settings.inference.port
         self.state.context_size = profile.context_size
@@ -261,6 +272,9 @@ class InferenceManager:
             "vision": settings.inference.vision,
             "vision_loaded": self.state.vision_loaded,
             "thinking": profile.thinking,
+            "thinking_mode": "selective" if profile.thinking else "off",
+            "vision": self.state.vision,
+            "context_policy": "dynamic",
         }
 
     async def record_timings(self, timings: dict[str, Any]) -> None:

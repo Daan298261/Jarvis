@@ -45,7 +45,9 @@ async def model_status():
             "label": p.label,
             "quant": p.quant,
             "thinking": p.thinking,
+            "thinking_mode": "selective" if p.thinking else "off",
             "context_size": p.context_size,
+            "vision": p.vision,
             "description": p.description,
         }
         for p in available_profiles()

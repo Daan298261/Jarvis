@@ -82,20 +82,16 @@ class BrowserTool(Tool):
             try:
                 if action == "close":
                     global _playwright, _browser, _context, _page, _pages
-                    if _context is None and _page is None:
-                        _pages = []
-                        return ToolResult(True, "Browser was not running")
                     if _context:
                         await _context.close()
                     if _playwright:
                         await _playwright.stop()
                     _context = None
+                    _browser = None
                     _playwright = None
                     _page = None
                     _pages = []
                     return ToolResult(True, "Browser closed")
-                if action == "open" and not kwargs.get("url"):
-                    return ToolResult(False, "", error="url is required")
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs.get("url")
