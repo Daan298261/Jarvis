@@ -20,6 +20,7 @@ These guides describe the **current** Jarvis repository: a local-first desktop a
 | [../ANDROID_CLIENT.md](../ANDROID_CLIENT.md) | Android client to the Leader; AI-guided WAN reachability (separate spec) |
 | [../JARVIS_2.0.md](../JARVIS_2.0.md) | Approved Jarvis 2.0 Away Mode spec (sections 64–85) |
 | [../HOME_IOT.md](../HOME_IOT.md) | Home IoT / mansion house control |
-| [../BLUE_TEAM.md](../BLUE_TEAM.md) | Home-network SIEM; defensive response on the user’s LAN |
+| [../SECURITY_AGENTS.md](../SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical) |
+| [../BLUE_TEAM.md](../BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
 
 Product intent and unfinished work live in the master plan. Installation and day-to-day development live here so those sections stay short and accurate.

@@ -22,7 +22,8 @@ Detailed P2+ swarm role, node placement, resource-control, and universal-UI requ
 | [ANDROID_CLIENT.md](ANDROID_CLIENT.md) | Android client to the Leader; AI-guided WAN reachability |
 | [JARVIS_2.0.md](JARVIS_2.0.md) | Approved Away Mode / novel / marketing / SEO / multimedia (sections 64–85) |
 | [HOME_IOT.md](HOME_IOT.md) | Home IoT / mansion house control |
-| [BLUE_TEAM.md](BLUE_TEAM.md) | Home-network SIEM; defensive sniffer response on the user’s LAN |
+| [SECURITY_AGENTS.md](SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical). `BLUE_TEAM.md` is a pointer |
+| [BLUE_TEAM.md](BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
 | [TOOLS.md](TOOLS.md) | Native tools, MCP, trajectories, skills |
 | [SECURITY.md](SECURITY.md) | Bind address, private keys, filesystem policy |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Unloaded model, CUDA, Playwright, Office, Docker |

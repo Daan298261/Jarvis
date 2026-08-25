@@ -29,7 +29,7 @@ Bad (forbidden):
 | Scope | One RFC or one queue item only |
 | Tests | `python3 -m pytest` |
 | Frontend | `npm --prefix frontend run build` (and `lint` if TS changed) |
-| Docs | Do **not** edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `BLUE_TEAM.md`). Architect-only. Note status in the PR. |
+| Docs | Do **not** edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`). Architect-only. Note status in the PR. |
 | PR target | `cursor/local-qwen-desktop-agent` |
 
 ### Model selection (Cursor cloud)
@@ -51,7 +51,7 @@ Implement and unit-test; leave P0 live-model items as `TODO` / desktop sign-off 
 ### Do not
 
 - Merge unrelated PRs (see superseded list in `docs/PROCESS.md`; **PR #25 is closed — do not merge**)
-- Edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `BLUE_TEAM.md`) — Jarvis Architect is the sole editor; spec-change requests come from Taco or Chief of Staff
+- Edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`) — Jarvis Architect is the sole editor; spec-change requests come from Taco or Chief of Staff
 - Rewrite `JARVIS_MASTER_PLAN.md` wholesale or paste large design specs into it
 - Start swarm / Browser Use / P4–P5 / model-stack work unless that is the named ticket
 
