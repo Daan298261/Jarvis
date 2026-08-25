@@ -62,6 +62,8 @@ def test_build_script_invokes_iscc():
     text = _read(BUILD_SCRIPT)
     assert "iscc" in text.lower()
     assert "JarvisSetup.exe" in text
+    lower = text.lower()
+    assert "localappdata" in lower or r"programs\inno setup 6" in lower
 
 
 def test_readme_documents_build_oneliner():
