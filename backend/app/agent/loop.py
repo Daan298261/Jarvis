@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from openai import APIConnectionError, APIStatusError
+
 from ..coding.usage import record_task_usage
 from ..config import AppSettings, load_settings
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
@@ -563,7 +565,7 @@ class AgentRuntime:
                     provider = MANAGER.provider or provider
                 try:
                     result: ChatResult = await asyncio.wait_for(
-                        provider.chat(
+                        MANAGER.chat(
                             messages,
                             tools=None if force_final else exposure_schemas_for(working.task_class, working.requested_tools),
                             temperature=profile.temperature,
@@ -574,6 +576,27 @@ class AgentRuntime:
                         ),
                         timeout=90 if force_final else 180,
                     )
+                except (APIStatusError, APIConnectionError) as exc:
+                    await self._release_lazy_vision()
+                    if isinstance(exc, APIStatusError):
+                        detail = getattr(exc, "message", None) or str(exc)
+                        err = f"Inference server error ({exc.status_code}): {detail}"
+                    else:
+                        err = f"Inference server unreachable: {exc}"
+                    await self._update(
+                        task_id,
+                        status="failed",
+                        stage="failed",
+                        result=err,
+                        error=err,
+                        current_action="Failed: inference error",
+                        current_tool="",
+                        **metrics.as_fields(),
+                    )
+                    await record_trajectory(task_id, working, "failed")
+                    await complete_coding_route(task_id, "failed", err)
+                    await BUS.publish(task_id, "failed", "Inference failed", err, stage="failed")
+                    return
                 except TimeoutError:
                     await self._release_lazy_vision()
                     if tools_used and verifying:
@@ -954,7 +977,7 @@ class AgentRuntime:
             if not MANAGER.provider:
                 raise RuntimeError("no provider after expert load")
             wrapped = [ChatMessage(role=item["role"], content=item["content"]) for item in raw_messages]
-            return await MANAGER.provider.chat(wrapped, tools=None, thinking=True, max_tokens=1024)
+            return await MANAGER.chat(wrapped, tools=None, thinking=True, max_tokens=1024)
 
         await BUS.publish(task_id, "stage", "Consulting Expert 27B", brief.unresolved_problem[:800], stage="diagnose")
         advice = await consult_expert(

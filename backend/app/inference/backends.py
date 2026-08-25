@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from pathlib import Path
@@ -10,6 +11,7 @@ import httpx
 
 from ..config import AppSettings, logs_dir, runtime_dir
 from ..hardware import detect_hardware
+from ..providers.base import ChatMessage
 from .profiles import ModelProfile, profile_gguf, resolve_mmproj
 
 LLAMA_CPP_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
@@ -37,6 +39,36 @@ DEFAULT_PORTS = {
 STOCK_PORTS = set(DEFAULT_PORTS.values())
 
 PROBE_PATHS = ("/health", "/v1/models", "/models", "/api/tags")
+
+
+def _message_text(content: str | list[dict[str, Any]]) -> str:
+    if isinstance(content, str):
+        return content
+    return json.dumps(content)
+
+
+def normalize_chat_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Merge all system turns to the front for Qwen 3.5 jinja chat templates.
+
+    History compaction injects extra system blocks after the first user turn.
+    llama.cpp with --jinja rejects that ordering with:
+    "Jinja Exception: System message must be at the beginning."
+    """
+    if not messages:
+        return messages
+    system_parts: list[str] = []
+    ordered: list[ChatMessage] = []
+    for message in messages:
+        if message.role == "system":
+            text = _message_text(message.content).strip()
+            if text:
+                system_parts.append(text)
+            continue
+        ordered.append(message)
+    if not system_parts:
+        return messages
+    merged = ChatMessage(role="system", content="\n\n".join(system_parts))
+    return [merged, *ordered]
 
 
 def inference_headers(api_key: str | None) -> dict[str, str]:

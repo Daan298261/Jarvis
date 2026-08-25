@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from ..agent.loop import AGENT
-from ..workers.voice import synthesize_speech, transcribe_audio, voice_status
+from ..workers.voice import VoiceSTTError, synthesize_speech, transcribe_audio, voice_status
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
@@ -17,6 +17,19 @@ class VoiceIn(BaseModel):
 
 class SpeakIn(BaseModel):
     text: str
+
+
+def _stt_error_response(exc: VoiceSTTError) -> JSONResponse:
+    status = exc.status or voice_status()
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": exc.code,
+            "detail": str(exc),
+            "install_hint": exc.install_hint or status.get("install_hint", ""),
+            "voice_status": status,
+        },
+    )
 
 
 @router.get("/status")
@@ -42,8 +55,13 @@ async def voice_listen(audio: UploadFile = File(...), autonomy: str | None = For
         raise HTTPException(400, "audio is required")
     try:
         transcript = await transcribe_audio(data, audio.filename or "audio.webm")
+    except VoiceSTTError as exc:
+        return _stt_error_response(exc)
     except RuntimeError as exc:
-        raise HTTPException(503, str(exc)) from exc
+        status = voice_status()
+        return _stt_error_response(
+            VoiceSTTError(str(exc), code="stt_failed", install_hint=status.get("install_hint") or "")
+        )
     task = await AGENT.create_task(transcript, autonomy)
     return {
         "task_id": task.id,
@@ -59,8 +77,13 @@ async def voice_transcribe(audio: UploadFile = File(...)):
         raise HTTPException(400, "audio is required")
     try:
         transcript = await transcribe_audio(data, audio.filename or "audio.webm")
+    except VoiceSTTError as exc:
+        return _stt_error_response(exc)
     except RuntimeError as exc:
-        raise HTTPException(503, str(exc)) from exc
+        status = voice_status()
+        return _stt_error_response(
+            VoiceSTTError(str(exc), code="stt_failed", install_hint=status.get("install_hint") or "")
+        )
     return {"transcript": transcript}
 
 
