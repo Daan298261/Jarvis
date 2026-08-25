@@ -177,3 +177,19 @@ export async function listSwarmNodes(): Promise<SwarmNodesResponse> {
 export async function getSwarmNode(nodeId: string): Promise<SwarmNode> {
   return api<SwarmNode>(`/api/swarm/nodes/${encodeURIComponent(nodeId)}`)
 }
+
+export type SwarmRoleHolder = {
+  role: string
+  node_id: string
+  hostname: string
+  assignment: string
+}
+
+export type SwarmRolesResponse = {
+  orchestrator: SwarmRoleHolder | null
+  leader: SwarmRoleHolder | null
+}
+
+export async function listSwarmRoles(): Promise<SwarmRolesResponse> {
+  return api<SwarmRolesResponse>("/api/swarm/roles")
+}
