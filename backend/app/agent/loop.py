@@ -39,7 +39,7 @@ from .skills import bind_parameters, instantiate_steps, promote_from_trajectorie
 from ..coding.routing import recommendation_prompt_block
 from ..coding.usage import record_task_usage
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
-from .context_policy import recommend_context_size
+from .policy import policy_guidance
 from .prompts import (
     CONTINUE_PROMPT,
     CRITIC_PROMPT,
@@ -309,11 +309,7 @@ class AgentRuntime:
             else:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
-            system_prompt = SYSTEM_PROMPT + _environment_block(settings)
-            audit = professional_prompt_block(prompt, settings.professional_mode)
-            if audit:
-                system_prompt += "\n\n" + audit
-                await BUS.publish(task_id, "progress", "Professional / Forensic Audit Mode", audit[:800], stage="understand")
+            system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(prompt) + _environment_block(settings)
             matched_skills = await relevant_skills(working.task_class, working.goal)
             skills = skills_prompt_block(matched_skills)
             if skills:

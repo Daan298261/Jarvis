@@ -169,14 +169,11 @@ export function SettingsPage() {
       </div>
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Phone / Android</h2>
+        <h2>Professional analysis policy</h2>
         <p className="lede">
-          The portal is an installable PWA. On the PC enable LAN access, then open <a href="/phone">/phone</a> from Android Chrome and Add to Home screen.
-          Pairing details never include the private key.
+          Jarvis may analyze legitimate security, forensic, investigative, or otherwise sensitive material.
+          Analysis is not the same as authorization to attack, deploy exploits, change credentials, or disable defenses.
         </p>
-        <div className="row">
-          <Link className="btn" to="/phone">Open phone client</Link>
-        </div>
       </div>
 
       {queueStatus && (

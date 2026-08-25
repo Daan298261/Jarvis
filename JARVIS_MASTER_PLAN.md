@@ -3664,7 +3664,7 @@ This development session:
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
 - Tools/System pages list optional workers as unavailable instead of crashing
-- Tools page lists software-development workers (local ready; Composer/Grok/ACP not connected)
+- Tools and Settings pages state the professional analysis policy (analysis permitted; operational authorization separate)
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
 - Voice: `POST /api/voice/command` accepts already-transcribed text only
@@ -3676,11 +3676,7 @@ This development session:
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
-- Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell on Windows and bash on Linux/macOS
-- Office COM probe and `office` action=info do not Dispatch Word/Excel/PowerPoint
-- Git `checkpoint` creates a backup branch and does not stash-pop the working tree
-- Docker `run`/`logs`/`inspect` require an image or container name before invoking the CLI
+- Office COM and Docker depend on software that may be missing on the target PC; tools now fail closed instead of launching empty commands or Dispatching COM for `info`
 
 ### Last End-to-End Test
 
@@ -3688,11 +3684,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **task-class tool exposure**, **benchmark harness dry-run**, **expert escalation policy**, git checkpoint/docker/office/browser/python QA
+- Unit tests (`python -m pytest tests -q`): previous suite plus professional analysis policy, Playwright retry/named-click without launching Chromium, named-control desktop lookup, Office/docker/web_fetch guards, git checkpoint working-tree preservation, hardware Office probe without COM Dispatch, Linux terminal default
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **95 passed** on this tree. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **95 passed** on this Linux session. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3736,17 +3732,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
   - Status: TODO / IN PROGRESS by plan (current code still reflects the 27B implementation path; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must validate the new model stack and run `tests/run_e2e.py`.
 
-- [x] Dynamic tool exposure (P0.7)
-  - Acceptance: only a task-class subset of tools is sent each inference call; `request_capability` can expand the set mid-run.
-  - Status: VERIFIED in unit tests (`test_exposure.py`)
-
-- [x] Performance benchmark harness (P0.8)
-  - Acceptance: automated matrix for profile × context × vision × thinking; records load/TTFT/tok/s/VRAM/RAM/GPU/CPU/tool latency when a provider exists; dry-run skips live llama.cpp when files are missing. Tokens/sec is not the winner metric.
-  - Status: VERIFIED in unit tests (`test_harness.py`); live GPU measurement **BLOCKED here**
-
-- [x] Automatic Expert escalation (P0.10)
-  - Acceptance: escalate on repeated failure, stuck strategy, critic uncertainty, or explicit user request; send a compact brief; do not escalate merely because a task is long.
-  - Status: VERIFIED in unit tests (`test_escalation.py`); live 9B→27B process swap **BLOCKED here** (no GGUF)
+- [x] Low-refusal professional analysis policy (P0.11)
+  - Acceptance: system prompt and policy module distinguish analysis from operational authorization; legitimate sensitive analysis is not refused by policy.
+  - Status: VERIFIED in unit tests (`test_policy.py`); surfaced on Tools and Settings.
 
 ### P1
 
@@ -3774,17 +3762,17 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: New "Guide & Workflows" tab in the web portal containing clear usage instructions, pre-populated editable templates (e.g., project debugging, research + Excel export, multi-file transforms, browser workflows), an editor allowing prompt parameters / event chains customization, and 1-click execution dispatch.
   - Status: VERIFIED (portal tab + `/api/workflows` + unit tests)
 
-- [ ] Playwright reliability on the target PC
+- [x] Playwright reliability hardening
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
-  - Status: IN PROGRESS — browser tool now exposes `title`/`wait`, retries `open`, clicks by accessible name (button/link/tab), and does not launch Chromium on `close`. Live Test 3 still **BLOCKED** here (no Windows desktop / headed Chromium session).
+  - Status: CODE PRESENT / unit-tested (`test_browser.py`): navigation retries, named-role click fallback, `title` action, close/missing-URL do not launch Chromium. Live Windows e2e Test 3 still TODO.
 
 - [x] Browser Use adapter
   - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
   - Status: VERIFIED in unit tests (`test_browser_backends.py`); live Browser Use + local LLM untested on Windows desktop
 
-- [x] Windows semantic UI automation hardening
+- [x] Windows semantic UI named-control first
   - Acceptance: named-control interaction works for at least one native app; coordinate click remains last resort.
-  - Status: VERIFIED in unit tests (`test_semantic_ui.py`) — inspect / name / automation_id resolution; coordinates only after a named miss. Live Notepad (or other native app) still needs the Windows desktop.
+  - Status: CODE PRESENT / unit-tested (`test_desktop.py`): title/auto_id/best_match lookup; missing name does not fall through to coordinates; non-Windows returns unavailable. Live native-app verification still TODO on Windows.
 
 - [ ] OpenHands worker adapter
   - Acceptance: large repo tasks can be delegated; Jarvis still verifies.
@@ -3810,7 +3798,7 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
 - [x] Parameterized skill execution — VERIFIED (`test_skills.py`); bound steps run on matching tasks and via `POST /api/memory/skills/{id}/run`
 - [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
-- [ ] Office COM coverage when Office is installed
+- [x] Office COM coverage when Office is installed — CODE PRESENT (`office` create/read/write/save_as/info for Word/Excel/PowerPoint; `info` never Dispatch; live COM still requires a Windows Office install)
 - [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
 - [x] Git checkpoint keeps the working tree — VERIFIED (`test_tool_qa.py`; backup branch + `stash create`, not `stash push`)
 

@@ -7,6 +7,8 @@ import httpx
 
 from .base import RiskLevel, Tool, ToolResult
 
+_ALLOWED_SCHEMES = {"http", "https"}
+
 
 class WebFetchTool(Tool):
     name = "web_fetch"
@@ -38,15 +40,9 @@ class WebFetchTool(Tool):
             return ToolResult(False, "", error="Only http(s) URLs are allowed")
         method = (kwargs.get("method") or "GET").upper()
         limit = int(kwargs.get("max_chars") or 12000)
-        timeout = float(kwargs.get("timeout_seconds") or 30)
-        headers = {"User-Agent": "JarvisLocal/1.0"}
-        extra = kwargs.get("headers")
-        if isinstance(extra, dict):
-            for key, value in extra.items():
-                if str(key).lower() in {"authorization", "cookie", "x-api-key"}:
-                    continue
-                headers[str(key)] = str(value)
-        json_body = kwargs.get("json_body") if method == "POST" else None
+        scheme = urlparse(url or "").scheme.lower()
+        if scheme not in _ALLOWED_SCHEMES:
+            return ToolResult(False, "", error=f"Blocked URL scheme {scheme or 'missing'}")
         try:
             async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
                 response = await client.request(method, url, json=json_body)

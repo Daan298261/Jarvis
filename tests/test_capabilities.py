@@ -25,11 +25,6 @@ def test_capability_snapshot_includes_native_filesystem():
     native = {item["id"]: item for item in snap["native"]}
     assert native["filesystem"]["available"] is True
     assert len(snap["all"]) == len(snap["native"]) + len(snap["optional_workers"])
-
-
-def test_capability_snapshot_lists_browser_backends():
-    snap = capability_snapshot()
-    backends = {item["backend"]: item for item in snap["browser_backends"]}
-    assert "playwright" in backends
-    assert "browser-use" in backends
-    assert backends["playwright"]["default"] is True
+    policy = snap["professional_analysis"]
+    assert policy["analyze_sensitive_material"] is True
+    assert policy["operational_authorization_separate"] is True

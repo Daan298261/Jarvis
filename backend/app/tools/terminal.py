@@ -81,13 +81,16 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         if shutil.which("bash"):
             return ["bash", "-lc", command]
         return ToolResult(False, "", error="WSL/bash is not available on this machine")
+    if platform.system() != "Windows":
+        if shutil.which("bash"):
+            return ["bash", "-lc", command]
+        return [sys.executable or "python3", "-c", command]
     exe = shutil.which("powershell") or shutil.which("pwsh")
     if exe:
         return [exe, "-NoProfile", "-Command", command]
     if shutil.which("bash"):
         return ["bash", "-lc", command]
-    exe = shutil.which("python") or shutil.which("python3") or sys.executable or "python3"
-    return [exe, "-c", command]
+    return [sys.executable or "python", "-c", command]
 
 
 async def _pump(job: BackgroundJob) -> None:
@@ -146,7 +149,7 @@ class TerminalTool(Tool):
     name = "terminal"
     description = (
         "Run a local command. shell can be powershell, cmd, python, git, or bash/wsl. "
-        "Default shell is PowerShell on Windows and bash on Linux. "
+        "Default is PowerShell on Windows and bash elsewhere. "
         "action=run (default) waits for the process. action=start returns a PID immediately; "
         "then use inspect/wait/kill with that pid to see if it is still alive and to collect output. "
         "inspect also works for other local PIDs. Captures stdout, stderr, exit code and duration. "
@@ -160,7 +163,8 @@ class TerminalTool(Tool):
             "shell": {
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
-                "description": "powershell on Windows; bash on Linux/macOS when omitted",
+                "default": "powershell",
+                "description": "Defaults to powershell on Windows and bash on Linux/macOS",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},

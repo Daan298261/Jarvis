@@ -5,7 +5,7 @@ type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
   optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
-  exposure?: Record<string, string[]>
+  professional_analysis?: { analyze_sensitive_material: boolean; operational_authorization_separate: boolean; detail: string }
 }
 
 export function ToolsPage() {
@@ -58,6 +58,16 @@ export function ToolsPage() {
           </div>
         ))}
       </div>
+      {catalog.professional_analysis && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Professional analysis</h2>
+          <p className="lede" style={{ margin: "0 0 8px" }}>{catalog.professional_analysis.detail}</p>
+          <div className="kv">
+            <b>Analyze sensitive material</b><span>{catalog.professional_analysis.analyze_sensitive_material ? "yes" : "no"}</span>
+            <b>Operational authorization separate</b><span>{catalog.professional_analysis.operational_authorization_separate ? "yes" : "no"}</span>
+          </div>
+        </div>
+      )}
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Optional workers</h2>
         {catalog.optional_workers.map((worker) => (

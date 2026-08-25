@@ -14,8 +14,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a recoverable backup branch named jarvis-checkpoint-* "
-        "and stores uncommitted work as a stash commit object without changing the working tree."
+        "checkpoint. checkpoint creates a backup branch named jarvis-checkpoint-* without "
+        "changing the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -100,24 +100,18 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
                 branch = f"jarvis-checkpoint-{stamp}"
-                created = await self._git(["branch", branch], cwd)
-                if not created.success:
-                    return created
-                stash = await self._git(["stash", "create", f"jarvis-checkpoint-{stamp}"], cwd)
-                extra = ""
-                digest = (stash.output or "").strip().splitlines()
-                commit = digest[-1].strip() if digest else ""
-                if commit and len(commit) >= 7 and all(ch in "0123456789abcdef" for ch in commit.lower()):
-                    stored = await self._git(["update-ref", f"refs/jarvis-checkpoints/{branch}", commit], cwd)
-                    if stored.success:
-                        extra = f" Uncommitted work stored at refs/jarvis-checkpoints/{branch} without changing the working tree."
-                return ToolResult(
-                    True,
-                    f"Created backup branch {branch} at HEAD. Working tree left unchanged.{extra}",
-                    data={"branch": branch, "stash_commit": commit or None},
-                )
+                created = await self._git(["stash", "create"], cwd)
+                oid = (created.output or "").strip().splitlines()[-1] if created.success else ""
+                if created.success and oid and all(ch in "0123456789abcdef" for ch in oid.lower()) and len(oid) >= 7:
+                    branched = await self._git(["branch", branch, oid], cwd)
+                    if branched.success:
+                        return ToolResult(True, f"Created backup branch {branch} (working tree unchanged).")
+                branched = await self._git(["branch", branch], cwd)
+                if branched.success:
+                    return ToolResult(True, f"Created backup branch {branch} from HEAD (working tree unchanged).")
+                return branched
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

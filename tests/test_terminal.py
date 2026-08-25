@@ -1,13 +1,5 @@
-import sys
-
-from app.tools.terminal import TerminalTool, _python_args, default_shell
-
-
-def test_default_shell_is_native_for_the_os():
-    if sys.platform == "win32":
-        assert default_shell() == "powershell"
-    else:
-        assert default_shell() in {"bash", "python"}
+from app.tools.python_exec import PythonTool
+from app.tools.terminal import TerminalTool, _command_args, _python_args, default_shell
 
 
 def test_python_shell_uses_dash_c_for_snippets():
@@ -44,6 +36,27 @@ async def test_background_process_can_be_inspected_and_killed(tmp_path):
     assert killed.success
     inspected_after = await tool.execute(action="inspect", pid=pid)
     assert inspected_after.data["alive"] is False
+
+
+def test_default_shell_is_bash_off_windows(monkeypatch):
+    monkeypatch.setattr("app.tools.terminal.platform.system", lambda: "Linux")
+    assert default_shell() == "bash"
+    monkeypatch.setattr("app.tools.terminal.platform.system", lambda: "Windows")
+    assert default_shell() == "powershell"
+
+
+def test_unknown_shell_falls_back_to_bash_on_linux(monkeypatch):
+    monkeypatch.setattr("app.tools.terminal.platform.system", lambda: "Linux")
+    monkeypatch.setattr("app.tools.terminal.shutil.which", lambda name: "/bin/bash" if name == "bash" else None)
+    args = _command_args("echo hi", "unknown")
+    assert args[:3] == ["bash", "-lc", "echo hi"]
+
+
+def test_python_tool_uses_sys_executable():
+    import sys
+
+    tool = PythonTool()
+    assert tool._python_bin(None) == sys.executable
 
 
 async def test_wait_collects_output_from_a_started_process(tmp_path):

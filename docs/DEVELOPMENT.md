@@ -51,6 +51,7 @@ backend/app/
     skills.py             Promote after 3 identical successful tool sequences
     queue_watcher.py      data/queue/pending file drop
     prompts.py            System / plan / verify / critic prompts
+    policy.py             Professional analysis vs operational authorization
   inference/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend; mmproj is opt-in
