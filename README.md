@@ -25,6 +25,8 @@ Detailed P2+ swarm role, node placement, resource-control, and universal-UI requ
 | [SECURITY_AGENTS.md](SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical). `BLUE_TEAM.md` is a pointer |
 | [BLUE_TEAM.md](BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
 | [INSTALLER.md](INSTALLER.md) | Windows 11 consumer `.exe` onboarding (smoke PR #51; wizard/GPU/WAN still open) |
+| [WINDOWS_SHELL.md](WINDOWS_SHELL.md) | Tray / Stop / Uninstall (not Start Menu only) |
+| [PORTAL_UX.md](PORTAL_UX.md) | ChatGPT-style portal shell; orange/black; keep Swarm/Phone |
 | [TOOLS.md](TOOLS.md) | Native tools, MCP, trajectories, skills |
 | [SECURITY.md](SECURITY.md) | Bind address, private keys, filesystem policy |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Unloaded model, CUDA, Playwright, Office, Docker |

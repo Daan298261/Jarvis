@@ -6,7 +6,7 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 This file replaces the need to repeatedly provide large architectural prompts to Cursor.
 
-**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [`JARVIS_2.0.md`](JARVIS_2.0.md), [`HOME_IOT.md`](HOME_IOT.md), [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md), the [`BLUE_TEAM.md`](BLUE_TEAM.md) pointer, and [`INSTALLER.md`](INSTALLER.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
+**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [`JARVIS_2.0.md`](JARVIS_2.0.md), [`HOME_IOT.md`](HOME_IOT.md), [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md), the [`BLUE_TEAM.md`](BLUE_TEAM.md) pointer, [`INSTALLER.md`](INSTALLER.md), [`WINDOWS_SHELL.md`](WINDOWS_SHELL.md), and [`PORTAL_UX.md`](PORTAL_UX.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
 
 Swarm role/placement/resource design lives in `SWARM_ARCHITECTURE.md`.
 
@@ -16,7 +16,7 @@ P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating
 
 **Jarvis 2.0** (Away Mode, event-driven operators, **marketing**, **SEO**, **NovelProject**, **multimedia**, policy, self-healing) is restored in [`JARVIS_2.0.md`](JARVIS_2.0.md) — the approved sections 64–85 from git history. Do not drop those features. Do not treat 2.0 as current-session P0 unless this queue promotes an item.
 
-The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network security agents (Blue / Purple / Red-gated): [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer). Offensive / red capability: Taco or PolitieGPT only — ordinary executing bots must not add it. Windows consumer `.exe` installer: [`INSTALLER.md`](INSTALLER.md). Do not paste those specs into this file.
+The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network security agents (Blue / Purple / Red-gated): [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer). Offensive / red capability: Taco or PolitieGPT only — ordinary executing bots must not add it. Windows consumer `.exe` installer: [`INSTALLER.md`](INSTALLER.md). Windows tray/Stop: [`WINDOWS_SHELL.md`](WINDOWS_SHELL.md). Portal shell: [`PORTAL_UX.md`](PORTAL_UX.md). Do not paste those specs into this file.
 
 Filter: if a **new** idea would make home-network JARVIS more real, spec it. Never delete Taco-approved features.
 
@@ -28,8 +28,10 @@ Filter: if a **new** idea would make home-network JARVIS more real, spec it. Nev
 4. [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md): AI-guided brand-agnostic router. Link-device asks login/pairing, explains WAN exposure, DIY vs Jarvis+router password, router access later used by security agents.
 5. [`HOME_IOT.md`](HOME_IOT.md): local-first house control.
 6. [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer): Blue home SIEM (detect/contain/evidence); Purple owned-net tests; Red/counter **disabled by default**. Offensive capability may be added **only** by Taco (manually) or PolitieGPT (LE bot) under the LE gate. Developers / CoS / PR fixer / home self-dev cannot; attempts refuse + audit.
-7. Architect owns all spec files (this file, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`). Executing bots do not edit them.
+7. Architect owns all spec files (this file, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, `PORTAL_UX.md`). Executing bots do not edit them.
 8. [`INSTALLER.md`](INSTALLER.md): Windows 11 consumer `.exe` for non-technical onboarding. Smoke (PR #51): `JarvisSetup.exe`, Start Jarvis → health 200, Stop kills backend + llama-server, 9B Q8 on disk. Remaining P1: wizard copy, GPU fork, no-WAN first-run. Do not overwrite `installer/windows/` product files from Architect PRs.
+9. [`WINDOWS_SHELL.md`](WINDOWS_SHELL.md): tray Stop/Quit and Apps Uninstall/Modify must not leave `llama-server` orphaned.
+10. [`PORTAL_UX.md`](PORTAL_UX.md): ChatGPT-style app shell; orange/black; keep Swarm/Phone; no API redesign.
 
 
 Every development session must read this file before making substantial changes.
@@ -1420,6 +1422,8 @@ Do not let voice implementation delay core Jarvis functionality.
 
 A basic microphone button can be added later if straightforward.
 
+**Constraint (do not expand here):** llama.cpp chat must keep the **system message at the beginning**. Voice/listen must **not** inject a system turn mid-conversation. Product fix is D1’s P0 (503 listen + 500 “System message must be at the beginning”). Architect PRs must not implement it or edit voice backend files.
+
 ---
 
 ## 45. Permissions / Autonomy
@@ -1853,7 +1857,11 @@ Specified in `JARVIS_2.0.md` (approved Away Mode / novel / marketing / SEO / mul
 
 ### Windows consumer installer
 
-Specified in `INSTALLER.md`. Smoke on canonical (PR #51): `JarvisSetup.exe`; Start Jarvis → `http://127.0.0.1:4780` health 200; Stop kills backend + llama-server; 9B Q8 on disk. Remaining: wizard copy, GPU/VRAM fork, no-WAN first-run. Do not edit `installer/windows/` product files from this Architect ticket.
+Specified in `INSTALLER.md`. Smoke on canonical (PR #51): `JarvisSetup.exe`; Start Jarvis → `http://127.0.0.1:4780` health 200; Stop kills backend + llama-server; 9B Q8 on disk. Remaining: wizard copy, GPU/VRAM fork, no-WAN first-run. Tray/Stop from Windows: `WINDOWS_SHELL.md` (not implemented). Do not edit `installer/windows/` product files from this Architect ticket.
+
+### Portal UX
+
+Specified in `PORTAL_UX.md`. Command is still a tab among admin pages. ChatGPT-style shell (left projects + main chat) is **not implemented**. Do not overwrite swarm backend from a UX ticket.
 
 ### Persistence
 
@@ -1875,7 +1883,7 @@ Specified in `INSTALLER.md`. Smoke on canonical (PR #51): `JarvisSetup.exe`; Sta
 - Command, History, Model, Tools, MCP, Settings, System, and Swarm pages exist
 - Live status now shows execution mode, task class, and verification
 - Tools/System pages list optional workers as unavailable instead of crashing
-- Voice: Command Speak button; local STT/TTS when packages are present; JSON `/api/voice/command` still accepts text
+- Voice: Command Speak button; local STT/TTS when packages are present; JSON `/api/voice/command` still accepts text. Constraint: llama.cpp chat must keep the system message at the beginning; voice/listen must not inject a system turn mid-conversation (D1 P0; do not implement from Architect PRs).
 
 ### Known Problems
 
@@ -1885,7 +1893,8 @@ Specified in `INSTALLER.md`. Smoke on canonical (PR #51): `JarvisSetup.exe`; Sta
 - P3 multi-node swarm (discovery, pairing, remote execution) is not started
 - Android WAN reachability / AI-guided router port-forward is specified, not implemented
 - Home IoT and security agents (Blue / Purple / Red-gated) are specified, not implemented
-- Windows consumer `.exe`: smoke PR #51 (`JarvisSetup.exe`, Start/Stop, health 200, 9B Q8 on disk). Remaining: wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`)
+- Windows consumer `.exe`: smoke PR #51 (`JarvisSetup.exe`, Start/Stop, health 200, 9B Q8 on disk). Remaining: wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`). Tray/Stop from Windows: specified (`WINDOWS_SHELL.md`), not implemented.
+- Portal UX shell (`PORTAL_UX.md`) specified, not implemented
 
 ### Last End-to-End Test
 
@@ -1979,6 +1988,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [ ] Windows consumer installer — wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`)
   - Plain-language first-run wizard (progress UI; data dir; private key; optional LAN; Q6 fallback / 27B optional). If GPU/VRAM is missing or too small: explain and offer CPU-degraded or stop. First-run must **not** expose WAN without the Link-device flow.
   - Status: TODO / specified. Do not overwrite `installer/windows/` product files from Architect PRs.
+- [ ] Windows tray / Stop from Settings (`WINDOWS_SHELL.md`)
+  - While running: tray with Open portal, Start, Stop, Quit. Quit = Stop backend + llama-server + tray helper. Stop must not leave llama-server orphaned. Uninstall/Modify from Settings → Apps → Jarvis must not leave those processes. Startup toggle (if any) matches §48. Not P3; no WAN. D1 is on voice P0; CoS assigns this later.
+  - Status: TODO / specified. Do not touch `installer/windows/` or voice backend from this Architect PR.
+- [ ] Portal UX app shell (`PORTAL_UX.md`)
+  - ChatGPT-style shell: left rail projects + recents; main pane current chat/task; home is talk/work. Keep orange/black, existing destinations, Swarm and Phone. UX owns `frontend/src`; do not redesign the API or overwrite swarm backend.
+  - Status: TODO / specified. For Jarvis UX.
 
 ### P2
 
@@ -2106,7 +2121,7 @@ Approved text restored (sections 64–85). Specified, not implemented. Do not dr
 
 Decision: Jarvis Architect is sole editor of spec docs
 
-Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, the `BLUE_TEAM.md` pointer, and `INSTALLER.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
+Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, the `BLUE_TEAM.md` pointer, `INSTALLER.md`, `WINDOWS_SHELL.md`, and `PORTAL_UX.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
 
 Reason:
 
@@ -2138,7 +2153,7 @@ Filter going forward is additive for home-JARVIS; deletion of approved work is f
 
 Decision: spec-set completeness (Taco pass)
 
-The spec set must keep all of: original 63-section master plan body; queue ticks with PR numbers; P2 swarm ticks; lazy mmproj VERIFIED in code (PR #50); Jarvis 2.0 §§64–85 including Novel (`JARVIS_2.0.md`); P4/P5 (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`, Founder OS not a dependency); Android link-device / AI-guided brand-agnostic router (`ANDROID_CLIENT.md`); home IoT (`HOME_IOT.md`); Blue / Purple / Red-gated (`SECURITY_AGENTS.md`); Windows consumer `.exe` (`INSTALLER.md`); Architect-owns-specs. Offensive/red capability: Taco or PolitieGPT only.
+The spec set must keep all of: original 63-section master plan body; queue ticks with PR numbers; P2 swarm ticks; lazy mmproj VERIFIED in code (PR #50); Jarvis 2.0 §§64–85 including Novel (`JARVIS_2.0.md`); P4/P5 (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`, Founder OS not a dependency); Android link-device / AI-guided brand-agnostic router (`ANDROID_CLIENT.md`); home IoT (`HOME_IOT.md`); Blue / Purple / Red-gated (`SECURITY_AGENTS.md`); Windows consumer `.exe` (`INSTALLER.md`); Windows tray/Stop (`WINDOWS_SHELL.md`); portal shell (`PORTAL_UX.md`); Architect-owns-specs. Offensive/red capability: Taco or PolitieGPT only.
 
 Reason:
 
@@ -2151,6 +2166,30 @@ Non-technical Windows 11 onboarding lives in `INSTALLER.md`. Smoke (PR #51): `Ja
 Reason:
 
 New users should not perform a manual Python/Node/llama.cpp dance. Developer/manual install stays in `docs/INSTALL.md`.
+
+Decision: Windows tray / Stop from Settings is a separate spec
+
+`WINDOWS_SHELL.md`. While Jarvis is running, a tray icon is required (Open portal, Start, Stop, Quit). Quit stops backend + llama-server + tray helper. Stop must not leave llama-server orphaned. Settings → Apps Uninstall/Modify must not leave those processes. Later CoS ticket; D1 is on voice P0. Do not touch `installer/windows/` from Architect PRs. Not P3; no WAN.
+
+Reason:
+
+Start Menu Stop is not enough for non-technical Windows users.
+
+Decision: portal UX is a ChatGPT-style app shell
+
+`PORTAL_UX.md`. Keep orange/black and existing destinations including Swarm and Phone. Home is talk/work: left projects + recents, main chat/task. Admin pages remain reachable, not the home screen. UX owns `frontend/src`; do not redesign the API or overwrite swarm backend.
+
+Reason:
+
+Taco/CoS: current tabs feel like a stack of admin dashboards.
+
+Decision: llama.cpp system message stays first
+
+llama.cpp chat must keep the system message at the beginning. Voice/listen must not inject a system turn mid-conversation. D1 owns the product fix. Do not implement from Architect PRs; do not edit voice backend files.
+
+Reason:
+
+Constraint only. Avoid a voice rewrite in this spec pass.
 
 Decision: swarm architecture remains a separate specification
 

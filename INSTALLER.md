@@ -6,7 +6,7 @@ Status: **separate specification** referenced by `JARVIS_MASTER_PLAN.md` §58 P1
 
 This is the **non-technical onboarding** path: a new Windows 11 user downloads Jarvis and double-clicks one installer. It is **not** a second product, **not** P3 swarm, and **not** a replacement for the developer/manual path in [`docs/INSTALL.md`](docs/INSTALL.md).
 
-Implementation **may** live under `installer/windows/` (Inno Setup + bootstrap is the in-flight claim). This spec states **outcomes**. It does **not** prescribe Inno script line-by-line. Architect and other bots **must not** overwrite D1’s in-flight files in that tree.
+Implementation **may** live under `installer/windows/` (Inno Setup + bootstrap). This spec states **outcomes**. It does **not** prescribe Inno script line-by-line. Architect and other bots **must not** overwrite `installer/windows/` product files.
 
 ---
 
@@ -72,3 +72,9 @@ Still open (not in that smoke):
 - [ ] First-run **wizard copy** (plain-language progress UI; data dir; private key; optional LAN; Q6 fallback / 27B optional downloads)
 - [ ] **GPU/VRAM fork**: missing or too small → explain and offer CPU-degraded or stop
 - [ ] **No WAN from first-run** without the Link-device flow (`ANDROID_CLIENT.md`)
+
+---
+
+## 7. Running-app Stop / tray
+
+Start Menu Stop is not enough for non-technical users. Tray, Quit, and Apps Uninstall/Modify: [`WINDOWS_SHELL.md`](WINDOWS_SHELL.md). Separate ticket; do not fold into wizard/GPU/WAN work. Do not touch `installer/windows/` from Architect PRs.
