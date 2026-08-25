@@ -12,7 +12,7 @@ This document fixes the broken loop where vague prompts ("continue Jarvis develo
 
 | Role | Does | Does not |
 | --- | --- | --- |
-| **Jarvis Architect** | Sole editor of `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, and `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. Applies spec-change requests from Taco or Chief of Staff. | Execute product tickets; paste megabyte dumps into the master plan |
+| **Jarvis Architect** | Sole editor of `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, and `ANDROID_CLIENT.md`. Applies spec-change requests from Taco or Chief of Staff. | Execute product tickets; paste megabyte dumps into the master plan |
 | **ChatGPT / Codex (design)** | Write RFCs under [`docs/rfcs/`](rfcs/) | Edit spec docs; rewrite `JARVIS_MASTER_PLAN.md`; paste megabyte spec updates into the master plan |
 | **Cursor cloud worker (implement)** | Implement **one** named RFC or **one** named Development Queue item | Edit spec docs; "Continue all development"; merge unrelated PRs; re-audit the repo; rewrite §57 Current State |
 | **Windows desktop session (sign-off)** | Live 9B/27B load, `tests/run_e2e.py`, GPU/tok/s harness | Cannot be done on Linux cloud VMs (see below) |
@@ -41,7 +41,7 @@ or:
    Then create your feature branch: `git checkout -b cursor/<short-slug>-99ea`
 3. **Implement only that ticket** — touch files listed in the RFC; no drive-by refactors, no new architecture in the master plan.
 4. **Test** — `python3 -m pytest`; if frontend changed, `npm --prefix frontend run build` (and `npm --prefix frontend run lint` if you touched TS).
-5. **Do not edit spec docs.** Executing agents must not edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, or `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. Note queue/status implications in the PR for Jarvis Architect. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect.
+5. **Do not edit spec docs.** Executing agents must not edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, or `ANDROID_CLIENT.md`. Note queue/status implications in the PR for Jarvis Architect. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect.
 6. **Open one PR** against `cursor/local-qwen-desktop-agent` with the RFC id or queue item in the title.
 
 ### Forbidden prompts (do not use)
@@ -57,7 +57,7 @@ or:
 - Merging or rebasing unrelated open PRs
 - Closing PRs except when explicitly named in the ticket (or when documenting superseded PRs in process docs)
 - Replacing §57 Current State with a full re-audit
-- Editing `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, or `ADAPTIVE_DOMAIN_ARCHITECTURE.md` (Architect-only)
+- Editing `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, or `ANDROID_CLIENT.md` (Architect-only)
 - Adding Jarvis 2.0 / swarm / Browser Use / model-stack work unless that is the named ticket
 
 ---
@@ -121,7 +121,7 @@ If GitHub API access from a mirror is blocked, leave this table in place and men
 
 **ChatGPT — new design**
 
-> Add an RFC under `docs/rfcs/` for [one concern]. Use `TEMPLATE.md`. Do not edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, or `ADAPTIVE_DOMAIN_ARCHITECTURE.md`.
+> Add an RFC under `docs/rfcs/` for [one concern]. Use `TEMPLATE.md`. Do not edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, or `ANDROID_CLIENT.md`.
 
 **Cursor worker — implement**
 

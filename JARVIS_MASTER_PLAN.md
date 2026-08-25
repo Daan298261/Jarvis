@@ -6,13 +6,15 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 This file replaces the need to repeatedly provide large architectural prompts to Cursor.
 
-**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), and [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
+**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), and [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
 
 Swarm role/placement/resource design lives in `SWARM_ARCHITECTURE.md`.
 
 P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating platform) remain in the spec set. Detailed requirements live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file translates useful patterns from [Founder OS](https://github.com/thecloudtips/founder-os) into native Jarvis concepts. Founder OS is **not** a runtime dependency. Do not start P4/P5 implementation ahead of active P0–P3 work unless this queue or the user promotes it. Do not paste the full adaptive spec into this file.
 
 **Extensible Agent OS (ZoeyOS / FounderOS feature parity)** lives in [`JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`](JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md). That file specifies persistent Agent Profiles, Specialist Packs, modular command-center dashboard, multi-agent delegation, hybrid inference, offline licensing, and the full owner-control UX needed to match Zoey-style specialist teams and FounderOS-style business autonomy. Do not start its P1–P6 roadmap ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it. Do not paste that spec into this file.
+
+The Android client that talks to the Windows Leader (evolve `/phone`, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Do not paste that spec into this file.
 
 Every development session must read this file before making substantial changes.
 
@@ -141,6 +143,8 @@ Qwen3.5-27B Q4_K_M remains the Expert / escalation model. It is not the everyday
 Reason: 27B does not stay fully GPU-resident on the user's 16 GB RTX 5070 Ti. Ordinary tool-calling work uses 9B; 27B is consulted when the task needs substantially deeper reasoning.
 
 The 9B model should still support reasoning, tool calling, coding, writing, agentic execution, and vision when the projector is loaded.
+
+**Lazy mmproj:** attach the vision projector only when a request actually needs vision, then unload it. Do not keep mmproj resident for ordinary text/tool work. VRAM on 16 GB is the constraint.
 
 Use reasoning/thinking for difficult autonomous tasks where supported. Use a faster mode for simple deterministic requests.
 
@@ -1804,7 +1808,7 @@ This documentation session:
 - Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
 - Playwright: native backend present
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
-- Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
+- Vision: screenshot tool + llama.cpp `--mmproj`. Spec: lazy attach when a request needs vision, then unload (see §4 / queue). Live Windows vision not verified this session.
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
 
 ### Optional Workers
@@ -1818,6 +1822,10 @@ This machine registers as a localhost Node. Software workers bind to that Node. 
 ### Adaptive intelligence / domain packs (P4/P5)
 
 Specified in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. **Not implemented.** Do not start ahead of active P0–P3 work. Founder OS is an architecture reference only, not a Jarvis dependency.
+
+### Android client
+
+Specified in `ANDROID_CLIENT.md`. Phone PWA (`/phone`) exists for LAN. Installable Android client + AI-guided WAN port-forward is **not implemented**. Not P3 swarm.
 
 ### Persistence
 
@@ -1847,6 +1855,7 @@ Specified in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. **Not implemented.** Do not star
 - Optional worker packages may be missing on the desktop; adapters report `missing` rather than crashing
 - Office COM and Docker depend on software that may be missing on the desktop
 - P3 multi-node swarm (discovery, pairing, remote execution) is not started
+- Android WAN reachability / AI-guided router port-forward is specified, not implemented
 
 ### Last End-to-End Test
 
@@ -1888,6 +1897,10 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
   - Acceptance: model loads, API responds, tool calls work, vision projector loads.
   - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`. Live 9B load is likewise unsigned-off.
+
+- [ ] Lazy mmproj (attach vision projector only when needed, then unload)
+  - Acceptance: ordinary text/tool tasks do not keep `--mmproj` resident. When a request needs vision, attach the projector; when it no longer needs vision, unload it.
+  - Status: CODE PRESENT / partial (`vision_mode=lazy`; `--mmproj` only on vision loads). Unload-after-use is the remaining intent. Implementing bots apply this in product PRs; they must not edit spec files.
 
 ### P1
 
@@ -1978,7 +1991,10 @@ These items make the existing machine a one-node swarm first. They must not requ
 - [x] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
   - Status: VERIFIED in code (PR #4)
 - [x] Phone / Android client against the local API
-  - Status: VERIFIED in code (PR #13)
+  - Status: VERIFIED in code (PR #13) for the LAN Phone PWA (`/phone`, `GET /api/mobile` does not leak the key). Live Android home-screen install is still a desktop-session check.
+- [ ] Android client to the Leader with AI-guided WAN reachability (`ANDROID_CLIENT.md`)
+  - Evolve `/phone` into an installable Android client (TWA/PWA or thin WebView). Same REST/WebSocket API and private-key auth. Router setup is attended and brand-agnostic (UPnP first, else drive the gateway admin UI). Forward only the Jarvis port. CGNAT → overlay fallback. Not P3 swarm.
+  - Status: TODO / specified. Do not hardcode ISP or brand adapters.
 - [x] Dedicated LAN inference server
   - Status: VERIFIED in code (PR #6)
 - [x] UFO adapter
@@ -2026,7 +2042,7 @@ Specified, not implemented. Domain Packs are enableable Jarvis modules, not a Fo
 
 Decision: Jarvis Architect is sole editor of spec docs
 
-Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, and `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
+Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, and `ANDROID_CLIENT.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
 
 Reason:
 
@@ -2063,6 +2079,22 @@ Adaptive intelligence and domain-pack requirements live in `ADAPTIVE_DOMAIN_ARCH
 Reason:
 
 P4/P5 must stay visible in the Development Queue without pasting the adaptive spec into this file.
+
+Decision: Android client talks to the Leader; router setup is AI-guided and brand-agnostic
+
+The phone is a remote control for the Windows Leader, evolving `/phone`. WAN setup discovers the gateway, tries UPnP/IGD, then walks the user through the admin UI with existing browser tools. No hardcoded ISP/brand adapter matrix. Router passwords stay in local secret storage. This is not P3 swarm. See `ANDROID_CLIENT.md`.
+
+Reason:
+
+One client, one Leader, every household's router — not a Netherlands-vendor special case.
+
+Decision: lazy mmproj
+
+Attach the vision projector only when a request needs vision, then unload. Do not keep it resident.
+
+Reason:
+
+16 GB VRAM cannot spare a resident projector during ordinary text/tool work.
 
 Decision: Jarvis remains orchestrator
 
