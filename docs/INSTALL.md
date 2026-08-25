@@ -38,9 +38,9 @@ Install these before cloning, or confirm they are already on `PATH`:
 Optional, depending on which tools you want the agent to use:
 
 - **Playwright Chromium** — installed in the next section; required for the browser tool
-- **Microsoft Office** — Word/Excel/PowerPoint COM (`office` tool). Without it, `.docx` can still be written as files
+- **Microsoft Office** — Word/Excel/PowerPoint COM (`office` tool). Without Office, the same tool uses python-docx / openpyxl / python-pptx
 - **Docker Desktop** — `docker` tool
-- **WSL** — extra `bash` shell; PowerShell is the default
+- **WSL** — extra `bash` shell; PowerShell is the default on Windows
 
 Confirm:
 

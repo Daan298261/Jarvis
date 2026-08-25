@@ -3603,11 +3603,15 @@ This development session:
 ### Working Tools
 
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
-- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
+- PowerShell: implemented as default `terminal` shell on Windows (CMD/Python/Git/WSL/bash also supported). Linux defaults to bash. `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
+- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`; interpreter defaults to the Jarvis process executable
 - Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
 - Playwright: native backend present
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
+- Office: Word/Excel/PowerPoint. Windows COM when Office is installed; python-docx / openpyxl / python-pptx otherwise. Paths are sandboxed.
+- Git: status/diff/branch/log/search plus non-destructive `jarvis-checkpoint-*` backup branches (`checkpoint` / `list_checkpoints` / `restore`)
+- Docker: optional; `run`/`logs`/`inspect` require an image or container
+- Web fetch: HTTP GET/POST/HEAD with optional body, headers, and sandboxed download
 - Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
 
@@ -3667,20 +3671,20 @@ This development session:
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
-- Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
+- Office COM and Docker depend on software that may be missing on the target PC; the office tool falls back to python-docx/openpyxl/python-pptx
+- Terminal default is PowerShell on Windows and bash on Linux
 
 ### Last End-to-End Test
 
-Date: 2026-08-24
+Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, Office library backend, git checkpoints, web_fetch POST/download, docker target guards
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **91 passed** on this branch. Live Qwen/Windows e2e and live Office COM remain desktop-session P0/P2 checks.
 
 ---
 
@@ -3762,8 +3766,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
 - [x] Parameterized skill execution — VERIFIED (`test_skills.py`); bound steps run on matching tasks and via `POST /api/memory/skills/{id}/run`
 - [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
-- [ ] Office COM coverage when Office is installed
+- [x] Office COM coverage when Office is installed
+  - Acceptance: Word/Excel/PowerPoint create/read/write/save_as/append/info; COM when Office is present; library backend otherwise; sandbox enforced.
+  - Status: VERIFIED in unit tests (`test_office.py`). Live COM on a Windows Office install was not exercised in this environment.
 - [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
+- [x] Git recoverable checkpoints — VERIFIED (`test_git.py`); `checkpoint` creates `jarvis-checkpoint-*` without removing working-tree changes; `restore` overlays without switching branch
+- [x] web_fetch research completeness — VERIFIED (`test_web_fetch.py`); POST body, headers, sandboxed download, http(s) only
 
 #### P2 — Swarm-ready foundation (`SWARM_ARCHITECTURE.md`)
 

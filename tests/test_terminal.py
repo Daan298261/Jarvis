@@ -1,4 +1,11 @@
-from app.tools.terminal import TerminalTool, _python_args
+from app.tools.terminal import TerminalTool, _python_args, default_shell
+
+
+def test_default_shell_is_platform_native():
+    import platform
+
+    expected = "powershell" if platform.system() == "Windows" else "bash"
+    assert default_shell() == expected
 
 
 def test_python_shell_uses_dash_c_for_snippets():

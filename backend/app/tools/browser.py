@@ -137,14 +137,16 @@ class BrowserTool(Tool):
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
                 if action == "close":
-                    global _playwright, _browser, _context, _page
+                    global _playwright, _browser, _context, _page, _pages
                     if _context:
                         await _context.close()
                     if _playwright:
                         await _playwright.stop()
                     _context = None
                     _playwright = None
+                    _browser = None
                     _page = None
+                    _pages = []
                     return ToolResult(True, "Browser closed")
                 return ToolResult(False, "", error=f"Unknown action {action}")
             except Exception as exc:

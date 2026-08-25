@@ -31,10 +31,10 @@ class ToolRegistry:
             PythonTool(),
             BrowserTool(getter),
             DesktopTool(),
-            OfficeTool(),
-            GitTool(),
+            OfficeTool(getter),
+            GitTool(getter),
             DockerTool(),
-            WebFetchTool(),
+            WebFetchTool(getter),
             ScreenshotTool(),
             MCPProxyTool(),
         ]

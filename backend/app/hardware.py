@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -78,20 +79,24 @@ def _nvidia() -> dict[str, Any]:
 
 
 def _office_installed() -> bool:
+    """Detect Office from install paths. Do not launch Word/Excel just to probe."""
     if platform.system() != "Windows":
         return False
-    try:
-        import win32com.client  # type: ignore
-
-        for progid in ("Word.Application", "Excel.Application", "PowerPoint.Application"):
-            try:
-                win32com.client.Dispatch(progid)
-                return True
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return False
+    if shutil.which("WINWORD.EXE") or shutil.which("EXCEL.EXE") or shutil.which("POWERPNT.EXE"):
+        return True
+    roots = [
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")),
+        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")),
+    ]
+    relatives = [
+        Path("Microsoft Office") / "root" / "Office16" / "WINWORD.EXE",
+        Path("Microsoft Office") / "Office16" / "WINWORD.EXE",
+        Path("Microsoft Office") / "root" / "Office15" / "WINWORD.EXE",
+        Path("Microsoft Office") / "Office15" / "WINWORD.EXE",
+        Path("Microsoft Office") / "root" / "Office16" / "EXCEL.EXE",
+        Path("Microsoft Office") / "Office16" / "EXCEL.EXE",
+    ]
+    return any((root / rel).is_file() for root in roots for rel in relatives)
 
 
 def detect_hardware() -> HardwareInfo:

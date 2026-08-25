@@ -9,10 +9,10 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | `python` | run_code, run_file, create_venv, pip install. Prefer project virtualenvs. |
 | `browser` | Playwright Chromium: open, accessibility snapshot, click by name/selector, type, evaluate, screenshot, tabs, download, upload. Persistent profile in `data/browser-profile`. |
 | `desktop` | pywinauto UI Automation first; coordinate click only as fallback. Screenshot via `mss`. |
-| `office` | Word/Excel/PowerPoint COM when Office is installed. Writes new files unless in-place edit was requested. |
-| `git` | status, diff, branch, log, search, stash checkpoint before large edits. |
-| `docker` | ps/images/build/run/logs/inspect when Docker exists. |
-| `web_fetch` | HTTP GET/POST distinct from the browser. |
+| `office` | Word/Excel/PowerPoint. Windows COM when Office is installed; otherwise python-docx / openpyxl / python-pptx. create/read/write/save_as/append/info. Sandboxed to allowed directories. |
+| `git` | status, diff, branch, log, search, non-destructive `jarvis-checkpoint-*` backup branches, list_checkpoints, restore. Checkpoint does not stash away the working tree. |
+| `docker` | ps/images/build/run/logs/inspect when Docker exists. `run` needs `image`; `logs`/`inspect` need a target. |
+| `web_fetch` | HTTP GET/POST/HEAD. Optional body, headers, timeout, and `path` to save the response. http/https only. |
 | `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
 
