@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import or_, select
 
 from ..config import data_dir
-from ..db.models import Node, NodeWorker
+from ..db.models import Node, NodeCapability, NodeWorker
 from ..db.session import SessionLocal
 from ..hardware import hardware_dict
 from .roles import ensure_localhost_role_assignments
@@ -69,7 +69,11 @@ def default_resources(hardware: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def node_to_dict(node: Node, workers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def node_to_dict(
+    node: Node,
+    workers: list[dict[str, Any]] | None = None,
+    capabilities: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     try:
         roles = json.loads(node.roles_json or "[]")
     except Exception:
@@ -100,6 +104,7 @@ def node_to_dict(node: Node, workers: list[dict[str, Any]] | None = None) -> dic
         "hardware": hardware,
         "resources": resources,
         "workers": workers if workers is not None else [],
+        "capabilities": capabilities if capabilities is not None else [],
         "created_at": node.created_at.isoformat() if node.created_at else None,
         "updated_at": node.updated_at.isoformat() if node.updated_at else None,
         "last_seen_at": node.last_seen_at.isoformat() if node.last_seen_at else None,
@@ -183,7 +188,15 @@ async def list_nodes() -> list[dict[str, Any]]:
                 .order_by(NodeWorker.worker_id.asc())
             )
         ).scalars().all()
+        capability_rows = (
+            await session.execute(
+                select(NodeCapability)
+                .where(NodeCapability.node_id.in_(node_ids))
+                .order_by(NodeCapability.capability_id.asc())
+            )
+        ).scalars().all()
         workers_by_node: dict[str, list[dict[str, Any]]] = {node_id: [] for node_id in node_ids}
+        capabilities_by_node: dict[str, list[dict[str, Any]]] = {node_id: [] for node_id in node_ids}
         for binding in worker_rows:
             workers_by_node.setdefault(binding.node_id, []).append(
                 {
@@ -194,7 +207,24 @@ async def list_nodes() -> list[dict[str, Any]]:
                     "node_id": binding.node_id,
                 }
             )
-        return [node_to_dict(row, workers_by_node.get(row.id, [])) for row in rows]
+        for binding in capability_rows:
+            capabilities_by_node.setdefault(binding.node_id, []).append(
+                {
+                    "id": binding.capability_id,
+                    "name": binding.name,
+                    "status": binding.status,
+                    "detail": binding.detail,
+                    "node_id": binding.node_id,
+                }
+            )
+        return [
+            node_to_dict(
+                row,
+                workers_by_node.get(row.id, []),
+                capabilities_by_node.get(row.id, []),
+            )
+            for row in rows
+        ]
 
 
 async def get_node(node_id: str) -> dict[str, Any] | None:
@@ -209,6 +239,13 @@ async def get_node(node_id: str) -> dict[str, Any] | None:
                 .order_by(NodeWorker.worker_id.asc())
             )
         ).scalars().all()
+        capability_rows = (
+            await session.execute(
+                select(NodeCapability)
+                .where(NodeCapability.node_id == node_id)
+                .order_by(NodeCapability.capability_id.asc())
+            )
+        ).scalars().all()
         workers = [
             {
                 "id": binding.worker_id,
@@ -219,4 +256,14 @@ async def get_node(node_id: str) -> dict[str, Any] | None:
             }
             for binding in worker_rows
         ]
-        return node_to_dict(row, workers)
+        capabilities = [
+            {
+                "id": binding.capability_id,
+                "name": binding.name,
+                "status": binding.status,
+                "detail": binding.detail,
+                "node_id": binding.node_id,
+            }
+            for binding in capability_rows
+        ]
+        return node_to_dict(row, workers, capabilities)

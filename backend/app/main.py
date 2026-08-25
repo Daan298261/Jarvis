@@ -19,6 +19,7 @@ from .db import init_db
 from .events import BUS
 from .hardware import hardware_dict
 from .inference.manager import MANAGER
+from .swarm.capabilities import register_localhost_capabilities
 from .swarm.nodes import register_localhost_node
 from .swarm.workers import bind_workers_to_node
 from .tools.mcp_runtime import MCP
@@ -82,6 +83,7 @@ async def startup() -> None:
     await init_db()
     node = await register_localhost_node()
     await bind_workers_to_node(node.id)
+    await register_localhost_capabilities(node.id)
     current = load_settings()
     if not current.allowed_directories:
         current.allowed_directories = default_allowed_directories()
