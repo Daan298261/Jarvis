@@ -6,7 +6,7 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 This file replaces the need to repeatedly provide large architectural prompts to Cursor.
 
-**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [`JARVIS_2.0.md`](JARVIS_2.0.md), [`HOME_IOT.md`](HOME_IOT.md), [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md), and the [`BLUE_TEAM.md`](BLUE_TEAM.md) pointer. Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
+**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [`JARVIS_2.0.md`](JARVIS_2.0.md), [`HOME_IOT.md`](HOME_IOT.md), [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md), the [`BLUE_TEAM.md`](BLUE_TEAM.md) pointer, and [`INSTALLER.md`](INSTALLER.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
 
 Swarm role/placement/resource design lives in `SWARM_ARCHITECTURE.md`.
 
@@ -16,7 +16,7 @@ P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating
 
 **Jarvis 2.0** (Away Mode, event-driven operators, **marketing**, **SEO**, **NovelProject**, **multimedia**, policy, self-healing) is restored in [`JARVIS_2.0.md`](JARVIS_2.0.md) — the approved sections 64–85 from git history. Do not drop those features. Do not treat 2.0 as current-session P0 unless this queue promotes an item.
 
-The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network security agents (Blue / Purple / Red-gated): [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer). Offensive / red capability: Taco or PolitieGPT only — ordinary executing bots must not add it. Do not paste those specs into this file.
+The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network security agents (Blue / Purple / Red-gated): [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer). Offensive / red capability: Taco or PolitieGPT only — ordinary executing bots must not add it. Windows consumer `.exe` installer: [`INSTALLER.md`](INSTALLER.md). Do not paste those specs into this file.
 
 Filter: if a **new** idea would make home-network JARVIS more real, spec it. Never delete Taco-approved features.
 
@@ -28,7 +28,8 @@ Filter: if a **new** idea would make home-network JARVIS more real, spec it. Nev
 4. [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md): AI-guided brand-agnostic router. Link-device asks login/pairing, explains WAN exposure, DIY vs Jarvis+router password, router access later used by security agents.
 5. [`HOME_IOT.md`](HOME_IOT.md): local-first house control.
 6. [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer): Blue home SIEM (detect/contain/evidence); Purple owned-net tests; Red/counter **disabled by default**. Offensive capability may be added **only** by Taco (manually) or PolitieGPT (LE bot) under the LE gate. Developers / CoS / PR fixer / home self-dev cannot; attempts refuse + audit.
-7. Architect owns all spec files (this file, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`). Executing bots do not edit them.
+7. Architect owns all spec files (this file, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`). Executing bots do not edit them.
+8. [`INSTALLER.md`](INSTALLER.md): Windows 11 consumer `.exe` for non-technical onboarding. Unchecked P1 until the `.exe` exists. Do not overwrite D1’s in-flight `installer/windows/` from Architect PRs.
 
 
 Every development session must read this file before making substantial changes.
@@ -1850,6 +1851,10 @@ Specified in `HOME_IOT.md` and `SECURITY_AGENTS.md` (Blue default-on household S
 
 Specified in `JARVIS_2.0.md` (approved Away Mode / novel / marketing / SEO / multimedia / operators). **Not implemented** as current-session P0.
 
+### Windows consumer installer
+
+Specified in `INSTALLER.md`. One `.exe` for non-technical Windows 11 onboarding. **Not implemented** until that `.exe` exists. Do not edit in-flight `installer/windows/` from this Architect ticket.
+
 ### Persistence
 
 - Task storage: SQLite, including conversation JSON and tool-call records
@@ -1880,6 +1885,7 @@ Specified in `JARVIS_2.0.md` (approved Away Mode / novel / marketing / SEO / mul
 - P3 multi-node swarm (discovery, pairing, remote execution) is not started
 - Android WAN reachability / AI-guided router port-forward is specified, not implemented
 - Home IoT and security agents (Blue / Purple / Red-gated) are specified, not implemented
+- Windows consumer `.exe` installer is specified (`INSTALLER.md`), not implemented until the `.exe` exists
 
 ### Last End-to-End Test
 
@@ -1967,6 +1973,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [ ] RFC-0002 Agent policy interviews and per-capability autonomy
   - Acceptance: guided interview UI + runtime `authorize()` before every tool. Portal UI is this ticket; the loop hook is PR #72.
   - Status: IN PROGRESS — frontend interview UI against landed `/api/agent-policy`. Do not mark implemented until this UI and #72 are both on canonical.
+- [ ] Windows consumer .exe installer (`INSTALLER.md`)
+  - One double-click `.exe` on Windows 11 for non-technical users. Installs or bundles what `docs/INSTALL.md` requires (Python, Node, llama.cpp CUDA, start/stop, portal). First-run wizard: GGUFs (9B Abliterated Q8 preferred, Q6 fallback; 27B optional/later), data dir, private key, optional LAN; do not expose WAN without the Link-device flow. Start Menu / desktop shortcut launches working local 9B Jarvis. GPU/VRAM missing → explain and offer CPU-degraded or stop. Not P3 swarm. Implementation may live in `installer/windows/`; this spec does not prescribe Inno line-by-line.
+  - Status: TODO / specified. Unchecked until the `.exe` exists. Do not overwrite D1’s in-flight installer files from Architect PRs.
 
 ### P2
 
@@ -2094,7 +2103,7 @@ Approved text restored (sections 64–85). Specified, not implemented. Do not dr
 
 Decision: Jarvis Architect is sole editor of spec docs
 
-Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, and the `BLUE_TEAM.md` pointer. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
+Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, the `BLUE_TEAM.md` pointer, and `INSTALLER.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
 
 Reason:
 
@@ -2126,11 +2135,19 @@ Filter going forward is additive for home-JARVIS; deletion of approved work is f
 
 Decision: spec-set completeness (Taco pass)
 
-The spec set must keep all of: original 63-section master plan body; queue ticks with PR numbers; P2 swarm ticks; lazy mmproj VERIFIED in code (PR #50); Jarvis 2.0 §§64–85 including Novel (`JARVIS_2.0.md`); P4/P5 (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`, Founder OS not a dependency); Android link-device / AI-guided brand-agnostic router (`ANDROID_CLIENT.md`); home IoT (`HOME_IOT.md`); Blue / Purple / Red-gated (`SECURITY_AGENTS.md`); Architect-owns-specs. Offensive/red capability: Taco or PolitieGPT only.
+The spec set must keep all of: original 63-section master plan body; queue ticks with PR numbers; P2 swarm ticks; lazy mmproj VERIFIED in code (PR #50); Jarvis 2.0 §§64–85 including Novel (`JARVIS_2.0.md`); P4/P5 (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`, Founder OS not a dependency); Android link-device / AI-guided brand-agnostic router (`ANDROID_CLIENT.md`); home IoT (`HOME_IOT.md`); Blue / Purple / Red-gated (`SECURITY_AGENTS.md`); Windows consumer `.exe` (`INSTALLER.md`); Architect-owns-specs. Offensive/red capability: Taco or PolitieGPT only.
 
 Reason:
 
 Taco: when this pass finishes, the PR must contain all of that. Do not drop any approved feature.
+
+Decision: Windows consumer .exe installer is a first-class spec
+
+Non-technical Windows 11 onboarding lives in `INSTALLER.md` (P1, unchecked until the `.exe` exists). One double-click; bundles/installs what `docs/INSTALL.md` requires; first-run wizard; no WAN without Link-device. Implementation may live in `installer/windows/`; this spec does not prescribe Inno line-by-line. Architect PRs must not overwrite D1’s in-flight installer files. Not P3 swarm.
+
+Reason:
+
+New users should not perform a manual Python/Node/llama.cpp dance. Developer/manual install stays in `docs/INSTALL.md`.
 
 Decision: swarm architecture remains a separate specification
 

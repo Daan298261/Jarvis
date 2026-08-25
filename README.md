@@ -24,6 +24,7 @@ Detailed P2+ swarm role, node placement, resource-control, and universal-UI requ
 | [HOME_IOT.md](HOME_IOT.md) | Home IoT / mansion house control |
 | [SECURITY_AGENTS.md](SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical). `BLUE_TEAM.md` is a pointer |
 | [BLUE_TEAM.md](BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
+| [INSTALLER.md](INSTALLER.md) | Windows 11 consumer `.exe` onboarding (P1; not shipped until the `.exe` exists) |
 | [TOOLS.md](TOOLS.md) | Native tools, MCP, trajectories, skills |
 | [SECURITY.md](SECURITY.md) | Bind address, private keys, filesystem policy |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Unloaded model, CUDA, Playwright, Office, Docker |

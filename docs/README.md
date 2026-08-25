@@ -22,5 +22,6 @@ These guides describe the **current** Jarvis repository: a local-first desktop a
 | [../HOME_IOT.md](../HOME_IOT.md) | Home IoT / mansion house control |
 | [../SECURITY_AGENTS.md](../SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical) |
 | [../BLUE_TEAM.md](../BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
+| [../INSTALLER.md](../INSTALLER.md) | Windows 11 consumer `.exe` onboarding |
 
 Product intent and unfinished work live in the master plan. Installation and day-to-day development live here so those sections stay short and accurate.
