@@ -14,6 +14,13 @@ def test_mobile_snapshot_does_not_include_private_key():
     assert info["urls"]["local"].startswith("http://127.0.0.1:")
     assert "/phone" in info["urls"]["phone"]
     assert "install" in info["pairing"]
+    assert info["client"] == "android-pwa"
+
+
+def test_mobile_endpoint_lists_command_surface():
+    info = mobile_snapshot()
+    assert info["urls"]["phone"].endswith("/phone")
+    assert "lan_phone" in info["urls"]
 
 
 def test_mobile_endpoint_is_open_when_auth_required(jarvis_env, monkeypatch):

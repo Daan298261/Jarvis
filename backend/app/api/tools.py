@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..agent.acp import acp_status
+from ..agent.coding_workers import coding_worker_catalog, route_software_task
 from ..config import load_settings, save_settings
 from ..mcp_server import jarvis_mcp_manifest
 from ..tools.capabilities import capability_snapshot
@@ -38,6 +41,14 @@ async def tool_catalog():
         "jarvis_mcp": jarvis_mcp_manifest(),
         "cursor_acp": acp_status(),
     }
+
+
+@router.get("/coding-workers")
+async def coding_workers(prompt: str | None = None, task_class: str | None = None):
+    body: dict[str, Any] = {"workers": coding_worker_catalog()}
+    if prompt:
+        body["route"] = route_software_task(prompt, task_class=task_class or "").as_dict()
+    return body
 
 
 @router.post("/{tool_name}/enable")

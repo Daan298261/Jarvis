@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { api, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { api, apiForm, getPrivateKey, setPrivateKey, type Task } from "../api"
+
+type VoiceStatus = { stt_ready?: boolean; tts_ready?: boolean; detail?: string }
 
 export function PhonePage() {
   const navigate = useNavigate()
@@ -10,12 +12,40 @@ export function PhonePage() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState("")
   const [recent, setRecent] = useState<Task[]>([])
+  const [active, setActive] = useState<Task | null>(null)
+  const [voice, setVoice] = useState<VoiceStatus | null>(null)
+  const [recording, setRecording] = useState(false)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
   const standalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches
+
+  async function refreshLists(preferredId?: string) {
+    const tasks = await api<Task[]>("/api/tasks").catch(() => [] as Task[])
+    setRecent(tasks.slice(0, 8))
+    const running = tasks.find((task) => ["running", "queued", "waiting"].includes(task.status))
+    const chosen = (preferredId && tasks.find((task) => task.id === preferredId)) || running || tasks[0] || null
+    if (chosen) {
+      const detail = await api<Task>(`/api/tasks/${chosen.id}`).catch(() => chosen)
+      setActive(detail)
+    } else {
+      setActive(null)
+    }
+  }
 
   useEffect(() => {
     api<any>("/api/mobile").then(setInfo).catch(() => undefined)
-    api<Task[]>("/api/tasks").then((tasks) => setRecent(tasks.slice(0, 6))).catch(() => undefined)
+    api<VoiceStatus>("/api/voice/status").then(setVoice).catch(() => undefined)
+    refreshLists().catch(() => undefined)
   }, [])
+
+  useEffect(() => {
+    if (!active?.id) return
+    if (!["running", "queued", "waiting"].includes(active.status)) return
+    const timer = window.setInterval(() => {
+      api<Task>(`/api/tasks/${active.id}`).then(setActive).catch(() => undefined)
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [active?.id, active?.status])
 
   function saveKey() {
     setPrivateKey(keyInput)
@@ -37,7 +67,8 @@ export function PhonePage() {
     try {
       const created = await api<Task>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt }) })
       setPrompt("")
-      navigate(`/tasks/${created.id}`)
+      await refreshLists(created.id)
+      setMsg("Task started on the PC.")
     } catch (err: any) {
       setMsg(err.message || "Could not start task")
     } finally {
@@ -45,8 +76,62 @@ export function PhonePage() {
     }
   }
 
+  async function cancelActive() {
+    if (!active) return
+    await api(`/api/tasks/${active.id}/cancel`, { method: "POST" }).catch(() => undefined)
+    await refreshLists(active.id)
+  }
+
+  async function continueActive() {
+    if (!active) return
+    await api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ prompt: "Continue this." }) }).catch(() => undefined)
+    await refreshLists(active.id)
+  }
+
+  async function toggleRecord() {
+    if (recording) {
+      recorderRef.current?.stop()
+      return
+    }
+    if (!voice?.stt_ready) {
+      setMsg(voice?.detail || "Local Whisper is not installed. Type the command instead.")
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      chunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunksRef.current.push(event.data)
+      }
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop())
+        setRecording(false)
+        setBusy(true)
+        try {
+          const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })
+          const body = new FormData()
+          body.append("audio", blob, "phone.webm")
+          const created = await apiForm<Task>("/api/voice/listen", body)
+          await refreshLists((created as any).task_id || (created as any).id)
+          setMsg("Voice command sent to the PC.")
+        } catch (err: any) {
+          setMsg(err.message || "Voice command failed")
+        } finally {
+          setBusy(false)
+        }
+      }
+      recorderRef.current = recorder
+      recorder.start()
+      setRecording(true)
+    } catch (err: any) {
+      setMsg(err.message || "Microphone is not available")
+    }
+  }
+
   const lan = info?.urls?.lan || []
   const phoneUrls = info?.urls?.lan_phone || []
+  const live = active && ["running", "queued", "waiting"].includes(active.status)
 
   return (
     <div className="phone-page">
@@ -69,7 +154,35 @@ export function PhonePage() {
         />
         <div className="row" style={{ marginTop: 12 }}>
           <button className="btn" disabled={busy} onClick={submit}>Run on PC</button>
+          <button className="btn secondary" disabled={busy} type="button" onClick={toggleRecord}>
+            {recording ? "Stop" : "Speak"}
+          </button>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2>Live task</h2>
+        {active ? (
+          <>
+            <div className="kv">
+              <b>Task</b><span>{active.title}</span>
+              <b>Status</b><span className={`badge ${active.status}`}>{active.status}</span>
+              <b>Stage</b><span>{active.stage || "—"}</span>
+              <b>Action</b><span>{active.current_action || "—"}</span>
+              <b>Tool</b><span>{active.current_tool || "—"}</span>
+              <b>Verified</b><span>{active.verification ? "yes" : "pending"}</span>
+            </div>
+            {active.result && <div className="report" style={{ marginTop: 12 }}>{active.result.slice(0, 600)}</div>}
+            {active.error && <p className="lede" style={{ marginTop: 12 }}>{active.error}</p>}
+            <div className="row" style={{ marginTop: 12 }}>
+              {live && <button className="btn secondary" type="button" onClick={cancelActive}>Cancel</button>}
+              {!live && <button className="btn secondary" type="button" onClick={continueActive}>Continue</button>}
+              <button className="btn secondary" type="button" onClick={() => navigate(`/tasks/${active.id}`)}>Open on PC layout</button>
+            </div>
+          </>
+        ) : (
+          <p className="lede">No task yet. Send a command above.</p>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -121,7 +234,10 @@ export function PhonePage() {
             key={task.id}
             className="template-card"
             style={{ width: "100%", marginTop: 10 }}
-            onClick={() => navigate(`/tasks/${task.id}`)}
+            onClick={() => {
+              setActive(task)
+              refreshLists(task.id).catch(() => undefined)
+            }}
           >
             <strong>{task.title}</strong>
             <p>{task.status} · {task.stage}</p>

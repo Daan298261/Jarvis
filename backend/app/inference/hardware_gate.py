@@ -170,3 +170,6 @@ async def hardware_purchase_gate() -> dict[str, Any]:
     )
     report["agent_suite_successes"] = len(suite_cases)
     return report
+
+
+evaluate_purchase_gate = hardware_purchase_gate

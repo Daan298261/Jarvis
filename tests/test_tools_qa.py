@@ -28,7 +28,7 @@ async def test_office_info_does_not_require_com():
     result = await tool.execute(app="word", action="info")
     assert "Office" in (result.output or result.error)
     if platform.system() != "Windows":
-        assert result.success is False
+        assert "COM was not launched" in (result.output or "")
         create = await tool.execute(app="word", action="create", destination="/tmp/no.docx")
         assert create.success is False
         assert "unavailable" in create.error.lower()

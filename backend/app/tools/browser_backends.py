@@ -57,7 +57,9 @@ class PlaywrightBackend(BrowserBackend):
 
     @classmethod
     def is_available(cls) -> bool:
-        return importlib.util.find_spec("playwright") is not None
+        # Playwright is the built-in default backend. The package may still be
+        # missing at runtime; execute() reports that when Chromium is needed.
+        return True
 
     async def _ensure_page(self, headless: bool):
         if self._page:

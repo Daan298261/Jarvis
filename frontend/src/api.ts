@@ -88,7 +88,6 @@ export type Task = {
   acceptance_criteria?: string
   current_action: string
   current_tool: string
-  exposed_tools?: string[]
   result: string
   error: string
   verification?: string

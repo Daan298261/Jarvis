@@ -1,4 +1,5 @@
-from app.tools.terminal import TerminalTool, _python_args, default_shell
+from app.tools.python_exec import PythonTool
+from app.tools.terminal import TerminalTool, _command_args, _python_args, default_shell
 
 
 def test_python_shell_uses_dash_c_for_snippets():

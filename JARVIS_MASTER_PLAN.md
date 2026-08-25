@@ -3629,9 +3629,9 @@ This development session:
 ### Optional Workers
 
 - Browser Use: **adapter present** (catalog `missing`/`ready`; MIT; local OpenAI-compatible endpoint only)
-- UFO: **not integrated**
-- Cua: **not integrated**
-- Open Interpreter: **not integrated**
+- UFO: **adapter present** (catalog `missing`/`ready`; native desktop remains default)
+- Cua: **adapter present** (catalog `missing`/`ready`; native desktop remains default)
+- Open Interpreter: **adapter present** (`open_interpreter`; catalog `missing`/`ready`; Jarvis still verifies)
 - OpenHands: **adapter present** (`code_worker`; catalog `missing`/`ready`; Jarvis still verifies)
 
 ### Jarvis 2.0
@@ -3701,7 +3701,7 @@ Tests performed:
 - Frontend (`npm run build`): TypeScript build (this session)
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **105 passed** on this branch. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **312 passed** on this branch after merge-repair QA. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3861,15 +3861,21 @@ These items make the existing machine a one-node swarm first. They must not requ
 
 - [x] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
   - Status: VERIFIED (`test_workers.py` + Command Speak button). Optional packages; degrades to typed commands when Whisper is missing. Cloud speech APIs are not used.
-- [ ] Phone / Android client against the local API
-- [ ] Dedicated LAN inference server
+- [x] Phone / Android client against the local API
+  - Acceptance: `/phone` PWA talks to the local API: start task, live status, cancel/continue, Speak, recent-task follow. Pairing via `/api/mobile` does not leak the private key.
+  - Status: VERIFIED (`test_mobile.py` + Phone page). Live Android install is still a desktop-session check.
+- [x] Dedicated LAN inference server
+  - Acceptance: remote/LM Studio/Ollama/vLLM backends attach without a local GGUF; Settings expose host/port/API key/remote model; snapshot lists advertised models.
+  - Status: VERIFIED (`test_inference_backends.py`). Live second-PC attach remains a desktop-session check.
 - [x] UFO adapter
   - Acceptance: optional Windows HostAgent worker behind `ComputerUseBackend`; native UI Automation remains default; missing install reports `missing` and names the desktop fallback.
   - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
 - [x] Cua adapter
   - Acceptance: optional computer-use worker behind `ComputerUseBackend`; missing install reports `missing` and names the desktop fallback.
   - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
-- [ ] Open Interpreter adapter
+- [x] Open Interpreter adapter
+  - Acceptance: optional code/shell worker behind `open_interpreter`; missing install reports `missing` and names native filesystem/python/git/terminal fallback; Jarvis still verifies.
+  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
 - [ ] Browser workflow promotion (BrowserCode-style skills)
 
 ### Jarvis 2.0 — specified, not implemented
@@ -4094,7 +4100,7 @@ Switching tools does not grant more rights. Suggesting one would only teach the 
 
 Decision: optional workers are displayed even when absent
 
-The Tools and System pages list optional workers. Browser Use and OpenHands adapters are integrated and report `missing` until installed. UFO, Cua, and Open Interpreter remain `not_integrated`.
+The Tools and System pages list optional workers. Browser Use, OpenHands, UFO, Cua, and Open Interpreter adapters are integrated and report `missing` until installed.
 
 Reason:
 

@@ -9,10 +9,12 @@ from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent.loop import AGENT
+from ..agent.tool_exposure import tool_names_for as allowed_tool_names
 from ..agent.self_dev import KillSwitchActive
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
+from ..tools.exposure import schema_names
 from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])

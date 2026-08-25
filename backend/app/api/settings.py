@@ -28,6 +28,9 @@ class SettingsUpdate(BaseModel):
     inference_host: str | None = None
     inference_port: int | None = None
     inference_vision: bool | None = None
+    inference_remote_model: str | None = None
+    inference_api_key: str | None = None
+    vision_mode: str | None = None
     browser_headless: bool | None = None
     self_dev_max_duration_hours: float | None = None
     self_dev_max_paid_spend_eur: float | None = None
@@ -89,6 +92,13 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.port = body.inference_port
     if body.inference_vision is not None:
         settings.inference.vision = body.inference_vision
+    if body.inference_remote_model is not None:
+        settings.inference.remote_model = body.inference_remote_model
+    if body.inference_api_key is not None:
+        settings.inference.api_key = body.inference_api_key
+    if body.vision_mode is not None:
+        settings.inference.vision_mode = body.vision_mode
+        settings.inference.vision = body.vision_mode in {"always", "on"}
     if body.browser_headless is not None:
         settings.browser.headless = body.browser_headless
     if body.self_dev_max_duration_hours is not None:

@@ -13,8 +13,6 @@ from .safety import resolve_allowed_path
 _ALLOWED_SCHEMES = {"http", "https"}
 _MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 
-_ALLOWED_SCHEMES = {"http", "https"}
-
 
 class WebFetchTool(Tool):
     name = "web_fetch"
@@ -31,9 +29,15 @@ class WebFetchTool(Tool):
             "url": {"type": "string"},
             "method": {"type": "string", "enum": ["GET", "POST", "HEAD"], "default": "GET"},
             "max_chars": {"type": "integer", "default": 12000},
-            "headers": {"type": "object"},
-            "body": {"type": "string"},
-            "json_body": {"type": "object"},
+            "body": {"type": "string", "description": "Request body for POST"},
+            "json_body": {"description": "JSON object sent as the POST body"},
+            "headers": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": "Optional HTTP headers",
+            },
+            "timeout_seconds": {"type": "integer", "default": 30},
+            "path": {"type": "string", "description": "If set, save the response body to this allowed path"},
         },
         "required": ["url"],
     }
@@ -42,33 +46,77 @@ class WebFetchTool(Tool):
         self.context_getter = context_getter or (lambda: {})
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        url = kwargs.get("url")
+        url = (kwargs.get("url") or "").strip()
         if not url:
             return ToolResult(False, "", error="url is required")
-        scheme = (urlparse(str(url)).scheme or "").lower()
-        if scheme not in {"http", "https"}:
-            return ToolResult(False, "", error="Only http and https URLs are allowed")
+        parsed = urlparse(url)
+        if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
+            return ToolResult(
+                False,
+                "",
+                error=f"Blocked URL scheme {parsed.scheme!r}. Only http and https URLs are allowed (http/https).",
+            )
+        if not parsed.netloc:
+            return ToolResult(False, "", error="url is missing a host")
         method = (kwargs.get("method") or "GET").upper()
         if method not in {"GET", "POST", "HEAD"}:
             return ToolResult(False, "", error=f"Unsupported method {method}")
         limit = int(kwargs.get("max_chars") or 12000)
-        if method not in {"GET", "POST", "HEAD"}:
-            return ToolResult(False, "", error=f"Unsupported method {method}")
+        timeout = float(kwargs.get("timeout_seconds") or 30)
         headers = {"User-Agent": "JarvisLocal/1.0"}
-        extra = kwargs.get("headers")
+        extra = kwargs.get("headers") or {}
         if isinstance(extra, dict):
-            headers.update({str(key): str(value) for key, value in extra.items()})
-        json_body = kwargs.get("json_body") if isinstance(kwargs.get("json_body"), dict) else None
+            for key, value in extra.items():
+                if value is None:
+                    continue
+                headers[str(key)] = str(value)
         body = kwargs.get("body")
+        json_body = kwargs.get("json_body")
+        if json_body is None:
+            json_body = kwargs.get("json")
+        save_to = kwargs.get("path")
+        allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
+        dest: Path | None = None
+        if save_to:
+            try:
+                dest = resolve_allowed_path(str(save_to), allowed)
+            except PermissionError as exc:
+                return ToolResult(False, "", error=str(exc))
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30, headers=headers) as client:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
                 request_kwargs: dict[str, Any] = {}
-                if json_body is not None:
-                    request_kwargs["json"] = json_body
-                elif body is not None:
-                    request_kwargs["content"] = body
+                if method == "POST":
+                    if json_body is not None:
+                        request_kwargs["json"] = json_body
+                    elif body is not None:
+                        request_kwargs["content"] = body if isinstance(body, (bytes, str)) else str(body)
                 response = await client.request(method, url, **request_kwargs)
-            text = response.text[:limit]
+            content_type = response.headers.get("content-type", "")
+            raw = getattr(response, "content", None)
+            if raw is None:
+                text_body = getattr(response, "text", "") or ""
+                raw = text_body.encode("utf-8") if isinstance(text_body, str) else b""
+            payload = raw[:_MAX_DOWNLOAD_BYTES]
+            truncated_bytes = len(raw) > _MAX_DOWNLOAD_BYTES
+            saved = ""
+            if dest is not None and method != "HEAD":
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(payload)
+                saved = str(dest)
+            try:
+                text = payload.decode(getattr(response, "encoding", None) or "utf-8")
+            except (LookupError, UnicodeDecodeError):
+                text = payload.decode("utf-8", errors="replace")
+            preview = text[:limit]
+            lines = [
+                f"status={response.status_code}",
+                f"content-type={content_type}",
+                f"bytes={len(payload)}" + (" (truncated)" if truncated_bytes else ""),
+            ]
+            if saved:
+                lines.append(f"saved={saved}")
+            if method != "HEAD":
+                lines.extend(["", preview])
             return ToolResult(
                 response.is_success,
                 "\n".join(lines),

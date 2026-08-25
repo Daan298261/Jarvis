@@ -148,7 +148,7 @@ class DesktopTool(Tool):
 
                 names = sorted({p.info["name"] for p in psutil.process_iter(["name"]) if p.info["name"]})
                 return ToolResult(True, "\n".join(names[:400]))
-            if action not in {"windows", "focus", "click", "type", "keys"}:
+            if action not in {"windows", "inspect", "focus", "click", "type", "keys", "wait"}:
                 return ToolResult(False, "", error=f"Unknown action {action}")
             if not windows_ui_available():
                 return ToolResult(False, "", error=UNAVAILABLE)

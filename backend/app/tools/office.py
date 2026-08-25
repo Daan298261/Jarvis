@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import csv
+import io
+import json
 import platform
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -37,40 +41,6 @@ def _module_ok(name: str) -> bool:
     import importlib.util
 
     return importlib.util.find_spec(name) is not None
-
-_PROGID = {
-    "word": "Word.Application",
-    "excel": "Excel.Application",
-    "powerpoint": "PowerPoint.Application",
-}
-
-
-def office_runtime_available() -> bool:
-    if platform.system() != "Windows":
-        return False
-    try:
-        import win32com.client  # noqa: F401
-        import pythoncom  # noqa: F401
-    except Exception:
-        return False
-    return True
-
-
-def office_available() -> tuple[bool, str]:
-    if platform.system() != "Windows":
-        return False, "Office COM is only available on Windows"
-    try:
-        import win32com.client  # noqa: F401
-    except Exception:
-        return False, "pywin32 is not installed"
-    roots = [
-        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office",
-        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft Office",
-        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office 16",
-    ]
-    if any(root.exists() for root in roots):
-        return True, "Microsoft Office appears to be installed"
-    return False, "Microsoft Office does not appear to be installed"
 
 
 def _dispatch(progid: str):
@@ -163,33 +133,18 @@ class OfficeTool(Tool):
         "required": ["app", "action"],
     }
 
-    def _info(self, app: str, path: str | None) -> ToolResult:
-        bits = [f"app={app or 'unspecified'}", f"os={platform.system()}"]
-        if path:
-            target = Path(path)
-            if not target.exists():
-                return ToolResult(False, "", error=f"Office file not found: {path}")
-            stat = target.stat()
-            bits.extend(
-                [
-                    f"path={target.resolve()}",
-                    f"size_bytes={stat.st_size}",
-                    f"suffix={target.suffix}",
-                ]
-            )
-            return ToolResult(True, "\n".join(bits) + "\nCOM was not launched.")
-        if platform.system() != "Windows":
-            return ToolResult(True, "\n".join(bits) + "\nOffice COM is only available on Windows. COM was not launched.")
-        from ..hardware import detect_hardware
+    def __init__(self, context_getter=None) -> None:
+        self.context_getter = context_getter or (lambda: {})
 
-        installed = detect_hardware().office_installed
-        bits.append(f"office_installed={installed}")
-        bits.append("COM was not launched.")
-        return ToolResult(True, "\n".join(bits))
+    def _allowed(self) -> list[str]:
+        return list((self.context_getter() or {}).get("allowed_directories") or [])
+
+    def _resolve(self, path: str | None) -> Path:
+        if not path:
+            raise ValueError("path is required")
+        return resolve_allowed_path(path, self._allowed())
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        if platform.system() != "Windows":
-            return ToolResult(False, "", error="Office COM is unavailable on this operating system")
         app = (kwargs.get("app") or "").lower()
         action = (kwargs.get("action") or "").lower()
         backend = (kwargs.get("backend") or "auto").lower()
@@ -197,81 +152,51 @@ class OfficeTool(Tool):
             return ToolResult(False, "", error="app must be word, excel, or powerpoint")
         if action not in {"create", "read", "write", "save_as", "append", "info"}:
             return ToolResult(False, "", error=f"Unknown action {action}")
+        if action == "info" and not (kwargs.get("path") or kwargs.get("destination")):
+            return self._info_probe(app)
+        if action in {"create", "write", "save_as", "append"} and not self._allowed() and not office_com_available():
+            return ToolResult(
+                False,
+                "",
+                error="Office write unavailable without allowed directories or Microsoft Office COM",
+            )
         try:
-            if action == "info":
-                return self._info(app, kwargs.get("path"))
-            if app == "word":
-                word = _dispatch("Word.Application")
-                word.Visible = False
-                if action == "create":
-                    doc = word.Documents.Add()
-                    if kwargs.get("content"):
-                        doc.Range().Text = kwargs["content"]
-                    dest = kwargs.get("destination") or kwargs.get("path")
-                    if not dest:
-                        word.Quit()
-                        return ToolResult(False, "", error="destination required")
-                    Path(dest).parent.mkdir(parents=True, exist_ok=True)
-                    doc.SaveAs(str(Path(dest).resolve()))
-                    doc.Close()
-                    word.Quit()
-                    return ToolResult(True, f"Created Word document {dest}")
-                if action == "read":
-                    doc = word.Documents.Open(str(Path(kwargs["path"]).resolve()))
-                    text = doc.Range().Text
-                    doc.Close(False)
-                    word.Quit()
-                    return ToolResult(True, text)
-                if action in {"write", "save_as"}:
-                    src = Path(kwargs["path"]).resolve()
-                    dest = Path(kwargs.get("destination") or kwargs["path"]).resolve()
-                    if action != "write" or dest != src:
-                        pass
-                    doc = word.Documents.Open(str(src))
-                    if kwargs.get("content"):
-                        doc.Range().Text = kwargs["content"]
-                    doc.SaveAs(str(dest))
-                    doc.Close()
-                    word.Quit()
-                    return ToolResult(True, f"Saved {dest}")
-                word.Quit()
-            if app == "excel":
-                excel = _dispatch("Excel.Application")
-                excel.Visible = False
-                excel.DisplayAlerts = False
-                if action == "create":
-                    wb = excel.Workbooks.Add()
-                    dest = kwargs.get("destination") or kwargs.get("path")
-                    Path(dest).parent.mkdir(parents=True, exist_ok=True)
-                    wb.SaveAs(str(Path(dest).resolve()))
-                    wb.Close()
-                    excel.Quit()
-                    return ToolResult(True, f"Created workbook {dest}")
-                if action == "read":
-                    wb = excel.Workbooks.Open(str(Path(kwargs["path"]).resolve()))
-                    sheet = wb.Worksheets(1)
-                    used = sheet.UsedRange
-                    rows = []
-                    for row in used.Value or []:
-                        rows.append("\t".join("" if c is None else str(c) for c in (row if isinstance(row, tuple) else (row,))))
-                    wb.Close(False)
-                    excel.Quit()
-                    return ToolResult(True, "\n".join(rows))
-                excel.Quit()
-            if app == "powerpoint":
-                ppt = _dispatch("PowerPoint.Application")
-                if action == "create":
-                    pres = ppt.Presentations.Add()
-                    dest = kwargs.get("destination") or kwargs.get("path")
-                    Path(dest).parent.mkdir(parents=True, exist_ok=True)
-                    pres.SaveAs(str(Path(dest).resolve()))
-                    pres.Close()
-                    ppt.Quit()
-                    return ToolResult(True, f"Created presentation {dest}")
-                ppt.Quit()
-            return ToolResult(False, "", error="Office action not supported or Office is not installed")
+            chosen = self._choose_backend(app, backend)
+            if chosen == "com":
+                return self._run_com(app, action, kwargs)
+            return self._run_library(app, action, kwargs)
+        except PermissionError as exc:
+            return ToolResult(False, "", error=str(exc))
+        except FileNotFoundError as exc:
+            return ToolResult(False, "", error=str(exc))
+        except ValueError as exc:
+            return ToolResult(False, "", error=str(exc))
         except Exception as exc:
+            if action == "info" and backend != "com":
+                return self._info_probe(app)
             return ToolResult(False, "", error=f"Office automation unavailable: {exc}")
+
+    def _info_probe(self, app: str) -> ToolResult:
+        com = office_com_available()
+        lib = office_library_available(app)
+        progid = {"word": "Word.Application", "excel": "Excel.Application", "powerpoint": "PowerPoint.Application"}[app]
+        available = com or lib
+        launched = "COM was launched" if com and platform.system() == "Windows" else "COM was not launched"
+        text = (
+            f"Office {app} probe\navailable={available}\ncom={com}\nlibrary={lib}\n"
+            f"progid={progid}\nwindows={platform.system() == 'Windows'}\n{launched}"
+        )
+        return ToolResult(
+            True,
+            text,
+            data={
+                "available": available,
+                "com": com,
+                "library": lib,
+                "progid": progid,
+                "windows": platform.system() == "Windows",
+            },
+        )
 
     def _choose_backend(self, app: str, backend: str) -> str:
         com_ok = office_com_available()

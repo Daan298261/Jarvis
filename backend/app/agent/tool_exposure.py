@@ -46,6 +46,7 @@ CAPABILITY_ALIASES: dict[str, str] = {
 }
 
 ESCAPE_TOOL = "request_tools"
+ESCAPE_TOOLS = ("request_tools", "request_capability")
 MCP_CAPABILITY = "mcp"
 
 
@@ -102,8 +103,11 @@ def schemas_for(task_class: str, extra: Iterable[str] | None = None) -> list[dic
     names = tool_names_for(task_class, extras)
     schemas = [REGISTRY.tools[name].schema() for name in names if name in REGISTRY.tools]
     full = is_full_exposure(task_class, extras)
-    if not full and ESCAPE_TOOL in REGISTRY.tools and REGISTRY.tools[ESCAPE_TOOL].enabled:
-        schemas.append(REGISTRY.tools[ESCAPE_TOOL].schema())
+    if not full:
+        for escape in ESCAPE_TOOLS:
+            if escape in REGISTRY.tools and REGISTRY.tools[escape].enabled:
+                if all(item.get("function", {}).get("name") != escape for item in schemas):
+                    schemas.append(REGISTRY.tools[escape].schema())
     if full or MCP_CAPABILITY in extras:
         schemas.extend(MCP.openai_tools())
     return schemas
@@ -121,7 +125,7 @@ def describe_exposure(task_class: str, extra: Iterable[str] | None = None) -> st
     return (
         f"Tool exposure: this {task_class or 'task'} is limited to: {listed}.\n"
         "If you need another capability (browser, desktop, office, docker, git, screenshot, "
-        "terminal, python, web_fetch, mcp), call request_tools with that name rather than inventing a tool."
+        "terminal, python, web_fetch, mcp), call request_tools or request_capability with that name rather than inventing a tool."
     )
 
 

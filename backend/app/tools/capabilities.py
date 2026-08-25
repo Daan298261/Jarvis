@@ -5,8 +5,12 @@ import platform
 import shutil
 from typing import Any
 
+from ..agent.acp import acp_status
+from ..agent.coding_workers import coding_worker_catalog
 from ..workers.browser import BrowserUseBackend
 from ..workers.code import OpenHandsBackend
+from ..workers.computer import CuaBackend, UFOBackend
+from ..workers.interpreter import OpenInterpreterBackend
 from ..workers.voice import voice_status
 
 
@@ -119,38 +123,21 @@ def native_capabilities() -> list[dict[str, Any]]:
 
 
 def optional_workers() -> list[dict[str, Any]]:
-    from ..agent.acp import acp_status
-
     acp = acp_status()
     return [
         BrowserUseBackend().probe(),
-        {
-            "id": "ufo",
-            "name": "Microsoft UFO",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Windows HostAgent/AppAgent worker. Native UI Automation is the current fallback.",
-        },
-        {
-            "id": "cua",
-            "name": "Cua",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Computer-use worker. Not required for Jarvis to run.",
-        },
         UFOBackend().probe(),
         CuaBackend().probe(),
-        {
-            "id": "open-interpreter",
-            "name": "Open Interpreter",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Optional code/shell worker behind an adapter.",
-        },
+        OpenInterpreterBackend().probe(),
         OpenHandsBackend().probe(),
+        {
+            "id": "cursor-acp",
+            "name": "Cursor ACP",
+            "kind": "optional",
+            "available": bool(acp.get("available")),
+            "status": acp.get("status") or "not_connected",
+            "detail": acp.get("detail") or "Cursor ACP CLI is not on PATH.",
+        },
     ]
 
 

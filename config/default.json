@@ -10,6 +10,7 @@
     "profile": "balanced",
     "context_size": 16384,
     "vision": false,
+    "vision_mode": "lazy",
     "flash_attn": "auto",
     "fit": true,
     "fit_target_mib": 1024,

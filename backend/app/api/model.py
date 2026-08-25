@@ -6,19 +6,21 @@ from pydantic import BaseModel
 from ..agent.agent_benchmark import (
     apply_expected_solution,
     check_case,
+    empty_metrics,
     format_prompt,
     get_case,
     list_results as list_agent_results,
     list_suite,
     prepare_case,
     record_case_result,
-    empty_metrics,
 )
 from ..config import data_dir, load_settings, save_settings
+from ..inference.backends import probe_remote_server
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
+from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
-from ..inference.profiles import declared_profiles, profile_as_dict
+from ..inference.profiles import declared_profiles
 
 router = APIRouter(prefix="/api/model", tags=["model"])
 
@@ -30,6 +32,11 @@ class LoadBody(BaseModel):
 class HarnessBody(BaseModel):
     live: bool = False
     background: bool = False
+
+
+class AgentSuiteRun(BaseModel):
+    case_id: str
+    simulate_success: bool = False
 
 
 @router.get("")
@@ -46,7 +53,7 @@ async def model_status():
             "description": p.description,
             "escalation_only": p.name == "expert",
         }
-        for p in available_profiles()
+        for p in declared_profiles()
     ]
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
@@ -68,6 +75,7 @@ async def probe_inference():
         "host": settings.inference.host,
         "port": settings.inference.port,
         "base_url": f"http://{settings.inference.host}:{settings.inference.port}/v1",
+        "requires_local_files": settings.inference.backend in {"llama.cpp", "llamacpp", "llama", "local", ""},
         **probe,
     }
 
@@ -106,11 +114,12 @@ async def capture_benchmark():
 
 @router.get("/harness")
 async def model_harness():
-    return load_last_report() or {"ran_at": None, "model_available": False, "blocked_reason": "not run yet"}
+    report = load_last_report()
+    return {"running": False, "report": report, "matrix_size": None}
 
 
 @router.post("/harness/run")
-async def run_model_harness():
+async def run_model_harness(body: HarnessBody | None = None):
     report = await run_harness(
         loaded=MANAGER.state.loaded,
         chat=MANAGER.provider.chat if MANAGER.provider else None,
@@ -118,7 +127,7 @@ async def run_model_harness():
         state=MANAGER.state,
         persist=True,
     )
-    return report.as_dict()
+    return report.as_dict() if hasattr(report, "as_dict") else report
 
 
 @router.post("/load")
@@ -142,22 +151,38 @@ async def unload_model():
     return await MANAGER.snapshot(settings)
 
 
-@router.get("/harness")
-async def get_harness():
-    return harness_status()
+@router.get("/hardware-gate")
+async def hardware_gate():
+    return await hardware_purchase_gate()
 
 
-@router.post("/harness")
-async def start_harness(body: HarnessBody | None = None):
-    live = bool(body.live) if body else False
-    background = bool(body.background) if body else False
-    status = harness_status()
-    if status["running"]:
-        return {"ok": True, "running": True, "report": status.get("report")}
-    if background:
-        import asyncio
+@router.get("/agent-suite")
+async def agent_suite():
+    payload = list_suite()
+    payload["results"] = await list_agent_results(limit=40)
+    return payload
 
-        asyncio.create_task(run_harness_background(live=live))
-        return {"ok": True, "running": True}
-    report = run_harness(live=live)
-    return {"ok": True, "running": False, "report": report}
+
+@router.post("/agent-suite/run")
+async def run_agent_suite_case(body: AgentSuiteRun):
+    try:
+        case = get_case(body.case_id)
+    except KeyError:
+        raise HTTPException(404, f"Unknown case {body.case_id}")
+    workspace = data_dir() / "agent-suite" / case.id
+    ctx = prepare_case(case, workspace)
+    if body.simulate_success:
+        apply_expected_solution(case, ctx)
+    ok, note = check_case(case, workspace, ctx)
+    metrics = empty_metrics()
+    metrics["success"] = ok
+    metrics["verification_result"] = note
+    row = await record_case_result(case=case, metrics=metrics, source="simulate" if body.simulate_success else "fixture")
+    return {
+        "success": ok,
+        "note": note,
+        "prompt": format_prompt(case, ctx),
+        "case_id": case.id,
+        "result_id": row.id,
+        "workspace": str(workspace),
+    }

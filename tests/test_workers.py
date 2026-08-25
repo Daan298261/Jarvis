@@ -4,6 +4,7 @@ from app.tools.docker_tools import DockerTool
 from app.tools.registry import REGISTRY
 from app.workers.browser import BrowserUseBackend, playwright_is_default
 from app.workers.code import OpenHandsBackend
+from app.workers.interpreter import OpenInterpreterBackend
 from app.workers.local_llm import local_openai_env
 from app.config import AppSettings
 
@@ -16,7 +17,9 @@ def test_browser_use_and_openhands_are_integrated_adapters():
     workers = {item["id"]: item for item in optional_workers()}
     assert workers["browser-use"]["status"] in {"missing", "ready"}
     assert workers["openhands"]["status"] in {"missing", "ready"}
-    assert workers["ufo"]["status"] == "not_integrated"
+    assert workers["ufo"]["status"] in {"missing", "ready"}
+    assert workers["cua"]["status"] in {"missing", "ready"}
+    assert workers["open-interpreter"]["status"] in {"missing", "ready"}
     snap = capability_snapshot()
     native = {item["id"]: item for item in snap["native"]}
     assert "voice" in native
@@ -94,6 +97,39 @@ async def test_openhands_backend_reminds_jarvis_to_verify(monkeypatch, tmp_path)
     assert result.success is True
     assert "independently inspect" in result.output.lower()
     assert result.data["kind"] == "cli"
+
+
+async def test_open_interpreter_status_and_sandbox(jarvis_env):
+    status = await REGISTRY.execute("open_interpreter", {"action": "status"})
+    assert status.success is True
+    assert "open interpreter" in status.output.lower()
+    missing = await REGISTRY.execute(
+        "open_interpreter",
+        {"action": "delegate", "goal": "fix the tests", "path": str(jarvis_env["tmp"])},
+    )
+    assert missing.success is False
+    assert "not installed" in missing.error.lower()
+    denied = await REGISTRY.execute(
+        "open_interpreter",
+        {"action": "delegate", "goal": "fix the tests", "path": "/etc"},
+    )
+    assert denied.success is False
+    assert "outside allowed" in denied.error.lower()
+
+
+async def test_open_interpreter_backend_reminds_jarvis_to_verify(monkeypatch, tmp_path):
+    backend = OpenInterpreterBackend()
+    monkeypatch.setattr(backend, "detect_kind", lambda: "cli")
+
+    async def fake_invoke(command, workdir, settings, timeout):
+        assert command[0] == "interpreter"
+        return ("changed files", "", 0)
+
+    monkeypatch.setattr(backend, "_invoke", fake_invoke)
+    result = await backend.run("install the project deps", tmp_path)
+    assert result.success is True
+    assert "independently inspect" in result.output.lower()
+    assert result.data["backend"] == "open-interpreter"
 
 
 async def test_docker_run_requires_image(monkeypatch):

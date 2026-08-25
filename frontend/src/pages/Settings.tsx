@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 
 export function SettingsPage() {

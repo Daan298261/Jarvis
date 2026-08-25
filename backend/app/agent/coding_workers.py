@@ -322,6 +322,34 @@ def should_route(task_class: str, prompt: str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def is_software_task(prompt: str, task_class: str | None = None) -> bool:
+    return should_route(task_class or "", prompt)
+
+
+async def route_coding_task(prompt: str, task_class: str | None = None) -> dict[str, Any]:
+    from ..coding.routing import recommend_worker, recommendation_dict
+
+    rec = await recommend_worker(prompt, task_class or "software engineering")
+    data = recommendation_dict(rec)
+    data["execute_worker"] = rec.worker
+    data["complexity"] = rec.complexity
+    return data
+
+
+def format_routing_block(routing: dict[str, Any] | None) -> str:
+    if not routing:
+        return ""
+    if isinstance(routing, dict) and routing.get("reason"):
+        return (
+            "Software-development worker routing:\n"
+            f"- Selected worker: {routing.get('execute_worker') or routing.get('worker')}\n"
+            f"- Complexity: {routing.get('complexity')}\n"
+            f"- Reason: {routing.get('reason')}\n"
+            "- A worker claiming success is never completion. Jarvis must independently verify."
+        )
+    return str(routing)
+
+
 async def record_coding_route(task_id: str, decision: CodingRouteDecision) -> CodingRoute:
     row = CodingRoute(
         task_id=task_id,

@@ -10,7 +10,10 @@ import httpx
 
 from ..config import AppSettings, logs_dir, runtime_dir
 from ..hardware import detect_hardware
-from .profiles import ModelProfile, mmproj_path, profile_gguf
+from dataclasses import replace
+
+from .profiles import ModelProfile, mmproj_path, model_paths, profile_gguf
+from .vision import mmproj_args
 
 LLAMA_CPP_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
 OLLAMA_ALIASES = {"ollama"}
@@ -232,6 +235,9 @@ class LlamaCppBackend(InferenceBackend):
         hardware = detect_hardware()
         inference = self.settings.inference
         projector = mmproj_path(profile)
+        legacy = model_paths().get("mmproj")
+        if legacy and Path(legacy).exists() and not projector.exists():
+            projector = Path(legacy)
         threads = inference.threads or hardware.cpu_cores
         ctx = int(context_size or profile.context_size or inference.context_size)
         args = [
@@ -275,9 +281,11 @@ class LlamaCppBackend(InferenceBackend):
             args.extend(["--fit", "on", "--fit-target", str(inference.fit_target_mib)])
         else:
             args.extend(["--n-gpu-layers", "99"])
-        # P0.5: do not reserve VRAM for the projector unless vision is requested.
-        if inference.vision and projector.exists():
-            args.extend(["--mmproj", str(projector)])
+        # P0.5: do not reserve VRAM for the projector unless this load needs vision.
+        mode = (getattr(inference, "vision_mode", None) or ("always" if inference.vision else "lazy")).strip().lower()
+        want_vision = bool(vision) or mode in {"always", "on"} or (inference.vision and mode not in {"off", "never", "disabled", "lazy"})
+        if want_vision:
+            args.extend(mmproj_args(replace(profile, vision=True), projector))
         return args
 
     async def start(
@@ -305,7 +313,7 @@ class LlamaCppBackend(InferenceBackend):
             self.last_probe = {
                 "ok": True,
                 "health_path": "/health",
-                "models": ["Qwen3.5-27B"],
+                "models": [profile.alias],
             }
         return ready
 

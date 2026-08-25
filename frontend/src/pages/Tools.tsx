@@ -5,7 +5,14 @@ type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
   optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
+  coding_workers?: { id: string; name: string; available?: boolean; status: string; detail?: string }[]
   cursor_acp?: { status?: string; detail?: string; command?: string; available?: boolean; session_id?: string }
+}
+
+type CodingOverview = {
+  workers?: { id: string; name?: string; available?: boolean; status?: string }[]
+  models?: { status?: string }
+  usage?: Record<string, unknown>
 }
 
 export function ToolsPage() {
@@ -21,6 +28,15 @@ export function ToolsPage() {
   }
   useEffect(() => { refresh() }, [])
   if (!catalog) return <div>Loading tools…</div>
+  const codingWorkers = catalog.coding_workers?.length
+    ? catalog.coding_workers
+    : (coding?.workers || []).map((worker) => ({
+        id: worker.id,
+        name: worker.name || worker.id,
+        available: worker.available,
+        status: worker.status,
+        detail: "",
+      }))
   return (
     <div>
       <h1>Tools</h1>
@@ -71,11 +87,11 @@ export function ToolsPage() {
           </div>
         ))}
       </div>
-      {!!catalog.coding_workers?.length && (
+      {!!codingWorkers.length && (
         <div className="card" style={{ marginTop: 16 }}>
           <h2>Software-development workers</h2>
           <p className="lede">Jarvis routes coding work to the cheapest capable worker. Paid Cursor workers stay listed when they are not configured. A worker claiming success is never completion.</p>
-          {catalog.coding_workers.map((worker) => (
+          {codingWorkers.map((worker) => (
             <div className="toggle" key={worker.id}>
               <div>
                 <strong>{worker.name}</strong>

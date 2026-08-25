@@ -77,6 +77,30 @@ async def test_snapshot_includes_lan_fields():
     assert "api_key_configured" in snap
 
 
+async def test_remote_backend_load_does_not_require_local_gguf(monkeypatch):
+    from app.config import AppSettings
+    from app.inference.manager import InferenceManager
+
+    settings = AppSettings(inference={"backend": "remote", "host": "192.168.1.40", "port": 8088, "remote_model": "qwen"})
+    mgr = InferenceManager()
+
+    async def fake_probe(host, port, api_key="", timeout=8, retry=False):
+        assert host == "192.168.1.40"
+        return {"ok": True, "health_path": "/v1/models", "models": ["qwen"]}
+
+    async def fake_health(self):
+        return True
+
+    monkeypatch.setattr("app.inference.manager.probe_remote_server", fake_probe)
+    monkeypatch.setattr("app.providers.base.ModelProvider.health", fake_health)
+    state = await mgr.load(settings, "balanced")
+    assert state.loaded is True
+    assert state.manages_process is False
+    assert mgr.provider is not None
+    assert mgr.provider.model == "qwen"
+    assert not state.model_path
+
+
 def test_llama_cpp_reports_missing_local_files():
     backend = LlamaCppBackend(_settings())
     missing = backend.missing_requirements(resolve_profile("balanced"))

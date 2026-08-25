@@ -280,6 +280,12 @@ class WorkingState:
     verified: bool = False
     requested_tools: list[str] = field(default_factory=list)
     expert_consults: int = 0
+    coding_worker: str = ""
+    coding_tier: str = ""
+    coding_complexity: int = 0
+    escalated: bool = False
+    recommended_context: int = 0
+    vision_requested: bool = False
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"
@@ -315,7 +321,7 @@ class WorkingState:
             f"Known failures:\n{failures}\n"
             f"Next action: {self.next_action or 'continue'}\n"
             f"Verified: {self.verified}\n"
-            f"Requested extra tools: {', '.join(self.extra_tools) or 'none'}"
+            f"Requested extra tools: {', '.join(self.requested_tools) or 'none'}"
         )
 
     def dumps(self) -> str:

@@ -15,7 +15,8 @@ def test_long_tasks_start_at_16k_not_profile_cap():
     assert initial_context_size("software engineering", PROFILES["balanced"]) == CONTEXT_NORMAL
     assert initial_context_size("long-horizon autonomous", PROFILES["balanced"]) == CONTEXT_NORMAL
     assert initial_context_size("mixed", PROFILES["balanced"]) == CONTEXT_NORMAL
-    assert PROFILES["balanced"].context_size == CONTEXT_LONG
+    assert PROFILES["balanced"].context_size == CONTEXT_NORMAL
+    assert PROFILES["quality"].context_size == CONTEXT_LONG
 
 
 def test_fast_profile_cannot_exceed_its_cap():
@@ -35,7 +36,7 @@ def test_with_context_copies_profile():
     grown = with_context(PROFILES["fast"], 32768)
     assert grown.context_size == 32768
     assert grown.filename == PROFILES["fast"].filename
-    assert PROFILES["fast"].context_size == 16384
+    assert PROFILES["fast"].context_size == 8192
 
 
 def test_expert_profile_stays_compact():

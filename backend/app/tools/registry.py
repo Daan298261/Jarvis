@@ -5,12 +5,16 @@ from typing import Any, Callable
 from ..config import AppSettings, default_allowed_directories
 from .base import Tool, ToolResult
 from .browser import BrowserTool
+from .browser_use import BrowserUseTool
 from .capability import RequestCapabilityTool
+from .code_worker import CodeWorkerTool
+from .computer_use import CuaTool, UFOTool
 from .desktop import DesktopTool
 from .docker_tools import DockerTool
 from .exposure import REQUEST_CAPABILITY, ToolExposure
 from .filesystem import FilesystemTool
 from .git_tools import GitTool
+from .interpreter import OpenInterpreterTool
 from .mcp_runtime import MCP, MCPProxyTool
 from .office import OfficeTool
 from .python_exec import PythonTool
@@ -35,6 +39,7 @@ class ToolRegistry:
             BrowserTool(getter),
             BrowserUseTool(),
             CodeWorkerTool(getter),
+            OpenInterpreterTool(getter),
             DesktopTool(),
             OfficeTool(getter),
             GitTool(getter),
@@ -42,8 +47,8 @@ class ToolRegistry:
             WebFetchTool(getter),
             ScreenshotTool(),
             RequestToolsTool(),
+            RequestCapabilityTool(),
             MCPProxyTool(),
-            RequestToolsTool(),
             UFOTool(),
             CuaTool(),
         ]
@@ -95,7 +100,7 @@ class ToolRegistry:
     async def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         exposure = self._context.get("exposure")
         if isinstance(exposure, ToolExposure):
-            if name == REQUEST_CAPABILITY:
+            if name in {REQUEST_CAPABILITY, "request_tools"}:
                 arguments = dict(arguments or {})
                 arguments.setdefault("task_class", exposure.task_class)
             elif name.startswith("mcp_"):

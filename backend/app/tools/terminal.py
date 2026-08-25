@@ -26,10 +26,6 @@ class BackgroundJob:
     pump: asyncio.Task | None = None
 
 
-def _default_shell() -> str:
-    return "powershell" if os.name == "nt" else "bash"
-
-
 _JOBS: dict[int, BackgroundJob] = {}
 
 
@@ -37,12 +33,12 @@ def default_shell() -> str:
     return "powershell" if platform.system() == "Windows" else "bash"
 
 
+def _default_shell() -> str:
+    return default_shell()
+
+
 def _decode(data: bytes | bytearray) -> str:
     return bytes(data).decode("utf-8", errors="replace")
-
-
-def default_shell() -> str:
-    return "powershell" if os.name == "nt" else "bash"
 
 
 def _python_args(command: str) -> list[str]:
@@ -55,14 +51,6 @@ def _python_args(command: str) -> list[str]:
     if looks_like_file:
         return [python, *stripped.split()]
     return [python, "-c", command]
-
-
-def default_shell() -> str:
-    if sys.platform == "win32":
-        return "powershell"
-    if shutil.which("bash"):
-        return "bash"
-    return "python"
 
 
 def _command_args(command: str, shell: str) -> list[str] | ToolResult:

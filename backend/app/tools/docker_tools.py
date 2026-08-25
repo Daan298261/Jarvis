@@ -24,7 +24,7 @@ def docker_argv(action: str, kwargs: dict[str, Any]) -> tuple[list[str] | None, 
     if action == "logs":
         container = str(kwargs.get("container") or "").strip()
         if not container:
-            return None, "container is required for docker logs"
+            return None, "container is required for docker logs (container or image)"
         return ["logs", container], ""
     if action == "inspect":
         target = str(kwargs.get("container") or kwargs.get("image") or "").strip()
@@ -54,34 +54,12 @@ class DockerTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        action = kwargs.get("action")
-        if action == "run" and not (kwargs.get("image") or "").strip():
-            return ToolResult(False, "", error="image is required for docker run")
-        if action in {"logs", "inspect"} and not (
-            (kwargs.get("container") or "").strip() or (kwargs.get("image") or "").strip()
-        ):
-            return ToolResult(False, "", error="container or image is required")
+        action = kwargs.get("action") or ""
+        args, err = docker_argv(action, kwargs)
+        if err:
+            return ToolResult(False, "", error=err)
         if not shutil.which("docker"):
             return ToolResult(False, "", error="Docker is not installed on this machine")
-        action = kwargs.get("action")
-        if action == "run" and not (kwargs.get("image") or "").strip():
-            return ToolResult(False, "", error="image is required for docker run")
-        if action == "logs" and not (kwargs.get("container") or "").strip():
-            return ToolResult(False, "", error="container is required for docker logs")
-        if action == "inspect" and not ((kwargs.get("container") or kwargs.get("image") or "").strip()):
-            return ToolResult(False, "", error="container or image is required for docker inspect")
-        mapping = {
-            "ps": ["ps", "-a"],
-            "images": ["images"],
-            "build": ["build", kwargs.get("path") or "."],
-            "run": ["run", "--rm", *(kwargs.get("args") or "").split(), image],
-            "logs": ["logs", container],
-            "inspect": ["inspect", container or image],
-        }
-        args = mapping.get(action)
-        if not args:
-            return ToolResult(False, "", error=f"Unknown action {action}")
-        args = [a for a in args if a]
         proc = await asyncio.create_subprocess_exec(
             "docker",
             *args,

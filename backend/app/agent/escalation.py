@@ -163,3 +163,34 @@ async def consult_expert(
     if not content:
         return ExpertAdvice(False, reason=reason, primary_restored=restored)
     return ExpertAdvice(True, content=content.strip(), reason=reason, primary_restored=restored)
+
+
+_PACKAGES: dict[str, dict[str, Any]] = {}
+
+
+def build_escalation_package(working: WorkingState, unresolved: str = "") -> dict[str, Any]:
+    brief = build_expert_brief(working, unresolved=unresolved)
+    return {
+        "goal": brief.goal,
+        "acceptance_criteria": brief.acceptance_criteria,
+        "observations": brief.observations,
+        "failed_approaches": brief.failed_approaches,
+        "unresolved_problem": brief.unresolved_problem,
+        "relevant_files": brief.relevant_files,
+        "task_class": brief.task_class,
+    }
+
+
+async def persist_escalation_package(package: dict[str, Any], package_id: str | None = None) -> dict[str, Any]:
+    ident = package_id or f"esc-{len(_PACKAGES) + 1}"
+    stored = {"id": ident, **package}
+    _PACKAGES[ident] = stored
+    return stored
+
+
+async def list_escalation_packages() -> list[dict[str, Any]]:
+    return list(_PACKAGES.values())
+
+
+async def get_escalation_package(package_id: str) -> dict[str, Any] | None:
+    return _PACKAGES.get(package_id)
