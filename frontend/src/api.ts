@@ -141,6 +141,14 @@ export type SwarmNodeResources = {
   gpu_name?: string | null
 }
 
+export type SwarmWorker = {
+  id: string
+  name: string
+  kind: string
+  status: string
+  node_id: string
+}
+
 export type SwarmNode = {
   id: string
   hostname?: string
@@ -152,6 +160,7 @@ export type SwarmNode = {
   is_local: boolean
   hardware: SwarmNodeHardware
   resources: SwarmNodeResources
+  workers?: SwarmWorker[]
   created_at?: string | null
   updated_at?: string | null
   last_seen_at?: string | null

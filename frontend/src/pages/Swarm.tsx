@@ -6,12 +6,21 @@ import {
   type SwarmNode,
   type SwarmNodeHardware,
   type SwarmNodeResources,
+  type SwarmWorker,
 } from "../api"
 
 function statusBadgeClass(status: string): string {
   const normalized = status.toLowerCase()
   if (normalized === "online") return "completed"
   if (normalized === "offline") return "failed"
+  return "queued"
+}
+
+function workerStatusBadgeClass(status: string): string {
+  const normalized = status.toLowerCase()
+  if (normalized === "ready" || normalized === "available" || normalized === "online") return "completed"
+  if (normalized === "running" || normalized === "waiting") return "running"
+  if (normalized === "error" || normalized === "failed" || normalized === "not_loaded") return "failed"
   return "queued"
 }
 
@@ -72,6 +81,36 @@ function ObjectKv({ data }: { data: Record<string, unknown> }) {
   )
 }
 
+function WorkersSection({ workers }: { workers: SwarmWorker[] | undefined }) {
+  if (!workers?.length) {
+    return <p className="lede">No workers bound to this node.</p>
+  }
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Kind</th>
+          <th>Status</th>
+          <th>ID</th>
+          <th>Node ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {workers.map((worker) => (
+          <tr key={worker.id}>
+            <td><strong>{worker.name}</strong></td>
+            <td>{worker.kind}</td>
+            <td><span className={`badge ${workerStatusBadgeClass(worker.status)}`}>{worker.status}</span></td>
+            <td className="stat">{worker.id}</td>
+            <td className="stat">{worker.node_id}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 function NodeDetail({ node }: { node: SwarmNode }) {
   return (
     <div className="card">
@@ -91,7 +130,9 @@ function NodeDetail({ node }: { node: SwarmNode }) {
         <b>Last seen</b><span>{formatTimestamp(node.last_seen_at)}</span>
         <b>Updated</b><span>{formatTimestamp(node.updated_at)}</span>
       </div>
-      <h2 style={{ marginTop: 0 }}>Resources</h2>
+      <h2 style={{ marginTop: 0 }}>Workers</h2>
+      <WorkersSection workers={node.workers} />
+      <h2 style={{ marginTop: 18 }}>Resources</h2>
       <p className="lede" style={{ margin: "0 0 10px" }}>{formatResources(node.resources)}</p>
       <ObjectKv data={node.resources as Record<string, unknown>} />
       <h2 style={{ marginTop: 18 }}>Hardware</h2>
@@ -196,6 +237,7 @@ export function SwarmPage() {
                   <th>Status</th>
                   <th>Class</th>
                   <th>Roles</th>
+                  <th>Workers</th>
                   <th>Resources</th>
                 </tr>
               </thead>
@@ -216,6 +258,7 @@ export function SwarmPage() {
                     <td><span className={`badge ${statusBadgeClass(node.status)}`}>{node.status}</span></td>
                     <td>{node.class}</td>
                     <td>{formatRoles(node.roles)}</td>
+                    <td className="stat">{node.workers?.length ?? 0}</td>
                     <td className="stat">{formatResources(node.resources)}</td>
                   </tr>
                 ))}
