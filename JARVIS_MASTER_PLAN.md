@@ -8,7 +8,9 @@ This file replaces the need to repeatedly provide large architectural prompts to
 
 **Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), and [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
 
-Swarm role/placement/resource design lives in `SWARM_ARCHITECTURE.md`. P4/P5 adaptive intelligence and domain packs live in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. Do not paste those specs into this file.
+Swarm role/placement/resource design lives in `SWARM_ARCHITECTURE.md`.
+
+P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating platform) remain in the spec set. Detailed requirements live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file translates useful patterns from [Founder OS](https://github.com/thecloudtips/founder-os) into native Jarvis concepts. Founder OS is **not** a runtime dependency. Do not start P4/P5 implementation ahead of active P0–P3 work unless this queue or the user promotes it. Do not paste the full adaptive spec into this file.
 
 **Extensible Agent OS (ZoeyOS / FounderOS feature parity)** lives in [`JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`](JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md). That file specifies persistent Agent Profiles, Specialist Packs, modular command-center dashboard, multi-agent delegation, hybrid inference, offline licensing, and the full owner-control UX needed to match Zoey-style specialist teams and FounderOS-style business autonomy. Do not start its P1–P6 roadmap ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it. Do not paste that spec into this file.
 
@@ -1813,6 +1815,10 @@ This documentation session:
 
 This machine registers as a localhost Node. Software workers bind to that Node. Orchestrator (control plane) and Leader (execution) are distinct roles, colocated on one host. Capability registry, role policy (`AUTO`/`PREFERRED`/`FORCED`/`AVOID`/`DISABLED`), resource budgets/leases, single-node placement, intelligence-vs-placement, and warm-state/data-locality scoring are in the tree. The portal has a Swarm page. P3 multi-node discovery/pairing is not started. See `SWARM_ARCHITECTURE.md`.
 
+### Adaptive intelligence / domain packs (P4/P5)
+
+Specified in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. **Not implemented.** Do not start ahead of active P0–P3 work. Founder OS is an architecture reference only, not a Jarvis dependency.
+
 ### Persistence
 
 - Task storage: SQLite, including conversation JSON and tool-call records
@@ -1859,7 +1865,7 @@ Results: live 9B/27B remains desktop sign-off. Do not treat unit tests as a live
 
 Statuses: TODO, IN PROGRESS, BLOCKED, VERIFIED
 
-Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvement, P3 future. Long-term ZoeyOS/FounderOS parity (Agent Profiles, Specialist Packs, command-center dashboard, offline licensing) is specified in `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md` — promote individual items into this queue via RFCs; do not bulk-import the full spec here.
+Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvement / swarm-ready foundation, P3 multi-node/future, P4 adaptive intelligence, P5 domain packs. Long-term ZoeyOS/FounderOS parity (Agent Profiles, Specialist Packs, command-center dashboard, offline licensing) is specified in `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md` — promote individual items into this queue via RFCs; do not bulk-import the full spec here.
 
 ### P0
 
@@ -1986,6 +1992,34 @@ These items make the existing machine a one-node swarm first. They must not requ
 - [ ] Multi-node discovery, secure pairing, remote workers, and cross-node networking
   - Status: TODO / not started. One-node swarm only. Do not claim a second machine works.
 
+### P4 — Adaptive intelligence (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
+
+Specified, not implemented. Complements swarm resilience in `SWARM_ARCHITECTURE.md`. Detailed requirements stay in the adaptive spec; this queue only tracks headings.
+
+- [ ] Structured execution event layer (central event model; correlation IDs; outcome states)
+- [ ] Memory confidence lifecycle (`CANDIDATE` → `CONFIRMED` → `APPLIED` → `DISMISSED`)
+- [ ] Memory categories, reinforcement, and confidence-gated context injection
+- [ ] Adaptive Intelligence layer (observation → learning → routing → self-healing)
+- [ ] Adaptive worker/model routing and node placement with warm-worker/data-locality bonuses
+- [ ] Learned recovery reliability and graceful degradation (`CAPABILITY_UNAVAILABLE`)
+- [ ] Standard multi-agent patterns (pipeline, parallel gathering, batch, competing hypotheses, map/reduce, supervisor)
+- [ ] Workflow composition engine, idempotent automation, universal scheduling bridge
+- [ ] Capability/automation audit and optional coverage score
+- [ ] Business/project context profiles with least-context isolation
+
+### P5 — Domain packs / business platform (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
+
+Specified, not implemented. Domain Packs are enableable Jarvis modules, not a Founder OS runtime.
+
+- [ ] Domain Pack architecture (enableable packs; namespace convention)
+- [ ] Core business workflows: daily briefing, inbox, meeting intelligence, follow-up tracker
+- [ ] Report generation pipeline; competitive intelligence; proposal generation
+- [ ] Invoice/expense processing; goals/milestones; knowledge base
+- [ ] Cross-domain workflow composition; domain dashboard views
+- [ ] Domain Pack dependency declaration, health/coverage, enablement lifecycle
+- [ ] Domain-specific verification per pack; domain learning into shared P4 layer
+- [ ] External integrations as sync targets — Jarvis owns canonical state
+
 ---
 
 ## 59. DECISION LOG
@@ -2021,6 +2055,14 @@ Detailed role, placement, resource-control, and universal-UI requirements live i
 Reason:
 
 The swarm design is large and must not be duplicated into the master plan.
+
+Decision: P4/P5 remain in the spec set as a separate file
+
+Adaptive intelligence and domain-pack requirements live in `ADAPTIVE_DOMAIN_ARCHITECTURE.md` (Taco upload, commit `c2d6386eb0`). This master plan keeps queue headings only. Source inspiration is useful patterns from https://github.com/thecloudtips/founder-os translated into native Jarvis concepts. Founder OS is **not** a Jarvis dependency.
+
+Reason:
+
+P4/P5 must stay visible in the Development Queue without pasting the adaptive spec into this file.
 
 Decision: Jarvis remains orchestrator
 

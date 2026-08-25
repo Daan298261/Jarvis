@@ -2,7 +2,7 @@
 
 Status: **separate P4/P5 long-term architecture specification** referenced by `JARVIS_MASTER_PLAN.md`.
 
-Source inspiration: useful architectural patterns extracted from `thecloudtips/founder-os`, translated into native Jarvis concepts. Founder OS itself is **not** a Jarvis dependency.
+Source inspiration: useful architectural patterns extracted from https://github.com/thecloudtips/founder-os, translated into native Jarvis concepts. Founder OS itself is **not** a Jarvis dependency.
 
 Priority mapping:
 
