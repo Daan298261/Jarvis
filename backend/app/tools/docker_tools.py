@@ -26,9 +26,17 @@ class DockerTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
+        action = kwargs.get("action")
+        image = (kwargs.get("image") or "").strip()
+        container = (kwargs.get("container") or "").strip()
+        if action == "run" and not image:
+            return ToolResult(False, "", error="image is required for docker run")
+        if action == "logs" and not container:
+            return ToolResult(False, "", error="container is required for docker logs")
+        if action == "inspect" and not container and not image:
+            return ToolResult(False, "", error="container or image is required for docker inspect")
         if not shutil.which("docker"):
             return ToolResult(False, "", error="Docker is not installed on this machine")
-        action = kwargs.get("action")
         mapping = {
             "ps": ["ps", "-a"],
             "images": ["images"],

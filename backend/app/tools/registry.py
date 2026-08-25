@@ -14,6 +14,7 @@ from .office import OfficeTool
 from .python_exec import PythonTool
 from .screenshot import ScreenshotTool
 from .terminal import TerminalTool
+from .verify_code import VerifyCodeTool
 from .web_fetch import WebFetchTool
 
 
@@ -36,6 +37,7 @@ class ToolRegistry:
             DockerTool(),
             WebFetchTool(),
             ScreenshotTool(),
+            VerifyCodeTool(getter),
             MCPProxyTool(),
         ]
         self.tools = {tool.name: tool for tool in items}

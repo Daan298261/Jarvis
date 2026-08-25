@@ -15,10 +15,11 @@ from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
-from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
+from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
+from .metrics import LiveTaskMetrics
 from .planning import (
     WorkingState,
     best_of_n_plan_prompt,
@@ -177,17 +178,20 @@ class AgentRuntime:
         content: str,
         verification: str,
         working: WorkingState | None = None,
+        metrics: LiveTaskMetrics | None = None,
     ) -> None:
-        await self._update(
-            task_id,
-            status="completed",
-            stage="completed",
-            result=content,
-            conversation_json=serialize_messages(messages),
-            verification=verification,
-            current_action="Completed",
-            current_tool="",
-        )
+        fields = {
+            "status": "completed",
+            "stage": "completed",
+            "result": content,
+            "conversation_json": serialize_messages(messages),
+            "verification": verification,
+            "current_action": "Completed",
+            "current_tool": "",
+        }
+        if metrics is not None:
+            fields.update(metrics.as_fields())
+        await self._update(task_id, **fields)
         if working is not None:
             await record_trajectory(task_id, working, "completed")
             for skill in await promote_from_trajectories():
@@ -251,6 +255,7 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
+        metrics = LiveTaskMetrics()
 
         if existing and continue_existing:
             messages = existing
@@ -397,7 +402,7 @@ class AgentRuntime:
                             "The model timed out while writing the final report. "
                             "Actions already executed are in the activity log; verify files from that log."
                         )
-                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working)
+                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics)
                         return
                     content = "The model timed out before verification completed."
                     await self._update(
@@ -408,11 +413,14 @@ class AgentRuntime:
                         error=content,
                         current_action="Failed: model timeout before verification",
                         current_tool="",
+                        **metrics.as_fields(),
                     )
                     await record_trajectory(task_id, working, "failed")
                     await BUS.publish(task_id, "failed", "Task ended after model timeout", content, stage="failed")
                     return
                 await MANAGER.record_timings(result.timings)
+                metrics.note_model(result.timings)
+                await self._update(task_id, **metrics.as_fields())
                 if result.reasoning:
                     await BUS.publish(task_id, "progress", "Reasoning complete", result.reasoning[-1500:], stage="act")
 
@@ -423,7 +431,7 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
                     working.verified = True
                     await self._update(task_id, compact_memory=working.dumps())
-                    await self._complete(task_id, messages, content, content, working)
+                    await self._complete(task_id, messages, content, content, working, metrics)
                     return
 
                 parsed = parse_plan_block(result.content or "")
@@ -472,7 +480,9 @@ class AgentRuntime:
                     )
                     for call in result.tool_calls:
                         name = call["function"]["name"]
-                        arguments = parse_tool_arguments(call["function"]["arguments"])
+                        raw_args = call["function"]["arguments"]
+                        schema_error = not tool_arguments_valid(raw_args)
+                        arguments = parse_tool_arguments(raw_args)
                         signature = hashlib.sha256(f"{name}:{json.dumps(arguments, sort_keys=True)}".encode()).hexdigest()
                         if recent_hashes[-3:].count(signature) >= 2:
                             observation = "Repeated identical failing/identical tool call blocked. Choose a different strategy."
@@ -485,6 +495,7 @@ class AgentRuntime:
                         risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
                         command = arguments.get("command") if isinstance(arguments, dict) else None
                         if needs_confirmation(autonomy, risk, command):
+                            metrics.note_confirmation()
                             await self._update(
                                 task_id,
                                 status="waiting",
@@ -493,12 +504,15 @@ class AgentRuntime:
                                 current_action=f"Waiting for confirmation: {name}",
                                 conversation_json=serialize_messages(messages),
                                 compact_memory=working.dumps(),
+                                **metrics.as_fields(),
                             )
                             await BUS.publish(task_id, "confirm", f"Confirmation required for {name}", json.dumps(arguments)[:1500], stage="act")
                             return
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
-                        observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
+                        observation, attach = await self._execute_tool_ex(
+                            task_id, name, arguments, autonomy, settings, metrics=metrics, schema_error=schema_error
+                        )
                         failed = "ERROR:" in observation or observation.lower().startswith("error")
                         if failed:
                             consecutive_failures += 1
@@ -537,6 +551,7 @@ class AgentRuntime:
                         retries=consecutive_failures,
                         compact_memory=working.dumps(),
                         current_action=f"Ran {primary}" if primary else "Observed tools",
+                        **metrics.as_fields(),
                     )
                     continue
 
@@ -620,16 +635,16 @@ class AgentRuntime:
                 working.verified = True
                 verification = content or "Independent verification pass completed; acceptance criteria checked."
                 await self._update(task_id, compact_memory=working.dumps(), verification=verification)
-                await self._complete(task_id, messages, content or verification, verification, working)
+                await self._complete(task_id, messages, content or verification, verification, working, metrics)
                 return
-            await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification")
+            await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification", **metrics.as_fields())
             await record_trajectory(task_id, working, "failed")
             await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
         except asyncio.CancelledError:
-            await self._update(task_id, status="cancelled", stage="cancelled")
+            await self._update(task_id, status="cancelled", stage="cancelled", **metrics.as_fields())
             raise
         except Exception as exc:
-            await self._update(task_id, status="failed", stage="failed", error=str(exc))
+            await self._update(task_id, status="failed", stage="failed", error=str(exc), **metrics.as_fields())
             await record_trajectory(task_id, working, "failed")
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
 
@@ -640,11 +655,20 @@ class AgentRuntime:
         return text
 
     async def _execute_tool_ex(
-        self, task_id: str, name: str, arguments: dict[str, Any], autonomy: str, settings: AppSettings
+        self,
+        task_id: str,
+        name: str,
+        arguments: dict[str, Any],
+        autonomy: str,
+        settings: AppSettings,
+        metrics: LiveTaskMetrics | None = None,
+        schema_error: bool = False,
     ) -> tuple[str, str | None]:
         started = datetime.now(timezone.utc)
         result = await REGISTRY.execute(name, arguments)
         duration = (datetime.now(timezone.utc) - started).total_seconds() * 1000
+        if metrics is not None:
+            metrics.note_tool(duration, schema_error=schema_error)
         async with SessionLocal() as session:
             session.add(
                 ToolCallRecord(

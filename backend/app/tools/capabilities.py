@@ -83,7 +83,15 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": shutil.which("git") is not None,
             "status": "ready" if shutil.which("git") else "missing",
-            "detail": "Status, diff, and checkpoints before risky edits.",
+            "detail": "Status, diff, and checkpoints before risky edits. Checkpoints do not modify the working tree.",
+        },
+        {
+            "id": "verify_code",
+            "name": "Independent code verification",
+            "kind": "native",
+            "available": True,
+            "status": "ready",
+            "detail": "Inspects git diff and runs pytest. A worker claiming success is not enough.",
         },
         {
             "id": "docker",

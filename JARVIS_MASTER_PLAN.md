@@ -3602,14 +3602,16 @@ This development session:
 
 ### Working Tools
 
-- Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
-- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
-- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
+- Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent/snapshot/restore, backups, allowed-directory sandbox)
+- PowerShell: implemented as default `terminal` shell on Windows (CMD/Python/Git/WSL/bash also supported; bash is default on Linux). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use the current interpreter.
+- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`; host interpreter is `sys.executable`
+- Browser: Playwright Chromium (accessibility snapshot, click/type by name or selector with retries on open, screenshot, tabs). Close and missing-URL open do not launch Chromium.
 - Playwright: native backend present
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
 - Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
+- Git: status/diff/branch/log/search plus a non-destructive checkpoint (backup branch + `stash create`, working tree unchanged)
+- Independent software verification: `verify_code` inspects git and runs pytest; a worker claiming success is not enough
 
 ### Optional Workers
 
@@ -3651,6 +3653,8 @@ This development session:
 ### Portal / API
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
+- History and Command show live per-task model/tool call counts, schema errors, and model vs tool time
+- Model page also shows verified tasks per hour and tool schema-error rate from recent tasks
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
 - Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
 - Live status shows execution mode, task class, and verification
@@ -3668,19 +3672,19 @@ This development session:
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
+- Terminal default is PowerShell on Windows and bash on Linux
 
 ### Last End-to-End Test
 
-Date: 2026-08-24
+Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent/snapshot/restore, independent `verify_code` git+pytest verification, live per-task metrics, non-destructive git checkpoints, docker/web_fetch/office/python/browser QA guards, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **88 passed** on this Linux cloud tree. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3764,6 +3768,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
 - [ ] Office COM coverage when Office is installed
 - [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
+- [x] Directory snapshot backups before mass edits — VERIFIED (`test_backlog_metrics.py`; filesystem `snapshot`/`snapshots`/`restore`; identical trees are not snapshotted again)
+- [x] Independent software verification (`verify_code`) — VERIFIED (`test_backlog_metrics.py`); git inspect + pytest; worker self-report is never enough
+- [x] Live per-task operational metrics (model/tool time, schema errors, interventions) — VERIFIED (`test_backlog_metrics.py` + History/Command/Model pages)
 
 #### P2 — Swarm-ready foundation (`SWARM_ARCHITECTURE.md`)
 
@@ -4019,6 +4026,30 @@ Provide pre-built and editable chained workflow recipes in the UI to facilitate 
 Reason:
 
 Improves ease of use and low-maintenance UX by letting users load, customize parameters for, and fire complex multi-stage tasks directly from the web portal.
+
+Decision: independent software verification is a tool, not a worker claim
+
+`verify_code` inspects git status/diff and runs pytest when a Python test layout exists. Completing a software task still requires Jarvis's existing verification pass; a coding worker saying "tests pass" is never sufficient.
+
+Reason:
+
+Coding spec §19. The supervisor must re-run tests and inspect the diff itself.
+
+Decision: git checkpoints must not disturb the working tree
+
+Checkpoint creates a backup branch at HEAD and uses `git stash create` (plus a `refs/jarvis/checkpoints/*` ref) when the tree is dirty. It does not `stash push`.
+
+Reason:
+
+Section 46 requires preserving unrelated user changes. `stash push` would hide or lose in-progress work.
+
+Decision: live task metrics are first-class operational data
+
+Each task records model calls, tool calls, schema errors, model/tool milliseconds, and human interventions. The Model page derives verified-tasks-per-hour from those rows.
+
+Reason:
+
+P0.8/P0.9 require measuring successful autonomous work per unit time, not only tokens/sec.
 
 Decision: Reliable mode uses best-of-N for planning, not for full retries
 

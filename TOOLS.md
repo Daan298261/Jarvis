@@ -4,15 +4,16 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 
 | Tool | What it does |
 | --- | --- |
-| `filesystem` | list, search, read, write, edit, copy, move, rename, mkdir, delete, hash, stat, compare, recent. `compare` diffs two files (unified diff for text, hashes for binaries). `recent` lists backup copies next to a file (`.bak`, `.bak-<timestamp>`). Backs up files before overwrite when enabled. Restricted to allowed directories. |
-| `terminal` | PowerShell, cmd, git, python, WSL/bash when present. `run` waits; `start` returns a PID; `inspect` / `wait` / `kill` check whether that process is still alive and collect output. `inspect` also works for other local PIDs. Captures stdout, stderr, exit code, duration. Blocks irreversible commands. Python snippets use `python -c`. |
-| `python` | run_code, run_file, create_venv, pip install. Prefer project virtualenvs. |
-| `browser` | Playwright Chromium: open, accessibility snapshot, click by name/selector, type, evaluate, screenshot, tabs, download, upload. Persistent profile in `data/browser-profile`. |
+| `filesystem` | list, search, read, write, edit, copy, move, rename, mkdir, delete, hash, stat, compare, recent, snapshot, snapshots, restore. `compare` diffs two files (unified diff for text, hashes for binaries). `recent` lists backup copies next to a file (`.bak`, `.bak-<timestamp>`). `snapshot` copies a directory into `data/backups` before mass edits and skips identical trees. Restricted to allowed directories. |
+| `terminal` | PowerShell on Windows, bash elsewhere (cmd, git, python, WSL also available). `run` waits; `start` returns a PID; `inspect` / `wait` / `kill` check whether that process is still alive and collect output. Blocks irreversible commands. Python snippets use the current interpreter. |
+| `python` | run_code, run_file, create_venv, pip install. Uses `sys.executable` when no venv is given. Prefer project virtualenvs. |
+| `browser` | Playwright Chromium: open (retries), accessibility snapshot, click by accessible name (button/link/tab/menu/checkbox) or selector, type, evaluate, screenshot, tabs, download, upload, close. Close and missing-URL open do not launch Chromium. Persistent profile in `data/browser-profile`. |
 | `desktop` | pywinauto UI Automation first; coordinate click only as fallback. Screenshot via `mss`. |
-| `office` | Word/Excel/PowerPoint COM when Office is installed. Writes new files unless in-place edit was requested. |
-| `git` | status, diff, branch, log, search, stash checkpoint before large edits. |
-| `docker` | ps/images/build/run/logs/inspect when Docker exists. |
-| `web_fetch` | HTTP GET/POST distinct from the browser. |
+| `office` | Word/Excel/PowerPoint COM when Office is installed. `info` returns file metadata without starting COM. Writes new files unless in-place edit was requested. |
+| `git` | status, diff, branch, log, search, checkpoint. Checkpoint creates a backup branch and a `stash create` object without modifying the working tree. |
+| `docker` | ps/images/build/run/logs/inspect when Docker exists. `run` requires an image; `logs`/`inspect` require a container or image. |
+| `web_fetch` | HTTP GET/POST/HEAD for http(s) URLs only. Distinct from the browser. |
+| `verify_code` | Independent software verification: git status/diff plus pytest when a Python test layout exists. A worker claiming success is not enough. |
 | `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
 

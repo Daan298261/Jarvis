@@ -153,3 +153,11 @@ def parse_tool_arguments(payload: str) -> dict[str, Any]:
         return data if isinstance(data, dict) else {"value": data}
     except json.JSONDecodeError:
         return {"_raw": payload}
+
+
+def tool_arguments_valid(payload: str | None) -> bool:
+    try:
+        data = json.loads(payload or "{}")
+    except json.JSONDecodeError:
+        return False
+    return isinstance(data, dict)

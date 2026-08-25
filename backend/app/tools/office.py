@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,23 @@ class OfficeTool(Tool):
     async def execute(self, **kwargs: Any) -> ToolResult:
         app = (kwargs.get("app") or "").lower()
         action = kwargs.get("action")
+        if action == "info":
+            raw = kwargs.get("path") or kwargs.get("destination") or ""
+            if not raw:
+                return ToolResult(
+                    True,
+                    "Office info does not start Word/Excel/PowerPoint. Pass path for file metadata.",
+                )
+            target = Path(raw)
+            if not target.exists():
+                return ToolResult(True, f"path={target}\nexists=false\nnote=COM was not started.")
+            st = target.stat()
+            return ToolResult(
+                True,
+                f"path={target.resolve()}\nexists=true\nsize={st.st_size}\n"
+                f"mtime={datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat()}\n"
+                f"app={app or 'unknown'}\nnote=File metadata only; COM was not started.",
+            )
         try:
             if app == "word":
                 word = _dispatch("Word.Application")

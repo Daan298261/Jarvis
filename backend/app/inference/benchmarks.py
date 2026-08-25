@@ -36,12 +36,29 @@ async def task_outcome_stats() -> dict[str, Any]:
         failed = (
             await session.execute(select(func.count()).select_from(Task).where(Task.status == "failed"))
         ).scalar_one()
+        rows = (
+            await session.execute(
+                select(Task).where(Task.status.in_(("completed", "failed"))).order_by(Task.finished_at.desc()).limit(200)
+            )
+        ).scalars().all()
+        duration_sum = sum(float(row.duration_seconds or 0) for row in rows)
+        verified_ok = [row for row in rows if row.status == "completed"]
+        model_calls = sum(int(row.model_calls or 0) for row in rows)
+        tool_calls = sum(int(row.tool_call_count or 0) for row in rows)
+        schema_errors = sum(int(row.schema_errors or 0) for row in rows)
     finished = int(completed or 0) + int(failed or 0)
     rate = round(int(completed or 0) / finished, 4) if finished else None
+    wall_hours = duration_sum / 3600.0 if duration_sum else 0.0
+    per_hour = round(len(verified_ok) / wall_hours, 3) if wall_hours else None
     return {
         "tasks_completed": int(completed or 0),
         "tasks_failed": int(failed or 0),
         "task_success_rate": rate,
+        "verified_tasks_per_hour": per_hour,
+        "model_calls": model_calls,
+        "tool_calls": tool_calls,
+        "schema_errors": schema_errors,
+        "schema_error_rate": round(schema_errors / tool_calls, 4) if tool_calls else None,
     }
 
 

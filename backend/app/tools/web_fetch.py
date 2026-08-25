@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -28,6 +29,9 @@ class WebFetchTool(Tool):
         url = kwargs.get("url")
         method = (kwargs.get("method") or "GET").upper()
         limit = int(kwargs.get("max_chars") or 12000)
+        parsed = urlparse(url or "")
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return ToolResult(False, "", error="Only http/https URLs are allowed")
         try:
             async with httpx.AsyncClient(follow_redirects=True, timeout=30, headers={"User-Agent": "JarvisLocal/1.0"}) as client:
                 response = await client.request(method, url)

@@ -52,6 +52,12 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
         "verification": task.verification,
+        "model_calls": getattr(task, "model_calls", 0) or 0,
+        "tool_calls": getattr(task, "tool_call_count", 0) or 0,
+        "schema_errors": getattr(task, "schema_errors", 0) or 0,
+        "model_ms": getattr(task, "model_ms", 0) or 0,
+        "tool_ms": getattr(task, "tool_ms", 0) or 0,
+        "human_interventions": getattr(task, "human_interventions", 0) or 0,
     }
 
 

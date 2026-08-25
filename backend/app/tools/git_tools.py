@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,9 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a recoverable stash or commit-less backup branch named "
-        "jarvis-checkpoint-* before large autonomous edits."
+        "checkpoint. checkpoint creates a recoverable backup branch named jarvis-checkpoint-* "
+        "and, if the worktree is dirty, a stash object via `stash create` without modifying "
+        "the working tree. Unrelated user changes are preserved."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -56,11 +58,28 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = Path(cwd).name
-                result = await self._git(["stash", "push", "-u", "-m", f"jarvis-checkpoint-{stamp}"], cwd)
-                if result.success:
-                    return ToolResult(True, "Created git stash checkpoint. Use git stash list / pop to recover.")
-                return await self._git(["status"], cwd)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                branch = f"jarvis-checkpoint-{stamp}"
+                created = await self._git(["branch", branch], cwd)
+                stash = await self._git(["stash", "create", f"jarvis-checkpoint-{stamp}"], cwd)
+                sha = ""
+                if stash.success:
+                    candidate = (stash.output or "").strip().splitlines()
+                    sha = candidate[-1].strip() if candidate else ""
+                extra = ""
+                if sha and 7 <= len(sha) <= 40 and all(ch in "0123456789abcdef" for ch in sha.lower()):
+                    await self._git(["update-ref", f"refs/jarvis/checkpoints/{stamp}", sha], cwd)
+                    extra = (
+                        f" Dirty worktree captured as {sha[:12]} without changing files. "
+                        f"Recover with: git stash store {sha}"
+                    )
+                if created.success:
+                    return ToolResult(
+                        True,
+                        f"Created backup branch {branch} at HEAD.{extra} Working tree was not modified.",
+                        data={"branch": branch, "stash_sha": sha or None},
+                    )
+                return created
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

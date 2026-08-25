@@ -36,3 +36,5 @@ async def test_task_success_rate_is_included_in_snapshot(jarvis_env):
     stats = await task_outcome_stats()
     assert stats["tasks_completed"] == 2
     assert stats["task_success_rate"] == 0.6667
+    assert "verified_tasks_per_hour" in stats
+    assert "schema_errors" in stats

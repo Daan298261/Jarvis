@@ -31,7 +31,16 @@ type ModelStatus = {
   load_time_seconds?: number
   loaded?: boolean
   loading?: boolean
-  outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
+  outcomes?: {
+    tasks_completed: number
+    tasks_failed: number
+    task_success_rate: number | null
+    verified_tasks_per_hour?: number | null
+    model_calls?: number
+    tool_calls?: number
+    schema_errors?: number
+    schema_error_rate?: number | null
+  }
   benchmarks?: Benchmark[]
 }
 
@@ -90,6 +99,8 @@ export function ModelPage() {
             <b>Prompt tok/s</b><span>{model?.prompt_tokens_per_second ?? "n/a"}</span>
             <b>Load time</b><span>{model?.load_time_seconds ? `${model.load_time_seconds}s` : "n/a"}</span>
             <b>Task success</b><span>{pct(outcomes?.task_success_rate)} ({outcomes?.tasks_completed || 0} ok / {outcomes?.tasks_failed || 0} failed)</span>
+            <b>Verified / hour</b><span>{outcomes?.verified_tasks_per_hour ?? "n/a"}</span>
+            <b>Tool schema errors</b><span>{outcomes?.schema_errors ?? 0}{outcomes?.schema_error_rate != null ? ` (${pct(outcomes.schema_error_rate)})` : ""}</span>
             <b>State</b><span>{model?.loaded ? "loaded" : model?.loading ? "loading" : "unloaded"}</span>
           </div>
         </div>

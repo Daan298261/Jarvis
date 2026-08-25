@@ -48,6 +48,10 @@ backend/app/
     skills.py             Promote after 3 identical successful tool sequences
     queue_watcher.py      data/queue/pending file drop
     prompts.py            System / plan / verify / critic prompts
+    verify_code.py        Independent git/pytest verification of software changes
+    metrics.py            Live per-task model/tool/schema counters
+  tools/
+    snapshots.py          Directory snapshot/restore helpers used by filesystem
   inference/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
@@ -283,7 +287,7 @@ When changing CLI flags, extend `tests/test_inference_backends.py` rather than r
 
 SQLite file: `data/jarvis.db` (aiosqlite). Tests call `configure_database(path=tmp_path / "jarvis.db")` via the `jarvis_env` fixture.
 
-Tables: `tasks`, `task_events`, `tool_calls`, `checkpoints`, `trajectories`, `skills`, `conversations`.
+Tables: `tasks` (including live model/tool/schema metrics), `task_events`, `tool_calls`, `checkpoints`, `trajectories`, `skills`, `conversations`, `benchmark_samples`.
 
 Light additive migrations live in `db/session.py` (`_add_missing_columns`). Prefer a new column + default over a rewrite. There is no Alembic.
 
@@ -317,6 +321,9 @@ Current unit coverage (no GPU required):
 | `test_skills.py` | Promotion needs 3 repeats |
 | `test_auth.py` | 401 without key; header / bearer / query |
 | `test_queue.py` | File-drop watcher |
+| `test_benchmarks.py` | Persist tok/s and task success rate |
+| `test_terminal.py` | start/inspect/wait/kill |
+| `test_backlog_metrics.py` | verify_code, snapshots, live metrics, git checkpoint, docker/web_fetch/office/python QA |
 
 `conftest.py` fixture `jarvis_env` points SQLite at a temp path, marks the model loaded, and applies autonomous settings.
 
@@ -349,7 +356,6 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Skills guide the prompt; they do not execute a parameterized workflow themselves (Guide & Workflows templates compose one prompt)
 - Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
 - Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off

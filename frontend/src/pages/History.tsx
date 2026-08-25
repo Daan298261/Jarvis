@@ -14,7 +14,7 @@ export function HistoryPage() {
       <div className="card">
         <table>
           <thead>
-            <tr><th>Title</th><th>Status</th><th>Created</th><th>Duration</th></tr>
+            <tr><th>Title</th><th>Status</th><th>Created</th><th>Duration</th><th>Model</th><th>Tools</th></tr>
           </thead>
           <tbody>
             {tasks.map((task) => (
@@ -23,6 +23,8 @@ export function HistoryPage() {
                 <td><span className={`badge ${task.status}`}>{task.status}</span></td>
                 <td>{task.created_at?.replace("T", " ").slice(0, 19)}</td>
                 <td>{Math.round(task.duration_seconds || 0)}s</td>
+                <td>{task.model_calls ?? 0} / {Math.round((task.model_ms || 0) / 1000)}s</td>
+                <td>{task.tool_calls ?? 0}{task.schema_errors ? ` · ${task.schema_errors} schema` : ""}</td>
               </tr>
             ))}
           </tbody>

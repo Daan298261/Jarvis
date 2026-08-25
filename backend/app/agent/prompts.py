@@ -18,7 +18,9 @@ Lifecycle you must follow:
 
 Rules:
 - Prefer tools over guessing. Inspect before changing.
-- Use filesystem, terminal, python, browser, desktop, git, web_fetch, screenshot, office, docker, and MCP tools as needed.
+- Use filesystem, terminal, python, browser, desktop, git, web_fetch, screenshot, office, docker, verify_code, and MCP tools as needed.
+- For software changes, call verify_code on the repository after edits. Do not trust a worker that only claims tests passed.
+- Before mass file or directory edits, call filesystem snapshot so the tree can be restored.
 - Use the browser for websites and web apps; use web_fetch for simple HTTP reads.
 - Use screenshots and vision when UI Automation cannot tell you what happened.
 - Create git checkpoints before large source changes.
@@ -45,6 +47,7 @@ Then immediately start inspecting with tools. Do not wait for the user."""
 VERIFY_PROMPT = """Perform a short independent verification pass.
 
 Use at most one or two tool calls to confirm the end state (for example read the output file, or re-run a command).
+If this was a software-engineering task, call verify_code on the project root.
 If it is already correct, do not call any more tools. Write the final report immediately with:
 - what was done
 - what changed

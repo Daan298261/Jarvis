@@ -47,6 +47,18 @@ def _add_missing_columns(sync_conn) -> None:
         statements.append("ALTER TABLE tasks ADD COLUMN execution_mode VARCHAR(32) DEFAULT 'balanced'")
     if "task_class" not in columns:
         statements.append("ALTER TABLE tasks ADD COLUMN task_class VARCHAR(64) DEFAULT ''")
+    if "model_calls" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN model_calls INTEGER DEFAULT 0")
+    if "tool_call_count" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN tool_call_count INTEGER DEFAULT 0")
+    if "schema_errors" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN schema_errors INTEGER DEFAULT 0")
+    if "model_ms" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN model_ms FLOAT DEFAULT 0")
+    if "tool_ms" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN tool_ms FLOAT DEFAULT 0")
+    if "human_interventions" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN human_interventions INTEGER DEFAULT 0")
     for statement in statements:
         sync_conn.execute(text(statement))
 

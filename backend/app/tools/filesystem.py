@@ -9,6 +9,7 @@ from typing import Any
 
 from .base import RiskLevel, Tool, ToolResult
 from .safety import resolve_allowed_path
+from .snapshots import create_snapshot, list_snapshots, restore_snapshot
 
 
 _TEXT_SAMPLE = 4096
@@ -166,7 +167,9 @@ class FilesystemTool(Tool):
         "copy, move, rename, mkdir, delete, hash, stat, compare, recent. Use this for organizing "
         "files, creating documents, and inspecting project trees. Prefer write/edit over delete. "
         "compare shows a unified diff (or hashes for binaries). recent lists backup copies and "
-        "recent versions next to a file. Binary files are supported via hash/stat/copy; read "
+        "recent versions next to a file. snapshot copies a directory or file into data/backups "
+        "before mass edits; snapshots lists them; restore copies a snapshot back. Identical trees "
+        "are not snapshotted again. Binary files are supported via hash/stat/copy; read "
         "returns a note for large binaries."
     )
     risk = RiskLevel.MEDIUM
@@ -190,18 +193,23 @@ class FilesystemTool(Tool):
                     "stat",
                     "compare",
                     "recent",
+                    "snapshot",
+                    "snapshots",
+                    "restore",
                 ],
             },
             "path": {"type": "string", "description": "Primary path"},
-            "destination": {"type": "string", "description": "Second path for compare, or copy/move/rename target"},
+            "destination": {"type": "string", "description": "Second path for compare, or copy/move/rename/restore target"},
             "content": {"type": "string"},
             "pattern": {"type": "string", "description": "Glob or substring for search"},
             "recursive": {"type": "boolean", "default": True},
             "old_text": {"type": "string", "description": "Exact text to replace for edit"},
             "new_text": {"type": "string"},
             "create_backup": {"type": "boolean", "default": True},
+            "snapshot_id": {"type": "string", "description": "Snapshot id for restore"},
+            "note": {"type": "string", "description": "Optional snapshot note"},
         },
-        "required": ["action", "path"],
+        "required": ["action"],
     }
 
     def __init__(self, context_getter) -> None:
@@ -213,7 +221,39 @@ class FilesystemTool(Tool):
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
         try:
-            path = self._path(kwargs["path"])
+            ctx = self.context_getter()
+            if action == "snapshots":
+                source = self._path(kwargs["path"]) if kwargs.get("path") else None
+                rows = list_snapshots(ctx, source=source)
+                if not rows:
+                    return ToolResult(True, "No directory snapshots yet.")
+                lines = [
+                    f"{row['id']}  files={row.get('files')}  {row.get('created_at')}  {row.get('source')}"
+                    + ("  [identical skipped]" if row.get("skipped") else "")
+                    for row in rows
+                ]
+                return ToolResult(True, "\n".join(lines), data={"snapshots": rows})
+            if action == "restore":
+                snapshot_id = kwargs.get("snapshot_id") or ""
+                dest_raw = kwargs.get("destination") or kwargs.get("path") or ""
+                if not snapshot_id or not dest_raw:
+                    return ToolResult(False, "", error="restore requires snapshot_id and destination")
+                dest = self._path(dest_raw)
+                payload = restore_snapshot(snapshot_id, dest, ctx)
+                return ToolResult(True, f"Restored {payload.get('restored')} files to {dest}", data=payload)
+            if action == "snapshot":
+                if not kwargs.get("path"):
+                    return ToolResult(False, "", error="path is required")
+                path = self._path(kwargs["path"])
+                payload = create_snapshot(path, ctx, note=kwargs.get("note") or "")
+                if payload.get("skipped"):
+                    return ToolResult(True, f"Skipped extra snapshot; identical to {payload.get('id')}", data=payload)
+                return ToolResult(
+                    True,
+                    f"Created snapshot {payload['id']} ({payload.get('files')} files, {payload.get('bytes')} bytes)",
+                    data=payload,
+                )
+            path = self._path(kwargs.get("path") or "")
             if action == "list":
                 if not path.exists():
                     return ToolResult(False, "", error="Path does not exist")

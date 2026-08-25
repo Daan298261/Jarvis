@@ -74,13 +74,35 @@ class BrowserTool(Tool):
             headless = bool((settings.get("browser") or {}).get("headless", False))
         async with _lock:
             try:
+                if action == "close":
+                    global _playwright, _browser, _context, _page, _pages
+                    if not _context and not _page:
+                        return ToolResult(True, "Browser was not open")
+                    if _context:
+                        await _context.close()
+                    if _playwright:
+                        await _playwright.stop()
+                    _context = None
+                    _playwright = None
+                    _page = None
+                    _pages = []
+                    return ToolResult(True, "Browser closed")
+                if action == "open" and not kwargs.get("url"):
+                    return ToolResult(False, "", error="url is required")
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs.get("url")
-                    if not url:
-                        return ToolResult(False, "", error="url is required")
-                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                    return ToolResult(True, f"Opened {page.url}\ntitle={await page.title()}")
+                    last_error = ""
+                    for attempt in range(3):
+                        try:
+                            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                            return ToolResult(True, f"Opened {page.url}\ntitle={await page.title()}")
+                        except Exception as exc:
+                            last_error = str(exc)
+                            if attempt == 2:
+                                return ToolResult(False, "", error=f"open failed after retries: {last_error}")
+                            await asyncio.sleep(0.4 * (attempt + 1))
+                    return ToolResult(False, "", error=last_error or "open failed")
                 if action == "snapshot":
                     title = await page.title()
                     a11y = await page.locator("body").inner_text()
@@ -88,7 +110,15 @@ class BrowserTool(Tool):
                     return ToolResult(True, f"URL: {page.url}\nTitle: {title}\n\n{truncated}")
                 if action == "click":
                     if kwargs.get("name"):
-                        await page.get_by_role("button", name=kwargs["name"]).first.click(timeout=10000)
+                        clicked = False
+                        for role in ("button", "link", "tab", "menuitem", "checkbox"):
+                            locator = page.get_by_role(role, name=kwargs["name"])
+                            if await locator.count():
+                                await locator.first.click(timeout=10000)
+                                clicked = True
+                                break
+                        if not clicked:
+                            await page.get_by_text(kwargs["name"], exact=False).first.click(timeout=10000)
                     elif kwargs.get("selector"):
                         await page.locator(kwargs["selector"]).first.click(timeout=10000)
                     else:
@@ -136,16 +166,6 @@ class BrowserTool(Tool):
                 if action == "upload":
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
-                if action == "close":
-                    global _playwright, _browser, _context, _page
-                    if _context:
-                        await _context.close()
-                    if _playwright:
-                        await _playwright.stop()
-                    _context = None
-                    _playwright = None
-                    _page = None
-                    return ToolResult(True, "Browser closed")
                 return ToolResult(False, "", error=f"Unknown action {action}")
             except Exception as exc:
                 return ToolResult(False, "", error=str(exc))

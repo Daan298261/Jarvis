@@ -136,6 +136,9 @@ export function ChatPage() {
               <b>Tool</b><span>{task.current_tool || "—"}</span>
               <b>Elapsed</b><span className="stat">{elapsed || Math.round(task.duration_seconds || 0)}s</span>
               <b>Retries</b><span>{task.retries}</span>
+              <b>Model calls</b><span>{task.model_calls ?? 0} · {Math.round(task.model_ms || 0)}ms</span>
+              <b>Tool calls</b><span>{task.tool_calls ?? 0} · {Math.round(task.tool_ms || 0)}ms</span>
+              <b>Schema errors</b><span>{task.schema_errors ?? 0}</span>
               <b>Verified</b><span>{task.verification ? "yes" : "pending"}</span>
             </div>
           ) : (
