@@ -18,7 +18,10 @@ def test_browser_use_worker_reflects_install_state():
     workers = {item["id"]: item for item in optional_workers()}
     for key in ("ufo", "cua", "open-interpreter", "openhands", "browser-use"):
         assert workers[key]["available"] is False or workers[key]["status"] == "ready"
-        assert workers[key]["status"] in {"missing", "ready", "not_integrated"}
+        assert workers[key]["status"] in {"missing", "ready"}
+    ids = [item["id"] for item in optional_workers()]
+    assert len(ids) == len(set(ids))
+    assert "not_integrated" not in {item["status"] for item in optional_workers()}
     assert workers["browser-use"]["status"] in {"missing", "ready"}
     assert workers["openhands"]["status"] in {"missing", "ready"}
     if workers["browser-use"]["status"] == "missing":

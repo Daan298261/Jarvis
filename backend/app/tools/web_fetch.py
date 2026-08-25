@@ -46,10 +46,10 @@ class WebFetchTool(Tool):
             return ToolResult(False, "", error="url is required")
         lowered = url.lower()
         if lowered.startswith("file:") or lowered.startswith("javascript:") or lowered.startswith("data:"):
-            return ToolResult(False, "", error="Only http and https URLs are allowed (http/https only)")
+            return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed (http/https only)")
         scheme = (urlparse(url).scheme or "").lower()
         if scheme not in _ALLOWED_SCHEMES:
-            return ToolResult(False, "", error="Only http and https URLs are allowed (http/https only)")
+            return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed (http/https only)")
         method = (kwargs.get("method") or "GET").upper()
         if method not in {"GET", "POST", "HEAD"}:
             return ToolResult(False, "", error=f"Unsupported method {method}")
@@ -80,11 +80,14 @@ class WebFetchTool(Tool):
                     request_kwargs["content"] = body
                 response = await client.request(method, url, **request_kwargs)
             content_type = response.headers.get("content-type") or ""
-            raw = response.content
+            raw = getattr(response, "content", None)
+            if raw is None:
+                text_body = getattr(response, "text", "") or ""
+                raw = text_body.encode("utf-8") if isinstance(text_body, str) else b""
             truncated_bytes = len(raw) > _MAX_DOWNLOAD_BYTES
             if truncated_bytes:
                 raw = raw[:_MAX_DOWNLOAD_BYTES]
-            text = response.text[:limit]
+            text = (getattr(response, "text", None) or raw.decode("utf-8", errors="replace"))[:limit]
             saved = ""
             if resolved_path is not None:
                 resolved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,7 +109,7 @@ class WebFetchTool(Tool):
                     "status_code": response.status_code,
                     "content_type": content_type,
                     "path": saved,
-                    "truncated": truncated_bytes or len(response.text) > limit,
+                    "truncated": truncated_bytes or len(text) > limit,
                 },
                 error="" if response.is_success else f"HTTP {response.status_code}",
             )

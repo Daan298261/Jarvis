@@ -93,7 +93,7 @@ def node_to_dict(
         resources = {}
     if not isinstance(resources, dict):
         resources = {}
-    return {
+    payload = {
         "id": node.id,
         "hostname": node.hostname,
         "status": node.status,
@@ -110,6 +110,11 @@ def node_to_dict(
         "updated_at": node.updated_at.isoformat() if node.updated_at else None,
         "last_seen_at": node.last_seen_at.isoformat() if node.last_seen_at else None,
     }
+    if node.is_local:
+        from .warm_state import localhost_warm_state
+
+        payload["warm_state"] = localhost_warm_state(workers=payload["workers"])
+    return payload
 
 
 async def register_localhost_node() -> Node:

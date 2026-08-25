@@ -68,4 +68,5 @@ async def swarm_snapshot() -> dict[str, Any]:
         },
         "nodes": nodes,
         "workers": workers,
+        "warm_state": (local or {}).get("warm_state") or {},
     }

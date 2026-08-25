@@ -8,6 +8,8 @@ import {
   listNodeLeases,
   listSwarmNodes,
   listSwarmRoles,
+  postSwarmDispatch,
+  postSwarmIntelligence,
   postSwarmPlacement,
   putNodeBudget,
   putNodeRolePolicy,
@@ -15,6 +17,9 @@ import {
   SWARM_BUDGET_PRESETS,
   SWARM_ROLE_NAMES,
   SWARM_ROLE_POLICY_LEVELS,
+  type SwarmCapability,
+  type SwarmDispatchResult,
+  type SwarmIntelligence,
   type SwarmLease,
   type SwarmNode,
   type SwarmNodeBudget,
@@ -22,10 +27,13 @@ import {
   type SwarmNodeHardware,
   type SwarmNodeResources,
   type SwarmResourceAmounts,
+  type SwarmPlacementRequest,
   type SwarmPlacementResult,
+  type SwarmPlacementSignals,
   type SwarmRoleHolder,
   type SwarmRolePolicy,
   type SwarmRolesResponse,
+  type SwarmWarmState,
   type SwarmWorker,
 } from "../api"
 
@@ -34,6 +42,25 @@ function statusBadgeClass(status: string): string {
   if (normalized === "online") return "completed"
   if (normalized === "offline") return "failed"
   return "queued"
+}
+
+function capabilityStatusBadgeClass(status: string): string {
+  const normalized = status.toLowerCase()
+  if (normalized === "ready" || normalized === "available") return "completed"
+  if (normalized === "missing" || normalized === "unavailable" || normalized === "error") return "failed"
+  return "queued"
+}
+
+function formatSignals(signals: SwarmPlacementSignals | undefined): string {
+  if (!signals) return "—"
+  const parts: string[] = []
+  if (signals.warm_model) parts.push("warm model")
+  if (signals.would_reload_model) parts.push("would reload model")
+  if (signals.warm_worker) parts.push("warm worker")
+  if (signals.cold_worker) parts.push("cold worker")
+  if (signals.data_locality) parts.push("data local")
+  if (!parts.length && signals.is_local) parts.push("localhost")
+  return parts.length ? parts.join(" · ") : "—"
 }
 
 function workerStatusBadgeClass(status: string): string {
@@ -169,6 +196,8 @@ function PlacementSection({
 }) {
   const [capabilities, setCapabilities] = useState("")
   const [role, setRole] = useState("")
+  const [model, setModel] = useState("")
+  const [paths, setPaths] = useState("")
   const [cpuThreads, setCpuThreads] = useState("")
   const [ramGb, setRamGb] = useState("")
   const [ttlSeconds, setTtlSeconds] = useState("300")
@@ -184,13 +213,11 @@ function PlacementSection({
         .split(/[,\s]+/)
         .map((value) => value.trim())
         .filter(Boolean)
-      const body: {
-        capabilities: string[]
-        role?: string
-        claim?: { cpu_threads?: number; ram_gb?: number }
-        ttl_seconds?: number
-      } = { capabilities: capabilityList }
+      const body: SwarmPlacementRequest = { capabilities: capabilityList }
       if (role) body.role = role
+      if (model.trim()) body.model = model.trim()
+      const pathList = paths.split(/[\n,]+/).map((value) => value.trim()).filter(Boolean)
+      if (pathList.length) body.paths = pathList
 
       const claim: { cpu_threads?: number; ram_gb?: number } = {}
       if (cpuThreads.trim()) {
@@ -249,6 +276,26 @@ function PlacementSection({
             disabled={submitting}
             onChange={(e) => setCapabilities(e.target.value)}
             placeholder="comma-separated (empty = localhost)"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>Model</span>
+          <input
+            type="text"
+            value={model}
+            disabled={submitting}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="optional (prefer warm profile)"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>Data paths</span>
+          <input
+            type="text"
+            value={paths}
+            disabled={submitting}
+            onChange={(e) => setPaths(e.target.value)}
+            placeholder="optional local paths"
           />
         </label>
         <label className="row" style={{ alignItems: "center", gap: 12 }}>
@@ -317,6 +364,8 @@ function PlacementSection({
           {result.accepted ? (
             <div className="kv">
               <b>Reason</b><span>{result.reason}</span>
+              <b>Score</b><span>{result.score ?? "—"}</span>
+              <b>Signals</b><span>{formatSignals(result.signals)}</span>
               <b>Node</b>
               <span>
                 <Link to={`/swarm/${result.node_id}`} className="stat">
@@ -345,6 +394,19 @@ function PlacementSection({
                   </span>
                 </>
               )}
+              {!!result.candidates?.length && (
+                <>
+                  <b>Candidates</b>
+                  <span>
+                    {result.candidates.map((candidate) => (
+                      <span key={candidate.node_id} style={{ display: "block" }}>
+                        {candidate.selected ? "→ " : ""}
+                        {candidate.hostname || candidate.node_id} · score {candidate.score} · {formatSignals(candidate.signals)}
+                      </span>
+                    ))}
+                  </span>
+                </>
+              )}
             </div>
           ) : (
             <div className="kv">
@@ -352,6 +414,105 @@ function PlacementSection({
               <b>Reason</b><span>{result.reason}</span>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IntelligenceSection() {
+  const [prompt, setPrompt] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [mode, setMode] = useState<"select" | "dispatch">("select")
+  const [error, setError] = useState<string | null>(null)
+  const [intelligence, setIntelligence] = useState<SwarmIntelligence | null>(null)
+  const [dispatch, setDispatch] = useState<SwarmDispatchResult | null>(null)
+
+  async function handleSubmit(action: "select" | "dispatch") {
+    const text = prompt.trim()
+    if (!text) {
+      setError("Prompt is required")
+      return
+    }
+    setMode(action)
+    setSubmitting(true)
+    setError(null)
+    try {
+      if (action === "select") {
+        setDispatch(null)
+        setIntelligence(await postSwarmIntelligence(text))
+      } else {
+        const result = await postSwarmDispatch(text)
+        setDispatch(result)
+        setIntelligence(result.intelligence)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Intelligence request failed")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h2 style={{ marginTop: 0 }}>Intelligence</h2>
+      <p className="lede" style={{ margin: "0 0 12px" }}>
+        Choose worker/model first, then place on a Node. Selection does not pick a machine.
+      </p>
+      {error && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>{error}</p>
+      )}
+      <div className="grid" style={{ gap: 10, maxWidth: 520 }}>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>Prompt</span>
+          <input
+            type="text"
+            value={prompt}
+            disabled={submitting}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="what should Jarvis do?"
+          />
+        </label>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={submitting}
+            onClick={() => { void handleSubmit("select") }}
+          >
+            {submitting && mode === "select" ? "Selecting…" : "Select intelligence"}
+          </button>
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={submitting}
+            onClick={() => { void handleSubmit("dispatch") }}
+          >
+            {submitting && mode === "dispatch" ? "Dispatching…" : "Select then place"}
+          </button>
+        </div>
+      </div>
+      {intelligence && (
+        <div className="kv" style={{ marginTop: 14 }}>
+          <b>Task class</b><span>{intelligence.task_class}</span>
+          <b>Worker kind</b><span>{intelligence.worker_kind}</span>
+          <b>Worker</b><span>{intelligence.worker_id || "—"}</span>
+          <b>Model</b><span>{intelligence.model || "—"}</span>
+          <b>Capabilities</b><span>{intelligence.capabilities.join(", ") || "—"}</span>
+        </div>
+      )}
+      {dispatch?.placement && (
+        <div className="kv" style={{ marginTop: 10 }}>
+          <b>Placement</b>
+          <span>
+            <span className={`badge ${dispatch.placement.accepted ? "completed" : "failed"}`}>
+              {dispatch.placement.accepted ? "Accepted" : "Rejected"}
+            </span>
+            {" · "}
+            {dispatch.placement.accepted
+              ? `${dispatch.placement.hostname || dispatch.placement.node_id} · score ${dispatch.placement.score ?? "—"} · ${formatSignals(dispatch.placement.signals)}`
+              : dispatch.placement.reason}
+          </span>
         </div>
       )}
     </div>
@@ -836,6 +997,53 @@ function LeasesSection({
   )
 }
 
+function CapabilitiesSection({ capabilities }: { capabilities: SwarmCapability[] | undefined }) {
+  if (!capabilities?.length) {
+    return <p className="lede">No capabilities advertised on this node.</p>
+  }
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {capabilities.map((capability) => (
+          <tr key={capability.id}>
+            <td>
+              <strong>{capability.name}</strong>
+              {capability.detail && <div className="lede" style={{ margin: "4px 0 0" }}>{capability.detail}</div>}
+            </td>
+            <td><span className={`badge ${capabilityStatusBadgeClass(capability.status)}`}>{capability.status}</span></td>
+            <td className="stat">{capability.id}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function WarmStateSection({ warm }: { warm: SwarmWarmState | undefined }) {
+  if (!warm) {
+    return <p className="lede">Warm-state is only reported for the local node.</p>
+  }
+  return (
+    <div className="kv">
+      <b>Model loaded</b><span>{warm.loaded ? "yes" : "no"}</span>
+      <b>Profile</b><span>{warm.profile || "—"}</span>
+      <b>Model</b><span>{warm.model_id || "—"}</span>
+      <b>Family</b><span>{warm.family || "—"}</span>
+      <b>Quant</b><span>{warm.quant || "—"}</span>
+      <b>Vision</b><span>{warm.vision_loaded ? "loaded" : "off"}</span>
+      <b>Warm workers</b><span>{(warm.warm_workers || []).join(", ") || "—"}</span>
+      <b>Data roots</b><span>{(warm.data_roots || []).join(", ") || "—"}</span>
+    </div>
+  )
+}
+
 function NodeDetail({
   node,
   onRolesRefresh,
@@ -871,6 +1079,10 @@ function NodeDetail({
       </div>
       <h2 style={{ marginTop: 0 }}>Workers</h2>
       <WorkersSection workers={node.workers} />
+      <h2 style={{ marginTop: 18 }}>Capabilities</h2>
+      <CapabilitiesSection capabilities={node.capabilities} />
+      <h2 style={{ marginTop: 18 }}>Warm state</h2>
+      <WarmStateSection warm={node.warm_state} />
       <h2 style={{ marginTop: 18 }}>Resources</h2>
       <p className="lede" style={{ margin: "0 0 10px" }}>{formatResources(node.resources)}</p>
       <ObjectKv data={node.resources as Record<string, unknown>} />
@@ -967,6 +1179,7 @@ export function SwarmPage() {
         )}
       </div>
       <RolesSection roles={roles} error={rolesError} loading={loading} />
+      <IntelligenceSection />
       <PlacementSection
         onPlaced={async () => {
           await refreshList()

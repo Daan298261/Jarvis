@@ -108,7 +108,9 @@ def test_llama_cpp_reports_missing_local_files():
 
 
 def test_expert_profile_is_the_27b_escalation_alias():
-    expert = resolve_profile("expert")
+    from app.inference.profiles import PROFILES
+
+    expert = PROFILES["expert"]
     assert expert.name == "expert"
     assert "27B" in expert.filename
     assert expert.thinking is True

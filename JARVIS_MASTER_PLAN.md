@@ -3625,7 +3625,7 @@ This development session:
 ### Jarvis 2.0
 
 - Specification: **appended** as sections 64–85 (Autonomous Operator / Away Mode)
-- Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers, `Node` registry / Worker placement / GPU scheduler: **not implemented**
+- Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers: **not implemented**. P2 one-node Node registry, worker-on-node placement, role policy, budgets, local scheduler, and warm-state/data-locality scoring: **implemented** (unit-tested). P3 remote pairing remains TODO.
 - 1.x self-development isolation (worktrees, verification gate, trial budget, kill switch, end-of-run report): **implemented** (unit-tested; does not auto-merge; Cursor ACP still not wired)
 - Flagship benchmark `Away Mode — Autonomous Bug Fix`: **not implemented**
 - Hardware Stage 1 remains the existing desktop; no new GPU is required to continue development
@@ -3666,6 +3666,7 @@ This development session:
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
 - Voice: Command Speak button; `POST /api/voice/listen` transcribes locally; `POST /api/voice/speak` returns WAV; JSON `/api/voice/command` still accepts text
+- Swarm: `/swarm` portal page lists Nodes, Orchestrator/Leader, workers, capabilities, warm-state, role policy, budgets/leases, intelligence selection, and scored placement. `POST /api/swarm/placement` ranks eligible Nodes by loaded model, ready workers, and local data paths.
 
 ### Known Problems
 
@@ -3685,11 +3686,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **task-class tool exposure + request_tools**, **Expert 27B consult policy**, **performance harness / hardware gate**, docker/browser/python/git/web_fetch guards
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **task-class tool exposure + request_tools**, **Expert 27B consult policy**, **performance harness / hardware gate**, docker/browser/python/git/web_fetch guards, **swarm warm-state/data-locality scoring**
 - Frontend (`npm run build`): TypeScript build (this session)
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **312 passed** on this branch after merge-repair QA. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **389 passed** on this branch after swarm warm-state + QA. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3834,16 +3835,26 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 
 These items make the existing machine a one-node swarm first. They must not require a second computer. Detailed role/resource/UI semantics live in `SWARM_ARCHITECTURE.md`.
 
-- [ ] Introduce first-class `Node` identity/state separate from software Worker abstractions.
-- [ ] Preserve software workers (`LocalJarvisCodingWorker`, `CursorACPWorker`, browser/media workers, etc.) as services that execute on eligible Nodes.
-- [ ] Separate Orchestrator (control plane) from Leader (strongest general-purpose execution Node).
-- [ ] Generalize capability registration so Nodes and Workers advertise capabilities and requirements.
-- [ ] Implement node role/class policy: `AUTO`, `PREFERRED`, `FORCED`, `AVOID`, `DISABLED`, including persistence and failover intent without implementing distributed failover yet.
-- [ ] Implement host resource budgets, hard/soft caps, reserved capacity, task priority, and resource-lease representation (CPU/RAM/GPU/VRAM/storage/network where meaningful).
-- [ ] Implement a single-node placement scheduler that selects an eligible Node from requirements even when only `localhost` exists.
-- [ ] Keep intelligence selection separate from physical placement: choose the Worker/model first or jointly, then select the eligible Node based on capability, policy, locality, load, and resource availability.
-- [ ] Add model/worker warm-state and data-locality signals to placement scoring so the scheduler does not cause pointless model reloads or large transfers.
-- [ ] Extend the existing React portal toward the universal dynamic UI contract and add a Swarm settings surface without creating OS-specific frontends.
+- [x] Introduce first-class `Node` identity/state separate from software Worker abstractions.
+  - Status: VERIFIED (`test_nodes.py`); localhost registers once with a stable `data/node_identity.json` id.
+- [x] Preserve software workers (`LocalJarvisCodingWorker`, `CursorACPWorker`, browser/media workers, etc.) as services that execute on eligible Nodes.
+  - Status: VERIFIED (`test_workers_on_nodes.py`); workers bind to the localhost Node and stay distinct from it.
+- [x] Separate Orchestrator (control plane) from Leader (strongest general-purpose execution Node).
+  - Status: VERIFIED (`test_roles.py`, `test_swarm_snapshot.py`); colocated on localhost, distinct role records.
+- [x] Generalize capability registration so Nodes and Workers advertise capabilities and requirements.
+  - Status: VERIFIED (`test_capabilities.py`); `GET /api/swarm/capabilities`.
+- [x] Implement node role/class policy: `AUTO`, `PREFERRED`, `FORCED`, `AVOID`, `DISABLED`, including persistence and failover intent without implementing distributed failover yet.
+  - Status: VERIFIED (`test_role_policy.py`); persisted per node; DISABLED is a hard reject.
+- [x] Implement host resource budgets, hard/soft caps, reserved capacity, task priority, and resource-lease representation (CPU/RAM/GPU/VRAM/storage/network where meaningful).
+  - Status: VERIFIED (`test_budgets.py`); leases refuse HARD-cap overcommit.
+- [x] Implement a single-node placement scheduler that selects an eligible Node from requirements even when only `localhost` exists.
+  - Status: VERIFIED (`test_placement.py`); empty requirements place on localhost.
+- [x] Keep intelligence selection separate from physical placement: choose the Worker/model first or jointly, then select the eligible Node based on capability, policy, locality, load, and resource availability.
+  - Status: VERIFIED (`test_intelligence.py`); `POST /api/swarm/intelligence` has no `node_id`; dispatch composes placement second.
+- [x] Add model/worker warm-state and data-locality signals to placement scoring so the scheduler does not cause pointless model reloads or large transfers.
+  - Status: VERIFIED (`test_warm_state.py`); loaded profile / ready worker / local paths score higher; reload and remote paths are penalized; hard policy still wins.
+- [x] Extend the existing React portal toward the universal dynamic UI contract and add a Swarm settings surface without creating OS-specific frontends.
+  - Status: VERIFIED (Swarm page: nodes, roles, capabilities, warm-state, budgets/leases, intelligence, scored placement). P3 remote join/security/failover UI remains TODO.
 
 ### P3
 
@@ -3954,6 +3965,14 @@ The Orchestrator owns coordination/control-plane responsibilities. The Leader is
 Reason:
 
 Control-plane availability must not depend on the most powerful GPU workstation.
+
+Decision: placement scoring prefers warm models and local data
+
+Eligible Nodes are ranked by loaded-model match, ready workers, and whether requested paths already live on the Node. Hard constraints (DISABLED, HARD caps, missing capabilities) still reject first. On a one-node swarm this reports `would_reload_model` instead of forcing a second machine.
+
+Reason:
+
+Avoid pointless GGUF reloads and large file transfers even before a second computer exists.
 
 Decision: Node and Worker are distinct concepts
 

@@ -8,7 +8,6 @@ from ..agent.agent_benchmark import (
     check_case,
     format_prompt,
     get_case,
-    list_results as list_agent_results,
     list_suite,
     prepare_case,
     record_case_result,
@@ -19,6 +18,7 @@ from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, tas
 from ..inference.backends import probe_remote_server
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
+from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.profiles import available_profiles, declared_profiles
 
 router = APIRouter(prefix="/api/model", tags=["model"])
@@ -134,6 +134,50 @@ async def load_model(body: LoadBody | None = None):
         settings.inference.profile = body.profile
         save_settings(settings)
     return await MANAGER.snapshot(settings)
+
+
+class AgentSuiteRun(BaseModel):
+    case_id: str
+    simulate_success: bool = False
+
+
+@router.get("/agent-suite")
+async def agent_suite():
+    return list_suite()
+
+
+@router.post("/agent-suite/run")
+async def run_agent_suite_case(body: AgentSuiteRun):
+    try:
+        case = get_case(body.case_id)
+    except KeyError as exc:
+        raise HTTPException(404, f"Unknown case: {body.case_id}") from exc
+    workspace = data_dir() / "agent-suite" / case.id
+    ctx = prepare_case(case, workspace)
+    if body.simulate_success:
+        apply_expected_solution(case, ctx)
+    ok, notes = check_case(case, workspace, ctx)
+    metrics = empty_metrics()
+    metrics["success"] = bool(ok or body.simulate_success)
+    metrics["verification_result"] = notes
+    await record_case_result(
+        case=case,
+        metrics=metrics,
+        source="simulate" if body.simulate_success else "api",
+        workspace=str(workspace),
+    )
+    return {
+        "success": metrics["success"],
+        "prompt": format_prompt(case, ctx),
+        "notes": notes,
+        "case_id": case.id,
+        "check_passed": ok,
+    }
+
+
+@router.get("/hardware-gate")
+async def hardware_gate():
+    return await hardware_purchase_gate()
 
 
 @router.post("/unload")

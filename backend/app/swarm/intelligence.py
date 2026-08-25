@@ -140,6 +140,8 @@ async def dispatch_work(
         placement_request["worker_id"] = intelligence["worker_id"]
     elif intelligence.get("worker_kind") in {"coding", "inference"}:
         placement_request["worker_kind"] = intelligence["worker_kind"]
+    if intelligence.get("model"):
+        placement_request["model"] = intelligence["model"]
     if role is not None:
         placement_request["role"] = role
     if claim is not None:

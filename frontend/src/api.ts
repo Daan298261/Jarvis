@@ -149,6 +149,28 @@ export type SwarmWorker = {
   node_id: string
 }
 
+export type SwarmCapability = {
+  id: string
+  name: string
+  status: string
+  detail?: string
+  node_id: string
+}
+
+export type SwarmWarmState = {
+  loaded?: boolean
+  loading?: boolean
+  profile?: string
+  model_id?: string
+  model_path?: string
+  quant?: string
+  family?: string
+  vision_loaded?: boolean
+  data_roots?: string[]
+  warm_workers?: string[]
+  local_files?: boolean
+}
+
 export type SwarmNode = {
   id: string
   hostname?: string
@@ -161,6 +183,8 @@ export type SwarmNode = {
   hardware: SwarmNodeHardware
   resources: SwarmNodeResources
   workers?: SwarmWorker[]
+  capabilities?: SwarmCapability[]
+  warm_state?: SwarmWarmState
   created_at?: string | null
   updated_at?: string | null
   last_seen_at?: string | null
@@ -368,6 +392,27 @@ export type SwarmPlacementRequest = {
   worker_kind?: string
   claim?: SwarmLeaseClaim
   ttl_seconds?: number
+  model?: string
+  paths?: string[]
+}
+
+export type SwarmPlacementSignals = {
+  warm_model?: boolean
+  would_reload_model?: boolean
+  warm_worker?: boolean
+  cold_worker?: boolean
+  data_locality?: boolean
+  matched_paths?: string[]
+  unmatched_paths?: string[]
+  is_local?: boolean
+}
+
+export type SwarmPlacementCandidate = {
+  node_id: string
+  hostname?: string
+  score: number
+  signals: SwarmPlacementSignals
+  selected: boolean
 }
 
 export type SwarmPlacementAccepted = {
@@ -377,6 +422,43 @@ export type SwarmPlacementAccepted = {
   worker: SwarmWorker
   reason: string
   lease?: SwarmLease
+  score?: number
+  signals?: SwarmPlacementSignals
+  candidates?: SwarmPlacementCandidate[]
+}
+
+export type SwarmIntelligence = {
+  task_class: string
+  worker_kind: string
+  capabilities: string[]
+  worker_id?: string
+  model?: string
+}
+
+export type SwarmDispatchResult = {
+  intelligence: SwarmIntelligence
+  placement: SwarmPlacementResult
+}
+
+export async function postSwarmIntelligence(prompt: string, taskClass?: string): Promise<SwarmIntelligence> {
+  return api<SwarmIntelligence>("/api/swarm/intelligence", {
+    method: "POST",
+    body: JSON.stringify({ prompt, task_class: taskClass || undefined }),
+  })
+}
+
+export async function postSwarmDispatch(prompt: string, taskClass?: string): Promise<SwarmDispatchResult> {
+  const headers = authHeaders({ "Content-Type": "application/json" })
+  const response = await fetch("/api/swarm/dispatch", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ prompt, task_class: taskClass || undefined }),
+  })
+  if (response.status === 409) {
+    return response.json() as Promise<SwarmDispatchResult>
+  }
+  await throwIfNotOk(response)
+  return response.json() as Promise<SwarmDispatchResult>
 }
 
 export type SwarmPlacementRejected = {

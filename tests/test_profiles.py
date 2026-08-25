@@ -29,11 +29,11 @@ def test_expert_keeps_twenty_seven_b():
     assert expert.thinking_mode == "on"
 
 
-def test_balanced_is_selective_thinking_16k():
+def test_balanced_is_selective_thinking_32k_cap():
     balanced = resolve_profile("balanced")
     assert balanced.thinking_mode == "selective"
     assert balanced.thinking is True
-    assert balanced.context_size == 16384
+    assert balanced.context_size == 32768
     assert resolve_profile("fast").thinking_mode == "off"
     assert resolve_profile("fast").context_size == 8192
     assert resolve_profile("reliable").name == "quality"

@@ -232,6 +232,12 @@ class LlamaCppBackend(InferenceBackend):
         hardware = detect_hardware()
         inference = self.settings.inference
         projector = mmproj_path(profile)
+        if vision:
+            paths = model_paths()
+            for candidate in (projector, paths.get("mmproj_9b"), paths.get("mmproj")):
+                if candidate and Path(candidate).exists():
+                    projector = Path(candidate)
+                    break
         threads = inference.threads or hardware.cpu_cores
         ctx = int(context_size or profile.context_size or inference.context_size)
         args = [

@@ -55,6 +55,8 @@ class PlacementRequest(BaseModel):
     worker_kind: str | None = None
     claim: dict | None = None
     ttl_seconds: int | None = 300
+    model: str | None = None
+    paths: list[str] | None = None
 
 
 class IntelligenceRequest(BaseModel):
