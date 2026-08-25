@@ -1,5 +1,7 @@
 # Install Jarvis
 
+> **Nontechnical users:** after someone builds `JarvisSetup.exe` on Windows (see [`installer/windows/README.md`](../installer/windows/README.md)), double-click that installer instead of following the manual steps below. It runs the same setup automatically and adds **Start Jarvis** / **Stop Jarvis** shortcuts.
+
 Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal. Inference defaults to **Qwen3.5-9B Abliterated** through llama.cpp on this machine. **Qwen3.5-27B** remains an optional Expert/escalation model. You can also point Jarvis at any OpenAI-compatible server.
 
 The portal is [http://127.0.0.1:4780](http://127.0.0.1:4780). The same REST API drives the installable phone PWA at `/phone`, plus later voice or automations.
