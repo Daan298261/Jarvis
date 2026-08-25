@@ -257,3 +257,6 @@ label { display: block; color: var(--muted); font-size: 13px; }
 }
 
 .phone-page .command { min-height: 96px; }
+
+.swarm-row { cursor: pointer; }
+.swarm-row.selected td { background: rgba(212, 160, 23, 0.06); }

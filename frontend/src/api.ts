@@ -104,3 +104,67 @@ export type Task = {
   waiting_for_confirmation: boolean
   events?: { kind: string; title: string; detail: string; stage: string; created_at: string }[]
 }
+
+export type SwarmNodeHardware = {
+  os_name?: string
+  os_version?: string
+  architecture?: string
+  cpu_name?: string
+  cpu_cores?: number
+  cpu_threads?: number
+  ram_total_gb?: number
+  ram_available_gb?: number
+  gpu_name?: string | null
+  vram_total_mib?: number | null
+  vram_free_mib?: number | null
+  nvidia_driver?: string | null
+  cuda_version?: string | null
+  disk_free_gb?: number
+  disk_total_gb?: number
+  python_version?: string
+  node_installed?: boolean
+  git_installed?: boolean
+  docker_installed?: boolean
+  office_installed?: boolean
+  wsl_available?: boolean
+}
+
+export type SwarmNodeResources = {
+  cpu_cores?: number
+  cpu_threads?: number
+  ram_total_gb?: number
+  ram_available_gb?: number
+  vram_total_mib?: number | null
+  vram_free_mib?: number | null
+  disk_total_gb?: number
+  disk_free_gb?: number
+  gpu_name?: string | null
+}
+
+export type SwarmNode = {
+  id: string
+  hostname?: string
+  host_alias: string
+  address: string
+  status: string
+  class: string
+  roles: string[]
+  is_local: boolean
+  hardware: SwarmNodeHardware
+  resources: SwarmNodeResources
+  created_at?: string | null
+  updated_at?: string | null
+  last_seen_at?: string | null
+}
+
+export type SwarmNodesResponse = {
+  nodes: SwarmNode[]
+}
+
+export async function listSwarmNodes(): Promise<SwarmNodesResponse> {
+  return api<SwarmNodesResponse>("/api/swarm/nodes")
+}
+
+export async function getSwarmNode(nodeId: string): Promise<SwarmNode> {
+  return api<SwarmNode>(`/api/swarm/nodes/${encodeURIComponent(nodeId)}`)
+}
