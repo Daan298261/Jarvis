@@ -41,8 +41,8 @@ backend/app/
     agent/
     loop.py               AgentRuntime — create/continue/cancel, verification
     planning.py           ExecutionPolicy, task classification, best-of-N plan parse/select
-    coding_workers.py     SoftwareDevelopmentWorker router (local first; paid stubs)
-    agent_benchmark.py    P0.9 20-task catalog, metrics, comparison report
+    thinking.py           Selective enable_thinking per turn (P0.4)
+    forensic.py           Professional/Forensic Audit Mode prompt (P0.11)
     workflows.py          Guide copy + editable templates + compose_prompt
     recovery.py           Failure classes → alternative tools
     compaction.py         History summary that cannot orphan tool results
@@ -52,7 +52,7 @@ backend/app/
     prompts.py            System / plan / verify / critic prompts
   inference/
     manager.py            Load/unload, adopt already-running server
-    backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
+    backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend; mmproj is opt-in
     profiles.py           fast / balanced / quality GGUF profiles
     hardware_gate.py      P0.12 purchase gate (no hardware buys without measurements)
   providers/              OpenAI-compatible chat + tool-call parsing
@@ -149,7 +149,7 @@ You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects
 | `JARVIS_URL` | `tests/run_e2e.py` base URL (default `http://127.0.0.1:4780`) |
 | `JARVIS_TEST_TIMEOUT` | e2e wait seconds (default 900) |
 
-`PUT /api/settings` is the programmatic settings API (autonomy, directories, inference backend/host/port, LAN/auth, browser headless, and so on). `auth_token` is never written back to `data/settings.json`.
+`PUT /api/settings` is the programmatic settings API (autonomy, directories, inference backend/host/port, LAN/auth, browser headless, `professional_mode`, `vision` lazy/always/off, and so on). `auth_token` is never written back to `data/settings.json`.
 
 Default allowed directories: Desktop, Documents, Downloads, repo root, `data/`. Tools refuse paths outside that list.
 
@@ -210,8 +210,8 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 `backend/app/agent/loop.py` is the orchestrator. A task:
 
 1. Classifies (`planning.classify_task`) and stores `task_class`
-2. Injects matching skills, trajectories, and (for software tasks) a coding-worker routing block into the system prompt
-3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
+2. Injects matching skills and trajectories into the system prompt
+3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run. Thinking tokens are enabled for planning, recovery, Reliable verification, and complex task classes; simple list/read/status follow-ups skip them (`thinking.should_think`).
 4. Executes tool calls until the policy budget is spent
 5. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
 6. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`

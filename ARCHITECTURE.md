@@ -17,9 +17,8 @@ FastAPI backend / Orchestrator
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
-Inference backend
-  ├── local llama.cpp today
-  └── optional remote OpenAI-compatible endpoint
+llama-server (localhost:8088)
+  Qwen3.5-27B GGUF; mmproj loaded lazily when a screenshot needs interpreting
 ```
 
 Today the host PC implicitly performs every physical role. Swarm work must refactor that assumption incrementally rather than replace the working control plane.
@@ -84,7 +83,7 @@ These systems remain Orchestrator-owned when Workers become remote. A remote Wor
 
 ## Intelligence and software-development workers
 
-Software-development routing is defined in the master plan. Jarvis selects the cheapest sufficiently capable worker, beginning with deterministic/local options and escalating to paid coding workers when necessary. `CursorACPWorker` is the preferred Cursor integration path; MCP complements it in the opposite direction.
+Live model timings (tok/s, VRAM, RAM, load time) and task success rates are persisted in `benchmark_samples` and shown on the Model page. llama.cpp starts without the vision projector unless vision mode is `always` or a screenshot is attached. Balanced/Quality profiles keep the reasoning parser available and toggle `enable_thinking` per turn.
 
 Worker selection must remain compatible with swarm placement:
 

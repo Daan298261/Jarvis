@@ -7,10 +7,38 @@ from typing import Any
 from .base import RiskLevel, Tool, ToolResult
 
 
+def docker_argv(action: str, kwargs: dict[str, Any]) -> tuple[list[str] | None, str]:
+    """Build `docker …` arguments or return a user-visible error."""
+    if action == "ps":
+        return ["ps", "-a"], ""
+    if action == "images":
+        return ["images"], ""
+    if action == "build":
+        return ["build", kwargs.get("path") or "."], ""
+    if action == "run":
+        image = str(kwargs.get("image") or "").strip()
+        if not image:
+            return None, "image is required for docker run"
+        extra = [part for part in str(kwargs.get("args") or "").split() if part]
+        return ["run", "--rm", *extra, image], ""
+    if action == "logs":
+        container = str(kwargs.get("container") or "").strip()
+        if not container:
+            return None, "container is required for docker logs"
+        return ["logs", container], ""
+    if action == "inspect":
+        target = str(kwargs.get("container") or kwargs.get("image") or "").strip()
+        if not target:
+            return None, "container or image is required for docker inspect"
+        return ["inspect", target], ""
+    return None, f"Unknown action {action}"
+
+
 class DockerTool(Tool):
     name = "docker"
     description = (
-        "Inspect and run Docker containers when Docker is installed. Actions: ps, images, build, run, logs, inspect."
+        "Inspect and run Docker containers when Docker is installed. Actions: ps, images, build, run, logs, inspect. "
+        "run requires image; logs requires container; inspect requires container or image."
     )
     risk = RiskLevel.HIGH
     parameters = {
@@ -27,24 +55,11 @@ class DockerTool(Tool):
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
-        mapping = {
-            "ps": ["ps", "-a"],
-            "images": ["images"],
-            "build": ["build", kwargs.get("path") or "."],
-            "run": ["run", "--rm", *(kwargs.get("args") or "").split(), kwargs.get("image") or ""],
-            "logs": ["logs", kwargs.get("container") or ""],
-            "inspect": ["inspect", kwargs.get("container") or kwargs.get("image") or ""],
-        }
-        args = mapping.get(action)
-        if not args:
-            return ToolResult(False, "", error=f"Unknown action {action}")
-        if action == "run" and not (kwargs.get("image") or "").strip():
-            return ToolResult(False, "", error="image is required for docker run")
-        if action in {"logs", "inspect"} and not (kwargs.get("container") or kwargs.get("image") or "").strip():
-            return ToolResult(False, "", error="container or image is required")
+        args, error = docker_argv(str(action or ""), kwargs)
+        if error:
+            return ToolResult(False, "", error=error)
         if not shutil.which("docker"):
             return ToolResult(False, "", error="Docker is not installed on this machine")
-        args = [a for a in args if a]
         proc = await asyncio.create_subprocess_exec(
             "docker",
             *args,

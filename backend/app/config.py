@@ -61,6 +61,8 @@ class InferenceSettings(BaseModel):
     cache_type_v: str = "q8_0"
     threads: int = 0
     auto_load: bool = True
+    # lazy = text-only until a screenshot/vision turn; always = load mmproj at start; off = never.
+    vision: str = "lazy"
 
 
 class BrowserSettings(BaseModel):
@@ -87,6 +89,7 @@ class AppSettings(BaseModel):
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
+    professional_mode: bool = False
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:

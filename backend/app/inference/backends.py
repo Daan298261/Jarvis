@@ -57,7 +57,7 @@ class InferenceBackend:
     def missing_requirements(self, profile: ModelProfile) -> list[str]:
         return []
 
-    async def start(self, profile: ModelProfile, timeout: float = 300) -> bool:
+    async def start(self, profile: ModelProfile, timeout: float = 300, vision: bool = False) -> bool:
         raise NotImplementedError
 
     async def stop(self) -> None:
@@ -102,7 +102,7 @@ class LlamaCppBackend(InferenceBackend):
             missing.append(f"llama-server missing at {self.server_path()}")
         return missing
 
-    def build_args(self, profile: ModelProfile) -> list[str]:
+    def build_args(self, profile: ModelProfile, vision: bool = False) -> list[str]:
         hardware = detect_hardware()
         inference = self.settings.inference
         paths = model_paths()
@@ -144,25 +144,23 @@ class LlamaCppBackend(InferenceBackend):
             "--prio",
             "3",
             "--metrics",
-            "--image-min-tokens",
-            "1024",
         ]
         if inference.fit:
             args.extend(["--fit", "on", "--fit-target", str(inference.fit_target_mib)])
         else:
             args.extend(["--n-gpu-layers", "99"])
-        if mmproj.exists():
-            args.extend(["--mmproj", str(mmproj)])
+        if vision and mmproj.exists():
+            args.extend(["--mmproj", str(mmproj), "--image-min-tokens", "1024"])
         return args
 
-    async def start(self, profile: ModelProfile, timeout: float = 300) -> bool:
+    async def start(self, profile: ModelProfile, timeout: float = 300, vision: bool = False) -> bool:
         await self.stop()
         log_file = logs_dir() / "llama-server.log"
         self._log_handle = open(log_file, "ab", buffering=0)
         env = os.environ.copy()
         env["CUDA_MODULE_LOADING"] = "LAZY"
         self._process = await asyncio.create_subprocess_exec(
-            *self.build_args(profile),
+            *self.build_args(profile, vision=vision),
             cwd=str(runtime_dir()),
             stdout=self._log_handle,
             stderr=self._log_handle,
@@ -201,7 +199,7 @@ class RemoteOpenAICompatibleBackend(InferenceBackend):
     manages_process = False
     requires_local_files = False
 
-    async def start(self, profile: ModelProfile, timeout: float = 60) -> bool:
+    async def start(self, profile: ModelProfile, timeout: float = 60, vision: bool = False) -> bool:
         return await wait_for_health(self.health_url(), timeout)
 
 

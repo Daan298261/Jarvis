@@ -14,6 +14,15 @@ from .backends import InferenceBackend, resolve_backend
 from .profiles import ModelProfile, model_paths, resolve_profile
 
 
+def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
+    mode = (settings.inference.vision or "lazy").strip().lower()
+    if mode in {"off", "never", "disabled"}:
+        return False
+    if mode in {"always", "on", "enabled"}:
+        return True
+    return bool(requested)
+
+
 @dataclass
 class InferenceState:
     loaded: bool = False
@@ -22,6 +31,7 @@ class InferenceState:
     quant: str = ""
     model_path: str = ""
     mmproj_path: str = ""
+    vision_loaded: bool = False
     backend: str = "llama.cpp"
     manages_process: bool = True
     host: str = "127.0.0.1"
@@ -67,62 +77,103 @@ class InferenceManager:
     def base_url(self, settings: AppSettings) -> str:
         return f"http://{settings.inference.host}:{settings.inference.port}/v1"
 
-    async def load(self, settings: AppSettings, profile_name: str | None = None) -> InferenceState:
+    async def load(
+        self,
+        settings: AppSettings,
+        profile_name: str | None = None,
+        vision: bool | None = None,
+    ) -> InferenceState:
         async with self._lock:
-            profile = resolve_profile(profile_name or settings.inference.profile)
-            backend = resolve_backend(settings)
-            paths = model_paths()
-            model = paths["root"] / profile.filename
+            return await self._load_unlocked(settings, profile_name, vision=vision)
 
-            missing = backend.missing_requirements(profile)
-            if missing:
-                self.state.last_error = "; ".join(missing)
-                raise FileNotFoundError(self.state.last_error)
+    async def ensure_vision(self, settings: AppSettings, enabled: bool) -> InferenceState:
+        """Restart llama.cpp with/without mmproj when Jarvis owns the process.
 
-            if self.backend and self.state.loaded and self.state.profile == profile.name and self.backend.name == backend.name:
+        Remote or already-adopted servers cannot hot-swap the projector; we record
+        the requested state and leave the process alone.
+        """
+        async with self._lock:
+            wanted = resolve_vision(settings, enabled)
+            if self.state.loaded and self.state.vision_loaded == wanted:
                 return self.state
-
-            self._apply_profile_state(settings, profile, backend, model, paths)
-
-            # Adopt a server that is already answering when we did not start one.
-            existing = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
-            already_running = (self.backend is None or self.backend.pid is None) and await existing.health()
-            if already_running:
-                self.backend = backend
-                self.provider = existing
-                self.state.loaded = True
-                self.state.loading = False
-                self.state.pid = backend.pid
-                await self.refresh_resources()
+            if not self.backend or not self.backend.manages_process or self.backend.pid is None:
+                self.state.vision_loaded = wanted
                 return self.state
+            return await self._load_unlocked(settings, self.state.profile, vision=wanted)
 
-            if self.backend:
-                await self.backend.stop()
+    async def _load_unlocked(
+        self,
+        settings: AppSettings,
+        profile_name: str | None,
+        vision: bool | None = None,
+    ) -> InferenceState:
+        profile = resolve_profile(profile_name or settings.inference.profile)
+        backend = resolve_backend(settings)
+        paths = model_paths()
+        model = paths["root"] / profile.filename
+        wanted_vision = resolve_vision(settings, vision)
+
+        missing = backend.missing_requirements(profile)
+        if missing:
+            self.state.last_error = "; ".join(missing)
+            raise FileNotFoundError(self.state.last_error)
+
+        same_backend = (
+            self.backend
+            and self.state.loaded
+            and self.state.profile == profile.name
+            and self.backend.name == backend.name
+            and self.state.vision_loaded == wanted_vision
+        )
+        if same_backend:
+            return self.state
+
+        self._apply_profile_state(settings, profile, backend, model, paths, vision=wanted_vision)
+
+        # Adopt a server that is already answering when we did not start one.
+        existing = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
+        already_running = (self.backend is None or self.backend.pid is None) and await existing.health()
+        owns_process = bool(self.backend and self.backend.manages_process and self.backend.pid)
+        if already_running and not owns_process:
             self.backend = backend
-            self.state.loading = True
-            self.state.last_error = ""
-            started = time.time()
-
-            ready = await backend.start(profile, timeout=300)
-            if not ready and backend.manages_process:
-                # Most first-load failures on a 16 GB card are context pressure.
-                fallback = _with_context(profile, 16384)
-                ready = await backend.start(fallback, timeout=240)
-                if ready:
-                    self.state.context_size = fallback.context_size
-            self.state.pid = backend.pid
-            if not ready:
-                self.state.loading = False
-                self.state.last_error = f"{backend.name} did not become ready"
-                detail = f". See {logs_dir() / 'llama-server.log'}" if backend.manages_process else f" at {self.base_url(settings)}"
-                raise RuntimeError(self.state.last_error + detail)
-
+            self.provider = existing
             self.state.loaded = True
             self.state.loading = False
-            self.state.load_time_seconds = round(time.time() - started, 2)
-            self.provider = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
+            self.state.pid = backend.pid
+            self.state.vision_loaded = False
+            self.state.mmproj_path = ""
+            # Adopted servers are operator-configured; Jarvis cannot add/remove mmproj.
             await self.refresh_resources()
             return self.state
+
+        if self.backend:
+            await self.backend.stop()
+        self.backend = backend
+        self.state.loading = True
+        self.state.last_error = ""
+        started = time.time()
+
+        ready = await backend.start(profile, timeout=300, vision=wanted_vision)
+        if not ready and backend.manages_process:
+            # Most first-load failures on a 16 GB card are context pressure.
+            fallback = _with_context(profile, 16384)
+            ready = await backend.start(fallback, timeout=240, vision=wanted_vision)
+            if ready:
+                self.state.context_size = fallback.context_size
+        self.state.pid = backend.pid
+        if not ready:
+            self.state.loading = False
+            self.state.last_error = f"{backend.name} did not become ready"
+            detail = f". See {logs_dir() / 'llama-server.log'}" if backend.manages_process else f" at {self.base_url(settings)}"
+            raise RuntimeError(self.state.last_error + detail)
+
+        self.state.loaded = True
+        self.state.loading = False
+        self.state.vision_loaded = wanted_vision and paths["mmproj"].exists()
+        self.state.load_time_seconds = round(time.time() - started, 2)
+        self.provider = OpenAICompatProvider(self.base_url(settings), model="Qwen3.5-27B")
+        await self.refresh_resources()
+        return self.state
 
     def _apply_profile_state(
         self,
@@ -131,11 +182,13 @@ class InferenceManager:
         backend: InferenceBackend,
         model: Path,
         paths: dict[str, Path],
+        vision: bool = False,
     ) -> None:
         self.state.profile = profile.name
         self.state.quant = profile.quant
         self.state.model_path = str(model) if backend.requires_local_files else ""
-        self.state.mmproj_path = str(paths["mmproj"]) if paths["mmproj"].exists() else ""
+        self.state.mmproj_path = str(paths["mmproj"]) if vision and paths["mmproj"].exists() else ""
+        self.state.vision_loaded = bool(vision and paths["mmproj"].exists())
         self.state.host = settings.inference.host
         self.state.port = settings.inference.port
         self.state.context_size = profile.context_size
@@ -205,6 +258,8 @@ class InferenceManager:
             "last_error": self.state.last_error,
             "model_path": self.state.model_path,
             "mmproj_path": self.state.mmproj_path,
+            "vision": settings.inference.vision,
+            "vision_loaded": self.state.vision_loaded,
             "thinking": profile.thinking,
         }
 

@@ -27,6 +27,8 @@ class SettingsUpdate(BaseModel):
     inference_host: str | None = None
     inference_port: int | None = None
     browser_headless: bool | None = None
+    professional_mode: bool | None = None
+    vision: str | None = None
 
 
 @router.get("")
@@ -80,6 +82,12 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.port = body.inference_port
     if body.browser_headless is not None:
         settings.browser.headless = body.browser_headless
+    if body.professional_mode is not None:
+        settings.professional_mode = body.professional_mode
+    if body.vision is not None:
+        mode = body.vision.strip().lower()
+        if mode in {"lazy", "always", "off"}:
+            settings.inference.vision = mode
     save_settings(settings)
     REGISTRY.apply_settings(settings)
     return settings.model_dump()

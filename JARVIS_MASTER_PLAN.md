@@ -3652,8 +3652,10 @@ This development session:
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
-- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
-- Model page also shows the 20-task agent suite catalog and the hardware purchasing gate (`GET /api/model/agent-benchmarks`, `GET /api/model/hardware-gate`)
+- Model page persists tok/s, VRAM, RAM, load time, vision projector state, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
+- Settings can enable Professional / Forensic Audit Mode and vision lazy/always/off
+- llama.cpp starts without `--mmproj` unless vision is `always` or a screenshot is attached (P0.5 lazy vision)
+- Balanced/Quality profiles toggle `enable_thinking` per turn (P0.4); Fast keeps thinking off
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
@@ -3669,9 +3671,9 @@ This development session:
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
-- Office COM and Docker depend on software that may be missing on the target PC
-- Paid Composer/Grok/ACP coding workers are catalogued but not connected; software tasks execute on the local Jarvis worker
-- 20-task live comparison (9B Q8 vs Q6 vs 27B Q4) still requires the Windows GPU desktop
+- Office COM and Docker depend on software that may be missing on the target PC. Docker `run`/`logs`/`inspect` now reject missing targets instead of spawning a bare `docker` command.
+- Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
+- Live 9B Abliterated default stack, Expert escalation, dynamic context, and optional workers remain on unmerged draft PRs #4–#8
 
 ### Last End-to-End Test
 
@@ -3679,11 +3681,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, 20-task agent suite catalog/report, hardware purchasing gate, coding-worker router, git checkpoint / docker / web_fetch / office / python / terminal QA
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building (including lazy vision flags), failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, dynamic thinking, professional/forensic audit prompt, docker argument validation, browser close without a session
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **93 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **98 passed** (this session). Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3726,6 +3728,18 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Software-development worker router
   - Acceptance: common `SoftwareDevelopmentWorker` interface; cheapest capable worker; local Jarvis always available; Composer/Grok/ACP catalogued but not invoked until connected; historical local success can override static thresholds; independent verification still required.
   - Status: VERIFIED in unit tests (`test_coding_workers.py`). Paid workers remain `not_connected` here.
+
+- [x] Dynamic thinking (P0.4)
+  - Acceptance: expensive reasoning is not applied to simple list/read/status tool follow-ups; planning, recovery, Reliable verification, and complex task classes still think when the profile allows it.
+  - Status: VERIFIED in unit tests (`test_thinking.py`, `test_thinking_loop.py`)
+
+- [x] Lazy vision loading (P0.5)
+  - Acceptance: llama.cpp command omits `--mmproj` and `--image-min-tokens` until vision is requested; Settings vision mode lazy/always/off; screenshot attachment can enable the projector when Jarvis owns the process.
+  - Status: VERIFIED in unit tests (`test_inference_backends.py`, `test_vision.py`). Live VRAM savings not measured (no GPU here).
+
+- [x] Professional / Forensic Audit Mode (P0.11)
+  - Acceptance: Settings toggle plus automatic activation on security/forensic prompts; system prompt tells the model to analyze rather than refuse; operational authorization (safety.py) is unchanged.
+  - Status: VERIFIED in unit tests (`test_forensic.py`)
 
 ### P1
 
