@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from ..swarm.capabilities import list_all_capabilities
 from ..swarm.nodes import get_node, list_nodes
 from ..swarm.roles import get_swarm_roles
 
@@ -11,6 +12,12 @@ router = APIRouter(prefix="/api/swarm", tags=["swarm"])
 @router.get("/roles")
 async def swarm_roles():
     return await get_swarm_roles()
+
+
+@router.get("/capabilities")
+async def swarm_capabilities():
+    capabilities = await list_all_capabilities()
+    return {"capabilities": capabilities}
 
 
 @router.get("/nodes")

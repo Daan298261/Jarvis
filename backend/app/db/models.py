@@ -307,6 +307,10 @@ class Node(Base):
         back_populates="node",
         cascade="all, delete-orphan",
     )
+    capabilities: Mapped[list["NodeCapability"]] = relationship(
+        back_populates="node",
+        cascade="all, delete-orphan",
+    )
 
 
 class NodeWorker(Base):
@@ -328,6 +332,23 @@ class NodeWorker(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     node: Mapped[Node] = relationship(back_populates="workers")
+
+
+class NodeCapability(Base):
+    """Technical capability bound to a Node (distinct from SwarmRole and NodeWorker)."""
+
+    __tablename__ = "node_capabilities"
+    __table_args__ = (UniqueConstraint("node_id", "capability_id", name="uq_node_capability"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), index=True)
+    capability_id: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(32), default="unknown")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    node: Mapped[Node] = relationship(back_populates="capabilities")
 
 
 class SwarmRole(Base):
