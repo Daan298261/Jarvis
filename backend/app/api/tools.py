@@ -40,6 +40,19 @@ async def tool_catalog():
     }
 
 
+@router.get("/coding-workers")
+async def coding_workers(prompt: str | None = None, task_class: str | None = None):
+    from ..agent.coding_workers import coding_worker_catalog, format_route_prompt, route_software_task
+
+    workers = coding_worker_catalog()
+    payload: dict = {"workers": workers, "route": None, "prompt": None}
+    if prompt:
+        decision = route_software_task(prompt, task_class=task_class or "")
+        payload["route"] = decision.as_dict()
+        payload["prompt"] = format_route_prompt(decision)
+    return payload
+
+
 @router.post("/{tool_name}/enable")
 async def enable_tool(tool_name: str):
     settings = load_settings()

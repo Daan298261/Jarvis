@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import time
 from typing import Any
 
 from .base import RiskLevel, Tool, ToolResult
@@ -148,55 +149,10 @@ class DesktopTool(Tool):
 
                 names = sorted({p.info["name"] for p in psutil.process_iter(["name"]) if p.info["name"]})
                 return ToolResult(True, "\n".join(names[:400]))
-            if action not in {"windows", "focus", "click", "type", "keys"}:
-                return ToolResult(False, "", error=f"Unknown action {action}")
-            if not windows_ui_available():
-                return ToolResult(False, "", error=UNAVAILABLE)
-            try:
-                from pywinauto import Desktop
-            except Exception as exc:
-                return ToolResult(False, "", error=f"{UNAVAILABLE} ({exc})")
-
-            desktop = Desktop(backend="uia")
-            if action == "windows":
-                titles = [w.window_text() for w in desktop.windows() if w.window_text()]
-                return ToolResult(True, "\n".join(titles[:200]) or "No windows")
-            spec = desktop.window(title_re=f".*{kwargs.get('title') or ''}.*")
-            if action == "focus":
-                spec.set_focus()
-                return ToolResult(True, f"Focused {spec.window_text()}")
-            if action == "click":
-                if kwargs.get("name"):
-                    control = resolve_named_control(spec, kwargs["name"])
-                    if control is None:
-                        return ToolResult(
-                            False,
-                            "",
-                            error=f"Named control {kwargs['name']!r} was not found. "
-                            "Do not use coordinates yet; take a screenshot and retry with the visible name.",
-                        )
-                    control.click_input()
-                    return ToolResult(True, f"Clicked control {kwargs['name']}")
-                if kwargs.get("x") is not None and kwargs.get("y") is not None:
-                    import ctypes
-
-                    ctypes.windll.user32.SetCursorPos(int(kwargs["x"]), int(kwargs["y"]))
-                    ctypes.windll.user32.mouse_event(2, 0, 0, 0, 0)
-                    ctypes.windll.user32.mouse_event(4, 0, 0, 0, 0)
-                    return ToolResult(True, f"Clicked {kwargs['x']},{kwargs['y']} (coordinate fallback)")
-                return ToolResult(False, "", error="Provide name or x/y")
-            if action == "type":
-                if kwargs.get("name"):
-                    control = resolve_named_control(spec, kwargs["name"])
-                    if control is None:
-                        return ToolResult(False, "", error=f"Named control {kwargs['name']!r} was not found")
-                    control.type_keys(kwargs.get("text") or "", with_spaces=True)
-                    return ToolResult(True, f"Typed into {kwargs['name']}")
-                spec.type_keys(kwargs.get("text") or "", with_spaces=True)
-                return ToolResult(True, "Typed text")
-            if action == "keys":
-                spec.type_keys(kwargs.get("text") or "")
-                return ToolResult(True, f"Sent keys {kwargs.get('text')}")
+            if action in {"windows", "inspect", "focus", "click", "type", "keys", "wait"}:
+                if not windows_ui_available():
+                    return ToolResult(False, "", error=UNAVAILABLE)
+                return self._uia_action(action, kwargs)
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))
@@ -253,6 +209,26 @@ class DesktopTool(Tool):
             spec.set_focus()
             return ToolResult(True, f"Focused {spec.window_text()}")
         if action == "click":
+            if kwargs.get("name"):
+                named = resolve_named_control(spec, kwargs["name"])
+                if named:
+                    named.click_input()
+                    return ToolResult(True, f"Clicked control {kwargs['name']}")
+                if kwargs.get("x") is not None and kwargs.get("y") is not None:
+                    _coordinate_click(int(kwargs["x"]), int(kwargs["y"]))
+                    return ToolResult(
+                        True,
+                        f"Named control not found; clicked {kwargs['x']},{kwargs['y']} (coordinate fallback)",
+                        data={"method": "coordinate", "fallback": True},
+                    )
+                return ToolResult(
+                    False,
+                    "",
+                    error=(
+                        f"Named control {kwargs['name']!r} was not found. "
+                        "Do not use coordinates yet; take a screenshot and retry with the visible name."
+                    ),
+                )
             backend = click_backend(
                 name=kwargs.get("name"),
                 automation_id=kwargs.get("automation_id"),

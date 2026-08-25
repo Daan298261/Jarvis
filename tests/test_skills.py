@@ -249,3 +249,30 @@ async def test_stable_browser_procedure_is_promoted_with_url_parameter(jarvis_en
     assert bound["url"] == "https://cms.example/posts/final"
     block = as_prompt_block([skill])
     assert "BrowserCode-style" in block
+
+
+async def test_password_fields_are_secret_parameters_and_do_not_auto_bind(jarvis_env):
+    for index in range(3):
+        await _completed_task(
+            index,
+            "publish weekly notes on the cms",
+            "browser automation",
+            ["browser", "browser", "browser"],
+            [
+                {"action": "open", "url": "https://cms.example/login"},
+                {"action": "type", "name": "Password", "password": f"secret-{index}"},
+                {"action": "click", "name": "Sign in"},
+            ],
+            prefix="secret",
+        )
+    created = await promote_from_trajectories()
+    assert len(created) == 1
+    skill = created[0]
+    assert skill.origin == "browser_promoted"
+    params = json.loads(skill.parameters_json)
+    secret = next(item for item in params if isinstance(item, dict) and item.get("kind") == "secret")
+    assert secret["examples"] == []
+    assert bind_parameters(skill, "publish weekly notes on the cms") is None
+    bound = bind_parameters(skill, "publish weekly notes on the cms", {secret["name"]: "runtime-secret"})
+    assert bound is not None
+    assert bound[secret["name"]] == "runtime-secret"

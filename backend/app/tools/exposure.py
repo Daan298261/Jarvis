@@ -52,6 +52,11 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "repo": "git",
     "containers": "docker",
     "mcp_server": "mcp",
+    "openhands": "code_worker",
+    "interpreter": "open_interpreter",
+    "open-interpreter": "open_interpreter",
+    "browseruse": "browser_use",
+    "browser_use": "browser_use",
 }
 
 NATIVE_TOOLS = (
@@ -67,6 +72,11 @@ NATIVE_TOOLS = (
     "screenshot",
     "mcp",
     REQUEST_CAPABILITY,
+    "browser_use",
+    "code_worker",
+    "open_interpreter",
+    "ufo",
+    "cua",
 )
 
 

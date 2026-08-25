@@ -357,6 +357,19 @@ async def complete_coding_route(task_id: str, outcome: str, verification: str = 
         await session.commit()
 
 
+async def record_coding_outcome(
+    task_id: str,
+    task_class: str = "",
+    worker_id: str = "",
+    complexity: int = 0,
+    outcome: str = "",
+    verification: str = "",
+    duration_seconds: float = 0,
+) -> None:
+    """Keep the latest coding route row in sync with the task outcome."""
+    await complete_coding_route(task_id, outcome, verification)
+
+
 async def list_coding_routes(limit: int = 50) -> list[dict[str, Any]]:
     async with SessionLocal() as session:
         rows = (

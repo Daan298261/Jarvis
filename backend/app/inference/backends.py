@@ -10,7 +10,7 @@ import httpx
 
 from ..config import AppSettings, logs_dir, runtime_dir
 from ..hardware import detect_hardware
-from .profiles import ModelProfile, mmproj_path, profile_gguf
+from .profiles import ModelProfile, mmproj_path, model_paths, profile_gguf
 
 LLAMA_CPP_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
 OLLAMA_ALIASES = {"ollama"}
@@ -231,7 +231,8 @@ class LlamaCppBackend(InferenceBackend):
     ) -> list[str]:
         hardware = detect_hardware()
         inference = self.settings.inference
-        projector = mmproj_path(profile)
+        projector = model_paths().get("mmproj") or mmproj_path(profile)
+        projector = Path(projector)
         threads = inference.threads or hardware.cpu_cores
         ctx = int(context_size or profile.context_size or inference.context_size)
         args = [
@@ -276,8 +277,9 @@ class LlamaCppBackend(InferenceBackend):
         else:
             args.extend(["--n-gpu-layers", "99"])
         # P0.5: do not reserve VRAM for the projector unless vision is requested.
-        if inference.vision and projector.exists():
-            args.extend(["--mmproj", str(projector)])
+        want_vision = bool(vision or inference.vision)
+        if want_vision and projector.exists():
+            args.extend(["--mmproj", str(projector), "--image-min-tokens", "1024"])
         return args
 
     async def start(

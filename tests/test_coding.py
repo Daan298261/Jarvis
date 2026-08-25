@@ -13,7 +13,7 @@ from app.config import AppSettings
 from app.tools.browser import BrowserTool
 from app.tools.docker_tools import DockerTool
 from app.tools.git_tools import GitTool
-from app.tools.office import OfficeTool
+from app.tools.office import OfficeTool, office_library_available
 from app.tools.python_exec import PythonTool
 from app.tools.terminal import default_shell
 from app.tools.web_fetch import WebFetchTool
@@ -191,9 +191,10 @@ async def test_office_info_does_not_dispatch():
     info = await tool.execute(app="word", action="info")
     assert info.success
     assert info.data["windows"] is False
-    create = await tool.execute(app="word", action="create", destination="/tmp/no.docx")
-    assert create.success is False
-    assert "unavailable" in create.error.lower()
+    if not office_library_available("word"):
+        create = await tool.execute(app="word", action="create", destination="/tmp/no.docx")
+        assert create.success is False
+        assert "unavailable" in create.error.lower()
 
 
 def test_python_uses_current_interpreter():

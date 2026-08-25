@@ -2,11 +2,11 @@ from app.tools.capabilities import capability_snapshot, optional_workers
 from app.tools.browser_backends import browser_use_available
 
 
-def test_browser_use_worker_reflects_install_state():
+def test_optional_workers_are_integrated_adapters():
     workers = {item["id"]: item for item in optional_workers()}
     for key in ("ufo", "cua", "open-interpreter"):
-        assert workers[key]["available"] is False
-        assert workers[key]["status"] == "not_integrated"
+        assert workers[key]["available"] is False or workers[key]["status"] == "ready"
+        assert workers[key]["status"] in {"missing", "ready"}
     assert workers["browser-use"]["status"] in {"missing", "ready"}
     assert workers["openhands"]["status"] in {"missing", "ready"}
     if workers["browser-use"]["status"] == "missing":

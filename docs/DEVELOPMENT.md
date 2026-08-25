@@ -59,7 +59,7 @@ backend/app/
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
     profiles.py           fast / balanced / quality (9B) plus expert (27B)
   providers/              OpenAI-compatible chat + tool-call parsing
-  workers/                Optional Open Interpreter adapter
+    workers/                Optional Browser Use, OpenHands, Open Interpreter, UFO, Cua adapters
   tools/                  Native tools + MCP proxy + code_worker
   db/                     SQLAlchemy models, aiosqlite session, light migrations
 frontend/src/
@@ -272,7 +272,7 @@ Context compaction (`agent/compaction.py`) must keep tool results paired with th
 
 MCP tools do not need a Python class: configure servers via the MCP page or `mcp_servers` in settings. They appear as `mcp_*` functions through `MCPProxyTool`.
 
-Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend. Browser Use and OpenHands adapters live in `backend/app/workers/` and register `browser_use` / `code_worker` tools that return "not installed" until the optional packages are present.
+Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend. Adapters live in `backend/app/workers/` and register `browser_use` / `code_worker` / `open_interpreter` / `ufo` / `cua` tools that return "not installed" until the optional packages are present.
 
 ---
 
@@ -391,7 +391,7 @@ From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
 - Parameterized skills execute bound steps after 3 matching successes (`POST /api/memory/skills/{id}/run`)
-- Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
+- Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are integrated and report `missing` until the optional packages are installed
 - Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
 - Live GPU measurement of every harness configuration requires the Windows desktop GGUFs

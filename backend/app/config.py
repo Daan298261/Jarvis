@@ -62,6 +62,9 @@ class InferenceSettings(BaseModel):
     threads: int = 0
     auto_load: bool = True
     vision: bool = False
+    vision_mode: str = "lazy"
+    remote_model: str = ""
+    api_key: str = ""
 
 
 class BrowserSettings(BaseModel):

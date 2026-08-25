@@ -20,7 +20,16 @@ from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
-from .compaction import compact_history, deserialize_messages, serialize_messages
+from .compaction import SUMMARY_MARKER, compact_history, deserialize_messages, estimate_prompt_tokens, serialize_messages
+from .context_policy import initial_context_size, next_context_size, recommend_context_size
+from .coding_workers import (
+    complete_coding_route,
+    format_route_prompt,
+    record_coding_outcome,
+    record_coding_route,
+    route_software_task,
+    should_route,
+)
 from .escalation import (
     EscalationSignals,
     build_expert_brief,
@@ -40,14 +49,16 @@ from .planning import (
     resolve_execution_policy,
     select_best_plan,
 )
-from .escalation import build_escalation_package, persist_escalation_package
+from .model_policy import select_context_size, task_needs_vision
 from .recovery import recovery_hint
 from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
-from .tooling import apply_capability_request, expose_called_tool, schemas_for, should_enable_thinking, tools_for_task
+from .tooling import apply_capability_request, expose_called_tool, should_enable_thinking
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
+from .forensic import professional_prompt_block
 from .policy import policy_guidance
+from ..coding.usage import record_task_usage
 from .prompts import (
     CONTINUE_PROMPT,
     CRITIC_PROMPT,
@@ -91,7 +102,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
         return None
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _exposed_csv(working: WorkingState) -> str:
@@ -340,6 +351,9 @@ class AgentRuntime:
         skill_requires_verify = False
         already_escalated = bool(getattr(working, "escalated", False))
         critic_rejected = False
+        exposed_tools = set(tool_names_for(working.task_class, working.requested_tools))
+        expert_on_request = user_requested_expert(prompt)
+        escalated = already_escalated
 
         if existing and continue_existing:
             messages = existing
@@ -349,17 +363,22 @@ class AgentRuntime:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
             system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(prompt) + _environment_block(settings)
+            forensic = professional_prompt_block(prompt, bool(getattr(settings, "professional_mode", False)))
+            if forensic:
+                system_prompt += "\n\n" + forensic
             matched_skills = await relevant_skills(working.task_class, working.goal)
             skills = skills_prompt_block(matched_skills)
             if skills:
                 system_prompt += "\n\n" + skills
                 await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
-            if is_software_task(prompt, working.task_class):
-                routing = await route_coding_task(prompt, task_class=working.task_class)
-                working.coding_worker = routing.get("execute_worker") or ""
-                working.coding_complexity = int(routing.get("complexity") or 0)
-                system_prompt += "\n\n" + format_routing_block(routing)
-                await BUS.publish(task_id, "progress", "Coding worker selected", format_routing_block(routing)[:1500], stage="understand")
+            if should_route(working.task_class, prompt):
+                decision = route_software_task(prompt, task_class=working.task_class)
+                working.coding_worker = decision.selected_worker
+                working.coding_complexity = int(decision.score or 0)
+                working.coding_tier = decision.tier_name
+                await record_coding_route(task_id, decision)
+                system_prompt += "\n\n" + format_route_prompt(decision)
+                await BUS.publish(task_id, "progress", "Coding worker selected", format_route_prompt(decision)[:1500], stage="understand")
             lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
             if lessons:
                 system_prompt += "\n\n" + lessons
@@ -455,21 +474,6 @@ class AgentRuntime:
             )
             tools_used = True
 
-        pre = should_escalate(prompt=prompt, task_class=working.task_class, already_escalated=already_escalated)
-        if pre.should_escalate and pre.reason.startswith("user requested"):
-            already_escalated = True
-            working.escalated = True
-            await BUS.publish(task_id, "stage", "Escalating to Expert 27B", pre.reason, stage="plan")
-            analysis = await consult_expert(
-                settings,
-                expert_packet(working, pre.reason),
-                profile_name or profile.name,
-                provider=provider,
-            )
-            messages.append(ChatMessage(role="user", content="Expert analysis:\n" + analysis))
-            provider = MANAGER.provider or provider
-            await self._update(task_id, compact_memory=working.dumps(), current_action="Expert consult complete")
-
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel or kill_switch_active():
@@ -483,19 +487,6 @@ class AgentRuntime:
                     )
                     await BUS.publish(task_id, "cancelled", reason)
                     return
-                think = should_think(
-                    profile_thinking=profile.thinking,
-                    execution_mode=execution_mode,
-                    force_final=force_final,
-                    verifying=verifying,
-                    tools_used=tools_used,
-                    consecutive_failures=consecutive_failures,
-                    last_tool=last_tool_name,
-                    last_action=last_tool_action,
-                    awaiting_plan_selection=awaiting_plan_selection,
-                    critic_pending=policy.critic_pass and not critic_done and not verifying and tools_used,
-                    task_class=working.task_class,
-                )
                 await self._update(
                     task_id,
                     stage="verify" if verifying else "act",
@@ -636,6 +627,7 @@ class AgentRuntime:
                         if name == "request_tools":
                             granted = grant_requested_tools(arguments)
                             working.requested_tools = sorted(set(working.requested_tools) | set(granted))
+                            exposed_tools = set(tool_names_for(working.task_class, working.requested_tools))
                             await self._update(task_id, exposed_tools=_exposed_csv(working), compact_memory=working.dumps())
                             await BUS.publish(
                                 task_id,
@@ -670,7 +662,8 @@ class AgentRuntime:
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
                         if name == "request_capability":
-                            exposed_tools, _added, observation = apply_capability_request(exposed_tools, arguments)
+                            exposed_tools, added, observation = apply_capability_request(exposed_tools, arguments)
+                            working.requested_tools = sorted(set(working.requested_tools) | set(added))
                             attach = None
                             failed = False
                         else:
@@ -794,18 +787,28 @@ class AgentRuntime:
                     continue
 
                 if expert_on_request and not escalated:
-                    brief = brief_from_working(working, "user_requested_expert", prompt)
-                    expert = await consult_expert(
-                        brief,
-                        provider=provider,
-                        manager=MANAGER,
-                        settings=settings,
-                        allow_swap=False,
+                    expert = await self._maybe_consult_expert(
+                        task_id,
+                        working,
+                        prompt,
+                        consecutive_failures,
+                        failures_by_tool,
+                        profile_name,
+                        settings,
+                        verifying,
                     )
                     escalated = True
+                    already_escalated = True
+                    working.escalated = True
                     expert_on_request = False
-                    await BUS.publish(task_id, "progress", "Expert consult", (expert.advice or "")[:1500], stage="plan")
-                    messages.append(ChatMessage(role="user", content=format_expert_message(expert)))
+                    if expert:
+                        await BUS.publish(task_id, "progress", "Expert consult", expert[:1500], stage="plan")
+                        messages.append(
+                            ChatMessage(
+                                role="user",
+                                content="Expert 27B analysis (execute this plan with tools; do not wait):\n" + expert,
+                            )
+                        )
 
                 if policy.critic_pass and not critic_done and not verifying:
                     critic_done = True

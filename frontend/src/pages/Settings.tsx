@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 
 export function SettingsPage() {
@@ -9,6 +8,7 @@ export function SettingsPage() {
   const [authStatus, setAuthStatus] = useState<any>(null)
   const [queueStatus, setQueueStatus] = useState<any>(null)
   const [msg, setMsg] = useState("")
+  const [probe, setProbe] = useState<any>(null)
 
   async function loadData() {
     const [s, a, q] = await Promise.all([
@@ -160,6 +160,26 @@ export function SettingsPage() {
             onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, api_key: e.target.value } })}
           />
         </label>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn secondary"
+            type="button"
+            onClick={async () => {
+              try {
+                setProbe(await api("/api/model/probe"))
+              } catch (err: any) {
+                setProbe({ ok: false, error: err?.message || "probe failed" })
+              }
+            }}
+          >
+            Probe endpoint
+          </button>
+          {probe && (
+            <span className="lede">
+              {probe.ok ? "reachable" : "unreachable"} {probe.health_path || probe.error} {(probe.models || []).join(", ")}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>

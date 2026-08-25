@@ -6,7 +6,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..agent.acp import ACP_WORKER, acp_status, handle_blocking_request, list_acp_sessions
+from ..agent.coding_workers import coding_worker_catalog
 from ..agent.escalation import get_escalation_package, list_escalation_packages
+from ..coding.catalog import probe_cursor_models
+from ..coding.routing import recommend_worker, workers_snapshot
 from ..mcp_server import SERVER, jarvis_mcp_manifest
 
 router = APIRouter(prefix="/api/coding", tags=["coding"])
@@ -28,6 +31,41 @@ class AcpAnswerIn(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     isolated: bool = True
     autonomy: str = "autonomous"
+
+
+class RouteIn(BaseModel):
+    prompt: str
+    task_class: str = "software engineering"
+
+
+@router.get("")
+async def coding_overview():
+    probe = probe_cursor_models()
+    return {
+        "workers": workers_snapshot(),
+        "catalog": coding_worker_catalog(),
+        **probe,
+    }
+
+
+@router.get("/models")
+async def coding_models():
+    return probe_cursor_models()
+
+
+@router.post("/route")
+async def coding_route(body: RouteIn):
+    rec = await recommend_worker(body.prompt, body.task_class)
+    return {
+        "worker": rec.worker,
+        "model": rec.model,
+        "tier": rec.tier,
+        "complexity": rec.complexity,
+        "reason": rec.reason,
+        "paid": rec.paid,
+        "fallback": rec.fallback,
+        "historical": rec.historical,
+    }
 
 
 @router.get("/mcp")

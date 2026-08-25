@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Iterable
+from uuid import uuid4
 
+from sqlalchemy import select
+
+from ..db.models import EscalationPackage
+from ..db.session import SessionLocal
 from .planning import WorkingState
 
 LoadFn = Callable[[str], Awaitable[Any]]
@@ -163,3 +168,69 @@ async def consult_expert(
     if not content:
         return ExpertAdvice(False, reason=reason, primary_restored=restored)
     return ExpertAdvice(True, content=content.strip(), reason=reason, primary_restored=restored)
+
+
+async def list_escalation_packages() -> list[dict[str, Any]]:
+    async with SessionLocal() as session:
+        rows = (
+            await session.execute(select(EscalationPackage).order_by(EscalationPackage.created_at.desc()))
+        ).scalars().all()
+    return [
+        {
+            "id": row.id,
+            "task_id": row.task_id,
+            "task_class": row.task_class,
+            "goal": row.goal,
+            "reason": row.reason,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+
+
+async def get_escalation_package(package_id: str) -> dict[str, Any] | None:
+    async with SessionLocal() as session:
+        row = await session.get(EscalationPackage, package_id)
+    if not row:
+        return None
+    import json
+
+    payload = {}
+    try:
+        payload = json.loads(row.payload_json or "{}")
+    except Exception:
+        payload = {}
+    return {
+        "id": row.id,
+        "task_id": row.task_id,
+        "task_class": row.task_class,
+        "goal": row.goal,
+        "reason": row.reason,
+        "payload": payload,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+async def persist_escalation_package(
+    *,
+    task_id: str = "",
+    task_class: str = "",
+    goal: str = "",
+    reason: str = "",
+    payload: dict[str, Any] | None = None,
+) -> EscalationPackage:
+    import json
+
+    row = EscalationPackage(
+        id=str(uuid4()),
+        task_id=task_id,
+        task_class=task_class,
+        goal=goal,
+        reason=reason,
+        payload_json=json.dumps(payload or {}),
+    )
+    async with SessionLocal() as session:
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return row

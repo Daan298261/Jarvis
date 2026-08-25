@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +11,7 @@ import psutil
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, resolve_backend
-from .profiles import ModelProfile, model_paths, resolve_profile, with_context
+from .profiles import ModelProfile, declared_profiles, model_paths, profile_gguf, resolve_profile, with_context
 
 
 @dataclass
@@ -43,6 +43,9 @@ class InferenceState:
     family: str = ""
     alias: str = ""
     thinking_mode: str = ""
+    advertised_models: list[str] = field(default_factory=list)
+    remote_model: str = ""
+    health_path: str = ""
 
 
 class InferenceManager:
@@ -323,6 +326,7 @@ class InferenceManager:
             "quantization": self.state.quant or profile.quant,
             "profile": self.state.profile or profile.name,
             "context_size": self.state.context_size if self.state.loaded else profile.context_size,
+            "context_cap": 32768,
             "inference_backend": self.state.backend,
             "manages_process": self.state.manages_process,
             "gpu_layers": "auto (--fit on)" if settings.inference.fit else "99",
@@ -331,9 +335,24 @@ class InferenceManager:
             "port": settings.inference.port,
             "base_url": self.base_url(settings),
             "advertised_models": self.state.advertised_models or [],
-            "health_path": self.state.health_path,
+            "health_path": self.state.health_path or "",
             "remote_model": self.state.remote_model or settings.inference.remote_model,
             "api_key_configured": bool((settings.inference.api_key or "").strip()),
+            "vision_mode": self.state.vision_mode or settings.inference.vision_mode or "lazy",
+            "profiles": [
+                {
+                    "name": item.name,
+                    "label": item.label,
+                    "quant": item.quant,
+                    "thinking": item.thinking,
+                    "thinking_mode": item.thinking_mode,
+                    "context_size": item.context_size,
+                    "description": item.description,
+                    "escalation_only": item.name == "expert",
+                    "installed": profile_gguf(item).exists(),
+                }
+                for item in declared_profiles()
+            ],
             "vram_used_mib": self.state.vram_used_mib,
             "ram_used_gb": self.state.ram_used_gb,
             "tokens_per_second": self.state.generation_tps,

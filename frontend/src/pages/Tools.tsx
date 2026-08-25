@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react"
 import { api } from "../api"
 
+type WorkerRow = { id: string; name: string; available?: boolean; status: string; detail: string }
+
 type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
-  native: { id: string; name: string; available: boolean; status: string; detail: string }[]
-  optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
+  native: WorkerRow[]
+  optional_workers: WorkerRow[]
+  coding_workers?: WorkerRow[]
   cursor_acp?: { status?: string; detail?: string; command?: string; available?: boolean; session_id?: string }
+}
+
+type CodingOverview = {
+  workers?: WorkerRow[]
+  status?: string
 }
 
 export function ToolsPage() {
@@ -71,11 +79,11 @@ export function ToolsPage() {
           </div>
         ))}
       </div>
-      {!!catalog.coding_workers?.length && (
+      {!!(catalog.coding_workers?.length || coding?.workers?.length) && (
         <div className="card" style={{ marginTop: 16 }}>
           <h2>Software-development workers</h2>
           <p className="lede">Jarvis routes coding work to the cheapest capable worker. Paid Cursor workers stay listed when they are not configured. A worker claiming success is never completion.</p>
-          {catalog.coding_workers.map((worker) => (
+          {(catalog.coding_workers || coding?.workers || []).map((worker) => (
             <div className="toggle" key={worker.id}>
               <div>
                 <strong>{worker.name}</strong>

@@ -57,6 +57,13 @@ def tools_for_task(task_class: str | None) -> set[str]:
 def apply_capability_request(exposed: set[str], arguments: dict[str, Any]) -> tuple[set[str], list[str], str]:
     """Expand the live tool set. Returns (new_set, added, observation)."""
     wanted = arguments.get("capabilities") or arguments.get("tools") or []
+    if arguments.get("name"):
+        if isinstance(wanted, list):
+            wanted = list(wanted) + [arguments.get("name")]
+        elif wanted:
+            wanted = [wanted, arguments.get("name")]
+        else:
+            wanted = [arguments.get("name")]
     if isinstance(wanted, str):
         wanted = [part.strip() for part in wanted.replace(",", " ").split() if part.strip()]
     if not isinstance(wanted, list):

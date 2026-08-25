@@ -13,7 +13,6 @@ from ..agent.self_dev import KillSwitchActive
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
-from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -36,12 +35,14 @@ def _task_dict(task: Task) -> dict[str, Any]:
     if raw:
         try:
             parsed = json.loads(raw)
-            if isinstance(parsed, dict) and isinstance(parsed.get("extra_tools"), list):
-                extra = [str(item) for item in parsed["extra_tools"]]
+            if isinstance(parsed, dict):
+                extra_raw = parsed.get("requested_tools") or parsed.get("extra_tools") or []
+                if isinstance(extra_raw, list):
+                    extra = [str(item) for item in extra_raw]
         except (TypeError, json.JSONDecodeError):
             extra = []
-    allowed = allowed_tool_names(getattr(task, "task_class", None) or "", extra)
-    exposed = sorted(allowed) if allowed is not None else schema_names(REGISTRY.openai_tools())
+    stored = [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item]
+    exposed = stored or extra
     return {
         "id": task.id,
         "title": task.title,
@@ -56,7 +57,6 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "acceptance_criteria": task.acceptance_criteria,
         "current_action": task.current_action,
         "current_tool": task.current_tool,
-        "exposed_tools": [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item],
         "result": task.result,
         "error": task.error,
         "retries": task.retries,

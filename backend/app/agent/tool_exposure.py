@@ -43,6 +43,10 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "coding": "python",
     "repo": "git",
     "source": "git",
+    "openhands": "code_worker",
+    "interpreter": "open_interpreter",
+    "open-interpreter": "open_interpreter",
+    "ufo2": "ufo",
 }
 
 ESCAPE_TOOL = "request_tools"
@@ -104,6 +108,9 @@ def schemas_for(task_class: str, extra: Iterable[str] | None = None) -> list[dic
     full = is_full_exposure(task_class, extras)
     if not full and ESCAPE_TOOL in REGISTRY.tools and REGISTRY.tools[ESCAPE_TOOL].enabled:
         schemas.append(REGISTRY.tools[ESCAPE_TOOL].schema())
+    if not full and "request_capability" in REGISTRY.tools and REGISTRY.tools["request_capability"].enabled:
+        if all(item.get("function", {}).get("name") != "request_capability" for item in schemas):
+            schemas.append(REGISTRY.tools["request_capability"].schema())
     if full or MCP_CAPABILITY in extras:
         schemas.extend(MCP.openai_tools())
     return schemas

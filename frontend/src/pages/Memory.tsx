@@ -99,7 +99,7 @@ export function MemoryPage() {
               <strong>{skill.name}</strong>
               <div className="lede" style={{ margin: "4px 0 0" }}>{skill.description}</div>
               <div className="lede" style={{ margin: "4px 0 0" }}>
-                {skill.tools.join(" → ") || "no tools"} · used {skill.times_used}× · {skill.origin}
+                {skill.tools.join(" → ") || "no tools"} · used {skill.times_used}× · {skill.origin === "browser_promoted" ? "BrowserCode-style" : skill.origin}
                 {skill.executable ? " · executable" : " · guide only"}
               </div>
               <div className="lede" style={{ margin: "4px 0 0" }}>Steps: {skill.steps.map(stepLabel).join(" → ") || "—"}</div>
@@ -107,11 +107,12 @@ export function MemoryPage() {
                 <div style={{ marginTop: 8 }}>
                   {skill.parameters.map((param) => (
                     <label key={param.name} className="lede" style={{ display: "block", marginBottom: 6 }}>
-                      {param.name}
+                      {param.name}{param.kind === "secret" ? " (not stored)" : ""}
                       <input
-                        type="text"
+                        type={param.kind === "secret" ? "password" : "text"}
                         value={paramValues[skill.id]?.[param.name] || ""}
-                        placeholder={param.examples?.[0] || param.kind || param.name}
+                        placeholder={param.kind === "secret" ? "enter at run time" : (param.examples?.[0] || param.kind || param.name)}
+                        autoComplete={param.kind === "secret" ? "off" : undefined}
                         onChange={(event) =>
                           setParamValues((current) => ({
                             ...current,

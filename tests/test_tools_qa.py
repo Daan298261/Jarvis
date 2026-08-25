@@ -6,7 +6,7 @@ from pathlib import Path
 from app.tools.browser import BrowserTool
 from app.tools.docker_tools import DockerTool
 from app.tools.git_tools import GitTool
-from app.tools.office import OfficeTool
+from app.tools.office import OfficeTool, office_library_available
 from app.tools.python_exec import PythonTool
 from app.tools.terminal import TerminalTool, default_shell
 from app.tools.web_fetch import WebFetchTool
@@ -26,9 +26,9 @@ async def test_docker_requires_targets_before_invoking_cli():
 async def test_office_info_does_not_require_com():
     tool = OfficeTool()
     result = await tool.execute(app="word", action="info")
+    assert result.success
     assert "Office" in (result.output or result.error)
-    if platform.system() != "Windows":
-        assert result.success is False
+    if platform.system() != "Windows" and not office_library_available("word"):
         create = await tool.execute(app="word", action="create", destination="/tmp/no.docx")
         assert create.success is False
         assert "unavailable" in create.error.lower()

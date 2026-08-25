@@ -6,19 +6,20 @@ from pydantic import BaseModel
 from ..agent.agent_benchmark import (
     apply_expected_solution,
     check_case,
+    empty_metrics,
     format_prompt,
     get_case,
-    list_results as list_agent_results,
     list_suite,
     prepare_case,
     record_case_result,
-    empty_metrics,
 )
 from ..config import data_dir, load_settings, save_settings
+from ..inference.backends import probe_remote_server
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
+from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
-from ..inference.profiles import declared_profiles, profile_as_dict
+from ..inference.profiles import declared_profiles, profile_gguf
 
 router = APIRouter(prefix="/api/model", tags=["model"])
 
@@ -42,11 +43,13 @@ async def model_status():
             "label": p.label,
             "quant": p.quant,
             "thinking": p.thinking,
+            "thinking_mode": p.thinking_mode,
             "context_size": p.context_size,
             "description": p.description,
             "escalation_only": p.name == "expert",
+            "installed": profile_gguf(p).exists(),
         }
-        for p in available_profiles()
+        for p in declared_profiles()
     ]
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
@@ -106,7 +109,12 @@ async def capture_benchmark():
 
 @router.get("/harness")
 async def model_harness():
-    return load_last_report() or {"ran_at": None, "model_available": False, "blocked_reason": "not run yet"}
+    report = load_last_report()
+    payload = report.as_dict() if hasattr(report, "as_dict") else (report or {})
+    if not payload:
+        payload = {"ran_at": None, "model_available": False, "blocked_reason": "not run yet"}
+    payload.setdefault("running", False)
+    return payload
 
 
 @router.post("/harness/run")
@@ -142,22 +150,54 @@ async def unload_model():
     return await MANAGER.snapshot(settings)
 
 
-@router.get("/harness")
-async def get_harness():
-    return harness_status()
+@router.get("/hardware-gate")
+async def model_hardware_gate():
+    report = await hardware_purchase_gate()
+    report["purchase_allowed"] = bool(report.get("purchase_recommended"))
+    report["recommendation"] = report.get("reason") or report.get("hardware_recommendation") or ""
+    report["inference_samples"] = report.get("sample_count") or 0
+    report["agent_results"] = report.get("agent_suite_successes") or 0
+    report["deferred_until_measured"] = report.get("deferred_purchases") or []
+    report["bottlenecks"] = [report["bottleneck"]] if report.get("bottleneck") else []
+    return report
 
 
-@router.post("/harness")
-async def start_harness(body: HarnessBody | None = None):
-    live = bool(body.live) if body else False
-    background = bool(body.background) if body else False
-    status = harness_status()
-    if status["running"]:
-        return {"ok": True, "running": True, "report": status.get("report")}
-    if background:
-        import asyncio
+@router.get("/agent-benchmarks")
+async def model_agent_benchmarks():
+    suite = list_suite()
+    return {
+        "suite": suite.get("cases") or [],
+        "coverage": {"task_count": suite.get("count") or 0},
+        "live_status": suite.get("live_comparison_reason"),
+        "primary_metric": suite.get("primary_metric"),
+        "comparison": None,
+    }
 
-        asyncio.create_task(run_harness_background(live=live))
-        return {"ok": True, "running": True}
-    report = run_harness(live=live)
-    return {"ok": True, "running": False, "report": report}
+
+@router.get("/agent-suite")
+async def agent_suite():
+    return list_suite()
+
+
+class AgentSuiteRun(BaseModel):
+    case_id: str
+    simulate_success: bool = False
+
+
+@router.post("/agent-suite/run")
+async def run_agent_suite(body: AgentSuiteRun):
+    try:
+        case = get_case(body.case_id)
+    except KeyError as exc:
+        raise HTTPException(404, f"Unknown case {exc}") from exc
+    workspace = data_dir() / "agent-suite" / body.case_id
+    ctx = prepare_case(case, workspace)
+    prompt = format_prompt(case, ctx)
+    if body.simulate_success:
+        apply_expected_solution(case, ctx)
+    ok, note = check_case(case, workspace, ctx)
+    metrics = empty_metrics()
+    metrics["success"] = ok
+    metrics["verification_result"] = note
+    await record_case_result(case=case, metrics=metrics, source="simulate" if body.simulate_success else "run", workspace=str(workspace), notes=note)
+    return {"success": ok, "prompt": prompt, "note": note, "case_id": case.id}

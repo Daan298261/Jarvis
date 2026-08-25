@@ -67,3 +67,9 @@ def next_context_size(
     if current < CONTEXT_LONG:
         return min(CONTEXT_LONG, cap)
     return None
+
+
+def recommend_context_size(task_class: str | None, execution_mode: str | None, profile_cap: int) -> int:
+    """Starting window from the task class, never above the profile cap."""
+    dummy = type("Profile", (), {"context_size": int(profile_cap or CONTEXT_LONG)})()
+    return initial_context_size(task_class, dummy)

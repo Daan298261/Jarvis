@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import csv
+import io
+import json
+import os
 import platform
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -163,8 +168,32 @@ class OfficeTool(Tool):
         "required": ["app", "action"],
     }
 
+    def __init__(self, context_getter=None) -> None:
+        self.context_getter = context_getter or (lambda: {})
+
+    def _resolve(self, path: str | None) -> Path:
+        if not path:
+            raise ValueError("path is required")
+        allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
+        return resolve_allowed_path(path, allowed)
+
     def _info(self, app: str, path: str | None) -> ToolResult:
-        bits = [f"app={app or 'unspecified'}", f"os={platform.system()}"]
+        progid = _PROGID.get(app, "Word.Application")
+        lib_ok = office_library_available(app) if app else office_library_available()
+        bits = [
+            f"app={app or 'unspecified'}",
+            f"os={platform.system()}",
+            f"available={lib_ok or office_com_available()}",
+            f"library_available={lib_ok}",
+            f"com_available={office_com_available()}",
+            f"progid={progid}",
+            f"{progid}",
+        ]
+        data: dict[str, Any] = {
+            "windows": platform.system() == "Windows",
+            "available": lib_ok or office_com_available(),
+            "backend": "none",
+        }
         if path:
             target = Path(path)
             if not target.exists():
@@ -177,19 +206,12 @@ class OfficeTool(Tool):
                     f"suffix={target.suffix}",
                 ]
             )
-            return ToolResult(True, "\n".join(bits) + "\nCOM was not launched.")
-        if platform.system() != "Windows":
-            return ToolResult(True, "\n".join(bits) + "\nOffice COM is only available on Windows. COM was not launched.")
-        from ..hardware import detect_hardware
-
-        installed = detect_hardware().office_installed
-        bits.append(f"office_installed={installed}")
         bits.append("COM was not launched.")
-        return ToolResult(True, "\n".join(bits))
+        if platform.system() != "Windows":
+            bits.append("Office COM is only available on Windows. COM was not launched.")
+        return ToolResult(True, "\n".join(bits), data=data)
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        if platform.system() != "Windows":
-            return ToolResult(False, "", error="Office COM is unavailable on this operating system")
         app = (kwargs.get("app") or "").lower()
         action = (kwargs.get("action") or "").lower()
         backend = (kwargs.get("backend") or "auto").lower()
@@ -198,79 +220,30 @@ class OfficeTool(Tool):
         if action not in {"create", "read", "write", "save_as", "append", "info"}:
             return ToolResult(False, "", error=f"Unknown action {action}")
         try:
+            if action == "info" and backend != "com":
+                if kwargs.get("path") and office_library_available(app):
+                    try:
+                        return self._run_library(app, "info", kwargs)
+                    except (PermissionError, FileNotFoundError, ValueError):
+                        raise
+                    except Exception:
+                        pass
+                return self._info(app, kwargs.get("path"))
+            chosen = self._choose_backend(app, backend)
+            if chosen == "library":
+                return self._run_library(app, action, kwargs)
             if action == "info":
                 return self._info(app, kwargs.get("path"))
-            if app == "word":
-                word = _dispatch("Word.Application")
-                word.Visible = False
-                if action == "create":
-                    doc = word.Documents.Add()
-                    if kwargs.get("content"):
-                        doc.Range().Text = kwargs["content"]
-                    dest = kwargs.get("destination") or kwargs.get("path")
-                    if not dest:
-                        word.Quit()
-                        return ToolResult(False, "", error="destination required")
-                    Path(dest).parent.mkdir(parents=True, exist_ok=True)
-                    doc.SaveAs(str(Path(dest).resolve()))
-                    doc.Close()
-                    word.Quit()
-                    return ToolResult(True, f"Created Word document {dest}")
-                if action == "read":
-                    doc = word.Documents.Open(str(Path(kwargs["path"]).resolve()))
-                    text = doc.Range().Text
-                    doc.Close(False)
-                    word.Quit()
-                    return ToolResult(True, text)
-                if action in {"write", "save_as"}:
-                    src = Path(kwargs["path"]).resolve()
-                    dest = Path(kwargs.get("destination") or kwargs["path"]).resolve()
-                    if action != "write" or dest != src:
-                        pass
-                    doc = word.Documents.Open(str(src))
-                    if kwargs.get("content"):
-                        doc.Range().Text = kwargs["content"]
-                    doc.SaveAs(str(dest))
-                    doc.Close()
-                    word.Quit()
-                    return ToolResult(True, f"Saved {dest}")
-                word.Quit()
-            if app == "excel":
-                excel = _dispatch("Excel.Application")
-                excel.Visible = False
-                excel.DisplayAlerts = False
-                if action == "create":
-                    wb = excel.Workbooks.Add()
-                    dest = kwargs.get("destination") or kwargs.get("path")
-                    Path(dest).parent.mkdir(parents=True, exist_ok=True)
-                    wb.SaveAs(str(Path(dest).resolve()))
-                    wb.Close()
-                    excel.Quit()
-                    return ToolResult(True, f"Created workbook {dest}")
-                if action == "read":
-                    wb = excel.Workbooks.Open(str(Path(kwargs["path"]).resolve()))
-                    sheet = wb.Worksheets(1)
-                    used = sheet.UsedRange
-                    rows = []
-                    for row in used.Value or []:
-                        rows.append("\t".join("" if c is None else str(c) for c in (row if isinstance(row, tuple) else (row,))))
-                    wb.Close(False)
-                    excel.Quit()
-                    return ToolResult(True, "\n".join(rows))
-                excel.Quit()
-            if app == "powerpoint":
-                ppt = _dispatch("PowerPoint.Application")
-                if action == "create":
-                    pres = ppt.Presentations.Add()
-                    dest = kwargs.get("destination") or kwargs.get("path")
-                    Path(dest).parent.mkdir(parents=True, exist_ok=True)
-                    pres.SaveAs(str(Path(dest).resolve()))
-                    pres.Close()
-                    ppt.Quit()
-                    return ToolResult(True, f"Created presentation {dest}")
-                ppt.Quit()
-            return ToolResult(False, "", error="Office action not supported or Office is not installed")
+            return self._run_com(app, action, kwargs)
+        except PermissionError as exc:
+            return ToolResult(False, "", error=str(exc))
         except Exception as exc:
+            message = str(exc)
+            lowered = message.lower()
+            if "com is not available" in lowered or "only available on windows" in lowered:
+                return ToolResult(False, "", error=message if "COM is not available" in message else f"Office COM is not available: {message}")
+            if "unavailable" in lowered:
+                return ToolResult(False, "", error=message)
             return ToolResult(False, "", error=f"Office automation unavailable: {exc}")
 
     def _choose_backend(self, app: str, backend: str) -> str:

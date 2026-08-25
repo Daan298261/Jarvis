@@ -18,13 +18,40 @@ type Benchmark = {
   created_at: string | null
 }
 
+type HarnessCase = {
+  profile: string
+  context_size: number
+  vision: boolean
+  thinking: string
+  status?: string
+  skip_reason?: string
+  id?: string
+}
+
+type HarnessStatus = {
+  running?: boolean
+  report?: HarnessReport | null
+  matrix_size?: number
+  measured_cases?: number
+  skipped_cases?: number
+  warning?: string
+  cases?: HarnessCase[]
+}
+
 type HarnessReport = {
   ran_at?: string | null
+  created_at?: string | null
   model_available?: boolean
   blocked_reason?: string
   bottleneck?: string
   buy_hardware?: boolean
   hardware_recommendation?: string
+  measured?: number
+  skipped?: number
+  primary_metric?: string
+  agent_catalog_size?: number
+  configurations?: Array<{ id: string; status?: string; skip_reason?: string }>
+  agent_tasks?: Array<{ id: string }>
   metrics?: {
     ttft_ms?: number | null
     tool_call_latency_ms?: number | null
@@ -49,6 +76,15 @@ type ModelStatus = {
   context_size?: number
   context_cap?: number
   inference_backend?: string
+  host?: string
+  port?: number
+  remote_model?: string
+  advertised_models?: string[]
+  health_path?: string
+  last_error?: string
+  vision_loaded?: boolean
+  thinking?: boolean
+  profile?: string
   gpu_layers?: string
   vram_used_mib?: number
   ram_used_gb?: number
@@ -61,6 +97,8 @@ type ModelStatus = {
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
   harness?: HarnessReport | null
+  harness_cases?: Array<{ profile: string; context_size: number; vision: boolean; thinking: string }>
+  profiles?: Array<{ name: string; label: string; installed?: boolean; quant?: string; thinking_mode?: string }>
 }
 
 function pct(value: number | null | undefined) {
@@ -70,14 +108,14 @@ function pct(value: number | null | undefined) {
 
 export function ModelPage() {
   const [model, setModel] = useState<ModelStatus | null>(null)
-  const [harness, setHarness] = useState<{ running?: boolean; report?: HarnessReport | null; matrix_size?: number } | null>(null)
+  const [harness, setHarness] = useState<HarnessStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [probe, setProbe] = useState<any>(null)
 
   async function refresh() {
     const [status, harnessStatus] = await Promise.all([
       api<ModelStatus>("/api/model"),
-      api<{ running?: boolean; report?: HarnessReport | null; matrix_size?: number }>("/api/model/harness"),
+      api<HarnessStatus>("/api/model/harness"),
     ])
     setModel(status)
     setHarness(harnessStatus)
@@ -104,7 +142,7 @@ export function ModelPage() {
     }
   }
 
-  async function runHarness() {
+  async function runHarness(_live?: boolean) {
     setBusy(true)
     try {
       await api("/api/model/harness/run", { method: "POST" })
@@ -114,9 +152,21 @@ export function ModelPage() {
     }
   }
 
+  async function probeServer() {
+    setBusy(true)
+    try {
+      setProbe(await api("/api/model/probe"))
+    } catch (err: any) {
+      setProbe({ ok: false, error: err?.message || "probe failed" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const outcomes = model?.outcomes
   const samples = model?.benchmarks || []
-  const report = harness?.report
+  const profiles = model?.profiles || []
+  const report = (harness?.report || model?.harness) as HarnessReport | null | undefined
   const configPreview = (report?.configurations || []).slice(0, 8)
   const catalogPreview = (report?.agent_tasks || []).slice(0, 8)
 
@@ -159,7 +209,8 @@ export function ModelPage() {
             <button className="btn secondary" disabled={busy} onClick={() => load("expert")}>Expert 27B</button>
             <button className="btn secondary" disabled={busy} onClick={() => api("/api/model/unload", { method: "POST" }).then(refresh)}>Unload</button>
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
-            <button className="btn secondary" disabled={busy} onClick={runHarness}>Run harness</button>
+            <button className="btn secondary" disabled={busy} onClick={() => runHarness()}>Run harness</button>
+            <button className="btn secondary" disabled={busy} onClick={probeServer}>Probe endpoint</button>
           </div>
           {probe && (
             <p className="lede" style={{ marginTop: 12 }}>
@@ -317,57 +368,6 @@ export function ModelPage() {
           </table>
         )}
       </div>
-      {gate && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <h2>Hardware purchasing gate</h2>
-          <p className="lede">{gate.reason}</p>
-          <div className="kv" style={{ marginTop: 12 }}>
-            <b>Decision</b><span>{gate.purchase_recommended ? "purchase may be justified" : "defer purchase"}</span>
-            <b>Bottleneck</b><span>{gate.bottleneck}</span>
-            <b>GPU</b><span>{gate.gpu_name || "not detected"}</span>
-            <b>VRAM saturated</b><span>{gate.gpu_vram_saturated ? "yes" : "no"}</span>
-            <b>CPU offload</b><span>{gate.cpu_offload_likely ? "likely" : "no"}</span>
-            <b>RAM constrained</b><span>{gate.system_ram_constrained ? "yes" : "no"}</span>
-            <b>CPU inference</b><span>{gate.cpu_inference_limiting == null ? "unmeasured" : gate.cpu_inference_limiting ? "limiting" : "not limiting"}</span>
-            <b>Model switching</b><span>{gate.model_switching_costly == null ? "unmeasured" : gate.model_switching_costly ? "costly" : "cheap"}</span>
-            <b>More VRAM</b><span>{gate.estimated_benefit_more_vram || "not estimated until desktop benchmarks exist"}</span>
-            <b>More RAM</b><span>{gate.estimated_benefit_more_ram || "not estimated until desktop benchmarks exist"}</span>
-            <b>Agent suite</b><span>{gate.agent_suite_complete ? "complete" : `${gate.agent_suite_successes || 0}/20 desktop successes`}</span>
-          </div>
-          <p className="lede" style={{ marginTop: 12 }}>Deferred until then: {(gate.deferred_purchases || []).join(", ")}.</p>
-          {!!gate.missing_evidence?.length && (
-            <p className="lede">Missing evidence: {gate.missing_evidence.join("; ")}.</p>
-          )}
-        </div>
-      )}
-      {suite && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <h2>20-task agent suite</h2>
-          <p className="lede">
-            Primary metric: {suite.primary_metric}. {suite.live_comparison_reason}
-          </p>
-          <table>
-            <thead>
-              <tr>
-                <th>Case</th>
-                <th>Category</th>
-                <th>Tools</th>
-                <th>Live needs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(suite.cases || []).map((row) => (
-                <tr key={row.id}>
-                  <td>{row.title}</td>
-                  <td>{row.category}</td>
-                  <td>{(row.expected_tools || []).join(", ")}</td>
-                  <td>{(row.live_requires || []).join(", ") || "none"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   )
 }

@@ -280,6 +280,11 @@ class WorkingState:
     verified: bool = False
     requested_tools: list[str] = field(default_factory=list)
     expert_consults: int = 0
+    coding_worker: str = ""
+    coding_complexity: int = 0
+    coding_tier: str = ""
+    recommended_context: int = 0
+    vision_requested: bool = False
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"
@@ -315,7 +320,7 @@ class WorkingState:
             f"Known failures:\n{failures}\n"
             f"Next action: {self.next_action or 'continue'}\n"
             f"Verified: {self.verified}\n"
-            f"Requested extra tools: {', '.join(self.extra_tools) or 'none'}"
+            f"Requested extra tools: {', '.join(self.requested_tools) or 'none'}"
         )
 
     def dumps(self) -> str:
@@ -332,6 +337,8 @@ class WorkingState:
         if not isinstance(data, dict):
             return cls()
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        if isinstance(data.get("extra_tools"), list) and not known.get("requested_tools"):
+            known["requested_tools"] = [str(item) for item in data["extra_tools"]]
         if not isinstance(known.get("requested_tools"), list):
             known["requested_tools"] = []
         if not isinstance(known.get("expert_consults"), int):
@@ -339,4 +346,9 @@ class WorkingState:
                 known["expert_consults"] = int(known.get("expert_consults") or 0)
             except (TypeError, ValueError):
                 known["expert_consults"] = 0
+        if not isinstance(known.get("coding_complexity"), int):
+            try:
+                known["coding_complexity"] = int(known.get("coding_complexity") or 0)
+            except (TypeError, ValueError):
+                known["coding_complexity"] = 0
         return cls(**known)

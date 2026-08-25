@@ -56,6 +56,14 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("filesystem", "inspect and edit the files directly"),
         Alternative("git", "inspect the working tree, then apply a smaller native change"),
         Alternative("terminal", "run tests or the project CLI yourself"),
+        Alternative("open_interpreter", "delegate a larger coding job to Open Interpreter when it is installed"),
+    ),
+    "open_interpreter": (
+        Alternative("python", "write and run the script with the native python tool"),
+        Alternative("filesystem", "inspect or edit the files yourself"),
+        Alternative("git", "inspect the working tree, then apply a smaller native change"),
+        Alternative("terminal", "run tests or the project CLI yourself"),
+        Alternative("code_worker", "delegate a larger repository job to OpenHands when it is installed"),
     ),
     "web_fetch": (
         Alternative("browser", "the endpoint needs a real session, cookies, or JavaScript"),
@@ -88,12 +96,8 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
     "python": (
         Alternative("terminal", "run the interpreter or tool directly and read stderr"),
         Alternative("filesystem", "inspect the inputs before running code again"),
-        Alternative("code_worker", "delegate a larger coding job to Open Interpreter when it is installed"),
-    ),
-    "code_worker": (
-        Alternative("python", "write and run the script with the native python tool"),
-        Alternative("terminal", "run the commands directly"),
-        Alternative("filesystem", "inspect or edit the files yourself"),
+        Alternative("code_worker", "delegate a larger coding job to OpenHands when it is installed"),
+        Alternative("open_interpreter", "delegate a larger coding job to Open Interpreter when it is installed"),
     ),
     "docker": (
         Alternative("terminal", "run the process locally; Docker may not be installed"),
