@@ -1,8 +1,8 @@
 # Install Jarvis
 
-Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal. Inference is **Qwen3.5-27B** through llama.cpp on this machine, or any OpenAI-compatible server you point at.
+Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal. Inference defaults to **Qwen3.5-9B Abliterated** through llama.cpp on this machine. **Qwen3.5-27B** remains an optional Expert/escalation model. You can also point Jarvis at any OpenAI-compatible server.
 
-The portal is [http://127.0.0.1:4780](http://127.0.0.1:4780). The same REST API can later drive voice, Android, or automations.
+The portal is [http://127.0.0.1:4780](http://127.0.0.1:4780). The same REST API drives the installable phone PWA at `/phone`, plus later voice or automations.
 
 This is a **Windows** product. Startup scripts, Office COM, and desktop UI automation assume Windows. Linux is only useful for unit tests; see [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -16,9 +16,7 @@ This is a **Windows** product. Startup scripts, Office COM, and desktop UI autom
 - NVIDIA GeForce RTX 5070 Ti (16 GB VRAM, CUDA 13.0)
 - llama.cpp **b10516**, Windows **CUDA 13.3** build
 
-Q4_K_M (~16.7 GB) does not fully fit in 16 GB VRAM together with the vision projector and KV cache. Jarvis starts llama.cpp with `--fit on` so as many layers as possible go to the GPU and the rest stay in system RAM.
-
-Smaller GPUs can still run the Fast profile (16K context) or a remote OpenAI-compatible backend. Do not substitute a tiny model just because it is easier to download.
+Qwen3.5-27B Q4_K_M (~16.7 GB) does not fully fit in 16 GB VRAM together with the vision projector and KV cache. The default 9B Q8_0 profile is intended to stay GPU-resident. Expert 27B still starts llama.cpp with `--fit on`. The vision projector is **not** loaded unless you enable vision in Settings.
 
 ---
 
@@ -38,9 +36,12 @@ Install these before cloning, or confirm they are already on `PATH`:
 Optional, depending on which tools you want the agent to use:
 
 - **Playwright Chromium** — installed in the next section; required for the browser tool
-- **Microsoft Office** — Word/Excel/PowerPoint COM (`office` tool). Without it, `.docx` can still be written as files
+- **Microsoft Office** — Word/Excel/PowerPoint COM (`office` tool). Without Office, the same tool uses python-docx / openpyxl / python-pptx
 - **Docker Desktop** — `docker` tool
 - **WSL** — extra `bash` shell; PowerShell is the default
+- **Browser Use** (`pip install browser-use`) — optional intelligent browser worker; Playwright remains the default
+- **OpenHands** — optional software-engineering worker (`code_worker`). Jarvis still verifies
+- **faster-whisper** plus a model in `models/whisper/` (or `JARVIS_WHISPER_MODEL`) — local voice input on Command. Windows SAPI speaks results without extra packages
 
 Confirm:
 
@@ -134,36 +135,43 @@ Skip this section only if you will use a **remote** OpenAI-compatible server and
 
 ## 7. Model weights (GGUF)
 
-Jarvis loads Unsloth quantizations of official `Qwen/Qwen3.5-27B`, plus the multimodal projector.
+The default primary model is **Qwen3.5-9B Abliterated** (source `wangzhang/Qwen3.5-9B-abliterated`, GGUF `Abiray/Qwen3.5-9B-abliterated-GGUF`). Qwen3.5-27B stays available as the Expert profile.
 
-Required files under `models/Qwen3.5-27B-GGUF/`:
+Preferred files under `models/Qwen3.5-9B-abliterated-GGUF/`:
 
 | File | Used by |
 | --- | --- |
-| `Qwen3.5-27B-Q4_K_M.gguf` | Fast and Balanced profiles (required to start) |
-| `mmproj-F16.gguf` | Vision / screenshots (required to start) |
-| `Qwen3.5-27B-Q5_K_M.gguf` | Quality profile (optional; falls back to Balanced if missing) |
+| `Qwen3.5-9B-abliterated-Q8_0.gguf` | Balanced (default) and Quality |
+| `Qwen3.5-9B-abliterated-Q6_K.gguf` | Fast |
+| `mmproj-f16.gguf` | Optional. Loaded only when Settings → vision is on |
 
-Download (Hugging Face Hub is already in `backend/requirements.txt`):
+Download:
 
 ```powershell
 $env:HF_XET_HIGH_PERFORMANCE = "1"
-python -m huggingface_hub.cli.hf download unsloth/Qwen3.5-27B-GGUF `
-  --include "Qwen3.5-27B-Q4_K_M.gguf" `
-  --include "Qwen3.5-27B-Q5_K_M.gguf" `
-  --include "mmproj-F16.gguf" `
-  --local-dir models\Qwen3.5-27B-GGUF
+python -m huggingface_hub.cli.hf download Abiray/Qwen3.5-9B-abliterated-GGUF `
+  --include "Qwen3.5-9B-abliterated-Q8_0.gguf" `
+  --include "Qwen3.5-9B-abliterated-Q6_K.gguf" `
+  --include "mmproj-f16.gguf" `
+  --local-dir models\Qwen3.5-9B-abliterated-GGUF
 ```
 
-Equivalent with the `hf` CLI, if installed:
+Optional Expert 27B (keep the existing tree if you already downloaded it) under `models/Qwen3.5-27B-GGUF/`:
+
+| File | Used by |
+| --- | --- |
+| `Qwen3.5-27B-Q4_K_M.gguf` | Expert escalation |
+| `mmproj-F16.gguf` | Vision when Expert is loaded with vision enabled |
+| `Qwen3.5-27B-Q5_K_M.gguf` | Unused by current profiles; safe to keep |
 
 ```powershell
-hf download unsloth/Qwen3.5-27B-GGUF `
+python -m huggingface_hub.cli.hf download unsloth/Qwen3.5-27B-GGUF `
   --include "Qwen3.5-27B-Q4_K_M.gguf" `
-  --include "Qwen3.5-27B-Q5_K_M.gguf" `
   --include "mmproj-F16.gguf" `
   --local-dir models\Qwen3.5-27B-GGUF
 ```
+
+If the 9B GGUFs are missing, Fast/Balanced/Quality automatically fall back to Expert 27B Q4_K_M when that file is present. `start-jarvis.ps1` accepts either family. The vision projector is no longer required to start.
 
 Weights stay on this computer. Do not commit them.
 
@@ -240,8 +248,10 @@ On first boot Jarvis copies defaults from `config/default.json` into `data/setti
 | --- | --- | --- |
 | `bind_host` / `bind_port` | `127.0.0.1` / `4780` | Portal + API |
 | `lan_access` / `auth_required` | `false` | LAN bind and private-key gate |
-| `inference.backend` | `llama.cpp` | `llama.cpp` (Jarvis starts the process) or `remote` |
+| `inference.backend` | `llama.cpp` | `llama.cpp` (Jarvis starts the process), `remote`, `ollama`, `lmstudio`, `vllm`, `sglang` |
 | `inference.host` / `port` | `127.0.0.1` / `8088` | OpenAI-compatible `/v1` endpoint |
+| `inference.api_key` | empty | Optional bearer token for the inference server |
+| `inference.remote_model` | empty | Model id to send in `/v1/chat/completions`; blank uses the first advertised model |
 | `inference.profile` | `balanced` | Model Fast / Balanced / Quality |
 | `inference.auto_load` | `true` | Load GGUF on API startup |
 | `autonomy` | `trusted` | Confirmation policy |
@@ -255,6 +265,7 @@ Environment variables (copy `.env.example` to `.env`; never commit secrets):
 | `JARVIS_PRIVATE_KEY` | Private key (also `JARVIS_API_KEY` or `JARVIS_AUTH_TOKEN`) |
 | `JARVIS_BIND_HOST` / `JARVIS_BIND_PORT` | Override bind address |
 | `JARVIS_SKIP_MODEL` | Skip auto-load (`1`) |
+| `JARVIS_INFERENCE_API_KEY` | Optional bearer token for a remote inference server |
 | `JARVIS_LAUNCH_PROMPT` | Enqueue this prompt at startup |
 | `JARVIS_LAUNCH_PROMPT_FILE` | Enqueue the contents of this file at startup |
 
@@ -277,17 +288,33 @@ If the first load OOMs, Jarvis retries at 16K context. You can also set `"contex
 
 ---
 
-## 10. Remote inference (optional)
+## 10. Remote / dedicated LAN inference (optional)
 
-Jarvis always chats through an OpenAI-compatible `/v1` client. `llama.cpp` is the local backend Jarvis starts and supervises. Anything else (LAN GPU box, LM Studio, Ollama, vLLM, SGLang) is a `remote` backend that is only health-checked.
+Jarvis always chats through an OpenAI-compatible `/v1` client. `llama.cpp` is the local backend Jarvis starts and supervises. A dedicated GPU box, LM Studio, Ollama, vLLM, or SGLang is only probed (`/health`, `/v1/models`, Ollama `/api/tags`) and never spawned by Jarvis.
+
+On **Settings → Inference server**, pick the backend, host, port, optional remote model name, and optional API key. Switching to Ollama/LM Studio/vLLM/SGLang from a stock port (8088, 11434, 1234, 8000, 30000) also sets that family's default port.
 
 ```powershell
 Invoke-RestMethod -Method PUT http://127.0.0.1:4780/api/settings `
   -ContentType application/json `
-  -Body '{"inference_backend":"remote","inference_host":"192.168.1.50","inference_port":8088}'
+  -Body '{"inference_backend":"ollama","inference_host":"192.168.1.50","inference_port":11434,"inference_remote_model":"qwen3.5:9b"}'
+```
+
+Probe without loading a GGUF:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:4780/api/model/probe
 ```
 
 Set `inference_backend` back to `llama.cpp` to run locally again. No agent, tool, or portal code changes.
+
+On the GPU box itself, bind llama.cpp to the LAN:
+
+```powershell
+.\llama-server.exe --host 0.0.0.0 --port 8088 --model <gguf> --jinja --alias Qwen3.5-27B
+```
+
+Then point this PC's Jarvis at that host. Local `models/` files are not required for a `remote` / `ollama` / `lmstudio` / `vllm` / `sglang` backend.
 
 ---
 
@@ -305,7 +332,16 @@ Every `/api` call and the WebSocket must then present the key as:
 2. `Authorization: Bearer <key>`
 3. `?key=<key>` (bookmarks and WebSockets)
 
-`/api/health`, `/api/auth/status`, and `/api/auth/verify` stay reachable without a key. Localhost can skip the key when `lan_access` is on but `auth_required` is still false. Treat Jarvis like a logged-in user on this PC — see [SECURITY.md](../SECURITY.md).
+`/api/health`, `/api/auth/status`, `/api/auth/verify`, and `/api/mobile` stay reachable without a key. `/api/mobile` lists LAN URLs and install steps; it never returns the private key. Localhost can skip the key when `lan_access` is on but `auth_required` is still false. Treat Jarvis like a logged-in user on this PC — see [SECURITY.md](../SECURITY.md).
+
+### Android / phone client
+
+1. On the PC: Settings → enable **Allow LAN / Remote exposure** and keep a private key.
+2. On the phone (same Wi-Fi): open `http://<pc-ipv4>:4780/phone` in Chrome or Samsung Internet.
+3. Menu → **Add to Home screen**. The PWA starts on `/phone`.
+4. Paste the private key once on the Phone page (or in Settings). Then use **Run on PC**.
+
+Do not mail or message the private key. Copy it from the PC Settings page while you are at the machine.
 
 ---
 

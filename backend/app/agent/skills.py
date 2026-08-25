@@ -16,9 +16,13 @@ from .trajectory import keywords
 
 MIN_REPEATS = 3
 MAX_PROMPT_SKILLS = 2
+BROWSER_TOOLS = {"browser", "web_fetch"}
 _PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|/)[^\s\"']+")
 _FILE_RE = re.compile(r"\b[\w.-]+\.[A-Za-z0-9]{1,5}\b")
+_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.I)
+_EPHEMERAL_SELECTOR = re.compile(r"^#?e\d+$", re.I)
+_SECRET_KEYS = ("password", "passwd", "secret", "token", "api_key", "apikey", "credential", "auth")
 
 
 @dataclass
@@ -50,12 +54,84 @@ def _looks_like_path(value: str) -> bool:
     return bool(_PATH_RE.search(text) or "\\" in text or text.startswith("/") or _FILE_RE.fullmatch(text.strip()))
 
 
+def _looks_like_url(value: str) -> bool:
+    text = (value or "").strip()
+    return bool(_URL_RE.fullmatch(text) or text.lower().startswith("http://") or text.lower().startswith("https://"))
+
+
+def _is_ephemeral_selector(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return True
+    if _EPHEMERAL_SELECTOR.fullmatch(text):
+        return True
+    if re.fullmatch(r"\d+", text):
+        return True
+    return False
+
+
+def _looks_secret(key: str, values: list[Any] | None = None) -> bool:
+    lowered = (key or "").lower()
+    if any(token in lowered for token in _SECRET_KEYS):
+        return True
+    return False
+
+
+def is_browser_workflow(tools: Iterable[str]) -> bool:
+    return any(tool in BROWSER_TOOLS for tool in tools)
+
+
+def browser_sequence_is_stable(sequences: list[list[dict[str, Any]]]) -> bool:
+    """Promote only browser procedures that can replay without snapshot element ids.
+
+    Discovery runs that click `#e12`-style refs are one-off; named controls, CSS
+    selectors, and explicit URLs are BrowserCode-style and worth keeping.
+    """
+    has_entry = False
+    has_interaction = False
+    has_stable_target = False
+    for seq in sequences:
+        for step in seq:
+            tool = step.get("tool")
+            args = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
+            action = str(args.get("action") or "")
+            if tool == "web_fetch" and args.get("url"):
+                has_entry = True
+            if tool == "browser" and action == "open" and args.get("url"):
+                has_entry = True
+            if tool == "browser" and action in {"click", "type", "fill", "download", "upload"}:
+                has_interaction = True
+                name = args.get("name")
+                selector = args.get("selector")
+                if isinstance(name, str) and name.strip():
+                    has_stable_target = True
+                elif isinstance(selector, str) and selector.strip() and not _is_ephemeral_selector(selector):
+                    has_stable_target = True
+    if not has_entry:
+        return False
+    if has_interaction and not has_stable_target:
+        return False
+    return True
+
+
 def _param_kind(key: str, values: list[Any]) -> str:
+    if _looks_secret(key, values):
+        return "secret"
+    if key in {"url", "href"}:
+        return "url"
+    if key in {"selector"}:
+        return "selector"
+    if key in {"name", "label"}:
+        return "name"
     if key in {"path", "destination", "working_directory", "file", "filename"}:
         return "path"
     strings = [v for v in values if isinstance(v, str)]
+    if strings and all(_looks_like_url(v) for v in strings):
+        return "url"
     if strings and all(_looks_like_path(v) for v in strings):
         return "path"
+    if key in {"text", "content", "value"}:
+        return "text"
     return "string"
 
 
@@ -100,6 +176,13 @@ def parameterize_call_sequences(sequences: list[list[dict[str, Any]]]) -> tuple[
                 args = seq[index].get("arguments") or {}
                 values.append(args.get(key) if isinstance(args, dict) else None)
             comparable = [json.dumps(v, sort_keys=True, default=str) for v in values]
+            if key == "selector" and values and all(isinstance(v, str) and _is_ephemeral_selector(v) for v in values):
+                continue
+            if _looks_secret(str(key), values):
+                name = _param_name(str(key), used_names)
+                parameters.append({"name": name, "kind": "secret", "examples": [], "step": index, "key": key})
+                templated[key] = "{" + name + "}"
+                continue
             if len(set(comparable)) <= 1:
                 templated[key] = values[0]
                 continue
@@ -147,6 +230,10 @@ def extract_goal_tokens(goal: str) -> list[str]:
         token = match.group(1) or match.group(2)
         if token and token not in found:
             found.append(token)
+    for match in _URL_RE.finditer(goal or ""):
+        token = match.group(0).rstrip(").,;")
+        if token not in found:
+            found.append(token)
     for match in _PATH_RE.finditer(goal or ""):
         token = match.group(0)
         if token not in found:
@@ -174,8 +261,17 @@ def bind_parameters(skill: Skill, goal: str, extra: dict[str, Any] | None = None
             continue
         kind = param.get("kind") or "string"
         picked = None
+        if kind == "secret":
+            return None
+        if kind == "url":
+            picked = next((token for token in tokens if _looks_like_url(token)), None)
+            if picked is None:
+                match = _URL_RE.search(goal or "")
+                picked = match.group(0).rstrip(").,;") if match else None
         if kind == "path":
             picked = next((token for token in tokens if _looks_like_path(token)), None)
+        if kind in {"name", "selector", "text"} and picked is None and tokens:
+            picked = next((token for token in tokens if not _looks_like_url(token) and not _looks_like_path(token)), tokens[0] if tokens else None)
         if picked is None and tokens:
             picked = tokens[0]
         if picked is None:
@@ -311,6 +407,9 @@ async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skil
             if candidate.occurrences < min_repeats or key in known:
                 continue
             sequences = [await _successful_calls(session, task_id) for task_id in candidate.task_ids]
+            browserish = is_browser_workflow(candidate.tools)
+            if browserish and not browser_sequence_is_stable(sequences):
+                continue
             templated, parameters = parameterize_call_sequences(sequences)
             if templated:
                 steps_payload: list[Any] = templated
@@ -322,11 +421,13 @@ async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skil
             if name in used_names:
                 name = f"{name}_{len(used_names) + 1}"
             used_names.add(name)
+            origin = "browser_promoted" if browserish else "promoted"
+            kind_label = "browser procedure" if browserish else (candidate.task_class or "workflow")
             skill = Skill(
                 id=str(uuid.uuid4()),
                 name=name,
                 description=(
-                    f"Repeatable {candidate.task_class or 'workflow'} solved {candidate.occurrences} times "
+                    f"Repeatable {kind_label} solved {candidate.occurrences} times "
                     f"with {', '.join(candidate.tools)}. Example goal: {candidate.goals[0][:200]}"
                 ),
                 task_class=candidate.task_class,
@@ -335,7 +436,7 @@ async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skil
                 steps_json=json.dumps(steps_payload),
                 verification=(candidate.verifications[0] if candidate.verifications else "")[:1000],
                 recovery="Fall back to the alternatives suggested for the failing tool.",
-                origin="promoted",
+                origin=origin,
             )
             session.add(skill)
             created.append(skill)
@@ -391,6 +492,11 @@ def as_prompt_block(skills: Iterable[Skill]) -> str:
             line += f"\n  Steps: {', '.join(rendered)}"
         if skill.verification:
             line += f"\n  Verify: {skill.verification[:200]}"
+        if skill.origin == "browser_promoted":
+            line += (
+                "\n  BrowserCode-style skill: replay the recorded named clicks and fills. "
+                "Do not rediscover the page unless a control is missing."
+            )
         if any(isinstance(step, dict) and step.get("arguments") for step in raw_steps):
             line += "\n  This skill can run itself once parameters are bound. Prefer executing it over rediscovering the workflow."
         entries.append(line)

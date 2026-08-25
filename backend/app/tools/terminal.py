@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import platform
 import shutil
 import sys
 import time
@@ -25,13 +26,15 @@ class BackgroundJob:
     pump: asyncio.Task | None = None
 
 
-_JOBS: dict[int, BackgroundJob] = {}
-
-
 def default_shell() -> str:
-    if os.name == "nt":
-        return "powershell"
-    return "bash"
+    return "powershell" if platform.system() == "Windows" else "bash"
+
+
+def _default_shell() -> str:
+    return default_shell()
+
+
+_JOBS: dict[int, BackgroundJob] = {}
 
 
 def _decode(data: bytes | bytearray) -> str:
@@ -65,17 +68,12 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
             return command.split()
         return ["git", *command.split()]
     if shell in {"bash", "wsl"}:
-        if shutil.which("wsl"):
+        if sys.platform == "win32" and shutil.which("wsl") and shell == "wsl":
             return ["wsl", "-e", "bash", "-lc", command]
         if shutil.which("bash"):
             return ["bash", "-lc", command]
         return ToolResult(False, "", error="WSL/bash is not available on this machine")
-    exe = shutil.which("powershell") or shutil.which("pwsh")
-    if exe:
-        return [exe, "-NoProfile", "-Command", command]
-    if shutil.which("bash"):
-        return ["bash", "-lc", command]
-    return ["python", "-c", command]
+    return _command_args(command, default_shell())
 
 
 async def _pump(job: BackgroundJob) -> None:
@@ -134,7 +132,7 @@ class TerminalTool(Tool):
     name = "terminal"
     description = (
         "Run a local command. shell can be powershell, cmd, python, git, or bash/wsl. "
-        "Default shell is PowerShell on Windows and bash elsewhere. "
+        "Default shell is PowerShell on Windows and bash on Linux. "
         "action=run (default) waits for the process. action=start returns a PID immediately; "
         "then use inspect/wait/kill with that pid to see if it is still alive and to collect output. "
         "inspect also works for other local PIDs. Captures stdout, stderr, exit code and duration. "
@@ -148,7 +146,7 @@ class TerminalTool(Tool):
             "shell": {
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
-                "default": "bash",
+                "default": "powershell" if os.name == "nt" else "bash",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},

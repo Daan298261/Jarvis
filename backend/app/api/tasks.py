@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -8,9 +9,13 @@ from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent.loop import AGENT
+from ..agent.self_dev import KillSwitchActive
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
+from ..agent.tool_exposure import is_full_exposure, tool_names_for
+from ..tools.exposure import schema_names
+from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -28,6 +33,21 @@ class ContinueBody(BaseModel):
 
 
 def _task_dict(task: Task) -> dict[str, Any]:
+    extra: list[str] = []
+    raw = getattr(task, "compact_memory", None) or ""
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and isinstance(parsed.get("extra_tools"), list):
+                extra = [str(item) for item in parsed["extra_tools"]]
+        except (TypeError, json.JSONDecodeError):
+            extra = []
+    task_class = getattr(task, "task_class", None) or ""
+    if is_full_exposure(task_class, extra):
+        allowed_tools = schema_names(REGISTRY.openai_tools())
+    else:
+        allowed_tools = sorted(tool_names_for(task_class, extra))
+    db_exposed = [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item]
     return {
         "id": task.id,
         "title": task.title,
@@ -37,10 +57,9 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "autonomy": task.autonomy,
         "profile": task.profile,
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
-        "task_class": getattr(task, "task_class", None) or "",
-        "acceptance_criteria": task.acceptance_criteria,
-        "current_action": task.current_action,
-        "current_tool": task.current_tool,
+        "task_class": task_class,
+        "exposed_tools": db_exposed if db_exposed else allowed_tools,
+        "allowed_tools": allowed_tools,
         "result": task.result,
         "error": task.error,
         "retries": task.retries,
@@ -63,7 +82,10 @@ def _task_dict(task: Task) -> dict[str, Any]:
 
 @router.post("")
 async def create_task(body: TaskCreate):
-    task = await AGENT.create_task(body.prompt, body.autonomy, body.profile, body.execution_mode)
+    try:
+        task = await AGENT.create_task(body.prompt, body.autonomy, body.profile, body.execution_mode)
+    except KillSwitchActive as exc:
+        raise HTTPException(409, str(exc)) from exc
     return _task_dict(task)
 
 
@@ -106,6 +128,8 @@ async def continue_task(task_id: str, body: ContinueBody | None = None):
         else:
             task = await AGENT.continue_task(task_id, body.prompt)
         return _task_dict(task)
+    except KillSwitchActive as exc:
+        raise HTTPException(409, str(exc)) from exc
     except KeyError:
         raise HTTPException(404, "Task not found")
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Jarvis is a local-first control plane for autonomous work. The current implementation is a single-machine FastAPI + React + SQLite application with a local/remote OpenAI-compatible model provider. The P0 model migration in `JARVIS_MASTER_PLAN.md` targets moving normal operation from Qwen3.5-27B hybrid inference toward a fully GPU-resident Qwen3.5-9B primary model while retaining 27B as an expert escalation model.
+Jarvis is a local control plane around llama.cpp. The default model is Qwen3.5-9B Abliterated; Qwen3.5-27B is the Expert escalation profile.
 
 Overall project priority and current implementation state live in [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md). Detailed P2+ swarm role, placement, resource-control, node-management, and universal-UI requirements live in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md).
 
@@ -13,13 +13,13 @@ Browser (localhost:4780)
 FastAPI backend / Orchestrator
   ├── Task store (SQLite)
   ├── Agent runtime (plan → act → observe → recover → verify)
-  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP)
+  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, request_tools, MCP)
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
-Inference backend
-  ├── local llama.cpp today
-  └── optional remote OpenAI-compatible endpoint
+llama-server (localhost:8088)
+  Qwen3.5-9B Abliterated GGUF (default) or Qwen3.5-27B Expert
+  mmproj only when vision is enabled
 ```
 
 Today the host PC implicitly performs every physical role. Swarm work must refactor that assumption incrementally rather than replace the working control plane.
@@ -56,23 +56,28 @@ Adding another machine later should extend the registry/placement choices, not r
 
 `backend/app/providers/base.py` defines `ModelProvider`. The built-in `OpenAICompatProvider` can talk to local llama.cpp or another OpenAI-compatible endpoint. Server lifecycle is abstracted separately through inference backends.
 
-Swarm architecture does not replace this abstraction. An inference endpoint becomes one capability exposed by a Node/Worker; physical node identity, resource policy, and placement remain separate concepts.
+- local llama.cpp
+- another machine on the LAN
+- a dedicated multi-GPU server
+
+Swap by pointing `inference.host`/`port` at any OpenAI-compatible `/v1` endpoint, or pick `ollama` / `lmstudio` / `vllm` / `sglang` / `remote` on Settings. `GET /api/model/probe` lists advertised models. No agent code changes.
 
 ## Agent lifecycle
 
 `backend/app/agent/loop.py` runs an explicit loop:
 
-1. Understand the requested end state.
+1. Understand the requested end state and classify the task.
 2. Capture acceptance criteria.
 3. In Reliable mode, generate candidate plans and select one.
-4. Inspect with deterministic tools.
-5. Plan and execute the next action.
-6. Persist the observation.
-7. Classify success vs failure.
-8. Diagnose failures and choose a materially different strategy.
-9. Repeat until acceptance criteria can be checked.
-10. Run an independent verification pass.
-11. Report completion only after verification.
+4. Expose only tools relevant to the task class (`request_tools` can expand the set).
+5. Inspect with deterministic tools.
+6. Plan and execute the next action.
+7. Persist the observation.
+8. Classify success vs failure.
+9. Diagnose failures and choose a materially different strategy. After repeated distinct failures, consult Expert 27B with a compact brief, then restore the primary model.
+10. Repeat until acceptance criteria can be checked.
+11. Run an independent verification pass.
+12. Report completion only after verification.
 
 Task state is checkpointed in SQLite after tool calls. `POST /api/tasks/{id}/continue` reloads compacted state.
 
@@ -82,9 +87,9 @@ Older tool traces are compacted so long tasks do not continually resend raw hist
 
 These systems remain Orchestrator-owned when Workers become remote. A remote Worker may report execution evidence, but the Orchestrator retains task state and final verification authority unless a later explicit architecture decision changes that boundary.
 
-## Intelligence and software-development workers
+`trajectories` records how each task actually went; `skills` holds workflows that succeeded repeatedly with the same tool sequence. Parameterized skills execute their bound tool steps instead of only injecting advice. Repeated stable browser procedures become BrowserCode-style skills. Both are injected into the system prompt of similar later tasks. See `TOOLS.md`.
 
-Software-development routing is defined in the master plan. Jarvis selects the cheapest sufficiently capable worker, beginning with deterministic/local options and escalating to paid coding workers when necessary. `CursorACPWorker` is the preferred Cursor integration path; MCP complements it in the opposite direction.
+Live model timings (tok/s, VRAM, RAM, load time) and task success rates are persisted in `benchmark_samples` and shown on the Model page. llama.cpp starts without the vision projector unless vision mode is `always` or a screenshot is attached. Balanced/Quality profiles keep the reasoning parser available and toggle `enable_thinking` per turn.
 
 Worker selection must remain compatible with swarm placement:
 
@@ -146,9 +151,9 @@ Security/SIEM/forensics are future specialized roles only. Their appearance in t
 
 The existing React + TypeScript + Vite portal is the basis of the universal UI. Do not create separate Windows/Linux/Pi frontends. Future desktop/mobile wrappers should reuse the same frontend and expose host-specific capabilities through APIs/bridges. Tauri is the preferred future desktop-shell candidate in the swarm specification, with Electron as an alternative.
 
-## Autonomy
+## Voice
 
-`interactive`, `trusted`, and `autonomous` modes remain policy boundaries for execution. Swarm placement must not grant a Worker/Node more authority than the task already has. A placement decision changes **where** authorized work runs, not **what** it is allowed to do.
+`GET /api/voice/status` reports local STT/TTS. `POST /api/voice/command` still accepts already-transcribed text. `POST /api/voice/listen` transcribes uploaded audio with local Whisper when installed. `POST /api/voice/speak` returns WAV from Windows SAPI, espeak-ng, or pyttsx3. Cloud speech APIs are not used. The Command page has a Speak button and an optional Speak-results toggle.
 
 ## Implementation rule
 

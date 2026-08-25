@@ -46,17 +46,40 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("python", "call the site's API or parse the response with a library"),
         Alternative("screenshot", "look at the page only when the DOM cannot answer the question"),
     ),
+    "browser_use": (
+        Alternative("browser", "Playwright is the default deterministic backend; use it when selectors are known"),
+        Alternative("web_fetch", "read the page or its API directly when no JavaScript is needed"),
+        Alternative("python", "call the site's API or parse the response with a library"),
+    ),
+    "code_worker": (
+        Alternative("python", "make the change with a script instead of delegating to OpenHands"),
+        Alternative("filesystem", "inspect and edit the files directly"),
+        Alternative("git", "inspect the working tree, then apply a smaller native change"),
+        Alternative("terminal", "run tests or the project CLI yourself"),
+    ),
     "web_fetch": (
         Alternative("browser", "the endpoint needs a real session, cookies, or JavaScript"),
     ),
     "office": (
-        Alternative("python", "edit the document with openpyxl / python-docx instead of COM"),
+        Alternative("python", "edit the document with openpyxl / python-docx / python-pptx instead of COM"),
         Alternative("filesystem", "inspect or copy the file directly"),
     ),
     "desktop": (
         Alternative("terminal", "drive the app through its CLI or PowerShell instead of the GUI"),
         Alternative("screenshot", "capture the screen and use vision when UI Automation cannot see the control"),
         Alternative("browser", "use the web interface if the app has one"),
+        Alternative("ufo", "Windows HostAgent worker when native UI Automation is not enough"),
+        Alternative("cua", "computer-use worker when accessibility lookup fails"),
+    ),
+    "ufo": (
+        Alternative("desktop", "use native UI Automation / pywinauto instead of UFO"),
+        Alternative("terminal", "drive the app through its CLI or PowerShell"),
+        Alternative("screenshot", "inspect the screen when the worker cannot see the control"),
+    ),
+    "cua": (
+        Alternative("desktop", "use native UI Automation / pywinauto instead of Cua"),
+        Alternative("terminal", "drive the app through its CLI or PowerShell"),
+        Alternative("screenshot", "inspect the screen when the worker cannot see the control"),
     ),
     "terminal": (
         Alternative("python", "do the work in a script instead of a shell one-liner"),
@@ -65,6 +88,12 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
     "python": (
         Alternative("terminal", "run the interpreter or tool directly and read stderr"),
         Alternative("filesystem", "inspect the inputs before running code again"),
+        Alternative("code_worker", "delegate a larger coding job to Open Interpreter when it is installed"),
+    ),
+    "code_worker": (
+        Alternative("python", "write and run the script with the native python tool"),
+        Alternative("terminal", "run the commands directly"),
+        Alternative("filesystem", "inspect or edit the files yourself"),
     ),
     "docker": (
         Alternative("terminal", "run the process locally; Docker may not be installed"),
@@ -129,10 +158,15 @@ def recovery_hint(tool: str, observation: str, attempt: int = 1) -> str:
         limit = 1 if attempt <= 1 else len(options)
         lines.append("Alternative tools, most deterministic first:")
         lines.extend(f"- {item.tool}: {item.why}" for item in options[:limit])
+    if kind == UNAVAILABLE:
+        lines.append("If that tool is not in the current exposed set, call request_capability with its name.")
     if attempt >= 3:
         lines.append(
             "Several strategies have now failed. Re-check your assumptions about the environment, "
             "inspect the actual state before acting, and change approach rather than parameters."
+        )
+        lines.append(
+            "If the tool you need is not in the current schema, call request_tools before switching."
         )
     lines.append("Do not repeat the call that just failed.")
     return "\n".join(lines)

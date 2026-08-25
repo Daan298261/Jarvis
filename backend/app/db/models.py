@@ -34,6 +34,7 @@ class Task(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     current_action: Mapped[str] = mapped_column(Text, default="")
     current_tool: Mapped[str] = mapped_column(String(80), default="")
+    exposed_tools: Mapped[str] = mapped_column(Text, default="")
     retries: Mapped[int] = mapped_column(Integer, default=0)
     compact_memory: Mapped[str] = mapped_column(Text, default="")
     conversation_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -163,7 +164,80 @@ class BenchmarkSample(Base):
     tasks_completed: Mapped[int] = mapped_column(Integer, default=0)
     tasks_failed: Mapped[int] = mapped_column(Integer, default=0)
     source: Mapped[str] = mapped_column(String(32), default="timing")
+    metrics_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CodingUsageSample(Base):
+    """Paid/local coding-worker cost and outcome for routing decisions."""
+
+    __tablename__ = "coding_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    worker: Mapped[str] = mapped_column(String(40), default="")
+    model: Mapped[str] = mapped_column(String(80), default="")
+    task_class: Mapped[str] = mapped_column(String(64), default="")
+    complexity: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0)
+    verified_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    first_attempt_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AgentBenchmarkResult(Base):
+    """One case result from the P0.9 representative agent suite."""
+
+    __tablename__ = "agent_benchmark_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    suite_id: Mapped[str] = mapped_column(String(64), default="")
+    case_id: Mapped[str] = mapped_column(String(64), default="")
+    category: Mapped[str] = mapped_column(String(64), default="")
+    profile: Mapped[str] = mapped_column(String(32), default="")
+    quantization: Mapped[str] = mapped_column(String(32), default="")
+    success: Mapped[bool] = mapped_column(Boolean, default=False)
+    human_intervention: Mapped[bool] = mapped_column(Boolean, default=False)
+    total_time_seconds: Mapped[float] = mapped_column(Float, default=0)
+    model_time_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tool_time_seconds: Mapped[float] = mapped_column(Float, default=0)
+    model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, default=0)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    schema_errors: Mapped[int] = mapped_column(Integer, default=0)
+    incorrect_actions: Mapped[int] = mapped_column(Integer, default=0)
+    verification_result: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(32), default="scripted")
+    workspace: Mapped[str] = mapped_column(Text, default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CodingRoute(Base):
+    """Software-development worker routing decision for a task."""
+
+    __tablename__ = "coding_routes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    complexity: Mapped[int] = mapped_column(Integer, default=0)
+    tier: Mapped[int] = mapped_column(Integer, default=1)
+    tier_name: Mapped[str] = mapped_column(String(32), default="")
+    intended_worker: Mapped[str] = mapped_column(String(64), default="")
+    selected_worker: Mapped[str] = mapped_column(String(64), default="")
+    fallback_worker: Mapped[str] = mapped_column(String(64), default="local-jarvis-coding")
+    paid_worker_available: Mapped[bool] = mapped_column(Boolean, default=False)
+    independent_verification_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    outcome: Mapped[str] = mapped_column(String(32), default="")
+    verification: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Conversation(Base):
@@ -175,3 +249,46 @@ class Conversation(Base):
     messages_json: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EscalationPackage(Base):
+    """Compact EscalationContext persisted for the next coding worker."""
+
+    __tablename__ = "escalation_packages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    task_class: Mapped[str] = mapped_column(String(64), default="")
+    goal: Mapped[str] = mapped_column(Text, default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AcpSession(Base):
+    """Persisted Cursor ACP session so Jarvis can resume after restart."""
+
+    __tablename__ = "acp_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    cursor_session_id: Mapped[str] = mapped_column(String(80), default="")
+    model: Mapped[str] = mapped_column(String(80), default="")
+    cwd: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="disconnected")
+    last_event: Mapped[str] = mapped_column(String(80), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkerReport(Base):
+    """Worker-reported results and verification requests. Never treated as completion."""
+
+    __tablename__ = "worker_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    worker: Mapped[str] = mapped_column(String(80), default="")
+    kind: Mapped[str] = mapped_column(String(40), default="worker_result")
+    reported_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

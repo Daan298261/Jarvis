@@ -38,6 +38,13 @@ def test_browser_failure_routes_to_more_deterministic_tools():
     assert options.index("web_fetch") < options.index("screenshot")
 
 
+def test_ufo_failure_routes_to_native_desktop():
+    options = [item.tool for item in alternatives_for("ufo", UNAVAILABLE)]
+    assert options[0] == "desktop"
+    cua = [item.tool for item in alternatives_for("cua", UNAVAILABLE)]
+    assert cua[0] == "desktop"
+
+
 def test_permission_failures_do_not_suggest_another_tool():
     assert alternatives_for("filesystem", PERMISSION) == []
     assert alternatives_for("terminal", BLOCKED) == []
@@ -52,6 +59,13 @@ def test_hint_names_an_alternative_and_forbids_the_same_call():
     assert "python" in hint
     assert "Do not repeat the call that just failed." in hint
     assert "missing on this machine" in hint
+
+
+def test_code_worker_falls_back_to_native_python():
+    options = [item.tool for item in alternatives_for("code_worker", UNAVAILABLE)]
+    assert options[0] == "python"
+    hint = recovery_hint("code_worker", "ERROR: Open Interpreter is not installed")
+    assert "python" in hint
 
 
 def test_hint_escalates_after_repeated_failures():

@@ -5,6 +5,12 @@ import platform
 import shutil
 from typing import Any
 
+from ..agent.coding_workers import coding_worker_catalog
+from ..workers.computer import CuaBackend, UFOBackend
+from ..workers.browser import BrowserUseBackend
+from ..workers.code import OpenHandsBackend
+from ..workers.voice import voice_status
+
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -20,6 +26,15 @@ def native_capabilities() -> list[dict[str, Any]]:
             office = detect_hardware().office_installed
         except Exception:
             office = False
+    office_lib = any(_module_available(name) for name in ("docx", "openpyxl", "pptx"))
+    if office and office_lib:
+        office_detail = "Word/Excel/PowerPoint via COM, with python-docx/openpyxl/python-pptx as fallback."
+    elif office:
+        office_detail = "Word/Excel/PowerPoint via Windows COM."
+    elif office_lib:
+        office_detail = "Word/Excel/PowerPoint via python-docx/openpyxl/python-pptx. COM is used when Office is installed."
+    else:
+        office_detail = "Install Microsoft Office (Windows) or python-docx/openpyxl/python-pptx."
     return [
         {
             "id": "filesystem",
@@ -35,7 +50,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": True,
             "status": "ready",
-            "detail": "PowerShell on Windows; bash available when present.",
+            "detail": "PowerShell on Windows; bash on Linux when present.",
         },
         {
             "id": "python",
@@ -51,7 +66,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": _module_available("playwright"),
             "status": "ready" if _module_available("playwright") else "missing",
-            "detail": "Deterministic browser backend.",
+            "detail": "Deterministic browser backend (default). Browser Use is optional for unfamiliar sites.",
         },
         {
             "id": "windows_ui",
@@ -59,15 +74,15 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": windows and _module_available("pywinauto"),
             "status": "ready" if windows and _module_available("pywinauto") else "unavailable",
-            "detail": "pywinauto / UI Automation. Coordinate clicking is last resort.",
+            "detail": "Named-control UI Automation first (inspect / name / automation_id). Coordinate click is last resort.",
         },
         {
             "id": "office",
-            "name": "Microsoft Office COM",
+            "name": "Microsoft Office",
             "kind": "native",
-            "available": office,
-            "status": "ready" if office else "unavailable",
-            "detail": "Word/Excel/PowerPoint when Office is installed.",
+            "available": office or office_lib,
+            "status": "ready" if (office or office_lib) else "unavailable",
+            "detail": office_detail,
         },
         {
             "id": "mcp",
@@ -75,7 +90,15 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": _module_available("mcp"),
             "status": "ready" if _module_available("mcp") else "missing",
-            "detail": "User-configured stdio or HTTP MCP servers.",
+            "detail": "User-configured stdio or HTTP MCP servers, plus the built-in Jarvis MCP server for Cursor.",
+        },
+        {
+            "id": "jarvis-mcp-server",
+            "name": "Jarvis MCP for Cursor",
+            "kind": "native",
+            "available": True,
+            "status": "ready",
+            "detail": "Read-oriented MCP server Cursor can attach to. Jarvis remains the supervisor.",
         },
         {
             "id": "git",
@@ -83,15 +106,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": shutil.which("git") is not None,
             "status": "ready" if shutil.which("git") else "missing",
-            "detail": "Status, diff, and checkpoints before risky edits. Checkpoints do not modify the working tree.",
-        },
-        {
-            "id": "verify_code",
-            "name": "Independent code verification",
-            "kind": "native",
-            "available": True,
-            "status": "ready",
-            "detail": "Inspects git diff and runs pytest. A worker claiming success is not enough.",
+            "detail": "Status, diff, and non-destructive jarvis-checkpoint-* backup branches.",
         },
         {
             "id": "docker",
@@ -101,19 +116,16 @@ def native_capabilities() -> list[dict[str, Any]]:
             "status": "ready" if shutil.which("docker") else "unavailable",
             "detail": "Optional. Jarvis continues without it.",
         },
+        voice_status(),
     ]
 
 
 def optional_workers() -> list[dict[str, Any]]:
+    from ..agent.acp import acp_status
+
+    acp = acp_status()
     return [
-        {
-            "id": "browser-use",
-            "name": "Browser Use",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Intelligent browser discovery worker. Playwright remains the deterministic backend.",
-        },
+        BrowserUseBackend().probe(),
         {
             "id": "ufo",
             "name": "Microsoft UFO",
@@ -130,6 +142,8 @@ def optional_workers() -> list[dict[str, Any]]:
             "status": "not_integrated",
             "detail": "Computer-use worker. Not required for Jarvis to run.",
         },
+        UFOBackend().probe(),
+        CuaBackend().probe(),
         {
             "id": "open-interpreter",
             "name": "Open Interpreter",
@@ -138,22 +152,30 @@ def optional_workers() -> list[dict[str, Any]]:
             "status": "not_integrated",
             "detail": "Optional code/shell worker behind an adapter.",
         },
-        {
-            "id": "openhands",
-            "name": "OpenHands",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Optional software-engineering worker. Jarvis still verifies results.",
-        },
+        OpenHandsBackend().probe(),
     ]
+
+
+def professional_analysis_policy() -> dict[str, Any]:
+    return {
+        "id": "professional-analysis",
+        "analyze_sensitive_material": True,
+        "operational_authorization_separate": True,
+        "detail": (
+            "Legitimate security, forensic, and investigative analysis is permitted. "
+            "Analysis is not authorization to attack, deploy exploits, or disable defenses."
+        ),
+    }
 
 
 def capability_snapshot() -> dict[str, Any]:
     native = native_capabilities()
     optional = optional_workers()
+    coding = coding_worker_catalog()
     return {
         "native": native,
         "optional_workers": optional,
+        "coding_workers": coding,
         "all": native + optional,
+        "professional_analysis": professional_analysis_policy(),
     }

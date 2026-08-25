@@ -53,7 +53,7 @@ class InferenceSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8088
     profile: str = "balanced"
-    context_size: int = 32768
+    context_size: int = 16384
     flash_attn: str = "auto"
     fit: bool = True
     fit_target_mib: int = 1024
@@ -61,11 +61,34 @@ class InferenceSettings(BaseModel):
     cache_type_v: str = "q8_0"
     threads: int = 0
     auto_load: bool = True
+    vision: bool = False
+    vision_mode: str = "lazy"
+    remote_model: str = ""
+    api_key: str = ""
 
 
 class BrowserSettings(BaseModel):
+    backend: str = "playwright"
     headless: bool = False
     timeout_ms: int = 30000
+    browser_use_model: str = "Qwen3.5-27B"
+
+
+class CodingSettings(BaseModel):
+    composer_model: str = "composer-2.5"
+    grok_model: str = "grok-4.6"
+    specialist_model: str = ""
+    allow_fast_variants: bool = False
+    local_max_attempts: int = 2
+
+
+class SelfDevSettings(BaseModel):
+    max_duration_hours: float = 12.0
+    max_paid_spend_eur: float = 0.0
+    max_paid_invocations: int = 0
+    max_consecutive_failures: int = 3
+    experimental_port: int = 4781
+    auto_merge: bool = False
 
 
 class AppSettings(BaseModel):
@@ -82,9 +105,11 @@ class AppSettings(BaseModel):
     logging_level: str = "INFO"
     backup_enabled: bool = True
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
+    self_dev: SelfDevSettings = Field(default_factory=SelfDevSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
+    coding: CodingSettings = Field(default_factory=CodingSettings)
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -117,6 +142,13 @@ def load_settings() -> AppSettings:
         except Exception:
             pass
     payload["auth_token"] = token
+    inference_key = os.environ.get("JARVIS_INFERENCE_API_KEY")
+    if inference_key:
+        inference = payload.get("inference")
+        if not isinstance(inference, dict):
+            inference = {}
+            payload["inference"] = inference
+        inference["api_key"] = inference_key
     host = os.environ.get("JARVIS_BIND_HOST")
     port = os.environ.get("JARVIS_BIND_PORT")
     if host:

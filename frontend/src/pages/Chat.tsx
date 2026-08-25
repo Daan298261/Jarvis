@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { api, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } from "../api"
+
+type VoiceStatus = {
+  stt_ready?: boolean
+  tts_ready?: boolean
+  detail?: string
+}
 
 export function ChatPage() {
   const { id } = useParams()
@@ -11,6 +17,16 @@ export function ChatPage() {
   const [elapsed, setElapsed] = useState(0)
   const [keyInput, setKeyInput] = useState<string>(getPrivateKey())
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false)
+  const [voice, setVoice] = useState<VoiceStatus | null>(null)
+  const [recording, setRecording] = useState(false)
+  const [speakResults, setSpeakResults] = useState(false)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const spokenRef = useRef<string>("")
+
+  useEffect(() => {
+    api<VoiceStatus>("/api/voice/status").then(setVoice).catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -46,6 +62,21 @@ export function ChatPage() {
     return () => clearInterval(timer)
   }, [task?.status, task?.id, task?.started_at, task?.duration_seconds])
 
+  useEffect(() => {
+    if (!speakResults || !task || task.status !== "completed" || !task.result) return
+    const key = `${task.id}:${task.result}`
+    if (spokenRef.current === key) return
+    spokenRef.current = key
+    fetchAudio("/api/voice/speak", { method: "POST", body: JSON.stringify({ text: task.result.slice(0, 800) }) })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob)
+        const audio = new Audio(url)
+        audio.onended = () => URL.revokeObjectURL(url)
+        return audio.play()
+      })
+      .catch(() => undefined)
+  }, [speakResults, task?.id, task?.status, task?.result])
+
   async function submit() {
     if (!prompt.trim()) return
     setBusy(true)
@@ -61,6 +92,52 @@ export function ChatPage() {
       }
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function toggleRecord() {
+    if (recording) {
+      recorderRef.current?.stop()
+      return
+    }
+    if (!voice?.stt_ready) {
+      alert(voice?.detail || "Local Whisper is not installed. Voice stays on this machine; cloud speech APIs are not used.")
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      chunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunksRef.current.push(event.data)
+      }
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop())
+        setRecording(false)
+        setBusy(true)
+        try {
+          const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })
+          const body = new FormData()
+          body.append("audio", blob, "command.webm")
+          const created = await apiForm<Task & { transcript?: string; task_id?: string }>("/api/voice/listen", body)
+          const taskId = created.id || created.task_id
+          if (created.transcript) setPrompt(created.transcript)
+          if (taskId) navigate(`/tasks/${taskId}`)
+        } catch (err: any) {
+          if (err.message && err.message.toLowerCase().includes("authentication required")) {
+            setShowAuthModal(true)
+          } else {
+            alert(err.message)
+          }
+        } finally {
+          setBusy(false)
+        }
+      }
+      recorder.start()
+      recorderRef.current = recorder
+      setRecording(true)
+    } catch (err: any) {
+      alert(err?.message || "Microphone permission was denied.")
     }
   }
 
@@ -110,6 +187,18 @@ export function ChatPage() {
           />
           <div className="row" style={{ marginTop: 12 }}>
             <button className="btn" disabled={busy} onClick={submit}>Run task</button>
+            <button
+              className={recording ? "btn recording" : "btn secondary"}
+              disabled={busy}
+              onClick={toggleRecord}
+              title={voice?.stt_ready ? "Record a spoken command (local Whisper)" : (voice?.detail || "Local Whisper is not installed")}
+            >
+              {recording ? "Stop recording" : "Speak"}
+            </button>
+            <label className="row" style={{ margin: 0 }}>
+              <input type="checkbox" checked={speakResults} onChange={(e) => setSpeakResults(e.target.checked)} />
+              Speak results
+            </label>
             {task && (task.status === "running" || task.status === "waiting") && (
               <button className="btn secondary" onClick={() => api(`/api/tasks/${task.id}/cancel`, { method: "POST" })}>Cancel</button>
             )}
@@ -121,6 +210,15 @@ export function ChatPage() {
                 Continue this
               </button>
             )}
+            <button
+              className="btn danger"
+              onClick={async () => {
+                await api("/api/self-dev/stop", { method: "POST", body: JSON.stringify({ reason: "Portal emergency stop" }) })
+                alert("Emergency stop is on. New tasks and queued files are blocked until you resume on System.")
+              }}
+            >
+              STOP AUTONOMOUS DEVELOPMENT
+            </button>
           </div>
         </div>
         <div className="card">
@@ -131,6 +229,7 @@ export function ChatPage() {
               <b>Status</b><span className={`badge ${task.status}`}>{task.status}</span>
               <b>Mode</b><span>{task.execution_mode || "balanced"}</span>
               <b>Class</b><span>{task.task_class || "—"}</span>
+              <b>Tools</b><span>{task.exposed_tools?.length ? task.exposed_tools.join(", ") : "—"}</span>
               <b>Stage</b><span>{task.stage}</span>
               <b>Action</b><span>{task.current_action || "—"}</span>
               <b>Tool</b><span>{task.current_tool || "—"}</span>

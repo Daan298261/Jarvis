@@ -4,11 +4,15 @@ import os
 import platform
 import shutil
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import psutil
+
+_CACHE: tuple[float, "HardwareInfo"] | None = None
+_CACHE_TTL_SECONDS = 30.0
 
 
 @dataclass
@@ -79,37 +83,27 @@ def _nvidia() -> dict[str, Any]:
 
 
 def _office_installed() -> bool:
+    """Detect Office from install paths. Do not launch Word/Excel just to probe."""
     if platform.system() != "Windows":
         return False
-    program_files = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
-    program_files_x86 = Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
-    candidates = [
-        program_files / "Microsoft Office",
-        program_files_x86 / "Microsoft Office",
-        program_files / "Microsoft Office" / "root" / "Office16" / "WINWORD.EXE",
-        program_files / "Microsoft Office" / "Office16" / "WINWORD.EXE",
+    roots = [
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office",
+        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft Office",
     ]
-    if any(path.exists() for path in candidates):
-        return True
-    try:
-        import winreg  # type: ignore
-
-        for hive, key in (
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Winword.exe"),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration"),
-        ):
-            try:
-                handle = winreg.OpenKey(hive, key)
-                winreg.CloseKey(handle)
-                return True
-            except OSError:
-                continue
-    except Exception:
-        pass
-    return False
+    return any(root.exists() for root in roots)
 
 
-def detect_hardware() -> HardwareInfo:
+def detect_hardware(*, force: bool = False) -> HardwareInfo:
+    global _CACHE
+    now = time.monotonic()
+    if not force and _CACHE and (now - _CACHE[0]) < _CACHE_TTL_SECONDS:
+        return _CACHE[1]
+    info = _probe_hardware()
+    _CACHE = (now, info)
+    return info
+
+
+def _probe_hardware() -> HardwareInfo:
     vm = psutil.virtual_memory()
     disk = shutil.disk_usage(str(Path.home().anchor or "C:\\"))
     cpu = platform.processor() or "Unknown CPU"

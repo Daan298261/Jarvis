@@ -36,7 +36,10 @@ async def jarvis_env(tmp_path, monkeypatch):
 
     MANAGER.state.loaded = True
     MANAGER.state.last_error = ""
+    MANAGER.state.context_size = 16384
+    MANAGER.backend = None
     REGISTRY.apply_settings(settings)
     yield {"tmp": tmp_path, "settings": settings, "manager": MANAGER}
     MANAGER.provider = None
     MANAGER.state.loaded = False
+    REGISTRY.bind_exposure(None)

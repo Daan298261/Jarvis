@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
+from ..agent.acp import acp_status
 from ..config import load_settings, save_settings
+from ..mcp_server import jarvis_mcp_manifest
 from ..tools.capabilities import capability_snapshot
+from ..tools.exposure import exposure_catalog, tools_for_task
 from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
+
+
+class RouteBody(BaseModel):
+    prompt: str
+    task_class: str | None = None
+    files_hint: int = 0
+    previous_failures: int = 0
 
 
 @router.get("")
@@ -21,7 +32,12 @@ async def tool_catalog():
     settings = load_settings()
     REGISTRY.apply_settings(settings)
     caps = capability_snapshot()
-    return {"tools": REGISTRY.list_tools(), **caps}
+    return {
+        "tools": REGISTRY.list_tools(),
+        **caps,
+        "jarvis_mcp": jarvis_mcp_manifest(),
+        "cursor_acp": acp_status(),
+    }
 
 
 @router.post("/{tool_name}/enable")

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 
 export function SettingsPage() {
@@ -114,6 +115,54 @@ export function SettingsPage() {
       </div>
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Inference server</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Local llama.cpp is started by Jarvis. A dedicated LAN GPU box, LM Studio, Ollama, vLLM, or SGLang is health-checked only — point host/port at its OpenAI-compatible <code>/v1</code> endpoint.
+        </p>
+        <label>Backend
+          <select value={settings.inference?.backend || "llama.cpp"} onChange={(e) => save({ inference_backend: e.target.value })}>
+            <option value="llama.cpp">llama.cpp (this PC)</option>
+            <option value="remote">Remote OpenAI-compatible</option>
+            <option value="ollama">Ollama</option>
+            <option value="lmstudio">LM Studio</option>
+            <option value="vllm">vLLM</option>
+            <option value="sglang">SGLang</option>
+          </select>
+        </label>
+        <label>Host
+          <input
+            value={settings.inference?.host || "127.0.0.1"}
+            onBlur={(e) => save({ inference_host: e.target.value.trim() || "127.0.0.1" })}
+            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, host: e.target.value } })}
+          />
+        </label>
+        <label>Port
+          <input
+            type="number"
+            value={settings.inference?.port || 8088}
+            onChange={(e) => save({ inference_port: Number(e.target.value) })}
+          />
+        </label>
+        <label>Remote model name (optional)
+          <input
+            value={settings.inference?.remote_model || ""}
+            placeholder="Leave blank to use the first advertised model"
+            onBlur={(e) => save({ inference_remote_model: e.target.value.trim() })}
+            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, remote_model: e.target.value } })}
+          />
+        </label>
+        <label>Inference API key (optional)
+          <input
+            type="password"
+            value={settings.inference?.api_key || ""}
+            placeholder="Usually empty for llama.cpp"
+            onBlur={(e) => save({ inference_api_key: e.target.value })}
+            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, api_key: e.target.value } })}
+          />
+        </label>
+      </div>
+
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
         <h2>Core Execution</h2>
         <label>Autonomy
           <select value={settings.autonomy} onChange={(e) => save({ autonomy: e.target.value })}>
@@ -139,12 +188,24 @@ export function SettingsPage() {
           <select value={settings.inference?.profile} onChange={(e) => save({ profile: e.target.value })}>
             <option value="fast">Fast</option>
             <option value="balanced">Balanced</option>
-            <option value="quality">Quality</option>
+            <option value="quality">Quality (9B thinking on)</option>
+            <option value="expert">Expert (27B)</option>
+          </select>
+        </label>
+        <label>Vision
+          <select value={settings.inference?.vision_mode || "lazy"} onChange={(e) => save({ vision_mode: e.target.value })}>
+            <option value="lazy">Lazy (load projector only when needed)</option>
+            <option value="always">Always load mmproj</option>
+            <option value="off">Off</option>
           </select>
         </label>
         <label>Allowed directories (one per line)
           <textarea className="field" rows={4} defaultValue={(settings.allowed_directories || []).join("\n")}
             onBlur={(e) => save({ allowed_directories: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })} />
+        </label>
+        <label className="row">
+          <input type="checkbox" checked={!!settings.inference?.vision} onChange={(e) => save({ inference_vision: e.target.checked })} />
+          Load vision projector (uses extra VRAM; leave off for text/tool work)
         </label>
         <label className="row">
           <input type="checkbox" checked={settings.browser?.headless} onChange={(e) => save({ browser_headless: e.target.checked })} />
@@ -153,6 +214,28 @@ export function SettingsPage() {
         <label className="row">
           <input type="checkbox" checked={settings.backup_enabled} onChange={(e) => save({ backup_enabled: e.target.checked })} />
           Create backups before overwriting files
+        </label>
+      </div>
+
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Self-development trial budget</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Isolated worktrees never auto-merge. Paid workers stay off unless you set a spend or invocation limit above zero.
+        </p>
+        <label>Maximum duration (hours)
+          <input type="number" value={settings.self_dev?.max_duration_hours ?? 12} onChange={(e) => save({ self_dev_max_duration_hours: Number(e.target.value) })} />
+        </label>
+        <label>Maximum paid spend (€)
+          <input type="number" value={settings.self_dev?.max_paid_spend_eur ?? 0} onChange={(e) => save({ self_dev_max_paid_spend_eur: Number(e.target.value) })} />
+        </label>
+        <label>Maximum paid worker invocations
+          <input type="number" value={settings.self_dev?.max_paid_invocations ?? 0} onChange={(e) => save({ self_dev_max_paid_invocations: Number(e.target.value) })} />
+        </label>
+        <label>Maximum consecutive failures
+          <input type="number" value={settings.self_dev?.max_consecutive_failures ?? 3} onChange={(e) => save({ self_dev_max_consecutive_failures: Number(e.target.value) })} />
+        </label>
+        <label>Experimental Jarvis port
+          <input type="number" value={settings.self_dev?.experimental_port ?? 4781} onChange={(e) => save({ self_dev_experimental_port: Number(e.target.value) })} />
         </label>
       </div>
 

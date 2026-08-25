@@ -3,16 +3,34 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..config import load_settings, save_settings
+from ..agent.agent_benchmark import (
+    apply_expected_solution,
+    check_case,
+    format_prompt,
+    get_case,
+    list_results as list_agent_results,
+    list_suite,
+    prepare_case,
+    record_case_result,
+    empty_metrics,
+)
+from ..config import data_dir, load_settings, save_settings
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
+from ..inference.backends import probe_remote_server
+from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
-from ..inference.profiles import available_profiles
+from ..inference.profiles import available_profiles, declared_profiles
 
 router = APIRouter(prefix="/api/model", tags=["model"])
 
 
 class LoadBody(BaseModel):
     profile: str | None = None
+
+
+class HarnessBody(BaseModel):
+    live: bool = False
+    background: bool = False
 
 
 @router.get("")
@@ -27,12 +45,32 @@ async def model_status():
             "thinking": p.thinking,
             "context_size": p.context_size,
             "description": p.description,
+            "escalation_only": p.name == "expert",
         }
         for p in available_profiles()
     ]
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
+    snapshot["harness"] = load_last_report()
     return snapshot
+
+
+@router.get("/probe")
+async def probe_inference():
+    settings = load_settings()
+    probe = await probe_remote_server(
+        settings.inference.host,
+        settings.inference.port,
+        settings.inference.api_key,
+        timeout=8,
+    )
+    return {
+        "backend": settings.inference.backend,
+        "host": settings.inference.host,
+        "port": settings.inference.port,
+        "base_url": f"http://{settings.inference.host}:{settings.inference.port}/v1",
+        **probe,
+    }
 
 
 @router.get("/benchmarks")
@@ -65,6 +103,23 @@ async def capture_benchmark():
         "task_success_rate": row.task_success_rate,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }}
+
+
+@router.get("/harness")
+async def model_harness():
+    return load_last_report() or {"ran_at": None, "model_available": False, "blocked_reason": "not run yet"}
+
+
+@router.post("/harness/run")
+async def run_model_harness():
+    report = await run_harness(
+        loaded=MANAGER.state.loaded,
+        chat=MANAGER.provider.chat if MANAGER.provider else None,
+        refresh_resources=MANAGER.refresh_resources,
+        state=MANAGER.state,
+        persist=True,
+    )
+    return report.as_dict()
 
 
 @router.post("/load")

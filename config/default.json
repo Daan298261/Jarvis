@@ -8,24 +8,38 @@
     "host": "127.0.0.1",
     "port": 8088,
     "profile": "balanced",
-    "context_size": 32768,
+    "context_size": 16384,
+    "vision": false,
     "flash_attn": "auto",
     "fit": true,
     "fit_target_mib": 1024,
     "cache_type_k": "q8_0",
     "cache_type_v": "q8_0",
     "threads": 0,
-    "auto_load": true
+    "auto_load": true,
+    "api_key": "",
+    "remote_model": ""
   },
   "autonomy": "trusted",
+  "professional_mode": false,
   "default_timeout_seconds": 1800,
   "retry_limit": 4,
   "execution_mode": "balanced",
   "logging_level": "INFO",
   "backup_enabled": true,
   "browser": {
+    "backend": "playwright",
     "headless": false,
-    "timeout_ms": 30000
+    "timeout_ms": 30000,
+    "browser_use_model": "Qwen3.5-27B"
+  },
+  "self_dev": {
+    "max_duration_hours": 12,
+    "max_paid_spend_eur": 0,
+    "max_paid_invocations": 0,
+    "max_consecutive_failures": 3,
+    "experimental_port": 4781,
+    "auto_merge": false
   },
   "allowed_directories": [],
   "mcp_servers": []

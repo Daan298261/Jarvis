@@ -12,12 +12,19 @@ from app.agent.workflows import (
 
 def test_builtins_cover_requested_templates():
     ids = {item.id for item in builtin_workflows()}
-    assert {"debug-project", "research-spreadsheet", "organize-files", "browser-extract", "maintenance-job"} <= ids
+    assert {"debug-project", "research-spreadsheet", "organize-files", "browser-extract", "browser-form", "browser-procedure", "maintenance-job"} <= ids
     debug = get_workflow("debug-project")
     assert debug is not None
     assert debug.builtin
     assert debug.execution_mode == "reliable"
     assert any("{{path}}" in step.prompt for step in debug.steps)
+
+
+def test_guide_includes_voice_and_command():
+    from app.agent.workflows import GUIDE_SECTIONS
+
+    ids = {item["id"] for item in GUIDE_SECTIONS}
+    assert {"command", "modes", "voice", "memory"} <= ids
 
 
 def test_render_and_compose_substitute_parameters():

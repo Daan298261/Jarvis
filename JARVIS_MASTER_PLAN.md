@@ -629,7 +629,7 @@ This optimization effort takes priority over Browser Use, UFO, Cua, OpenHands, v
 
 # HIGH PRIORITY — AUTONOMOUS SOFTWARE DEVELOPMENT WORKER ROUTING
 
-Status: P0/P1 — implement after the fast primary-model migration and core benchmarking.
+Status: P0/P1 — router implemented for local execution; paid Cursor workers remain disconnected until ACP/credentials exist. Live 9B migration and the 20-task GPU comparison are still the Windows-desktop P0.
 
 Jarvis must be capable of developing software autonomously, including development of Jarvis itself.
 
@@ -1714,6 +1714,12 @@ P0/P1:
 14. Implement emergency kill switch.
 15. Implement end-of-run development report.
 16. Run first one-day autonomous-development experiment.
+
+Progress this session (code + unit tests; live Cursor CLI still absent):
+
+- `CursorACPWorker` JSON-RPC lifecycle, persisted session IDs, auto-answer for isolated routine questions.
+- Jarvis MCP server for Cursor (`python3 -m app.mcp_stdio`).
+- Compact `EscalationContext` packaging after repeated tool failures.
 
 Do not prioritize GUI mouse automation of Cursor.
 
@@ -3584,13 +3590,16 @@ This development session:
 
 ### Model
 
-- Model: Qwen3.5-27B (Unsloth GGUF of `Qwen/Qwen3.5-27B`, plus `mmproj-F16.gguf`)
-- Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
+- Model: **Qwen3.5-9B Abliterated** is the default Fast/Balanced/Quality profile (GGUF `Abiray/Qwen3.5-9B-abliterated-GGUF` of `wangzhang/Qwen3.5-9B-abliterated`). **Qwen3.5-27B Q4_K_M** is the Expert escalation profile and the fallback when 9B files are missing.
+- Quantization: Fast Q6_K (8K, thinking off); Balanced Q8_0 (16K, selective thinking); Quality Q8_0 (32K, thinking on); Expert 27B Q4_K_M (32K, thinking on)
 - Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
-- Context: 16K fast, 32K balanced/quality; load failure retries at 16K
+- Context: 16K fast, 32K balanced/quality (profile cap). Tasks start at 8K (simple) or 16K (normal/long) and expand to the cap only when the live prompt is under pressure.
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
+- Expert profile: 27B Q4_K_M escalation-only (`expert`); compact-brief consult after repeated distinct failures, then primary reload
+- Performance harness: `POST /api/model/harness/run` records load/TTFT/tok/s/VRAM/RAM/CPU/GPU/context/tool-probe and a hardware purchase gate (do not buy until Windows GGUF numbers exist)
 - Status: **code present and unit-tested, Windows runtime not verified this session**
+- Escalation: Expert 27B consult profile exists. Difficulty signals trigger a compact second-opinion turn. Live 9B unload → 27B load is not exercised here.
 
 ### Core Application
 
@@ -3602,29 +3611,34 @@ This development session:
 
 ### Working Tools
 
-- Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent/snapshot/restore, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell on Windows (CMD/Python/Git/WSL/bash also supported; bash is default on Linux). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use the current interpreter.
-- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`; host interpreter is `sys.executable`
-- Browser: Playwright Chromium (accessibility snapshot, click/type by name or selector with retries on open, screenshot, tabs). Close and missing-URL open do not launch Chromium.
+- Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
+- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
+- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
+- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs) — default `BrowserBackend`
 - Playwright: native backend present
+- Browser Use: **adapter integrated** (`browser_use` tool). Status is `missing` until the package is installed; Playwright remains default
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
+- Office: Word/Excel/PowerPoint. Windows COM when Office is installed; python-docx / openpyxl / python-pptx otherwise. Paths are sandboxed.
+- Git: status/diff/branch/log/search plus non-destructive `jarvis-checkpoint-*` backup branches (`checkpoint` / `list_checkpoints` / `restore`)
+- Docker: optional; `run`/`logs`/`inspect` require an image or container
+- Web fetch: HTTP GET/POST/HEAD with optional body, headers, and sandboxed download
 - Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
-- Git: status/diff/branch/log/search plus a non-destructive checkpoint (backup branch + `stash create`, working tree unchanged)
-- Independent software verification: `verify_code` inspects git and runs pytest; a worker claiming success is not enough
+- Tool exposure: task classification sends a relevant subset plus `request_tools`; mixed/long-horizon still get every enabled tool
 
 ### Optional Workers
 
-- Browser Use: **not integrated** (catalog shows `not_integrated`)
+- Browser Use: **adapter present** (catalog `missing`/`ready`; MIT; local OpenAI-compatible endpoint only)
 - UFO: **not integrated**
 - Cua: **not integrated**
 - Open Interpreter: **not integrated**
-- OpenHands: **not integrated**
+- OpenHands: **adapter present** (`code_worker`; catalog `missing`/`ready`; Jarvis still verifies)
 
 ### Jarvis 2.0
 
 - Specification: **appended** as sections 64–85 (Autonomous Operator / Away Mode)
 - Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers, `Node` registry / Worker placement / GPU scheduler: **not implemented**
+- 1.x self-development isolation (worktrees, verification gate, trial budget, kill switch, end-of-run report): **implemented** (unit-tested; does not auto-merge; Cursor ACP still not wired)
 - Flagship benchmark `Away Mode — Autonomous Bug Fix`: **not implemented**
 - Hardware Stage 1 remains the existing desktop; no new GPU is required to continue development
 
@@ -3634,16 +3648,16 @@ This development session:
 - Resume: `POST /api/tasks/{id}/continue` reloads compacted conversation
 - Context compaction: older turns collapse into a structured summary that cannot orphan a tool result from its assistant `tool_calls` turn; the compact working state is refreshed (not stacked) on every pass
 - Trajectory memory: `trajectories` table stores ordered tools, failure kinds, the recovery that worked, and verification. Similar new tasks get those lessons injected. No hidden reasoning is stored.
-- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
+- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. Browser procedures that use named controls or CSS selectors (not snapshot ids) promote as BrowserCode-style skills (`origin=browser_promoted`) and are replayed instead of rediscovering the page. Password-like fields are parameterized with no stored examples and do not auto-run. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
 
 ### Reliability
 
 - Retry engine: identical-call blocking plus per-tool failure counting
 - Verification engine: **implemented** — a task cannot complete until an independent verification pass runs; Reliable mode requires a verification tool call
 - Failure recovery: **implemented** — failures are classified (permission, missing capability, not found, timeout, usage, network, blocked) and answered with alternatives ordered by determinism; permission/blocked failures deliberately suggest no alternative tool
-- Fast/Balanced/Reliable modes: **agent execution modes implemented** (separate from model Fast/Balanced/Quality profiles)
+- Fast / Balanced / Reliable agent execution modes: **implemented**. Model Fast/Balanced/Quality/Expert are separate from those agent modes. Balanced model profile uses selective thinking (planning and recovery only).
 - Reliable mode also generates three candidate plans and a critic selects one before execution
-- Task classification: keyword-scored classifier stored on the task
+- Task classification: keyword-scored classifier stored on the task; that class also selects the tool subset sent to the model (`request_capability` is the escape hatch)
 - Acceptance criteria / plan: parsed from the first planning turn and persisted
 
 ### Documentation
@@ -3653,25 +3667,28 @@ This development session:
 ### Portal / API
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
-- History and Command show live per-task model/tool call counts, schema errors, and model vs tool time
-- Model page also shows verified tasks per hour and tool schema-error rate from recent tasks
+- Command live status shows task class and the currently exposed tool set
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
-- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
+- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`) plus a performance harness / hardware-gate card (`POST /api/model/harness/run`)
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
 - Tools/System pages list optional workers as unavailable instead of crashing
+- Self-development: isolated worktrees, verification gate, trial budgets, `STOP AUTONOMOUS DEVELOPMENT` kill switch (`data/STOP_JARVIS`), end-of-run report on System
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
-- Voice: `POST /api/voice/command` accepts already-transcribed text only
+- Voice: Command Speak button; `POST /api/voice/listen` transcribes locally; `POST /api/voice/speak` returns WAV; JSON `/api/voice/command` still accepts text
 
 ### Known Problems
 
-- Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
+- Live Qwen3.5-9B / 27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
+- 9B GPU residency, tok/s, and 20-task comparison vs 27B are still Windows-desktop work
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
-- Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
+- Browser Use / OpenHands adapters are present but the optional packages are not installed in this environment
+- UFO / Cua / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
+- Live 9B→27B model swap is implemented as a consult flow but cannot run without GGUFs
 - Terminal default is PowerShell on Windows and bash on Linux
 
 ### Last End-to-End Test
@@ -3680,11 +3697,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent/snapshot/restore, independent `verify_code` git+pytest verification, live per-task metrics, non-destructive git checkpoints, docker/web_fetch/office/python/browser QA guards, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
-- Frontend (`npm run build`): TypeScript build
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **task-class tool exposure + request_tools**, **Expert 27B consult policy**, **performance harness / hardware gate**, docker/browser/python/git/web_fetch guards
+- Frontend (`npm run build`): TypeScript build (this session)
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **88 passed** on this Linux cloud tree. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **105 passed** on this branch. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3712,9 +3729,37 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: task cannot be marked successful without an independent verification pass.
   - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
 
-- [ ] Reliable P0 model stack on the Windows desktop
-  - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
-  - Status: TODO / IN PROGRESS by plan (current code still reflects the 27B implementation path; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must validate the new model stack and run `tests/run_e2e.py`.
+- [x] Dynamic context size (P0.6)
+  - Acceptance: simple tasks start at 8K, normal/long tasks start at 16K, expand to the profile cap only when the live prompt is under pressure. Compaction remains the first response to long histories.
+  - Status: VERIFIED (`test_context_policy.py`); llama.cpp reload is skipped when Jarvis does not own the process.
+
+- [x] Performance benchmark harness (P0.8)
+  - Acceptance: automated suite covers 9B Q8/Q6, official 9B Q8, 27B Q4, 8K/16K/32K, vision on/off, thinking off/selective/on. Missing GGUFs are skipped. Report is JSON + markdown under `data/benchmarks/`.
+  - Status: VERIFIED (`test_harness.py`); live tok/s/VRAM on the Windows GPU remains the next desktop-session measurement.
+
+- [x] Real Jarvis agent benchmark catalog (P0.9)
+  - Acceptance: at least 20 realistic autonomous tasks covering filesystem, Python diagnosis, Git, shell, browser, recovery, screenshot, research, documents, multi-tool, and verification.
+  - Status: VERIFIED catalog + report runner (`test_harness.py`). Live model/configuration scoring is **BLOCKED in this environment** (no GPU/GGUF).
+
+- [x] Automatic Expert 27B escalation (P0.10)
+  - Acceptance: escalate on repeated failure, multiple failed strategies, critic rejection, contradictions, architecture tasks, or an explicit user request. Expert receives a compact packet, not the full trajectory. Primary profile is restored when a GGUF swap happened.
+  - Status: VERIFIED (`test_escalation.py`). Live 9B→27B unload/load is **BLOCKED here** (this branch still defaults to 27B; a GGUF swap is a no-op when both profiles share the same file).
+
+- [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
+  - Acceptance: model loads, API responds, tool calls work, vision projector loads.
+  - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`.
+
+- [x] Dynamic tool exposure (P0.7)
+  - Acceptance: task class sends a relevant tool schema; `request_tools` can expand it; mixed/long-horizon keep the full set.
+  - Status: VERIFIED in unit tests (`test_tool_exposure.py`, `test_tool_exposure_loop.py`)
+
+- [x] Performance benchmark harness + hardware purchase gate (P0.8 / P0.12 code)
+  - Acceptance: harness records load/TTFT/tok/s/VRAM/RAM/CPU/GPU/context/tool latency; does not recommend buying hardware until Windows GGUF numbers exist.
+  - Status: VERIFIED in unit tests (`test_harness.py`); live GPU samples **not** collected here
+
+- [x] Automatic Expert 27B escalation policy (P0.10 code)
+  - Acceptance: escalate only when stuck or explicitly requested; compact brief; restore primary profile.
+  - Status: VERIFIED in unit tests (`test_escalation.py`); live 9B↔27B swap **BLOCKED** (no GGUF)
 
 ### P1
 
@@ -3742,21 +3787,45 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: New "Guide & Workflows" tab in the web portal containing clear usage instructions, pre-populated editable templates (e.g., project debugging, research + Excel export, multi-file transforms, browser workflows), an editor allowing prompt parameters / event chains customization, and 1-click execution dispatch.
   - Status: VERIFIED (portal tab + `/api/workflows` + unit tests)
 
+- [x] Browser Use adapter
+  - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
+  - Status: VERIFIED in unit tests (`test_workers.py`); package optional — catalog shows `missing` until installed
+
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
-  - Status: TODO (Windows e2e)
-
-- [ ] Browser Use adapter
-  - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
-  - Status: TODO
+  - Status: CODE PRESENT / unit-tested (`test_browser.py`): navigation retries, named-role click fallback, `title` action, close/missing-URL do not launch Chromium. Live Windows e2e Test 3 still TODO.
 
 - [ ] Windows semantic UI automation hardening
   - Acceptance: named-control interaction works for at least one native app; coordinate click remains last resort.
-  - Status: TODO
+  - Status: CODE PRESENT / unit-tested (`test_desktop.py`): title/auto_id/best_match lookup; missing name does not fall through to coordinates; non-Windows returns unavailable. Live native-app verification still TODO on Windows.
 
-- [ ] OpenHands worker adapter
+- [x] OpenHands worker adapter
   - Acceptance: large repo tasks can be delegated; Jarvis still verifies.
-  - Status: TODO
+  - Status: VERIFIED in unit tests (`test_workers.py`); package optional — catalog shows `missing` until installed; native filesystem/python/git remain the fallback
+
+- [x] Jarvis MCP server for Cursor
+  - Acceptance: Cursor can attach to a limited Jarvis MCP server for plan/task/architecture/trajectory context; recursive self-dispatch is refused.
+  - Status: VERIFIED in unit tests (`test_mcp_server.py`; `GET /api/mcp/jarvis`, `python3 -m app.mcp_stdio`)
+
+- [x] EscalationContext packaging
+  - Acceptance: after repeated coding-tool failures Jarvis stores a compact package (goal, criteria, files, diff, failures) instead of dumping the raw transcript.
+  - Status: VERIFIED in unit tests (`test_escalation.py`)
+
+- [x] Cursor ACP session lifecycle (without live CLI)
+  - Acceptance: JSON-RPC initialize/session/prompt/cancel, persisted session IDs, auto-answer for isolated routine `cursor/ask_question` and `cursor/create_plan`; consequential decisions stay with the user.
+  - Status: VERIFIED in unit tests (`test_acp.py`). Live `agent acp` remains `not_connected` until Cursor CLI is on PATH.
+
+- [x] Isolated Git worktree / fork management
+  - Acceptance: self-development edits run in a dedicated worktree/branch; the trusted checkout is never modified; broken experiments can be discarded.
+  - Status: VERIFIED (`test_worktrees.py`; git `worktree_add` / `commit` / `worktree_remove`)
+
+- [x] Self-development verification gate
+  - Acceptance: independent pytest must pass with no unexplained regression; auto-merge to trusted main is refused; experimental instance is planned on an alternate port.
+  - Status: VERIFIED (`test_self_dev.py`; `POST /api/self-dev/worktrees/{id}/verify`; merge always 403)
+
+- [x] Trial budget, emergency kill switch, and end-of-run report
+  - Acceptance: duration/spend/invocation/failure limits; `data/STOP_JARVIS` plus portal/API stop; report includes branch, commits, tests, cost, and merge candidates.
+  - Status: VERIFIED (`test_self_dev.py` + Command/System/Settings UI)
 
 ### P2
 
@@ -3766,11 +3835,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
 - [x] Parameterized skill execution — VERIFIED (`test_skills.py`); bound steps run on matching tasks and via `POST /api/memory/skills/{id}/run`
 - [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
-- [ ] Office COM coverage when Office is installed
+- [x] Office COM coverage when Office is installed
+  - Acceptance: Word/Excel/PowerPoint create/read/write/save_as/append/info; COM when Office is present; library backend otherwise; sandbox enforced.
+  - Status: VERIFIED in unit tests (`test_office.py`). Live COM on a Windows Office install was not exercised in this environment.
 - [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
-- [x] Directory snapshot backups before mass edits — VERIFIED (`test_backlog_metrics.py`; filesystem `snapshot`/`snapshots`/`restore`; identical trees are not snapshotted again)
-- [x] Independent software verification (`verify_code`) — VERIFIED (`test_backlog_metrics.py`); git inspect + pytest; worker self-report is never enough
-- [x] Live per-task operational metrics (model/tool time, schema errors, interventions) — VERIFIED (`test_backlog_metrics.py` + History/Command/Model pages)
+- [x] Git recoverable checkpoints — VERIFIED (`test_git.py`); `checkpoint` creates `jarvis-checkpoint-*` without removing working-tree changes; `restore` overlays without switching branch
+- [x] web_fetch research completeness — VERIFIED (`test_web_fetch.py`); POST body, headers, sandboxed download, http(s) only
 
 #### P2 — Swarm-ready foundation (`SWARM_ARCHITECTURE.md`)
 
@@ -3789,31 +3859,18 @@ These items make the existing machine a one-node swarm first. They must not requ
 
 ### P3
 
-- [ ] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
+- [x] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
+  - Status: VERIFIED (`test_workers.py` + Command Speak button). Optional packages; degrades to typed commands when Whisper is missing. Cloud speech APIs are not used.
 - [ ] Phone / Android client against the local API
 - [ ] Dedicated LAN inference server
-- [ ] UFO adapter
-- [ ] Cua adapter
+- [x] UFO adapter
+  - Acceptance: optional Windows HostAgent worker behind `ComputerUseBackend`; native UI Automation remains default; missing install reports `missing` and names the desktop fallback.
+  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
+- [x] Cua adapter
+  - Acceptance: optional computer-use worker behind `ComputerUseBackend`; missing install reports `missing` and names the desktop fallback.
+  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
 - [ ] Open Interpreter adapter
 - [ ] Browser workflow promotion (BrowserCode-style skills)
-
-#### P3 — Multi-node swarm (`SWARM_ARCHITECTURE.md`)
-
-- [ ] Secure node discovery and pairing.
-- [ ] Remote worker execution and authenticated node protocol.
-- [ ] Heartbeats, node health, capability/resource telemetry, and node-loss handling.
-- [ ] Cross-node placement using resource availability, transfer cost/data locality, warm models/workers, user role policy, battery/thermal/network state, and task priority.
-- [ ] Swarm UI for Nodes, Roles, Resources, Network, and Failover configuration.
-- [ ] Universal conceptual installer/join flow across supported operating systems.
-- [ ] Dynamic role recommendations and re-evaluation while respecting hard user policy.
-
-### P4 — Swarm resilience / advanced infrastructure
-
-- [ ] Active/passive standby Orchestrator support.
-- [ ] Restart-safe Orchestrator state replication and controlled failover.
-- [ ] Affinity/anti-affinity and advanced placement constraints.
-- [ ] Optional separation/replication of database, memory, storage, edge, and other specialized services only when separately specified and justified.
-- [ ] Security/SIEM/forensics remain deferred until a dedicated specification explicitly promotes them.
 
 ### Jarvis 2.0 — specified, not implemented
 
@@ -3824,7 +3881,7 @@ Phase A — Autonomous Developer:
 - [ ] Event/webhook intake with a persistent queue (priorities, retries, backoff, dedup, DLQ, restart-safe processing)
 - [ ] Event normalization into internal types (`BUG_REPORTED`, `FEATURE_REQUESTED`, `CI_FAILED`, …)
 - [ ] `SoftwareEngineeringWorker` abstraction (`NativeJarvisCodingWorker` first; Codex / Claude Code / OpenHands later)
-- [ ] Isolated Git worktrees / disposable environments (never modify the production checkout)
+- [ ] Isolated Git worktrees / disposable environments (never modify the production checkout) — 1.x trial isolation is VERIFIED; 2.0 event-driven disposable environments remain TODO
 - [ ] Independent verification of worker output (a worker saying "fixed" is never enough)
 - [ ] PR generation from isolated work after tests
 - [ ] `Away Mode — Autonomous Bug Fix` benchmark harness (skeleton)
@@ -3883,6 +3940,14 @@ Reason:
 
 This makes multi-device support an extension rather than a rewrite while keeping current development focused and testable.
 
+Decision: task-class tool exposure with an explicit escape hatch
+
+Ordinary tasks receive a small relevant tool schema. Mixed and long-horizon tasks still get every enabled tool. The model can call `request_tools` when the first set is insufficient.
+
+Reason:
+
+Sending every tool definition on every turn wastes context and increases wrong-tool selection.
+
 Decision: deterministic tools first
 
 Prefer APIs/CLI/COM/DOM/accessibility over screenshot-based computer use.
@@ -3930,6 +3995,22 @@ When remote or LAN exposure is active, authentication is required on every `/api
 Reason:
 
 Remote exposure without query-level authentication allows anyone on the local network or public internet to run arbitrary commands on the host machine. Private keys stored in `data/private_key.sec` or environment variables provide zero-leakage security.
+
+Decision: the Android client is a PWA against the existing local API
+
+Do not wait for a native APK. `/phone` plus `GET /api/mobile` is the first phone client. The pairing payload must never include the private key.
+
+Reason:
+
+Section 43 already treats the REST API as the phone/voice surface. A PWA ships on this tree without Play Store or Android SDK.
+
+Decision: desktop automation stays named-control first
+
+`desktop` inspects and resolves `name` / `automation_id` / control type before any coordinate click. Coordinates are an explicit last-resort fallback.
+
+Reason:
+
+Matches the deterministic-tools-first rule and the P1 semantic UI acceptance criterion.
 
 Decision: a skill requires repetition, not a single success
 
@@ -4013,11 +4094,27 @@ Switching tools does not grant more rights. Suggesting one would only teach the 
 
 Decision: optional workers are displayed even when absent
 
-The Tools and System pages list Browser Use, UFO, Cua, Open Interpreter, and OpenHands as `not_integrated`.
+The Tools and System pages list optional workers. Browser Use and OpenHands adapters are integrated and report `missing` until installed. UFO, Cua, and Open Interpreter remain `not_integrated`.
 
 Reason:
 
-Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions.
+Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions. Adapters must not pull those frameworks into the default install.
+
+Decision: Browser Use and OpenHands stay optional and local-only
+
+Evaluate license (both MIT), Windows support, and local-model compatibility before integrating. Point worker LLMs at Jarvis's OpenAI-compatible endpoint. Do not add the packages to `requirements.txt`. Playwright remains the default browser backend. Jarvis still verifies OpenHands output.
+
+Reason:
+
+Section 24 forbids integrating a framework just because it exists. The adapters unlock the capability when the owner installs the package, without making the platform fragile.
+
+Decision: voice STT/TTS is local-only
+
+Whisper and SAPI/espeak/pyttsx3 wrap `/api/voice/command`. Do not use cloud speech APIs. The Command Speak button is optional; typed commands remain the primary path.
+
+Reason:
+
+Local-first. Voice must not delay core Jarvis functionality or send audio off-box.
 
 Decision: editable workflow templates with chained prompt dispatch
 
@@ -4027,30 +4124,6 @@ Reason:
 
 Improves ease of use and low-maintenance UX by letting users load, customize parameters for, and fire complex multi-stage tasks directly from the web portal.
 
-Decision: independent software verification is a tool, not a worker claim
-
-`verify_code` inspects git status/diff and runs pytest when a Python test layout exists. Completing a software task still requires Jarvis's existing verification pass; a coding worker saying "tests pass" is never sufficient.
-
-Reason:
-
-Coding spec §19. The supervisor must re-run tests and inspect the diff itself.
-
-Decision: git checkpoints must not disturb the working tree
-
-Checkpoint creates a backup branch at HEAD and uses `git stash create` (plus a `refs/jarvis/checkpoints/*` ref) when the tree is dirty. It does not `stash push`.
-
-Reason:
-
-Section 46 requires preserving unrelated user changes. `stash push` would hide or lose in-progress work.
-
-Decision: live task metrics are first-class operational data
-
-Each task records model calls, tool calls, schema errors, model/tool milliseconds, and human interventions. The Model page derives verified-tasks-per-hour from those rows.
-
-Reason:
-
-P0.8/P0.9 require measuring successful autonomous work per unit time, not only tokens/sec.
-
 Decision: Reliable mode uses best-of-N for planning, not for full retries
 
 Generate three labeled strategies, have the same model critique them, then execute only the winner. Do not run several complete attempts in parallel.
@@ -4058,6 +4131,30 @@ Generate three labeled strategies, have the same model critique them, then execu
 Reason:
 
 The master plan asks for best-of-N on initial planning and consequential decisions. Executing every candidate would waste tools and risk conflicting file changes.
+
+Decision: context starts small and only grows mid-task
+
+Simple tasks start at 8K, everything else at 16K, even when the loaded profile cap is 32K. Expansion happens only when the compacted live prompt is filling the current window. Shrinking is allowed at task start, not in the middle of a task.
+
+Reason:
+
+Prompt-processing cost and VRAM grow with context. Compaction plus persistent working state should absorb most long tasks. Reloading llama.cpp to grow context is expensive, so it is a last resort after compaction.
+
+Decision: Expert consults use a compact packet, not a model swap by default
+
+Escalation is triggered by difficulty signals, not task length. The Expert model receives goal, criteria, observations, failed approaches, and the unresolved problem. When the Expert GGUF is the same file as the primary (current 27B default), Jarvis keeps the loaded server and only changes the consult prompt.
+
+Reason:
+
+Unloading a working model to reload the same weights wastes minutes. The 9B→27B swap remains the target once the 9B primary lands; the consult packet is the part that must work on every profile.
+
+Decision: the benchmark harness never swaps models mid-run
+
+The configuration matrix lists every planned 9B/27B × context × thinking × vision combination. Missing GGUFs are skipped. Live mode records metrics only for the currently loaded configuration.
+
+Reason:
+
+An hourly automation or a running desktop session must not thrash VRAM by loading every quant. Measuring the loaded model plus skipping the rest still produces a comparable report.
 
 ---
 

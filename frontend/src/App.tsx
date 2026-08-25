@@ -9,10 +9,12 @@ import { McpPage } from "./pages/Mcp"
 import { SettingsPage } from "./pages/Settings"
 import { SystemPage } from "./pages/System"
 import { WorkflowsPage } from "./pages/Workflows"
+import { PhonePage } from "./pages/Phone"
 import { api } from "./api"
 
 export default function App() {
   const [model, setModel] = useState<any>(null)
+  const [navOpen, setNavOpen] = useState(false)
 
   useEffect(() => {
     const tick = () => api<any>("/api/model").then(setModel).catch(() => undefined)
@@ -21,15 +23,28 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
+  function closeNav() {
+    setNavOpen(false)
+  }
+
   return (
-    <div className="app">
+    <div className={`app${navOpen ? " nav-open" : ""}`}>
+      <header className="mobile-bar">
+        <button className="nav-toggle" type="button" aria-label="Open menu" onClick={() => setNavOpen((open) => !open)}>
+          Menu
+        </button>
+        <strong>JARVIS</strong>
+        <span className={`dot ${model?.loaded ? "on" : model?.loading ? "load" : "off"}`} />
+      </header>
+      {navOpen && <button className="nav-backdrop" type="button" aria-label="Close menu" onClick={closeNav} />}
       <aside className="sidebar">
         <div className="brand">
           <strong>JARVIS</strong>
           <span>Local desktop agent</span>
         </div>
-        <nav>
+        <nav onClick={closeNav}>
           <NavLink to="/" end>Command</NavLink>
+          <NavLink to="/phone">Phone</NavLink>
           <NavLink to="/history">History</NavLink>
           <NavLink to="/workflows">Guide & Workflows</NavLink>
           <NavLink to="/memory">Memory</NavLink>
@@ -42,7 +57,7 @@ export default function App() {
         <div className="side-status">
           <div>
             <span className={`dot ${model?.loaded ? "on" : model?.loading ? "load" : "off"}`} />
-            {model?.loaded ? "Qwen3.5-27B loaded" : model?.loading ? "Loading model" : "Model unloaded"}
+            {model?.loaded ? `${model.active_model || "Model"} loaded` : model?.loading ? "Loading model" : "Model unloaded"}
           </div>
           <div style={{ marginTop: 8 }}>{model?.quantization} · {model?.profile}</div>
         </div>
@@ -50,6 +65,7 @@ export default function App() {
       <main className="main">
         <Routes>
           <Route path="/" element={<ChatPage />} />
+          <Route path="/phone" element={<PhonePage />} />
           <Route path="/tasks/:id" element={<ChatPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />

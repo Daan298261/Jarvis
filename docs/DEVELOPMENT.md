@@ -21,7 +21,7 @@ FastAPI (backend/app)
             ▼
 InferenceBackend
   ├── llama.cpp — Jarvis starts llama-server (localhost:8088)
-  └── remote — health-check only (LM Studio, Ollama, vLLM, SGLang, LAN GPU)
+  └── remote / ollama / lmstudio / vllm / sglang — probe only (LAN GPU box, LM Studio, Ollama, vLLM, SGLang)
 ```
 
 The React portal is built into `frontend/dist` and served by FastAPI so operators have a single local URL. Vite is for development only.
@@ -38,29 +38,32 @@ backend/app/
   events.py               In-process event bus for WS + SSE
   hardware.py             CPU/RAM/GPU probe (nvidia-smi)
   api/                    REST routers (prefix /api/…)
-  agent/
+    agent/
     loop.py               AgentRuntime — create/continue/cancel, verification
+    thinking.py           Selective thinking (plan/recover vs routine tools)
+    context_policy.py     8K / 16K / 32K from task class + execution mode
     planning.py           ExecutionPolicy, task classification, best-of-N plan parse/select
+    coding_workers.py     Software-dev worker router (complexity 0–100, cheapest capable worker)
+    agent_benchmark.py    P0.9 20-task representative suite + scoring
     workflows.py          Guide copy + editable templates + compose_prompt
     recovery.py           Failure classes → alternative tools
     compaction.py         History summary that cannot orphan tool results
     trajectory.py         Cross-task lessons (no hidden reasoning)
     skills.py             Promote after 3 identical successful tool sequences
     queue_watcher.py      data/queue/pending file drop
+    worktrees.py          Isolated git worktrees for self-development
+    self_dev.py           Trial budget, kill switch, verification gate, reports
     prompts.py            System / plan / verify / critic prompts
-    verify_code.py        Independent git/pytest verification of software changes
-    metrics.py            Live per-task model/tool/schema counters
-  tools/
-    snapshots.py          Directory snapshot/restore helpers used by filesystem
-  inference/
+    inference/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
-    profiles.py           fast / balanced / quality GGUF profiles
+    profiles.py           fast / balanced / quality (9B) plus expert (27B)
   providers/              OpenAI-compatible chat + tool-call parsing
-  tools/                  Native tools + MCP proxy
+  workers/                Optional Open Interpreter adapter
+  tools/                  Native tools + MCP proxy + code_worker
   db/                     SQLAlchemy models, aiosqlite session, light migrations
 frontend/src/
-  App.tsx                 Routes: Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System
+  App.tsx                 Routes: Command, Phone, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System
   api.ts                  fetch helper + X-Jarvis-Key from localStorage
   pages/                  One page per portal tab (Workflows.tsx is Guide & Workflows)
 config/default.json       Checked-in defaults (copied into data/settings.json)
@@ -133,7 +136,7 @@ On Linux you can still:
 - Run pytest for non-Windows modules
 - Build the frontend (`npm run build`)
 
-You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal default is PowerShell; on Linux the agent should use `shell=bash`.
+You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal default is PowerShell on Windows and bash on Linux.
 
 ---
 
@@ -150,7 +153,7 @@ You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects
 | `JARVIS_URL` | `tests/run_e2e.py` base URL (default `http://127.0.0.1:4780`) |
 | `JARVIS_TEST_TIMEOUT` | e2e wait seconds (default 900) |
 
-`PUT /api/settings` is the programmatic settings API (autonomy, directories, inference backend/host/port, LAN/auth, browser headless, and so on). `auth_token` is never written back to `data/settings.json`.
+`PUT /api/settings` is the programmatic settings API (autonomy, directories, inference backend/host/port, LAN/auth, browser headless, `professional_mode`, `vision` lazy/always/off, and so on). `auth_token` is never written back to `data/settings.json`.
 
 Default allowed directories: Desktop, Documents, Downloads, repo root, `data/`. Tools refuse paths outside that list.
 
@@ -163,6 +166,7 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | Method | Path | Role |
 | --- | --- | --- |
 | GET | `/api/health` | Liveness (no auth) |
+| GET | `/api/mobile` | Phone/PWA pairing info (no auth, never includes the private key) |
 | WS | `/api/ws` | Live task events |
 | GET | `/api/auth/status` | Whether auth is on / key present |
 | POST | `/api/auth/verify` | Check a key |
@@ -175,13 +179,25 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | POST | `/api/tasks/{id}/cancel` | Cooperative cancel |
 | GET | `/api/tasks/{id}/events` | SSE stream |
 | GET/POST | `/api/queue`, `/enqueue`, `/process` | File-drop queue |
-| GET | `/api/model` | Load state + available profiles |
+| GET | `/api/model` | Load state + profiles + hardware gate + agent suite |
+| GET | `/api/model/hardware-gate` | P0.12 purchase recommendation (always defer until desktop evidence) |
+| GET | `/api/model/agent-suite` | P0.9 20-task catalog + recent results |
+| POST | `/api/model/agent-suite/run` | `{ case_id, simulate_success? }` prepare/score one case |
 | POST | `/api/model/load` | `{ profile? }` |
 | POST | `/api/model/unload` | Stop llama-server if Jarvis owns it |
+| GET | `/api/model/benchmarks` | Persisted tok/s / VRAM samples |
+| POST | `/api/model/benchmarks/snapshot` | Capture current resource snapshot |
+| GET | `/api/model/harness` | Last benchmark report + 20-task catalog |
+| POST | `/api/model/harness` | `{ live?, background? }` — dry-run matrix by default; live measures the loaded model only |
 | GET | `/api/tools`, `/api/tools/catalog` | Registry + optional-worker catalog |
+| GET | `/api/tools/coding-workers` | Software-dev worker catalog; `?prompt=` returns a route |
 | POST | `/api/tools/{name}/enable` / `disable` | Persist `disabled_tools` |
 | GET/PUT | `/api/settings` | Full settings dump / patch |
 | GET/POST/DELETE | `/api/mcp`, `/api/mcp/{id}`, `/refresh` | MCP servers |
+| GET | `/api/mcp/jarvis` | Built-in Jarvis MCP manifest for Cursor |
+| GET/POST | `/api/coding/mcp`, `/api/coding/mcp/call` | Invoke Jarvis MCP tools over HTTP |
+| GET | `/api/coding/escalations` | Compact EscalationContext packages |
+| GET/POST | `/api/coding/acp`, `/connect`, `/answer` | Cursor ACP status, session persist, auto-answer preview |
 | GET | `/api/memory/trajectories` | Trajectory memory |
 | GET/POST/DELETE | `/api/memory/skills` | Skills; `POST /skills/promote` |
 | POST | `/api/memory/skills/{id}/enable` or `disable` | Toggle skill |
@@ -192,9 +208,21 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | POST | `/api/workflows` | Save a preset under `data/workflows/` |
 | DELETE | `/api/workflows/{id}` | Delete a saved preset (not a builtin) |
 | POST | `/api/workflows/run` | Fill placeholders, compose stages, create a task |
+| GET | `/api/self-dev` | Isolated trial status, budget, kill switch, worktrees |
+| POST | `/api/self-dev/start` | Create a dedicated worktree/branch from a repo (never the running checkout) |
+| POST | `/api/self-dev/stop` | Emergency kill switch (`data/STOP_JARVIS`); cancels tasks, preserves Git |
+| POST | `/api/self-dev/resume` | Clear the kill switch |
+| POST | `/api/self-dev/worktrees/{id}/checkpoint` | Commit only inside the isolated worktree |
+| POST | `/api/self-dev/worktrees/{id}/verify` | Independent pytest gate; never auto-merges |
+| POST | `/api/self-dev/worktrees/{id}/discard` | Remove the experimental worktree only |
+| POST | `/api/self-dev/report` | End-of-run development report |
+| POST | `/api/self-dev/merge` | Always 403 during trials |
 | POST | `/api/voice/command` | `{ text, autonomy? }` — already-transcribed speech |
+| POST | `/api/voice/listen` | multipart `audio` — local Whisper, then create a task |
+| POST | `/api/voice/transcribe` | multipart `audio` — transcript only |
+| POST | `/api/voice/speak` | `{ text }` — local TTS WAV |
 
-Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from text.
+Voice stays on this machine. If Whisper is missing, type on Command as usual. Windows SAPI / espeak-ng / pyttsx3 provide TTS.
 
 ---
 
@@ -203,14 +231,16 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 `backend/app/agent/loop.py` is the orchestrator. A task:
 
 1. Classifies (`planning.classify_task`) and stores `task_class`
-2. Injects matching skills and trajectories into the system prompt
-3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
-4. Executes tool calls until the policy budget is spent
-5. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
-6. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
-7. Reliable mode also requires a verification **tool** call and a critic pass
-8. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
-9. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence
+2. Exposes only tools for that class (`agent/tool_exposure.py`); mixed/long-horizon tasks still get every enabled tool. `request_tools` expands the set. Command live status shows it.
+3. Injects matching skills and trajectories into the system prompt
+4. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
+5. Executes tool calls until the policy budget is spent
+6. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
+7. After several distinct failures, may consult the Expert 27B profile with a compact brief, then reload the primary model (`agent/escalation.py`)
+8. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
+9. Reliable mode also requires a verification **tool** call and a critic pass
+10. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
+11. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence
 
 Execution modes (`planning.POLICIES`) are **not** model profiles:
 
@@ -220,7 +250,7 @@ Execution modes (`planning.POLICIES`) are **not** model profiles:
 | balanced | 28 | no | no | 1 |
 | reliable | 40 | yes | yes | 3 (critic picks one; it does not run three full attempts) |
 
-Model profiles (`inference/profiles.py`): Fast / Balanced / Quality change quant, thinking, and context.
+Model profiles (`inference/profiles.py`): Fast / Balanced / Quality change quant, whether thinking is allowed, and the context ceiling. Per-turn thinking is selective (`agent/thinking.py`). Per-task context is 8K/16K/32K (`agent/context_policy.py`). The vision projector is omitted unless the task needs it (`inference/vision.py`).
 
 Autonomy (`tools/safety.py`): `interactive` confirms medium+ tools, `trusted` confirms high/irreversible, `autonomous` only pauses for irreversible patterns (disk format, credential changes, mass-delete, purchases, unsolicited external communications).
 
@@ -242,7 +272,7 @@ Context compaction (`agent/compaction.py`) must keep tool results paired with th
 
 MCP tools do not need a Python class: configure servers via the MCP page or `mcp_servers` in settings. They appear as `mcp_*` functions through `MCPProxyTool`.
 
-Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend.
+Do not add Browser Use / UFO / Cua / OpenHands / Open Interpreter as the primary app. Those are optional **workers** behind the existing orchestrator (see the master plan). Playwright remains the default browser backend. Browser Use and OpenHands adapters live in `backend/app/workers/` and register `browser_use` / `code_worker` tools that return "not installed" until the optional packages are present.
 
 ---
 
@@ -266,7 +296,7 @@ Keep the portal low-maintenance: Command is the main surface; History, Guide & W
 - `DELETE /api/workflows/{id}` — delete a saved preset only
 - `POST /api/workflows/run` — fill `{{parameter}}` placeholders, concatenate stages into one prompt, `AGENT.create_task(...)`
 
-Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `browser-extract`, `web-scrape-save`, `maintenance-job`. Placeholders use `{{key}}`. Running a workflow is still **one task**; stages are prompt structure, not separate orchestrator jobs.
+Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `browser-extract`, `browser-form`, `browser-procedure`, `web-scrape-save`, `maintenance-job`. Placeholders use `{{key}}`. Running a workflow is still **one task**; stages are prompt structure, not separate orchestrator jobs.
 
 ---
 
@@ -275,9 +305,12 @@ Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `b
 - Chat always goes through `ModelProvider` (`providers/base.py` → `OpenAICompatProvider`).
 - Process ownership belongs in `InferenceBackend`, not in the agent.
 - Local: `LlamaCppBackend.build_args` — `--jinja`, `--reasoning-format deepseek`, `--fit on` (or `--n-gpu-layers 99` if fit is off), optional `--mmproj`.
-- Remote: `RemoteOpenAICompatibleBackend` only waits on `/health`. Aliases include `remote`, `lmstudio`, `ollama`, `vllm`, `sglang`, `openai-compatible`.
+- Remote: `RemoteOpenAICompatibleBackend` (and Ollama/LM Studio/vLLM/SGLang subclasses) probe `/health`, `/v1/models`, and `/api/tags`. Aliases include `remote`, `lmstudio`, `ollama`, `vllm`, `sglang`, `openai-compatible`.
+- Optional `inference.api_key` and `inference.remote_model`. `GET /api/model/probe` reports reachability and advertised models.
+- Switching backend from a stock port also sets that family's default port (Ollama 11434, LM Studio 1234, …).
 - Unknown backend name + non-localhost host is treated as remote.
 - `InferenceManager.load` will adopt a server that is already healthy so a second Jarvis process does not spawn another llama-server.
+- `POST /api/model/harness/run` — collect load/TTFT/tok/s/VRAM/RAM/CPU/GPU/context/tool-probe metrics and a **do not buy hardware yet** gate. `GET /api/model` includes the last report.
 
 When changing CLI flags, extend `tests/test_inference_backends.py` rather than relying on a live GPU.
 
@@ -287,7 +320,7 @@ When changing CLI flags, extend `tests/test_inference_backends.py` rather than r
 
 SQLite file: `data/jarvis.db` (aiosqlite). Tests call `configure_database(path=tmp_path / "jarvis.db")` via the `jarvis_env` fixture.
 
-Tables: `tasks` (including live model/tool/schema metrics), `task_events`, `tool_calls`, `checkpoints`, `trajectories`, `skills`, `conversations`, `benchmark_samples`.
+Tables: `tasks`, `task_events`, `tool_calls`, `checkpoints`, `trajectories`, `skills`, `conversations`.
 
 Light additive migrations live in `db/session.py` (`_add_missing_columns`). Prefer a new column + default over a rewrite. There is no Alembic.
 
@@ -315,15 +348,16 @@ Current unit coverage (no GPU required):
 | `test_capabilities.py` | Catalog includes missing workers as unavailable |
 | `test_verification_loop.py` | Cannot complete without verification; Reliable needs a verify tool |
 | `test_compaction.py` | Tool results stay paired |
-| `test_inference_backends.py` | llama.cpp vs remote selection and CLI flags |
+| `test_inference_backends.py` | llama.cpp vs remote/Ollama/LM Studio selection, CLI flags, model-list parsing |
 | `test_recovery.py` / `test_recovery_loop.py` | Failure class → alternative tool |
 | `test_trajectory.py` | Record / recall |
 | `test_skills.py` | Promotion needs 3 repeats |
 | `test_auth.py` | 401 without key; header / bearer / query |
 | `test_queue.py` | File-drop watcher |
-| `test_benchmarks.py` | Persist tok/s and task success rate |
-| `test_terminal.py` | start/inspect/wait/kill |
-| `test_backlog_metrics.py` | verify_code, snapshots, live metrics, git checkpoint, docker/web_fetch/office/python QA |
+| `test_tool_exposure.py` / `test_tool_exposure_loop.py` | Task-class tool schemas and `request_tools` |
+| `test_escalation.py` | Expert 27B consult policy and restore |
+| `test_harness.py` | Performance harness + hardware purchase gate |
+| `test_qa_guards.py` | Docker targets, browser close, python/sys, terminal default, git checkpoint, web_fetch POST |
 
 `conftest.py` fixture `jarvis_env` points SQLite at a temp path, marks the model loaded, and applies autonomous settings.
 
@@ -356,9 +390,11 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
+- Parameterized skills execute bound steps after 3 matching successes (`POST /api/memory/skills/{id}/run`)
 - Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
 - Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
+- Live GPU measurement of every harness configuration requires the Windows desktop GGUFs
 
 ---
 

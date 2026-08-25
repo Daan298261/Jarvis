@@ -11,6 +11,7 @@ from typing import Any
 
 from ..config import data_dir
 from .loop import AGENT
+from .self_dev import kill_switch_active
 
 logger = logging.getLogger("jarvis.queue")
 
@@ -98,6 +99,9 @@ class QueueWatcher:
             await asyncio.sleep(self.poll_interval)
 
     async def process_pending(self) -> list[str]:
+        if kill_switch_active():
+            logger.info("Kill switch active; leaving queued files in pending")
+            return []
         root = queue_root()
         pending_dirs = [root / "pending"]
         processed_dir = root / "processed"
