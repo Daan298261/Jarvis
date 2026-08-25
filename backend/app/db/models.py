@@ -388,6 +388,40 @@ class NodeRolePolicy(Base):
     node: Mapped[Node] = relationship()
 
 
+class NodeBudget(Base):
+    """Configurable Jarvis resource budget for a Node.
+
+    Distinct from Node.resources_json, which is a hardware capacity snapshot.
+    """
+
+    __tablename__ = "node_budgets"
+
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), primary_key=True)
+    preset: Mapped[str] = mapped_column(String(32), default="balanced")
+    mode: Mapped[str] = mapped_column(String(32), default="static")
+    global_percent: Mapped[int] = mapped_column(Integer, default=50)
+    limits_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    node: Mapped[Node] = relationship()
+
+
+class ResourceLease(Base):
+    """Time-bounded claim against a Node's resource budget."""
+
+    __tablename__ = "resource_leases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), index=True)
+    claim_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    node: Mapped[Node] = relationship()
+
+
 class WorkerReport(Base):
     """Worker-reported results and verification requests. Never treated as completion."""
 
