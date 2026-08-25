@@ -15,6 +15,7 @@ from ..swarm.capabilities import list_all_capabilities
 from ..swarm.nodes import get_node, list_nodes
 from ..swarm.intelligence import dispatch_work, select_intelligence
 from ..swarm.placement import place_work
+from ..swarm.scoring import probe_node_warm_state
 from ..swarm.roles import (
     SWARM_ROLES,
     get_node_role_policies,
@@ -55,6 +56,8 @@ class PlacementRequest(BaseModel):
     worker_kind: str | None = None
     claim: dict | None = None
     ttl_seconds: int | None = 300
+    data_paths: list[str] | None = None
+    prefer_model: str | None = None
 
 
 class IntelligenceRequest(BaseModel):
@@ -118,6 +121,14 @@ async def swarm_node_detail(node_id: str):
     if not node:
         raise HTTPException(404, "Node not found")
     return node
+
+
+@router.get("/nodes/{node_id}/warm-state")
+async def swarm_node_warm_state(node_id: str):
+    node = await get_node(node_id)
+    if not node:
+        raise HTTPException(404, "Node not found")
+    return probe_node_warm_state(node)
 
 
 @router.get("/nodes/{node_id}/budget")

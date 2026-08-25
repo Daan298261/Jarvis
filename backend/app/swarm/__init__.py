@@ -14,6 +14,7 @@ from .nodes import get_node, list_nodes, register_localhost_node
 from .intelligence import dispatch_work, select_intelligence
 from .placement import place_work
 from .roles import get_swarm_roles
+from .scoring import probe_node_warm_state, score_candidate
 from .snapshot import swarm_snapshot
 from .workers import bind_workers_to_node, worker_catalog
 
@@ -30,7 +31,9 @@ __all__ = [
     "list_node_leases",
     "list_nodes",
     "place_work",
+    "probe_node_warm_state",
     "register_localhost_capabilities",
+    "score_candidate",
     "select_intelligence",
     "register_localhost_node",
     "release_lease",
