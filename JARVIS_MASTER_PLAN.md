@@ -20,6 +20,17 @@ The Android client that talks to the Windows Leader (link-device, AI-guided rout
 
 Filter: if a **new** idea would make home-network JARVIS more real, spec it. Never delete Taco-approved features.
 
+**Must remain in the spec set** (do not drop):
+
+1. This file: original 63-section body; Development Queue ticked with PR numbers; P2 swarm ticked; lazy mmproj **VERIFIED in code (PR #50)**.
+2. [`JARVIS_2.0.md`](JARVIS_2.0.md): approved sections 64–85, including **NovelProject**. Unchecked 2.0 queue headings in §58.
+3. [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md): P4/P5 kept. Founder OS is a reference, **not** a runtime dependency.
+4. [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md): AI-guided brand-agnostic router. Link-device asks login/pairing, explains WAN exposure, DIY vs Jarvis+router password, router access later used by security agents.
+5. [`HOME_IOT.md`](HOME_IOT.md): local-first house control.
+6. [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer): Blue home SIEM (detect/contain/evidence); Purple owned-net tests; Red/counter **disabled by default**. Offensive capability may be added **only** by Taco (manually) or PolitieGPT (LE bot) under the LE gate. Developers / CoS / PR fixer / home self-dev cannot; attempts refuse + audit.
+7. Architect owns all spec files (this file, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`). Executing bots do not edit them.
+
+
 Every development session must read this file before making substantial changes.
 
 The user should not be expected to manually maintain technical state, architecture notes, implementation status, or development priorities.
@@ -2112,6 +2123,14 @@ If a **new** idea would make home-network JARVIS/Cortana more real, add a spec. 
 Reason:
 
 Filter going forward is additive for home-JARVIS; deletion of approved work is forbidden.
+
+Decision: spec-set completeness (Taco pass)
+
+The spec set must keep all of: original 63-section master plan body; queue ticks with PR numbers; P2 swarm ticks; lazy mmproj VERIFIED in code (PR #50); Jarvis 2.0 §§64–85 including Novel (`JARVIS_2.0.md`); P4/P5 (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`, Founder OS not a dependency); Android link-device / AI-guided brand-agnostic router (`ANDROID_CLIENT.md`); home IoT (`HOME_IOT.md`); Blue / Purple / Red-gated (`SECURITY_AGENTS.md`); Architect-owns-specs. Offensive/red capability: Taco or PolitieGPT only.
+
+Reason:
+
+Taco: when this pass finishes, the PR must contain all of that. Do not drop any approved feature.
 
 Decision: swarm architecture remains a separate specification
 
