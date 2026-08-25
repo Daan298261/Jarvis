@@ -400,3 +400,54 @@ export async function postSwarmPlacement(body: SwarmPlacementRequest): Promise<S
   await throwIfNotOk(response)
   return response.json() as Promise<SwarmPlacementAccepted>
 }
+
+export type SwarmIntelligenceRequest = {
+  prompt: string
+  task_class?: string
+  execution_mode?: string
+}
+
+export type SwarmIntelligenceResult = {
+  task_class: string
+  worker_kind: string
+  capabilities: string[]
+  worker_id?: string
+  model?: string
+}
+
+export async function postSwarmIntelligence(
+  body: SwarmIntelligenceRequest,
+): Promise<SwarmIntelligenceResult> {
+  return api<SwarmIntelligenceResult>("/api/swarm/intelligence", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export type SwarmDispatchRequest = {
+  prompt: string
+  task_class?: string
+  execution_mode?: string
+  role?: string
+  claim?: SwarmLeaseClaim
+  ttl_seconds?: number
+}
+
+export type SwarmDispatchResult = {
+  intelligence: SwarmIntelligenceResult
+  placement: SwarmPlacementResult
+}
+
+export async function postSwarmDispatch(body: SwarmDispatchRequest): Promise<SwarmDispatchResult> {
+  const headers = authHeaders({ "Content-Type": "application/json" })
+  const response = await fetch("/api/swarm/dispatch", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (response.status === 409) {
+    return response.json() as Promise<SwarmDispatchResult>
+  }
+  await throwIfNotOk(response)
+  return response.json() as Promise<SwarmDispatchResult>
+}
