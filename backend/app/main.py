@@ -20,6 +20,7 @@ from .events import BUS
 from .hardware import hardware_dict
 from .inference.manager import MANAGER
 from .swarm.nodes import register_localhost_node
+from .swarm.workers import bind_workers_to_node
 from .tools.mcp_runtime import MCP
 from .tools.registry import REGISTRY
 
@@ -79,7 +80,8 @@ async def auth_middleware(request: Request, call_next):
 @app.on_event("startup")
 async def startup() -> None:
     await init_db()
-    await register_localhost_node()
+    node = await register_localhost_node()
+    await bind_workers_to_node(node.id)
     current = load_settings()
     if not current.allowed_directories:
         current.allowed_directories = default_allowed_directories()
