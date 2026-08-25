@@ -68,7 +68,7 @@ class PythonTool(Tool):
             ):
                 if candidate.exists():
                     return str(candidate)
-        return sys.executable or "python"
+        return sys.executable or "python3"
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")

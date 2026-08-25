@@ -3664,6 +3664,7 @@ This development session:
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
 - Voice: `POST /api/voice/command` accepts already-transcribed text only
+- Coding workers: cost telemetry, Composer/Grok model catalog (Fast off by default), and evidence-based local-vs-paid routing (`GET /api/coding`). Cursor ACP stays `not_connected` until the CLI is on PATH.
 
 ### Known Problems
 
@@ -3681,11 +3682,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building (including lazy vision flags), failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, dynamic thinking, professional/forensic audit prompt, docker argument validation, browser close without a session
+- Unit tests (`python -m pytest tests -q`): previous coverage plus coding cost/usage, Cursor model catalog, evidence-based worker routing, git checkpoint (working tree preserved), docker target validation, web_fetch http/https only, Office info without COM dispatch, python `sys.executable`, Linux bash default, browser close without launching Chromium
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **98 passed** (this session). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **90 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3782,6 +3783,18 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [ ] OpenHands worker adapter
   - Acceptance: large repo tasks can be delegated; Jarvis still verifies.
   - Status: TODO
+
+- [x] Coding cost/usage telemetry
+  - Acceptance: persist worker/model tokens, estimated USD, monthly total, and cost per verified successful software task; Tools page shows the summary.
+  - Status: VERIFIED in unit tests (`test_coding.py`); live Cursor token counts still need ACP
+
+- [x] Cursor model catalog and selection
+  - Acceptance: configurable Composer/Grok/specialist identifiers; Fast variants off by default; `GET /api/coding/models` probes PATH without starting ACP.
+  - Status: VERIFIED in unit tests; live `agent acp` remains `not_connected` here
+
+- [x] Evidence-based coding-worker learning
+  - Acceptance: historical local success keeps similar work local; three recent local failures escalate to Composer; a worker claiming success is never completion.
+  - Status: VERIFIED in unit tests (`recommend_from_history`)
 
 ### P2
 

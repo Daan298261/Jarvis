@@ -72,6 +72,14 @@ class BrowserSettings(BaseModel):
     browser_use_model: str = "Qwen3.5-27B"
 
 
+class CodingSettings(BaseModel):
+    composer_model: str = "composer-2.5"
+    grok_model: str = "grok-4.6"
+    specialist_model: str = ""
+    allow_fast_variants: bool = False
+    local_max_attempts: int = 2
+
+
 class AppSettings(BaseModel):
     bind_host: str = "127.0.0.1"
     bind_port: int = 4780
@@ -89,7 +97,7 @@ class AppSettings(BaseModel):
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
-    professional_mode: bool = False
+    coding: CodingSettings = Field(default_factory=CodingSettings)
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:

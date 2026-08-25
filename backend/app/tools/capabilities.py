@@ -38,7 +38,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": True,
             "status": "ready",
-            "detail": "PowerShell on Windows; bash available when present.",
+            "detail": "PowerShell on Windows; bash by default on Linux.",
         },
         {
             "id": "python",
@@ -86,7 +86,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": shutil.which("git") is not None,
             "status": "ready" if shutil.which("git") else "missing",
-            "detail": "Status, diff, and checkpoints before risky edits.",
+            "detail": "Status, diff, recoverable checkpoints (backup branch + stash create), restore.",
         },
         {
             "id": "docker",

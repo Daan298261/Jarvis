@@ -27,8 +27,11 @@ class SettingsUpdate(BaseModel):
     inference_host: str | None = None
     inference_port: int | None = None
     browser_headless: bool | None = None
-    professional_mode: bool | None = None
-    vision: str | None = None
+    composer_model: str | None = None
+    grok_model: str | None = None
+    specialist_model: str | None = None
+    allow_fast_variants: bool | None = None
+    local_max_attempts: int | None = None
 
 
 @router.get("")
@@ -82,12 +85,16 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.port = body.inference_port
     if body.browser_headless is not None:
         settings.browser.headless = body.browser_headless
-    if body.professional_mode is not None:
-        settings.professional_mode = body.professional_mode
-    if body.vision is not None:
-        mode = body.vision.strip().lower()
-        if mode in {"lazy", "always", "off"}:
-            settings.inference.vision = mode
+    if body.composer_model is not None:
+        settings.coding.composer_model = body.composer_model.strip() or "composer-2.5"
+    if body.grok_model is not None:
+        settings.coding.grok_model = body.grok_model.strip() or "grok-4.6"
+    if body.specialist_model is not None:
+        settings.coding.specialist_model = body.specialist_model.strip()
+    if body.allow_fast_variants is not None:
+        settings.coding.allow_fast_variants = body.allow_fast_variants
+    if body.local_max_attempts is not None:
+        settings.coding.local_max_attempts = max(1, int(body.local_max_attempts))
     save_settings(settings)
     REGISTRY.apply_settings(settings)
     return settings.model_dump()

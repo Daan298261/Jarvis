@@ -82,9 +82,9 @@ class BrowserTool(Tool):
             try:
                 if action == "close":
                     global _playwright, _browser, _context, _page, _pages
-                    if _page is None and _context is None:
+                    if _context is None and _page is None:
                         _pages = []
-                        return ToolResult(True, "Browser was not open")
+                        return ToolResult(True, "Browser was not running")
                     if _context:
                         await _context.close()
                     if _playwright:
@@ -92,14 +92,13 @@ class BrowserTool(Tool):
                     _context = None
                     _playwright = None
                     _page = None
-                    _browser = None
                     _pages = []
                     return ToolResult(True, "Browser closed")
+                if action == "open" and not kwargs.get("url"):
+                    return ToolResult(False, "", error="url is required")
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs.get("url")
-                    if not url:
-                        return ToolResult(False, "", error="url is required")
                     await page.goto(url, wait_until="domcontentloaded", timeout=45000)
                     return ToolResult(True, f"Opened {page.url}\ntitle={await page.title()}")
                 if action == "snapshot":

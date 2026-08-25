@@ -15,11 +15,26 @@ def _dispatch(progid: str):
     return win32com.client.Dispatch(progid)
 
 
+def _office_status() -> dict[str, Any]:
+    windows = platform.system() == "Windows"
+    return {
+        "windows": windows,
+        "com_available": windows,
+        "detail": (
+            "Office COM is available on Windows when Microsoft Office is installed. "
+            "This info action does not Dispatch COM."
+            if windows
+            else "Office COM is unavailable on this OS. info does not Dispatch COM."
+        ),
+    }
+
+
 class OfficeTool(Tool):
     name = "office"
     description = (
         "Read, create, and edit Microsoft Word, Excel, and PowerPoint documents via Windows COM "
-        "when Office is installed. Always write to a new file unless the user asked for in-place edits."
+        "when Office is installed. action=info reports availability without launching Office. "
+        "Always write to a new file unless the user asked for in-place edits."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -40,18 +55,10 @@ class OfficeTool(Tool):
         app = (kwargs.get("app") or "").lower()
         action = kwargs.get("action")
         if action == "info":
-            path = kwargs.get("path") or kwargs.get("destination") or ""
-            if path:
-                target = Path(path)
-                if not target.exists():
-                    return ToolResult(False, "", error=f"File not found: {path}")
-                stat = target.stat()
-                return ToolResult(
-                    True,
-                    f"path={target.resolve()}\nsize={stat.st_size}\nexists=true",
-                    data={"path": str(target.resolve()), "size": stat.st_size},
-                )
-            return ToolResult(True, "Office info: pass path to inspect a document without launching COM.")
+            status = _office_status()
+            return ToolResult(True, status["detail"], data=status)
+        if platform.system() != "Windows":
+            return ToolResult(False, "", error="Office COM is unavailable on this OS")
         try:
             if app == "word":
                 word = _dispatch("Word.Application")

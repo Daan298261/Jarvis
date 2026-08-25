@@ -4,6 +4,7 @@ import os
 import platform
 import shutil
 import subprocess
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -83,27 +84,13 @@ def _office_installed() -> bool:
     if platform.system() != "Windows":
         return False
     roots = [
-        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office",
-        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft Office",
-        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office" / "root" / "Office16",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "Office",
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Microsoft Office",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Office",
     ]
     for root in roots:
-        if root and root.exists():
+        if root.exists():
             return True
-    try:
-        import winreg  # type: ignore
-
-        for key in (r"Word.Application\CLSID", r"Excel.Application\CLSID", r"PowerPoint.Application\CLSID"):
-            try:
-                handle = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key)
-                winreg.CloseKey(handle)
-                return True
-            except OSError:
-                continue
-    except Exception:
-        pass
-    return False
+    return shutil.which("WINWORD.EXE") is not None or shutil.which("winword") is not None
 
 
 def detect_hardware() -> HardwareInfo:
