@@ -21,7 +21,14 @@ from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
-from .escalation import brief_from_working, consult_expert, format_expert_message, should_escalate
+from .model_policy import (
+    bump_context_tier,
+    context_under_pressure,
+    estimate_message_chars,
+    select_context_size,
+    should_think,
+    task_needs_vision,
+)
 from .planning import (
     WorkingState,
     best_of_n_plan_prompt,
@@ -265,22 +272,39 @@ class AgentRuntime:
         working.recommended_context = recommended_context
         working.vision_requested = need_vision
         plan_prompt = best_of_n_plan_prompt(policy.best_of_n) if policy.best_of_n > 1 else PLAN_PROMPT
-        vision_needed = working.task_class == "multimodal" or settings.inference.vision == "always"
+        vision_mode = settings.inference.vision_mode or "lazy"
+        need_vision = task_needs_vision(working.task_class, prompt, vision_mode)
+        wanted_context = select_context_size(
+            task_class=working.task_class,
+            execution_mode=execution_mode,
+            profile_name=profile.name,
+            profile_cap=profile.context_size,
+            prompt=prompt,
+            current=MANAGER.state.context_size if MANAGER.state.loaded else None,
+        )
         if not MANAGER.provider or not MANAGER.state.loaded:
-            await BUS.publish(
-                task_id,
-                "stage",
-                f"Loading local model (ctx {recommended_context}, vision {'on' if need_vision else 'off'})",
-                stage="model",
-            )
+            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
             await MANAGER.load(
                 settings,
                 profile_name,
-                context_size=recommended_context,
+                context_size=wanted_context,
+                vision=need_vision,
+            )
+        else:
+            await MANAGER.ensure_runtime(
+                settings,
+                profile_name,
+                context_size=wanted_context,
                 vision=need_vision,
             )
         provider = MANAGER.provider
         assert provider is not None
+        await BUS.publish(
+            task_id,
+            "progress",
+            f"Context {MANAGER.state.context_size} · vision {'on' if MANAGER.state.vision_loaded else vision_mode} · thinking {'selective' if profile.thinking else 'off'}",
+            stage="understand",
+        )
 
         recent_hashes: list[str] = []
         max_steps = policy.max_steps
@@ -299,8 +323,9 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
-        escalated = False
-        expert_on_request = should_escalate(prompt=prompt, step_count=0) == "user_requested_expert"
+        recovering = False
+        critic_turn = False
+        last_tool_for_think = ""
 
         if existing and continue_existing:
             messages = existing
@@ -383,7 +408,8 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="tool", name=name, tool_call_id=call_id, content=observation))
                     if attach:
                         messages.append(_image_message(attach))
-                        await MANAGER.ensure_vision(settings, True)
+                        need_vision = True
+                        await MANAGER.ensure_vision(settings)
                     if failed:
                         skill_ok = False
                         await BUS.publish(task_id, "error", f"Skill {skill.name} failed at {name}", observation[:1500], stage="diagnose")
@@ -445,38 +471,50 @@ class AgentRuntime:
                     execution_mode=execution_mode,
                     task_class=working.task_class,
                 )
-                phase = infer_phase(
-                    force_final=force_final,
-                    verifying=verifying,
-                    awaiting_plan_selection=awaiting_plan_selection,
-                    best_of_n_complete=best_of_n_complete,
-                    tools_used=tools_used,
-                    consecutive_failures=consecutive_failures,
-                    critic_pending=policy.critic_pass and not critic_done and not verifying and tools_used,
-                )
                 think = should_think(
                     profile_thinking=profile.thinking,
+                    profile_name=profile.name,
                     execution_mode=execution_mode,
-                    phase=phase,
+                    verifying=verifying,
+                    force_final=force_final,
+                    planning=not tools_used or awaiting_plan_selection,
+                    recovering=recovering,
+                    critic_turn=critic_turn,
                     consecutive_failures=consecutive_failures,
-                    same_tool_streak=same_tool_streak,
-                    tool_rounds=tool_rounds,
+                    last_tool=last_tool_for_think,
+                    task_class=working.task_class,
                 )
+                critic_turn = False
                 await BUS.publish(
                     task_id,
                     "model",
-                    "Writing final report"
-                    if force_final
-                    else (
-                        "Verifying result"
-                        if verifying
-                        else ("Model is thinking" if think.enabled else "Model is responding")
-                    ),
-                    think.reason,
+                    "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if think else "Model is responding")),
                     stage="verify" if verifying else "act",
                 )
                 messages = compact_history(messages, working_state_block=working.as_prompt_block())
-                exposed = None if force_final else REGISTRY.openai_tools(exposure.names())
+                if context_under_pressure(estimate_message_chars(messages), MANAGER.state.context_size or wanted_context):
+                    grown = bump_context_tier(MANAGER.state.context_size or wanted_context)
+                    grown = select_context_size(
+                        task_class=working.task_class,
+                        execution_mode=execution_mode,
+                        profile_name=profile.name,
+                        profile_cap=profile.context_size,
+                        prompt=prompt,
+                        current=grown,
+                    )
+                    if grown > (MANAGER.state.context_size or 0):
+                        await MANAGER.ensure_runtime(
+                            settings,
+                            profile_name,
+                            context_size=grown,
+                            vision=MANAGER.state.vision_loaded or need_vision,
+                        )
+                        await BUS.publish(
+                            task_id,
+                            "progress",
+                            f"Expanded context to {MANAGER.state.context_size}",
+                            stage="act",
+                        )
                 try:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
@@ -485,7 +523,7 @@ class AgentRuntime:
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
-                            thinking=think.enabled,
+                            thinking=think,
                             max_tokens=400 if force_final else 1024,
                         ),
                         timeout=90 if force_final else 180,
@@ -556,9 +594,7 @@ class AgentRuntime:
                         verify_tool_rounds += 1
                     names = [c.get("function", {}).get("name") or "" for c in result.tool_calls]
                     primary = names[0] if names else ""
-                    if result.tool_calls:
-                        first_args = parse_tool_arguments(result.tool_calls[0]["function"].get("arguments") or "{}")
-                        last_tool_action = str(first_args.get("action") or "")
+                    last_tool_for_think = primary
                     hints: list[str] = []
                     if primary == last_tool_name:
                         same_tool_streak += 1
@@ -611,15 +647,18 @@ class AgentRuntime:
                         else:
                             consecutive_failures = 0
                             failures_by_tool.pop(name, None)
+                            recovering = False
                             await BUS.publish(task_id, "observation", f"{name} finished", observation[:1500], stage="observe")
                         working.note_tool(name, observation, not failed)
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
                             messages.append(_image_message(attach))
-                            await MANAGER.ensure_vision(settings, True)
+                            need_vision = True
+                            await MANAGER.ensure_vision(settings)
                     if hints:
                         guidance = "\n\n".join(hints)
                         working.next_action = "recover with a different strategy"
+                        recovering = True
                         await BUS.publish(task_id, "retry", "Choosing a recovery strategy", guidance[:1500], stage="diagnose")
                         messages.append(ChatMessage(role="user", content=guidance))
                         reason = should_escalate(
@@ -733,6 +772,7 @@ class AgentRuntime:
 
                 if policy.critic_pass and not critic_done and not verifying:
                     critic_done = True
+                    critic_turn = True
                     await BUS.publish(task_id, "stage", "Critiquing plan", stage="plan")
                     messages.append(ChatMessage(role="user", content=CRITIC_PROMPT))
                     continue

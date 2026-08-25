@@ -143,16 +143,12 @@ export function SettingsPage() {
             <option value="quality">Quality</option>
           </select>
         </label>
-        <label>Vision projector
-          <select value={settings.inference?.vision || "lazy"} onChange={(e) => save({ vision: e.target.value })}>
-            <option value="lazy">Lazy (load only when a screenshot needs interpreting)</option>
-            <option value="always">Always loaded</option>
+        <label>Vision
+          <select value={settings.inference?.vision_mode || "lazy"} onChange={(e) => save({ vision_mode: e.target.value })}>
+            <option value="lazy">Lazy (load projector only when needed)</option>
+            <option value="always">Always load mmproj</option>
             <option value="off">Off</option>
           </select>
-        </label>
-        <label className="row">
-          <input type="checkbox" checked={!!settings.professional_mode} onChange={(e) => save({ professional_mode: e.target.checked })} />
-          Professional / Forensic Audit Mode (analyze sensitive material instead of refusing it; operational authorization is unchanged)
         </label>
         <label>Allowed directories (one per line)
           <textarea className="field" rows={4} defaultValue={(settings.allowed_directories || []).join("\n")}

@@ -3587,10 +3587,9 @@ This development session:
 - Model: Qwen3.5-27B (Unsloth GGUF of `Qwen/Qwen3.5-27B`, plus `mmproj-F16.gguf`)
 - Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
 - Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
-- Context: 16K fast, 32K balanced/quality; load failure retries at 16K
-- Tool exposure: task-class subset plus `request_capability` escape hatch
-- Expert consult: compact-brief escalation after repeated failure (no swap merely because a task is long)
-- Local harness: POST `/api/model/benchmarks/run` (dry-run without GPU)
+- Context: selected per task (8K simple / 16K normal / 32K long-horizon), capped by the profile. Fast never opens 32K. Idle Model-page loads use 16K for Balanced, not 32K.
+- Thinking: Fast stays off. Balanced/Quality use **selective** reasoning (planning, recovery, Reliable verification) via per-request `enable_thinking`.
+- Vision: Settings `vision_mode` is `lazy` (default) / `always` / `off`. llama.cpp starts without `--mmproj` unless the task is multimodal/Windows GUI or a screenshot is attached.
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
 - Status: **code present and unit-tested, Windows runtime not verified this session**
@@ -3606,13 +3605,15 @@ This development session:
 ### Working Tools
 
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell on Windows; bash is the default on Linux (CMD/Python/Git/WSL also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
-- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
-- Browser: Playwright Chromium (`open`/`title`/`wait`/`snapshot`, click by accessible name across button/link/tab, type, screenshot, tabs). `close` and missing-URL `open` do not launch Chromium.
-- Playwright: native backend present; live example.com e2e still Windows-only
-- Windows UI: `desktop` inspect + named-control click/type (`name` / `automation_id` first; coordinates last). UIA actions return a clear unavailable error on Linux; screenshot/apps still work.
-- Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
+- PowerShell: implemented as the default `terminal` shell on Windows; Linux defaults to bash. `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `sys.executable -c`.
+- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); uses `sys.executable` when no venv is given; venv lookup checks Windows `Scripts` and Unix `bin`
+- Browser: Playwright Chromium (accessibility snapshot, click by button/link/tab name, screenshot with `attach_image`). `close` and missing-URL `open` do not launch Chromium.
+- Playwright: native backend present
+- Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
+- Vision: screenshot tool + llama.cpp `--mmproj` when vision is requested; lazy by default
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
+- Git: status/diff/log/search plus `checkpoint` (backup branch + optional WIP ref; does not reset the working tree)
+- Docker: `run`/`logs`/`inspect` require a target even when Docker is missing
 
 ### Optional Workers
 
@@ -3656,10 +3657,8 @@ This development session:
 - Command, Phone, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
 - Phone / Android client: installable PWA (`/phone`, `manifest.webmanifest`) against the local API; `GET /api/mobile` is unauthenticated pairing metadata and never includes the private key
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
-- Model page persists tok/s, VRAM, RAM, load time, vision projector state, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
-- Settings can enable Professional / Forensic Audit Mode and vision lazy/always/off
-- llama.cpp starts without `--mmproj` unless vision is `always` or a screenshot is attached (P0.5 lazy vision)
-- Balanced/Quality profiles toggle `enable_thinking` per turn (P0.4); Fast keeps thinking off
+- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`). It also shows thinking mode, vision lazy/loaded, and effective context vs profile cap.
+- Settings includes vision mode (lazy / always / off).
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
@@ -3676,7 +3675,9 @@ This development session:
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
-- Office COM and Docker depend on software that may be missing on the target PC; tools now fail closed instead of launching empty commands or Dispatching COM for `info`
+- Office COM and Docker depend on software that may be missing on the target PC
+- Terminal default is PowerShell on Windows and bash on Linux; Linux-only environments no longer need to pass `shell=bash` for ordinary commands.
+- Office hardware probe looks at install paths / registry and does not Dispatch COM.
 
 ### Last End-to-End Test
 
@@ -3684,11 +3685,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): previous suite plus professional analysis policy, Playwright retry/named-click without launching Chromium, named-control desktop lookup, Office/docker/web_fetch guards, git checkpoint working-tree preservation, hardware Office probe without COM Dispatch, Linux terminal default
-- Frontend (`npm run build`): TypeScript build
+- Unit tests (`python3 -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building (lazy vision / explicit context), failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, selective thinking / dynamic context / lazy vision policy, docker/browser/python/git QA
+- Frontend (`npm run lint` + `npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **95 passed** on this Linux session. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **92 passed** on this branch. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3716,17 +3717,17 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: task cannot be marked successful without an independent verification pass.
   - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
 
-- [x] Selective / dynamic thinking (P0.4)
-  - Acceptance: expensive reasoning is not applied to every tool call; planning, recovery, and consequential verification still think.
-  - Status: VERIFIED in unit tests (`test_thinking.py`, `test_p0_loop_policies.py`)
+- [x] Dynamic thinking (P0.4)
+  - Acceptance: Fast never thinks; Balanced/Quality spend reasoning tokens on planning, recovery, and Reliable verification, not routine list/read/status calls.
+  - Status: VERIFIED in unit tests (`test_model_policy.py`). Live llama.cpp `enable_thinking` still needs the Windows desktop.
 
 - [x] Lazy vision loading (P0.5)
-  - Acceptance: llama.cpp is started without `--mmproj` for ordinary text/tool tasks; multimodal / Windows GUI tasks request the projector.
-  - Status: VERIFIED in unit tests (`test_vision.py`, `test_inference_backends.py`). Live VRAM savings not measured here (no GPU).
+  - Acceptance: llama.cpp starts without `--mmproj` unless vision mode is always, the task is multimodal/Windows GUI, or a screenshot is attached.
+  - Status: VERIFIED in unit tests (`test_inference_backends.py`). Live projector attach/reload needs GGUF + mmproj.
 
-- [x] Dynamic context sizing (P0.6)
-  - Acceptance: simple tasks use 8K, normal 16K, long-horizon 32K; Fast mode caps at 16K; Reliable steps one tier up; capped by the loaded profile.
-  - Status: VERIFIED in unit tests (`test_context_policy.py`, `test_p0_loop_policies.py`)
+- [x] Dynamic context size (P0.6)
+  - Acceptance: simple 8K, normal 16K, long 32K; Fast never opens 32K; Reliable steps one tier up; mid-task shrink is forbidden; idle Balanced load is 16K not 32K.
+  - Status: VERIFIED in unit tests (`test_model_policy.py`, unloaded snapshot). Live VRAM effect not measured here.
 
 - [ ] Reliable P0 model stack on the Windows desktop
   - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
@@ -3798,9 +3799,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
 - [x] Parameterized skill execution — VERIFIED (`test_skills.py`); bound steps run on matching tasks and via `POST /api/memory/skills/{id}/run`
 - [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
-- [x] Office COM coverage when Office is installed — CODE PRESENT (`office` create/read/write/save_as/info for Word/Excel/PowerPoint; `info` never Dispatch; live COM still requires a Windows Office install)
+- [ ] Office COM coverage when Office is installed (probe no longer launches Word; live COM still needs Windows Office)
 - [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
-- [x] Git checkpoint keeps the working tree — VERIFIED (`test_tool_qa.py`; backup branch + `stash create`, not `stash push`)
+- [x] Git recoverable checkpoints — VERIFIED (`test_tool_qa.py`); `checkpoint` creates a backup branch without wiping the working tree
 
 #### P2 — Swarm-ready foundation (`SWARM_ARCHITECTURE.md`)
 

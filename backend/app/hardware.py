@@ -80,35 +80,35 @@ def _nvidia() -> dict[str, Any]:
 
 
 def _office_installed() -> bool:
-    """Detect Office from install paths. Do not Dispatch COM — that launches Word."""
+    """Detect Office from install paths / registry. Do not Dispatch COM (that launches Word)."""
     if platform.system() != "Windows":
         return False
     roots = [
-        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office",
-        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft Office",
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
     ]
-    if any(root.exists() for root in roots):
-        return True
+    relatives = [
+        Path("Microsoft Office") / "root" / "Office16" / "WINWORD.EXE",
+        Path("Microsoft Office") / "Office16" / "WINWORD.EXE",
+        Path("Microsoft Office") / "Office15" / "WINWORD.EXE",
+        Path("Microsoft Office") / "root" / "Office16" / "EXCEL.EXE",
+    ]
+    for root in roots:
+        for relative in relatives:
+            if (root / relative).exists():
+                return True
+        if (root / "Microsoft Office").is_dir():
+            return True
     try:
         import winreg  # type: ignore
 
-        for key in (
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WINWORD.EXE",
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\EXCEL.EXE",
-            r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration",
         ):
-            try:
-                winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key)
-                return True
-            except OSError:
-                continue
+            return True
     except Exception:
-        pass
-    roots = [
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Microsoft Office",
-        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Office",
-    ]
-    return any(path.exists() for path in roots)
+        return False
 
 
 def detect_hardware() -> HardwareInfo:

@@ -34,7 +34,7 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.8,
         top_k=20,
         presence_penalty=0.0,
-        description="Non-thinking Q4_K_M with a smaller context window.",
+        description="Thinking off. Context 8K–16K. Vision stays unloaded until a screenshot is needed.",
     ),
     "balanced": ModelProfile(
         name="balanced",
@@ -47,7 +47,7 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.95,
         top_k=20,
         presence_penalty=0.0,
-        description="Thinking-enabled Q4_K_M for autonomous tool work.",
+        description="Selective thinking. Typical context 16K, cap 32K. Vision is lazy.",
     ),
     "quality": ModelProfile(
         name="quality",
@@ -60,7 +60,7 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.95,
         top_k=20,
         presence_penalty=0.0,
-        description="Higher-quality Q5_K_M hybrid GPU/CPU profile.",
+        description="Selective thinking with more recovery reasoning. Context cap 32K. Hybrid GPU/CPU.",
     ),
 }
 

@@ -103,12 +103,19 @@ class LlamaCppBackend(InferenceBackend):
             missing.append(f"llama-server missing at {self.server_path()}")
         return missing
 
-    def build_args(self, profile: ModelProfile, vision: bool = False) -> list[str]:
+    def build_args(
+        self,
+        profile: ModelProfile,
+        *,
+        context_size: int | None = None,
+        vision: bool = False,
+    ) -> list[str]:
         hardware = detect_hardware()
         inference = self.settings.inference
         paths = model_paths()
         mmproj = paths["mmproj"]
         threads = inference.threads or hardware.cpu_cores
+        ctx = int(context_size or profile.context_size or inference.context_size)
         args = [
             str(self.server_path()),
             "--model",
@@ -120,7 +127,7 @@ class LlamaCppBackend(InferenceBackend):
             "--port",
             str(inference.port),
             "--ctx-size",
-            str(profile.context_size or inference.context_size),
+            str(ctx),
             "--flash-attn",
             inference.flash_attn,
             "--jinja",
@@ -150,17 +157,25 @@ class LlamaCppBackend(InferenceBackend):
             args.extend(["--fit", "on", "--fit-target", str(inference.fit_target_mib)])
         else:
             args.extend(["--n-gpu-layers", "99"])
-        args.extend(mmproj_args(profile, mmproj))
+        if vision and mmproj.exists():
+            args.extend(["--mmproj", str(mmproj), "--image-min-tokens", "1024"])
         return args
 
-    async def start(self, profile: ModelProfile, timeout: float = 300, vision: bool = False) -> bool:
+    async def start(
+        self,
+        profile: ModelProfile,
+        timeout: float = 300,
+        *,
+        context_size: int | None = None,
+        vision: bool = False,
+    ) -> bool:
         await self.stop()
         log_file = logs_dir() / "llama-server.log"
         self._log_handle = open(log_file, "ab", buffering=0)
         env = os.environ.copy()
         env["CUDA_MODULE_LOADING"] = "LAZY"
         self._process = await asyncio.create_subprocess_exec(
-            *self.build_args(profile, vision=vision),
+            *self.build_args(profile, context_size=context_size, vision=vision),
             cwd=str(runtime_dir()),
             stdout=self._log_handle,
             stderr=self._log_handle,

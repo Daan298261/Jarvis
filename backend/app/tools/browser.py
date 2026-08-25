@@ -190,7 +190,8 @@ class BrowserTool(Tool):
                 if action == "close":
                     global _playwright, _browser, _context, _page, _pages
                     if not _context and not _page and not _playwright:
-                        return ToolResult(True, "Browser was not open")
+                        _pages = []
+                        return ToolResult(True, "Browser was not running")
                     if _context:
                         await _context.close()
                     if _playwright:
@@ -222,7 +223,17 @@ class BrowserTool(Tool):
                 if action == "click":
                     method = "selector"
                     if kwargs.get("name"):
-                        await _click_named(page, kwargs["name"])
+                        name = kwargs["name"]
+                        clicked = False
+                        for role in ("button", "link", "tab"):
+                            try:
+                                await page.get_by_role(role, name=name).first.click(timeout=4000)
+                                clicked = True
+                                break
+                            except Exception:
+                                continue
+                        if not clicked:
+                            await page.get_by_text(name, exact=False).first.click(timeout=8000)
                     elif kwargs.get("selector"):
                         await page.locator(kwargs["selector"]).first.click(timeout=10000)
                     else:
@@ -257,7 +268,7 @@ class BrowserTool(Tool):
                     return ToolResult(
                         True,
                         f"Saved screenshot to {out}",
-                        data={"path": str(out), "image_base64": encoded[:80] + "..."},
+                        data={"path": str(out), "image_base64": encoded[:80] + "...", "attach_image": str(out)},
                     )
                 if action == "tabs":
                     pages = page.context.pages

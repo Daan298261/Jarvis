@@ -14,8 +14,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a backup branch named jarvis-checkpoint-* without "
-        "changing the working tree."
+        "checkpoint. checkpoint creates a jarvis-checkpoint-* backup branch (and a WIP ref for "
+        "dirty files) without resetting or switching the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -100,18 +100,24 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
                 branch = f"jarvis-checkpoint-{stamp}"
-                created = await self._git(["stash", "create"], cwd)
-                oid = (created.output or "").strip().splitlines()[-1] if created.success else ""
-                if created.success and oid and all(ch in "0123456789abcdef" for ch in oid.lower()) and len(oid) >= 7:
-                    branched = await self._git(["branch", branch, oid], cwd)
-                    if branched.success:
-                        return ToolResult(True, f"Created backup branch {branch} (working tree unchanged).")
-                branched = await self._git(["branch", branch], cwd)
-                if branched.success:
-                    return ToolResult(True, f"Created backup branch {branch} from HEAD (working tree unchanged).")
-                return branched
+                created = await self._git(["branch", branch], cwd)
+                if not created.success:
+                    return created
+                dirty = await self._git(["status", "--porcelain"], cwd)
+                wip_note = ""
+                if dirty.success and (dirty.output or "").strip():
+                    stash = await self._git(["stash", "create"], cwd)
+                    digest = (stash.output or "").strip().splitlines()[-1] if stash.success and stash.output.strip() else ""
+                    if digest and len(digest) >= 7 and " " not in digest:
+                        await self._git(["update-ref", f"refs/jarvis-wip/{branch}", digest], cwd)
+                        wip_note = f" Dirty work stored at refs/jarvis-wip/{branch} ({digest[:12]})."
+                return ToolResult(
+                    True,
+                    f"Created backup branch {branch} at HEAD without changing the working tree.{wip_note}",
+                    data={"branch": branch},
+                )
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

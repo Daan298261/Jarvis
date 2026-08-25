@@ -53,7 +53,7 @@ class InferenceSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8088
     profile: str = "balanced"
-    context_size: int = 32768
+    context_size: int = 16384
     flash_attn: str = "auto"
     fit: bool = True
     fit_target_mib: int = 1024
@@ -61,8 +61,7 @@ class InferenceSettings(BaseModel):
     cache_type_v: str = "q8_0"
     threads: int = 0
     auto_load: bool = True
-    # lazy = text-only until a screenshot/vision turn; always = load mmproj at start; off = never.
-    vision: str = "lazy"
+    vision_mode: str = "lazy"
 
 
 class BrowserSettings(BaseModel):
