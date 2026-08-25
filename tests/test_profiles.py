@@ -29,11 +29,11 @@ def test_expert_keeps_twenty_seven_b():
     assert expert.thinking_mode == "on"
 
 
-def test_balanced_is_selective_thinking_16k():
+def test_balanced_is_selective_thinking_32k_cap():
     balanced = resolve_profile("balanced")
     assert balanced.thinking_mode == "selective"
     assert balanced.thinking is True
-    assert balanced.context_size == 16384
+    assert balanced.context_size == 32768
     assert resolve_profile("fast").thinking_mode == "off"
     assert resolve_profile("fast").context_size == 8192
     assert resolve_profile("reliable").name == "quality"
@@ -54,6 +54,25 @@ def test_resolve_falls_back_to_installed_weights(tmp_path, monkeypatch):
     assert profile_gguf(resolved) == expert_file
 
 
+def test_resolve_mmproj_prefers_existing_model_paths(tmp_path, monkeypatch):
+    from app.inference import profiles as profiles_mod
+
+    projector = tmp_path / "mmproj-f16.gguf"
+    projector.write_bytes(b"gguf")
+    monkeypatch.setattr(
+        profiles_mod,
+        "model_paths",
+        lambda: {
+            "root": tmp_path,
+            "mmproj_9b": projector,
+            "mmproj": tmp_path / "missing.gguf",
+        },
+    )
+    found = profiles_mod.resolve_mmproj(profiles_mod.PROFILES["balanced"])
+    assert found == projector
+    assert profiles_mod.resolve_mmproj(None) == projector
+
+
 def test_llama_cpp_omits_mmproj_unless_vision_enabled():
     from app.config import AppSettings
 
@@ -65,7 +84,7 @@ def test_llama_cpp_omits_mmproj_unless_vision_enabled():
     assert args[args.index("--ctx-size") + 1] == str(profile.context_size)
 
     with_vision = LlamaCppBackend(AppSettings(inference={"vision": True, "fit": False})).build_args(profile)
-    # Projector file is not present in this environment, so it still must not be attached.
+    # Settings.vision does not attach the projector. Only a vision=True start does.
     assert "--mmproj" not in with_vision
 
 

@@ -16,7 +16,7 @@ from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
-from ..inference.vision import should_load_vision
+from ..inference.vision import messages_need_vision, should_load_vision
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
@@ -35,9 +35,12 @@ from .coding_workers import (
     complete_coding_route,
     format_routing_block,
     record_coding_outcome,
+    record_coding_route,
     route_coding_task,
+    route_software_task,
     should_route,
 )
+from .forensic import professional_prompt_block
 from .escalation import (
     EscalationSignals,
     build_expert_brief,
@@ -252,6 +255,7 @@ class AgentRuntime:
             for skill in await promote_from_trajectories():
                 await BUS.publish(task_id, "progress", f"Promoted reusable skill: {skill.name}", skill.description[:800])
         await complete_coding_route(task_id, "completed", verification)
+        await self._release_lazy_vision()
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
 
     async def _note_coding_outcome(self, task_id: str, working: WorkingState, outcome: str, verification: str = "") -> None:
@@ -271,6 +275,12 @@ class AgentRuntime:
             verification=verification[:2000],
             duration_seconds=duration,
         )
+
+    async def _release_lazy_vision(self) -> None:
+        try:
+            await MANAGER.release_vision(load_settings())
+        except Exception:
+            pass
 
     async def _run(
         self,
@@ -381,15 +391,21 @@ class AgentRuntime:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
             system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(prompt) + _environment_block(settings)
+            audit = professional_prompt_block(prompt)
+            if audit:
+                system_prompt += "\n\n" + audit
             matched_skills = await relevant_skills(working.task_class, working.goal)
             skills = skills_prompt_block(matched_skills)
             if skills:
                 system_prompt += "\n\n" + skills
                 await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
             if should_route(working.task_class, prompt):
+                decision = route_software_task(prompt, task_class=working.task_class)
+                await record_coding_route(task_id, decision)
                 routing = await route_coding_task(prompt, task_class=working.task_class)
-                working.coding_worker = routing.get("execute_worker") or ""
-                working.coding_complexity = int(routing.get("complexity") or 0)
+                working.coding_worker = decision.selected_worker or routing.get("execute_worker") or ""
+                working.coding_tier = decision.tier_name or ""
+                working.coding_complexity = int(decision.score or routing.get("complexity") or 0)
                 system_prompt += "\n\n" + format_routing_block(routing)
                 await BUS.publish(task_id, "progress", "Coding worker selected", format_routing_block(routing)[:1500], stage="understand")
             lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
@@ -453,8 +469,7 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="tool", name=name, tool_call_id=call_id, content=observation))
                     if attach:
                         messages.append(_image_message(attach))
-                        need_vision = True
-                        await MANAGER.ensure_vision(settings)
+                        working.vision_requested = True
                     if failed:
                         skill_ok = False
                         await BUS.publish(task_id, "error", f"Skill {skill.name} failed at {name}", observation[:1500], stage="diagnose")
@@ -542,6 +557,10 @@ class AgentRuntime:
                     if grown >= needed:
                         await BUS.publish(task_id, "progress", f"Expanded context to {grown}", stage="act")
                         provider = MANAGER.provider or provider
+                vision_turn = messages_need_vision(messages)
+                if vision_turn:
+                    await MANAGER.ensure_vision(settings)
+                    provider = MANAGER.provider or provider
                 try:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
@@ -556,6 +575,7 @@ class AgentRuntime:
                         timeout=90 if force_final else 180,
                     )
                 except TimeoutError:
+                    await self._release_lazy_vision()
                     if tools_used and verifying:
                         content = (
                             "The model timed out while writing the final report. "
@@ -578,6 +598,10 @@ class AgentRuntime:
                     await complete_coding_route(task_id, "failed", content)
                     await BUS.publish(task_id, "failed", "Task ended after model timeout", content, stage="failed")
                     return
+                else:
+                    if vision_turn:
+                        await self._release_lazy_vision()
+                        provider = MANAGER.provider or provider
                 await MANAGER.record_timings(result.timings)
                 metrics.note_model(result.timings)
                 await self._update(task_id, **metrics.as_fields())
@@ -707,8 +731,7 @@ class AgentRuntime:
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
                             messages.append(_image_message(attach))
-                            need_vision = True
-                            await MANAGER.ensure_vision(settings)
+                            working.vision_requested = True
                     if hints:
                         guidance = "\n\n".join(hints)
                         working.next_action = "recover with a different strategy"
@@ -841,15 +864,18 @@ class AgentRuntime:
             await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification", **metrics.as_fields())
             await record_trajectory(task_id, working, "failed")
             await complete_coding_route(task_id, "failed", "Step limit reached before verification")
+            await self._release_lazy_vision()
             await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
         except asyncio.CancelledError:
             await self._update(task_id, status="cancelled", stage="cancelled", **metrics.as_fields())
             await complete_coding_route(task_id, "cancelled")
+            await self._release_lazy_vision()
             raise
         except Exception as exc:
             await self._update(task_id, status="failed", stage="failed", error=str(exc), **metrics.as_fields())
             await record_trajectory(task_id, working, "failed")
             await complete_coding_route(task_id, "failed", str(exc))
+            await self._release_lazy_vision()
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
 
     async def _execute_tool(

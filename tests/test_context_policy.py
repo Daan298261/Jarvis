@@ -15,7 +15,7 @@ def test_long_tasks_start_at_16k_not_profile_cap():
     assert initial_context_size("software engineering", PROFILES["balanced"]) == CONTEXT_NORMAL
     assert initial_context_size("long-horizon autonomous", PROFILES["balanced"]) == CONTEXT_NORMAL
     assert initial_context_size("mixed", PROFILES["balanced"]) == CONTEXT_NORMAL
-    assert PROFILES["balanced"].context_size == CONTEXT_NORMAL
+    assert PROFILES["balanced"].context_size == CONTEXT_LONG
     assert PROFILES["quality"].context_size == CONTEXT_LONG
 
 
