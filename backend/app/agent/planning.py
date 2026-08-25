@@ -278,6 +278,8 @@ class WorkingState:
     next_action: str = ""
     task_class: str = ""
     verified: bool = False
+    coding_worker: str = ""
+    coding_complexity: int = 0
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"

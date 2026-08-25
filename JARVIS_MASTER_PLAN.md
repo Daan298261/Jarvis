@@ -629,7 +629,7 @@ This optimization effort takes priority over Browser Use, UFO, Cua, OpenHands, v
 
 # HIGH PRIORITY — AUTONOMOUS SOFTWARE DEVELOPMENT WORKER ROUTING
 
-Status: P0/P1 — implement after the fast primary-model migration and core benchmarking.
+Status: P0/P1 — router implemented for local execution; paid Cursor workers remain disconnected until ACP/credentials exist. Live 9B migration and the 20-task GPU comparison are still the Windows-desktop P0.
 
 Jarvis must be capable of developing software autonomously, including development of Jarvis itself.
 
@@ -3653,10 +3653,12 @@ This development session:
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
 - Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
+- Model page also shows the 20-task agent suite catalog and the hardware purchasing gate (`GET /api/model/agent-benchmarks`, `GET /api/model/hardware-gate`)
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
 - Tools/System pages list optional workers as unavailable instead of crashing
+- Tools page lists software-development workers (local ready; Composer/Grok/ACP not connected)
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
 - Voice: `POST /api/voice/command` accepts already-transcribed text only
@@ -3668,19 +3670,20 @@ This development session:
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
+- Paid Composer/Grok/ACP coding workers are catalogued but not connected; software tasks execute on the local Jarvis worker
+- 20-task live comparison (9B Q8 vs Q6 vs 27B Q4) still requires the Windows GPU desktop
 
 ### Last End-to-End Test
 
-Date: 2026-08-24
+Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, 20-task agent suite catalog/report, hardware purchasing gate, coding-worker router, git checkpoint / docker / web_fetch / office / python / terminal QA
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **93 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3711,6 +3714,18 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [ ] Reliable P0 model stack on the Windows desktop
   - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
   - Status: TODO / IN PROGRESS by plan (current code still reflects the 27B implementation path; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must validate the new model stack and run `tests/run_e2e.py`.
+
+- [x] Representative 20-task agent benchmark catalog and report (P0.9)
+  - Acceptance: at least 20 realistic autonomous tasks; metrics include success, intervention, durations, model/tool calls, retries, schema errors, verification; primary metric is successful tasks per hour; report is visible on the Model page.
+  - Status: VERIFIED in unit tests (`test_agent_benchmark.py`). Live 9B vs 27B comparison remains blocked without GPU.
+
+- [x] Hardware purchasing gate (P0.12)
+  - Acceptance: Jarvis does not recommend extra RAM/GPUs/NPUs until inference samples and agent-suite results exist; bottlenecks are described from measurements.
+  - Status: VERIFIED in unit tests (`test_coding_workers.py` gate tests) and Model/System pages.
+
+- [x] Software-development worker router
+  - Acceptance: common `SoftwareDevelopmentWorker` interface; cheapest capable worker; local Jarvis always available; Composer/Grok/ACP catalogued but not invoked until connected; historical local success can override static thresholds; independent verification still required.
+  - Status: VERIFIED in unit tests (`test_coding_workers.py`). Paid workers remain `not_connected` here.
 
 ### P1
 
@@ -3764,6 +3779,7 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
 - [ ] Office COM coverage when Office is installed
 - [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
+- [x] Git checkpoint keeps the working tree — VERIFIED (`test_tool_qa.py`; backup branch + `stash create`, not `stash push`)
 
 #### P2 — Swarm-ready foundation (`SWARM_ARCHITECTURE.md`)
 

@@ -160,6 +160,48 @@ class BenchmarkSample(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class AgentBenchmarkResult(Base):
+    """One recorded run of a P0.9 representative autonomous task."""
+
+    __tablename__ = "agent_benchmark_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_key: Mapped[str] = mapped_column(String(80), default="")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    category: Mapped[str] = mapped_column(String(64), default="")
+    profile: Mapped[str] = mapped_column(String(32), default="")
+    success: Mapped[bool] = mapped_column(Boolean, default=False)
+    human_intervention: Mapped[bool] = mapped_column(Boolean, default=False)
+    total_seconds: Mapped[float] = mapped_column(Float, default=0)
+    model_seconds: Mapped[float] = mapped_column(Float, default=0)
+    tool_seconds: Mapped[float] = mapped_column(Float, default=0)
+    model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, default=0)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    schema_errors: Mapped[int] = mapped_column(Integer, default=0)
+    incorrect_actions: Mapped[int] = mapped_column(Integer, default=0)
+    verification: Mapped[str] = mapped_column(Text, default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CodingWorkerOutcome(Base):
+    """Measured coding-worker routing outcomes for cost-aware selection."""
+
+    __tablename__ = "coding_worker_outcomes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    task_class: Mapped[str] = mapped_column(String(64), default="")
+    worker_id: Mapped[str] = mapped_column(String(64), default="")
+    complexity: Mapped[int] = mapped_column(Integer, default=0)
+    outcome: Mapped[str] = mapped_column(String(32), default="")
+    verification: Mapped[str] = mapped_column(Text, default="")
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 

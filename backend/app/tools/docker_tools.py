@@ -26,8 +26,6 @@ class DockerTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        if not shutil.which("docker"):
-            return ToolResult(False, "", error="Docker is not installed on this machine")
         action = kwargs.get("action")
         mapping = {
             "ps": ["ps", "-a"],
@@ -40,6 +38,12 @@ class DockerTool(Tool):
         args = mapping.get(action)
         if not args:
             return ToolResult(False, "", error=f"Unknown action {action}")
+        if action == "run" and not (kwargs.get("image") or "").strip():
+            return ToolResult(False, "", error="image is required for docker run")
+        if action in {"logs", "inspect"} and not (kwargs.get("container") or kwargs.get("image") or "").strip():
+            return ToolResult(False, "", error="container or image is required")
+        if not shutil.which("docker"):
+            return ToolResult(False, "", error="Docker is not installed on this machine")
         args = [a for a in args if a]
         proc = await asyncio.create_subprocess_exec(
             "docker",

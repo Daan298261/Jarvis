@@ -109,6 +109,8 @@ export function ModelPage() {
           </p>
         </div>
       </div>
+      <AgentSuiteCard />
+      <HardwareGateCard />
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Benchmark history</h2>
         {!samples.length && <p className="lede">No samples yet. Load the model or record a snapshot after a few tasks.</p>}
@@ -143,6 +145,80 @@ export function ModelPage() {
           </table>
         )}
       </div>
+    </div>
+  )
+}
+
+type SuiteTask = { id: string; title: string; category: string; live_requires?: string }
+type Gate = {
+  purchase_allowed?: boolean
+  recommendation?: string
+  bottlenecks?: string[]
+  inference_samples?: number
+  agent_results?: number
+  deferred_until_measured?: string[]
+}
+
+function AgentSuiteCard() {
+  const [report, setReport] = useState<any>(null)
+  useEffect(() => { api("/api/model/agent-benchmarks").then(setReport).catch(() => undefined) }, [])
+  const tasks: SuiteTask[] = report?.suite || []
+  const comparison = report?.comparison
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h2>20-task agent suite</h2>
+      <p className="lede">
+        Representative autonomous tasks used to compare models. Primary metric: successful tasks per hour — not tok/s.
+        {report?.coverage ? ` Catalog has ${report.coverage.task_count} tasks.` : ""} {report?.live_status}
+      </p>
+      {comparison?.winner && (
+        <p>Current recorded leader: <strong>{comparison.winner}</strong> ({comparison.primary_metric}).</p>
+      )}
+      {tasks.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Id</th>
+              <th>Task</th>
+              <th>Category</th>
+              <th>Live needs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((task) => (
+              <tr key={task.id}>
+                <td>{task.id}</td>
+                <td>{task.title}</td>
+                <td>{task.category}</td>
+                <td>{task.live_requires || "unit-testable"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+function HardwareGateCard() {
+  const [gate, setGate] = useState<Gate | null>(null)
+  useEffect(() => { api<Gate>("/api/model/hardware-gate").then(setGate).catch(() => undefined) }, [])
+  if (!gate) return null
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h2>Hardware purchasing gate</h2>
+      <p className="lede">{gate.recommendation}</p>
+      <div className="kv">
+        <b>Purchases allowed</b><span>{gate.purchase_allowed ? "yes" : "no — measure first"}</span>
+        <b>Inference samples</b><span>{gate.inference_samples ?? 0}</span>
+        <b>Agent results</b><span>{gate.agent_results ?? 0}</span>
+      </div>
+      <ul>
+        {(gate.bottlenecks || []).map((item) => <li key={item}>{item}</li>)}
+      </ul>
+      {!!gate.deferred_until_measured?.length && (
+        <p className="lede">Deferred until measured: {gate.deferred_until_measured.join(", ")}.</p>
+      )}
     </div>
   )
 }

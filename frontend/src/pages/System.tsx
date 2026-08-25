@@ -17,6 +17,13 @@ export function SystemPage() {
           </div>
         ))}
       </div>
+      {info?.hardware_gate && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Hardware purchasing gate</h2>
+          <p className="lede">{info.hardware_gate.recommendation}</p>
+          <strong>{info.hardware_gate.purchase_allowed ? "Purchases may be discussed" : "Do not buy hardware yet"}</strong>
+        </div>
+      )}
       {info?.capabilities && (
         <div className="card" style={{ marginTop: 16 }}>
           <h2>Backends</h2>

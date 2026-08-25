@@ -34,6 +34,7 @@ from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
+from .coding_workers import format_routing_block, is_software_task, record_coding_outcome, route_coding_task
 from .prompts import (
     CONTINUE_PROMPT,
     CRITIC_PROMPT,
@@ -190,9 +191,28 @@ class AgentRuntime:
         )
         if working is not None:
             await record_trajectory(task_id, working, "completed")
+            await self._note_coding_outcome(task_id, working, "verified_success", verification)
             for skill in await promote_from_trajectories():
                 await BUS.publish(task_id, "progress", f"Promoted reusable skill: {skill.name}", skill.description[:800])
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+
+    async def _note_coding_outcome(self, task_id: str, working: WorkingState, outcome: str, verification: str = "") -> None:
+        if not working.coding_worker:
+            return
+        duration = 0.0
+        async with SessionLocal() as session:
+            task = await session.get(Task, task_id)
+            if task:
+                duration = float(task.duration_seconds or 0)
+        await record_coding_outcome(
+            task_id=task_id,
+            task_class=working.task_class,
+            worker_id=working.coding_worker,
+            complexity=working.coding_complexity,
+            outcome=outcome,
+            verification=verification[:2000],
+            duration_seconds=duration,
+        )
 
     async def _run(
         self,
@@ -265,6 +285,12 @@ class AgentRuntime:
             if skills:
                 system_prompt += "\n\n" + skills
                 await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
+            if is_software_task(prompt, working.task_class):
+                routing = await route_coding_task(prompt, task_class=working.task_class)
+                working.coding_worker = routing.get("execute_worker") or ""
+                working.coding_complexity = int(routing.get("complexity") or 0)
+                system_prompt += "\n\n" + format_routing_block(routing)
+                await BUS.publish(task_id, "progress", "Coding worker selected", format_routing_block(routing)[:1500], stage="understand")
             lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
             if lessons:
                 system_prompt += "\n\n" + lessons
@@ -410,6 +436,7 @@ class AgentRuntime:
                         current_tool="",
                     )
                     await record_trajectory(task_id, working, "failed")
+                    await self._note_coding_outcome(task_id, working, "failed", content)
                     await BUS.publish(task_id, "failed", "Task ended after model timeout", content, stage="failed")
                     return
                 await MANAGER.record_timings(result.timings)
@@ -624,6 +651,7 @@ class AgentRuntime:
                 return
             await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification")
             await record_trajectory(task_id, working, "failed")
+            await self._note_coding_outcome(task_id, working, "failed", "Step limit reached before verification")
             await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
         except asyncio.CancelledError:
             await self._update(task_id, status="cancelled", stage="cancelled")
@@ -631,6 +659,7 @@ class AgentRuntime:
         except Exception as exc:
             await self._update(task_id, status="failed", stage="failed", error=str(exc))
             await record_trajectory(task_id, working, "failed")
+            await self._note_coding_outcome(task_id, working, "failed", str(exc))
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
 
     async def _execute_tool(

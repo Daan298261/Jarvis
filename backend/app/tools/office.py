@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -34,8 +35,23 @@ class OfficeTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
+        if platform.system() != "Windows":
+            return ToolResult(False, "", error="Office COM is unavailable on this operating system")
         app = (kwargs.get("app") or "").lower()
         action = kwargs.get("action")
+        if action == "info":
+            path = kwargs.get("path") or kwargs.get("destination") or ""
+            if path:
+                target = Path(path)
+                if not target.exists():
+                    return ToolResult(False, "", error=f"File not found: {path}")
+                stat = target.stat()
+                return ToolResult(
+                    True,
+                    f"path={target.resolve()}\nsize={stat.st_size}\nexists=true",
+                    data={"path": str(target.resolve()), "size": stat.st_size},
+                )
+            return ToolResult(True, "Office info: pass path to inspect a document without launching COM.")
         try:
             if app == "word":
                 word = _dispatch("Word.Application")

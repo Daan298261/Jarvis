@@ -138,6 +138,30 @@ def optional_workers() -> list[dict[str, Any]]:
             "status": "not_integrated",
             "detail": "Optional software-engineering worker. Jarvis still verifies results.",
         },
+        {
+            "id": "local-jarvis-coding",
+            "name": "Local Jarvis coding worker",
+            "kind": "optional",
+            "available": True,
+            "status": "ready",
+            "detail": "Default software-development worker. Cost is zero. Jarvis independently verifies.",
+        },
+        {
+            "id": "cursor-acp",
+            "name": "Cursor ACP / Composer 2.5",
+            "kind": "optional",
+            "available": False,
+            "status": "not_connected",
+            "detail": "Default paid coding worker when connected. Not wired in this runtime.",
+        },
+        {
+            "id": "cursor-grok",
+            "name": "Cursor Grok 4.6",
+            "kind": "optional",
+            "available": False,
+            "status": "not_connected",
+            "detail": "Escalation coding worker for difficult architecture. Not the default.",
+        },
     ]
 
 

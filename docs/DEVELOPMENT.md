@@ -38,9 +38,11 @@ backend/app/
   events.py               In-process event bus for WS + SSE
   hardware.py             CPU/RAM/GPU probe (nvidia-smi)
   api/                    REST routers (prefix /api/…)
-  agent/
+    agent/
     loop.py               AgentRuntime — create/continue/cancel, verification
     planning.py           ExecutionPolicy, task classification, best-of-N plan parse/select
+    coding_workers.py     SoftwareDevelopmentWorker router (local first; paid stubs)
+    agent_benchmark.py    P0.9 20-task catalog, metrics, comparison report
     workflows.py          Guide copy + editable templates + compose_prompt
     recovery.py           Failure classes → alternative tools
     compaction.py         History summary that cannot orphan tool results
@@ -52,6 +54,7 @@ backend/app/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
     profiles.py           fast / balanced / quality GGUF profiles
+    hardware_gate.py      P0.12 purchase gate (no hardware buys without measurements)
   providers/              OpenAI-compatible chat + tool-call parsing
   tools/                  Native tools + MCP proxy
   db/                     SQLAlchemy models, aiosqlite session, light migrations
@@ -129,7 +132,7 @@ On Linux you can still:
 - Run pytest for non-Windows modules
 - Build the frontend (`npm run build`)
 
-You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal default is PowerShell; on Linux the agent should use `shell=bash`.
+You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal defaults to bash on Linux and PowerShell on Windows.
 
 ---
 
@@ -172,9 +175,17 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | GET | `/api/tasks/{id}/events` | SSE stream |
 | GET/POST | `/api/queue`, `/enqueue`, `/process` | File-drop queue |
 | GET | `/api/model` | Load state + available profiles |
+| GET | `/api/model/benchmarks` | Persisted tok/s samples + task outcomes |
+| POST | `/api/model/benchmarks/snapshot` | Record a timing snapshot |
+| GET | `/api/model/agent-benchmarks` | 20-task suite catalog + comparison report |
+| GET | `/api/model/agent-benchmarks/suite` | Catalog only |
+| POST | `/api/model/agent-benchmarks/results` | Record one suite run (live desktop fills this) |
+| GET | `/api/model/hardware-gate` | P0.12 purchase recommendation from measured samples |
 | POST | `/api/model/load` | `{ profile? }` |
 | POST | `/api/model/unload` | Stop llama-server if Jarvis owns it |
-| GET | `/api/tools`, `/api/tools/catalog` | Registry + optional-worker catalog |
+| GET | `/api/tools`, `/api/tools/catalog` | Registry + optional-worker + coding-worker catalog |
+| GET | `/api/tools/coding-workers` | Worker descriptors + cost/success stats |
+| POST | `/api/tools/coding-workers/route` | `{ prompt }` — complexity score and worker choice |
 | POST | `/api/tools/{name}/enable` / `disable` | Persist `disabled_tools` |
 | GET/PUT | `/api/settings` | Full settings dump / patch |
 | GET/POST/DELETE | `/api/mcp`, `/api/mcp/{id}`, `/refresh` | MCP servers |
@@ -199,7 +210,7 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 `backend/app/agent/loop.py` is the orchestrator. A task:
 
 1. Classifies (`planning.classify_task`) and stores `task_class`
-2. Injects matching skills and trajectories into the system prompt
+2. Injects matching skills, trajectories, and (for software tasks) a coding-worker routing block into the system prompt
 3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
 4. Executes tool calls until the policy budget is spent
 5. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)

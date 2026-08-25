@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -56,11 +57,28 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = Path(cwd).name
-                result = await self._git(["stash", "push", "-u", "-m", f"jarvis-checkpoint-{stamp}"], cwd)
-                if result.success:
-                    return ToolResult(True, "Created git stash checkpoint. Use git stash list / pop to recover.")
-                return await self._git(["status"], cwd)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                branch = f"jarvis-checkpoint-{stamp}"
+                created = await self._git(["branch", branch, "HEAD"], cwd)
+                extra = ""
+                status = await self._git(["status", "--porcelain"], cwd)
+                dirty = bool((status.output or "").strip())
+                if dirty:
+                    stash = await self._git(["stash", "create", f"jarvis-checkpoint-{stamp}"], cwd)
+                    hash_id = (stash.output or "").strip().splitlines()[-1].strip() if stash.success else ""
+                    if hash_id and len(hash_id) >= 7:
+                        wip = f"{branch}-wip"
+                        await self._git(["update-ref", f"refs/heads/{wip}", hash_id], cwd)
+                        extra = f" Uncommitted work saved on {wip} via stash create (working tree unchanged)."
+                    else:
+                        extra = " Working tree has uncommitted files; HEAD branch still points at the last commit."
+                if created.success:
+                    return ToolResult(
+                        True,
+                        f"Created backup branch {branch}. Working tree was not modified.{extra}",
+                        data={"branch": branch, "working_tree_unchanged": True},
+                    )
+                return created
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

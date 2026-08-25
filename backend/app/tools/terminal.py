@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import platform
 import shutil
 import sys
 import time
@@ -69,7 +70,12 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         return [exe, "-NoProfile", "-Command", command]
     if shutil.which("bash"):
         return ["bash", "-lc", command]
-    return ["python", "-c", command]
+    python = sys.executable or shutil.which("python3") or shutil.which("python") or "python3"
+    return [python, "-c", command]
+
+
+def default_shell() -> str:
+    return "powershell" if platform.system() == "Windows" else "bash"
 
 
 async def _pump(job: BackgroundJob) -> None:
@@ -171,7 +177,7 @@ class TerminalTool(Tool):
         command = kwargs.get("command") or ""
         if not command.strip():
             return ToolResult(False, "", error="command is required for run/start")
-        shell = (kwargs.get("shell") or "powershell").lower()
+        shell = (kwargs.get("shell") or default_shell()).lower()
         cwd = kwargs.get("working_directory") or os.getcwd()
         timeout = int(kwargs.get("timeout_seconds") or 120)
         risk = classify_command(command)

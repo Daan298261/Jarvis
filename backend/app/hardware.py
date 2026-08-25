@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -78,16 +79,27 @@ def _nvidia() -> dict[str, Any]:
 
 
 def _office_installed() -> bool:
+    """Detect Office without launching Word/Excel/PowerPoint via COM Dispatch."""
     if platform.system() != "Windows":
         return False
+    roots = [
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office",
+        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft Office",
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office" / "root" / "Office16",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "Office",
+    ]
+    for root in roots:
+        if root and root.exists():
+            return True
     try:
-        import win32com.client  # type: ignore
+        import winreg  # type: ignore
 
-        for progid in ("Word.Application", "Excel.Application", "PowerPoint.Application"):
+        for key in (r"Word.Application\CLSID", r"Excel.Application\CLSID", r"PowerPoint.Application\CLSID"):
             try:
-                win32com.client.Dispatch(progid)
+                handle = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key)
+                winreg.CloseKey(handle)
                 return True
-            except Exception:
+            except OSError:
                 continue
     except Exception:
         pass

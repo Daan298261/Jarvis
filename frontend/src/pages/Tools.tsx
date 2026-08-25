@@ -5,6 +5,7 @@ type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
   optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
+  coding_workers?: { id: string; name: string; available: boolean; status: string; detail: string; tier?: number; cost_class?: string }[]
 }
 
 export function ToolsPage() {
@@ -50,6 +51,23 @@ export function ToolsPage() {
           </div>
         ))}
       </div>
+      {!!catalog.coding_workers?.length && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Software-development workers</h2>
+          <p className="lede">Cheapest capable worker first. Paid Composer/Grok stay listed when disconnected so Jarvis does not pretend they ran.</p>
+          {catalog.coding_workers.map((worker) => (
+            <div className="toggle" key={worker.id}>
+              <div>
+                <strong>{worker.name}</strong>
+                <div className="lede" style={{ margin: "4px 0 0" }}>
+                  {worker.tier != null ? `Tier ${worker.tier} · ${worker.cost_class || ""} · ` : ""}{worker.detail}
+                </div>
+              </div>
+              <span className={`badge ${worker.available ? "completed" : "queued"}`}>{worker.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
