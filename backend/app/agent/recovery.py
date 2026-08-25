@@ -124,6 +124,8 @@ def recovery_hint(tool: str, observation: str, attempt: int = 1) -> str:
         limit = 1 if attempt <= 1 else len(options)
         lines.append("Alternative tools, most deterministic first:")
         lines.extend(f"- {item.tool}: {item.why}" for item in options[:limit])
+    if kind == UNAVAILABLE:
+        lines.append("If that tool is not in the current exposed set, call request_capability with its name.")
     if attempt >= 3:
         lines.append(
             "Several strategies have now failed. Re-check your assumptions about the environment, "

@@ -3588,6 +3588,9 @@ This development session:
 - Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
 - Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
 - Context: 16K fast, 32K balanced/quality; load failure retries at 16K
+- Tool exposure: task-class subset plus `request_capability` escape hatch
+- Expert consult: compact-brief escalation after repeated failure (no swap merely because a task is long)
+- Local harness: POST `/api/model/benchmarks/run` (dry-run without GPU)
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
 - Status: **code present and unit-tested, Windows runtime not verified this session**
@@ -3668,7 +3671,10 @@ This development session:
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
+- Terminal default is PowerShell on Windows and bash on Linux/macOS
+- Office COM probe and `office` action=info do not Dispatch Word/Excel/PowerPoint
+- Git `checkpoint` creates a backup branch and does not stash-pop the working tree
+- Docker `run`/`logs`/`inspect` require an image or container name before invoking the CLI
 
 ### Last End-to-End Test
 
@@ -3676,11 +3682,11 @@ Date: 2026-08-24
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **task-class tool exposure**, **benchmark harness dry-run**, **expert escalation policy**, git checkpoint/docker/office/browser/python QA
 - Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **95 passed** on this tree. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3711,6 +3717,18 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [ ] Reliable P0 model stack on the Windows desktop
   - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
   - Status: TODO / IN PROGRESS by plan (current code still reflects the 27B implementation path; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must validate the new model stack and run `tests/run_e2e.py`.
+
+- [x] Dynamic tool exposure (P0.7)
+  - Acceptance: only a task-class subset of tools is sent each inference call; `request_capability` can expand the set mid-run.
+  - Status: VERIFIED in unit tests (`test_exposure.py`)
+
+- [x] Performance benchmark harness (P0.8)
+  - Acceptance: automated matrix for profile × context × vision × thinking; records load/TTFT/tok/s/VRAM/RAM/GPU/CPU/tool latency when a provider exists; dry-run skips live llama.cpp when files are missing. Tokens/sec is not the winner metric.
+  - Status: VERIFIED in unit tests (`test_harness.py`); live GPU measurement **BLOCKED here**
+
+- [x] Automatic Expert escalation (P0.10)
+  - Acceptance: escalate on repeated failure, stuck strategy, critic uncertainty, or explicit user request; send a compact brief; do not escalate merely because a task is long.
+  - Status: VERIFIED in unit tests (`test_escalation.py`); live 9B→27B process swap **BLOCKED here** (no GGUF)
 
 ### P1
 

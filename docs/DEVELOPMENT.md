@@ -41,6 +41,7 @@ backend/app/
   agent/
     loop.py               AgentRuntime — create/continue/cancel, verification
     planning.py           ExecutionPolicy, task classification, best-of-N plan parse/select
+    escalation.py         Compact 9B→27B expert consult after repeated failure (no swap on length)
     workflows.py          Guide copy + editable templates + compose_prompt
     recovery.py           Failure classes → alternative tools
     compaction.py         History summary that cannot orphan tool results
@@ -52,8 +53,10 @@ backend/app/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
     profiles.py           fast / balanced / quality GGUF profiles
+    harness.py            Local benchmark matrix (context/vision/thinking); dry-run without GPU
+    benchmarks.py         Persist tok/s samples for the Model page
   providers/              OpenAI-compatible chat + tool-call parsing
-  tools/                  Native tools + MCP proxy
+  tools/                  Native tools + MCP proxy; exposure.py is task-class subsets + request_capability
   db/                     SQLAlchemy models, aiosqlite session, light migrations
 frontend/src/
   App.tsx                 Routes: Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System

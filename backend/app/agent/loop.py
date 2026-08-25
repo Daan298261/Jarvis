@@ -16,9 +16,11 @@ from ..events import BUS
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
+from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
 from .compaction import compact_history, deserialize_messages, serialize_messages
+from .escalation import brief_from_working, consult_expert, format_expert_message, should_escalate
 from .planning import (
     WorkingState,
     best_of_n_plan_prompt,
@@ -203,6 +205,8 @@ class AgentRuntime:
     ) -> None:
         settings = load_settings()
         REGISTRY.apply_settings(settings)
+        exposure = ToolExposure("mixed")
+        REGISTRY.bind_exposure(exposure)
         fields = {
             "status": "running",
             "stage": "understand",
@@ -226,6 +230,8 @@ class AgentRuntime:
                 working.goal = prompt.strip().splitlines()[0][:240]
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
+        exposure = ToolExposure(working.task_class)
+        REGISTRY.bind_exposure(exposure)
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         plan_prompt = best_of_n_plan_prompt(policy.best_of_n) if policy.best_of_n > 1 else PLAN_PROMPT
@@ -251,6 +257,8 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
+        escalated = False
+        expert_on_request = should_escalate(prompt=prompt, step_count=0) == "user_requested_expert"
 
         if existing and continue_existing:
             messages = existing
@@ -378,11 +386,12 @@ class AgentRuntime:
                     stage="verify" if verifying else "act",
                 )
                 messages = compact_history(messages, working_state_block=working.as_prompt_block())
+                exposed = None if force_final else REGISTRY.openai_tools(exposure.names())
                 try:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
                             messages,
-                            tools=None if force_final else REGISTRY.openai_tools(),
+                            tools=exposed,
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
@@ -518,6 +527,25 @@ class AgentRuntime:
                         working.next_action = "recover with a different strategy"
                         await BUS.publish(task_id, "retry", "Choosing a recovery strategy", guidance[:1500], stage="diagnose")
                         messages.append(ChatMessage(role="user", content=guidance))
+                        reason = should_escalate(
+                            prompt=prompt,
+                            consecutive_failures=consecutive_failures,
+                            same_tool_streak=same_tool_streak,
+                            already_escalated=escalated,
+                            verifying=verifying,
+                        )
+                        if reason:
+                            brief = brief_from_working(working, reason, prompt)
+                            expert = await consult_expert(
+                                brief,
+                                provider=provider,
+                                manager=MANAGER,
+                                settings=settings,
+                                allow_swap=False,
+                            )
+                            escalated = True
+                            await BUS.publish(task_id, "progress", "Expert consult", (expert.advice or "")[:1500], stage="diagnose")
+                            messages.append(ChatMessage(role="user", content=format_expert_message(expert)))
                     elif verifying and verify_tool_rounds >= policy.max_verify_tools:
                         force_final = True
                         messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))
@@ -593,6 +621,20 @@ class AgentRuntime:
                     )
                     messages.append(ChatMessage(role="user", content=format_selected_plan(chosen)))
                     continue
+
+                if expert_on_request and not escalated:
+                    brief = brief_from_working(working, "user_requested_expert", prompt)
+                    expert = await consult_expert(
+                        brief,
+                        provider=provider,
+                        manager=MANAGER,
+                        settings=settings,
+                        allow_swap=False,
+                    )
+                    escalated = True
+                    expert_on_request = False
+                    await BUS.publish(task_id, "progress", "Expert consult", (expert.advice or "")[:1500], stage="plan")
+                    messages.append(ChatMessage(role="user", content=format_expert_message(expert)))
 
                 if policy.critic_pass and not critic_done and not verifying:
                     critic_done = True

@@ -24,6 +24,7 @@ def _sample_dict(row: BenchmarkSample) -> dict[str, Any]:
         "tasks_completed": row.tasks_completed,
         "tasks_failed": row.tasks_failed,
         "source": row.source,
+        "notes": row.notes or "",
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
@@ -56,6 +57,7 @@ async def record_benchmark_sample(
     ram_used_gb: float | None = None,
     load_time_seconds: float | None = None,
     source: str = "timing",
+    notes: str = "",
 ) -> BenchmarkSample | None:
     stats = await task_outcome_stats()
     async with SessionLocal() as session:
@@ -91,6 +93,7 @@ async def record_benchmark_sample(
             tasks_completed=stats["tasks_completed"],
             tasks_failed=stats["tasks_failed"],
             source=source,
+            notes=notes or "",
         )
         session.add(row)
         await session.commit()

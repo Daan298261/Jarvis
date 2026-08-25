@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a recoverable stash or commit-less backup branch named "
-        "jarvis-checkpoint-* before large autonomous edits."
+        "checkpoint. checkpoint creates a recoverable backup branch named jarvis-checkpoint-* "
+        "and stores uncommitted work as a stash commit object without changing the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -56,11 +57,24 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = Path(cwd).name
-                result = await self._git(["stash", "push", "-u", "-m", f"jarvis-checkpoint-{stamp}"], cwd)
-                if result.success:
-                    return ToolResult(True, "Created git stash checkpoint. Use git stash list / pop to recover.")
-                return await self._git(["status"], cwd)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                branch = f"jarvis-checkpoint-{stamp}"
+                created = await self._git(["branch", branch], cwd)
+                if not created.success:
+                    return created
+                stash = await self._git(["stash", "create", f"jarvis-checkpoint-{stamp}"], cwd)
+                extra = ""
+                digest = (stash.output or "").strip().splitlines()
+                commit = digest[-1].strip() if digest else ""
+                if commit and len(commit) >= 7 and all(ch in "0123456789abcdef" for ch in commit.lower()):
+                    stored = await self._git(["update-ref", f"refs/jarvis-checkpoints/{branch}", commit], cwd)
+                    if stored.success:
+                        extra = f" Uncommitted work stored at refs/jarvis-checkpoints/{branch} without changing the working tree."
+                return ToolResult(
+                    True,
+                    f"Created backup branch {branch} at HEAD. Working tree left unchanged.{extra}",
+                    data={"branch": branch, "stash_commit": commit or None},
+                )
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from ..config import load_settings, save_settings
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
+from ..inference.harness import HARNESS_CASES, run_harness
 from ..inference.manager import MANAGER
 from ..inference.profiles import available_profiles
 
@@ -13,6 +14,10 @@ router = APIRouter(prefix="/api/model", tags=["model"])
 
 class LoadBody(BaseModel):
     profile: str | None = None
+
+
+class HarnessBody(BaseModel):
+    live: bool = False
 
 
 @router.get("")
@@ -32,6 +37,8 @@ async def model_status():
     ]
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
+    snapshot["harness_cases"] = list(HARNESS_CASES)
+    snapshot["primary_metric"] = "successful autonomous tasks per wall-clock minute"
     return snapshot
 
 
@@ -65,6 +72,13 @@ async def capture_benchmark():
         "task_success_rate": row.task_success_rate,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }}
+
+
+@router.post("/benchmarks/run")
+async def run_model_harness(body: HarnessBody | None = None):
+    live = bool(body.live) if body else False
+    report = await run_harness(live=live, persist=True)
+    return report.as_dict()
 
 
 @router.post("/load")

@@ -5,6 +5,7 @@ type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
   optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
+  exposure?: Record<string, string[]>
 }
 
 export function ToolsPage() {
@@ -18,7 +19,21 @@ export function ToolsPage() {
   return (
     <div>
       <h1>Tools</h1>
-      <p className="lede">Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing.</p>
+      <p className="lede">Native tools can be enabled or disabled. The agent only receives a task-class subset plus request_capability as an escape hatch. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing.</p>
+      {catalog.exposure && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Task-class exposure</h2>
+          <p className="lede">Filesystem tasks do not receive Office or Docker unless requested mid-run.</p>
+          {Object.entries(catalog.exposure).map(([taskClass, names]) => (
+            <div className="toggle" key={taskClass}>
+              <div>
+                <strong>{taskClass}</strong>
+                <div className="lede" style={{ margin: "4px 0 0" }}>{names.join(", ")}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="card">
         {catalog.tools.map((tool) => (
           <div className="toggle" key={tool.name}>

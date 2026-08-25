@@ -18,6 +18,17 @@ type Benchmark = {
   created_at: string | null
 }
 
+type HarnessCase = {
+  profile: string
+  context_size: number
+  vision: boolean
+  thinking: string
+  status: string
+  skip_reason?: string
+  time_to_first_token_seconds?: number | null
+  output_tokens_per_second?: number | null
+}
+
 type ModelStatus = {
   active_model?: string
   quantization?: string
@@ -33,6 +44,8 @@ type ModelStatus = {
   loading?: boolean
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
+  harness_cases?: { profile: string; context_size: number; vision: boolean; thinking: string }[]
+  primary_metric?: string
 }
 
 function pct(value: number | null | undefined) {
@@ -43,6 +56,7 @@ function pct(value: number | null | undefined) {
 export function ModelPage() {
   const [model, setModel] = useState<ModelStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const [harness, setHarness] = useState<{ cases: HarnessCase[]; warning?: string; live?: boolean; measured_cases?: number; skipped_cases?: number } | null>(null)
 
   async function refresh() {
     setModel(await api("/api/model"))
@@ -63,6 +77,20 @@ export function ModelPage() {
     setBusy(true)
     try {
       await api("/api/model/benchmarks/snapshot", { method: "POST" })
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function runHarness() {
+    setBusy(true)
+    try {
+      const report = await api<{ cases: HarnessCase[]; warning?: string; live?: boolean; measured_cases?: number; skipped_cases?: number }>(
+        "/api/model/benchmarks/run",
+        { method: "POST", body: JSON.stringify({ live: false }) },
+      )
+      setHarness(report)
       await refresh()
     } finally {
       setBusy(false)
@@ -101,13 +129,50 @@ export function ModelPage() {
             <button className="btn" disabled={busy} onClick={() => load("quality")}>Quality</button>
             <button className="btn secondary" disabled={busy} onClick={() => api("/api/model/unload", { method: "POST" }).then(refresh)}>Unload</button>
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
+            <button className="btn secondary" disabled={busy} onClick={runHarness}>Run local harness</button>
           </div>
           <p className="lede" style={{ marginTop: 16 }}>
             Fast: Q4_K_M, thinking off, 16K context.<br />
             Balanced: Q4_K_M, thinking on, 32K context.<br />
-            Quality: Q5_K_M, thinking on, hybrid GPU/CPU.
+            Quality: Q5_K_M, thinking on, hybrid GPU/CPU.<br />
+            Primary metric: {model?.primary_metric || "successful autonomous tasks per wall-clock minute"} — not tokens/sec alone.
           </p>
         </div>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2>Local harness matrix</h2>
+        <p className="lede">
+          Planned cases cover Fast/Balanced/Quality × 8K/16K/32K, vision on/off, and thinking off/selective/on.
+          Live llama.cpp measurement is skipped here unless the GGUF and server exist.
+        </p>
+        {harness && (
+          <p className="lede">
+            Last run: {harness.measured_cases || 0} measured / {harness.skipped_cases || 0} skipped
+            {harness.warning ? ` — ${harness.warning}` : ""}
+          </p>
+        )}
+        <table>
+          <thead>
+            <tr>
+              <th>Profile</th>
+              <th>Context</th>
+              <th>Vision</th>
+              <th>Thinking</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(harness?.cases || (model?.harness_cases || []).map((row) => ({ ...row, status: "planned", skip_reason: "" }))).map((row, index) => (
+              <tr key={`${row.profile}-${row.context_size}-${row.vision}-${row.thinking}-${index}`}>
+                <td>{row.profile}</td>
+                <td className="stat">{row.context_size}</td>
+                <td>{row.vision ? "on" : "off"}</td>
+                <td>{row.thinking}</td>
+                <td>{row.status}{row.skip_reason ? ` (${row.skip_reason})` : ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Benchmark history</h2>

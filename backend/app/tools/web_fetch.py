@@ -25,7 +25,12 @@ class WebFetchTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        url = kwargs.get("url")
+        url = (kwargs.get("url") or "").strip()
+        if not url:
+            return ToolResult(False, "", error="url is required")
+        lowered = url.lower()
+        if lowered.startswith("file:") or lowered.startswith("javascript:") or lowered.startswith("data:"):
+            return ToolResult(False, "", error="Only http(s) URLs are allowed")
         method = (kwargs.get("method") or "GET").upper()
         limit = int(kwargs.get("max_chars") or 12000)
         try:
