@@ -4,6 +4,10 @@ Read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial 
 
 ## Cursor Cloud specific instructions
 
+### GitHub repository mapping
+
+The canonical public repository is [`Daan298261/Jarvis`](https://github.com/Daan298261/Jarvis) on GitHub. Cursor Cloud agents use the `origin` remote (`origin.cursor.com/git/taco-1/Jarvis`), which mirrors that GitHub repo; pushes to `origin` sync to GitHub. PR numbers and the GitHub UI refer to `Daan298261/Jarvis`, not `taco-1/Jarvis`.
+
 Jarvis is a Windows-tuned local desktop agent (FastAPI backend + React/Vite portal) whose model is a 27B GGUF served by llama.cpp on an NVIDIA GPU. The Cloud VM is headless Linux with no GPU, so the model and the Windows-only tools do not run here, but the backend, portal, tool system, and test suite all run fine for development.
 
 ### Environment (already handled by the startup update script)
