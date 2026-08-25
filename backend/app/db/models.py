@@ -34,6 +34,7 @@ class Task(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     current_action: Mapped[str] = mapped_column(Text, default="")
     current_tool: Mapped[str] = mapped_column(String(80), default="")
+    exposed_tools: Mapped[str] = mapped_column(Text, default="")
     retries: Mapped[int] = mapped_column(Integer, default=0)
     compact_memory: Mapped[str] = mapped_column(Text, default="")
     conversation_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -157,7 +158,7 @@ class BenchmarkSample(Base):
     tasks_completed: Mapped[int] = mapped_column(Integer, default=0)
     tasks_failed: Mapped[int] = mapped_column(Integer, default=0)
     source: Mapped[str] = mapped_column(String(32), default="timing")
-    notes: Mapped[str] = mapped_column(Text, default="")
+    metrics_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

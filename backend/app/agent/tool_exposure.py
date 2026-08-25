@@ -1,135 +1,130 @@
-"""Task-class tool exposure (P0.7).
-
-Do not send every Jarvis tool schema on every model turn. Classification
-already exists; use it to expose a small relevant set, plus filesystem for
-verification, plus an escape hatch (`request_tools`) so the agent can ask
-for another capability when the first set is insufficient.
-
-Returning None from `allowed_tool_names` means "every enabled tool", which
-is used for mixed and long-horizon work.
-"""
-
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
-CORE_TOOLS: tuple[str, ...] = ("filesystem", "request_tools")
+from ..tools.mcp_runtime import MCP
+from ..tools.registry import REGISTRY
 
-# Classification names come from `planning.TASK_CATEGORIES`.
+# Task class → native tools Jarvis should send to the model.
+# Mixed / long-horizon tasks keep the full enabled set.
 CLASS_TOOLS: dict[str, tuple[str, ...]] = {
     "filesystem": ("filesystem", "python"),
-    "shell": ("terminal", "python", "filesystem"),
-    "system administration": ("terminal", "python", "filesystem"),
-    "software engineering": ("filesystem", "terminal", "python", "git", "docker"),
+    "shell": ("filesystem", "terminal", "python"),
+    "system administration": ("filesystem", "terminal", "python", "docker"),
+    "software engineering": ("filesystem", "terminal", "python", "git"),
     "research": ("web_fetch", "browser", "filesystem", "python"),
     "browser automation": ("browser", "web_fetch", "filesystem", "screenshot"),
-    "windows gui": ("desktop", "screenshot", "terminal", "filesystem", "ufo", "cua"),
-    "office": ("office", "python", "filesystem"),
-    "document processing": ("filesystem", "python", "office"),
-    "data processing": ("filesystem", "python"),
-    "multimodal": ("screenshot", "filesystem", "desktop", "browser"),
+    "windows gui": ("desktop", "screenshot", "filesystem"),
+    "office": ("office", "filesystem", "python"),
+    "document processing": ("office", "filesystem", "python", "web_fetch"),
+    "data processing": ("filesystem", "python", "terminal"),
+    "multimodal": ("screenshot", "desktop", "browser", "filesystem"),
 }
 
-FULL_ACCESS_CLASSES = frozenset({"mixed", "long-horizon autonomous"})
+FULL_CLASSES = {"mixed", "long-horizon autonomous", ""}
 
-CATEGORY_ALIASES: dict[str, tuple[str, ...] | None] = {
-    "all": None,
-    "everything": None,
-    "browser": ("browser", "web_fetch", "screenshot"),
-    "web": ("browser", "web_fetch"),
-    "windows": ("desktop", "screenshot", "ufo", "cua"),
-    "gui": ("desktop", "screenshot", "ufo", "cua"),
-    "computer": ("desktop", "screenshot", "ufo", "cua"),
-    "coding": ("filesystem", "terminal", "python", "git", "docker"),
-    "code": ("filesystem", "terminal", "python", "git", "docker"),
-    "shell": ("terminal", "python", "filesystem"),
-    "office": ("office", "python", "filesystem"),
-    "vision": ("screenshot", "desktop", "browser"),
-    "mcp": ("mcp_call", "mcp"),
+# Capability names the model may pass to request_tools.
+CAPABILITY_ALIASES: dict[str, str] = {
+    "web": "web_fetch",
+    "http": "web_fetch",
+    "fetch": "web_fetch",
+    "spreadsheet": "office",
+    "excel": "office",
+    "word": "office",
+    "document": "office",
+    "gui": "desktop",
+    "windows": "desktop",
+    "vision": "screenshot",
+    "image": "screenshot",
+    "shell": "terminal",
+    "powershell": "terminal",
+    "bash": "terminal",
+    "code": "python",
+    "coding": "python",
+    "repo": "git",
+    "source": "git",
 }
 
+ESCAPE_TOOL = "request_tools"
+MCP_CAPABILITY = "mcp"
 
-def _normalize(items: Iterable[str] | str | None) -> list[str]:
-    if items is None:
+
+def _enabled_native() -> list[str]:
+    return [name for name, tool in REGISTRY.tools.items() if tool.enabled and name != ESCAPE_TOOL]
+
+
+def is_full_exposure(task_class: str, extra: Iterable[str] | None = None) -> bool:
+    extras = {item.lower() for item in (extra or [])}
+    if "all" in extras:
+        return True
+    return (task_class or "").strip().lower() in FULL_CLASSES
+
+
+def normalize_capabilities(raw: Iterable[str] | str | None) -> list[str]:
+    if raw is None:
         return []
-    if isinstance(items, str):
-        parts = [part.strip() for part in items.replace(";", ",").split(",")]
-        return [part.lower() for part in parts if part]
+    values = [raw] if isinstance(raw, str) else list(raw)
     out: list[str] = []
-    for item in items:
-        if not item:
-            continue
-        out.append(str(item).strip().lower())
-    return [item for item in out if item]
-
-
-def wants_full_access(task_class: str | None, extra: Iterable[str] | str | None = None) -> bool:
-    if (task_class or "").strip().lower() in FULL_ACCESS_CLASSES:
-        return True
-    requested = _normalize(extra)
-    return any(CATEGORY_ALIASES.get(name) is None for name in requested if name in CATEGORY_ALIASES)
-
-
-def resolve_requested_names(requested: Iterable[str] | str | None) -> set[str]:
-    names: set[str] = set()
-    for item in _normalize(requested):
-        alias = CATEGORY_ALIASES.get(item)
-        if alias is None and item in CATEGORY_ALIASES:
-            continue
-        if alias:
-            names.update(alias)
-        else:
-            names.add(item)
-    return names
-
-
-def apply_request(existing: Iterable[str] | None, requested: Iterable[str] | str | None) -> list[str]:
-    merged: list[str] = []
     seen: set[str] = set()
-    for item in list(existing or []) + _normalize(requested):
-        key = str(item).strip().lower()
-        if not key or key in seen:
+    native = set(REGISTRY.tools) | {MCP_CAPABILITY, "all"}
+    for item in values:
+        key = str(item or "").strip().lower()
+        if not key:
             continue
-        seen.add(key)
-        merged.append(key)
-    return merged
+        mapped = CAPABILITY_ALIASES.get(key, key)
+        if mapped not in native and mapped not in REGISTRY.tools:
+            continue
+        if mapped not in seen:
+            seen.add(mapped)
+            out.append(mapped)
+    return out
 
 
-def allowed_tool_names(task_class: str | None, extra: Iterable[str] | None = None) -> set[str] | None:
-    """Return the tool names to put in the model schema, or None for all tools."""
-    extra_list = list(extra or [])
-    if wants_full_access(task_class, extra_list):
-        return None
-    names = set(CORE_TOOLS)
-    names.update(CLASS_TOOLS.get((task_class or "").strip().lower(), ()))
-    names.update(resolve_requested_names(extra_list))
+def tool_names_for(task_class: str, extra: Iterable[str] | None = None) -> list[str]:
+    extras = normalize_capabilities(extra)
+    if is_full_exposure(task_class, extras):
+        return _enabled_native()
+    wanted = list(CLASS_TOOLS.get((task_class or "").strip().lower(), ()))
+    for name in extras:
+        if name == MCP_CAPABILITY:
+            continue
+        if name not in wanted:
+            wanted.append(name)
+    enabled = set(_enabled_native())
+    names = [name for name in wanted if name in enabled]
+    if "filesystem" not in names and "filesystem" in enabled:
+        names.insert(0, "filesystem")
     return names
 
 
-def includes_mcp(allowed: set[str] | None) -> bool:
-    if allowed is None:
-        return True
-    return "mcp" in allowed or "mcp_call" in allowed
+def schemas_for(task_class: str, extra: Iterable[str] | None = None) -> list[dict[str, Any]]:
+    extras = normalize_capabilities(extra)
+    names = tool_names_for(task_class, extras)
+    schemas = [REGISTRY.tools[name].schema() for name in names if name in REGISTRY.tools]
+    full = is_full_exposure(task_class, extras)
+    if not full and ESCAPE_TOOL in REGISTRY.tools and REGISTRY.tools[ESCAPE_TOOL].enabled:
+        schemas.append(REGISTRY.tools[ESCAPE_TOOL].schema())
+    if full or MCP_CAPABILITY in extras:
+        schemas.extend(MCP.openai_tools())
+    return schemas
 
 
-def schema_names(schemas: list[dict]) -> list[str]:
-    names: list[str] = []
-    for item in schemas:
-        function = item.get("function") if isinstance(item, dict) else None
-        if isinstance(function, dict) and function.get("name"):
-            names.append(str(function["name"]))
-    return names
-
-
-def exposure_prompt_block(task_class: str | None, extra: Iterable[str] | None = None) -> str:
-    allowed = allowed_tool_names(task_class, extra)
-    if allowed is None:
+def describe_exposure(task_class: str, extra: Iterable[str] | None = None) -> str:
+    names = tool_names_for(task_class, extra)
+    full = is_full_exposure(task_class, extra)
+    listed = ", ".join(names) or "(none)"
+    if full:
         return (
-            "Tool exposure: every enabled tool is available for this mixed/long-horizon task.\n"
+            "Tool exposure: this mixed/long-horizon task receives every enabled tool.\n"
+            f"Currently enabled: {listed}."
         )
-    listed = ", ".join(sorted(allowed))
     return (
-        f"Tool exposure: {listed}.\n"
-        "If this set cannot finish the task, call request_tools with extra tool names "
-        "or a category (browser, coding, windows, office, mcp, all).\n"
+        f"Tool exposure: this {task_class or 'task'} is limited to: {listed}.\n"
+        "If you need another capability (browser, desktop, office, docker, git, screenshot, "
+        "terminal, python, web_fetch, mcp), call request_tools with that name rather than inventing a tool."
     )
+
+
+def grant_requested_tools(arguments: dict[str, Any]) -> list[str]:
+    raw = arguments.get("capabilities") or arguments.get("tools") or arguments.get("capability")
+    return normalize_capabilities(raw)

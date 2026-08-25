@@ -16,7 +16,7 @@ from ..agent.agent_benchmark import (
 )
 from ..config import data_dir, load_settings, save_settings
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
-from ..inference.harness import harness_status, run_harness, run_harness_background
+from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
 from ..inference.profiles import declared_profiles, profile_as_dict
 
@@ -36,12 +36,21 @@ class HarnessBody(BaseModel):
 async def model_status():
     settings = load_settings()
     snapshot = await MANAGER.snapshot(settings)
-    if "profiles" not in snapshot:
-        snapshot["profiles"] = [profile_as_dict(p) for p in declared_profiles()]
+    snapshot["profiles"] = [
+        {
+            "name": p.name,
+            "label": p.label,
+            "quant": p.quant,
+            "thinking": p.thinking,
+            "context_size": p.context_size,
+            "description": p.description,
+            "escalation_only": p.name == "expert",
+        }
+        for p in available_profiles()
+    ]
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
-    snapshot["harness_cases"] = list(HARNESS_CASES)
-    snapshot["primary_metric"] = "successful autonomous tasks per wall-clock minute"
+    snapshot["harness"] = load_last_report()
     return snapshot
 
 
@@ -95,60 +104,21 @@ async def capture_benchmark():
     }}
 
 
-@router.get("/hardware-gate")
-async def model_hardware_gate():
-    return await hardware_purchase_gate()
+@router.get("/harness")
+async def model_harness():
+    return load_last_report() or {"ran_at": None, "model_available": False, "blocked_reason": "not run yet"}
 
 
-@router.get("/agent-suite")
-async def model_agent_suite():
-    payload = list_suite()
-    payload["recent_results"] = await list_agent_results(limit=50)
-    return payload
-
-
-class AgentSuiteRunBody(BaseModel):
-    case_id: str
-    simulate_success: bool = False
-
-
-@router.post("/agent-suite/run")
-async def run_agent_suite_case(body: AgentSuiteRunBody):
-    """Prepare a suite case (and optionally mark a simulated fixture success).
-
-    Live model execution remains a Windows desktop job. This endpoint is the
-    dataset/harness path used by tests and the Model page.
-    """
-    try:
-        case = get_case(body.case_id)
-    except KeyError as exc:
-        raise HTTPException(404, f"Unknown case {body.case_id}") from exc
-    workspace = data_dir() / "agent-suite" / case.id
-    ctx = prepare_case(case, workspace)
-    if body.simulate_success:
-        apply_expected_solution(case, ctx)
-    ok, note = check_case(case, workspace, ctx)
-    metrics = empty_metrics()
-    metrics["success"] = ok
-    metrics["verification_result"] = note
-    settings = load_settings()
-    row = await record_case_result(
-        case=case,
-        metrics=metrics,
-        profile=settings.inference.profile,
-        source="simulate" if body.simulate_success else "fixture",
-        workspace=str(workspace),
-        notes=note,
+@router.post("/harness/run")
+async def run_model_harness():
+    report = await run_harness(
+        loaded=MANAGER.state.loaded,
+        chat=MANAGER.provider.chat if MANAGER.provider else None,
+        refresh_resources=MANAGER.refresh_resources,
+        state=MANAGER.state,
+        persist=True,
     )
-    return {
-        "ok": True,
-        "case": case.as_public_dict(),
-        "prompt": format_prompt(case, ctx),
-        "success": ok,
-        "note": note,
-        "workspace": str(workspace),
-        "result_id": row.id,
-    }
+    return report.as_dict()
 
 
 @router.post("/load")

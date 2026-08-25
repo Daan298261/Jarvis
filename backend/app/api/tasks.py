@@ -56,6 +56,7 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "acceptance_criteria": task.acceptance_criteria,
         "current_action": task.current_action,
         "current_tool": task.current_tool,
+        "exposed_tools": [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item],
         "result": task.result,
         "error": task.error,
         "retries": task.retries,

@@ -278,7 +278,8 @@ class WorkingState:
     next_action: str = ""
     task_class: str = ""
     verified: bool = False
-    escalated: bool = False
+    requested_tools: list[str] = field(default_factory=list)
+    expert_consults: int = 0
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"
@@ -331,11 +332,11 @@ class WorkingState:
         if not isinstance(data, dict):
             return cls()
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-        state = cls(**known)
-        if not isinstance(state.extra_tools, list):
-            state.extra_tools = []
-        if not isinstance(state.acceptance_criteria, list):
-            state.acceptance_criteria = []
-        if not isinstance(state.plan, list):
-            state.plan = []
-        return state
+        if not isinstance(known.get("requested_tools"), list):
+            known["requested_tools"] = []
+        if not isinstance(known.get("expert_consults"), int):
+            try:
+                known["expert_consults"] = int(known.get("expert_consults") or 0)
+            except (TypeError, ValueError):
+                known["expert_consults"] = 0
+        return cls(**known)

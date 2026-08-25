@@ -83,6 +83,13 @@ def test_llama_cpp_reports_missing_local_files():
     assert any("model file missing" in item for item in missing)
 
 
+def test_expert_profile_is_the_27b_escalation_alias():
+    expert = resolve_profile("expert")
+    assert expert.name == "expert"
+    assert "27B" in expert.filename
+    assert expert.thinking is True
+
+
 def test_llama_cpp_command_reflects_profile_and_settings():
     profile = resolve_profile("balanced")
     args = LlamaCppBackend(_settings(port=9099, fit=True, fit_target_mib=2048)).build_args(profile)

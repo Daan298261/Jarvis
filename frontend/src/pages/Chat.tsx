@@ -229,10 +229,7 @@ export function ChatPage() {
               <b>Status</b><span className={`badge ${task.status}`}>{task.status}</span>
               <b>Mode</b><span>{task.execution_mode || "balanced"}</span>
               <b>Class</b><span>{task.task_class || "—"}</span>
-              <b>Tools</b>
-              <span title={(task.exposed_tools || []).join(", ")}>
-                {(task.exposed_tools || []).join(", ") || "all"}
-              </span>
+              <b>Tools</b><span>{task.exposed_tools?.length ? task.exposed_tools.join(", ") : "—"}</span>
               <b>Stage</b><span>{task.stage}</span>
               <b>Action</b><span>{task.current_action || "—"}</span>
               <b>Tool</b><span>{task.current_tool || "—"}</span>

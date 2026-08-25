@@ -19,15 +19,25 @@ type Benchmark = {
 }
 
 type HarnessReport = {
-  created_at?: string
-  live?: boolean
-  measured?: number
-  skipped?: number
-  agent_catalog_size?: number
-  primary_metric?: string
+  ran_at?: string | null
+  model_available?: boolean
+  blocked_reason?: string
+  bottleneck?: string
+  buy_hardware?: boolean
+  hardware_recommendation?: string
+  metrics?: {
+    ttft_ms?: number | null
+    tool_call_latency_ms?: number | null
+    generation_tps?: number | null
+    prompt_tps?: number | null
+    vram_used_mib?: number | null
+    ram_used_gb?: number | null
+    cpu_utilization_percent?: number | null
+    gpu_utilization_percent?: number | null
+    load_time_seconds?: number | null
+    context_size?: number | null
+  }
   notes?: string[]
-  configurations?: { id: string; status: string; skip_reason?: string; context_size?: number }[]
-  agent_tasks?: { id: string; category: string; status: string; skip_reason?: string }[]
 }
 
 type ModelStatus = {
@@ -50,16 +60,7 @@ type ModelStatus = {
   context_policy?: { live?: number; profile_cap?: number; note?: string }
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
-  hardware_gate?: HardwareGate
-  agent_suite?: {
-    suite_id: string
-    count: number
-    primary_metric: string
-    live_comparison_blocked: boolean
-    live_comparison_reason: string
-    cases: SuiteCase[]
-    recent_results: { case_id: string; success: boolean; source: string }[]
-  }
+  harness?: HarnessReport | null
 }
 
 function pct(value: number | null | undefined) {
@@ -103,10 +104,10 @@ export function ModelPage() {
     }
   }
 
-  async function runHarness(live: boolean) {
+  async function runHarness() {
     setBusy(true)
     try {
-      await api("/api/model/harness", { method: "POST", body: JSON.stringify({ live, background: false }) })
+      await api("/api/model/harness/run", { method: "POST" })
       await refresh()
     } finally {
       setBusy(false)
@@ -155,10 +156,10 @@ export function ModelPage() {
             <button className="btn" disabled={busy} onClick={() => load("fast")}>Fast</button>
             <button className="btn" disabled={busy} onClick={() => load("balanced")}>Balanced</button>
             <button className="btn" disabled={busy} onClick={() => load("quality")}>Quality</button>
-            <button className="btn" disabled={busy} onClick={() => load("expert")}>Expert</button>
+            <button className="btn secondary" disabled={busy} onClick={() => load("expert")}>Expert 27B</button>
             <button className="btn secondary" disabled={busy} onClick={() => api("/api/model/unload", { method: "POST" }).then(refresh)}>Unload</button>
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
-            <button className="btn secondary" disabled={busy} onClick={runProbe}>Probe server</button>
+            <button className="btn secondary" disabled={busy} onClick={runHarness}>Run harness</button>
           </div>
           {probe && (
             <p className="lede" style={{ marginTop: 12 }}>
@@ -166,10 +167,10 @@ export function ModelPage() {
             </p>
           )}
           <p className="lede" style={{ marginTop: 16 }}>
-            Fast: Q4_K_M, thinking off, 16K cap; tasks often start at 8K.<br />
-            Balanced: Q4_K_M, thinking on, 32K cap; tasks start at 16K.<br />
+            Fast: Q4_K_M, thinking off, 16K context.<br />
+            Balanced: Q4_K_M, thinking on, 32K context.<br />
             Quality: Q5_K_M, thinking on, hybrid GPU/CPU.<br />
-            Expert: compact 27B consult used when the primary agent is stuck.
+            Expert: 27B escalation only — not for ordinary tool work.
           </p>
           {profiles.length > 0 && (
             <div className="lede" style={{ marginTop: 12 }}>
@@ -258,6 +259,28 @@ export function ModelPage() {
           <p className="lede" style={{ marginTop: 12 }}>
             Agent catalog sample: {catalogPreview.map((row) => row.id).join(", ")}
           </p>
+        )}
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <h2>Performance harness</h2>
+        <p className="lede">
+          Records load time, time-to-first-token, tok/s, VRAM/RAM, CPU/GPU use, context, and a local tool-stat probe.
+          Hardware purchases stay gated until this has run on the Windows desktop with real GGUFs.
+        </p>
+        {model?.harness?.ran_at ? (
+          <div className="kv" style={{ marginTop: 12 }}>
+            <b>Last run</b><span>{model.harness.ran_at.replace("T", " ").slice(0, 19)}</span>
+            <b>Model</b><span>{model.harness.model_available ? "loaded" : "not loaded"}</span>
+            <b>Bottleneck</b><span>{model.harness.bottleneck || "unmeasured"}</span>
+            <b>TTFT</b><span>{model.harness.metrics?.ttft_ms != null ? `${model.harness.metrics.ttft_ms} ms` : "n/a"}</span>
+            <b>Tool probe</b><span>{model.harness.metrics?.tool_call_latency_ms != null ? `${model.harness.metrics.tool_call_latency_ms} ms` : "n/a"}</span>
+            <b>CPU</b><span>{model.harness.metrics?.cpu_utilization_percent != null ? `${model.harness.metrics.cpu_utilization_percent}%` : "n/a"}</span>
+            <b>GPU</b><span>{model.harness.metrics?.gpu_utilization_percent != null ? `${model.harness.metrics.gpu_utilization_percent}%` : "n/a"}</span>
+            <b>Buy hardware</b><span>{model.harness.buy_hardware ? "maybe" : "no"}</span>
+            <b>Gate</b><span>{model.harness.hardware_recommendation || "—"}</span>
+          </div>
+        ) : (
+          <p className="lede" style={{ marginTop: 12 }}>No harness run yet. Use Run harness even without a loaded model to capture CPU/RAM and the purchase gate.</p>
         )}
       </div>
       <div className="card" style={{ marginTop: 16 }}>

@@ -86,30 +86,11 @@ def _office_installed() -> bool:
     """Detect Office from install paths. Do not launch Word/Excel just to probe."""
     if platform.system() != "Windows":
         return False
-    program_files = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
-    program_files_x86 = Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
     roots = [
-        program_files / "Microsoft Office",
-        program_files_x86 / "Microsoft Office",
-        program_files / "Microsoft Office" / "root" / "Office16",
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office",
+        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft Office",
     ]
-    if any(root.exists() for root in roots):
-        return True
-    try:
-        import winreg  # type: ignore
-
-        for key in (
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WINWORD.EXE",
-            r"SOFTWARE\Microsoft\Office\16.0\Word",
-        ):
-            try:
-                winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key)
-                return True
-            except OSError:
-                continue
-    except Exception:
-        pass
-    return False
+    return any(root.exists() for root in roots)
 
 
 def detect_hardware(*, force: bool = False) -> HardwareInfo:

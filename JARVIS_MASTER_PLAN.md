@@ -3596,6 +3596,8 @@ This development session:
 - Context: 16K fast, 32K balanced/quality (profile cap). Tasks start at 8K (simple) or 16K (normal/long) and expand to the cap only when the live prompt is under pressure.
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
+- Expert profile: 27B Q4_K_M escalation-only (`expert`); compact-brief consult after repeated distinct failures, then primary reload
+- Performance harness: `POST /api/model/harness/run` records load/TTFT/tok/s/VRAM/RAM/CPU/GPU/context/tool-probe and a hardware purchase gate (do not buy until Windows GGUF numbers exist)
 - Status: **code present and unit-tested, Windows runtime not verified this session**
 - Escalation: Expert 27B consult profile exists. Difficulty signals trigger a compact second-opinion turn. Live 9B unload → 27B load is not exercised here.
 
@@ -3622,7 +3624,7 @@ This development session:
 - Web fetch: HTTP GET/POST/HEAD with optional body, headers, and sandboxed download
 - Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
-- Voice: local Whisper STT (when installed) + Windows SAPI / espeak-ng / pyttsx3 TTS wrapping `/api/voice/command` and `/api/voice/listen`
+- Tool exposure: task classification sends a relevant subset plus `request_tools`; mixed/long-horizon still get every enabled tool
 
 ### Optional Workers
 
@@ -3665,9 +3667,9 @@ This development session:
 ### Portal / API
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
+- Command live status shows task class and the currently exposed tool set
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
-- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
-- Model page can preview the local benchmark harness (`GET/POST /api/model/harness`) and load the Expert consult profile
+- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`) plus a performance harness / hardware-gate card (`POST /api/model/harness/run`)
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
@@ -3686,7 +3688,8 @@ This development session:
 - UFO / Cua / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Cursor ACP / paid Composer-Grok coding workers remain not_configured in this environment
+- Live 9B→27B model swap is implemented as a consult flow but cannot run without GGUFs
+- Terminal default is PowerShell on Windows and bash on Linux
 
 ### Last End-to-End Test
 
@@ -3694,12 +3697,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): previous coverage plus isolated git worktrees, self-development verification gate, trial budget / kill switch / end-of-run report, docker run/logs/inspect target guards, browser close without launching Chromium, Linux default shell
-- Frontend (`npm run build`): TypeScript build
-- Portal smoke: Command emergency stop, System self-development card, Settings trial budget
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **task-class tool exposure + request_tools**, **Expert 27B consult policy**, **performance harness / hardware gate**, docker/browser/python/git/web_fetch guards
+- Frontend (`npm run build`): TypeScript build (this session)
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **93 passed** on this branch. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **105 passed** on this branch. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3746,6 +3748,18 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
   - Acceptance: model loads, API responds, tool calls work, vision projector loads.
   - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`.
+
+- [x] Dynamic tool exposure (P0.7)
+  - Acceptance: task class sends a relevant tool schema; `request_tools` can expand it; mixed/long-horizon keep the full set.
+  - Status: VERIFIED in unit tests (`test_tool_exposure.py`, `test_tool_exposure_loop.py`)
+
+- [x] Performance benchmark harness + hardware purchase gate (P0.8 / P0.12 code)
+  - Acceptance: harness records load/TTFT/tok/s/VRAM/RAM/CPU/GPU/context/tool latency; does not recommend buying hardware until Windows GGUF numbers exist.
+  - Status: VERIFIED in unit tests (`test_harness.py`); live GPU samples **not** collected here
+
+- [x] Automatic Expert 27B escalation policy (P0.10 code)
+  - Acceptance: escalate only when stuck or explicitly requested; compact brief; restore primary profile.
+  - Status: VERIFIED in unit tests (`test_escalation.py`); live 9B↔27B swap **BLOCKED** (no GGUF)
 
 ### P1
 
@@ -3925,6 +3939,14 @@ P2 introduces Node/capability/resource/placement abstractions on the existing de
 Reason:
 
 This makes multi-device support an extension rather than a rewrite while keeping current development focused and testable.
+
+Decision: task-class tool exposure with an explicit escape hatch
+
+Ordinary tasks receive a small relevant tool schema. Mixed and long-horizon tasks still get every enabled tool. The model can call `request_tools` when the first set is insufficient.
+
+Reason:
+
+Sending every tool definition on every turn wastes context and increases wrong-tool selection.
 
 Decision: deterministic tools first
 

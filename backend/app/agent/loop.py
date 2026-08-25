@@ -20,12 +20,14 @@ from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
-from .compaction import (
-    SUMMARY_MARKER,
-    compact_history,
-    deserialize_messages,
-    estimate_prompt_tokens,
-    serialize_messages,
+from .compaction import compact_history, deserialize_messages, serialize_messages
+from .escalation import (
+    EscalationSignals,
+    build_expert_brief,
+    consult_expert,
+    looks_like_architecture,
+    should_escalate,
+    user_requested_expert,
 )
 from .planning import (
     WorkingState,
@@ -40,6 +42,7 @@ from .planning import (
 )
 from .escalation import build_escalation_package, persist_escalation_package
 from .recovery import recovery_hint
+from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
 from .tooling import apply_capability_request, expose_called_tool, schemas_for, should_enable_thinking, tools_for_task
@@ -88,7 +91,11 @@ def _as_utc(value: datetime | None) -> datetime | None:
         return None
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
+def _exposed_csv(working: WorkingState) -> str:
+    return ",".join(tool_names_for(working.task_class, working.requested_tools))
 
 
 class AgentRuntime:
@@ -110,6 +117,8 @@ class AgentRuntime:
             )
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
+        task_class = classify_task(prompt)
+        REGISTRY.apply_settings(settings)
         task = Task(
             id=str(uuid.uuid4()),
             title=prompt.strip().splitlines()[0][:120],
@@ -119,7 +128,8 @@ class AgentRuntime:
             autonomy=autonomy or settings.autonomy,
             profile=profile or settings.inference.profile,
             execution_mode=mode,
-            task_class=classify_task(prompt),
+            task_class=task_class,
+            exposed_tools=",".join(tool_names_for(task_class)),
         )
         async with SessionLocal() as session:
             session.add(task)
@@ -270,8 +280,7 @@ class AgentRuntime:
                 working.goal = prompt.strip().splitlines()[0][:240]
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
-            if not isinstance(working.extra_tools, list):
-                working.extra_tools = []
+        await self._update(task_id, exposed_tools=_exposed_csv(working))
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         recommended_context = recommend_context_size(
@@ -355,8 +364,7 @@ class AgentRuntime:
             if lessons:
                 system_prompt += "\n\n" + lessons
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
-            if coding_route is not None:
-                system_prompt += "\n\n" + format_route_prompt(coding_route)
+            system_prompt += "\n\n" + describe_exposure(working.task_class, working.requested_tools)
             messages = [
                 ChatMessage(role="system", content=system_prompt),
                 ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
@@ -495,6 +503,7 @@ class AgentRuntime:
                     compact_memory=working.dumps(),
                     execution_mode=execution_mode,
                     task_class=working.task_class,
+                    exposed_tools=_exposed_csv(working),
                 )
                 think = should_enable_thinking(
                     profile,
@@ -531,7 +540,7 @@ class AgentRuntime:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
                             messages,
-                            tools=None if force_final else schemas_for(exposed_tools),
+                            tools=None if force_final else schemas_for(working.task_class, working.requested_tools),
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
@@ -624,6 +633,17 @@ class AgentRuntime:
                     for call in result.tool_calls:
                         name = call["function"]["name"]
                         arguments = parse_tool_arguments(call["function"]["arguments"])
+                        if name == "request_tools":
+                            granted = grant_requested_tools(arguments)
+                            working.requested_tools = sorted(set(working.requested_tools) | set(granted))
+                            await self._update(task_id, exposed_tools=_exposed_csv(working), compact_memory=working.dumps())
+                            await BUS.publish(
+                                task_id,
+                                "progress",
+                                "Expanded tool set",
+                                ", ".join(granted) or "(none recognized)",
+                                stage="act",
+                            )
                         signature = hashlib.sha256(f"{name}:{json.dumps(arguments, sort_keys=True)}".encode()).hexdigest()
                         if recent_hashes[-3:].count(signature) >= 2:
                             observation = "Repeated identical failing/identical tool call blocked. Choose a different strategy."
@@ -680,34 +700,23 @@ class AgentRuntime:
                         recovering = True
                         await BUS.publish(task_id, "retry", "Choosing a recovery strategy", guidance[:1500], stage="diagnose")
                         messages.append(ChatMessage(role="user", content=guidance))
-                        if policy.critic_pass and critic_done and consecutive_failures >= 2:
-                            critic_rejected = True
-                        decision = should_escalate(
-                            prompt=prompt,
-                            task_class=working.task_class,
-                            consecutive_failures=consecutive_failures,
-                            distinct_failed_tools=len(failures_by_tool),
-                            critic_rejected=critic_rejected,
-                            observations=working.observations + working.known_failures,
-                            already_escalated=already_escalated,
+                        expert = await self._maybe_consult_expert(
+                            task_id,
+                            working,
+                            prompt,
+                            consecutive_failures,
+                            failures_by_tool,
+                            profile_name,
+                            settings,
+                            verifying,
                         )
-                        if decision.should_escalate:
-                            already_escalated = True
-                            working.escalated = True
-                            await BUS.publish(task_id, "stage", "Escalating to Expert 27B", decision.reason, stage="diagnose")
-                            analysis = await consult_expert(
-                                settings,
-                                expert_packet(working, decision.reason),
-                                profile_name or profile.name,
-                                provider=provider,
-                            )
+                        if expert:
                             messages.append(
                                 ChatMessage(
                                     role="user",
-                                    content="Expert analysis:\n" + analysis + "\n\nApply this plan with tools now.",
+                                    content="Expert 27B analysis (execute this plan with tools; do not wait):\n" + expert,
                                 )
                             )
-                            provider = MANAGER.provider or provider
                     elif verifying and verify_tool_rounds >= policy.max_verify_tools:
                         force_final = True
                         messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))
@@ -875,6 +884,55 @@ class AgentRuntime:
                 if name == "screenshot" or (name == "browser" and arguments.get("action") == "screenshot"):
                     attach = result.data.get("path")
         return result.text(), attach
+
+    async def _maybe_consult_expert(
+        self,
+        task_id: str,
+        working: WorkingState,
+        prompt: str,
+        consecutive_failures: int,
+        failures_by_tool: dict[str, int],
+        profile_name: str,
+        settings: AppSettings,
+        verifying: bool,
+    ) -> str | None:
+        if verifying:
+            return None
+        signals = EscalationSignals(
+            consecutive_failures=consecutive_failures,
+            failed_tools=list(failures_by_tool),
+            task_class=working.task_class,
+            user_requested_expert=user_requested_expert(prompt),
+            architecture_task=looks_like_architecture(prompt, working.task_class),
+            already_consulted=working.expert_consults,
+        )
+        if not should_escalate(signals):
+            return None
+        brief = build_expert_brief(working, unresolved=working.next_action or working.current_state)
+
+        async def _load(name: str):
+            return await MANAGER.load(settings, name)
+
+        async def _chat(raw_messages: list[dict[str, Any]]):
+            if not MANAGER.provider:
+                raise RuntimeError("no provider after expert load")
+            wrapped = [ChatMessage(role=item["role"], content=item["content"]) for item in raw_messages]
+            return await MANAGER.provider.chat(wrapped, tools=None, thinking=True, max_tokens=1024)
+
+        await BUS.publish(task_id, "stage", "Consulting Expert 27B", brief.unresolved_problem[:800], stage="diagnose")
+        advice = await consult_expert(
+            brief,
+            primary_profile=profile_name or "balanced",
+            load=_load,
+            unload=MANAGER.unload,
+            chat=_chat,
+        )
+        working.expert_consults += 1
+        if advice.used:
+            await BUS.publish(task_id, "progress", "Expert analysis ready", advice.content[:1500], stage="diagnose")
+            return advice.content
+        await BUS.publish(task_id, "progress", "Expert consult skipped", (advice.reason or "unavailable")[:1500], stage="diagnose")
+        return None
 
 
 AGENT = AgentRuntime()

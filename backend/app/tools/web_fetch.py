@@ -31,14 +31,9 @@ class WebFetchTool(Tool):
             "url": {"type": "string"},
             "method": {"type": "string", "enum": ["GET", "POST", "HEAD"], "default": "GET"},
             "max_chars": {"type": "integer", "default": 12000},
-            "body": {"type": "string", "description": "Request body for POST"},
-            "headers": {
-                "type": "object",
-                "additionalProperties": {"type": "string"},
-                "description": "Optional HTTP headers",
-            },
-            "timeout_seconds": {"type": "integer", "default": 30},
-            "path": {"type": "string", "description": "If set, save the response body to this allowed path"},
+            "headers": {"type": "object"},
+            "body": {"type": "string"},
+            "json_body": {"type": "object"},
         },
         "required": ["url"],
     }
@@ -57,51 +52,23 @@ class WebFetchTool(Tool):
         if method not in {"GET", "POST", "HEAD"}:
             return ToolResult(False, "", error=f"Unsupported method {method}")
         limit = int(kwargs.get("max_chars") or 12000)
-        timeout = float(kwargs.get("timeout_seconds") or 30)
+        if method not in {"GET", "POST", "HEAD"}:
+            return ToolResult(False, "", error=f"Unsupported method {method}")
         headers = {"User-Agent": "JarvisLocal/1.0"}
-        extra = kwargs.get("headers") or {}
+        extra = kwargs.get("headers")
         if isinstance(extra, dict):
-            for key, value in extra.items():
-                if value is None:
-                    continue
-                headers[str(key)] = str(value)
+            headers.update({str(key): str(value) for key, value in extra.items()})
+        json_body = kwargs.get("json_body") if isinstance(kwargs.get("json_body"), dict) else None
         body = kwargs.get("body")
-        save_to = kwargs.get("path")
-        allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
-        dest: Path | None = None
-        if save_to:
-            try:
-                dest = resolve_allowed_path(str(save_to), allowed)
-            except PermissionError as exc:
-                return ToolResult(False, "", error=str(exc))
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-                request_kwargs: dict[str, Any] = {"headers": headers}
-                if method == "POST" and body is not None:
-                    request_kwargs["content"] = body if isinstance(body, (bytes, str)) else str(body)
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30, headers=headers) as client:
+                request_kwargs: dict[str, Any] = {}
+                if json_body is not None:
+                    request_kwargs["json"] = json_body
+                elif body is not None:
+                    request_kwargs["content"] = body
                 response = await client.request(method, url, **request_kwargs)
-            content_type = response.headers.get("content-type", "")
-            payload = response.content[:_MAX_DOWNLOAD_BYTES]
-            truncated_bytes = len(response.content) > _MAX_DOWNLOAD_BYTES
-            saved = ""
-            if dest is not None and method != "HEAD":
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(payload)
-                saved = str(dest)
-            try:
-                text = payload.decode(response.encoding or "utf-8")
-            except (LookupError, UnicodeDecodeError):
-                text = payload.decode("utf-8", errors="replace")
-            preview = text[:limit]
-            lines = [
-                f"status={response.status_code}",
-                f"content-type={content_type}",
-                f"bytes={len(payload)}" + (" (truncated)" if truncated_bytes else ""),
-            ]
-            if saved:
-                lines.append(f"saved={saved}")
-            if method != "HEAD":
-                lines.extend(["", preview])
+            text = response.text[:limit]
             return ToolResult(
                 response.is_success,
                 "\n".join(lines),

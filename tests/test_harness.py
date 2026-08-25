@@ -1,55 +1,48 @@
-from app.inference.agent_bench import AGENT_TASKS, task_catalog, tasks_by_category
-from app.inference.harness import benchmark_matrix, harness_status, run_harness
+from app.inference.harness import hardware_gate, measure_tool_call_latency_ms, run_harness
+from app.providers.base import ChatMessage, ChatResult
 
 
-REQUIRED_CATEGORIES = {
-    "filesystem",
-    "software engineering",
-    "shell",
-    "browser automation",
-    "mixed",
-    "multimodal",
-    "research",
-    "document processing",
-    "data processing",
-    "long-horizon autonomous",
-}
+def test_hardware_gate_blocks_purchases_without_desktop_measurements():
+    gate = hardware_gate({"gpu_name": None, "vram_total_mib": None}, {}, [])
+    assert gate["buy_hardware"] is False
+    assert gate["bottleneck"] == "unmeasured"
+    assert "Do not buy" in gate["recommendation"]
 
 
-def test_agent_catalog_has_at_least_twenty_realistic_tasks():
-    assert len(AGENT_TASKS) >= 20
-    catalog = task_catalog()
-    assert catalog[0]["id"] == "fs-organize"
-    categories = tasks_by_category()
-    missing = REQUIRED_CATEGORIES - set(categories)
-    assert not missing, missing
-    ids = [task.id for task in AGENT_TASKS]
-    assert len(ids) == len(set(ids))
+def test_hardware_gate_flags_vram_pressure_but_still_does_not_buy():
+    hardware = {"gpu_name": "RTX 5070 Ti", "vram_total_mib": 16384, "ram_total_gb": 64}
+    metrics = {"generation_tps": 20.0, "vram_used_mib": 15800, "load_time_seconds": 8.0, "ttft_ms": 120}
+    gate = hardware_gate(hardware, metrics, [{"source": "harness"}])
+    assert gate["buy_hardware"] is False
+    assert gate["bottleneck"] == "gpu_vram"
+    assert "90%" in gate["recommendation"]
 
 
-def test_benchmark_matrix_covers_models_context_thinking_and_vision():
-    matrix = benchmark_matrix()
-    assert len(matrix) >= 72
-    models = {row.model for row in matrix}
-    assert "qwen3.5-9b-abliterated" in models
-    assert "qwen3.5-27b" in models
-    quants = {row.quant for row in matrix if row.model == "qwen3.5-9b-abliterated"}
-    assert "Q8_0" in quants and "Q6_K" in quants
-    assert {row.context_size for row in matrix} >= {8192, 16384, 32768}
-    assert {row.thinking for row in matrix} == {"off", "selective", "on"}
-    assert {row.vision for row in matrix} == {False, True}
+def test_tool_probe_is_a_real_stat():
+    assert measure_tool_call_latency_ms() >= 0
 
 
-def test_dry_run_harness_skips_missing_ggufs_and_writes_report(tmp_path, monkeypatch):
+async def test_harness_dry_run_records_cpu_and_gate(jarvis_env, tmp_path, monkeypatch):
     monkeypatch.setattr("app.inference.harness.data_dir", lambda: tmp_path)
-    report = run_harness(live=False)
-    assert report["agent_catalog_size"] >= 20
-    assert report["skipped"] == len(report["configurations"])
-    assert report["measured"] == 0
-    assert (tmp_path / "benchmarks" / "last-report.json").exists()
-    assert (tmp_path / "benchmarks" / "last-report.md").exists()
-    markdown = (tmp_path / "benchmarks" / "last-report.md").read_text(encoding="utf-8")
-    assert "successful autonomous tasks" in markdown
-    status = harness_status()
-    assert status["report"]["skipped"] == report["skipped"]
-    assert status["matrix_size"] == len(report["configurations"])
+    report = await run_harness(loaded=False, persist=True)
+    assert report.model_available is False
+    assert report.buy_hardware is False
+    assert report.metrics["tool_call_latency_ms"] is not None
+    assert report.metrics["cpu_utilization_percent"] is not None
+    assert "Do not buy" in report.hardware_recommendation
+    saved = (tmp_path / "benchmarks" / "last_harness.json")
+    assert saved.exists()
+
+
+async def test_harness_live_probe_records_ttft(jarvis_env, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.inference.harness.data_dir", lambda: tmp_path)
+
+    async def chat(messages, **kwargs):
+        assert isinstance(messages[0], ChatMessage)
+        return ChatResult(content="pong", timings={"prompt_per_second": 80.0, "predicted_per_second": 22.0})
+
+    report = await run_harness(loaded=True, chat=chat, persist=False)
+    assert report.model_available is True
+    assert report.metrics["ttft_ms"] is not None
+    assert report.metrics["prompt_tps"] == 80.0
+    assert report.metrics["generation_tps"] == 22.0

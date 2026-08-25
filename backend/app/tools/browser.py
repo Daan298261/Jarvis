@@ -51,17 +51,19 @@ async def _ensure_page(headless: bool):
     return _page
 
 
-async def _close_browser():
+async def _close_browser() -> ToolResult:
     global _playwright, _browser, _context, _page, _pages
+    if not _context and not _playwright:
+        _page = None
+        _pages = []
+        return ToolResult(True, "Browser was not open")
     if _context:
         await _context.close()
-    elif _browser:
-        await _browser.close()
     if _playwright:
         await _playwright.stop()
     _context = None
-    _browser = None
     _playwright = None
+    _browser = None
     _page = None
     _pages = []
     return ToolResult(True, "Browser closed")
@@ -144,18 +146,7 @@ class BrowserTool(Tool):
         async with _lock:
             try:
                 if action == "close":
-                    global _playwright, _browser, _context, _page, _pages
-                    if not _context and not _page:
-                        return ToolResult(True, "Browser was not running")
-                    if _context:
-                        await _context.close()
-                    if _playwright:
-                        await _playwright.stop()
-                    _context = None
-                    _playwright = None
-                    _page = None
-                    _pages = []
-                    return ToolResult(True, "Browser closed")
+                    return await _close_browser()
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs["url"]

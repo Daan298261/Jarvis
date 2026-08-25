@@ -13,7 +13,7 @@ Browser (localhost:4780)
 FastAPI backend / Orchestrator
   ├── Task store (SQLite)
   ├── Agent runtime (plan → act → observe → recover → verify)
-  ├── Tool registry (filesystem, terminal, python, browser, browser_use, code_worker, desktop, office, git, docker, web_fetch, screenshot, MCP)
+  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, request_tools, MCP)
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
@@ -66,17 +66,18 @@ Swap by pointing `inference.host`/`port` at any OpenAI-compatible `/v1` endpoint
 
 `backend/app/agent/loop.py` runs an explicit loop:
 
-1. Understand the requested end state.
+1. Understand the requested end state and classify the task.
 2. Capture acceptance criteria.
 3. In Reliable mode, generate candidate plans and select one.
-4. Inspect with deterministic tools.
-5. Plan and execute the next action.
-6. Persist the observation.
-7. Classify success vs failure.
-8. Diagnose failures and choose a materially different strategy.
-9. Repeat until acceptance criteria can be checked.
-10. Run an independent verification pass.
-11. Report completion only after verification.
+4. Expose only tools relevant to the task class (`request_tools` can expand the set).
+5. Inspect with deterministic tools.
+6. Plan and execute the next action.
+7. Persist the observation.
+8. Classify success vs failure.
+9. Diagnose failures and choose a materially different strategy. After repeated distinct failures, consult Expert 27B with a compact brief, then restore the primary model.
+10. Repeat until acceptance criteria can be checked.
+11. Run an independent verification pass.
+12. Report completion only after verification.
 
 Task state is checkpointed in SQLite after tool calls. `POST /api/tasks/{id}/continue` reloads compacted state.
 

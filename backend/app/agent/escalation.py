@@ -1,152 +1,165 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable, Iterable
 
-from ..config import AppSettings
-from ..inference.profiles import expert_profile, resolve_profile
-from ..providers.base import ChatMessage, ChatResult
 from .planning import WorkingState
-from .prompts import EXPERT_CONSULT_PROMPT
 
-QUALITY_PHRASES = (
-    "use the expert",
-    "expert model",
-    "maximum quality",
-    "max quality",
-    "deep analysis",
-    "second opinion",
-    "architecture decision",
-)
-
-ARCHITECTURE_PHRASES = (
-    "architecture",
-    "redesign",
-    "system design",
-    "migrate the",
-    "whole codebase",
-)
+LoadFn = Callable[[str], Awaitable[Any]]
+UnloadFn = Callable[[], Awaitable[Any]]
+ChatFn = Callable[[list[dict[str, Any]]], Awaitable[Any]]
 
 
 @dataclass
-class EscalationDecision:
-    should_escalate: bool
+class EscalationSignals:
+    consecutive_failures: int = 0
+    failed_tools: Iterable[str] = field(default_factory=list)
+    task_class: str = ""
+    user_requested_expert: bool = False
+    architecture_task: bool = False
+    critic_low_confidence: bool = False
+    already_consulted: int = 0
+
+
+@dataclass
+class ExpertBrief:
+    goal: str
+    acceptance_criteria: list[str]
+    observations: list[str]
+    failed_approaches: list[str]
+    unresolved_problem: str
+    relevant_files: list[str]
+    task_class: str = ""
+
+    def as_prompt(self) -> str:
+        criteria = "\n".join(f"- {item}" for item in self.acceptance_criteria) or "- (not captured)"
+        failed = "\n".join(f"- {item}" for item in self.failed_approaches[-6:]) or "- none recorded"
+        observed = "\n".join(f"- {item}" for item in self.observations[-6:]) or "- none"
+        files = "\n".join(f"- {item}" for item in self.relevant_files[:8]) or "- none named"
+        return (
+            "You are the Expert 27B advisor. Do not execute tools. Produce a focused analysis "
+            "and a concrete next plan the smaller primary model can carry out.\n\n"
+            f"Goal: {self.goal or '(same as the user request)'}\n"
+            f"Task class: {self.task_class or 'mixed'}\n"
+            f"Acceptance criteria:\n{criteria}\n"
+            f"Important observations:\n{observed}\n"
+            f"Failed approaches:\n{failed}\n"
+            f"Relevant files:\n{files}\n"
+            f"Unresolved problem: {self.unresolved_problem}\n\n"
+            "Reply with:\n"
+            "ANALYSIS:\n"
+            "NEXT PLAN:\n"
+            "1. ...\n"
+            "PITFALLS:\n"
+            "- ..."
+        )
+
+
+@dataclass
+class ExpertAdvice:
+    used: bool
+    content: str = ""
     reason: str = ""
+    primary_restored: bool = True
 
 
-def user_requests_expert(prompt: str | None) -> bool:
+_EXPERT_PROMPT_MARKERS = ("expert model", "maximum quality", "use 27b", "escalate to expert", "second opinion")
+_ARCHITECTURE_MARKERS = ("architecture", "redesign", "system design", "refactor the whole")
+
+
+def user_requested_expert(prompt: str) -> bool:
     text = (prompt or "").lower()
-    return any(phrase in text for phrase in QUALITY_PHRASES)
+    return any(marker in text for marker in _EXPERT_PROMPT_MARKERS)
 
 
-def architecture_task(task_class: str | None, prompt: str | None) -> bool:
-    text = (prompt or "").lower()
-    if (task_class or "").lower() != "software engineering":
+def looks_like_architecture(prompt: str, task_class: str = "") -> bool:
+    text = f"{prompt or ''} {task_class or ''}".lower()
+    return any(marker in text for marker in _ARCHITECTURE_MARKERS)
+
+
+def should_escalate(signals: EscalationSignals) -> bool:
+    """Escalate only when the primary model is stuck, not because a task is long."""
+    if signals.already_consulted >= 1:
         return False
-    return any(phrase in text for phrase in ARCHITECTURE_PHRASES)
+    if signals.user_requested_expert:
+        return True
+    failed = {name for name in signals.failed_tools if name}
+    if signals.consecutive_failures >= 3 and len(failed) >= 2:
+        return True
+    if signals.architecture_task and signals.consecutive_failures >= 2:
+        return True
+    if signals.critic_low_confidence and signals.consecutive_failures >= 2:
+        return True
+    return False
 
 
-def contradictory_observations(observations: list[str]) -> bool:
-    text = " ".join(observations[-6:]).lower()
-    missing = "not found" in text or "does not exist" in text or "no such file" in text
-    present = "exists" in text or "wrote" in text or "created" in text
-    return missing and present
-
-
-def should_escalate(
-    *,
-    prompt: str = "",
-    task_class: str = "",
-    consecutive_failures: int = 0,
-    distinct_failed_tools: int = 0,
-    critic_rejected: bool = False,
-    observations: list[str] | None = None,
-    already_escalated: bool = False,
-) -> EscalationDecision:
-    """Escalate for genuine difficulty, not because a task is merely long."""
-    if already_escalated:
-        return EscalationDecision(False, "")
-    if user_requests_expert(prompt):
-        return EscalationDecision(True, "user requested maximum-quality analysis")
-    if architecture_task(task_class, prompt) and consecutive_failures >= 1:
-        return EscalationDecision(True, "architecture-level task after a failed strategy")
-    if consecutive_failures >= 3:
-        return EscalationDecision(True, "repeated reasoning/tool failure")
-    if distinct_failed_tools >= 3:
-        return EscalationDecision(True, "multiple failed strategies")
-    if critic_rejected:
-        return EscalationDecision(True, "critic confidence below threshold")
-    if contradictory_observations(observations or []):
-        return EscalationDecision(True, "contradictory observations")
-    return EscalationDecision(False, "")
-
-
-def expert_packet(working: WorkingState, problem: str) -> str:
-    """Compact consult payload. Do not dump the full trajectory."""
-    criteria = "\n".join(f"- {item}" for item in working.acceptance_criteria[:8]) or "- (not yet captured)"
-    failures = "\n".join(f"- {item}" for item in working.known_failures[-6:]) or "- none recorded"
-    observations = "\n".join(f"- {item}" for item in working.observations[-6:]) or "- none"
-    plan = "\n".join(f"{i}. {step}" for i, step in enumerate(working.plan[:8], 1)) or "(none)"
-    return (
-        f"GOAL: {working.goal or '(same as user request)'}\n"
-        f"TASK CLASS: {working.task_class or 'mixed'}\n"
-        f"ACCEPTANCE CRITERIA:\n{criteria}\n"
-        f"CURRENT PLAN:\n{plan}\n"
-        f"IMPORTANT OBSERVATIONS:\n{observations}\n"
-        f"FAILED APPROACHES:\n{failures}\n"
-        f"UNRESOLVED PROBLEM: {problem}\n"
+def build_expert_brief(working: WorkingState, unresolved: str = "") -> ExpertBrief:
+    files: list[str] = []
+    for snippet in working.observations + working.recent_tool_outputs:
+        if ":" in snippet:
+            # keep short path-like tokens from tool output without dumping traces
+            tail = snippet.split(":", 1)[-1]
+            for token in tail.replace("\\", "/").split():
+                if "/" in token and len(token) < 180:
+                    files.append(token.strip(".,;\"'"))
+                    break
+    problem = unresolved or working.next_action or working.current_state or "primary model is stuck"
+    return ExpertBrief(
+        goal=working.goal,
+        acceptance_criteria=list(working.acceptance_criteria),
+        observations=list(working.observations[-6:]),
+        failed_approaches=list(working.known_failures[-6:]),
+        unresolved_problem=problem,
+        relevant_files=files[:8],
+        task_class=working.task_class,
     )
 
 
-def same_gguf(primary_name: str, expert_name: str) -> bool:
-    primary = resolve_profile(primary_name)
-    expert = resolve_profile(expert_name) if expert_name in {"fast", "balanced", "quality", "expert"} else expert_profile()
-    return primary.filename == expert.filename and primary.quant == expert.quant
-
-
 async def consult_expert(
-    settings: AppSettings,
-    packet: str,
-    primary_profile: str,
+    brief: ExpertBrief,
     *,
-    provider: Any | None = None,
-) -> str:
-    """Ask Expert for a focused plan, then restore the primary profile when a swap happened."""
-    from ..inference.manager import MANAGER
+    primary_profile: str,
+    expert_profile: str = "expert",
+    load: LoadFn,
+    unload: UnloadFn,
+    chat: ChatFn | None,
+) -> ExpertAdvice:
+    """Unload the primary model, ask Expert 27B, then restore the primary.
 
-    expert = expert_profile()
-    chat = provider or MANAGER.provider
-    swapped = False
+    Live model files are optional: missing GGUFs return used=False instead of crashing.
+    """
     if chat is None:
-        return "Expert consult skipped: no model provider is loaded."
+        return ExpertAdvice(False, reason="no chat provider available for expert consult")
     try:
-        if not same_gguf(primary_profile, expert.name):
-            await MANAGER.load(settings, expert.name, context_size=expert.context_size, force=True)
-            swapped = True
-            chat = MANAGER.provider or chat
-    except Exception:
-        swapped = False
-        chat = provider or MANAGER.provider
-    if chat is None:
-        return "Expert consult skipped: expert model is not available."
-    messages = [
-        ChatMessage(role="system", content="You are Jarvis Expert. Compact analysis only. Do not call tools."),
-        ChatMessage(role="user", content=packet + "\n\n" + EXPERT_CONSULT_PROMPT),
-    ]
-    try:
-        result: ChatResult = await chat.chat(
-            messages,
-            tools=None,
-            temperature=0.4,
-            thinking=True,
-            max_tokens=800,
-        )
-        content = (result.content or "").strip() or (result.reasoning or "").strip()
+        await unload()
+        await load(expert_profile)
     except Exception as exc:
-        content = f"Expert consult failed: {exc}"
-    if swapped:
         try:
-            await MANAGER.load(settings, primary_profile)
+            await load(primary_profile)
         except Exception:
-            pass
-    return content or "(expert returned an empty analysis)"
+            return ExpertAdvice(False, reason=str(exc), primary_restored=False)
+        return ExpertAdvice(False, reason=str(exc), primary_restored=True)
+    content = ""
+    try:
+        result = await chat(
+            [
+                {"role": "system", "content": "You are Jarvis Expert. Answer with ANALYSIS / NEXT PLAN / PITFALLS only."},
+                {"role": "user", "content": brief.as_prompt()},
+            ]
+        )
+        content = getattr(result, "content", None) or str(result)
+    except Exception as exc:
+        content = ""
+        reason = str(exc)
+    else:
+        reason = "expert consult completed"
+    restored = True
+    try:
+        await unload()
+        await load(primary_profile)
+    except Exception as exc:
+        restored = False
+        reason = f"{reason}; failed to restore primary: {exc}"
+    if not content:
+        return ExpertAdvice(False, reason=reason, primary_restored=restored)
+    return ExpertAdvice(True, content=content.strip(), reason=reason, primary_restored=restored)

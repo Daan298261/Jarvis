@@ -41,7 +41,7 @@ class ToolRegistry:
             DockerTool(),
             WebFetchTool(getter),
             ScreenshotTool(),
-            RequestCapabilityTool(),
+            RequestToolsTool(),
             MCPProxyTool(),
             RequestToolsTool(),
             UFOTool(),

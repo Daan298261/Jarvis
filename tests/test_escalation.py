@@ -1,102 +1,115 @@
 from app.agent.escalation import (
+    EscalationSignals,
+    ExpertBrief,
+    build_expert_brief,
     consult_expert,
-    expert_packet,
+    looks_like_architecture,
     should_escalate,
-    user_requests_expert,
+    user_requested_expert,
 )
-from app.agent.loop import AGENT
 from app.agent.planning import WorkingState
-from app.providers.base import ChatResult
-from tests.test_verification_loop import ScriptedProvider, _finished, _tool
 
 
-def test_user_request_escalates_immediately():
-    decision = should_escalate(prompt="Please use the expert model for this architecture decision")
-    assert decision.should_escalate
-    assert "user requested" in decision.reason
-    assert user_requests_expert("give me a second opinion on this")
+def test_does_not_escalate_for_a_long_or_single_failure():
+    assert not should_escalate(EscalationSignals(consecutive_failures=6, failed_tools=["filesystem"], already_consulted=0))
+    assert not should_escalate(EscalationSignals(consecutive_failures=2, failed_tools=["filesystem", "python"]))
 
 
-def test_length_alone_does_not_escalate():
-    decision = should_escalate(
-        prompt="Keep going through this long checklist of file copies",
-        task_class="filesystem",
-        consecutive_failures=0,
+def test_escalates_when_several_strategies_fail():
+    assert should_escalate(
+        EscalationSignals(consecutive_failures=3, failed_tools=["filesystem", "python"], already_consulted=0)
     )
-    assert decision.should_escalate is False
 
 
-def test_repeated_failures_escalate_once():
-    first = should_escalate(consecutive_failures=3, prompt="fix the build")
-    assert first.should_escalate
-    second = should_escalate(consecutive_failures=5, already_escalated=True)
-    assert second.should_escalate is False
+def test_escalates_when_the_user_asks_for_expert():
+    assert user_requested_expert("Please use the expert model for a second opinion")
+    assert should_escalate(EscalationSignals(user_requested_expert=True, already_consulted=0))
+    assert not should_escalate(EscalationSignals(user_requested_expert=True, already_consulted=1))
 
 
-def test_multiple_strategies_and_contradictions():
-    assert should_escalate(distinct_failed_tools=3).should_escalate
-    assert should_escalate(observations=["wrote report.md", "ERROR: file not found"]).should_escalate
-    assert should_escalate(critic_rejected=True).should_escalate
+def test_architecture_plus_repeated_failure_escalates():
+    assert looks_like_architecture("Redesign the inference architecture", "software engineering")
+    assert should_escalate(
+        EscalationSignals(
+            consecutive_failures=2,
+            failed_tools=["python"],
+            architecture_task=True,
+            already_consulted=0,
+        )
+    )
 
 
-def test_expert_packet_is_compact():
+def test_brief_is_compact_and_omits_raw_traces():
     working = WorkingState(
         goal="fix login",
         acceptance_criteria=["tests pass"],
-        plan=["inspect auth"],
-        known_failures=["browser: timeout"],
-        observations=["filesystem: found auth.py"],
+        observations=["filesystem: read /tmp/app/login.py"],
+        known_failures=["python: TypeError on line 4"],
+        next_action="try a different parser",
         task_class="software engineering",
     )
-    packet = expert_packet(working, "repeated tool failure")
-    assert "GOAL: fix login" in packet
-    assert "UNRESOLVED PROBLEM: repeated tool failure" in packet
-    assert "timeout" in packet
-    assert len(packet) < 2000
+    brief = build_expert_brief(working)
+    prompt = brief.as_prompt()
+    assert "fix login" in prompt
+    assert "tests pass" in prompt
+    assert "TypeError" in prompt
+    assert "Do not execute tools" in prompt
+    assert len(prompt) < 4000
 
 
-async def test_consult_expert_uses_current_provider_when_gguf_missing(jarvis_env):
-    provider = ScriptedProvider([ChatResult(content="PLAN:\n1. read the file\n2. patch it")])
-    jarvis_env["manager"].provider = provider
-    text = await consult_expert(jarvis_env["settings"], "GOAL: x\nUNRESOLVED PROBLEM: stuck", "balanced", provider=provider)
-    assert "read the file" in text
-    assert len(provider.turns) == 0
+async def test_consult_restores_primary_after_expert_chat():
+    order: list[str] = []
 
+    async def load(name: str):
+        order.append(f"load:{name}")
 
-async def test_requested_expert_consult_runs_inside_the_loop(jarvis_env):
-    tmp = jarvis_env["tmp"]
-    target = tmp / "expert.txt"
-    provider = ScriptedProvider(
-        [
-            ChatResult(content="PLAN:\n1. write the file with the filesystem tool"),
-            ChatResult(content="END STATE: expert.txt exists\nACCEPTANCE CRITERIA:\n- file contains EXPERT\nPLAN:\n1. write"),
-            ChatResult(
-                tool_calls=[
-                    _tool(
-                        "filesystem",
-                        {"action": "write", "path": str(target), "content": "EXPERT", "create_backup": False},
-                        "c1",
-                    )
-                ]
-            ),
-            ChatResult(content="Wrote it."),
-            ChatResult(tool_calls=[_tool("filesystem", {"action": "read", "path": str(target)}, "c2")]),
-            ChatResult(content="Verified expert.txt contains EXPERT."),
-        ]
+    async def unload():
+        order.append("unload")
+
+    async def chat(messages):
+        order.append("chat")
+        assert "Unresolved problem" in messages[1]["content"]
+        return type("R", (), {"content": "ANALYSIS:\nuse git\nNEXT PLAN:\n1. inspect"})()
+
+    brief = ExpertBrief(
+        goal="g",
+        acceptance_criteria=["ok"],
+        observations=[],
+        failed_approaches=["python failed"],
+        unresolved_problem="stuck parsing",
+        relevant_files=[],
+        task_class="software engineering",
     )
-    jarvis_env["manager"].provider = provider
-    created = await AGENT.create_task(
-        f"Use the expert model. Write {target} containing EXPERT.",
-        autonomy="autonomous",
-        profile="fast",
-        execution_mode="fast",
+    advice = await consult_expert(
+        brief,
+        primary_profile="balanced",
+        load=load,
+        unload=unload,
+        chat=chat,
     )
-    task = await _finished(created.id)
-    assert task.status == "completed"
-    assert target.read_text(encoding="utf-8") == "EXPERT"
-    injected = any(
-        "Expert analysis" in str(getattr(message, "content", ""))
-        for call in provider.calls
-        for message in call["messages"]
+    assert advice.used is True
+    assert "ANALYSIS" in advice.content
+    assert order == ["unload", "load:expert", "chat", "unload", "load:balanced"]
+
+
+async def test_consult_skips_when_expert_cannot_load():
+    async def load(name: str):
+        if name == "expert":
+            raise FileNotFoundError("GGUF missing")
+
+    async def unload():
+        return None
+
+    async def chat(_messages):
+        raise AssertionError("should not chat")
+
+    advice = await consult_expert(
+        ExpertBrief("g", [], [], [], "stuck", [], "mixed"),
+        primary_profile="fast",
+        load=load,
+        unload=unload,
+        chat=chat,
     )
-    assert injected
+    assert advice.used is False
+    assert "GGUF missing" in advice.reason
+    assert advice.primary_restored is True
