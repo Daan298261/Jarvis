@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -302,6 +302,32 @@ class Node(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    workers: Mapped[list["NodeWorker"]] = relationship(
+        back_populates="node",
+        cascade="all, delete-orphan",
+    )
+
+
+class NodeWorker(Base):
+    """Placement of a software Worker on a Node.
+
+    Workers remain distinct from Nodes: this records which execution services
+    are available on a given machine.
+    """
+
+    __tablename__ = "node_workers"
+    __table_args__ = (UniqueConstraint("node_id", "worker_id", name="uq_node_worker"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), index=True)
+    worker_id: Mapped[str] = mapped_column(String(80))
+    name: Mapped[str] = mapped_column(String(120), default="")
+    kind: Mapped[str] = mapped_column(String(32), default="worker")
+    status: Mapped[str] = mapped_column(String(32), default="unknown")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    node: Mapped[Node] = relationship(back_populates="workers")
 
 
 class WorkerReport(Base):

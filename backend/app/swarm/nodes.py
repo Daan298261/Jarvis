@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import or_, select
 
 from ..config import data_dir
-from ..db.models import Node
+from ..db.models import Node, NodeWorker
 from ..db.session import SessionLocal
 from ..hardware import hardware_dict
 
@@ -69,7 +69,7 @@ def default_resources(hardware: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def node_to_dict(node: Node) -> dict[str, Any]:
+def node_to_dict(node: Node, workers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     try:
         roles = json.loads(node.roles_json or "[]")
     except Exception:
@@ -99,6 +99,7 @@ def node_to_dict(node: Node) -> dict[str, Any]:
         "is_local": node.is_local,
         "hardware": hardware,
         "resources": resources,
+        "workers": workers if workers is not None else [],
         "created_at": node.created_at.isoformat() if node.created_at else None,
         "updated_at": node.updated_at.isoformat() if node.updated_at else None,
         "last_seen_at": node.last_seen_at.isoformat() if node.last_seen_at else None,
@@ -172,10 +173,50 @@ async def register_localhost_node() -> Node:
 async def list_nodes() -> list[dict[str, Any]]:
     async with SessionLocal() as session:
         rows = (await session.execute(select(Node).order_by(Node.created_at.asc()))).scalars().all()
-        return [node_to_dict(row) for row in rows]
+        if not rows:
+            return []
+        node_ids = [row.id for row in rows]
+        worker_rows = (
+            await session.execute(
+                select(NodeWorker)
+                .where(NodeWorker.node_id.in_(node_ids))
+                .order_by(NodeWorker.worker_id.asc())
+            )
+        ).scalars().all()
+        workers_by_node: dict[str, list[dict[str, Any]]] = {node_id: [] for node_id in node_ids}
+        for binding in worker_rows:
+            workers_by_node.setdefault(binding.node_id, []).append(
+                {
+                    "id": binding.worker_id,
+                    "name": binding.name,
+                    "kind": binding.kind,
+                    "status": binding.status,
+                    "node_id": binding.node_id,
+                }
+            )
+        return [node_to_dict(row, workers_by_node.get(row.id, [])) for row in rows]
 
 
 async def get_node(node_id: str) -> dict[str, Any] | None:
     async with SessionLocal() as session:
         row = (await session.execute(select(Node).where(Node.id == node_id))).scalar_one_or_none()
-        return node_to_dict(row) if row else None
+        if not row:
+            return None
+        worker_rows = (
+            await session.execute(
+                select(NodeWorker)
+                .where(NodeWorker.node_id == node_id)
+                .order_by(NodeWorker.worker_id.asc())
+            )
+        ).scalars().all()
+        workers = [
+            {
+                "id": binding.worker_id,
+                "name": binding.name,
+                "kind": binding.kind,
+                "status": binding.status,
+                "node_id": binding.node_id,
+            }
+            for binding in worker_rows
+        ]
+        return node_to_dict(row, workers)
