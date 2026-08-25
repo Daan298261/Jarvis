@@ -64,8 +64,10 @@ class InferenceSettings(BaseModel):
 
 
 class BrowserSettings(BaseModel):
+    backend: str = "playwright"
     headless: bool = False
     timeout_ms: int = 30000
+    browser_use_model: str = "Qwen3.5-27B"
 
 
 class AppSettings(BaseModel):

@@ -24,8 +24,10 @@
   "logging_level": "INFO",
   "backup_enabled": true,
   "browser": {
+    "backend": "playwright",
     "headless": false,
-    "timeout_ms": 30000
+    "timeout_ms": 30000,
+    "browser_use_model": "Qwen3.5-27B"
   },
   "allowed_directories": [],
   "mcp_servers": []
