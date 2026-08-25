@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..swarm.budgets import (
@@ -12,6 +13,7 @@ from ..swarm.budgets import (
 )
 from ..swarm.capabilities import list_all_capabilities
 from ..swarm.nodes import get_node, list_nodes
+from ..swarm.placement import place_work
 from ..swarm.roles import (
     SWARM_ROLES,
     get_node_role_policies,
@@ -35,6 +37,15 @@ class BudgetUpdate(BaseModel):
 
 class LeaseCreate(BaseModel):
     claim: dict = Field(default_factory=dict)
+    ttl_seconds: int | None = 300
+
+
+class PlacementRequest(BaseModel):
+    capabilities: list[str] = Field(default_factory=list)
+    role: str | None = None
+    worker_id: str | None = None
+    worker_kind: str | None = None
+    claim: dict | None = None
     ttl_seconds: int | None = 300
 
 
@@ -139,3 +150,14 @@ async def swarm_delete_node_lease(node_id: str, lease_id: str):
         return await release_lease(node_id, lease_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/placement")
+async def swarm_placement(body: PlacementRequest):
+    result = await place_work(body.model_dump(exclude_unset=True))
+    if not result.get("accepted"):
+        code = result.get("code")
+        if code in {"invalid_request", "invalid_role"}:
+            raise HTTPException(400, result.get("reason") or "Invalid placement request")
+        return JSONResponse(status_code=409, content=result)
+    return result
