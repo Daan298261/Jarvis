@@ -23,5 +23,7 @@ These guides describe the **current** Jarvis repository: a local-first desktop a
 | [../SECURITY_AGENTS.md](../SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical) |
 | [../BLUE_TEAM.md](../BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
 | [../INSTALLER.md](../INSTALLER.md) | Windows 11 consumer `.exe` onboarding (smoke PR #51; wizard/GPU/WAN still open) |
+| [../WINDOWS_SHELL.md](../WINDOWS_SHELL.md) | Tray / Stop / Uninstall |
+| [../PORTAL_UX.md](../PORTAL_UX.md) | Portal app-shell UX |
 
 Product intent and unfinished work live in the master plan. Installation and day-to-day development live here so those sections stay short and accurate.
