@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import base64
+from pathlib import Path
 from typing import Any
 
-from ..config import AppSettings, load_settings
+from ..config import data_dir
 from .base import RiskLevel, Tool, ToolResult
 
 _lock = asyncio.Lock()
@@ -53,20 +56,62 @@ async def _ensure_page(headless: bool):
 
 async def _close_browser() -> ToolResult:
     global _playwright, _browser, _context, _page, _pages
-    if not _context and not _playwright:
-        _page = None
-        _pages = []
-        return ToolResult(True, "Browser was not open")
+    if not _context and not _playwright and not _page:
+        return ToolResult(True, "Browser already closed")
     if _context:
         await _context.close()
     if _playwright:
         await _playwright.stop()
     _context = None
     _playwright = None
-    _browser = None
     _page = None
     _pages = []
     return ToolResult(True, "Browser closed")
+
+
+async def _wait_stable(page: Any) -> None:
+    for state in ("domcontentloaded", "load"):
+        try:
+            await page.wait_for_load_state(state, timeout=8000)
+        except Exception:
+            continue
+    try:
+        await page.wait_for_load_state("networkidle", timeout=4000)
+    except Exception:
+        pass
+
+
+async def _goto_with_retry(page: Any, url: str) -> None:
+    last_error: Exception | None = None
+    for attempt in range(_GOTO_RETRIES):
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await _wait_stable(page)
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt < _GOTO_RETRIES - 1:
+                await asyncio.sleep(0.4 * (attempt + 1))
+    raise last_error or RuntimeError(f"Failed to open {url}")
+
+
+async def _click_named(page: Any, name: str) -> None:
+    locators = [page.get_by_role(role, name=name) for role in _NAMED_ROLES]
+    locators.extend(
+        [
+            page.get_by_label(name),
+            page.get_by_placeholder(name),
+            page.get_by_text(name, exact=True),
+        ]
+    )
+    last_error: Exception | None = None
+    for locator in locators:
+        try:
+            await locator.first.click(timeout=4000)
+            return
+        except Exception as exc:
+            last_error = exc
+    raise last_error or RuntimeError(f"No control named {name}")
 
 
 class BrowserTool(Tool):
@@ -103,12 +148,10 @@ class BrowserTool(Tool):
             "selector": {"type": "string"},
             "name": {"type": "string", "description": "Accessible name for click/type"},
             "text": {"type": "string"},
-            "task": {"type": "string", "description": "Natural-language browser task for Browser Use"},
             "key": {"type": "string"},
             "script": {"type": "string"},
             "path": {"type": "string"},
             "headless": {"type": "boolean"},
-            "timeout_seconds": {"type": "integer", "default": 15},
         },
         "required": ["action"],
     }
@@ -116,20 +159,7 @@ class BrowserTool(Tool):
     def __init__(self, context_getter) -> None:
         self.context_getter = context_getter
 
-    def _settings(self) -> AppSettings:
-        raw = self.context_getter()
-        settings = load_settings()
-        if isinstance(raw, AppSettings):
-            return raw
-        browser = raw.get("browser") if isinstance(raw, dict) else None
-        if isinstance(browser, dict):
-            merged = settings.model_dump()
-            merged["browser"] = {**settings.browser.model_dump(), **browser}
-            return AppSettings.model_validate(merged)
-        return settings
-
     async def execute(self, **kwargs: Any) -> ToolResult:
-        settings = self._settings()
         action = kwargs.get("action")
         if action == "close":
             async with _lock:
@@ -145,8 +175,6 @@ class BrowserTool(Tool):
             headless = bool((settings.get("browser") or {}).get("headless", False))
         async with _lock:
             try:
-                if action == "close":
-                    return await _close_browser()
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs["url"]
@@ -159,25 +187,10 @@ class BrowserTool(Tool):
                     title = await page.title()
                     a11y = await page.locator("body").inner_text()
                     truncated = a11y[:8000]
-                    return ToolResult(
-                        True,
-                        f"{_title_payload(page.url, title)}\n\n{truncated}",
-                        data={"url": page.url, "title": title},
-                    )
+                    return ToolResult(True, f"URL: {page.url}\nTitle: {title}\n\n{truncated}")
                 if action == "click":
-                    method = "selector"
                     if kwargs.get("name"):
-                        name = kwargs["name"]
-                        clicked = False
-                        for role in ("button", "link", "tab"):
-                            try:
-                                await page.get_by_role(role, name=name).first.click(timeout=4000)
-                                clicked = True
-                                break
-                            except Exception:
-                                continue
-                        if not clicked:
-                            await page.get_by_text(name, exact=False).first.click(timeout=8000)
+                        await _click_named(page, kwargs["name"])
                     elif kwargs.get("selector"):
                         await page.locator(kwargs["selector"]).first.click(timeout=10000)
                     else:

@@ -13,6 +13,8 @@ from ..agent.self_dev import KillSwitchActive
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
+from ..agent.tool_exposure import tool_names_for
+from ..tools.exposure import schema_names
 from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -40,7 +42,7 @@ def _task_dict(task: Task) -> dict[str, Any]:
                 extra = [str(item) for item in parsed["extra_tools"]]
         except (TypeError, json.JSONDecodeError):
             extra = []
-    allowed = allowed_tool_names(getattr(task, "task_class", None) or "", extra)
+    allowed = tool_names_for(getattr(task, "task_class", None) or "", extra)
     exposed = sorted(allowed) if allowed is not None else schema_names(REGISTRY.openai_tools())
     return {
         "id": task.id,

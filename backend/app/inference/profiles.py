@@ -47,19 +47,7 @@ MMPROJ_NAME = EXPERT_MMPROJ
 
 
 def with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
-    return ModelProfile(
-        name=profile.name,
-        label=profile.label,
-        quant=profile.quant,
-        filename=profile.filename,
-        thinking=profile.thinking,
-        context_size=int(context_size),
-        temperature=profile.temperature,
-        top_p=profile.top_p,
-        top_k=profile.top_k,
-        presence_penalty=profile.presence_penalty,
-        description=profile.description,
-    )
+    return replace(profile, context_size=int(context_size))
 
 
 PROFILES: dict[str, ModelProfile] = {
@@ -143,32 +131,6 @@ PROFILES: dict[str, ModelProfile] = {
         description="Optional 27B Q4_K_M escalation model. Not for ordinary tasks; may offload to CPU.",
         fallbacks=(),
     ),
-    "expert": ModelProfile(
-        name="expert",
-        label="Expert",
-        quant="Q4_K_M",
-        filename="Qwen3.5-27B-Q4_K_M.gguf",
-        thinking=True,
-        context_size=16384,
-        temperature=0.4,
-        top_p=0.9,
-        top_k=20,
-        presence_penalty=0.0,
-        description="Escalation consult profile: compact 27B analysis, not everyday tool work.",
-    ),
-    "expert": ModelProfile(
-        name="expert",
-        label="Expert",
-        quant="Q4_K_M",
-        filename="Qwen3.5-27B-Q4_K_M.gguf",
-        thinking=True,
-        context_size=16384,
-        temperature=0.6,
-        top_p=0.95,
-        top_k=20,
-        presence_penalty=0.0,
-        description="Escalation-only 27B profile. Not used for ordinary tool work.",
-    ),
 }
 
 
@@ -230,6 +192,23 @@ def resolve_profile(name: str) -> ModelProfile:
     if not gguf.exists() and key in {"quality", "expert"}:
         return PROFILES["balanced"]
     return profile
+
+
+def profile_as_dict(profile: ModelProfile) -> dict:
+    return {
+        "name": profile.name,
+        "label": profile.label,
+        "quant": profile.quant,
+        "thinking": profile.thinking,
+        "thinking_mode": profile.thinking_mode,
+        "context_size": profile.context_size,
+        "description": profile.description,
+        "family": profile.family,
+        "alias": profile.alias,
+        "repo": profile.repo,
+        "installed": profile_gguf(profile).exists(),
+        "vision": profile.vision,
+    }
 
 
 def expert_profile() -> ModelProfile:

@@ -20,6 +20,7 @@ from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
+from .context_policy import initial_context_size
 from .compaction import compact_history, deserialize_messages, serialize_messages
 from .escalation import (
     EscalationSignals,
@@ -40,7 +41,6 @@ from .planning import (
     resolve_execution_policy,
     select_best_plan,
 )
-from .escalation import build_escalation_package, persist_escalation_package
 from .recovery import recovery_hint
 from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
@@ -283,9 +283,7 @@ class AgentRuntime:
         await self._update(task_id, exposed_tools=_exposed_csv(working))
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
-        recommended_context = recommend_context_size(
-            working.task_class, execution_mode, profile.context_size
-        )
+        recommended_context = initial_context_size(working.task_class, profile)
         need_vision = should_load_vision(working.task_class)
         working.recommended_context = recommended_context
         working.vision_requested = need_vision

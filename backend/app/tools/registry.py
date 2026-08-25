@@ -5,7 +5,10 @@ from typing import Any, Callable
 from ..config import AppSettings, default_allowed_directories
 from .base import Tool, ToolResult
 from .browser import BrowserTool
+from .browser_use import BrowserUseTool
 from .capability import RequestCapabilityTool
+from .code_worker import CodeWorkerTool
+from .computer_use import CuaTool, UFOTool
 from .desktop import DesktopTool
 from .docker_tools import DockerTool
 from .exposure import REQUEST_CAPABILITY, ToolExposure
@@ -43,7 +46,6 @@ class ToolRegistry:
             ScreenshotTool(),
             RequestToolsTool(),
             MCPProxyTool(),
-            RequestToolsTool(),
             UFOTool(),
             CuaTool(),
         ]
