@@ -6,15 +6,19 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 This file replaces the need to repeatedly provide large architectural prompts to Cursor.
 
-**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), and [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
+**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [`JARVIS_2.0.md`](JARVIS_2.0.md), [`HOME_IOT.md`](HOME_IOT.md), and [`BLUE_TEAM.md`](BLUE_TEAM.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
 
 Swarm role/placement/resource design lives in `SWARM_ARCHITECTURE.md`.
 
-P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating platform) remain in the spec set. Detailed requirements live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file translates useful patterns from [Founder OS](https://github.com/thecloudtips/founder-os) into native Jarvis concepts. Founder OS is **not** a runtime dependency. Do not start P4/P5 implementation ahead of active P0–P3 work unless this queue or the user promotes it. Do not paste the full adaptive spec into this file.
+P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating platform) remain in the spec set. Detailed requirements live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file translates useful patterns from [Founder OS](https://github.com/thecloudtips/founder-os) into native Jarvis concepts. Founder OS is **not** a runtime dependency. Do not start P4/P5 implementation ahead of active P0–P3 work unless this queue or the user promotes it. Do not paste the full adaptive spec into this file. **Invoices and business workflows stay in P5.**
 
 **Extensible Agent OS (ZoeyOS / FounderOS feature parity)** lives in [`JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`](JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md). That file specifies persistent Agent Profiles, Specialist Packs, modular command-center dashboard, multi-agent delegation, hybrid inference, offline licensing, and the full owner-control UX needed to match Zoey-style specialist teams and FounderOS-style business autonomy. Do not start its P1–P6 roadmap ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it. Do not paste that spec into this file.
 
-The Android client that talks to the Windows Leader (evolve `/phone`, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Do not paste that spec into this file.
+**Jarvis 2.0** (Away Mode, event-driven operators, **marketing**, **SEO**, **NovelProject**, **multimedia**, policy, self-healing) is restored in [`JARVIS_2.0.md`](JARVIS_2.0.md) — the approved sections 64–85 from git history. Do not drop those features. Do not treat 2.0 as current-session P0 unless this queue promotes an item.
+
+The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network blue team / SIEM: [`BLUE_TEAM.md`](BLUE_TEAM.md). Do not paste those specs into this file.
+
+Filter: if a **new** idea would make home-network JARVIS more real, spec it. Never delete Taco-approved features.
 
 Every development session must read this file before making substantial changes.
 
@@ -1825,7 +1829,15 @@ Specified in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. **Not implemented.** Do not star
 
 ### Android client
 
-Specified in `ANDROID_CLIENT.md`. Phone PWA (`/phone`) exists for LAN. Installable Android client + AI-guided WAN port-forward is **not implemented**. Not P3 swarm.
+Specified in `ANDROID_CLIENT.md`. Phone PWA (`/phone`) exists for LAN. Installable Android client + link-device + AI-guided WAN port-forward is **not implemented**. Not P3 swarm.
+
+### Home IoT / blue team
+
+Specified in `HOME_IOT.md` and `BLUE_TEAM.md`. **Not implemented.**
+
+### Jarvis 2.0
+
+Specified in `JARVIS_2.0.md` (approved Away Mode / novel / marketing / SEO / multimedia / operators). **Not implemented** as current-session P0.
 
 ### Persistence
 
@@ -1993,8 +2005,14 @@ These items make the existing machine a one-node swarm first. They must not requ
 - [x] Phone / Android client against the local API
   - Status: VERIFIED in code (PR #13) for the LAN Phone PWA (`/phone`, `GET /api/mobile` does not leak the key). Live Android home-screen install is still a desktop-session check.
 - [ ] Android client to the Leader with AI-guided WAN reachability (`ANDROID_CLIENT.md`)
-  - Evolve `/phone` into an installable Android client (TWA/PWA or thin WebView). Same REST/WebSocket API and private-key auth. Router setup is attended and brand-agnostic (UPnP first, else drive the gateway admin UI). Forward only the Jarvis port. CGNAT → overlay fallback. Not P3 swarm.
+  - Evolve `/phone` into an installable Android client (TWA/PWA or thin WebView). Link-device: ask for pairing then; explain WAN exposure; user self-setup **or** Jarvis with router admin passwords; router access may later be used by the blue-team agent. Brand-agnostic walkthrough. Forward only the Jarvis port. CGNAT → overlay fallback. Not P3 swarm.
   - Status: TODO / specified. Do not hardcode ISP or brand adapters.
+- [ ] Home IoT / mansion house control (`HOME_IOT.md`)
+  - Discover and safely control LAN devices (HA/Matter/local APIs). Locks/garage extra confirm. Not swarm Nodes.
+  - Status: TODO / specified
+- [ ] Home-network blue team / SIEM (`BLUE_TEAM.md`)
+  - Local SIEM on the user’s LAN; detect sniffing/new devices/ARP/rogue DHCP; alert portal+phone; contain via owned router with autonomy gates. No exploits or off-LAN attacks. Reuses link-device router secrets.
+  - Status: TODO / specified
 - [x] Dedicated LAN inference server
   - Status: VERIFIED in code (PR #6)
 - [x] UFO adapter
@@ -2036,13 +2054,28 @@ Specified, not implemented. Domain Packs are enableable Jarvis modules, not a Fo
 - [ ] Domain-specific verification per pack; domain learning into shared P4 layer
 - [ ] External integrations as sync targets — Jarvis owns canonical state
 
+### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
+
+Approved text restored (sections 64–85). Specified, not implemented. Do not drop marketing, SEO, novel, multimedia, or other approved 2.0 features.
+
+- [ ] Event-driven intake (queue, retries, backoff, dedup, DLQ)
+- [ ] Event normalization (`BUG_REPORTED`, `FEATURE_REQUESTED`, `CI_FAILED`, …)
+- [ ] SoftwareEngineeringWorker + isolated worktrees / verification (1.x trial isolation exists; 2.0 event-driven remains TODO)
+- [ ] Authority / approval policy engine
+- [ ] Production monitoring and self-healing
+- [ ] Marketing Manager worker
+- [ ] SEO / content operations
+- [ ] NovelProject subsystem (story bible, chapter state, editorial workers) — Taco writes novels with Jarvis
+- [ ] Multimedia / creative worker
+- [ ] Away Mode — Autonomous Bug Fix flagship benchmark
+
 ---
 
 ## 59. DECISION LOG
 
 Decision: Jarvis Architect is sole editor of spec docs
 
-Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, and `ANDROID_CLIENT.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
+Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, and `BLUE_TEAM.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
 
 Reason:
 
@@ -2056,13 +2089,21 @@ Reason:
 
 27B does not stay fully GPU-resident on the user's 16 GB RTX 5070 Ti.
 
-Decision: Jarvis 2.0 Away Mode is deferred and not in this master spec
+Decision: Jarvis 2.0 stays in the spec set as `JARVIS_2.0.md`
 
-Sections 64–85 (Autonomous Operator / Away Mode) were bot-appended after the original 63-section plan. They are not restored here. Git history retains them. Do not treat 2.0 as current-session P0.
+Taco: all previously approved features stay. Sections 64–85 are restored into `JARVIS_2.0.md` (not omitted, not thinned). Marketing, SEO, NovelProject, multimedia, Away Mode, and related operators remain. Invoices remain under P5 as well. Do not treat 2.0 as current-session P0 unless the queue promotes an item.
 
 Reason:
 
-Keep the master spec readable. Do not restuff a second product spec into this file.
+Hold was lifted. The 63-section master plan stays readable; the approved 2.0 text is a first-class spec file.
+
+Decision: never delete Taco-approved features
+
+If a **new** idea would make home-network JARVIS/Cortana more real, add a spec. Do not remove approved product from the spec set to “simplify.”
+
+Reason:
+
+Filter going forward is additive for home-JARVIS; deletion of approved work is forbidden.
 
 Decision: swarm architecture remains a separate specification
 
@@ -2082,11 +2123,19 @@ P4/P5 must stay visible in the Development Queue without pasting the adaptive sp
 
 Decision: Android client talks to the Leader; router setup is AI-guided and brand-agnostic
 
-The phone is a remote control for the Windows Leader, evolving `/phone`. WAN setup discovers the gateway, tries UPnP/IGD, then walks the user through the admin UI with existing browser tools. No hardcoded ISP/brand adapter matrix. Router passwords stay in local secret storage. This is not P3 swarm. See `ANDROID_CLIENT.md`.
+The phone is a remote control for the Windows Leader, evolving `/phone`. Link-device asks for pairing then, explains WAN exposure, and offers self-setup or Jarvis-with-router-password. Router access may later be used by the blue-team agent. WAN setup is AI-guided and brand-agnostic. See `ANDROID_CLIENT.md`.
 
 Reason:
 
 One client, one Leader, every household's router — not a Netherlands-vendor special case.
+
+Decision: home IoT and home-network blue team are first-class specs
+
+House control: `HOME_IOT.md` (local-first HA/Matter). Defensive SIEM on the user’s own LAN: `BLUE_TEAM.md` (investigate/contain/evidence; no exploits; no off-LAN attacks). Blue team reuses link-device router secrets.
+
+Reason:
+
+Mansion-JARVIS includes the house and the home LAN, not only the desktop agent.
 
 Decision: lazy mmproj
 

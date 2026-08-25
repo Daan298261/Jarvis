@@ -18,5 +18,8 @@ These guides describe the **current** Jarvis repository: a local-first desktop a
 | [../SWARM_ARCHITECTURE.md](../SWARM_ARCHITECTURE.md) | P2–P4 swarm role, placement, resources (separate spec) |
 | [../ADAPTIVE_DOMAIN_ARCHITECTURE.md](../ADAPTIVE_DOMAIN_ARCHITECTURE.md) | P4/P5 adaptive intelligence and domain packs (separate spec) |
 | [../ANDROID_CLIENT.md](../ANDROID_CLIENT.md) | Android client to the Leader; AI-guided WAN reachability (separate spec) |
+| [../JARVIS_2.0.md](../JARVIS_2.0.md) | Approved Jarvis 2.0 Away Mode spec (sections 64–85) |
+| [../HOME_IOT.md](../HOME_IOT.md) | Home IoT / mansion house control |
+| [../BLUE_TEAM.md](../BLUE_TEAM.md) | Home-network SIEM; defensive response on the user’s LAN |
 
 Product intent and unfinished work live in the master plan. Installation and day-to-day development live here so those sections stay short and accurate.
