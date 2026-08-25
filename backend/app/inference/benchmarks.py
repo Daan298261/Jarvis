@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import timezone
 from typing import Any
 
@@ -24,8 +25,20 @@ def _sample_dict(row: BenchmarkSample) -> dict[str, Any]:
         "tasks_completed": row.tasks_completed,
         "tasks_failed": row.tasks_failed,
         "source": row.source,
+        "metrics": _metrics(row),
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
+
+
+def _metrics(row: BenchmarkSample) -> dict[str, Any]:
+    raw = getattr(row, "metrics_json", "") or ""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 async def task_outcome_stats() -> dict[str, Any]:
@@ -56,6 +69,7 @@ async def record_benchmark_sample(
     ram_used_gb: float | None = None,
     load_time_seconds: float | None = None,
     source: str = "timing",
+    metrics: dict[str, Any] | None = None,
 ) -> BenchmarkSample | None:
     stats = await task_outcome_stats()
     async with SessionLocal() as session:
@@ -91,6 +105,7 @@ async def record_benchmark_sample(
             tasks_completed=stats["tasks_completed"],
             tasks_failed=stats["tasks_failed"],
             source=source,
+            metrics_json=json.dumps(metrics or {}),
         )
         session.add(row)
         await session.commit()

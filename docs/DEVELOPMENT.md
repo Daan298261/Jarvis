@@ -199,14 +199,16 @@ Voice STT/TTS is not implemented; `/api/voice/command` only creates a task from 
 `backend/app/agent/loop.py` is the orchestrator. A task:
 
 1. Classifies (`planning.classify_task`) and stores `task_class`
-2. Injects matching skills and trajectories into the system prompt
-3. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
-4. Executes tool calls until the policy budget is spent
-5. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
-6. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
-7. Reliable mode also requires a verification **tool** call and a critic pass
-8. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
-9. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence
+2. Exposes only tools for that class (`agent/tool_exposure.py`); mixed/long-horizon tasks still get every enabled tool. `request_tools` expands the set. Command live status shows it.
+3. Injects matching skills and trajectories into the system prompt
+4. Asks for a plan + acceptance criteria (`PLAN_PROMPT`). In Reliable mode (`best_of_n=3`) the model writes labeled PLAN A/B/C candidates and a critic selects one before any tools run
+5. Executes tool calls until the policy budget is spent
+6. Blocks identical retries; `recovery_hint()` suggests a different tool for most failure classes (not permission / blocked-command)
+7. After several distinct failures, may consult the Expert 27B profile with a compact brief, then reload the primary model (`agent/escalation.py`)
+8. Always runs an independent verification pass (`VERIFY_PROMPT`) before `completed`
+9. Reliable mode also requires a verification **tool** call and a critic pass
+10. Records a trajectory (tools, failures, recovery, verification — never chain-of-thought)
+11. Promotes a skill only after the same task class succeeds **three** times with the same tool sequence
 
 Execution modes (`planning.POLICIES`) are **not** model profiles:
 
@@ -274,6 +276,7 @@ Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `b
 - Remote: `RemoteOpenAICompatibleBackend` only waits on `/health`. Aliases include `remote`, `lmstudio`, `ollama`, `vllm`, `sglang`, `openai-compatible`.
 - Unknown backend name + non-localhost host is treated as remote.
 - `InferenceManager.load` will adopt a server that is already healthy so a second Jarvis process does not spawn another llama-server.
+- `POST /api/model/harness/run` — collect load/TTFT/tok/s/VRAM/RAM/CPU/GPU/context/tool-probe metrics and a **do not buy hardware yet** gate. `GET /api/model` includes the last report.
 
 When changing CLI flags, extend `tests/test_inference_backends.py` rather than relying on a live GPU.
 
@@ -317,6 +320,10 @@ Current unit coverage (no GPU required):
 | `test_skills.py` | Promotion needs 3 repeats |
 | `test_auth.py` | 401 without key; header / bearer / query |
 | `test_queue.py` | File-drop watcher |
+| `test_tool_exposure.py` / `test_tool_exposure_loop.py` | Task-class tool schemas and `request_tools` |
+| `test_escalation.py` | Expert 27B consult policy and restore |
+| `test_harness.py` | Performance harness + hardware purchase gate |
+| `test_qa_guards.py` | Docker targets, browser close, python/sys, terminal default, git checkpoint, web_fetch POST |
 
 `conftest.py` fixture `jarvis_env` points SQLite at a temp path, marks the model loaded, and applies autonomous settings.
 

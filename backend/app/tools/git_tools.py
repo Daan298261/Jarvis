@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a recoverable stash or commit-less backup branch named "
-        "jarvis-checkpoint-* before large autonomous edits."
+        "checkpoint. checkpoint creates a recoverable backup branch named jarvis-checkpoint-* "
+        "without resetting the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -56,11 +57,25 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = Path(cwd).name
-                result = await self._git(["stash", "push", "-u", "-m", f"jarvis-checkpoint-{stamp}"], cwd)
-                if result.success:
-                    return ToolResult(True, "Created git stash checkpoint. Use git stash list / pop to recover.")
-                return await self._git(["status"], cwd)
+                repo = await self._git(["rev-parse", "--is-inside-work-tree"], cwd)
+                if not repo.success:
+                    return ToolResult(False, "", error="path is not a git repository")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                branch = f"jarvis-checkpoint-{stamp}"
+                created = await self._git(["stash", "create"], cwd)
+                sha = (created.output or "").strip().split()[0] if created.success else ""
+                if sha and len(sha) >= 7 and all(ch in "0123456789abcdefABCDEF" for ch in sha):
+                    labeled = await self._git(["branch", branch, sha], cwd)
+                else:
+                    labeled = await self._git(["branch", branch], cwd)
+                if labeled.success:
+                    return ToolResult(
+                        True,
+                        f"Created recoverable backup branch {branch} without changing the working tree. "
+                        f"Restore with: git checkout {branch}",
+                        data={"branch": branch, "sha": sha},
+                    )
+                return labeled
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

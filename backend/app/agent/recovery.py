@@ -129,5 +129,8 @@ def recovery_hint(tool: str, observation: str, attempt: int = 1) -> str:
             "Several strategies have now failed. Re-check your assumptions about the environment, "
             "inspect the actual state before acting, and change approach rather than parameters."
         )
+        lines.append(
+            "If the tool you need is not in the current schema, call request_tools before switching."
+        )
     lines.append("Do not repeat the call that just failed.")
     return "\n".join(lines)

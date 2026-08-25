@@ -12,6 +12,7 @@ from .git_tools import GitTool
 from .mcp_runtime import MCP, MCPProxyTool
 from .office import OfficeTool
 from .python_exec import PythonTool
+from .request_tools import RequestToolsTool
 from .screenshot import ScreenshotTool
 from .terminal import TerminalTool
 from .web_fetch import WebFetchTool
@@ -36,6 +37,7 @@ class ToolRegistry:
             DockerTool(),
             WebFetchTool(),
             ScreenshotTool(),
+            RequestToolsTool(),
             MCPProxyTool(),
         ]
         self.tools = {tool.name: tool for tool in items}

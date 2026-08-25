@@ -47,6 +47,12 @@ def _add_missing_columns(sync_conn) -> None:
         statements.append("ALTER TABLE tasks ADD COLUMN execution_mode VARCHAR(32) DEFAULT 'balanced'")
     if "task_class" not in columns:
         statements.append("ALTER TABLE tasks ADD COLUMN task_class VARCHAR(64) DEFAULT ''")
+    if "exposed_tools" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN exposed_tools TEXT DEFAULT ''")
+    if "benchmark_samples" in inspector.get_table_names():
+        bench_cols = {col["name"] for col in inspector.get_columns("benchmark_samples")}
+        if "metrics_json" not in bench_cols:
+            statements.append("ALTER TABLE benchmark_samples ADD COLUMN metrics_json TEXT DEFAULT '{}'")
     for statement in statements:
         sync_conn.execute(text(statement))
 

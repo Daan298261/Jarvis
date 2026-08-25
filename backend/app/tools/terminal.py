@@ -25,6 +25,10 @@ class BackgroundJob:
     pump: asyncio.Task | None = None
 
 
+def _default_shell() -> str:
+    return "powershell" if os.name == "nt" else "bash"
+
+
 _JOBS: dict[int, BackgroundJob] = {}
 
 
@@ -128,6 +132,7 @@ class TerminalTool(Tool):
     name = "terminal"
     description = (
         "Run a local command. shell can be powershell, cmd, python, git, or bash/wsl. "
+        "Default shell is PowerShell on Windows and bash on Linux. "
         "action=run (default) waits for the process. action=start returns a PID immediately; "
         "then use inspect/wait/kill with that pid to see if it is still alive and to collect output. "
         "inspect also works for other local PIDs. Captures stdout, stderr, exit code and duration. "
@@ -141,7 +146,7 @@ class TerminalTool(Tool):
             "shell": {
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
-                "default": "powershell",
+                "default": "powershell" if os.name == "nt" else "bash",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},
@@ -171,7 +176,7 @@ class TerminalTool(Tool):
         command = kwargs.get("command") or ""
         if not command.strip():
             return ToolResult(False, "", error="command is required for run/start")
-        shell = (kwargs.get("shell") or "powershell").lower()
+        shell = (kwargs.get("shell") or _default_shell()).lower()
         cwd = kwargs.get("working_directory") or os.getcwd()
         timeout = int(kwargs.get("timeout_seconds") or 120)
         risk = classify_command(command)

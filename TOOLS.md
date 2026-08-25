@@ -5,15 +5,16 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | Tool | What it does |
 | --- | --- |
 | `filesystem` | list, search, read, write, edit, copy, move, rename, mkdir, delete, hash, stat, compare, recent. `compare` diffs two files (unified diff for text, hashes for binaries). `recent` lists backup copies next to a file (`.bak`, `.bak-<timestamp>`). Backs up files before overwrite when enabled. Restricted to allowed directories. |
-| `terminal` | PowerShell, cmd, git, python, WSL/bash when present. `run` waits; `start` returns a PID; `inspect` / `wait` / `kill` check whether that process is still alive and collect output. `inspect` also works for other local PIDs. Captures stdout, stderr, exit code, duration. Blocks irreversible commands. Python snippets use `python -c`. |
-| `python` | run_code, run_file, create_venv, pip install. Prefer project virtualenvs. |
-| `browser` | Playwright Chromium: open, accessibility snapshot, click by name/selector, type, evaluate, screenshot, tabs, download, upload. Persistent profile in `data/browser-profile`. |
+| `terminal` | PowerShell, cmd, git, python, WSL/bash when present. Default is PowerShell on Windows and bash on Linux. `run` waits; `start` returns a PID; `inspect` / `wait` / `kill` check whether that process is still alive and collect output. `inspect` also works for other local PIDs. Captures stdout, stderr, exit code, duration. Blocks irreversible commands. Python snippets use the current interpreter with `-c`. |
+| `python` | run_code, run_file, create_venv, pip install. Prefer project virtualenvs. Uses `sys.executable` when no venv is given. |
+| `browser` | Playwright Chromium: open, accessibility snapshot, click by name/selector, type, evaluate, screenshot, tabs, download, upload, close. `close` does not launch Chromium. Persistent profile in `data/browser-profile`. |
 | `desktop` | pywinauto UI Automation first; coordinate click only as fallback. Screenshot via `mss`. |
 | `office` | Word/Excel/PowerPoint COM when Office is installed. Writes new files unless in-place edit was requested. |
-| `git` | status, diff, branch, log, search, stash checkpoint before large edits. |
-| `docker` | ps/images/build/run/logs/inspect when Docker exists. |
-| `web_fetch` | HTTP GET/POST distinct from the browser. |
+| `git` | status, diff, branch, log, search, checkpoint. `checkpoint` creates a `jarvis-checkpoint-*` backup branch (via `git stash create`) without resetting the working tree. |
+| `docker` | ps/images/build/run/logs/inspect when Docker exists. `run`/`logs`/`inspect` require an image or container. |
+| `web_fetch` | HTTP GET/POST/HEAD distinct from the browser. POST may send `body` or `json_body` plus optional headers. |
 | `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
+| `request_tools` | Escape hatch: ask the runtime to expose extra tools for the rest of the task. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
 
 ## Memory and skills

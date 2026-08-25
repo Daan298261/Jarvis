@@ -61,6 +61,19 @@ PROFILES: dict[str, ModelProfile] = {
         presence_penalty=0.0,
         description="Higher-quality Q5_K_M hybrid GPU/CPU profile.",
     ),
+    "expert": ModelProfile(
+        name="expert",
+        label="Expert",
+        quant="Q4_K_M",
+        filename="Qwen3.5-27B-Q4_K_M.gguf",
+        thinking=True,
+        context_size=16384,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        presence_penalty=0.0,
+        description="Escalation-only 27B profile. Not used for ordinary tool work.",
+    ),
 }
 
 
