@@ -61,8 +61,7 @@ class InferenceSettings(BaseModel):
     cache_type_v: str = "q8_0"
     threads: int = 0
     auto_load: bool = True
-    api_key: str = ""
-    remote_model: str = ""
+    vision: bool = False
 
 
 class BrowserSettings(BaseModel):

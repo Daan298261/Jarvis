@@ -3590,10 +3590,11 @@ This development session:
 
 ### Model
 
-- Model: Qwen3.5-27B (Unsloth GGUF of `Qwen/Qwen3.5-27B`, plus `mmproj-F16.gguf`)
-- Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
-- Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `OllamaBackend` / `LMStudioBackend` / `VLLMBackend` / `SGLangBackend` / `RemoteOpenAICompatibleBackend` probe `/health`, `/v1/models`, and Ollama `/api/tags`, list advertised models, and accept an optional API key plus remote model name. Selectable via `inference_backend` / `inference_host` / `inference_port` / `inference_api_key` / `inference_remote_model` on `PUT /api/settings`, or the Settings → Inference server card. `GET /api/model/probe` checks the configured endpoint without loading a GGUF.
-- Context: 16K fast, 32K balanced/quality; load failure retries at 16K
+- Model: **Qwen3.5-9B Abliterated** is the default Fast/Balanced/Quality profile (GGUF `Abiray/Qwen3.5-9B-abliterated-GGUF` of `wangzhang/Qwen3.5-9B-abliterated`). **Qwen3.5-27B Q4_K_M** is the Expert escalation profile and the fallback when 9B files are missing.
+- Quantization: Fast Q6_K (8K, thinking off); Balanced Q8_0 (16K, selective thinking); Quality Q8_0 (32K, thinking on); Expert 27B Q4_K_M (32K, thinking on)
+- Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
+- Context: 8K fast, 16K balanced, 32K quality/expert; load failure retries at 16K
+- Vision: projector is **not** attached unless `inference.vision` is true (Settings toggle)
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
 - Status: **code present and unit-tested, Windows runtime not verified this session**
@@ -3651,9 +3652,9 @@ This development session:
 - Retry engine: identical-call blocking plus per-tool failure counting
 - Verification engine: **implemented** — a task cannot complete until an independent verification pass runs; Reliable mode requires a verification tool call
 - Failure recovery: **implemented** — failures are classified (permission, missing capability, not found, timeout, usage, network, blocked) and answered with alternatives ordered by determinism; permission/blocked failures deliberately suggest no alternative tool
-- Fast/Balanced/Reliable modes: **agent execution modes implemented** (separate from model Fast/Balanced/Quality profiles)
+- Fast / Balanced / Reliable agent execution modes: **implemented**. Model Fast/Balanced/Quality/Expert are separate from those agent modes. Balanced model profile uses selective thinking (planning and recovery only).
 - Reliable mode also generates three candidate plans and a critic selects one before execution
-- Task classification: keyword-scored classifier stored on the task
+- Task classification: keyword-scored classifier stored on the task; that class also selects the tool subset sent to the model (`request_capability` is the escape hatch)
 - Acceptance criteria / plan: parsed from the first planning turn and persisted
 
 ### Documentation
@@ -3664,8 +3665,7 @@ This development session:
 
 - Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
-- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
-- Model page also shows the P0.12 hardware purchasing gate (`GET /api/model/hardware-gate`) and the P0.9 20-task agent suite catalog (`GET /api/model/agent-suite`)
+- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`). Profiles listed: Fast, Balanced, Quality (9B), Expert (27B). Vision and thinking mode are visible.
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
@@ -3676,7 +3676,8 @@ This development session:
 
 ### Known Problems
 
-- Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
+- Live Qwen3.5-9B / 27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
+- 9B GPU residency, tok/s, and 20-task comparison vs 27B are still Windows-desktop work
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Browser Use / OpenHands adapters are present but the optional packages are not installed in this environment
 - UFO / Cua / Open Interpreter adapters are absent
@@ -3691,11 +3692,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, Browser Use / OpenHands adapters, local voice STT/TTS wrap
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, **9B/27B profiles and 9B→27B fallback**, **task-class tool exposure and selective thinking**, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, docker run-requires-image, browser close reset
 - Frontend (`npm run build`): TypeScript build
 - Portal: Command, Tools (`code_worker`, Open Interpreter `missing`), Guide (`browser-form` / `browser-procedure`), Settings Inference card (Ollama port 11434), Model Probe, System backends
 
-Results: **87 passed** on this tree (unit tests; no GPU/GGUF). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **90 passed** on this tree. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3723,13 +3724,21 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: task cannot be marked successful without an independent verification pass.
   - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
 
-- [x] Dynamic tool exposure (P0.7)
-  - Acceptance: classification selects a small relevant tool set; `request_tools` can expand it; mixed/long-horizon tasks still receive every enabled tool.
-  - Status: VERIFIED (`test_tool_exposure.py`)
+- [x] Qwen3.5-9B Abliterated profiles as the default Fast/Balanced/Quality stack; 27B kept as Expert
+  - Acceptance: profiles exist; Balanced is default 9B Q8_0 16K selective thinking; Fast is 9B Q6_K 8K thinking off; Quality is 9B Q8_0 32K thinking on; Expert is 27B Q4_K_M; missing 9B GGUF falls back to 27B; vision projector is opt-in.
+  - Status: VERIFIED in unit tests (`test_profiles.py`, `test_inference_backends.py`). Live GPU residency **BLOCKED** in this environment.
 
-- [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
-  - Acceptance: model loads, API responds, tool calls work, vision projector loads.
-  - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`.
+- [x] Dynamic / selective thinking (P0.4)
+  - Acceptance: Balanced spends reasoning tokens on the first planning turn and on recovery, not on every tool follow-up; Fast never thinks; verification is non-thinking.
+  - Status: VERIFIED (`test_tooling.py`)
+
+- [x] Dynamic tool exposure (P0.7)
+  - Acceptance: task class selects a tool subset; `request_capability` (and calling an unlisted real tool) expands it.
+  - Status: VERIFIED (`test_tooling.py`)
+
+- [ ] Reliable Qwen3.5-9B (and Expert 27B) local inference on the Windows desktop
+  - Acceptance: 9B Q8_0 loads GPU-resident, API responds, tool calls work; Expert 27B still loads; vision projector loads only when enabled.
+  - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py` and measure tok/s / VRAM.
 
 ### P1
 
@@ -4081,6 +4090,22 @@ Generate three labeled strategies, have the same model critique them, then execu
 Reason:
 
 The master plan asks for best-of-N on initial planning and consequential decisions. Executing every candidate would waste tools and risk conflicting file changes.
+
+Decision: default model is 9B Abliterated; 27B is Expert-only
+
+Fast/Balanced/Quality load Qwen3.5-9B Abliterated. Expert loads Qwen3.5-27B Q4_K_M. Missing 9B GGUFs fall back to 27B so existing installs keep working. The vision projector is opt-in.
+
+Reason:
+
+The 27B Q4 stack does not stay in 16 GB VRAM with KV cache and mmproj. Ordinary work should be fast and GPU-resident; 27B is for escalation.
+
+Decision: tool schemas follow the task class
+
+Only the tools relevant to the classified task are sent to the model. `request_capability` (or calling a real unlisted tool) expands the set.
+
+Reason:
+
+Dumping every tool on every call wastes context and increases wrong-tool selection.
 
 ---
 

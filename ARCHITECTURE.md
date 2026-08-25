@@ -1,6 +1,6 @@
 # Architecture
 
-Jarvis is a local-first control plane for autonomous work. The current implementation is a single-machine FastAPI + React + SQLite application with a local/remote OpenAI-compatible model provider. The P0 model migration in `JARVIS_MASTER_PLAN.md` targets moving normal operation from Qwen3.5-27B hybrid inference toward a fully GPU-resident Qwen3.5-9B primary model while retaining 27B as an expert escalation model.
+Jarvis is a local control plane around llama.cpp. The default model is Qwen3.5-9B Abliterated; Qwen3.5-27B is the Expert escalation profile.
 
 Overall project priority and current implementation state live in [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md). Detailed P2+ swarm role, placement, resource-control, node-management, and universal-UI requirements live in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md).
 
@@ -17,8 +17,9 @@ FastAPI backend / Orchestrator
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
-llama-server (localhost:8088)  or  LAN GPU / Ollama / LM Studio / vLLM / SGLang
-  Qwen3.5-27B GGUF + mmproj     or  whatever that server advertises
+llama-server (localhost:8088)
+  Qwen3.5-9B Abliterated GGUF (default) or Qwen3.5-27B Expert
+  mmproj only when vision is enabled
 ```
 
 Today the host PC implicitly performs every physical role. Swarm work must refactor that assumption incrementally rather than replace the working control plane.

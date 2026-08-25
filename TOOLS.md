@@ -15,7 +15,8 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | `git` | status, diff, branch, log, search, checkpoint (backup branch + `stash create`, working tree kept). |
 | `docker` | ps/images/build/run/logs/inspect when Docker exists. |
 | `web_fetch` | HTTP GET/POST distinct from the browser. |
-| `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
+| `request_capability` | Ask Jarvis to expose extra tools for this task when the task-specific subset is too small. |
+| `screenshot` | Desktop capture for vision. Images are attached to the next model turn. The projector is only loaded when Settings → vision is on. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
 | `request_tools` | Escape hatch: add more tools for the current task (names or categories: browser, coding, windows, office, mcp, all). |
 | `ufo` | Optional Microsoft UFO HostAgent/AppAgent worker. Missing package degrades to the native `desktop` tool. |

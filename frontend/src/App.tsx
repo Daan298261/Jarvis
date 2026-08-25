@@ -57,7 +57,7 @@ export default function App() {
         <div className="side-status">
           <div>
             <span className={`dot ${model?.loaded ? "on" : model?.loading ? "load" : "off"}`} />
-            {model?.loaded ? "Qwen3.5-27B loaded" : model?.loading ? "Loading model" : "Model unloaded"}
+            {model?.loaded ? `${model.active_model || "Model"} loaded` : model?.loading ? "Loading model" : "Model unloaded"}
           </div>
           <div style={{ marginTop: 8 }}>{model?.quantization} · {model?.profile}</div>
         </div>

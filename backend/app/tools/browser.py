@@ -237,6 +237,7 @@ class BrowserTool(Tool):
                     _context = None
                     _browser = None
                     _playwright = None
+                    _browser = None
                     _page = None
                     _pages = []
                     return ToolResult(True, "Browser closed")

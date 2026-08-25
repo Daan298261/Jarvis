@@ -9,7 +9,7 @@
     "port": 8088,
     "profile": "balanced",
     "context_size": 16384,
-    "vision_mode": "lazy",
+    "vision": false,
     "flash_attn": "auto",
     "fit": true,
     "fit_target_mib": 1024,

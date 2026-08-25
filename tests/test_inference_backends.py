@@ -92,8 +92,8 @@ def test_llama_cpp_command_reflects_profile_and_settings():
     assert args[args.index("--reasoning") + 1] == "on"
     assert args[args.index("--fit-target") + 1] == "2048"
     assert "--jinja" in args
+    assert args[args.index("--alias") + 1] == "Qwen3.5-9B"
     assert "--mmproj" not in args
-    assert "--image-min-tokens" not in args
 
     fast = LlamaCppBackend(_settings(fit=False)).build_args(resolve_profile("fast"))
     assert fast[fast.index("--reasoning") + 1] == "off"

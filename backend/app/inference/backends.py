@@ -10,8 +10,7 @@ import httpx
 
 from ..config import AppSettings, logs_dir, runtime_dir
 from ..hardware import detect_hardware
-from .profiles import ModelProfile, model_paths
-from .vision import mmproj_args
+from .profiles import ModelProfile, mmproj_path, profile_gguf
 
 LLAMA_CPP_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
 OLLAMA_ALIASES = {"ollama"}
@@ -212,7 +211,7 @@ class LlamaCppBackend(InferenceBackend):
         return runtime_dir() / "llama-server.exe"
 
     def model_path(self, profile: ModelProfile) -> Path:
-        return model_paths()["root"] / profile.filename
+        return profile_gguf(profile)
 
     def missing_requirements(self, profile: ModelProfile) -> list[str]:
         missing = []
@@ -232,8 +231,7 @@ class LlamaCppBackend(InferenceBackend):
     ) -> list[str]:
         hardware = detect_hardware()
         inference = self.settings.inference
-        paths = model_paths()
-        mmproj = paths["mmproj"]
+        projector = mmproj_path(profile)
         threads = inference.threads or hardware.cpu_cores
         ctx = int(context_size or profile.context_size or inference.context_size)
         args = [
@@ -241,7 +239,7 @@ class LlamaCppBackend(InferenceBackend):
             "--model",
             str(self.model_path(profile)),
             "--alias",
-            "Qwen3.5-27B",
+            profile.alias,
             "--host",
             inference.host,
             "--port",
@@ -277,8 +275,9 @@ class LlamaCppBackend(InferenceBackend):
             args.extend(["--fit", "on", "--fit-target", str(inference.fit_target_mib)])
         else:
             args.extend(["--n-gpu-layers", "99"])
-        if vision and mmproj.exists():
-            args.extend(["--mmproj", str(mmproj), "--image-min-tokens", "1024"])
+        # P0.5: do not reserve VRAM for the projector unless vision is requested.
+        if inference.vision and projector.exists():
+            args.extend(["--mmproj", str(projector)])
         return args
 
     async def start(

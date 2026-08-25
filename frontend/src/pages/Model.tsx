@@ -18,35 +18,23 @@ type Benchmark = {
   created_at: string | null
 }
 
-type HardwareGate = {
-  decision: string
-  purchase_recommended: boolean
-  reason: string
-  bottleneck: string
-  gpu_name?: string | null
-  gpu_vram_saturated: boolean
-  cpu_offload_likely: boolean
-  system_ram_constrained: boolean
-  cpu_inference_limiting: boolean | null
-  model_switching_costly: boolean | null
-  estimated_benefit_more_vram: string | null
-  estimated_benefit_more_ram: string | null
-  deferred_purchases: string[]
-  missing_evidence: string[]
-  agent_suite_complete: boolean
-  agent_suite_successes?: number
-}
-
-type SuiteCase = {
-  id: string
-  title: string
-  category: string
-  expected_tools: string[]
-  live_requires: string[]
+type ProfileInfo = {
+  name: string
+  label: string
+  quant: string
+  thinking_mode?: string
+  context_size: number
+  description: string
+  family?: string
+  alias?: string
+  installed?: boolean
 }
 
 type ModelStatus = {
   active_model?: string
+  family?: string
+  thinking_mode?: string
+  vision?: boolean
   quantization?: string
   context_size?: number
   context_cap?: number
@@ -59,14 +47,8 @@ type ModelStatus = {
   load_time_seconds?: number
   loaded?: boolean
   loading?: boolean
-  host?: string
-  port?: number
-  base_url?: string
-  advertised_models?: string[]
-  health_path?: string
-  remote_model?: string
-  api_key_configured?: boolean
   last_error?: string
+  profiles?: ProfileInfo[]
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
   hardware_gate?: HardwareGate
@@ -137,19 +119,21 @@ export function ModelPage() {
 
   const outcomes = model?.outcomes
   const samples = model?.benchmarks || []
+  const profiles = model?.profiles || []
 
   return (
     <div>
       <h1>Model</h1>
-      <p className="lede">Local Qwen3.5-27B served by llama.cpp, or any OpenAI-compatible server on this machine or the LAN. Profiles change quantization and thinking mode for local loads. Benchmarks persist tok/s, VRAM, RAM, and task success so you can compare loads over time.</p>
+      <p className="lede">Default is Qwen3.5-9B Abliterated (fully GPU-resident on the 5070 Ti). Qwen3.5-27B remains the Expert escalation model. The vision projector stays unloaded until you enable vision in Settings.</p>
       <div className="grid two">
         <div className="card">
           <div className="kv">
             <b>Active</b><span>{model?.active_model || "unloaded"}</span>
+            <b>Family</b><span>{model?.family || "—"}</span>
             <b>Quantization</b><span>{model?.quantization}</span>
-            <b>Context</b><span>{model?.context_size}{model?.context_cap ? ` / cap ${model.context_cap}` : ""}</span>
-            <b>Thinking</b><span>{model?.thinking_mode || (model?.thinking ? "selective" : "off")}</span>
-            <b>Vision</b><span>{model?.vision_loaded ? "loaded" : (model?.vision_mode || "lazy")}</span>
+            <b>Context</b><span>{model?.context_size}</span>
+            <b>Thinking</b><span>{model?.thinking_mode || "—"}</span>
+            <b>Vision</b><span>{model?.vision ? "projector loaded" : "off"}</span>
             <b>Backend</b><span>{model?.inference_backend}</span>
             <b>Endpoint</b><span>{model?.host ? `${model.host}:${model.port}` : "n/a"}</span>
             <b>Remote model</b><span>{model?.remote_model || "default"}</span>
@@ -166,6 +150,7 @@ export function ModelPage() {
             <b>Task success</b><span>{pct(outcomes?.task_success_rate)} ({outcomes?.tasks_completed || 0} ok / {outcomes?.tasks_failed || 0} failed)</span>
             <b>State</b><span>{model?.loaded ? "loaded" : model?.loading ? "loading" : "unloaded"}</span>
           </div>
+          {model?.last_error ? <p className="lede" style={{ marginTop: 12 }}>{model.last_error}</p> : null}
         </div>
         <div className="card">
           <h2>Profiles</h2>
@@ -173,6 +158,7 @@ export function ModelPage() {
             <button className="btn" disabled={busy} onClick={() => load("fast")}>Fast</button>
             <button className="btn" disabled={busy} onClick={() => load("balanced")}>Balanced</button>
             <button className="btn" disabled={busy} onClick={() => load("quality")}>Quality</button>
+            <button className="btn" disabled={busy} onClick={() => load("expert")}>Expert</button>
             <button className="btn secondary" disabled={busy} onClick={() => api("/api/model/unload", { method: "POST" }).then(refresh)}>Unload</button>
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
             <button className="btn secondary" disabled={busy} onClick={runProbe}>Probe server</button>
@@ -183,10 +169,18 @@ export function ModelPage() {
             </p>
           )}
           <p className="lede" style={{ marginTop: 16 }}>
-            Fast: thinking off, 8K–16K context, vision lazy.<br />
-            Balanced: selective thinking, 16K typical / 32K cap.<br />
-            Quality: selective thinking with more recovery reasoning, 32K cap.
+            Fast: 9B Q6_K, thinking off, 8K context.<br />
+            Balanced (default): 9B Q8_0, selective thinking, 16K context.<br />
+            Quality: 9B Q8_0, thinking on, 32K context.<br />
+            Expert: 27B Q4_K_M escalation only. May spill to CPU.
           </p>
+          {profiles.length > 0 && (
+            <div className="lede" style={{ marginTop: 12 }}>
+              {profiles.map((p) => (
+                <div key={p.name}>{p.label}: {p.installed ? "installed" : "GGUF not downloaded"} · {p.quant} · {p.thinking_mode}</div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <AgentSuiteCard />

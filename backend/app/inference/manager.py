@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -10,18 +10,8 @@ import psutil
 
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
-from .backends import InferenceBackend, probe_remote_server, resolve_backend
-from .profiles import ModelProfile, model_paths, resolve_profile
-from .vision import with_vision
-
-
-def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
-    mode = (settings.inference.vision or "lazy").strip().lower()
-    if mode in {"off", "never", "disabled"}:
-        return False
-    if mode in {"always", "on", "enabled"}:
-        return True
-    return bool(requested)
+from .backends import InferenceBackend, resolve_backend
+from .profiles import ModelProfile, declared_profiles, mmproj_path, profile_as_dict, profile_gguf, resolve_profile
 
 
 @dataclass
@@ -38,7 +28,7 @@ class InferenceState:
     manages_process: bool = True
     host: str = "127.0.0.1"
     port: int = 8088
-    context_size: int = 16384
+    context_size: int = 0
     gpu_layers: str = "fit"
     flash_attn: str = "auto"
     pid: int | None = None
@@ -49,26 +39,14 @@ class InferenceState:
     ram_used_gb: float | None = None
     last_error: str = ""
     llama_version: str = ""
-    advertised_models: list[str] | None = None
-    health_path: str = ""
-    remote_model: str = ""
+    vision: bool = False
+    family: str = ""
+    alias: str = ""
+    thinking_mode: str = ""
 
 
 def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
-    return ModelProfile(
-        name=profile.name,
-        label=profile.label,
-        quant=profile.quant,
-        filename=profile.filename,
-        thinking=profile.thinking,
-        context_size=context_size,
-        temperature=profile.temperature,
-        top_p=profile.top_p,
-        top_k=profile.top_k,
-        presence_penalty=profile.presence_penalty,
-        description=profile.description,
-        vision=profile.vision,
-    )
+    return replace(profile, context_size=context_size)
 
 
 def _default_load_context(profile: ModelProfile) -> int:
@@ -110,44 +88,24 @@ class InferenceManager:
 
     async def load(self, settings: AppSettings, profile_name: str | None = None) -> InferenceState:
         async with self._lock:
-            return await self._load_locked(
-                settings,
-                profile_name,
-                context_size=context_size,
-                vision=vision,
-            )
+            profile = resolve_profile(profile_name or settings.inference.profile)
+            backend = resolve_backend(settings)
+            model = profile_gguf(profile)
 
-    async def ensure_runtime(
-        self,
-        settings: AppSettings,
-        profile_name: str | None = None,
-        *,
-        context_size: int | None = None,
-        vision: bool = False,
-    ) -> InferenceState:
-        """Reload only when context must grow or vision must be attached."""
-        async with self._lock:
-            if not self.state.loaded or not self.provider:
-                return await self._load_locked(
-                    settings,
-                    profile_name,
-                    context_size=context_size,
-                    vision=vision,
-                )
-            if not (self.backend and self.backend.manages_process):
+            missing = backend.missing_requirements(profile)
+            if missing:
+                self.state.last_error = "; ".join(missing)
+                raise FileNotFoundError(self.state.last_error)
+
+            if self.backend and self.state.loaded and self.state.profile == profile.name and self.backend.name == backend.name and self.state.vision == bool(settings.inference.vision):
                 return self.state
 
-            self._apply_profile_state(settings, profile, backend, model, paths)
+            self._apply_profile_state(settings, profile, backend, model)
 
             advertised: list[str] = []
             # Adopt a server that is already answering when we did not start one.
-            probe = await probe_remote_server(
-                settings.inference.host,
-                settings.inference.port,
-                settings.inference.api_key,
-                timeout=6,
-            )
-            already_running = (self.backend is None or self.backend.pid is None) and bool(probe.get("ok"))
+            existing = OpenAICompatProvider(self.base_url(settings), model=profile.alias)
+            already_running = (self.backend is None or self.backend.pid is None) and await existing.health()
             if already_running:
                 advertised = list(probe.get("models") or [])
                 self._record_probe(probe, settings)
@@ -240,7 +198,7 @@ class InferenceManager:
             self.state.loaded = True
             self.state.loading = False
             self.state.load_time_seconds = round(time.time() - started, 2)
-            self.provider = self._make_provider(settings, advertised)
+            self.provider = OpenAICompatProvider(self.base_url(settings), model=profile.alias)
             await self.refresh_resources()
             return self.state
 
@@ -290,27 +248,22 @@ class InferenceManager:
         profile: ModelProfile,
         backend: InferenceBackend,
         model: Path,
-        paths: dict[str, Path],
-        context_size: int,
-        vision: bool,
     ) -> None:
+        projector = mmproj_path(profile)
+        vision = bool(settings.inference.vision) and projector.exists()
         self.state.profile = profile.name
         self.state.quant = profile.quant
         self.state.model_path = str(model) if backend.requires_local_files else ""
-        self.state.vision_loaded = bool(vision and paths["mmproj"].exists())
-        self.state.mmproj_path = str(paths["mmproj"]) if self.state.vision_loaded else ""
-        self.state.vision_mode = settings.inference.vision_mode or "lazy"
+        self.state.mmproj_path = str(projector) if vision else ""
         self.state.host = settings.inference.host
         self.state.port = settings.inference.port
         self.state.context_size = int(context_size or profile.context_size)
         self.state.backend = backend.name
         self.state.manages_process = backend.manages_process
-        self.state.remote_model = settings.inference.remote_model
-
-    def _record_probe(self, probe: dict[str, Any], settings: AppSettings) -> None:
-        self.state.advertised_models = list(probe.get("models") or [])
-        self.state.health_path = str(probe.get("health_path") or "")
-        self.state.remote_model = self.provider_model(settings, self.state.advertised_models)
+        self.state.vision = vision
+        self.state.family = profile.family
+        self.state.alias = profile.alias
+        self.state.thinking_mode = profile.thinking_mode
 
     async def unload(self) -> InferenceState:
         async with self._lock:
@@ -356,12 +309,14 @@ class InferenceManager:
             "loaded": self.state.loaded,
             "loading": self.state.loading,
             "healthy": healthy,
-            "active_model": (self.provider.model if self.provider else self.provider_model(settings, self.state.advertised_models)) if self.state.loaded else None,
-            "official_model": "Qwen/Qwen3.5-27B",
+            "active_model": (self.state.alias or profile.alias) if self.state.loaded else None,
+            "official_model": profile.repo,
+            "family": self.state.family or profile.family,
+            "thinking_mode": self.state.thinking_mode or profile.thinking_mode,
+            "vision": self.state.vision,
             "quantization": self.state.quant or profile.quant,
-            "profile": self.state.profile,
-            "context_size": self.state.context_size or _default_load_context(profile),
-            "context_cap": profile.context_size,
+            "profile": self.state.profile or profile.name,
+            "context_size": self.state.context_size if self.state.loaded else profile.context_size,
             "inference_backend": self.state.backend,
             "manages_process": self.state.manages_process,
             "gpu_layers": "auto (--fit on)" if settings.inference.fit else "99",
@@ -385,9 +340,7 @@ class InferenceManager:
             "vision": settings.inference.vision,
             "vision_loaded": self.state.vision_loaded,
             "thinking": profile.thinking,
-            "thinking_mode": "off" if not profile.thinking else "selective",
-            "vision_mode": settings.inference.vision_mode or "lazy",
-            "vision_loaded": self.state.vision_loaded,
+            "profiles": [profile_as_dict(item) for item in declared_profiles()],
         }
 
     async def record_timings(self, timings: dict[str, Any]) -> None:

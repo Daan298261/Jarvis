@@ -27,8 +27,7 @@ class SettingsUpdate(BaseModel):
     inference_backend: str | None = None
     inference_host: str | None = None
     inference_port: int | None = None
-    inference_api_key: str | None = None
-    inference_remote_model: str | None = None
+    inference_vision: bool | None = None
     browser_headless: bool | None = None
     vision_mode: str | None = None
 
@@ -84,10 +83,8 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.host = body.inference_host
     if body.inference_port is not None:
         settings.inference.port = body.inference_port
-    if body.inference_api_key is not None:
-        settings.inference.api_key = body.inference_api_key
-    if body.inference_remote_model is not None:
-        settings.inference.remote_model = body.inference_remote_model
+    if body.inference_vision is not None:
+        settings.inference.vision = body.inference_vision
     if body.browser_headless is not None:
         settings.browser.headless = body.browser_headless
     if body.vision_mode is not None:

@@ -44,7 +44,7 @@ from .escalation import build_escalation_package, persist_escalation_package
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
-from .tool_exposure import allowed_tool_names, apply_request, exposure_prompt_block
+from .tooling import apply_capability_request, expose_called_tool, schemas_for, should_enable_thinking, tools_for_task
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .policy import policy_guidance
 from .prompts import (
@@ -324,9 +324,7 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
-        recovering = False
-        critic_turn = False
-        last_tool_for_think = ""
+        exposed_tools = tools_for_task(working.task_class)
 
         if existing and continue_existing:
             messages = existing
@@ -470,20 +468,15 @@ class AgentRuntime:
                     execution_mode=execution_mode,
                     task_class=working.task_class,
                 )
-                think = should_think(
-                    profile_thinking=profile.thinking,
-                    profile_name=profile.name,
-                    execution_mode=execution_mode,
-                    verifying=verifying,
+                think = should_enable_thinking(
+                    profile,
                     force_final=force_final,
-                    planning=not tools_used or awaiting_plan_selection,
-                    recovering=recovering,
-                    critic_turn=critic_turn,
+                    verifying=verifying,
+                    turn_index=_step,
                     consecutive_failures=consecutive_failures,
-                    last_tool=last_tool_for_think,
-                    task_class=working.task_class,
+                    awaiting_plan_selection=awaiting_plan_selection,
+                    best_of_n_complete=best_of_n_complete,
                 )
-                critic_turn = False
                 await BUS.publish(
                     task_id,
                     "model",
@@ -498,9 +491,7 @@ class AgentRuntime:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
                             messages,
-                            tools=None if force_final else REGISTRY.openai_tools(
-                                allowed_tool_names(working.task_class, working.extra_tools)
-                            ),
+                            tools=None if force_final else schemas_for(exposed_tools),
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
@@ -618,18 +609,15 @@ class AgentRuntime:
                             return
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
-                        observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
-                        failed = "ERROR:" in observation or observation.lower().startswith("error")
-                        if not failed and name == "request_tools":
-                            requested = arguments.get("names") if isinstance(arguments, dict) else []
-                            working.extra_tools = apply_request(working.extra_tools, requested)
-                            await BUS.publish(
-                                task_id,
-                                "progress",
-                                "Expanded tool set",
-                                ",".join(working.extra_tools)[:1500] or "all tools",
-                                stage="act",
-                            )
+                        if name == "request_capability":
+                            exposed_tools, _added, observation = apply_capability_request(exposed_tools, arguments)
+                            attach = None
+                            failed = False
+                        else:
+                            if name in REGISTRY.tools and name not in exposed_tools:
+                                exposed_tools = expose_called_tool(exposed_tools, name)
+                            observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
+                            failed = "ERROR:" in observation or observation.lower().startswith("error")
                         if failed:
                             consecutive_failures += 1
                             failures_by_tool[name] = failures_by_tool.get(name, 0) + 1

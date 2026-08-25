@@ -54,14 +54,10 @@ backend/app/
     escalation.py         compact EscalationContext for the next coding worker
     acp.py                Cursor ACP JSON-RPC client + auto-answer policy
     prompts.py            System / plan / verify / critic prompts
-  mcp_server.py           Jarvis MCP server tools (Cursor attaches as client)
-  mcp_stdio.py            stdio entry: python3 -m app.mcp_stdio
-  inference/
+    inference/
     manager.py            Load/unload, adopt already-running server
-    backends.py           LlamaCppBackend, Ollama/LM Studio/vLLM/SGLang, remote probe
-    profiles.py           fast / balanced / quality GGUF profiles
-    benchmarks.py         Persist tok/s / VRAM / task success
-    hardware_gate.py      P0.12 purchase gate (defer until desktop suite runs)
+    backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
+    profiles.py           fast / balanced / quality (9B) plus expert (27B)
   providers/              OpenAI-compatible chat + tool-call parsing
   workers/                Optional Open Interpreter adapter
   tools/                  Native tools + MCP proxy + code_worker
@@ -376,8 +372,11 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Browser Use and OpenHands adapters are integrated; they report `missing` until those packages are installed. UFO, Cua, and Open Interpreter remain `not_integrated`
+- Skills promote after 3 repeats and can execute parameterized steps
+- Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
+- Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
+- 9B Abliterated profiles are wired in code; GPU residency and tok/s must be measured on the RTX 5070 Ti
 
 ---
 
