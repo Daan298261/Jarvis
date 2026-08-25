@@ -17,6 +17,9 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | `request_tools` | Escape hatch: ask the runtime to expose extra tools for the rest of the task. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
 | `request_tools` | Escape hatch: add more tools for the current task (names or categories: browser, coding, windows, office, mcp, all). |
+| `browser_use` | Optional Browser Use worker for unfamiliar sites. Playwright remains default. Missing package reports not installed. |
+| `code_worker` | Optional OpenHands software-engineering worker. Jarvis still verifies. |
+| `open_interpreter` | Optional Open Interpreter coding/shell worker. Missing package reports not installed. Native filesystem/python/git remain the fallback. |
 | `ufo` | Optional Microsoft UFO HostAgent/AppAgent worker. Missing package degrades to the native `desktop` tool. |
 | `cua` | Optional Cua computer-use worker. Missing package degrades to the native `desktop` tool. |
 

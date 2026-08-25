@@ -43,6 +43,10 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "coding": "python",
     "repo": "git",
     "source": "git",
+    "openhands": "code_worker",
+    "interpreter": "open_interpreter",
+    "open-interpreter": "open_interpreter",
+    "ufo2": "ufo",
 }
 
 ESCAPE_TOOL = "request_tools"

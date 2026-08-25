@@ -24,7 +24,7 @@ Rules:
 - Before mass file or directory edits, call filesystem snapshot so the tree can be restored.
 - Use the browser for websites and web apps; use web_fetch for simple HTTP reads.
 - Prefer named controls and CSS selectors over snapshot element ids so a successful browser procedure can be replayed later.
-- Use code_worker only for substantial coding jobs when Open Interpreter is available; keep simple file/shell work on native tools. Jarvis must still verify.
+- Use code_worker for substantial repository jobs when OpenHands is available, and open_interpreter for Open Interpreter when it is installed. Keep simple file/shell work on native tools. Jarvis must still verify.
 - Use screenshots and vision when UI Automation cannot tell you what happened.
 - Create git checkpoints before large source changes. The git checkpoint action is non-destructive: it creates a backup branch and leaves your working tree in place.
 - Use the office tool for Word/Excel/PowerPoint. It uses COM when Office is installed and python-docx/openpyxl/python-pptx otherwise.

@@ -28,10 +28,22 @@ class OpenInterpreterBackend:
     license_id = "MIT"
 
     def detect_kind(self) -> str | None:
-        if _module_available("interpreter"):
+        if self._module_name():
             return "python-module"
-        if shutil.which("interpreter"):
+        if self._cli_name():
             return "cli"
+        return None
+
+    def _module_name(self) -> str | None:
+        for name in ("interpreter", "open_interpreter"):
+            if _module_available(name):
+                return name
+        return None
+
+    def _cli_name(self) -> str | None:
+        for name in ("interpreter", "open-interpreter"):
+            if shutil.which(name):
+                return name
         return None
 
     def available(self) -> bool:
@@ -67,8 +79,8 @@ class OpenInterpreterBackend:
     def build_command(self, goal: str, path: Path, kind: str | None = None) -> list[str]:
         resolved = kind or self.detect_kind()
         if resolved == "cli":
-            return ["interpreter", "--os", "-y", "-c", goal]
-        return [sys.executable, "-m", "interpreter", "--os", "-y", "-c", goal]
+            return [self._cli_name() or "interpreter", "--os", "-y", "-c", goal]
+        return [sys.executable, "-m", self._module_name() or "interpreter", "--os", "-y", "-c", goal]
 
     async def run(
         self,
