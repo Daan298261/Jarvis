@@ -47,7 +47,7 @@ When the user starts **linking a mobile device** (portal or `/phone`):
 3. **User chooses how WAN is set up:**
    - they configure port-forward / overlay themselves, or
    - Jarvis does it if they **supply router admin passwords** and run the AI-guided brand-agnostic walkthrough in §3.
-4. **Explain reuse:** router access granted here can later be used by the **home-network blue-team agent** (`BLUE_TEAM.md`) to read router logs and apply user-confirmed isolation on the user’s own LAN. Same secret store, same attended policy. Not a second login product.
+4. **Explain reuse:** router access granted here can later be used by **Blue** (and **Purple** on owned net) in [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) to read router logs and apply user-confirmed isolation on the user’s own LAN. Same secret store, same attended policy. Not a second login product. **Red** does not receive these credentials unless the law-enforcement gate is on **and** the action is in authorized case scope.
 5. **Credentials:** local secret storage on the Windows Leader only (never git, never logs, never chat, never the Jarvis room).
 
 LAN-only linking is valid: skip WAN/router steps if the user stays on the home Wi-Fi.
@@ -144,7 +144,7 @@ Leader stays the Windows desktop. The phone does not run the model, tools, or sw
 
 ## 7. Acceptance (when implemented)
 
-- [ ] Link-device flow asks for pairing, explains WAN exposure, offers self-setup vs Jarvis-with-router-password, and notes later blue-team reuse of router access
+- [ ] Link-device flow asks for pairing, explains WAN exposure, offers self-setup vs Jarvis-with-router-password, and notes later Blue/Purple reuse of router access (Red only under the LE gate)
 - [ ] Same `/phone` client (PWA/TWA/WebView) talks to the Leader API with the existing private key
 - [ ] `GET /api/mobile` still does not include the private key
 - [ ] UPnP/IGD attempted first; no password if it succeeds
@@ -161,7 +161,7 @@ Leader stays the Windows desktop. The phone does not run the model, tools, or sw
 
 Items in `JARVIS_MASTER_PLAN.md` §§1–63 that have **no Development Queue line** and are **not** covered by `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, or this Android spec. Do not invent product areas beyond that plan.
 
-Covered elsewhere (not gaps): core/portal/tools, verification/recovery/modes, skills/trajectory/best-of-N, Office, optional workers, voice, Phone PWA, LAN inference, swarm P2, P4/P5 headings, this Android client, home IoT, blue team, Jarvis 2.0 (`JARVIS_2.0.md`), lazy mmproj (queue overlay).
+Covered elsewhere (not gaps): core/portal/tools, verification/recovery/modes, skills/trajectory/best-of-N, Office, optional workers, voice, Phone PWA, LAN inference, swarm P2, P4/P5 headings, this Android client, home IoT, security agents (Blue / Purple / Red-gated), Jarvis 2.0 (`JARVIS_2.0.md`), lazy mmproj (queue overlay).
 
 | Plan section | Gap | Notes |
 | --- | --- | --- |

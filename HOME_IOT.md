@@ -34,7 +34,7 @@ Autonomy profiles from `JARVIS_MASTER_PLAN.md` §45 apply. House control is not 
 ## 4. Relation to other specs
 
 - Phone/voice: `ANDROID_CLIENT.md` — IoT commands are Leader API calls, not a cloud-only phone skill.
-- Blue team: `BLUE_TEAM.md` — new unknown IoT MACs are security events; house control does not silently trust a new device.
+- Security agents: `SECURITY_AGENTS.md` (Blue) — new unknown IoT MACs are security events; house control does not silently trust a new device.
 - P5 domain packs may later include a Home/Facilities pack; this file remains the house-control spec.
 - Not P3 swarm: bulbs are not Jarvis Nodes.
 

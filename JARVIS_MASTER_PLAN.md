@@ -6,7 +6,7 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 This file replaces the need to repeatedly provide large architectural prompts to Cursor.
 
-**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [`JARVIS_2.0.md`](JARVIS_2.0.md), [`HOME_IOT.md`](HOME_IOT.md), and [`BLUE_TEAM.md`](BLUE_TEAM.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
+**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [`JARVIS_2.0.md`](JARVIS_2.0.md), [`HOME_IOT.md`](HOME_IOT.md), [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md), and the [`BLUE_TEAM.md`](BLUE_TEAM.md) pointer. Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
 
 Swarm role/placement/resource design lives in `SWARM_ARCHITECTURE.md`.
 
@@ -16,7 +16,7 @@ P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating
 
 **Jarvis 2.0** (Away Mode, event-driven operators, **marketing**, **SEO**, **NovelProject**, **multimedia**, policy, self-healing) is restored in [`JARVIS_2.0.md`](JARVIS_2.0.md) — the approved sections 64–85 from git history. Do not drop those features. Do not treat 2.0 as current-session P0 unless this queue promotes an item.
 
-The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network blue team / SIEM: [`BLUE_TEAM.md`](BLUE_TEAM.md). Do not paste those specs into this file.
+The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network security agents (Blue / Purple / Red-gated): [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer). Do not paste those specs into this file.
 
 Filter: if a **new** idea would make home-network JARVIS more real, spec it. Never delete Taco-approved features.
 
@@ -1831,9 +1831,9 @@ Specified in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. **Not implemented.** Do not star
 
 Specified in `ANDROID_CLIENT.md`. Phone PWA (`/phone`) exists for LAN. Installable Android client + link-device + AI-guided WAN port-forward is **not implemented**. Not P3 swarm.
 
-### Home IoT / blue team
+### Home IoT / security agents
 
-Specified in `HOME_IOT.md` and `BLUE_TEAM.md`. **Not implemented.**
+Specified in `HOME_IOT.md` and `SECURITY_AGENTS.md` (Blue default-on household SIEM; Purple owned-net simulation; Red LE-gated stub). **Not implemented.**
 
 ### Jarvis 2.0
 
@@ -1868,6 +1868,7 @@ Specified in `JARVIS_2.0.md` (approved Away Mode / novel / marketing / SEO / mul
 - Office COM and Docker depend on software that may be missing on the desktop
 - P3 multi-node swarm (discovery, pairing, remote execution) is not started
 - Android WAN reachability / AI-guided router port-forward is specified, not implemented
+- Home IoT and security agents (Blue / Purple / Red-gated) are specified, not implemented
 
 ### Last End-to-End Test
 
@@ -2005,13 +2006,19 @@ These items make the existing machine a one-node swarm first. They must not requ
 - [x] Phone / Android client against the local API
   - Status: VERIFIED in code (PR #13) for the LAN Phone PWA (`/phone`, `GET /api/mobile` does not leak the key). Live Android home-screen install is still a desktop-session check.
 - [ ] Android client to the Leader with AI-guided WAN reachability (`ANDROID_CLIENT.md`)
-  - Evolve `/phone` into an installable Android client (TWA/PWA or thin WebView). Link-device: ask for pairing then; explain WAN exposure; user self-setup **or** Jarvis with router admin passwords; router access may later be used by the blue-team agent. Brand-agnostic walkthrough. Forward only the Jarvis port. CGNAT → overlay fallback. Not P3 swarm.
+  - Evolve `/phone` into an installable Android client (TWA/PWA or thin WebView). Link-device: ask for pairing then; explain WAN exposure; user self-setup **or** Jarvis with router admin passwords; router access may later be used by Blue (and Purple on owned net). Red does not get those credentials unless the LE gate is on and the action is in authorized scope. Brand-agnostic walkthrough. Forward only the Jarvis port. CGNAT → overlay fallback. Not P3 swarm.
   - Status: TODO / specified. Do not hardcode ISP or brand adapters.
 - [ ] Home IoT / mansion house control (`HOME_IOT.md`)
   - Discover and safely control LAN devices (HA/Matter/local APIs). Locks/garage extra confirm. Not swarm Nodes.
   - Status: TODO / specified
-- [ ] Home-network blue team / SIEM (`BLUE_TEAM.md`)
-  - Local SIEM on the user’s LAN; detect sniffing/new devices/ARP/rogue DHCP; alert portal+phone; contain via owned router with autonomy gates. No exploits or off-LAN attacks. Reuses link-device router secrets.
+- [ ] Blue (home, default on) — household SIEM (`SECURITY_AGENTS.md`)
+  - Detect, alert, contain, evidence on the user’s own LAN. Local SIEM; portal+phone alerts; owned-router containment with autonomy gates. Reuses link-device router secrets. No exploits or off-LAN attacks.
+  - Status: TODO / specified
+- [ ] Purple (owned-network only) — authorized adversary simulation (`SECURITY_AGENTS.md`)
+  - Tests Blue on assets the user owns and lists. Explicit user confirm + autonomy profile; never silent. Goal is to improve detection, not to attack anyone else. No simulation techniques, payloads, or exploit steps in the spec or product.
+  - Status: TODO / specified
+- [ ] Red / counter-response — law-enforcement gate only (`SECURITY_AGENTS.md`)
+  - Spec the **gate**, not the attacks. Default disabled in the consumer/home build; no UI toggle a normal user can flip. Until Taco provides a distinct LE authorization module (identity + authorization artifact — do not invent a fake badge check), Red is a stub that refuses to run. Even when gated on: case/authorization record, human confirm, full SIEM audit; autonomy cannot silently enable it. Identify/isolate/evidence stay in Blue. Not a shipped hack-back kit.
   - Status: TODO / specified
 - [x] Dedicated LAN inference server
   - Status: VERIFIED in code (PR #6)
@@ -2075,7 +2082,7 @@ Approved text restored (sections 64–85). Specified, not implemented. Do not dr
 
 Decision: Jarvis Architect is sole editor of spec docs
 
-Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, and `BLUE_TEAM.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
+Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, and the `BLUE_TEAM.md` pointer. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
 
 Reason:
 
@@ -2123,19 +2130,19 @@ P4/P5 must stay visible in the Development Queue without pasting the adaptive sp
 
 Decision: Android client talks to the Leader; router setup is AI-guided and brand-agnostic
 
-The phone is a remote control for the Windows Leader, evolving `/phone`. Link-device asks for pairing then, explains WAN exposure, and offers self-setup or Jarvis-with-router-password. Router access may later be used by the blue-team agent. WAN setup is AI-guided and brand-agnostic. See `ANDROID_CLIENT.md`.
+The phone is a remote control for the Windows Leader, evolving `/phone`. Link-device asks for pairing then, explains WAN exposure, and offers self-setup or Jarvis-with-router-password. Router access may later be used by Blue (and Purple on owned net). Red does not get those credentials unless the LE gate is on and the action is in authorized scope. WAN setup is AI-guided and brand-agnostic. See `ANDROID_CLIENT.md`.
 
 Reason:
 
 One client, one Leader, every household's router — not a Netherlands-vendor special case.
 
-Decision: home IoT and home-network blue team are first-class specs
+Decision: home IoT and security agents (Blue / Purple / Red-gated) are first-class specs
 
-House control: `HOME_IOT.md` (local-first HA/Matter). Defensive SIEM on the user’s own LAN: `BLUE_TEAM.md` (investigate/contain/evidence; no exploits; no off-LAN attacks). Blue team reuses link-device router secrets.
+House control: `HOME_IOT.md` (local-first HA/Matter). Security workers: `SECURITY_AGENTS.md` (`BLUE_TEAM.md` is a pointer). Blue is the household default (detect/alert/contain/evidence on the user’s own LAN). Purple is owned-network adversary simulation to test Blue, explicit confirm only. Red is a locked future worker behind a law-enforcement authorization module Taco must provide; until then it is a stub that refuses; no consumer toggle; this spec does not describe attacks. Blue (and Purple on owned net) may reuse link-device router secrets; Red does not unless the LE gate is on and the action is in authorized scope.
 
 Reason:
 
-Mansion-JARVIS includes the house and the home LAN, not only the desktop agent.
+Mansion-JARVIS includes the house and the home LAN, not only the desktop agent. Counter-response is not a home-user feature.
 
 Decision: lazy mmproj
 
