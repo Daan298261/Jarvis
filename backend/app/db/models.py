@@ -242,3 +242,46 @@ class Conversation(Base):
     messages_json: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EscalationPackage(Base):
+    """Compact EscalationContext persisted for the next coding worker."""
+
+    __tablename__ = "escalation_packages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    task_class: Mapped[str] = mapped_column(String(64), default="")
+    goal: Mapped[str] = mapped_column(Text, default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AcpSession(Base):
+    """Persisted Cursor ACP session so Jarvis can resume after restart."""
+
+    __tablename__ = "acp_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    cursor_session_id: Mapped[str] = mapped_column(String(80), default="")
+    model: Mapped[str] = mapped_column(String(80), default="")
+    cwd: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="disconnected")
+    last_event: Mapped[str] = mapped_column(String(80), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WorkerReport(Base):
+    """Worker-reported results and verification requests. Never treated as completion."""
+
+    __tablename__ = "worker_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    worker: Mapped[str] = mapped_column(String(80), default="")
+    kind: Mapped[str] = mapped_column(String(40), default="worker_result")
+    reported_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

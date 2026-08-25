@@ -38,7 +38,7 @@ def _decode(data: bytes | bytearray) -> str:
 
 
 def default_shell() -> str:
-    return "powershell" if platform.system() == "Windows" else "bash"
+    return "powershell" if os.name == "nt" else "bash"
 
 
 def _python_args(command: str) -> list[str]:
@@ -77,13 +77,15 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         if shutil.which("bash"):
             return ["bash", "-lc", command]
         return ToolResult(False, "", error="WSL/bash is not available on this machine")
-    if os.name == "nt":
-        exe = shutil.which("powershell") or shutil.which("pwsh")
-        if exe:
-            return [exe, "-NoProfile", "-Command", command]
+    fallback = default_shell()
+    if fallback == "bash" and shutil.which("bash"):
+        return ["bash", "-lc", command]
+    exe = shutil.which("powershell") or shutil.which("pwsh")
+    if exe:
+        return [exe, "-NoProfile", "-Command", command]
     if shutil.which("bash"):
         return ["bash", "-lc", command]
-    python = sys.executable or shutil.which("python3") or "python3"
+    python = sys.executable or shutil.which("python") or shutil.which("python3") or "python3"
     return [python, "-c", command]
 
 
@@ -157,7 +159,7 @@ class TerminalTool(Tool):
             "shell": {
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
-                "default": "powershell" if platform.system() == "Windows" else "bash",
+                "description": "Defaults to PowerShell on Windows and bash on Linux.",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},

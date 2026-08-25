@@ -51,8 +51,11 @@ backend/app/
     trajectory.py         Cross-task lessons (no hidden reasoning)
     skills.py             Promote after 3 identical successful tool sequences
     queue_watcher.py      data/queue/pending file drop
+    escalation.py         compact EscalationContext for the next coding worker
+    acp.py                Cursor ACP JSON-RPC client + auto-answer policy
     prompts.py            System / plan / verify / critic prompts
-    policy.py             Professional analysis vs operational authorization
+  mcp_server.py           Jarvis MCP server tools (Cursor attaches as client)
+  mcp_stdio.py            stdio entry: python3 -m app.mcp_stdio
   inference/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend, Ollama/LM Studio/vLLM/SGLang, remote probe
@@ -191,6 +194,10 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | POST | `/api/tools/{name}/enable` / `disable` | Persist `disabled_tools` |
 | GET/PUT | `/api/settings` | Full settings dump / patch |
 | GET/POST/DELETE | `/api/mcp`, `/api/mcp/{id}`, `/refresh` | MCP servers |
+| GET | `/api/mcp/jarvis` | Built-in Jarvis MCP manifest for Cursor |
+| GET/POST | `/api/coding/mcp`, `/api/coding/mcp/call` | Invoke Jarvis MCP tools over HTTP |
+| GET | `/api/coding/escalations` | Compact EscalationContext packages |
+| GET/POST | `/api/coding/acp`, `/connect`, `/answer` | Cursor ACP status, session persist, auto-answer preview |
 | GET | `/api/memory/trajectories` | Trajectory memory |
 | GET/POST/DELETE | `/api/memory/skills` | Skills; `POST /skills/promote` |
 | POST | `/api/memory/skills/{id}/enable` or `disable` | Toggle skill |
@@ -334,12 +341,10 @@ Current unit coverage (no GPU required):
 | `test_docker.py` | `docker run` requires an image |
 | `test_auth.py` | 401 without key; header / bearer / query |
 | `test_queue.py` | File-drop watcher |
-| `test_terminal.py` | Background PID inspect/wait/kill; Linux default shell is bash |
-| `test_benchmarks.py` | Model benchmark persistence |
-| `test_office.py` | Word/Excel/PowerPoint library backend + sandbox |
-| `test_git.py` | Non-destructive checkpoint / restore |
-| `test_web_fetch.py` | POST body, download sandbox, http(s) only |
-| `test_docker.py` | `run`/`logs`/`inspect` require targets |
+| `test_mcp_server.py` | Jarvis MCP for Cursor; recursive dispatch refused |
+| `test_escalation.py` | Compact EscalationContext persistence |
+| `test_acp.py` | ACP session persist + auto-answer policy |
+| `test_tool_qa.py` | Git checkpoint, docker targets, web_fetch scheme, Office info, shells |
 
 `conftest.py` fixture `jarvis_env` points SQLite at a temp path, marks the model loaded, and applies autonomous settings.
 

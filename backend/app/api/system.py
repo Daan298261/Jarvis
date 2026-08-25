@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ..agent.agent_benchmark import build_report
+from ..agent.acp import acp_status
 from ..config import load_settings
 from ..hardware import detect_hardware, hardware_dict
 from ..inference.benchmarks import list_benchmarks
 from ..inference.hardware_gate import evaluate_purchase_gate
 from ..inference.manager import MANAGER
+from ..mcp_server import jarvis_mcp_manifest
 from ..tools.capabilities import capability_snapshot
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -28,9 +29,6 @@ async def system_info():
         "execution_mode": settings.execution_mode,
         "allowed_directories": settings.allowed_directories,
         "capabilities": capability_snapshot(),
-        "hardware_gate": evaluate_purchase_gate(
-            hardware=detect_hardware(),
-            inference_samples=await list_benchmarks(limit=50),
-            agent_results=(await build_report())["results"],
-        ),
+        "jarvis_mcp": jarvis_mcp_manifest(),
+        "cursor_acp": acp_status(),
     }

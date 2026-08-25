@@ -47,14 +47,12 @@ class WebFetchTool(Tool):
         self.context_getter = context_getter or (lambda: {})
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        url = (kwargs.get("url") or "").strip()
+        url = kwargs.get("url")
         if not url:
             return ToolResult(False, "", error="url is required")
-        parsed = urlparse(url)
-        if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
+        scheme = (urlparse(str(url)).scheme or "").lower()
+        if scheme not in {"http", "https"}:
             return ToolResult(False, "", error="Only http and https URLs are allowed")
-        if not parsed.netloc:
-            return ToolResult(False, "", error="url is missing a host")
         method = (kwargs.get("method") or "GET").upper()
         if method not in {"GET", "POST", "HEAD"}:
             return ToolResult(False, "", error=f"Unsupported method {method}")

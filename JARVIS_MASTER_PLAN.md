@@ -1715,6 +1715,12 @@ P0/P1:
 15. Implement end-of-run development report.
 16. Run first one-day autonomous-development experiment.
 
+Progress this session (code + unit tests; live Cursor CLI still absent):
+
+- `CursorACPWorker` JSON-RPC lifecycle, persisted session IDs, auto-answer for isolated routine questions.
+- Jarvis MCP server for Cursor (`python3 -m app.mcp_stdio`).
+- Compact `EscalationContext` packaging after repeated tool failures.
+
 Do not prioritize GUI mouse automation of Cursor.
 
 ACP is the preferred primary integration.
@@ -3619,12 +3625,11 @@ This development session:
 
 ### Optional Workers
 
-- Browser Use: **adapter integrated** (`BrowserUseBackend` behind `BrowserBackend`; catalog shows `ready` when `browser-use` is installed, else `missing`)
-- UFO: **not integrated**
-- Cua: **not integrated**
-- Open Interpreter: **adapter present** (`code_worker` / `OpenInterpreterBackend`). Catalog is `ready` when the `open-interpreter` package or `interpreter` CLI is installed, otherwise `missing`. Forced onto Jarvis's local OpenAI-compatible endpoint. Jarvis still verifies. Native python/terminal/filesystem remain the default.
-- OpenHands: **not integrated**
-- Local Jarvis coding worker: **ready** (in-process supervisor loop). Cursor Composer / Grok / frontier specialists are catalogued as `not_configured`; software tasks are complexity-scored and routed to native tools or the local worker until paid workers are wired. Worker-reported success is never treated as completion.
+- Optional workers stay listed as unavailable: Browser Use, UFO, Cua, OpenHands, Open Interpreter
+- Jarvis MCP server for Cursor: **implemented** (`GET /api/mcp/jarvis`, `python3 -m app.mcp_stdio`). Read-oriented plus verification/result reporting; recursive Cursor dispatch is refused.
+- Cursor ACP client: **code present** (JSON-RPC session lifecycle, persisted session IDs, auto-answer for isolated routine questions). Live `agent acp` is `not_connected` here.
+- EscalationContext packaging: **implemented** (compact package persisted after repeated tool failures; never a raw transcript dump)
+- Flagship benchmark `Away Mode — Autonomous Bug Fix`: **not implemented**
 
 ### Jarvis 2.0
 
@@ -3680,7 +3685,8 @@ This development session:
 - The 20-task agent suite exists as fixtures + scoring; live 9B vs 27B comparison has not run
 - Hardware purchases remain gated until that desktop comparison exists
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
-- Office COM and Docker depend on software that may be missing on the target PC; the office tool falls back to python-docx/openpyxl/python-pptx
+- Office COM and Docker depend on software that may be missing on the target PC
+- Cursor ACP CLI is not on PATH in this environment; the client is catalogued `not_connected`
 - Terminal default is PowerShell on Windows and bash on Linux
 
 ### Last End-to-End Test
@@ -3689,11 +3695,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): previous coverage plus P0.9 20-task agent suite fixtures/scoring, P0.12 hardware purchasing gate, software-development worker routing, and API endpoints for those surfaces
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, Jarvis MCP server, EscalationContext packaging, ACP session auto-answer, tool QA guards
 - Frontend (`npm run build`): TypeScript build
 - Portal: Command, Tools (`code_worker`, Open Interpreter `missing`), Guide (`browser-form` / `browser-procedure`), Settings Inference card (Ollama port 11434), Model Probe, System backends
 
-Results: **96 passed** on this branch. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **97 passed** on this tree after Jarvis MCP, EscalationContext, ACP session auto-answer, and tool QA guards. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3791,17 +3797,17 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: large repo tasks can be delegated; Jarvis still verifies.
   - Status: TODO
 
-- [x] Coding cost/usage telemetry
-  - Acceptance: persist worker/model tokens, estimated USD, monthly total, and cost per verified successful software task; Tools page shows the summary.
-  - Status: VERIFIED in unit tests (`test_coding.py`); live Cursor token counts still need ACP
+- [x] Jarvis MCP server for Cursor
+  - Acceptance: Cursor can attach to a limited Jarvis MCP server for plan/task/architecture/trajectory context; recursive self-dispatch is refused.
+  - Status: VERIFIED in unit tests (`test_mcp_server.py`; `GET /api/mcp/jarvis`, `python3 -m app.mcp_stdio`)
 
-- [x] Cursor model catalog and selection
-  - Acceptance: configurable Composer/Grok/specialist identifiers; Fast variants off by default; `GET /api/coding/models` probes PATH without starting ACP.
-  - Status: VERIFIED in unit tests; live `agent acp` remains `not_connected` here
+- [x] EscalationContext packaging
+  - Acceptance: after repeated coding-tool failures Jarvis stores a compact package (goal, criteria, files, diff, failures) instead of dumping the raw transcript.
+  - Status: VERIFIED in unit tests (`test_escalation.py`)
 
-- [x] Evidence-based coding-worker learning
-  - Acceptance: historical local success keeps similar work local; three recent local failures escalate to Composer; a worker claiming success is never completion.
-  - Status: VERIFIED in unit tests (`recommend_from_history`)
+- [x] Cursor ACP session lifecycle (without live CLI)
+  - Acceptance: JSON-RPC initialize/session/prompt/cancel, persisted session IDs, auto-answer for isolated routine `cursor/ask_question` and `cursor/create_plan`; consequential decisions stay with the user.
+  - Status: VERIFIED in unit tests (`test_acp.py`). Live `agent acp` remains `not_connected` until Cursor CLI is on PATH.
 
 ### P2
 

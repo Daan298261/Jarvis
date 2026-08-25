@@ -1,3 +1,3 @@
-from . import mcp, mobile, model, settings, system, tasks, tools, voice, workflows
+from . import coding, mcp, model, settings, system, tasks, tools, voice, workflows
 
-__all__ = ["mcp", "mobile", "model", "settings", "system", "tasks", "tools", "voice", "workflows"]
+__all__ = ["coding", "mcp", "model", "settings", "system", "tasks", "tools", "voice", "workflows"]

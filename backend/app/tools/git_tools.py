@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,9 +19,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint, list_checkpoints, restore. checkpoint creates a jarvis-checkpoint-* backup "
-        "branch at HEAD without changing the working tree, and stores dirty work on a WIP ref. "
-        "restore overlays files from that checkpoint without switching the current branch."
+        "checkpoint. checkpoint creates a jarvis-checkpoint-* backup branch and a stash-create SHA "
+        "without emptying the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -118,11 +116,22 @@ class GitTool(Tool):
                     return ToolResult(False, "", error="query is required for search")
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                return await self._checkpoint(cwd)
-            if action == "list_checkpoints":
-                return await self._list_checkpoints(cwd)
-            if action == "restore":
-                return await self._restore(cwd, kwargs.get("ref") or "")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                branch = f"jarvis-checkpoint-{stamp}"
+                branch_result = await self._git(["branch", branch], cwd)
+                if not branch_result.success:
+                    return ToolResult(
+                        False,
+                        branch_result.output,
+                        error=branch_result.error or "Could not create checkpoint branch",
+                    )
+                created = await self._git(["stash", "create"], cwd)
+                sha = (created.output or "").strip() if created.success else ""
+                note = (
+                    f"Backup branch {branch} points at HEAD. Working tree was not modified. "
+                    f"stash_create={sha or 'clean'}."
+                )
+                return ToolResult(True, note, data={"branch": branch, "stash_create": sha or None})
             return ToolResult(False, "", error=f"Unknown action {action}")
         except PermissionError as exc:
             return ToolResult(False, "", error=str(exc))

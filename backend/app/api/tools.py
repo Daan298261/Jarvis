@@ -3,8 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..agent.coding_workers import coding_worker_catalog, list_coding_routes, route_software_task
+from ..agent.acp import acp_status
 from ..config import load_settings, save_settings
+from ..mcp_server import jarvis_mcp_manifest
 from ..tools.capabilities import capability_snapshot
 from ..tools.exposure import exposure_catalog, tools_for_task
 from ..tools.registry import REGISTRY
@@ -33,20 +34,10 @@ async def tool_catalog():
     caps = capability_snapshot()
     return {
         "tools": REGISTRY.list_tools(),
-        "exposure": exposure_catalog(),
-        "example_filesystem": sorted(tools_for_task("filesystem")),
-        "example_software": sorted(tools_for_task("software engineering")),
         **caps,
+        "jarvis_mcp": jarvis_mcp_manifest(),
+        "cursor_acp": acp_status(),
     }
-
-
-@router.get("/coding-workers")
-async def coding_workers(prompt: str = "", task_class: str = ""):
-    catalog = coding_worker_catalog()
-    payload: dict = {"workers": catalog, "recent_routes": await list_coding_routes(limit=20)}
-    if prompt:
-        payload["route"] = route_software_task(prompt, task_class=task_class).as_dict()
-    return payload
 
 
 @router.post("/{tool_name}/enable")

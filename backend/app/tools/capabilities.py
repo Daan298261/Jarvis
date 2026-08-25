@@ -86,7 +86,15 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": _module_available("mcp"),
             "status": "ready" if _module_available("mcp") else "missing",
-            "detail": "User-configured stdio or HTTP MCP servers.",
+            "detail": "User-configured stdio or HTTP MCP servers, plus the built-in Jarvis MCP server for Cursor.",
+        },
+        {
+            "id": "jarvis-mcp-server",
+            "name": "Jarvis MCP for Cursor",
+            "kind": "native",
+            "available": True,
+            "status": "ready",
+            "detail": "Read-oriented MCP server Cursor can attach to. Jarvis remains the supervisor.",
         },
         {
             "id": "git",
@@ -108,7 +116,9 @@ def native_capabilities() -> list[dict[str, Any]]:
 
 
 def optional_workers() -> list[dict[str, Any]]:
-    browser_use_installed = browser_use_available()
+    from ..agent.acp import acp_status
+
+    acp = acp_status()
     return [
         {
             "id": "browser-use",
@@ -147,28 +157,12 @@ def optional_workers() -> list[dict[str, Any]]:
             "detail": "Optional software-engineering worker. Jarvis still verifies results.",
         },
         {
-            "id": "local-jarvis-coding",
-            "name": "Local Jarvis coding worker",
-            "kind": "optional",
-            "available": True,
-            "status": "ready",
-            "detail": "Default software-development worker. Cost is zero. Jarvis independently verifies.",
-        },
-        {
             "id": "cursor-acp",
-            "name": "Cursor ACP / Composer 2.5",
-            "kind": "optional",
-            "available": False,
-            "status": "not_connected",
-            "detail": "Default paid coding worker when connected. Not wired in this runtime.",
-        },
-        {
-            "id": "cursor-grok",
-            "name": "Cursor Grok 4.6",
-            "kind": "optional",
-            "available": False,
-            "status": "not_connected",
-            "detail": "Escalation coding worker for difficult architecture. Not the default.",
+            "name": "Cursor ACP",
+            "kind": "coding",
+            "available": bool(acp.get("available")),
+            "status": acp.get("status") or "not_connected",
+            "detail": acp.get("detail") or "ACP JSON-RPC client. Live CLI is optional; session IDs persist.",
         },
     ]
 

@@ -55,12 +55,12 @@ class DockerTool(Tool):
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
-        if action == "run" and not str(kwargs.get("image") or "").strip():
-            return ToolResult(False, "", error="docker run requires an image")
-        if action == "logs" and not str(kwargs.get("container") or "").strip():
-            return ToolResult(False, "", error="docker logs requires a container")
-        if action == "inspect" and not str(kwargs.get("container") or kwargs.get("image") or "").strip():
-            return ToolResult(False, "", error="docker inspect requires a container or image")
+        if action == "run" and not (kwargs.get("image") or "").strip():
+            return ToolResult(False, "", error="image is required for docker run")
+        if action == "logs" and not (kwargs.get("container") or "").strip():
+            return ToolResult(False, "", error="container is required for docker logs")
+        if action == "inspect" and not ((kwargs.get("container") or kwargs.get("image") or "").strip()):
+            return ToolResult(False, "", error="container or image is required for docker inspect")
         if not shutil.which("docker"):
             return ToolResult(False, "", error="Docker is not installed on this machine")
         mapping = {

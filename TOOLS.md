@@ -5,14 +5,14 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | Tool | What it does |
 | --- | --- |
 | `filesystem` | list, search, read, write, edit, copy, move, rename, mkdir, delete, hash, stat, compare, recent. `compare` diffs two files (unified diff for text, hashes for binaries). `recent` lists backup copies next to a file (`.bak`, `.bak-<timestamp>`). Backs up files before overwrite when enabled. Restricted to allowed directories. |
-| `terminal` | PowerShell, cmd, git, python, WSL/bash when present. `run` waits; `start` returns a PID; `inspect` / `wait` / `kill` check whether that process is still alive and collect output. `inspect` also works for other local PIDs. Captures stdout, stderr, exit code, duration. Blocks irreversible commands. Python snippets use `python -c`. |
+| `terminal` | PowerShell on Windows, bash on Linux by default; cmd, git, python, WSL also supported. `run` waits; `start` returns a PID; `inspect` / `wait` / `kill` check whether that process is still alive and collect output. `inspect` also works for other local PIDs. Captures stdout, stderr, exit code, duration. Blocks irreversible commands. Python snippets use `sys.executable -c`. |
 | `python` | run_code, run_file, create_venv, pip install. Prefer project virtualenvs. |
 | `browser` | Playwright Chromium: open, accessibility snapshot, click by name/selector, type, evaluate, screenshot, tabs, download, upload. Persistent profile in `data/browser-profile`. |
 | `desktop` | pywinauto UI Automation first; coordinate click only as fallback. Screenshot via `mss`. |
-| `office` | Word/Excel/PowerPoint. Windows COM when Office is installed; otherwise python-docx / openpyxl / python-pptx. create/read/write/save_as/append/info. Sandboxed to allowed directories. |
-| `git` | status, diff, branch, log, search, non-destructive `jarvis-checkpoint-*` backup branches, list_checkpoints, restore. Checkpoint does not stash away the working tree. |
-| `docker` | ps/images/build/run/logs/inspect when Docker exists. `run` needs `image`; `logs`/`inspect` need a target. |
-| `web_fetch` | HTTP GET/POST/HEAD. Optional body, headers, timeout, and `path` to save the response. http/https only. |
+| `office` | Word/Excel/PowerPoint COM when Office is installed. Writes new files unless in-place edit was requested. |
+| `git` | status, diff, branch, log, search, checkpoint (backup branch + `stash create`, working tree kept). |
+| `docker` | ps/images/build/run/logs/inspect when Docker exists. |
+| `web_fetch` | HTTP GET/POST distinct from the browser. |
 | `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
 | `code_worker` | Optional Open Interpreter adapter for substantial coding jobs. Missing unless `open-interpreter` is installed. Forced onto Jarvis's local OpenAI-compatible endpoint. Native python/terminal/filesystem remain the default. Jarvis still verifies. |

@@ -1,197 +1,206 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
-from ..inference.manager import InferenceManager
-from ..inference.profiles import model_paths, resolve_profile
-from ..providers.base import ChatMessage, ChatResult, ModelProvider
-from .planning import WorkingState
+from sqlalchemy import select
 
-EXPERT_SYSTEM = (
-    "You are the Jarvis Expert model. You do not execute tools. "
-    "Given a compact brief, produce a focused analysis and the next concrete plan. "
-    "Do not request the full trajectory. Prefer deterministic tools (API/CLI/library) over GUI/vision. "
-    "If the primary agent already tried an approach, do not recommend repeating it."
-)
+from ..db.models import EscalationPackage, Task, ToolCallRecord
+from ..db.session import SessionLocal
+from .planning import WorkingState
+from .recovery import classify_failure
+
+MAX_PACKAGE_CHARS = 8000
+MAX_LOG_SNIPPET = 900
+PATH_KEYS = ("path", "destination", "working_directory", "file", "cwd")
 
 
 @dataclass
-class EscalationBrief:
-    goal: str = ""
+class EscalationContext:
+    """Compact package passed to the next coding worker. Never a raw transcript dump."""
+
+    id: str
+    task_id: str
+    goal: str
     acceptance_criteria: list[str] = field(default_factory=list)
-    observations: list[str] = field(default_factory=list)
-    failed_approaches: list[str] = field(default_factory=list)
-    relevant_files: list[str] = field(default_factory=list)
-    unresolved_problem: str = ""
-    reason: str = ""
     task_class: str = ""
+    relevant_files: list[str] = field(default_factory=list)
+    current_diff: str = ""
+    failing_tests: str = ""
+    important_logs: str = ""
+    attempted_strategies: list[str] = field(default_factory=list)
+    reason: str = ""
+    created_at: str = ""
 
     def as_prompt(self) -> str:
-        criteria = "\n".join(f"- {item}" for item in self.acceptance_criteria) or "- (not captured)"
-        observations = "\n".join(f"- {item}" for item in self.observations[-8:]) or "- none"
-        failed = "\n".join(f"- {item}" for item in self.failed_approaches[-8:]) or "- none"
-        files = "\n".join(f"- {item}" for item in self.relevant_files[-8:]) or "- none"
-        return (
-            "Expert consult. Do not execute tools. Return:\n"
-            "ANALYSIS:\n...\nNEXT PLAN:\n1. ...\nAVOID:\n- ...\n\n"
-            f"Reason for escalation: {self.reason or 'unspecified'}\n"
+        criteria = "\n".join(f"- {item}" for item in self.acceptance_criteria) or "- (same as the request)"
+        files = "\n".join(f"- {path}" for path in self.relevant_files[:12]) or "- (none captured)"
+        strategies = "\n".join(f"- {item}" for item in self.attempted_strategies[:12]) or "- (none)"
+        body = (
+            "EscalationContext — compact state for the next coding worker. "
+            "Do not assume the previous worker succeeded.\n\n"
+            f"Goal: {self.goal}\n"
             f"Task class: {self.task_class or 'mixed'}\n"
-            f"Goal: {self.goal or '(same as the user request)'}\n"
+            f"Reason for escalation: {self.reason or 'repeated failure'}\n"
             f"Acceptance criteria:\n{criteria}\n"
-            f"Important observations:\n{observations}\n"
-            f"Failed approaches:\n{failed}\n"
             f"Relevant files:\n{files}\n"
-            f"Unresolved problem: {self.unresolved_problem or '(see failures)'}\n"
+            f"Attempted strategies:\n{strategies}\n"
+            f"Current diff:\n{self.current_diff or '(not captured)'}\n"
+            f"Failing tests:\n{self.failing_tests or '(none captured)'}\n"
+            f"Important logs:\n{self.important_logs or '(none)'}\n"
         )
+        return body[:MAX_PACKAGE_CHARS]
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["prompt"] = self.as_prompt()
+        return payload
 
 
-@dataclass
-class EscalationResult:
-    advised: bool
-    skipped: bool
-    reason: str
-    advice: str = ""
-    swapped: bool = False
-    brief: EscalationBrief | None = None
+def _extract_paths(arguments: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for key in PATH_KEYS:
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            paths.append(value.strip())
+    return paths
 
 
-def brief_from_working(working: WorkingState, reason: str, prompt: str = "") -> EscalationBrief:
-    files: list[str] = []
-    for snippet in working.observations + working.recent_tool_outputs:
-        if ": " in snippet:
-            files.append(snippet.split(":", 1)[0][:80])
-    return EscalationBrief(
-        goal=working.goal or (prompt.strip().splitlines()[0][:240] if prompt else ""),
-        acceptance_criteria=list(working.acceptance_criteria),
-        observations=list(working.observations[-8:]),
-        failed_approaches=list(working.known_failures[-8:]),
-        relevant_files=[item for item in files if item][:8],
-        unresolved_problem=working.current_state or working.next_action or reason,
-        reason=reason,
-        task_class=working.task_class,
-    )
-
-
-def _prompt_asks_for_expert(text: str) -> bool:
+def _looks_like_test_failure(text: str) -> bool:
     lowered = (text or "").lower()
-    needles = (
-        "expert model",
-        "use the 27b",
-        "use 27b",
-        "maximum-quality",
-        "maximum quality",
-        "escalate to expert",
-        "second opinion",
-        "architect this",
-        "architecture decision",
+    markers = ("failed", "error:", "assertionerror", "traceback", "pytest", "failed to", "exit_code=")
+    return any(marker in lowered for marker in markers) and any(
+        token in lowered for token in ("test", "pytest", "assert", "failed", "error")
     )
-    return any(needle in lowered for needle in needles)
 
 
-def should_escalate(
+def context_from_working(
+    task_id: str,
+    working: WorkingState,
     *,
-    prompt: str = "",
-    consecutive_failures: int = 0,
-    same_tool_streak: int = 0,
-    critic_text: str = "",
-    already_escalated: bool = False,
-    step_count: int = 0,
-    verifying: bool = False,
-) -> str | None:
-    """Return an escalation reason, or None.
-
-    Long-running tasks are not a reason by themselves.
-    """
-    if already_escalated or verifying:
-        return None
-    if _prompt_asks_for_expert(prompt) and consecutive_failures == 0 and same_tool_streak == 0 and step_count <= 1:
-        return "user_requested_expert"
-    if consecutive_failures >= 3:
-        return "repeated_failure"
-    if same_tool_streak >= 4:
-        return "stuck_strategy"
-    critic = (critic_text or "").lower()
-    if critic and any(word in critic for word in ("not confident", "low confidence", "unsure", "contradict")):
-        return "critic_uncertainty"
-    if step_count >= 40:
-        # Step limit is handled by the runtime; length alone must not escalate.
-        return None
-    return None
-
-
-def expert_available() -> bool:
-    paths = model_paths()
-    quality = resolve_profile("quality")
-    return (paths["root"] / quality.filename).exists()
-
-
-async def consult_expert(
-    brief: EscalationBrief,
-    *,
-    provider: ModelProvider | None = None,
-    manager: InferenceManager | None = None,
-    settings: Any | None = None,
-    allow_swap: bool = False,
-) -> EscalationResult:
-    chat: ModelProvider | None = provider
-    if chat is None and manager is not None:
-        chat = manager.provider
-    if chat is None:
-        return EscalationResult(
-            advised=False,
-            skipped=True,
-            reason=brief.reason or "no provider",
-            advice="Expert consult skipped: no model provider is loaded.",
-            brief=brief,
-        )
-
-    original_profile = ""
-    swapped = False
-    if allow_swap and manager is not None and settings is not None and expert_available():
-        original_profile = manager.state.profile or settings.inference.profile
-        if original_profile != "quality":
-            try:
-                await manager.load(settings, "quality")
-                chat = manager.provider or chat
-                swapped = True
-            except Exception as exc:
-                return EscalationResult(
-                    advised=False,
-                    skipped=True,
-                    reason=brief.reason,
-                    advice=f"Expert consult skipped: could not load quality/27B profile ({exc}).",
-                    brief=brief,
-                )
-
-    result: ChatResult = await chat.chat(
-        [
-            ChatMessage(role="system", content=EXPERT_SYSTEM),
-            ChatMessage(role="user", content=brief.as_prompt()),
-        ],
-        tools=None,
-        thinking=True,
-        max_tokens=900,
+    reason: str = "",
+    relevant_files: list[str] | None = None,
+    current_diff: str = "",
+    failing_tests: str = "",
+    important_logs: str = "",
+    attempted_strategies: list[str] | None = None,
+) -> EscalationContext:
+    return EscalationContext(
+        id=str(uuid.uuid4()),
+        task_id=task_id,
+        goal=working.goal or "",
+        acceptance_criteria=list(working.acceptance_criteria),
+        task_class=working.task_class or "",
+        relevant_files=list(dict.fromkeys(relevant_files or [])),
+        current_diff=(current_diff or "")[:2000],
+        failing_tests=(failing_tests or "")[:2000],
+        important_logs=(important_logs or "")[:2000],
+        attempted_strategies=list(attempted_strategies or []),
+        reason=reason or (working.known_failures[-1] if working.known_failures else "escalation requested"),
+        created_at=datetime.now(timezone.utc).isoformat(),
     )
-    advice = (result.content or "").strip() or (result.reasoning or "").strip()
-    if swapped and manager is not None and settings is not None and original_profile:
+
+
+async def build_escalation_package(task_id: str, working: WorkingState, reason: str = "") -> EscalationContext | None:
+    async with SessionLocal() as session:
+        task = await session.get(Task, task_id)
+        if not task:
+            return None
+        calls = (
+            await session.execute(
+                select(ToolCallRecord).where(ToolCallRecord.task_id == task_id).order_by(ToolCallRecord.id)
+            )
+        ).scalars().all()
+
+    files: list[str] = []
+    strategies: list[str] = []
+    diffs: list[str] = []
+    test_bits: list[str] = []
+    logs: list[str] = []
+    last_failure = reason
+    for call in calls:
+        if call.tool_name and call.tool_name not in strategies:
+            strategies.append(call.tool_name)
         try:
-            await manager.load(settings, original_profile)
-        except Exception:
-            pass
-    return EscalationResult(
-        advised=bool(advice),
-        skipped=False,
-        reason=brief.reason,
-        advice=advice or "Expert returned an empty analysis.",
-        swapped=swapped,
-        brief=brief,
+            arguments = json.loads(call.arguments_json or "{}")
+        except json.JSONDecodeError:
+            arguments = {}
+        if isinstance(arguments, dict):
+            files.extend(_extract_paths(arguments))
+        blob = (call.output or call.error or "")[:MAX_LOG_SNIPPET]
+        if call.tool_name == "git" and "diff" in (arguments.get("action") or ""):
+            diffs.append(blob)
+        if not call.success:
+            kind = classify_failure(call.error or call.output)
+            last_failure = last_failure or f"{call.tool_name} failed ({kind})"
+            logs.append(f"{call.tool_name}: {blob}")
+            if _looks_like_test_failure(call.output or call.error or ""):
+                test_bits.append(blob)
+        elif call.tool_name in {"python", "terminal"} and _looks_like_test_failure(call.output or ""):
+            test_bits.append(blob)
+
+    if not last_failure and working.known_failures:
+        last_failure = working.known_failures[-1]
+    goal = working.goal or (task.prompt.strip().splitlines()[0][:240] if task.prompt else "")
+    working.goal = working.goal or goal
+    working.acceptance_criteria = working.acceptance_criteria or [
+        line for line in (task.acceptance_criteria or "").splitlines() if line.strip()
+    ]
+    working.task_class = working.task_class or task.task_class
+    return context_from_working(
+        task_id,
+        working,
+        reason=last_failure or "repeated failure",
+        relevant_files=files,
+        current_diff="\n\n".join(diffs)[:2000],
+        failing_tests="\n\n".join(test_bits)[:2000],
+        important_logs="\n\n".join(logs[-4:])[:2000],
+        attempted_strategies=strategies,
     )
 
 
-def format_expert_message(result: EscalationResult) -> str:
-    return (
-        "Expert consult completed. Follow this focused advice; do not repeat failed approaches. "
-        "Do not escalate again unless a new distinct failure appears.\n\n"
-        f"{result.advice}"
-    )
+async def persist_escalation_package(package: EscalationContext) -> EscalationContext:
+    async with SessionLocal() as session:
+        session.add(
+            EscalationPackage(
+                id=package.id,
+                task_id=package.task_id,
+                task_class=package.task_class,
+                goal=package.goal[:400],
+                reason=package.reason[:400],
+                payload_json=json.dumps(asdict(package), ensure_ascii=False),
+            )
+        )
+        await session.commit()
+    return package
+
+
+async def list_escalation_packages(limit: int = 20) -> list[dict[str, Any]]:
+    async with SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(EscalationPackage).order_by(EscalationPackage.created_at.desc()).limit(limit)
+            )
+        ).scalars().all()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row.payload_json or "{}")
+        except json.JSONDecodeError:
+            payload = {"id": row.id, "task_id": row.task_id, "goal": row.goal, "reason": row.reason}
+        out.append(payload)
+    return out
+
+
+async def get_escalation_package(package_id: str) -> dict[str, Any] | None:
+    async with SessionLocal() as session:
+        row = await session.get(EscalationPackage, package_id)
+        if not row:
+            return None
+        try:
+            return json.loads(row.payload_json or "{}")
+        except json.JSONDecodeError:
+            return {"id": row.id, "task_id": row.task_id, "goal": row.goal, "reason": row.reason}

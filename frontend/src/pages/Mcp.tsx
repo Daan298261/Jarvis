@@ -3,6 +3,7 @@ import { api } from "../api"
 
 export function McpPage() {
   const [servers, setServers] = useState<any[]>([])
+  const [jarvis, setJarvis] = useState<any>(null)
   const [name, setName] = useState("filesystem")
   const [transport, setTransport] = useState("stdio")
   const [command, setCommand] = useState("npx")
@@ -10,7 +11,12 @@ export function McpPage() {
   const [url, setUrl] = useState("")
 
   async function refresh() {
-    setServers(await api("/api/mcp"))
+    const [list, builtin] = await Promise.all([
+      api<any[]>("/api/mcp"),
+      api("/api/mcp/jarvis").catch(() => null),
+    ])
+    setServers(list)
+    setJarvis(builtin)
   }
   useEffect(() => { refresh() }, [])
 
@@ -18,6 +24,17 @@ export function McpPage() {
     <div>
       <h1>MCP</h1>
       <p className="lede">Add stdio or HTTP MCP servers without changing application code. Credentials belong in environment variables, never in source.</p>
+      {jarvis && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Jarvis MCP for Cursor</h2>
+          <p className="lede">
+            Cursor attaches as a client. Jarvis stays the supervisor. These tools cannot start ACP or create a new task.
+          </p>
+          <div className="lede" style={{ margin: "8px 0" }}><code>{jarvis.command}</code></div>
+          <div className="lede">Read: {(jarvis.read_tools || []).join(", ")}</div>
+          <div className="lede">Report: {(jarvis.action_tools || []).join(", ")}</div>
+        </div>
+      )}
       <div className="grid two">
         <div className="card">
           <h2>Add server</h2>

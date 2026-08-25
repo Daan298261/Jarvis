@@ -5,7 +5,7 @@ type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
   optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
-  coding_workers?: { id: string; name: string; available: boolean; status: string; detail: string; tier?: number }[]
+  cursor_acp?: { status?: string; detail?: string; command?: string; available?: boolean; session_id?: string }
 }
 
 export function ToolsPage() {
@@ -58,28 +58,21 @@ export function ToolsPage() {
           </div>
         ))}
       </div>
-      {catalog.professional_analysis && (
+      {catalog.cursor_acp && (
         <div className="card" style={{ marginTop: 16 }}>
-          <h2>Professional analysis</h2>
-          <p className="lede" style={{ margin: "0 0 8px" }}>{catalog.professional_analysis.detail}</p>
-          <div className="kv">
-            <b>Analyze sensitive material</b><span>{catalog.professional_analysis.analyze_sensitive_material ? "yes" : "no"}</span>
-            <b>Operational authorization separate</b><span>{catalog.professional_analysis.operational_authorization_separate ? "yes" : "no"}</span>
+          <h2>Cursor ACP</h2>
+          <p className="lede">{catalog.cursor_acp.detail}</p>
+          <div className="toggle">
+            <div>
+              <strong>{catalog.cursor_acp.command || "agent acp"}</strong>
+              <div className="lede" style={{ margin: "4px 0 0" }}>
+                Session IDs persist. Routine plan questions are auto-answered only for isolated work.
+              </div>
+            </div>
+            <span className={`badge ${catalog.cursor_acp.available ? "completed" : "queued"}`}>{catalog.cursor_acp.status}</span>
           </div>
         </div>
       )}
-      <div className="card" style={{ marginTop: 16 }}>
-        <h2>Native backends</h2>
-        {(catalog.native || []).map((item) => (
-          <div className="toggle" key={item.id}>
-            <div>
-              <strong>{item.name}</strong>
-              <div className="lede" style={{ margin: "4px 0 0" }}>{item.detail}</div>
-            </div>
-            <span className={`badge ${item.available ? "completed" : "queued"}`}>{item.status}</span>
-          </div>
-        ))}
-      </div>
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Optional workers</h2>
         {catalog.optional_workers.map((worker) => (

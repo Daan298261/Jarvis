@@ -86,21 +86,30 @@ def _office_installed() -> bool:
     """Detect Office from install paths. Do not launch Word/Excel just to probe."""
     if platform.system() != "Windows":
         return False
-    if shutil.which("WINWORD.EXE") or shutil.which("EXCEL.EXE") or shutil.which("POWERPNT.EXE"):
-        return True
+    program_files = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
+    program_files_x86 = Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
     roots = [
-        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")),
-        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")),
+        program_files / "Microsoft Office",
+        program_files_x86 / "Microsoft Office",
+        program_files / "Microsoft Office" / "root" / "Office16",
     ]
-    relatives = [
-        Path("Microsoft Office") / "root" / "Office16" / "WINWORD.EXE",
-        Path("Microsoft Office") / "Office16" / "WINWORD.EXE",
-        Path("Microsoft Office") / "root" / "Office15" / "WINWORD.EXE",
-        Path("Microsoft Office") / "Office15" / "WINWORD.EXE",
-        Path("Microsoft Office") / "root" / "Office16" / "EXCEL.EXE",
-        Path("Microsoft Office") / "Office16" / "EXCEL.EXE",
-    ]
-    return any((root / rel).is_file() for root in roots for rel in relatives)
+    if any(root.exists() for root in roots):
+        return True
+    try:
+        import winreg  # type: ignore
+
+        for key in (
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WINWORD.EXE",
+            r"SOFTWARE\Microsoft\Office\16.0\Word",
+        ):
+            try:
+                winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key)
+                return True
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return False
 
 
 def detect_hardware(*, force: bool = False) -> HardwareInfo:
