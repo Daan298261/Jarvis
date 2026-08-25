@@ -12,6 +12,7 @@ from .budgets import (
 from .capabilities import detect_localhost_capabilities, list_all_capabilities, register_localhost_capabilities
 from .nodes import get_node, list_nodes, register_localhost_node
 from .roles import get_swarm_roles
+from .snapshot import swarm_snapshot
 from .workers import bind_workers_to_node, worker_catalog
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "release_lease",
     "remaining_budget",
     "set_node_budget",
+    "swarm_snapshot",
     "worker_catalog",
 ]

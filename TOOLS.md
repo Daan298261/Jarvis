@@ -10,7 +10,7 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | `browser` | Playwright Chromium: open, accessibility snapshot, click by name/selector, type, evaluate, screenshot, tabs, download, upload, close. `close` does not launch Chromium. Persistent profile in `data/browser-profile`. |
 | `desktop` | pywinauto UI Automation first; coordinate click only as fallback. Screenshot via `mss`. |
 | `office` | Word/Excel/PowerPoint COM when Office is installed. Writes new files unless in-place edit was requested. |
-| `git` | status, diff, branch, log, search, checkpoint. `checkpoint` creates a `jarvis-checkpoint-*` backup branch (via `git stash create`) without resetting the working tree. |
+| `git` | status, diff, branch, log, search, checkpoint, list_checkpoints, restore. `checkpoint` creates a `jarvis-checkpoint-*` backup branch without resetting the working tree. |
 | `docker` | ps/images/build/run/logs/inspect when Docker exists. `run`/`logs`/`inspect` require an image or container. |
 | `web_fetch` | HTTP GET/POST/HEAD distinct from the browser. POST may send `body` or `json_body` plus optional headers. |
 | `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
@@ -26,7 +26,7 @@ The agent does **not** send every tool schema on every model turn. Task classifi
 
 Finished tasks write a trajectory: the ordered tools, which step failed and why, which tool worked instead, and the verification result. A later similar task gets those lessons in its system prompt.
 
-When the same task class succeeds three or more times with the same tool sequence, the workflow is promoted to a skill. If the tool arguments were recorded, values that differed across those runs become parameters (`{path}`, `{url}`, `{content}`, …) and the skill can **run itself**: matching later tasks execute the bound steps, then verify. Browser procedures that click named controls or CSS selectors (not snapshot ids like `e12`) promote as BrowserCode-style skills and are replayed instead of rediscovering the page. Password-like fields become parameters with no stored examples and do not auto-run. Inspect, promote, enable, disable, or run from the **Memory** page, or via `/api/memory/trajectories`, `/api/memory/skills`, and `POST /api/memory/skills/{id}/run`.
+When the same task class succeeds three or more times with the same tool sequence, the workflow is promoted to a skill. If the tool arguments were recorded, values that differed across those runs become parameters (`{path}`, `{url}`, `{content}`, …) and the skill can **run itself**: matching later tasks execute the bound steps, then verify. Browser procedures that click named controls, roles/ARIA, or CSS selectors (not snapshot ids like `e12`) promote as BrowserCode-style skills; snapshot/screenshot discovery steps are stripped so the skill can replay. Password-like fields become parameters with no stored examples and do not auto-run. Inspect, promote, enable, disable, or run from the **Memory** page (secret parameters use password inputs), or via `/api/memory/trajectories`, `/api/memory/skills`, and `POST /api/memory/skills/{id}/run`.
 
 Hidden reasoning is never stored — only tool choices, outcomes, and error summaries.
 

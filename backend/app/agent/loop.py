@@ -60,7 +60,14 @@ from .planning import (
 from .recovery import recovery_hint
 from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
-from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
+from .skills import (
+    bind_parameters,
+    has_secret_parameters,
+    instantiate_steps,
+    promote_from_trajectories,
+    relevant_skills,
+    steps_are_executable,
+)
 from .tooling import apply_capability_request, expose_called_tool, schemas_for as exposed_tool_schemas, should_enable_thinking, tools_for_task
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .policy import policy_guidance
@@ -395,6 +402,8 @@ class AgentRuntime:
                 ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
             ]
             for skill in matched_skills:
+                if has_secret_parameters(skill):
+                    continue
                 bound = bind_parameters(skill, working.goal)
                 if bound is None:
                     continue

@@ -172,7 +172,17 @@ class OfficeTool(Tool):
         self.context_getter = context_getter or (lambda: {})
 
     def _info(self, app: str, path: str | None) -> ToolResult:
-        bits = [f"app={app or 'unspecified'}", f"os={platform.system()}"]
+        windows = platform.system() == "Windows"
+        lib_ok = office_library_available(app) if app else office_library_available()
+        com_ok = office_com_available()
+        bits = [
+            f"app={app or 'unspecified'}",
+            f"os={platform.system()}",
+            f"windows={str(windows).lower()}",
+            f"available={str(lib_ok or com_ok).lower()}",
+            f"library_available={str(lib_ok).lower()}",
+            f"com_available={str(com_ok).lower()}",
+        ]
         if path:
             target = Path(path)
             if not target.exists():
@@ -185,15 +195,19 @@ class OfficeTool(Tool):
                     f"suffix={target.suffix}",
                 ]
             )
-            return ToolResult(True, "\n".join(bits) + "\nCOM was not launched. COM was not started.")
-        if platform.system() != "Windows":
-            return ToolResult(True, "app=word\nos=Linux\nOffice COM is only available on Windows. COM was not launched. COM was not started.")
-        from ..hardware import detect_hardware
-
-        installed = detect_hardware().office_installed
-        bits.append(f"office_installed={installed}")
+            bits.append("COM was not launched. COM was not started.")
+            return ToolResult(
+                True,
+                "\n".join(bits),
+                data={"windows": windows, "available": lib_ok or com_ok, "backend": "probe"},
+            )
+        bits.append("Office COM is only available on Windows." if not windows else f"office_installed={com_ok}")
         bits.append("COM was not launched. COM was not started.")
-        return ToolResult(True, "\n".join(bits))
+        return ToolResult(
+            True,
+            "\n".join(bits),
+            data={"windows": windows, "available": lib_ok or com_ok, "backend": "probe"},
+        )
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         app = (kwargs.get("app") or "").lower()
@@ -203,14 +217,22 @@ class OfficeTool(Tool):
             return ToolResult(False, "", error="app must be word, excel, or powerpoint")
         if action not in {"create", "read", "write", "save_as", "append", "info"}:
             return ToolResult(False, "", error=f"Unknown action {action}")
-        if action == "info":
-            return self._info(app, kwargs.get("path"))
+        if backend == "com" and not office_com_available():
+            return ToolResult(False, "", error="Office COM is not available on this machine")
+        if action == "info" and not (kwargs.get("path") or "").strip():
+            return self._info(app, None)
+        ctx = self.context_getter() if callable(self.context_getter) else {}
+        allowed = list((ctx or {}).get("allowed_directories") or [])
+        if action in {"create", "write", "append", "save_as"} and not allowed:
+            return ToolResult(False, "", error="Office write target is unavailable without allowed directories")
         try:
             mode = self._choose_backend(app, backend)
             if mode == "library":
                 return self._run_library(app, action, kwargs)
             return self._run_com(app, action, kwargs)
         except Exception as exc:
+            if action == "info":
+                return self._info(app, kwargs.get("path"))
             return ToolResult(False, "", error=str(exc))
 
     def _resolve(self, path: str | None) -> Path:

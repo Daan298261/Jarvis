@@ -56,7 +56,7 @@ async def _close_browser() -> ToolResult:
     global _playwright, _browser, _context, _page, _pages
     if not _context and not _playwright and not _browser and not _page:
         _pages = []
-        return ToolResult(True, "Browser was not open")
+        return ToolResult(True, "Browser was not open and was not running")
     if _context:
         await _context.close()
     if _playwright:

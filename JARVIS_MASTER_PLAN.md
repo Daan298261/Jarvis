@@ -3636,7 +3636,7 @@ This development session:
 - Resume: `POST /api/tasks/{id}/continue` reloads compacted conversation
 - Context compaction: older turns collapse into a structured summary that cannot orphan a tool result from its assistant `tool_calls` turn; the compact working state is refreshed (not stacked) on every pass
 - Trajectory memory: `trajectories` table stores ordered tools, failure kinds, the recovery that worked, and verification. Similar new tasks get those lessons injected. No hidden reasoning is stored.
-- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. Browser procedures that use named controls or CSS selectors (not snapshot ids) promote as BrowserCode-style skills (`origin=browser_promoted`) and are replayed instead of rediscovering the page. Password-like fields are parameterized with no stored examples and do not auto-run. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
+- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. Browser procedures that use named controls, roles/ARIA, or CSS selectors (not snapshot ids) promote as BrowserCode-style skills (`origin=browser_promoted`); snapshot/screenshot discovery is stripped so the skill can replay. Password-like fields are parameterized with no stored examples and do not auto-run. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
 
 ### Reliability
 
@@ -3660,7 +3660,7 @@ This development session:
 - Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`) plus a performance harness / hardware-gate card (`POST /api/model/harness/run`)
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
-- Memory page lists skills and trajectories with promote / enable / run controls
+- Memory page lists skills and trajectories with promote / enable / run controls; secret skill parameters use password inputs and are not stored as examples
 - Tools/System pages list optional workers as unavailable instead of crashing
 - Self-development: isolated worktrees, verification gate, trial budgets, `STOP AUTONOMOUS DEVELOPMENT` kill switch (`data/STOP_JARVIS`), end-of-run report on System
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
@@ -3673,7 +3673,7 @@ This development session:
 - 9B GPU residency, tok/s, and 20-task comparison vs 27B are still Windows-desktop work
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Browser Use / OpenHands adapters are present but the optional packages are not installed in this environment
-- UFO / Cua / Open Interpreter adapters are absent
+- UFO / Cua / Open Interpreter adapters are present (catalog `missing`/`ready` until the optional packages are installed)
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
 - Live 9B→27B model swap is implemented as a consult flow but cannot run without GGUFs
@@ -3864,7 +3864,8 @@ These items make the existing machine a one-node swarm first. They must not requ
 - [x] Open Interpreter adapter
   - Acceptance: optional code/shell worker behind `open_interpreter`; missing install reports `missing` and names native filesystem/python/git/terminal fallback; Jarvis still verifies.
   - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
-- [ ] Browser workflow promotion (BrowserCode-style skills)
+- [x] Browser workflow promotion (BrowserCode-style skills)
+  - Status: VERIFIED (`test_skills.py`). Snapshot/screenshot discovery is stripped; role/ARIA targets count as stable; password-like fields never auto-bind or auto-run.
 
 ### P4 — Adaptive intelligence (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
 

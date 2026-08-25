@@ -9,6 +9,7 @@ from ..agent.coding_workers import coding_worker_catalog
 from ..workers.computer import CuaBackend, UFOBackend
 from ..workers.browser import BrowserUseBackend
 from ..workers.code import OpenHandsBackend
+from ..workers.interpreter import OpenInterpreterBackend
 from ..workers.voice import voice_status
 
 
@@ -106,7 +107,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": shutil.which("git") is not None,
             "status": "ready" if shutil.which("git") else "missing",
-            "detail": "Status, diff, and non-destructive jarvis-checkpoint-* backup branches.",
+            "detail": "Status, diff, and non-destructive jarvis-checkpoint-* backup branches (checkpoint / list_checkpoints / restore).",
         },
         {
             "id": "docker",
@@ -144,14 +145,7 @@ def optional_workers() -> list[dict[str, Any]]:
         },
         UFOBackend().probe(),
         CuaBackend().probe(),
-        {
-            "id": "open-interpreter",
-            "name": "Open Interpreter",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Optional code/shell worker behind an adapter.",
-        },
+        OpenInterpreterBackend().probe(),
         OpenHandsBackend().probe(),
     ]
 

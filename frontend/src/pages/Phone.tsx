@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { api, apiForm, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } from "../api"
 
 type VoiceStatus = { stt_ready?: boolean; tts_ready?: boolean; detail?: string }
 
@@ -15,8 +15,10 @@ export function PhonePage() {
   const [active, setActive] = useState<Task | null>(null)
   const [voice, setVoice] = useState<VoiceStatus | null>(null)
   const [recording, setRecording] = useState(false)
+  const [speakResults, setSpeakResults] = useState(false)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const spokenRef = useRef<string>("")
   const standalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches
 
   async function refreshLists(preferredId?: string) {
@@ -46,6 +48,21 @@ export function PhonePage() {
     }, 2000)
     return () => window.clearInterval(timer)
   }, [active?.id, active?.status])
+
+  useEffect(() => {
+    if (!speakResults || !active || active.status !== "completed" || !active.result) return
+    const key = `${active.id}:${active.result}`
+    if (spokenRef.current === key) return
+    spokenRef.current = key
+    fetchAudio("/api/voice/speak", { method: "POST", body: JSON.stringify({ text: active.result.slice(0, 800) }) })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob)
+        const audio = new Audio(url)
+        audio.onended = () => URL.revokeObjectURL(url)
+        return audio.play()
+      })
+      .catch(() => undefined)
+  }, [speakResults, active?.id, active?.status, active?.result])
 
   function saveKey() {
     setPrivateKey(keyInput)
@@ -86,6 +103,23 @@ export function PhonePage() {
     if (!active) return
     await api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ prompt: "Continue this." }) }).catch(() => undefined)
     await refreshLists(active.id)
+  }
+
+  async function speakNow() {
+    const text = (active?.result || active?.verification || "").slice(0, 800)
+    if (!text) {
+      setMsg("Nothing to speak yet.")
+      return
+    }
+    try {
+      const blob = await fetchAudio("/api/voice/speak", { method: "POST", body: JSON.stringify({ text }) })
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.onended = () => URL.revokeObjectURL(url)
+      await audio.play()
+    } catch (err: any) {
+      setMsg(err.message || "Could not speak")
+    }
   }
 
   async function toggleRecord() {
@@ -132,6 +166,7 @@ export function PhonePage() {
   const lan = info?.urls?.lan || []
   const phoneUrls = info?.urls?.lan_phone || []
   const live = active && ["running", "queued", "waiting"].includes(active.status)
+  const events = (active?.events || []).slice(-8)
 
   return (
     <div className="phone-page">
@@ -152,12 +187,17 @@ export function PhonePage() {
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="What should Jarvis do on the PC?"
         />
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="row" style={{ marginTop: 12, flexWrap: "wrap" }}>
           <button className="btn" disabled={busy} onClick={submit}>Run on PC</button>
           <button className="btn secondary" disabled={busy} type="button" onClick={toggleRecord}>
             {recording ? "Stop" : "Speak"}
           </button>
+          <label className="lede" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={speakResults} onChange={(e) => setSpeakResults(e.target.checked)} />
+            Speak results
+          </label>
         </div>
+        {voice?.detail && <p className="lede" style={{ marginTop: 8 }}>{voice.detail}</p>}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -174,11 +214,25 @@ export function PhonePage() {
             </div>
             {active.result && <div className="report" style={{ marginTop: 12 }}>{active.result.slice(0, 600)}</div>}
             {active.error && <p className="lede" style={{ marginTop: 12 }}>{active.error}</p>}
-            <div className="row" style={{ marginTop: 12 }}>
+            {events.length > 0 && (
+              <ul className="lede" style={{ marginTop: 12 }}>
+                {events.map((event, index) => (
+                  <li key={`${event.created_at}-${index}`}>{event.title}</li>
+                ))}
+              </ul>
+            )}
+            <div className="row" style={{ marginTop: 12, flexWrap: "wrap" }}>
               {live && <button className="btn secondary" type="button" onClick={cancelActive}>Cancel</button>}
               {!live && <button className="btn secondary" type="button" onClick={continueActive}>Continue</button>}
+              <button className="btn secondary" type="button" onClick={speakNow}>Speak result</button>
               <button className="btn secondary" type="button" onClick={() => navigate(`/tasks/${active.id}`)}>Open on PC layout</button>
             </div>
+            {active.waiting_for_confirmation && (
+              <div className="row" style={{ marginTop: 12 }}>
+                <button className="btn" type="button" onClick={() => api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ approve: true }) })}>Approve</button>
+                <button className="btn secondary" type="button" onClick={() => api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ approve: false }) })}>Reject</button>
+              </div>
+            )}
           </>
         ) : (
           <p className="lede">No task yet. Send a command above.</p>
