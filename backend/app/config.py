@@ -63,8 +63,8 @@ class InferenceSettings(BaseModel):
     auto_load: bool = True
     vision: bool = False
     vision_mode: str = "lazy"
-    api_key: str = ""
     remote_model: str = ""
+    api_key: str = ""
 
 
 class BrowserSettings(BaseModel):

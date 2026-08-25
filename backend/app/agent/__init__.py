@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
 __all__ = ["AGENT"]
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str):
     if name == "AGENT":
         from .loop import AGENT
 

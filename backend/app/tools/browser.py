@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ..config import AppSettings, data_dir, load_settings
+from ..config import AppSettings, load_settings
 from .base import RiskLevel, Tool, ToolResult
 
 _lock = asyncio.Lock()
@@ -54,7 +54,9 @@ async def _ensure_page(headless: bool):
 
 async def _close_browser() -> ToolResult:
     global _playwright, _browser, _context, _page, _pages
-    had_session = bool(_context or _playwright)
+    if not _context and not _playwright and not _browser and not _page:
+        _pages = []
+        return ToolResult(True, "Browser was not open")
     if _context:
         await _context.close()
     if _playwright:
@@ -64,9 +66,7 @@ async def _close_browser() -> ToolResult:
     _browser = None
     _page = None
     _pages = []
-    if had_session:
-        return ToolResult(True, "Browser closed")
-    return ToolResult(True, "Browser closed (was not open / not running)")
+    return ToolResult(True, "Browser closed")
 
 
 class BrowserTool(Tool):

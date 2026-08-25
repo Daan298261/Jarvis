@@ -187,25 +187,39 @@ def resolve_profile(name: str) -> ModelProfile:
     if key not in PROFILES:
         key = "balanced"
     profile = PROFILES[key]
-    if profile_gguf(profile).exists():
-        return profile
-    for fallback_name in profile.fallbacks:
-        alt = PROFILES.get(fallback_name)
-        if alt and profile_gguf(alt).exists():
-            return _with_alt_weights(profile, alt)
-    expert = PROFILES["expert"]
-    if profile.name != "expert" and profile_gguf(expert).exists():
-        return _with_alt_weights(profile, expert)
+    paths = model_paths()
+    gguf = profile_gguf(profile)
+    if not gguf.exists():
+        expert = PROFILES["expert"]
+        expert_path = profile_gguf(expert)
+        if expert_path.exists() and key in {"fast", "balanced", "quality"}:
+            return _with_alt_weights(profile, expert)
+        if key == "expert" and not expert_path.exists():
+            return PROFILES["balanced"]
     return profile
 
 
-def expert_profile() -> ModelProfile:
-    """Prefer Q5 when present; otherwise the dedicated Expert 27B Q4 consult profile.
+def profile_as_dict(profile: ModelProfile) -> dict:
+    return {
+        "name": profile.name,
+        "label": profile.label,
+        "quant": profile.quant,
+        "thinking": profile.thinking,
+        "thinking_mode": profile.thinking_mode,
+        "context_size": profile.context_size,
+        "description": profile.description,
+        "family": profile.family,
+        "alias": profile.alias,
+        "repo": profile.repo,
+        "installed": profile_gguf(profile).exists(),
+        "vision": profile.vision,
+    }
 
-    Consults stay compact (16K) even when the Expert weights themselves allow 32K.
-    """
+
+def expert_profile() -> ModelProfile:
+    """Prefer Q5 when present; otherwise the dedicated Expert 27B Q4 consult profile."""
     paths = model_paths()
     quality = PROFILES["quality"]
     if (paths["root"] / quality.filename).exists():
         return with_context(quality, 16384)
-    return with_context(PROFILES["expert"], 16384)
+    return PROFILES["expert"]

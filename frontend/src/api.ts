@@ -93,6 +93,12 @@ export type Task = {
   verification?: string
   retries: number
   duration_seconds: number
+  model_calls?: number
+  tool_calls?: number
+  schema_errors?: number
+  model_ms?: number
+  tool_ms?: number
+  human_interventions?: number
   started_at?: string | null
   created_at: string
   waiting_for_confirmation: boolean

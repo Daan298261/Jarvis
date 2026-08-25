@@ -21,6 +21,7 @@ from .python_exec import PythonTool
 from .request_tools import RequestToolsTool
 from .screenshot import ScreenshotTool
 from .terminal import TerminalTool
+from .verify_code import VerifyCodeTool
 from .web_fetch import WebFetchTool
 
 
@@ -46,6 +47,7 @@ class ToolRegistry:
             DockerTool(),
             WebFetchTool(getter),
             ScreenshotTool(),
+            VerifyCodeTool(getter),
             RequestToolsTool(),
             RequestCapabilityTool(),
             MCPProxyTool(),

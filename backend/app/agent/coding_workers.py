@@ -385,6 +385,55 @@ async def complete_coding_route(task_id: str, outcome: str, verification: str = 
         await session.commit()
 
 
+async def route_coding_task(prompt: str, *, task_class: str = "") -> dict[str, Any]:
+    decision = route_software_task(prompt, task_class=task_class)
+    return {
+        "complexity": decision.score,
+        "execute_worker": decision.selected_worker,
+        "intended_worker": decision.intended_worker,
+        "tier": decision.tier,
+        "tier_name": decision.tier_name,
+        "reason": decision.reason,
+    }
+
+
+def format_routing_block(routing: dict[str, Any]) -> str:
+    return (
+        "Software-development routing:\n"
+        f"- Complexity score: {routing.get('complexity', 0)}/100\n"
+        f"- Intended tier: {routing.get('tier')} {routing.get('tier_name')} ({routing.get('intended_worker')})\n"
+        f"- Selected worker: {routing.get('execute_worker')}\n"
+        "- Independent verification required: yes\n"
+        "- Worker-reported success is not completion.\n"
+        f"- {routing.get('reason', '')}"
+    )
+
+
+async def record_coding_outcome(
+    *,
+    task_id: str,
+    task_class: str,
+    worker_id: str,
+    complexity: int,
+    outcome: str,
+    verification: str = "",
+    duration_seconds: float = 0,
+) -> None:
+    from ..coding.usage import record_usage
+
+    verified = outcome == "completed" and bool(verification.strip())
+    await record_usage(
+        task_id=task_id,
+        worker=worker_id,
+        model=worker_id,
+        task_class=task_class,
+        complexity=complexity,
+        duration_seconds=duration_seconds,
+        verified_success=verified,
+        first_attempt_success=verified and outcome == "completed",
+    )
+
+
 async def list_coding_routes(limit: int = 50) -> list[dict[str, Any]]:
     async with SessionLocal() as session:
         rows = (

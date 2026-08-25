@@ -6,7 +6,7 @@ from ..agent.acp import acp_status
 from ..config import load_settings
 from ..hardware import detect_hardware, hardware_dict
 from ..inference.benchmarks import list_benchmarks
-from ..inference.hardware_gate import evaluate_purchase_gate
+from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.manager import MANAGER
 from ..mcp_server import jarvis_mcp_manifest
 from ..tools.capabilities import capability_snapshot

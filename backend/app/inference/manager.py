@@ -11,7 +11,16 @@ import psutil
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, probe_remote_server, resolve_backend
-from .profiles import ModelProfile, declared_profiles, mmproj_path, profile_gguf, resolve_profile, with_context
+from .profiles import ModelProfile, model_paths, profile_gguf, resolve_profile, declared_profiles
+
+
+def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
+    mode = (settings.inference.vision or "lazy").strip().lower()
+    if mode in {"off", "never", "disabled"}:
+        return False
+    if mode in {"always", "on", "enabled"}:
+        return True
+    return bool(requested)
 
 
 @dataclass
@@ -48,6 +57,10 @@ class InferenceState:
     remote_model: str = ""
 
 
+def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
+    return replace(profile, context_size=context_size)
+
+
 def _default_load_context(profile: ModelProfile) -> int:
     cap = int(profile.context_size or 16384)
     if profile.name == "fast":
@@ -67,28 +80,27 @@ class InferenceManager:
     def base_url(self, settings: AppSettings) -> str:
         return f"http://{settings.inference.host}:{settings.inference.port}/v1"
 
+    def provider_model(self, settings: AppSettings, advertised: list[str] | None = None) -> str:
+        chosen = (settings.inference.remote_model or "").strip()
+        if chosen:
+            return chosen
+        if advertised:
+            return advertised[0]
+        profile = resolve_profile(self.state.profile or settings.inference.profile)
+        return profile.alias or "Qwen3.5-9B"
+
+    def provider_api_key(self, settings: AppSettings) -> str:
+        return (settings.inference.api_key or "").strip() or "local"
+
+    def _make_provider(self, settings: AppSettings, advertised: list[str] | None = None) -> OpenAICompatProvider:
+        return OpenAICompatProvider(
+            self.base_url(settings),
+            api_key=self.provider_api_key(settings),
+            model=self.provider_model(settings, advertised),
+        )
+
     def _vision_requested(self, settings: AppSettings, vision: bool | None) -> bool:
-        mode = (settings.inference.vision_mode or "lazy").strip().lower()
-        if mode in {"off", "never", "disabled"}:
-            return False
-        if vision is not None:
-            return bool(vision)
-        if settings.inference.vision:
-            return True
-        return mode in {"always", "on"}
-
-    def _make_provider(self, settings: AppSettings, advertised: list[str], profile: ModelProfile) -> OpenAICompatProvider:
-        remote = (settings.inference.remote_model or "").strip()
-        model = remote or (advertised[0] if advertised else profile.alias)
-        self.state.remote_model = remote
-        key = (settings.inference.api_key or "").strip() or "local"
-        return OpenAICompatProvider(self.base_url(settings), model=model, api_key=key)
-
-    def _record_probe(self, probe: dict[str, Any], settings: AppSettings) -> None:
-        self.state.advertised_models = list(probe.get("models") or [])
-        self.state.health_path = str(probe.get("health_path") or "")
-        self.state.host = settings.inference.host
-        self.state.port = settings.inference.port
+        return resolve_vision(settings, vision)
 
     async def load(
         self,
@@ -96,16 +108,29 @@ class InferenceManager:
         profile_name: str | None = None,
         context_size: int | None = None,
         force: bool = False,
-        *,
         vision: bool | None = None,
     ) -> InferenceState:
         async with self._lock:
+            profile = resolve_profile(profile_name or settings.inference.profile)
+            if context_size:
+                profile = _with_context(profile, int(context_size))
+            backend = resolve_backend(settings)
+            same = (
+                not force
+                and self.backend
+                and self.state.loaded
+                and self.state.profile == profile.name
+                and self.backend.name == backend.name
+                and int(self.state.context_size or 0) >= int(profile.context_size or 0)
+                and (not vision or self.state.vision_loaded)
+            )
+            if same:
+                return self.state
             return await self._load_locked(
                 settings,
-                profile_name,
-                context_size=context_size,
+                profile.name,
+                context_size=context_size or profile.context_size,
                 vision=vision,
-                force=force,
             )
 
     async def ensure_runtime(
@@ -125,20 +150,19 @@ class InferenceManager:
                     context_size=context_size,
                     vision=vision,
                 )
-            if not (self.backend and self.backend.manages_process):
+            want_context = int(context_size or self.state.context_size or 0)
+            want_vision = bool(vision)
+            if (
+                (self.state.context_size or 0) >= want_context
+                and (not want_vision or self.state.vision_loaded)
+            ):
                 return self.state
-            need_context = bool(context_size and context_size > (self.state.context_size or 0))
-            need_vision = bool(vision and not self.state.vision_loaded)
-            profile = resolve_profile(profile_name or self.state.profile or settings.inference.profile)
-            need_profile = profile.name != self.state.profile
-            if not (need_context or need_vision or need_profile):
-                return self.state
-            effective_ctx = max(int(context_size or 0), int(self.state.context_size or 0)) or None
             return await self._load_locked(
                 settings,
-                profile.name,
-                context_size=effective_ctx,
-                vision=vision or self.state.vision_loaded,
+                profile_name or self.state.profile,
+                context_size=want_context,
+                vision=want_vision,
+                force=True,
             )
 
     async def ensure_vision(self, settings: AppSettings) -> InferenceState:
@@ -160,9 +184,14 @@ class InferenceManager:
     ) -> InferenceState:
         profile = resolve_profile(profile_name or settings.inference.profile)
         backend = resolve_backend(settings)
+        paths = model_paths()
         model = profile_gguf(profile)
         want_vision = self._vision_requested(settings, vision)
-        want_context = int(context_size or _default_load_context(profile) or profile.context_size)
+        want_context = int(
+            context_size
+            or _default_load_context(profile)
+            or profile.context_size
+        )
 
         missing = backend.missing_requirements(profile)
         if missing:
@@ -181,34 +210,26 @@ class InferenceManager:
         if reusable:
             return self.state
 
-        self._apply_profile_state(settings, profile, backend, model, want_context, want_vision)
+        self._apply_profile_state(settings, profile, backend, model, paths, want_context, want_vision)
 
-        advertised: list[str] = []
-        existing = OpenAICompatProvider(self.base_url(settings), model=profile.alias)
-        already_running = (self.backend is None or self.backend.pid is None) and await existing.health()
-        if already_running or not backend.manages_process:
-            probe = await probe_remote_server(
-                settings.inference.host,
-                settings.inference.port,
-                settings.inference.api_key,
-                timeout=8,
-            )
-            if probe.get("ok") or already_running:
-                advertised = list(probe.get("models") or [])
-                self._record_probe(probe if probe.get("ok") else {"models": advertised, "health_path": "/v1/models"}, settings)
-                self.backend = backend
-                self.backend.last_probe = probe
-                self.provider = self._make_provider(settings, advertised, profile)
-                self.state.loaded = True
-                self.state.loading = False
-                self.state.pid = backend.pid
-                self.state.last_error = ""
-                await self.refresh_resources()
-                return self.state
-            if not backend.manages_process:
-                self.state.loading = False
-                self.state.last_error = f"{backend.name} did not become ready at {self.base_url(settings)}"
-                raise RuntimeError(self.state.last_error)
+        probe = await probe_remote_server(
+            settings.inference.host,
+            settings.inference.port,
+            settings.inference.api_key,
+            timeout=6,
+        )
+        already_running = (self.backend is None or self.backend.pid is None) and bool(probe.get("ok"))
+        if already_running and not backend.manages_process:
+            advertised = list(probe.get("models") or [])
+            self._record_probe(probe, settings)
+            self.backend = backend
+            self.backend.last_probe = probe
+            self.provider = self._make_provider(settings, advertised)
+            self.state.loaded = True
+            self.state.loading = False
+            self.state.pid = backend.pid
+            await self.refresh_resources()
+            return self.state
 
         if self.backend:
             await self.backend.stop()
@@ -226,28 +247,33 @@ class InferenceManager:
             fallback_ctx = 16384
             try:
                 ready = await backend.start(
-                    with_context(profile, fallback_ctx),
+                    _with_context(profile, fallback_ctx),
                     timeout=240,
                     context_size=fallback_ctx,
                     vision=want_vision,
                 )
             except TypeError:
-                ready = await backend.start(with_context(profile, fallback_ctx), timeout=240)
+                ready = await backend.start(_with_context(profile, fallback_ctx), timeout=240)
             if ready:
                 self.state.context_size = fallback_ctx
         self.state.pid = backend.pid
         if not ready:
             self.state.loading = False
             self.state.last_error = f"{backend.name} did not become ready"
-            detail = f". See {logs_dir() / 'llama-server.log'}" if backend.manages_process else f" at {self.base_url(settings)}"
+            detail = (
+                f". See {logs_dir() / 'llama-server.log'}"
+                if backend.manages_process
+                else f" at {self.base_url(settings)}"
+            )
             raise RuntimeError(self.state.last_error + detail)
 
         advertised = list((backend.last_probe or {}).get("models") or [])
-        self._record_probe(backend.last_probe or {}, settings)
+        if backend.last_probe:
+            self._record_probe(backend.last_probe, settings)
         self.state.loaded = True
         self.state.loading = False
         self.state.load_time_seconds = round(time.time() - started, 2)
-        self.provider = self._make_provider(settings, advertised, profile)
+        self.provider = self._make_provider(settings, advertised)
         await self.refresh_resources()
         return self.state
 
@@ -257,19 +283,17 @@ class InferenceManager:
         profile: ModelProfile,
         backend: InferenceBackend,
         model: Path,
-        context_size: int | None = None,
-        vision: bool = False,
-        *args: Any,
-        **kwargs: Any,
+        paths: dict[str, Path],
+        context_size: int,
+        vision: bool,
     ) -> None:
-        projector = mmproj_path(profile)
         self.state.profile = profile.name
         self.state.quant = profile.quant
         self.state.model_path = str(model) if backend.requires_local_files else ""
-        self.state.vision_loaded = bool(vision and projector.exists())
-        self.state.mmproj_path = str(projector) if self.state.vision_loaded else ""
+        self.state.vision_loaded = bool(vision and paths["mmproj"].exists())
+        self.state.mmproj_path = str(paths["mmproj"]) if self.state.vision_loaded else ""
         self.state.vision_mode = settings.inference.vision_mode or "lazy"
-        self.state.vision = self.state.vision_loaded
+        self.state.vision = bool(vision)
         self.state.host = settings.inference.host
         self.state.port = settings.inference.port
         self.state.context_size = int(context_size or profile.context_size)
@@ -278,6 +302,12 @@ class InferenceManager:
         self.state.family = profile.family
         self.state.alias = profile.alias
         self.state.thinking_mode = profile.thinking_mode
+        self.state.remote_model = settings.inference.remote_model
+
+    def _record_probe(self, probe: dict[str, Any], settings: AppSettings) -> None:
+        self.state.advertised_models = list(probe.get("models") or [])
+        self.state.health_path = str(probe.get("health_path") or "")
+        self.state.remote_model = self.provider_model(settings, self.state.advertised_models)
 
     async def unload(self) -> InferenceState:
         async with self._lock:
@@ -306,7 +336,12 @@ class InferenceManager:
             self.state.context_size = target
             return target
         try:
-            await self.load(settings, self.state.profile or settings.inference.profile, context_size=target, force=True)
+            await self.load(
+                settings,
+                self.state.profile or settings.inference.profile,
+                context_size=target,
+                force=True,
+            )
         except Exception:
             return int(self.state.context_size or current)
         return int(self.state.context_size or target)
@@ -339,20 +374,26 @@ class InferenceManager:
         if self.provider:
             healthy = await self.provider.health()
         profile = resolve_profile(self.state.profile or settings.inference.profile)
-        live = self.state.context_size if self.state.loaded else _default_load_context(profile)
         return {
             "loaded": self.state.loaded,
             "loading": self.state.loading,
             "healthy": healthy,
-            "active_model": (self.state.alias or profile.alias) if self.state.loaded else None,
+            "active_model": (
+                (self.provider.model if self.provider else self.provider_model(settings, self.state.advertised_models))
+                if self.state.loaded
+                else None
+            ),
             "official_model": profile.repo,
-            "family": self.state.family or profile.family,
-            "thinking_mode": self.state.thinking_mode or profile.thinking_mode,
+            "family": self.state.family or profile.family if self.state.loaded else profile.family,
+            "thinking_mode": (
+                self.state.thinking_mode or profile.thinking_mode or ("selective" if profile.thinking else "off")
+            ),
+            "vision": settings.inference.vision,
             "quantization": self.state.quant or profile.quant,
             "profile": self.state.profile or profile.name,
-            "context_size": live,
-            "context_cap": max(int(profile.context_size or 0), 32768) if profile.name != "fast" else int(profile.context_size or 8192),
-            "inference_backend": self.state.backend or settings.inference.backend,
+            "context_size": self.state.context_size if self.state.loaded else _default_load_context(profile),
+            "context_cap": profile.context_size,
+            "inference_backend": self.state.backend,
             "manages_process": self.state.manages_process,
             "gpu_layers": "auto (--fit on)" if settings.inference.fit else "99",
             "flash_attn": settings.inference.flash_attn,
@@ -372,26 +413,21 @@ class InferenceManager:
             "last_error": self.state.last_error,
             "model_path": self.state.model_path,
             "mmproj_path": self.state.mmproj_path,
-            "vision": self.state.vision_loaded or bool(settings.inference.vision),
             "vision_loaded": self.state.vision_loaded,
-            "vision_mode": settings.inference.vision_mode or self.state.vision_mode or "lazy",
             "thinking": profile.thinking,
+            "vision_mode": settings.inference.vision_mode or "lazy",
             "profiles": [
                 {
-                    "name": item.name,
-                    "label": item.label,
-                    "quant": item.quant,
-                    "thinking": item.thinking,
-                    "thinking_mode": item.thinking_mode,
-                    "context_size": item.context_size,
-                    "description": item.description,
-                    "family": item.family,
-                    "escalation_only": item.name == "expert",
+                    "name": p.name,
+                    "label": p.label,
+                    "family": p.family,
+                    "thinking_mode": p.thinking_mode,
+                    "context_size": p.context_size,
                 }
-                for item in declared_profiles()
+                for p in declared_profiles()
             ],
             "context_policy": {
-                "live": live,
+                "live": self.state.context_size or profile.context_size,
                 "profile_cap": profile.context_size,
                 "note": "Tasks start at 8K or 16K and expand to the profile cap only when the live prompt is under pressure.",
             },

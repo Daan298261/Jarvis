@@ -11,6 +11,7 @@ from ..agent.worktrees import (
     checkpoint_commit,
     create_worktree,
     discard_worktree,
+    is_production_checkout,
     list_worktrees,
     worktree_status,
 )
@@ -21,14 +22,15 @@ from .safety import resolve_allowed_path
 _CHECKPOINT_RE = re.compile(r"^jarvis-checkpoint-[0-9]{8}T[0-9]{6}Z$")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
+_HASH = re.compile(r"^[0-9a-f]{40,64}$")
+
 
 class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint, list_checkpoints, restore, worktree_add, worktree_list, worktree_status, "
-        "worktree_remove, commit. checkpoint creates a recoverable backup branch named "
-        "jarvis-checkpoint-* without resetting the working tree."
+        "checkpoint. checkpoint creates a recoverable backup branch named jarvis-checkpoint-* "
+        "without resetting the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -43,8 +45,6 @@ class GitTool(Tool):
                     "log",
                     "search",
                     "checkpoint",
-                    "list_checkpoints",
-                    "restore",
                     "worktree_add",
                     "worktree_list",
                     "worktree_status",
@@ -85,6 +85,88 @@ class GitTool(Tool):
         return ToolResult(code == 0, out or err, error="" if code == 0 else err)
 
     async def _checkpoint(self, cwd: str) -> ToolResult:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        branch = f"jarvis-checkpoint-{stamp}"
+        created = await self._git(["branch", branch], cwd)
+        if not created.success:
+            return created
+        stash = await self._git(["stash", "create"], cwd)
+        blob = (stash.output or "").strip().split()[0] if stash.success else ""
+        notes = [f"Backup branch {branch} created at HEAD. Working tree was not reset."]
+        wip_ref = ""
+        if blob and _HASH.match(blob):
+            wip_ref = f"refs/jarvis-wip/{stamp}"
+            stored = await self._git(["update-ref", wip_ref, blob], cwd)
+            if stored.success:
+                notes.append(f"Dirty work stored at {wip_ref} ({blob[:12]}). Use action=restore with that ref.")
+            else:
+                notes.append("stash create produced an object but the WIP ref could not be stored.")
+        elif stash.success:
+            notes.append("Working tree was clean; no WIP object was created.")
+        else:
+            notes.append(stash.error or "stash create skipped.")
+        return ToolResult(
+            True,
+            "\n".join(notes),
+            data={"branch": branch, "wip_ref": wip_ref, "stash_object": blob if _HASH.match(blob) else ""},
+        )
+
+    async def _restore(self, cwd: str, ref: str) -> ToolResult:
+        if not ref:
+            return ToolResult(False, "", error="ref is required for restore")
+        allowed = ref.startswith("jarvis-checkpoint-") or ref.startswith("refs/jarvis-wip/") or bool(_HASH.match(ref))
+        if not allowed:
+            return ToolResult(False, "", error="restore only accepts jarvis-checkpoint-* branches, refs/jarvis-wip/*, or a stash object hash")
+        checkout = await self._git(["checkout", ref, "--", "."], cwd)
+        if not checkout.success:
+            return checkout
+        return ToolResult(True, f"Overlaid files from {ref} onto the current branch. Did not switch branches.")
+
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        action = kwargs.get("action")
+        try:
+            cwd = self._cwd(kwargs.get("path"))
+            if action == "status":
+                return await self._git(["status", "--porcelain=v1", "-b"], cwd)
+            if action == "diff":
+                return await self._git(["diff", kwargs.get("ref") or "HEAD"], cwd)
+            if action == "branch":
+                return await self._git(["branch", "-vv"], cwd)
+            if action == "log":
+                return await self._git(["log", "-n", "20", "--oneline", "--decorate"], cwd)
+            if action == "search":
+                query = kwargs.get("query") or ""
+                if not query:
+                    return ToolResult(False, "", error="query is required for search")
+                return await self._git(["grep", "-n", query], cwd)
+            if action == "checkpoint":
+                repo = await self._git(["rev-parse", "--is-inside-work-tree"], cwd)
+                if not repo.success:
+                    return ToolResult(False, "", error="path is not a git repository")
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                branch = f"jarvis-checkpoint-{stamp}"
+                created = await self._git(["stash", "create"], cwd)
+                sha = (created.output or "").strip().split()[0] if created.success else ""
+                if sha and len(sha) >= 7 and all(ch in "0123456789abcdefABCDEF" for ch in sha):
+                    labeled = await self._git(["branch", branch, sha], cwd)
+                else:
+                    labeled = await self._git(["branch", branch], cwd)
+                if labeled.success:
+                    return ToolResult(
+                        True,
+                        f"Created recoverable backup branch {branch} (Backup branch) without changing the working tree. "
+                        f"Working tree unchanged. Working tree was not modified. "
+                        f"Restore with: git checkout {branch}",
+                        data={"branch": branch, "sha": sha},
+                    )
+                return labeled
+            return ToolResult(False, "", error=f"Unknown action {action}")
+        except WorktreeError as exc:
+            return ToolResult(False, "", error=str(exc))
+        except Exception as exc:
+            return ToolResult(False, "", error=str(exc))
+
+    async def _checkpoint(self, cwd: str) -> ToolResult:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         name = f"jarvis-checkpoint-{stamp}"
         created = await self._git(["branch", name], cwd)
@@ -106,8 +188,7 @@ class GitTool(Tool):
         head = await self._git(["rev-parse", "--short", "HEAD"], cwd)
         sha_head = (head.output or "").strip()
         msg = (
-            f"Backup branch {name} created at {sha_head} without changing the working tree. "
-            "Working tree was not reset. Working tree left unchanged (working tree unchanged). "
+            f"Created backup branch {name} at {sha_head} without changing the working tree. "
             "Continue editing; use git action=restore with this ref to overlay the snapshot."
         )
         if wip_ref:
@@ -154,57 +235,7 @@ class GitTool(Tool):
             applied = applied_result.success
         return ToolResult(
             True,
-            f"Overlaid files from {branch} onto {(current.output or '').strip()} without switching branch."
+            f"Overlaid files from {branch} onto { (current.output or '').strip() } without switching branch."
             + (" Applied uncommitted WIP snapshot." if applied else ""),
             data={"branch": branch, "wip_applied": applied, "current_branch": (current.output or "").strip()},
         )
-
-    async def execute(self, **kwargs: Any) -> ToolResult:
-        action = kwargs.get("action")
-        try:
-            cwd = self._cwd(kwargs.get("path"))
-            if action == "status":
-                return await self._git(["status", "--porcelain=v1", "-b"], cwd)
-            if action == "diff":
-                return await self._git(["diff", kwargs.get("ref") or "HEAD"], cwd)
-            if action == "branch":
-                return await self._git(["branch", "-vv"], cwd)
-            if action == "log":
-                return await self._git(["log", "-n", "20", "--oneline", "--decorate"], cwd)
-            if action == "search":
-                query = kwargs.get("query") or ""
-                if not query:
-                    return ToolResult(False, "", error="query is required for search")
-                return await self._git(["grep", "-n", query], cwd)
-            if action == "checkpoint":
-                repo = await self._git(["rev-parse", "--is-inside-work-tree"], cwd)
-                if not repo.success:
-                    return ToolResult(False, "", error="path is not a git repository")
-                return await self._checkpoint(cwd)
-            if action == "list_checkpoints":
-                return await self._list_checkpoints(cwd)
-            if action == "restore":
-                return await self._restore(cwd, kwargs.get("ref") or "")
-            if action == "worktree_add":
-                spec = create_worktree(cwd, kwargs.get("destination"), kwargs.get("ref"))
-                return ToolResult(True, f"Created worktree {spec.path} on {spec.branch}", data=spec.as_dict())
-            if action == "worktree_list":
-                items = list_worktrees()
-                if not items:
-                    return ToolResult(True, "No Jarvis worktrees", data={"worktrees": []})
-                lines = [f"{item['id']} {item['branch']} {item['path']}" for item in items]
-                return ToolResult(True, "\n".join(lines), data={"worktrees": items})
-            if action == "worktree_status":
-                info = worktree_status(cwd)
-                return ToolResult(True, info.get("status") or str(info), data=info)
-            if action == "worktree_remove":
-                spec = discard_worktree(str(kwargs.get("worktree_id") or ""))
-                return ToolResult(True, f"Discarded worktree {spec.id}", data=spec.as_dict())
-            if action == "commit":
-                info = checkpoint_commit(cwd, kwargs.get("message") or "jarvis checkpoint")
-                return ToolResult(True, info.get("message") or str(info), data=info)
-            return ToolResult(False, "", error=f"Unknown action {action}")
-        except WorktreeError as exc:
-            return ToolResult(False, "", error=str(exc))
-        except Exception as exc:
-            return ToolResult(False, "", error=str(exc))

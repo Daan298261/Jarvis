@@ -107,6 +107,11 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
     ),
     "git": (
         Alternative("terminal", "run the git command directly to see the full error"),
+        Alternative("verify_code", "independently inspect status, diff, and tests"),
+    ),
+    "verify_code": (
+        Alternative("terminal", "run pytest or git status directly if the verifier cannot start"),
+        Alternative("filesystem", "read the changed files yourself"),
     ),
     "screenshot": (
         Alternative("desktop", "query the UI Automation tree instead of pixels"),

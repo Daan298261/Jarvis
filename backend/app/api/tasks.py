@@ -9,11 +9,11 @@ from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent.loop import AGENT
-from ..agent.tool_exposure import tool_names_for as allowed_tool_names
 from ..agent.self_dev import KillSwitchActive
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
+from ..agent.tool_exposure import is_full_exposure, tool_names_for
 from ..tools.exposure import schema_names
 from ..tools.registry import REGISTRY
 
@@ -42,8 +42,12 @@ def _task_dict(task: Task) -> dict[str, Any]:
                 extra = [str(item) for item in parsed["extra_tools"]]
         except (TypeError, json.JSONDecodeError):
             extra = []
-    allowed = allowed_tool_names(getattr(task, "task_class", None) or "", extra)
-    exposed = sorted(allowed) if allowed is not None else schema_names(REGISTRY.openai_tools())
+    task_class = getattr(task, "task_class", None) or ""
+    if is_full_exposure(task_class, extra):
+        allowed_tools = schema_names(REGISTRY.openai_tools())
+    else:
+        allowed_tools = sorted(tool_names_for(task_class, extra))
+    db_exposed = [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item]
     return {
         "id": task.id,
         "title": task.title,
@@ -53,12 +57,9 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "autonomy": task.autonomy,
         "profile": task.profile,
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
-        "task_class": getattr(task, "task_class", None) or "",
-        "exposed_tools": exposed,
-        "acceptance_criteria": task.acceptance_criteria,
-        "current_action": task.current_action,
-        "current_tool": task.current_tool,
-        "exposed_tools": [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item],
+        "task_class": task_class,
+        "exposed_tools": db_exposed if db_exposed else allowed_tools,
+        "allowed_tools": allowed_tools,
         "result": task.result,
         "error": task.error,
         "retries": task.retries,
@@ -70,6 +71,12 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
         "verification": task.verification,
+        "model_calls": getattr(task, "model_calls", 0) or 0,
+        "tool_calls": getattr(task, "tool_call_count", 0) or 0,
+        "schema_errors": getattr(task, "schema_errors", 0) or 0,
+        "model_ms": getattr(task, "model_ms", 0) or 0,
+        "tool_ms": getattr(task, "tool_ms", 0) or 0,
+        "human_interventions": getattr(task, "human_interventions", 0) or 0,
     }
 
 

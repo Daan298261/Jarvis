@@ -24,7 +24,7 @@ def docker_argv(action: str, kwargs: dict[str, Any]) -> tuple[list[str] | None, 
     if action == "logs":
         container = str(kwargs.get("container") or "").strip()
         if not container:
-            return None, "container is required for docker logs (container or image)"
+            return None, "container is required for docker logs"
         return ["logs", container], ""
     if action == "inspect":
         target = str(kwargs.get("container") or kwargs.get("image") or "").strip()
@@ -54,20 +54,22 @@ class DockerTool(Tool):
     }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        action = kwargs.get("action") or ""
-        args, err = docker_argv(action, kwargs)
+        action = kwargs.get("action")
+        argv, err = docker_argv(str(action or ""), kwargs)
         if err:
             return ToolResult(False, "", error=err)
         if not shutil.which("docker"):
             return ToolResult(False, "", error="Docker is not installed on this machine")
+        if not argv:
+            return ToolResult(False, "", error=f"Unknown action {action}")
         proc = await asyncio.create_subprocess_exec(
             "docker",
-            *args,
+            *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
         out = stdout.decode("utf-8", errors="replace")
-        err = stderr.decode("utf-8", errors="replace")
+        err_out = stderr.decode("utf-8", errors="replace")
         code = proc.returncode or 0
-        return ToolResult(code == 0, out or err, error="" if code == 0 else err)
+        return ToolResult(code == 0, out or err_out, error="" if code == 0 else err_out)

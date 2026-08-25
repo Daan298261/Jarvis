@@ -45,6 +45,12 @@ class Task(Base):
     duration_seconds: Mapped[float] = mapped_column(Float, default=0)
     waiting_for_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
     confirmation_payload: Mapped[str] = mapped_column(Text, default="")
+    model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    tool_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    schema_errors: Mapped[int] = mapped_column(Integer, default=0)
+    model_ms: Mapped[float] = mapped_column(Float, default=0)
+    tool_ms: Mapped[float] = mapped_column(Float, default=0)
+    human_interventions: Mapped[int] = mapped_column(Integer, default=0)
 
     events: Mapped[list["TaskEvent"]] = relationship(back_populates="task", cascade="all, delete-orphan")
     tool_calls: Mapped[list["ToolCallRecord"]] = relationship(back_populates="task", cascade="all, delete-orphan")

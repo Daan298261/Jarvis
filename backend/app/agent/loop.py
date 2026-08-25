@@ -17,27 +17,27 @@ from ..events import BUS
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
 from ..inference.vision import should_load_vision
-from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
+from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
-from .coding_workers import (
-    complete_coding_route,
-    format_route_prompt,
-    format_routing_block,
-    is_software_task,
-    record_coding_route,
-    route_coding_task,
-    route_software_task,
-)
 from .compaction import (
-    SUMMARY_MARKER,
     compact_history,
     deserialize_messages,
     estimate_prompt_tokens,
     serialize_messages,
+    SUMMARY_MARKER,
 )
 from .context_policy import initial_context_size, next_context_size
+from .metrics import LiveTaskMetrics
+from .model_policy import select_context_size, task_needs_vision
+from .coding_workers import (
+    complete_coding_route,
+    format_routing_block,
+    record_coding_outcome,
+    route_coding_task,
+    should_route,
+)
 from .escalation import (
     EscalationSignals,
     build_expert_brief,
@@ -46,8 +46,6 @@ from .escalation import (
     should_escalate,
     user_requested_expert,
 )
-from .forensic import professional_prompt_block
-from .model_policy import select_context_size, task_needs_vision
 from .planning import (
     WorkingState,
     best_of_n_plan_prompt,
@@ -60,10 +58,10 @@ from .planning import (
     select_best_plan,
 )
 from .recovery import recovery_hint
-from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for, tool_names_for
+from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
-from .tooling import apply_capability_request, expose_called_tool, should_enable_thinking, tools_for_task
+from .tooling import apply_capability_request, expose_called_tool, schemas_for as exposed_tool_schemas, should_enable_thinking, tools_for_task
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .policy import policy_guidance
 from .prompts import (
@@ -109,7 +107,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
         return None
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 def _exposed_csv(working: WorkingState) -> str:
@@ -227,17 +225,20 @@ class AgentRuntime:
         content: str,
         verification: str,
         working: WorkingState | None = None,
+        metrics: LiveTaskMetrics | None = None,
     ) -> None:
-        await self._update(
-            task_id,
-            status="completed",
-            stage="completed",
-            result=content,
-            conversation_json=serialize_messages(messages),
-            verification=verification,
-            current_action="Completed",
-            current_tool="",
-        )
+        fields = {
+            "status": "completed",
+            "stage": "completed",
+            "result": content,
+            "conversation_json": serialize_messages(messages),
+            "verification": verification,
+            "current_action": "Completed",
+            "current_tool": "",
+        }
+        if metrics is not None:
+            fields.update(metrics.as_fields())
+        await self._update(task_id, **fields)
         if working is not None:
             await record_trajectory(task_id, working, "completed")
             await record_task_usage(task_id, "completed", verified=bool(verification))
@@ -249,7 +250,20 @@ class AgentRuntime:
     async def _note_coding_outcome(self, task_id: str, working: WorkingState, outcome: str, verification: str = "") -> None:
         if not working.coding_worker:
             return
-        await complete_coding_route(task_id, outcome, verification)
+        duration = 0.0
+        async with SessionLocal() as session:
+            task = await session.get(Task, task_id)
+            if task:
+                duration = float(task.duration_seconds or 0)
+        await record_coding_outcome(
+            task_id=task_id,
+            task_class=working.task_class,
+            worker_id=working.coding_worker,
+            complexity=working.coding_complexity,
+            outcome=outcome,
+            verification=verification[:2000],
+            duration_seconds=duration,
+        )
 
     async def _run(
         self,
@@ -262,7 +276,6 @@ class AgentRuntime:
         REGISTRY.apply_settings(settings)
         exposure = ToolExposure("mixed")
         REGISTRY.bind_exposure(exposure)
-        exposed_tools: set[str] = set()
         fields = {
             "status": "running",
             "stage": "understand",
@@ -286,19 +299,22 @@ class AgentRuntime:
                 working.goal = prompt.strip().splitlines()[0][:240]
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
-        exposure = ToolExposure(working.task_class)
-        REGISTRY.bind_exposure(exposure)
-        exposed_tools = set(tools_for_task(working.task_class))
         await self._update(task_id, exposed_tools=_exposed_csv(working))
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
-        recommended_context = initial_context_size(working.task_class, profile)
+        recommended_context = select_context_size(
+            task_class=working.task_class,
+            execution_mode=execution_mode,
+            profile_name=profile_name,
+            profile_cap=profile.context_size,
+            prompt=prompt,
+        )
         need_vision = should_load_vision(working.task_class)
         working.recommended_context = recommended_context
         working.vision_requested = need_vision
         plan_prompt = best_of_n_plan_prompt(policy.best_of_n) if policy.best_of_n > 1 else PLAN_PROMPT
         vision_mode = settings.inference.vision_mode or "lazy"
-        need_vision = need_vision or task_needs_vision(working.task_class, prompt, vision_mode)
+        need_vision = task_needs_vision(working.task_class, prompt, vision_mode)
         wanted_context = select_context_size(
             task_class=working.task_class,
             execution_mode=execution_mode,
@@ -345,10 +361,10 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
+        metrics = LiveTaskMetrics()
         already_escalated = bool(getattr(working, "escalated", False))
         critic_rejected = False
-        expert_on_request = user_requested_expert(prompt)
-        escalated = already_escalated
+        exposed_tools = tools_for_task(working.task_class)
 
         if existing and continue_existing:
             messages = existing
@@ -358,29 +374,17 @@ class AgentRuntime:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
             system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(prompt) + _environment_block(settings)
-            audit = professional_prompt_block(prompt)
-            if audit:
-                system_prompt += "\n\n" + audit
             matched_skills = await relevant_skills(working.task_class, working.goal)
             skills = skills_prompt_block(matched_skills)
             if skills:
                 system_prompt += "\n\n" + skills
                 await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
-            if is_software_task(prompt, working.task_class):
-                decision = route_software_task(prompt, task_class=working.task_class)
-                await record_coding_route(task_id, decision)
-                working.coding_worker = decision.selected_worker
-                working.coding_tier = decision.tier_name
-                working.coding_complexity = decision.score
-                system_prompt += "\n\n" + format_route_prompt(decision)
-                try:
-                    routing = await route_coding_task(prompt, working.task_class)
-                    extra_block = format_routing_block(routing)
-                    if extra_block:
-                        system_prompt += "\n\n" + extra_block
-                except Exception:
-                    routing = None
-                await BUS.publish(task_id, "progress", "Coding worker selected", format_route_prompt(decision)[:1500], stage="understand")
+            if should_route(working.task_class, prompt):
+                routing = await route_coding_task(prompt, task_class=working.task_class)
+                working.coding_worker = routing.get("execute_worker") or ""
+                working.coding_complexity = int(routing.get("complexity") or 0)
+                system_prompt += "\n\n" + format_routing_block(routing)
+                await BUS.publish(task_id, "progress", "Coding worker selected", format_routing_block(routing)[:1500], stage="understand")
             lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
             if lessons:
                 system_prompt += "\n\n" + lessons
@@ -476,32 +480,6 @@ class AgentRuntime:
             )
             tools_used = True
 
-        pre_signals = EscalationSignals(
-            task_class=working.task_class,
-            user_requested_expert=user_requested_expert(prompt),
-            architecture_task=looks_like_architecture(prompt, working.task_class),
-            already_consulted=working.expert_consults,
-        )
-        if should_escalate(pre_signals) and pre_signals.user_requested_expert:
-            already_escalated = True
-            working.escalated = True
-            working.expert_consults += 1
-            await BUS.publish(task_id, "stage", "Escalating to Expert 27B", "user requested expert", stage="plan")
-            advice = await self._maybe_consult_expert(
-                task_id,
-                working,
-                prompt,
-                0,
-                {},
-                profile_name or profile.name,
-                settings,
-                False,
-            )
-            if advice:
-                messages.append(ChatMessage(role="user", content="Expert analysis:\n" + advice))
-            provider = MANAGER.provider or provider
-            await self._update(task_id, compact_memory=working.dumps(), current_action="Expert consult complete")
-
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel or kill_switch_active():
@@ -515,15 +493,6 @@ class AgentRuntime:
                     )
                     await BUS.publish(task_id, "cancelled", reason)
                     return
-                think = should_enable_thinking(
-                    profile,
-                    force_final=force_final,
-                    verifying=verifying,
-                    turn_index=_step,
-                    consecutive_failures=consecutive_failures,
-                    awaiting_plan_selection=awaiting_plan_selection,
-                    best_of_n_complete=best_of_n_complete,
-                )
                 await self._update(
                     task_id,
                     stage="verify" if verifying else "act",
@@ -568,7 +537,7 @@ class AgentRuntime:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
                             messages,
-                            tools=None if force_final else schemas_for(working.task_class, working.requested_tools),
+                            tools=None if force_final else exposure_schemas_for(working.task_class, working.requested_tools),
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
@@ -583,7 +552,7 @@ class AgentRuntime:
                             "The model timed out while writing the final report. "
                             "Actions already executed are in the activity log; verify files from that log."
                         )
-                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working)
+                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics)
                         return
                     content = "The model timed out before verification completed."
                     await self._update(
@@ -594,12 +563,15 @@ class AgentRuntime:
                         error=content,
                         current_action="Failed: model timeout before verification",
                         current_tool="",
+                        **metrics.as_fields(),
                     )
                     await record_trajectory(task_id, working, "failed")
                     await complete_coding_route(task_id, "failed", content)
                     await BUS.publish(task_id, "failed", "Task ended after model timeout", content, stage="failed")
                     return
                 await MANAGER.record_timings(result.timings)
+                metrics.note_model(result.timings)
+                await self._update(task_id, **metrics.as_fields())
                 if result.reasoning:
                     await BUS.publish(task_id, "progress", "Reasoning complete", result.reasoning[-1500:], stage="act")
 
@@ -610,7 +582,7 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
                     working.verified = True
                     await self._update(task_id, compact_memory=working.dumps())
-                    await self._complete(task_id, messages, content, content, working)
+                    await self._complete(task_id, messages, content, content, working, metrics)
                     return
 
                 parsed = parse_plan_block(result.content or "")
@@ -660,7 +632,9 @@ class AgentRuntime:
                     )
                     for call in result.tool_calls:
                         name = call["function"]["name"]
-                        arguments = parse_tool_arguments(call["function"]["arguments"])
+                        raw_args = call["function"]["arguments"]
+                        schema_error = not tool_arguments_valid(raw_args)
+                        arguments = parse_tool_arguments(raw_args)
                         if name == "request_tools":
                             granted = grant_requested_tools(arguments)
                             working.requested_tools = sorted(set(working.requested_tools) | set(granted))
@@ -684,6 +658,7 @@ class AgentRuntime:
                         risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
                         command = arguments.get("command") if isinstance(arguments, dict) else None
                         if needs_confirmation(autonomy, risk, command):
+                            metrics.note_confirmation()
                             await self._update(
                                 task_id,
                                 status="waiting",
@@ -692,6 +667,7 @@ class AgentRuntime:
                                 current_action=f"Waiting for confirmation: {name}",
                                 conversation_json=serialize_messages(messages),
                                 compact_memory=working.dumps(),
+                                **metrics.as_fields(),
                             )
                             await BUS.publish(task_id, "confirm", f"Confirmation required for {name}", json.dumps(arguments)[:1500], stage="act")
                             return
@@ -704,7 +680,9 @@ class AgentRuntime:
                         else:
                             if name in REGISTRY.tools and name not in exposed_tools:
                                 exposed_tools = expose_called_tool(exposed_tools, name)
-                            observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
+                            observation, attach = await self._execute_tool_ex(
+                                task_id, name, arguments, autonomy, settings, metrics=metrics, schema_error=schema_error
+                            )
                             failed = "ERROR:" in observation or observation.lower().startswith("error")
                         if failed:
                             consecutive_failures += 1
@@ -764,6 +742,7 @@ class AgentRuntime:
                         retries=consecutive_failures,
                         compact_memory=working.dumps(),
                         current_action=f"Ran {primary}" if primary else "Observed tools",
+                        **metrics.as_fields(),
                     )
                     continue
 
@@ -821,24 +800,6 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="user", content=format_selected_plan(chosen)))
                     continue
 
-                if expert_on_request and not escalated:
-                    advice = await self._maybe_consult_expert(
-                        task_id,
-                        working,
-                        prompt,
-                        consecutive_failures,
-                        failures_by_tool,
-                        profile_name or profile.name,
-                        settings,
-                        verifying,
-                    )
-                    escalated = True
-                    already_escalated = True
-                    working.escalated = True
-                    expert_on_request = False
-                    if advice:
-                        messages.append(ChatMessage(role="user", content="Expert analysis:\n" + advice))
-
                 if policy.critic_pass and not critic_done and not verifying:
                     critic_done = True
                     critic_turn = True
@@ -866,18 +827,18 @@ class AgentRuntime:
                 working.verified = True
                 verification = content or "Independent verification pass completed; acceptance criteria checked."
                 await self._update(task_id, compact_memory=working.dumps(), verification=verification)
-                await self._complete(task_id, messages, content or verification, verification, working)
+                await self._complete(task_id, messages, content or verification, verification, working, metrics)
                 return
-            await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification")
+            await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification", **metrics.as_fields())
             await record_trajectory(task_id, working, "failed")
             await complete_coding_route(task_id, "failed", "Step limit reached before verification")
             await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
         except asyncio.CancelledError:
-            await self._update(task_id, status="cancelled", stage="cancelled")
+            await self._update(task_id, status="cancelled", stage="cancelled", **metrics.as_fields())
             await complete_coding_route(task_id, "cancelled")
             raise
         except Exception as exc:
-            await self._update(task_id, status="failed", stage="failed", error=str(exc))
+            await self._update(task_id, status="failed", stage="failed", error=str(exc), **metrics.as_fields())
             await record_trajectory(task_id, working, "failed")
             await complete_coding_route(task_id, "failed", str(exc))
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
@@ -889,11 +850,20 @@ class AgentRuntime:
         return text
 
     async def _execute_tool_ex(
-        self, task_id: str, name: str, arguments: dict[str, Any], autonomy: str, settings: AppSettings
+        self,
+        task_id: str,
+        name: str,
+        arguments: dict[str, Any],
+        autonomy: str,
+        settings: AppSettings,
+        metrics: LiveTaskMetrics | None = None,
+        schema_error: bool = False,
     ) -> tuple[str, str | None]:
         started = datetime.now(timezone.utc)
         result = await REGISTRY.execute(name, arguments)
         duration = (datetime.now(timezone.utc) - started).total_seconds() * 1000
+        if metrics is not None:
+            metrics.note_tool(duration, schema_error=schema_error)
         async with SessionLocal() as session:
             session.add(
                 ToolCallRecord(
