@@ -161,7 +161,7 @@ Leader stays the Windows desktop. The phone does not run the model, tools, or sw
 
 Items in `JARVIS_MASTER_PLAN.md` §§1–63 that have **no Development Queue line** and are **not** covered by `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, or this Android spec. Do not invent product areas beyond that plan.
 
-Covered elsewhere (not gaps): core/portal/tools, verification/recovery/modes, skills/trajectory/best-of-N, Office, optional workers, voice, Phone PWA, LAN inference, swarm P2, P4/P5 headings, this Android client, home IoT, security agents (Blue / Purple / Red-gated), Jarvis 2.0 (`JARVIS_2.0.md`), lazy mmproj (PR #50).
+Covered elsewhere (not gaps): core/portal/tools, verification/recovery/modes, skills/trajectory/best-of-N, Office, optional workers, voice, Phone PWA, LAN inference, swarm P2, P4/P5 headings, this Android client, home IoT, security agents (Blue / Purple / Red-gated), Jarvis 2.0 (`JARVIS_2.0.md`), lazy mmproj (PR #50), Windows consumer installer (`INSTALLER.md`).
 
 | Plan section | Gap | Notes |
 | --- | --- | --- |
