@@ -57,3 +57,5 @@ def test_llama_cpp_command_reflects_profile_and_settings():
     fast = LlamaCppBackend(_settings(fit=False)).build_args(resolve_profile("fast"))
     assert fast[fast.index("--reasoning") + 1] == "off"
     assert fast[fast.index("--n-gpu-layers") + 1] == "99"
+    assert "--mmproj" not in args
+    assert "--image-min-tokens" not in args

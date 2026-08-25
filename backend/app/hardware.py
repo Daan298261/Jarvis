@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -78,19 +79,22 @@ def _nvidia() -> dict[str, Any]:
 
 
 def _office_installed() -> bool:
+    """Detect Office from install paths. Do not Dispatch COM — that launches Word."""
     if platform.system() != "Windows":
         return False
-    try:
-        import win32com.client  # type: ignore
-
-        for progid in ("Word.Application", "Excel.Application", "PowerPoint.Application"):
-            try:
-                win32com.client.Dispatch(progid)
+    names = ("WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE")
+    if any(shutil.which(name) for name in names):
+        return True
+    roots = [
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office",
+        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft Office",
+    ]
+    for root in roots:
+        if not root.exists():
+            continue
+        for name in names:
+            if (root / "root" / "Office16" / name).exists() or (root / "Office16" / name).exists():
                 return True
-            except Exception:
-                continue
-    except Exception:
-        pass
     return False
 
 

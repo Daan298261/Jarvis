@@ -13,7 +13,7 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | `git` | status, diff, branch, log, search, stash checkpoint before large edits. |
 | `docker` | ps/images/build/run/logs/inspect when Docker exists. |
 | `web_fetch` | HTTP GET/POST distinct from the browser. |
-| `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
+| `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. The vision projector is not loaded for ordinary text/tool tasks. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
 
 ## Memory and skills

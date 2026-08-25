@@ -15,6 +15,7 @@ from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
+from ..inference.vision import should_load_vision
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, needs_confirmation
@@ -34,6 +35,7 @@ from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
+from .context_policy import recommend_context_size
 from .prompts import (
     CONTINUE_PROMPT,
     CRITIC_PROMPT,
@@ -43,6 +45,7 @@ from .prompts import (
     VERIFY_PROMPT,
     VERIFY_REQUIRED_PROMPT,
 )
+from .thinking import infer_phase, should_think
 
 
 def _environment_block(settings: AppSettings) -> str:
@@ -228,10 +231,26 @@ class AgentRuntime:
                 working.task_class = task.task_class or classify_task(prompt)
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
+        recommended_context = recommend_context_size(
+            working.task_class, execution_mode, profile.context_size
+        )
+        need_vision = should_load_vision(working.task_class)
+        working.recommended_context = recommended_context
+        working.vision_requested = need_vision
         plan_prompt = best_of_n_plan_prompt(policy.best_of_n) if policy.best_of_n > 1 else PLAN_PROMPT
         if not MANAGER.provider or not MANAGER.state.loaded:
-            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-            await MANAGER.load(settings, profile_name)
+            await BUS.publish(
+                task_id,
+                "stage",
+                f"Loading local model (ctx {recommended_context}, vision {'on' if need_vision else 'off'})",
+                stage="model",
+            )
+            await MANAGER.load(
+                settings,
+                profile_name,
+                context_size=recommended_context,
+                vision=need_vision,
+            )
         provider = MANAGER.provider
         assert provider is not None
 
@@ -371,10 +390,34 @@ class AgentRuntime:
                     execution_mode=execution_mode,
                     task_class=working.task_class,
                 )
+                phase = infer_phase(
+                    force_final=force_final,
+                    verifying=verifying,
+                    awaiting_plan_selection=awaiting_plan_selection,
+                    best_of_n_complete=best_of_n_complete,
+                    tools_used=tools_used,
+                    consecutive_failures=consecutive_failures,
+                    critic_pending=policy.critic_pass and not critic_done and not verifying and tools_used,
+                )
+                think = should_think(
+                    profile_thinking=profile.thinking,
+                    execution_mode=execution_mode,
+                    phase=phase,
+                    consecutive_failures=consecutive_failures,
+                    same_tool_streak=same_tool_streak,
+                    tool_rounds=tool_rounds,
+                )
                 await BUS.publish(
                     task_id,
                     "model",
-                    "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if profile.thinking else "Model is responding")),
+                    "Writing final report"
+                    if force_final
+                    else (
+                        "Verifying result"
+                        if verifying
+                        else ("Model is thinking" if think.enabled else "Model is responding")
+                    ),
+                    think.reason,
                     stage="verify" if verifying else "act",
                 )
                 messages = compact_history(messages, working_state_block=working.as_prompt_block())
@@ -386,7 +429,7 @@ class AgentRuntime:
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
-                            thinking=False if force_final or verifying else (profile.thinking and not verifying),
+                            thinking=think.enabled,
                             max_tokens=400 if force_final else 1024,
                         ),
                         timeout=90 if force_final else 180,

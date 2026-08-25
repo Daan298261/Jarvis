@@ -3587,7 +3587,9 @@ This development session:
 - Model: Qwen3.5-27B (Unsloth GGUF of `Qwen/Qwen3.5-27B`, plus `mmproj-F16.gguf`)
 - Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
 - Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
-- Context: 16K fast, 32K balanced/quality; load failure retries at 16K
+- Context: **dynamic** — 8K simple / 16K normal / 32K long-horizon, capped by the profile default; Fast mode never opens 32K; load failure still retries at 16K
+- Thinking: **selective** — planning, recovery, and Reliable verification only; Fast profiles stay off; routine tool calls do not spend reasoning tokens
+- Vision: **lazy** — `--mmproj` is omitted unless the task class is multimodal or Windows GUI
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
 - Status: **code present and unit-tested, Windows runtime not verified this session**
@@ -3608,7 +3610,7 @@ This development session:
 - Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
 - Playwright: native backend present
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
-- Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
+- Vision: screenshot tool + llama.cpp `--mmproj` only when a multimodal/GUI task requests it; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
 
 ### Optional Workers
@@ -3668,19 +3670,20 @@ This development session:
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell; Linux-only environments should use `shell=bash` or `shell=python`
+- Terminal default is PowerShell on Windows and bash on Linux; override with `shell=python` / `shell=cmd` when needed
 
 ### Last End-to-End Test
 
-Date: 2026-08-24
+Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building (including lazy `--mmproj`), failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **selective thinking, dynamic context, lazy vision**
 - Frontend (`npm run build`): TypeScript build
+- Portal smoke at `http://127.0.0.1:4780`: Command, Model (thinking=selective, vision=lazy/off, context=dynamic), Tools, System, Guide & Workflows, History, Memory, Settings, MCP
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **75 passed** on the merged tree (re-run after updating onto latest `cursor/local-qwen-desktop-agent`). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **96 passed** after P0.4/P0.5/P0.6 plus a QA pass (python interpreter, docker targets, browser close, Linux terminal default, Office probe). Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3707,6 +3710,18 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Verification loop
   - Acceptance: task cannot be marked successful without an independent verification pass.
   - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
+
+- [x] Selective / dynamic thinking (P0.4)
+  - Acceptance: expensive reasoning is not applied to every tool call; planning, recovery, and consequential verification still think.
+  - Status: VERIFIED in unit tests (`test_thinking.py`, `test_p0_loop_policies.py`)
+
+- [x] Lazy vision loading (P0.5)
+  - Acceptance: llama.cpp is started without `--mmproj` for ordinary text/tool tasks; multimodal / Windows GUI tasks request the projector.
+  - Status: VERIFIED in unit tests (`test_vision.py`, `test_inference_backends.py`). Live VRAM savings not measured here (no GPU).
+
+- [x] Dynamic context sizing (P0.6)
+  - Acceptance: simple tasks use 8K, normal 16K, long-horizon 32K; Fast mode caps at 16K; Reliable steps one tier up; capped by the loaded profile.
+  - Status: VERIFIED in unit tests (`test_context_policy.py`, `test_p0_loop_policies.py`)
 
 - [ ] Reliable P0 model stack on the Windows desktop
   - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.

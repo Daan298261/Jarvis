@@ -40,6 +40,8 @@ backend/app/
   api/                    REST routers (prefix /api/…)
   agent/
     loop.py               AgentRuntime — create/continue/cancel, verification
+    thinking.py           Selective thinking (plan/recover vs routine tools)
+    context_policy.py     8K / 16K / 32K from task class + execution mode
     planning.py           ExecutionPolicy, task classification, best-of-N plan parse/select
     workflows.py          Guide copy + editable templates + compose_prompt
     recovery.py           Failure classes → alternative tools
@@ -52,6 +54,7 @@ backend/app/
     manager.py            Load/unload, adopt already-running server
     backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend
     profiles.py           fast / balanced / quality GGUF profiles
+    vision.py             Lazy mmproj: only multimodal / Windows GUI loads vision
   providers/              OpenAI-compatible chat + tool-call parsing
   tools/                  Native tools + MCP proxy
   db/                     SQLAlchemy models, aiosqlite session, light migrations
@@ -216,7 +219,7 @@ Execution modes (`planning.POLICIES`) are **not** model profiles:
 | balanced | 28 | no | no | 1 |
 | reliable | 40 | yes | yes | 3 (critic picks one; it does not run three full attempts) |
 
-Model profiles (`inference/profiles.py`): Fast / Balanced / Quality change quant, thinking, and context.
+Model profiles (`inference/profiles.py`): Fast / Balanced / Quality change quant, whether thinking is allowed, and the context ceiling. Per-turn thinking is selective (`agent/thinking.py`). Per-task context is 8K/16K/32K (`agent/context_policy.py`). The vision projector is omitted unless the task needs it (`inference/vision.py`).
 
 Autonomy (`tools/safety.py`): `interactive` confirms medium+ tools, `trusted` confirms high/irreversible, `autonomous` only pauses for irreversible patterns (disk format, credential changes, mass-delete, purchases, unsolicited external communications).
 
@@ -270,7 +273,7 @@ Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `b
 
 - Chat always goes through `ModelProvider` (`providers/base.py` → `OpenAICompatProvider`).
 - Process ownership belongs in `InferenceBackend`, not in the agent.
-- Local: `LlamaCppBackend.build_args` — `--jinja`, `--reasoning-format deepseek`, `--fit on` (or `--n-gpu-layers 99` if fit is off), optional `--mmproj`.
+- Local: `LlamaCppBackend.build_args` — `--jinja`, `--reasoning-format deepseek`, `--fit on` (or `--n-gpu-layers 99` if fit is off), `--mmproj` only when the loaded profile has `vision=True`.
 - Remote: `RemoteOpenAICompatibleBackend` only waits on `/health`. Aliases include `remote`, `lmstudio`, `ollama`, `vllm`, `sglang`, `openai-compatible`.
 - Unknown backend name + non-localhost host is treated as remote.
 - `InferenceManager.load` will adopt a server that is already healthy so a second Jarvis process does not spawn another llama-server.
