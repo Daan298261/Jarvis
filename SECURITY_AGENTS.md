@@ -19,6 +19,7 @@ Three **Jarvis workers / profiles**, not separate products. All run on the Leade
 - **Blue** (and **Purple** on owned net) may use those router credentials.
 - **Red** does **not** receive router (or other) credentials unless the law-enforcement gate is on **and** the action is inside the authorized case scope.
 - Autonomy profiles cannot silently enable Purple or Red.
+- **Hard guardrail:** offensive / red / counter-response capability may be added only by Taco (manual) or PolitieGPT (named LE bot) under the LE gate. Ordinary executing bots must not add it. See §3.4.
 - Out of scope for all three: attacking third-party systems, police-colleague devices **off** Taco’s authorized network, ISP core, or “unleash malware on the sniffer.”
 
 ---
@@ -83,12 +84,15 @@ Authorized **adversary simulation** against the user’s **own** lab/home to **t
 
 This spec does **not** describe simulation techniques, payloads, or exploit steps. Implementation of Purple is a later ticket that still must not ship offensive recipes in the consumer tree. Until implemented, Purple is unspecified-as-code and must refuse any request that names a non-owned target.
 
+**Purple is not a back door to Red.** Completing, configuring, or “escalating” a Purple exercise must not install, unlock, or register red / offensive / hack-back tools.
+
 ### 2.1 Acceptance (Purple)
 
 - [ ] Explicit confirm + autonomy gate before any exercise
 - [ ] Owned-asset allowlist required
 - [ ] SIEM exercise record
 - [ ] Refuses non-owned targets
+- [ ] Cannot install, unlock, or register Red tools
 - [ ] No exploit/PoC text in product or this spec
 
 ---
@@ -131,22 +135,46 @@ Even when the gate is on:
 
 Red **does not get router credentials** unless the LE gate is on **and** the action is in authorized case scope.
 
-### 3.4 Acceptance (Red gate)
+### 3.4 Who may add or enable Red (hard guardrail)
+
+Taco confirmation. This is a **hard guardrail**, not a preference. This section still does **not** describe attacks, exploits, PoCs, payloads, or hack-back how-tos.
+
+Offensive / red / counter-response capability (enabling Red beyond the refuse-stub, or adding red tools, payloads, or hack-back skills):
+
+- **MUST NOT** be added by ordinary Jarvis executing bots, including: product developers, PR-fixer bots, Chief of Staff, generic cloud agents, home Jarvis self-dev, or any home/consumer worker implementing a ticket.
+- **MAY** be added only by:
+  1. **Taco**, manually; or
+  2. **PolitieGPT**, the named law-enforcement bot, operating **under the LE gate** (§3.2).
+
+**PolitieGPT** is named only as that LE bot. Do **not** invent its internals, models, prompts, badge UX, or a fake authorization check in this repo.
+
+**Interface (spec only):** Taco (manual) or PolitieGPT (LE bot under the gate) can enable Red and/or add red capability for an authorized case. **Everyone else cannot.**
+
+Home/product workers have **no API** to register offensive tools, payloads, or hack-back skills. Any such attempt **refuses** and is **audit-logged** in the SIEM.
+
+Purple (§2) cannot be used to install Red tools.
+
+### 3.5 Acceptance (Red gate)
 
 - [ ] Home build: Red stub refuses; no consumer toggle
 - [ ] No run without LE authorization module + case record + human confirm + SIEM audit
 - [ ] Autonomy cannot enable Red
 - [ ] Credentials withheld unless gate + authorized scope
-- [ ] This file still contains no attack recipes
+- [ ] Only Taco (manual) or PolitieGPT (under the LE gate) may add or enable red capability
+- [ ] Ordinary executing bots (developers, PR fixer, CoS, generic cloud agents, home self-dev) cannot add it
+- [ ] Home/product workers have no API to register offensive tools, payloads, or hack-back skills; attempts refuse and audit-log
+- [ ] Purple is not a back door to Red
+- [ ] This file still contains no attack recipes; PolitieGPT internals are not invented here
 
 ---
 
 ## 4. Relation to other specs
 
 - Router passwords: `ANDROID_CLIENT.md` link-device. Blue/Purple (owned net) may use them; Red only under §3.
+- Who may add Red: Taco manually, or PolitieGPT under the LE gate. Not Architect, CoS, PR fixers, or home workers. See §3.4.
 - Unknown IoT MAC: `HOME_IOT.md` inventory vs Blue event.
 - `JARVIS_2.0.md` §81 high-autonomy security remains. Swarm SIEM/forensics roles stay separately specified and are not promoted by this file alone.
 
 ## 5. Filter
 
-New ideas that make home-network JARVIS more real may be added here. Do not delete Taco-approved Blue household behavior to “simplify.” Do not fill Red with attack content.
+New ideas that make home-network JARVIS more real may be added here. Do not delete Taco-approved Blue household behavior to “simplify.” Do not fill Red with attack content. Do not add red capability in a product PR unless the actor is Taco (manual) or PolitieGPT (LE gate).

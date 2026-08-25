@@ -16,7 +16,7 @@ P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating
 
 **Jarvis 2.0** (Away Mode, event-driven operators, **marketing**, **SEO**, **NovelProject**, **multimedia**, policy, self-healing) is restored in [`JARVIS_2.0.md`](JARVIS_2.0.md) — the approved sections 64–85 from git history. Do not drop those features. Do not treat 2.0 as current-session P0 unless this queue promotes an item.
 
-The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network security agents (Blue / Purple / Red-gated): [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer). Do not paste those specs into this file.
+The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network security agents (Blue / Purple / Red-gated): [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer). Offensive / red capability: Taco or PolitieGPT only — ordinary executing bots must not add it. Do not paste those specs into this file.
 
 Filter: if a **new** idea would make home-network JARVIS more real, spec it. Never delete Taco-approved features.
 
@@ -2015,10 +2015,11 @@ These items make the existing machine a one-node swarm first. They must not requ
   - Detect, alert, contain, evidence on the user’s own LAN. Local SIEM; portal+phone alerts; owned-router containment with autonomy gates. Reuses link-device router secrets. No exploits or off-LAN attacks.
   - Status: TODO / specified
 - [ ] Purple (owned-network only) — authorized adversary simulation (`SECURITY_AGENTS.md`)
-  - Tests Blue on assets the user owns and lists. Explicit user confirm + autonomy profile; never silent. Goal is to improve detection, not to attack anyone else. No simulation techniques, payloads, or exploit steps in the spec or product.
+  - Tests Blue on assets the user owns and lists. Explicit user confirm + autonomy profile; never silent. Goal is to improve detection, not to attack anyone else. No simulation techniques, payloads, or exploit steps in the spec or product. **Not a back door** to install red tools.
   - Status: TODO / specified
 - [ ] Red / counter-response — law-enforcement gate only (`SECURITY_AGENTS.md`)
   - Spec the **gate**, not the attacks. Default disabled in the consumer/home build; no UI toggle a normal user can flip. Until Taco provides a distinct LE authorization module (identity + authorization artifact — do not invent a fake badge check), Red is a stub that refuses to run. Even when gated on: case/authorization record, human confirm, full SIEM audit; autonomy cannot silently enable it. Identify/isolate/evidence stay in Blue. Not a shipped hack-back kit.
+  - **Hard guardrail:** offensive / red / counter-response capability MUST NOT be added by ordinary executing bots (developers, PR fixer, CoS, generic cloud agents, home Jarvis self-dev). MAY be added only by Taco (manually) or PolitieGPT (named LE bot) under the LE gate. Do not invent PolitieGPT internals. Home/product workers have no API to register offensive tools, payloads, or hack-back skills; attempts refuse and audit-log. Purple is not a back door to Red.
   - Status: TODO / specified
 - [x] Dedicated LAN inference server
   - Status: VERIFIED in code (PR #6)
@@ -2143,6 +2144,14 @@ House control: `HOME_IOT.md` (local-first HA/Matter). Security workers: `SECURIT
 Reason:
 
 Mansion-JARVIS includes the house and the home LAN, not only the desktop agent. Counter-response is not a home-user feature.
+
+Decision: only Taco or PolitieGPT may add red / offensive / counter-response capability
+
+Hard guardrail (`SECURITY_AGENTS.md` §3.4). Ordinary Jarvis executing bots — developers, PR fixer, Chief of Staff, generic cloud agents, home Jarvis self-dev — MUST NOT add it. Home/product workers have no API to register offensive tools, payloads, or hack-back skills; attempts refuse and audit-log. Purple is not a back door. PolitieGPT is the named LE bot; do not invent its internals. Spec the interface only: Taco (manual) or PolitieGPT (under the LE gate) can enable/add red capability; everyone else cannot.
+
+Reason:
+
+Taco confirmation. Red is not a product feature ordinary workers may grow into.
 
 Decision: lazy mmproj
 
