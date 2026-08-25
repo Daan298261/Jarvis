@@ -54,8 +54,7 @@ from .prompts import (
     VERIFY_PROMPT,
     VERIFY_REQUIRED_PROMPT,
 )
-from .context_policy import initial_context_size, next_context_size
-from .escalation import consult_expert, expert_packet, should_escalate
+from .self_dev import KillSwitchActive, kill_switch_active
 
 
 def _environment_block(settings: AppSettings) -> str:
@@ -104,6 +103,11 @@ class AgentRuntime:
         profile: str | None = None,
         execution_mode: str | None = None,
     ) -> Task:
+        if kill_switch_active():
+            raise KillSwitchActive(
+                "Emergency stop is active (data/STOP_JARVIS). "
+                "New tasks are blocked until POST /api/self-dev/resume."
+            )
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
         task = Task(
@@ -125,6 +129,11 @@ class AgentRuntime:
         return task
 
     async def continue_task(self, task_id: str, prompt: str | None = None) -> Task:
+        if kill_switch_active():
+            raise KillSwitchActive(
+                "Emergency stop is active (data/STOP_JARVIS). "
+                "New tasks are blocked until POST /api/self-dev/resume."
+            )
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if not task:
@@ -455,9 +464,16 @@ class AgentRuntime:
 
         try:
             for _step in range(max_steps):
-                if task_id in self._cancel:
-                    await self._update(task_id, status="cancelled", stage="cancelled", current_action="Cancelled")
-                    await BUS.publish(task_id, "cancelled", "Task cancelled")
+                if task_id in self._cancel or kill_switch_active():
+                    reason = "Stopped by emergency kill switch" if kill_switch_active() else "Cancelled"
+                    await self._update(
+                        task_id,
+                        status="cancelled",
+                        stage="cancelled",
+                        current_action=reason,
+                        error=reason,
+                    )
+                    await BUS.publish(task_id, "cancelled", reason)
                     return
                 think = should_think(
                     profile_thinking=profile.thinking,

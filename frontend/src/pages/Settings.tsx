@@ -218,11 +218,25 @@ export function SettingsPage() {
       </div>
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Professional analysis policy</h2>
-        <p className="lede">
-          Jarvis may analyze legitimate security, forensic, investigative, or otherwise sensitive material.
-          Analysis is not the same as authorization to attack, deploy exploits, change credentials, or disable defenses.
+        <h2>Self-development trial budget</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Isolated worktrees never auto-merge. Paid workers stay off unless you set a spend or invocation limit above zero.
         </p>
+        <label>Maximum duration (hours)
+          <input type="number" value={settings.self_dev?.max_duration_hours ?? 12} onChange={(e) => save({ self_dev_max_duration_hours: Number(e.target.value) })} />
+        </label>
+        <label>Maximum paid spend (€)
+          <input type="number" value={settings.self_dev?.max_paid_spend_eur ?? 0} onChange={(e) => save({ self_dev_max_paid_spend_eur: Number(e.target.value) })} />
+        </label>
+        <label>Maximum paid worker invocations
+          <input type="number" value={settings.self_dev?.max_paid_invocations ?? 0} onChange={(e) => save({ self_dev_max_paid_invocations: Number(e.target.value) })} />
+        </label>
+        <label>Maximum consecutive failures
+          <input type="number" value={settings.self_dev?.max_consecutive_failures ?? 3} onChange={(e) => save({ self_dev_max_consecutive_failures: Number(e.target.value) })} />
+        </label>
+        <label>Experimental Jarvis port
+          <input type="number" value={settings.self_dev?.experimental_port ?? 4781} onChange={(e) => save({ self_dev_experimental_port: Number(e.target.value) })} />
+        </label>
       </div>
 
       {queueStatus && (

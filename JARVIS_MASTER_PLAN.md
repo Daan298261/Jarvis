@@ -3636,6 +3636,7 @@ This development session:
 
 - Specification: **appended** as sections 64–85 (Autonomous Operator / Away Mode)
 - Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers, `Node` registry / Worker placement / GPU scheduler: **not implemented**
+- 1.x self-development isolation (worktrees, verification gate, trial budget, kill switch, end-of-run report): **implemented** (unit-tested; does not auto-merge; Cursor ACP still not wired)
 - Flagship benchmark `Away Mode — Autonomous Bug Fix`: **not implemented**
 - Hardware Stage 1 remains the existing desktop; no new GPU is required to continue development
 
@@ -3670,7 +3671,8 @@ This development session:
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
-- Tools/System pages list optional workers; Browser Use and OpenHands show `missing` until installed
+- Tools/System pages list optional workers as unavailable instead of crashing
+- Self-development: isolated worktrees, verification gate, trial budgets, `STOP AUTONOMOUS DEVELOPMENT` kill switch (`data/STOP_JARVIS`), end-of-run report on System
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
 - Voice: Command Speak button; `POST /api/voice/listen` transcribes locally; `POST /api/voice/speak` returns WAV; JSON `/api/voice/command` still accepts text
@@ -3684,8 +3686,7 @@ This development session:
 - UFO / Cua / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Cursor ACP CLI is not on PATH in this environment; the client is catalogued `not_connected`
-- Terminal default is PowerShell on Windows and bash on Linux
+- Cursor ACP / paid Composer-Grok coding workers remain not_configured in this environment
 
 ### Last End-to-End Test
 
@@ -3693,11 +3694,12 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **dynamic context policy, Expert escalation, benchmark harness + 20-task catalog, docker image requirement, browser close reset**
+- Unit tests (`python -m pytest tests -q`): previous coverage plus isolated git worktrees, self-development verification gate, trial budget / kill switch / end-of-run report, docker run/logs/inspect target guards, browser close without launching Chromium, Linux default shell
 - Frontend (`npm run build`): TypeScript build
-- Portal: Command, Tools (`code_worker`, Open Interpreter `missing`), Guide (`browser-form` / `browser-procedure`), Settings Inference card (Ollama port 11434), Model Probe, System backends
+- Portal smoke: Command emergency stop, System self-development card, Settings trial budget
+- Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **96 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **93 passed** on this branch. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3799,6 +3801,18 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: JSON-RPC initialize/session/prompt/cancel, persisted session IDs, auto-answer for isolated routine `cursor/ask_question` and `cursor/create_plan`; consequential decisions stay with the user.
   - Status: VERIFIED in unit tests (`test_acp.py`). Live `agent acp` remains `not_connected` until Cursor CLI is on PATH.
 
+- [x] Isolated Git worktree / fork management
+  - Acceptance: self-development edits run in a dedicated worktree/branch; the trusted checkout is never modified; broken experiments can be discarded.
+  - Status: VERIFIED (`test_worktrees.py`; git `worktree_add` / `commit` / `worktree_remove`)
+
+- [x] Self-development verification gate
+  - Acceptance: independent pytest must pass with no unexplained regression; auto-merge to trusted main is refused; experimental instance is planned on an alternate port.
+  - Status: VERIFIED (`test_self_dev.py`; `POST /api/self-dev/worktrees/{id}/verify`; merge always 403)
+
+- [x] Trial budget, emergency kill switch, and end-of-run report
+  - Acceptance: duration/spend/invocation/failure limits; `data/STOP_JARVIS` plus portal/API stop; report includes branch, commits, tests, cost, and merge candidates.
+  - Status: VERIFIED (`test_self_dev.py` + Command/System/Settings UI)
+
 ### P2
 
 - [x] Reusable skills — VERIFIED (`test_skills.py`); promotion needs 3 repeats of the same tool sequence
@@ -3853,7 +3867,7 @@ Phase A — Autonomous Developer:
 - [ ] Event/webhook intake with a persistent queue (priorities, retries, backoff, dedup, DLQ, restart-safe processing)
 - [ ] Event normalization into internal types (`BUG_REPORTED`, `FEATURE_REQUESTED`, `CI_FAILED`, …)
 - [ ] `SoftwareEngineeringWorker` abstraction (`NativeJarvisCodingWorker` first; Codex / Claude Code / OpenHands later)
-- [ ] Isolated Git worktrees / disposable environments (never modify the production checkout)
+- [ ] Isolated Git worktrees / disposable environments (never modify the production checkout) — 1.x trial isolation is VERIFIED; 2.0 event-driven disposable environments remain TODO
 - [ ] Independent verification of worker output (a worker saying "fixed" is never enough)
 - [ ] PR generation from isolated work after tests
 - [ ] `Away Mode — Autonomous Bug Fix` benchmark harness (skeleton)

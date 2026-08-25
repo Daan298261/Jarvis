@@ -33,6 +33,14 @@
     "timeout_ms": 30000,
     "browser_use_model": "Qwen3.5-27B"
   },
+  "self_dev": {
+    "max_duration_hours": 12,
+    "max_paid_spend_eur": 0,
+    "max_paid_invocations": 0,
+    "max_consecutive_failures": 3,
+    "experimental_port": 4781,
+    "auto_merge": false
+  },
   "allowed_directories": [],
   "mcp_servers": []
 }

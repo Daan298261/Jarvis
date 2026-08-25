@@ -5,6 +5,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..agent.worktrees import (
+    WorktreeError,
+    checkpoint_commit,
+    create_worktree,
+    discard_worktree,
+    is_production_checkout,
+    list_worktrees,
+    worktree_status,
+)
 from .base import RiskLevel, Tool, ToolResult
 from .safety import resolve_allowed_path
 
@@ -19,8 +28,9 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a jarvis-checkpoint-* backup branch and a stash-create SHA "
-        "without emptying the working tree."
+        "checkpoint, worktree_add, worktree_list, worktree_status, worktree_remove, commit. "
+        "checkpoint creates a recoverable stash on the current checkout. Isolated self-development "
+        "uses worktree_add (never the trusted production tree) and commit only inside that worktree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -28,11 +38,25 @@ class GitTool(Tool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["status", "diff", "branch", "log", "search", "checkpoint", "list_checkpoints", "restore"],
+                "enum": [
+                    "status",
+                    "diff",
+                    "branch",
+                    "log",
+                    "search",
+                    "checkpoint",
+                    "worktree_add",
+                    "worktree_list",
+                    "worktree_status",
+                    "worktree_remove",
+                    "commit",
+                ],
             },
             "path": {"type": "string"},
             "query": {"type": "string"},
-            "ref": {"type": "string", "description": "Checkpoint branch or ref for restore/diff"},
+            "ref": {"type": "string"},
+            "message": {"type": "string"},
+            "worktree_id": {"type": "string"},
         },
         "required": ["action"],
     }
@@ -116,24 +140,41 @@ class GitTool(Tool):
                     return ToolResult(False, "", error="query is required for search")
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                branch = f"jarvis-checkpoint-{stamp}"
-                branch_result = await self._git(["branch", branch], cwd)
-                if not branch_result.success:
-                    return ToolResult(
-                        False,
-                        branch_result.output,
-                        error=branch_result.error or "Could not create checkpoint branch",
-                    )
-                created = await self._git(["stash", "create"], cwd)
-                sha = (created.output or "").strip() if created.success else ""
-                note = (
-                    f"Backup branch {branch} points at HEAD. Working tree was not modified. "
-                    f"stash_create={sha or 'clean'}."
+                if is_production_checkout(cwd):
+                    stamp = Path(cwd).name
+                    result = await self._git(["stash", "push", "-u", "-m", f"jarvis-checkpoint-{stamp}"], cwd)
+                    if result.success:
+                        return ToolResult(True, "Created git stash checkpoint on the trusted checkout. Use git stash list / pop to recover.")
+                    return await self._git(["status"], cwd)
+                try:
+                    payload = checkpoint_commit(cwd, kwargs.get("message") or "jarvis checkpoint")
+                    return ToolResult(True, f"Committed isolated checkpoint {payload['commit']}", data=payload)
+                except WorktreeError as exc:
+                    return ToolResult(False, "", error=str(exc))
+            if action == "worktree_add":
+                spec = create_worktree(cwd)
+                return ToolResult(
+                    True,
+                    f"Created isolated worktree {spec.branch} at {spec.path} from {spec.start_commit[:12]}",
+                    data=spec.as_dict(),
                 )
-                return ToolResult(True, note, data={"branch": branch, "stash_create": sha or None})
+            if action == "worktree_list":
+                rows = list_worktrees()
+                text = "\n".join(f"{item['id']} {item['status']} {item['branch']} {item['path']}" for item in rows) or "No isolated worktrees."
+                return ToolResult(True, text, data={"worktrees": rows})
+            if action == "worktree_status":
+                return ToolResult(True, "", data=worktree_status(cwd))
+            if action == "worktree_remove":
+                worktree_id = kwargs.get("worktree_id")
+                if not worktree_id:
+                    return ToolResult(False, "", error="worktree_id is required")
+                spec = discard_worktree(worktree_id)
+                return ToolResult(True, f"Discarded isolated worktree {spec.branch}", data=spec.as_dict())
+            if action == "commit":
+                payload = checkpoint_commit(cwd, kwargs.get("message") or "jarvis checkpoint")
+                return ToolResult(True, f"commit={payload['commit']} created={payload['created']}", data=payload)
             return ToolResult(False, "", error=f"Unknown action {action}")
-        except PermissionError as exc:
+        except WorktreeError as exc:
             return ToolResult(False, "", error=str(exc))
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

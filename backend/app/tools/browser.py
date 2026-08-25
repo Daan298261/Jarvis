@@ -145,13 +145,14 @@ class BrowserTool(Tool):
             try:
                 if action == "close":
                     global _playwright, _browser, _context, _page, _pages
+                    if not _context and not _page:
+                        return ToolResult(True, "Browser was not running")
                     if _context:
                         await _context.close()
                     if _playwright:
                         await _playwright.stop()
                     _context = None
                     _playwright = None
-                    _browser = None
                     _page = None
                     _pages = []
                     return ToolResult(True, "Browser closed")

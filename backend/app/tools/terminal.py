@@ -54,7 +54,11 @@ def _python_args(command: str) -> list[str]:
 
 
 def default_shell() -> str:
-    return "powershell" if os.name == "nt" else "bash"
+    if sys.platform == "win32":
+        return "powershell"
+    if shutil.which("bash"):
+        return "bash"
+    return "python"
 
 
 def _command_args(command: str, shell: str) -> list[str] | ToolResult:
@@ -72,21 +76,12 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
             return command.split()
         return ["git", *command.split()]
     if shell in {"bash", "wsl"}:
-        if shutil.which("wsl") and os.name == "nt":
+        if sys.platform == "win32" and shutil.which("wsl") and shell == "wsl":
             return ["wsl", "-e", "bash", "-lc", command]
         if shutil.which("bash"):
             return ["bash", "-lc", command]
         return ToolResult(False, "", error="WSL/bash is not available on this machine")
-    fallback = default_shell()
-    if fallback == "bash" and shutil.which("bash"):
-        return ["bash", "-lc", command]
-    exe = shutil.which("powershell") or shutil.which("pwsh")
-    if exe:
-        return [exe, "-NoProfile", "-Command", command]
-    if shutil.which("bash"):
-        return ["bash", "-lc", command]
-    python = sys.executable or shutil.which("python") or shutil.which("python3") or "python3"
-    return [python, "-c", command]
+    return _command_args(command, default_shell())
 
 
 async def _pump(job: BackgroundJob) -> None:
@@ -159,7 +154,6 @@ class TerminalTool(Tool):
             "shell": {
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
-                "description": "Defaults to PowerShell on Windows and bash on Linux.",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},

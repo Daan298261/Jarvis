@@ -210,6 +210,15 @@ export function ChatPage() {
                 Continue this
               </button>
             )}
+            <button
+              className="btn danger"
+              onClick={async () => {
+                await api("/api/self-dev/stop", { method: "POST", body: JSON.stringify({ reason: "Portal emergency stop" }) })
+                alert("Emergency stop is on. New tasks and queued files are blocked until you resume on System.")
+              }}
+            >
+              STOP AUTONOMOUS DEVELOPMENT
+            </button>
           </div>
         </div>
         <div className="card">

@@ -79,6 +79,15 @@ class CodingSettings(BaseModel):
     local_max_attempts: int = 2
 
 
+class SelfDevSettings(BaseModel):
+    max_duration_hours: float = 12.0
+    max_paid_spend_eur: float = 0.0
+    max_paid_invocations: int = 0
+    max_consecutive_failures: int = 3
+    experimental_port: int = 4781
+    auto_merge: bool = False
+
+
 class AppSettings(BaseModel):
     bind_host: str = "127.0.0.1"
     bind_port: int = 4780
@@ -93,6 +102,7 @@ class AppSettings(BaseModel):
     logging_level: str = "INFO"
     backup_enabled: bool = True
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
+    self_dev: SelfDevSettings = Field(default_factory=SelfDevSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
