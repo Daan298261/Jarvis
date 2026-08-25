@@ -11,6 +11,17 @@ Priority mapping:
 
 Do not start P4/P5 implementation ahead of active P0–P3 work unless the master plan or user explicitly promotes it.
 
+Intended progression:
+
+```text
+P0 → fast/reliable local intelligence
+P1 → autonomous software development
+P2 → swarm-ready architecture
+P3 → multi-node distributed execution
+P4 → resilient + adaptive Jarvis
+P5 → domain/business operating platform
+```
+
 Security/SIEM/forensics are outside this specification and remain separately deferred.
 
 ---
@@ -55,6 +66,25 @@ Minimum event families:
 - `USER_CORRECTED_RESULT`, `USER_REJECTED_RESULT`
 - `AUTOMATION_TRIGGERED`, `AUTOMATION_FAILED`
 - `RECOVERY_ATTEMPTED`, `RECOVERY_SUCCEEDED`, `RECOVERY_FAILED`
+
+Each event should carry structured metadata where applicable:
+
+- timestamp
+- task ID
+- workflow ID
+- worker
+- model
+- node
+- tool
+- task class
+- duration
+- result
+- cost where applicable
+- error classification
+- retry count
+- verification outcome
+
+These events become input to trajectory memory, adaptive routing, failure analysis, resource optimization, worker scoring, model scoring, automation auditing, and operational dashboards.
 
 Record observable facts and compact summaries only. Do not store hidden chain-of-thought.
 

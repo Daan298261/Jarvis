@@ -1,5 +1,4 @@
 from app.tools.capabilities import capability_snapshot, optional_workers
-from app.tools.browser_backends import browser_use_available
 
 
 def test_browser_use_worker_reflects_install_state():

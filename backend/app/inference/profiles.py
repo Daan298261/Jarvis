@@ -47,19 +47,7 @@ MMPROJ_NAME = EXPERT_MMPROJ
 
 
 def with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
-    return ModelProfile(
-        name=profile.name,
-        label=profile.label,
-        quant=profile.quant,
-        filename=profile.filename,
-        thinking=profile.thinking,
-        context_size=int(context_size),
-        temperature=profile.temperature,
-        top_p=profile.top_p,
-        top_k=profile.top_k,
-        presence_penalty=profile.presence_penalty,
-        description=profile.description,
-    )
+    return replace(profile, context_size=int(context_size))
 
 
 PROFILES: dict[str, ModelProfile] = {
@@ -209,6 +197,23 @@ def resolve_profile(name: str) -> ModelProfile:
         if key == "expert" and not expert_path.exists():
             return PROFILES["balanced"]
     return profile
+
+
+def profile_as_dict(profile: ModelProfile) -> dict:
+    return {
+        "name": profile.name,
+        "label": profile.label,
+        "quant": profile.quant,
+        "thinking": profile.thinking,
+        "thinking_mode": profile.thinking_mode,
+        "context_size": profile.context_size,
+        "description": profile.description,
+        "family": profile.family,
+        "alias": profile.alias,
+        "repo": profile.repo,
+        "installed": profile_gguf(profile).exists(),
+        "vision": profile.vision,
+    }
 
 
 def expert_profile() -> ModelProfile:

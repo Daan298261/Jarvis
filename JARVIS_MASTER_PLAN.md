@@ -10,7 +10,9 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 This file remains the overall source of truth for priorities, current state, and development status. Detailed swarm requirements intentionally live in the separate [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md) specification so this master plan does not duplicate a large evolving subsystem design.
 
-Every development session must read this file before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`.
+**P4/P5 adaptive intelligence and domain packs** live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file specifies resilient adaptive learning, domain packs, and business operating workflows translated from useful Founder OS patterns into native Jarvis abstractions. Do not start P4/P5 implementation ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it.
+
+Every development session must read this file before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`. Work touching execution eventing, confidence-gated memory, adaptive routing, workflow patterns, domain packs, or business operations must also read `ADAPTIVE_DOMAIN_ARCHITECTURE.md`.
 
 Cursor is responsible for keeping this document accurate.
 
@@ -3482,7 +3484,9 @@ Priority order:
 9. reusable skills, trajectory learning, and operational benchmarking improvements;
 10. P3 multi-node swarm only after the P2 single-node placement abstractions are sound;
 11. voice/phone and other product capabilities according to the active Development Queue;
-12. P4 swarm resilience and deferred specialized infrastructure only when explicitly promoted.
+12. P4 adaptive intelligence and domain workflows from `ADAPTIVE_DOMAIN_ARCHITECTURE.md` only when explicitly promoted;
+13. P5 domain packs / business operating platform from `ADAPTIVE_DOMAIN_ARCHITECTURE.md` only when explicitly promoted;
+14. P4 swarm resilience and deferred specialized infrastructure from `SWARM_ARCHITECTURE.md` only when explicitly promoted.
 
 ---
 
@@ -3709,7 +3713,7 @@ Results: **105 passed** on this branch. Live Qwen/Windows e2e remains the next d
 
 Statuses: TODO, IN PROGRESS, BLOCKED, VERIFIED
 
-Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/foundation or useful improvement, P3 multi-node/future capability, P4 resilience/advanced long-term infrastructure.
+Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/foundation or useful improvement, P3 multi-node/future capability, P4 adaptive intelligence/resilience, P5 domain/business platform, P4 (swarm) advanced long-term infrastructure per `SWARM_ARCHITECTURE.md`.
 
 ### P0
 
@@ -3872,6 +3876,34 @@ These items make the existing machine a one-node swarm first. They must not requ
 - [ ] Open Interpreter adapter
 - [ ] Browser workflow promotion (BrowserCode-style skills)
 
+### P4 — Adaptive intelligence (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
+
+Specified, not implemented. Complements swarm resilience in `SWARM_ARCHITECTURE.md`.
+
+- [ ] Structured execution event layer (central event model; correlation IDs; outcome states)
+- [ ] Memory confidence lifecycle (`CANDIDATE` → `CONFIRMED` → `APPLIED` → `DISMISSED`)
+- [ ] Memory categories, reinforcement, and confidence-gated context injection (3–8 relevant memories)
+- [ ] Adaptive Intelligence layer (observation → learning → routing → self-healing)
+- [ ] Adaptive worker/model routing and node placement with warm-worker/data-locality bonuses
+- [ ] Learned recovery reliability and graceful degradation (`CAPABILITY_UNAVAILABLE`)
+- [ ] Standard multi-agent patterns (pipeline, parallel gathering, batch, competing hypotheses, map/reduce, supervisor)
+- [ ] Workflow composition engine, idempotent automation, universal scheduling bridge
+- [ ] Capability/automation audit and optional coverage score
+- [ ] Business/project context profiles with least-context isolation
+
+### P5 — Domain packs / business platform (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
+
+Specified, not implemented.
+
+- [ ] Domain Pack architecture (enableable packs; namespace convention)
+- [ ] Core business workflows: daily briefing, inbox, meeting intelligence, follow-up tracker
+- [ ] Report generation pipeline; competitive intelligence; proposal generation
+- [ ] Invoice/expense processing; goals/milestones; knowledge base
+- [ ] Cross-domain workflow composition; domain dashboard views
+- [ ] Domain Pack dependency declaration, health/coverage, enablement lifecycle
+- [ ] Domain-specific verification per pack; domain learning into shared P4 layer
+- [ ] External integrations as sync targets — Jarvis owns canonical state
+
 ### Jarvis 2.0 — specified, not implemented
 
 Do not start these instead of Windows P0 unless the user asked for Away Mode / 2.0 work.
@@ -3907,6 +3939,14 @@ External frameworks such as OpenHands, UFO and Browser Use are execution workers
 Reason:
 
 Maintains a single persistent agent architecture while allowing specialized mature tooling.
+
+Decision: adaptive intelligence and domain packs remain separate authoritative specifications
+
+Detailed P4/P5 requirements for execution eventing, confidence-gated memory, adaptive routing, workflow patterns, domain packs, and business operating workflows live in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. The master plan references that file and owns priority/status rather than duplicating the full adaptive/domain specification.
+
+Reason:
+
+The adaptive/domain design is large and will evolve independently; keeping one detailed spec prevents the master plan from becoming contradictory or excessively duplicated. Founder OS is an architecture reference only — not a Jarvis dependency.
 
 Decision: swarm architecture remains a separate authoritative specification
 
