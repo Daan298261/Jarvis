@@ -8,7 +8,7 @@ The portal is [http://127.0.0.1:4780](http://127.0.0.1:4780). The same REST API 
 
 This is a **Windows** product. Startup scripts, Office COM, and desktop UI automation assume Windows. Linux is only useful for unit tests; see [DEVELOPMENT.md](DEVELOPMENT.md).
 
-Non-technical Windows 11 users: a one-click `.exe` is specified in [`INSTALLER.md`](../INSTALLER.md) (P1; not shipped until that `.exe` exists). **This page is the developer / manual path.**
+Non-technical Windows 11 users: a one-click `.exe` is specified in [`INSTALLER.md`](../INSTALLER.md) (`JarvisSetup.exe` smoke PR #51; wizard/GPU/WAN first-run still open). **This page is the developer / manual path.**
 
 ---
 

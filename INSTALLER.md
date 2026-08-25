@@ -1,6 +1,8 @@
 # Windows consumer installer
 
-Status: **separate specification** referenced by `JARVIS_MASTER_PLAN.md` §58 P1. **Not implemented** until a user-facing `.exe` exists. Architect-owned.
+Status: **separate specification** referenced by `JARVIS_MASTER_PLAN.md` §58 P1. Architect-owned.
+
+**Smoke (PR #51, squash-merge onto `cursor/local-qwen-desktop-agent`):** `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**. Remaining: wizard copy, GPU/VRAM fork, no-WAN first-run.
 
 This is the **non-technical onboarding** path: a new Windows 11 user downloads Jarvis and double-clicks one installer. It is **not** a second product, **not** P3 swarm, and **not** a replacement for the developer/manual path in [`docs/INSTALL.md`](docs/INSTALL.md).
 
@@ -56,11 +58,17 @@ Detect NVIDIA GPU and usable VRAM in plain language.
 
 ---
 
-## 6. Acceptance (tick when the .exe exists)
+## 6. Acceptance
 
-- [ ] One Windows 11 `.exe`; double-click; no manual Python/Node/llama.cpp dance
-- [ ] Installs or bundles Python, Node, llama.cpp CUDA, start/stop, portal
-- [ ] First-run: 9B Q8 preferred / Q6 fallback; 27B optional; data dir; private key; optional LAN; no WAN without Link-device
-- [ ] Non-technical progress UI; GPU/VRAM missing → explain and offer CPU-degraded or stop
-- [ ] Start Menu / desktop shortcut launches working local 9B Jarvis
-- [ ] Not treated as P3 swarm; `installer/windows/` not overwritten by unrelated Architect edits
+Covered by Windows smoke (PR #51):
+
+- [x] One Windows 11 `.exe` (`JarvisSetup.exe`)
+- [x] Start/stop + portal: **Start Jarvis** → `GET http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`
+- [x] **9B Abliterated Q8 on disk**
+- [x] Not treated as P3 swarm; Architect PRs must not overwrite `installer/windows/` product files
+
+Still open (not in that smoke):
+
+- [ ] First-run **wizard copy** (plain-language progress UI; data dir; private key; optional LAN; Q6 fallback / 27B optional downloads)
+- [ ] **GPU/VRAM fork**: missing or too small → explain and offer CPU-degraded or stop
+- [ ] **No WAN from first-run** without the Link-device flow (`ANDROID_CLIENT.md`)

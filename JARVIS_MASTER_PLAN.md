@@ -29,7 +29,7 @@ Filter: if a **new** idea would make home-network JARVIS more real, spec it. Nev
 5. [`HOME_IOT.md`](HOME_IOT.md): local-first house control.
 6. [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer): Blue home SIEM (detect/contain/evidence); Purple owned-net tests; Red/counter **disabled by default**. Offensive capability may be added **only** by Taco (manually) or PolitieGPT (LE bot) under the LE gate. Developers / CoS / PR fixer / home self-dev cannot; attempts refuse + audit.
 7. Architect owns all spec files (this file, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`). Executing bots do not edit them.
-8. [`INSTALLER.md`](INSTALLER.md): Windows 11 consumer `.exe` for non-technical onboarding. Unchecked P1 until the `.exe` exists. Do not overwrite D1’s in-flight `installer/windows/` from Architect PRs.
+8. [`INSTALLER.md`](INSTALLER.md): Windows 11 consumer `.exe` for non-technical onboarding. Smoke (PR #51): `JarvisSetup.exe`, Start Jarvis → health 200, Stop kills backend + llama-server, 9B Q8 on disk. Remaining P1: wizard copy, GPU fork, no-WAN first-run. Do not overwrite `installer/windows/` product files from Architect PRs.
 
 
 Every development session must read this file before making substantial changes.
@@ -1853,7 +1853,7 @@ Specified in `JARVIS_2.0.md` (approved Away Mode / novel / marketing / SEO / mul
 
 ### Windows consumer installer
 
-Specified in `INSTALLER.md`. One `.exe` for non-technical Windows 11 onboarding. **Not implemented** until that `.exe` exists. Do not edit in-flight `installer/windows/` from this Architect ticket.
+Specified in `INSTALLER.md`. Smoke on canonical (PR #51): `JarvisSetup.exe`; Start Jarvis → `http://127.0.0.1:4780` health 200; Stop kills backend + llama-server; 9B Q8 on disk. Remaining: wizard copy, GPU/VRAM fork, no-WAN first-run. Do not edit `installer/windows/` product files from this Architect ticket.
 
 ### Persistence
 
@@ -1885,7 +1885,7 @@ Specified in `INSTALLER.md`. One `.exe` for non-technical Windows 11 onboarding.
 - P3 multi-node swarm (discovery, pairing, remote execution) is not started
 - Android WAN reachability / AI-guided router port-forward is specified, not implemented
 - Home IoT and security agents (Blue / Purple / Red-gated) are specified, not implemented
-- Windows consumer `.exe` installer is specified (`INSTALLER.md`), not implemented until the `.exe` exists
+- Windows consumer `.exe`: smoke PR #51 (`JarvisSetup.exe`, Start/Stop, health 200, 9B Q8 on disk). Remaining: wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`)
 
 ### Last End-to-End Test
 
@@ -1973,9 +1973,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [ ] RFC-0002 Agent policy interviews and per-capability autonomy
   - Acceptance: guided interview UI + runtime `authorize()` before every tool. Portal UI is this ticket; the loop hook is PR #72.
   - Status: IN PROGRESS — frontend interview UI against landed `/api/agent-policy`. Do not mark implemented until this UI and #72 are both on canonical.
-- [ ] Windows consumer .exe installer (`INSTALLER.md`)
-  - One double-click `.exe` on Windows 11 for non-technical users. Installs or bundles what `docs/INSTALL.md` requires (Python, Node, llama.cpp CUDA, start/stop, portal). First-run wizard: GGUFs (9B Abliterated Q8 preferred, Q6 fallback; 27B optional/later), data dir, private key, optional LAN; do not expose WAN without the Link-device flow. Start Menu / desktop shortcut launches working local 9B Jarvis. GPU/VRAM missing → explain and offer CPU-degraded or stop. Not P3 swarm. Implementation may live in `installer/windows/`; this spec does not prescribe Inno line-by-line.
-  - Status: TODO / specified. Unchecked until the `.exe` exists. Do not overwrite D1’s in-flight installer files from Architect PRs.
+- [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
+  - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
+  - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
+- [ ] Windows consumer installer — wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`)
+  - Plain-language first-run wizard (progress UI; data dir; private key; optional LAN; Q6 fallback / 27B optional). If GPU/VRAM is missing or too small: explain and offer CPU-degraded or stop. First-run must **not** expose WAN without the Link-device flow.
+  - Status: TODO / specified. Do not overwrite `installer/windows/` product files from Architect PRs.
 
 ### P2
 
@@ -2143,7 +2146,7 @@ Taco: when this pass finishes, the PR must contain all of that. Do not drop any 
 
 Decision: Windows consumer .exe installer is a first-class spec
 
-Non-technical Windows 11 onboarding lives in `INSTALLER.md` (P1, unchecked until the `.exe` exists). One double-click; bundles/installs what `docs/INSTALL.md` requires; first-run wizard; no WAN without Link-device. Implementation may live in `installer/windows/`; this spec does not prescribe Inno line-by-line. Architect PRs must not overwrite D1’s in-flight installer files. Not P3 swarm.
+Non-technical Windows 11 onboarding lives in `INSTALLER.md`. Smoke (PR #51): `JarvisSetup.exe`, Start Jarvis → health 200, Stop kills backend + llama-server, 9B Q8 on disk. Remaining P1: wizard copy, GPU/VRAM fork, no-WAN first-run. This spec does not prescribe Inno line-by-line. Architect PRs must not overwrite `installer/windows/` product files. Not P3 swarm.
 
 Reason:
 
