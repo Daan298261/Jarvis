@@ -13,6 +13,7 @@ from ..swarm.budgets import (
 )
 from ..swarm.capabilities import list_all_capabilities
 from ..swarm.nodes import get_node, list_nodes
+from ..swarm.intelligence import dispatch_work, select_intelligence
 from ..swarm.placement import place_work
 from ..swarm.roles import (
     SWARM_ROLES,
@@ -45,6 +46,21 @@ class PlacementRequest(BaseModel):
     role: str | None = None
     worker_id: str | None = None
     worker_kind: str | None = None
+    claim: dict | None = None
+    ttl_seconds: int | None = 300
+
+
+class IntelligenceRequest(BaseModel):
+    prompt: str
+    task_class: str | None = None
+    execution_mode: str | None = None
+
+
+class DispatchRequest(BaseModel):
+    prompt: str
+    task_class: str | None = None
+    execution_mode: str | None = None
+    role: str | None = None
     claim: dict | None = None
     ttl_seconds: int | None = 300
 
@@ -150,6 +166,34 @@ async def swarm_delete_node_lease(node_id: str, lease_id: str):
         return await release_lease(node_id, lease_id)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/intelligence")
+async def swarm_intelligence(body: IntelligenceRequest):
+    return select_intelligence(
+        body.prompt,
+        task_class=body.task_class,
+        execution_mode=body.execution_mode,
+    )
+
+
+@router.post("/dispatch")
+async def swarm_dispatch(body: DispatchRequest):
+    result = await dispatch_work(
+        body.prompt,
+        task_class=body.task_class,
+        execution_mode=body.execution_mode,
+        role=body.role,
+        claim=body.claim,
+        ttl_seconds=body.ttl_seconds,
+    )
+    placement = result["placement"]
+    if not placement.get("accepted"):
+        code = placement.get("code")
+        if code in {"invalid_request", "invalid_role"}:
+            raise HTTPException(400, placement.get("reason") or "Invalid dispatch request")
+        return JSONResponse(status_code=409, content=result)
+    return result
 
 
 @router.post("/placement")

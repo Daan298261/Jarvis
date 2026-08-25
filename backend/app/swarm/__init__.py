@@ -11,6 +11,7 @@ from .budgets import (
 )
 from .capabilities import detect_localhost_capabilities, list_all_capabilities, register_localhost_capabilities
 from .nodes import get_node, list_nodes, register_localhost_node
+from .intelligence import dispatch_work, select_intelligence
 from .placement import place_work
 from .roles import get_swarm_roles
 from .workers import bind_workers_to_node, worker_catalog
@@ -22,12 +23,14 @@ __all__ = [
     "ensure_default_node_budget",
     "get_node",
     "get_node_budget",
+    "dispatch_work",
     "get_swarm_roles",
     "list_all_capabilities",
     "list_node_leases",
     "list_nodes",
     "place_work",
     "register_localhost_capabilities",
+    "select_intelligence",
     "register_localhost_node",
     "release_lease",
     "remaining_budget",
