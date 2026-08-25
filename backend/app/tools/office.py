@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +15,26 @@ def _dispatch(progid: str):
     return win32com.client.Dispatch(progid)
 
 
+def _office_status() -> dict[str, Any]:
+    windows = platform.system() == "Windows"
+    return {
+        "windows": windows,
+        "com_available": windows,
+        "detail": (
+            "Office COM is available on Windows when Microsoft Office is installed. "
+            "This info action does not Dispatch COM."
+            if windows
+            else "Office COM is unavailable on this OS. info does not Dispatch COM."
+        ),
+    }
+
+
 class OfficeTool(Tool):
     name = "office"
     description = (
         "Read, create, and edit Microsoft Word, Excel, and PowerPoint documents via Windows COM "
-        "when Office is installed. Always write to a new file unless the user asked for in-place edits."
+        "when Office is installed. action=info reports availability without launching Office. "
+        "Always write to a new file unless the user asked for in-place edits."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -36,6 +52,11 @@ class OfficeTool(Tool):
     async def execute(self, **kwargs: Any) -> ToolResult:
         app = (kwargs.get("app") or "").lower()
         action = kwargs.get("action")
+        if action == "info":
+            status = _office_status()
+            return ToolResult(True, status["detail"], data=status)
+        if platform.system() != "Windows":
+            return ToolResult(False, "", error="Office COM is unavailable on this OS")
         try:
             if app == "word":
                 word = _dispatch("Word.Application")

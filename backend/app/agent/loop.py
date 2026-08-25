@@ -33,6 +33,8 @@ from .planning import (
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
+from ..coding.routing import recommendation_prompt_block
+from ..coding.usage import record_task_usage
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .prompts import (
     CONTINUE_PROMPT,
@@ -190,6 +192,7 @@ class AgentRuntime:
         )
         if working is not None:
             await record_trajectory(task_id, working, "completed")
+            await record_task_usage(task_id, "completed", verified=bool(verification))
             for skill in await promote_from_trajectories():
                 await BUS.publish(task_id, "progress", f"Promoted reusable skill: {skill.name}", skill.description[:800])
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
@@ -269,6 +272,10 @@ class AgentRuntime:
             if lessons:
                 system_prompt += "\n\n" + lessons
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
+            if working.task_class in {"software engineering", "mixed"}:
+                routing = await recommendation_prompt_block(working.goal or prompt, working.task_class)
+                system_prompt += "\n\n" + routing
+                await BUS.publish(task_id, "progress", "Selected a coding worker", routing[:1500], stage="understand")
             messages = [
                 ChatMessage(role="system", content=system_prompt),
                 ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
@@ -410,6 +417,7 @@ class AgentRuntime:
                         current_tool="",
                     )
                     await record_trajectory(task_id, working, "failed")
+                    await record_task_usage(task_id, "failed", verified=False)
                     await BUS.publish(task_id, "failed", "Task ended after model timeout", content, stage="failed")
                     return
                 await MANAGER.record_timings(result.timings)
@@ -624,6 +632,7 @@ class AgentRuntime:
                 return
             await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification")
             await record_trajectory(task_id, working, "failed")
+            await record_task_usage(task_id, "failed", verified=False)
             await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
         except asyncio.CancelledError:
             await self._update(task_id, status="cancelled", stage="cancelled")
@@ -631,6 +640,7 @@ class AgentRuntime:
         except Exception as exc:
             await self._update(task_id, status="failed", stage="failed", error=str(exc))
             await record_trajectory(task_id, working, "failed")
+            await record_task_usage(task_id, "failed", verified=False)
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
 
     async def _execute_tool(

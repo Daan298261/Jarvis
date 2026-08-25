@@ -160,6 +160,28 @@ class BenchmarkSample(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class CodingUsageSample(Base):
+    """Paid/local coding-worker cost and outcome for routing decisions."""
+
+    __tablename__ = "coding_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    worker: Mapped[str] = mapped_column(String(40), default="")
+    model: Mapped[str] = mapped_column(String(80), default="")
+    task_class: Mapped[str] = mapped_column(String(64), default="")
+    complexity: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0)
+    verified_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    first_attempt_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
