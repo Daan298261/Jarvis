@@ -193,3 +193,49 @@ export type SwarmRolesResponse = {
 export async function listSwarmRoles(): Promise<SwarmRolesResponse> {
   return api<SwarmRolesResponse>("/api/swarm/roles")
 }
+
+export type SwarmRoleName = "orchestrator" | "leader"
+
+export type SwarmRolePolicyLevel = "AUTO" | "PREFERRED" | "FORCED" | "AVOID" | "DISABLED"
+
+export const SWARM_ROLE_NAMES: SwarmRoleName[] = ["orchestrator", "leader"]
+
+export const SWARM_ROLE_POLICY_LEVELS: SwarmRolePolicyLevel[] = [
+  "AUTO",
+  "PREFERRED",
+  "FORCED",
+  "AVOID",
+  "DISABLED",
+]
+
+export type SwarmRolePolicy = {
+  node_id: string
+  role: string
+  policy: string
+  updated_at: string | null
+}
+
+export type SwarmNodeRolePoliciesResponse = {
+  node_id: string
+  policies: SwarmRolePolicy[]
+}
+
+export async function getNodeRolePolicies(nodeId: string): Promise<SwarmNodeRolePoliciesResponse> {
+  return api<SwarmNodeRolePoliciesResponse>(
+    `/api/swarm/nodes/${encodeURIComponent(nodeId)}/role-policies`,
+  )
+}
+
+export async function putNodeRolePolicy(
+  nodeId: string,
+  role: string,
+  policy: string,
+): Promise<SwarmRolePolicy> {
+  return api<SwarmRolePolicy>(
+    `/api/swarm/nodes/${encodeURIComponent(nodeId)}/role-policies/${encodeURIComponent(role)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ policy }),
+    },
+  )
+}
