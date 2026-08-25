@@ -3,9 +3,12 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   getSwarmNode,
   listSwarmNodes,
+  listSwarmRoles,
   type SwarmNode,
   type SwarmNodeHardware,
   type SwarmNodeResources,
+  type SwarmRoleHolder,
+  type SwarmRolesResponse,
   type SwarmWorker,
 } from "../api"
 
@@ -81,6 +84,70 @@ function ObjectKv({ data }: { data: Record<string, unknown> }) {
   )
 }
 
+function RoleCard({ title, holder }: { title: string; holder: SwarmRoleHolder | null }) {
+  if (!holder) {
+    return (
+      <div className="card">
+        <h2>{title}</h2>
+        <p className="lede" style={{ margin: 0 }}>Unassigned</p>
+      </div>
+    )
+  }
+  return (
+    <div className="card">
+      <h2>{title}</h2>
+      <div className="kv">
+        <b>Role</b><span>{holder.role}</span>
+        <b>Hostname</b><span>{holder.hostname || "—"}</span>
+        <b>Node ID</b>
+        <span>
+          <Link to={`/swarm/${holder.node_id}`} className="stat">{holder.node_id}</Link>
+        </span>
+        <b>Assignment</b><span>{holder.assignment}</span>
+      </div>
+    </div>
+  )
+}
+
+function RolesSection({
+  roles,
+  error,
+  loading,
+}: {
+  roles: SwarmRolesResponse | null
+  error: string | null
+  loading: boolean
+}) {
+  if (error) {
+    return (
+      <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--warn)", padding: "12px 16px" }}>
+        <strong>Roles API unavailable</strong>
+        <p className="lede" style={{ margin: "6px 0 0" }}>
+          {error}. Role holders will appear once <code>GET /api/swarm/roles</code> is live.
+        </p>
+      </div>
+    )
+  }
+  if (loading && !roles) {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ marginBottom: 12 }}>Roles</h2>
+        <p className="lede">Loading roles…</p>
+      </div>
+    )
+  }
+  if (!roles) return null
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <h2 style={{ marginBottom: 12 }}>Roles</h2>
+      <div className="grid cards">
+        <RoleCard title="Orchestrator" holder={roles.orchestrator} />
+        <RoleCard title="Leader" holder={roles.leader} />
+      </div>
+    </div>
+  )
+}
+
 function WorkersSection({ workers }: { workers: SwarmWorker[] | undefined }) {
   if (!workers?.length) {
     return <p className="lede">No workers bound to this node.</p>
@@ -146,8 +213,10 @@ export function SwarmPage() {
   const { nodeId } = useParams()
   const navigate = useNavigate()
   const [nodes, setNodes] = useState<SwarmNode[]>([])
+  const [roles, setRoles] = useState<SwarmRolesResponse | null>(null)
   const [selected, setSelected] = useState<SwarmNode | null>(null)
   const [listError, setListError] = useState<string | null>(null)
+  const [rolesError, setRolesError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -159,6 +228,17 @@ export function SwarmPage() {
     } catch (err) {
       setNodes([])
       setListError(err instanceof Error ? err.message : "Failed to load swarm nodes")
+    }
+  }, [])
+
+  const refreshRoles = useCallback(async () => {
+    try {
+      const data = await listSwarmRoles()
+      setRoles(data)
+      setRolesError(null)
+    } catch (err) {
+      setRoles(null)
+      setRolesError(err instanceof Error ? err.message : "Failed to load swarm roles")
     }
   }, [])
 
@@ -176,11 +256,11 @@ export function SwarmPage() {
   useEffect(() => {
     let active = true
     setLoading(true)
-    refreshList().finally(() => {
+    Promise.all([refreshList(), refreshRoles()]).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [refreshList])
+  }, [refreshList, refreshRoles])
 
   useEffect(() => {
     if (!nodeId) {
@@ -193,7 +273,7 @@ export function SwarmPage() {
 
   async function handleRefresh() {
     setLoading(true)
-    await refreshList()
+    await Promise.all([refreshList(), refreshRoles()])
     if (nodeId) await loadDetail(nodeId)
     setLoading(false)
   }
@@ -214,6 +294,7 @@ export function SwarmPage() {
           </button>
         )}
       </div>
+      <RolesSection roles={roles} error={rolesError} loading={loading} />
       {listError && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--warn)", padding: "12px 16px" }}>
           <strong>Nodes API unavailable</strong>
