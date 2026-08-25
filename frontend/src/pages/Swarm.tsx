@@ -1,13 +1,18 @@
 import { Fragment, useCallback, useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
+  getNodeRolePolicies,
   getSwarmNode,
   listSwarmNodes,
   listSwarmRoles,
+  putNodeRolePolicy,
+  SWARM_ROLE_NAMES,
+  SWARM_ROLE_POLICY_LEVELS,
   type SwarmNode,
   type SwarmNodeHardware,
   type SwarmNodeResources,
   type SwarmRoleHolder,
+  type SwarmRolePolicy,
   type SwarmRolesResponse,
   type SwarmWorker,
 } from "../api"
@@ -148,6 +153,94 @@ function RolesSection({
   )
 }
 
+function formatRoleLabel(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1)
+}
+
+function RolePoliciesSection({
+  nodeId,
+  onRolesRefresh,
+}: {
+  nodeId: string
+  onRolesRefresh: () => Promise<void>
+}) {
+  const [policies, setPolicies] = useState<SwarmRolePolicy[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const loadPolicies = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const data = await getNodeRolePolicies(nodeId)
+      setPolicies(data.policies || [])
+    } catch (err) {
+      setPolicies([])
+      setLoadError(err instanceof Error ? err.message : "Failed to load role policies")
+    } finally {
+      setLoading(false)
+    }
+  }, [nodeId])
+
+  useEffect(() => {
+    loadPolicies()
+  }, [loadPolicies])
+
+  async function handlePolicyChange(role: string, policy: string) {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await putNodeRolePolicy(nodeId, role, policy)
+      await loadPolicies()
+      await onRolesRefresh()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to update role policy")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const policyByRole = new Map(policies.map((entry) => [entry.role, entry.policy]))
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <h2 style={{ marginTop: 0 }}>Role policies</h2>
+      {loadError && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>
+          {loadError}
+        </p>
+      )}
+      {saveError && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>
+          {saveError}
+        </p>
+      )}
+      {loading && !policies.length && !loadError ? (
+        <p className="lede">Loading role policies…</p>
+      ) : (
+        <div className="grid" style={{ gap: 10 }}>
+          {SWARM_ROLE_NAMES.map((role) => (
+            <label key={role} className="row" style={{ alignItems: "center", gap: 12 }}>
+              <span style={{ minWidth: 110 }}>{formatRoleLabel(role)}</span>
+              <select
+                value={policyByRole.get(role) ?? "AUTO"}
+                disabled={loading || saving}
+                onChange={(e) => handlePolicyChange(role, e.target.value)}
+              >
+                {SWARM_ROLE_POLICY_LEVELS.map((level) => (
+                  <option key={level} value={level}>{level}</option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function WorkersSection({ workers }: { workers: SwarmWorker[] | undefined }) {
   if (!workers?.length) {
     return <p className="lede">No workers bound to this node.</p>
@@ -178,13 +271,20 @@ function WorkersSection({ workers }: { workers: SwarmWorker[] | undefined }) {
   )
 }
 
-function NodeDetail({ node }: { node: SwarmNode }) {
+function NodeDetail({
+  node,
+  onRolesRefresh,
+}: {
+  node: SwarmNode
+  onRolesRefresh: () => Promise<void>
+}) {
   return (
     <div className="card">
       <h2>{node.host_alias}</h2>
       <p className="lede" style={{ margin: "0 0 14px" }}>
         {node.is_local ? "Local node" : "Remote node"} · {node.address}
       </p>
+      <RolePoliciesSection nodeId={node.id} onRolesRefresh={onRolesRefresh} />
       <div className="kv" style={{ marginBottom: 16 }}>
         <b>ID</b><span className="stat">{node.id}</span>
         <b>Hostname</b><span>{node.hostname || "—"}</span>
@@ -354,7 +454,7 @@ export function SwarmPage() {
               <p className="lede" style={{ margin: "6px 0 0" }}>{detailError}</p>
             </div>
           )}
-          {selected && <NodeDetail node={selected} />}
+          {selected && <NodeDetail node={selected} onRolesRefresh={refreshRoles} />}
           {!nodeId && !listError && nodes.length > 0 && (
             <div className="card">
               <h2>Node detail</h2>
