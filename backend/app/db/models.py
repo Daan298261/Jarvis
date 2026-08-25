@@ -280,6 +280,30 @@ class AcpSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Node(Base):
+    """A physical or virtual machine participating in the Jarvis swarm.
+
+    Distinct from software Workers (CursorACPWorker, BrowserWorker, etc.) which
+    execute on eligible Nodes.
+    """
+
+    __tablename__ = "nodes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(32), default="online")
+    node_class: Mapped[str] = mapped_column(String(64), default="leader")
+    roles_json: Mapped[str] = mapped_column(Text, default="[]")
+    address: Mapped[str] = mapped_column(String(255), default="127.0.0.1")
+    host_alias: Mapped[str] = mapped_column(String(64), default="localhost")
+    hardware_json: Mapped[str] = mapped_column(Text, default="{}")
+    resources_json: Mapped[str] = mapped_column(Text, default="{}")
+    is_local: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class WorkerReport(Base):
     """Worker-reported results and verification requests. Never treated as completion."""
 
