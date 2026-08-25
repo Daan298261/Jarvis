@@ -51,64 +51,20 @@ async def _ensure_page(headless: bool):
     return _page
 
 
-async def _close_browser() -> ToolResult:
+async def _close_browser():
     global _playwright, _browser, _context, _page, _pages
-    if not _context and not _playwright and not _page:
-        return ToolResult(True, "Browser already closed")
     if _context:
         await _context.close()
+    elif _browser:
+        await _browser.close()
     if _playwright:
         await _playwright.stop()
     _context = None
+    _browser = None
     _playwright = None
     _page = None
     _pages = []
     return ToolResult(True, "Browser closed")
-
-
-async def _wait_stable(page: Any) -> None:
-    for state in ("domcontentloaded", "load"):
-        try:
-            await page.wait_for_load_state(state, timeout=8000)
-        except Exception:
-            continue
-    try:
-        await page.wait_for_load_state("networkidle", timeout=4000)
-    except Exception:
-        pass
-
-
-async def _goto_with_retry(page: Any, url: str) -> None:
-    last_error: Exception | None = None
-    for attempt in range(_GOTO_RETRIES):
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await _wait_stable(page)
-            return
-        except Exception as exc:
-            last_error = exc
-            if attempt < _GOTO_RETRIES - 1:
-                await asyncio.sleep(0.4 * (attempt + 1))
-    raise last_error or RuntimeError(f"Failed to open {url}")
-
-
-async def _click_named(page: Any, name: str) -> None:
-    locators = [page.get_by_role(role, name=name) for role in _NAMED_ROLES]
-    locators.extend(
-        [
-            page.get_by_label(name),
-            page.get_by_placeholder(name),
-            page.get_by_text(name, exact=True),
-        ]
-    )
-    last_error: Exception | None = None
-    for locator in locators:
-        try:
-            await locator.first.click(timeout=4000)
-            return
-        except Exception as exc:
-            last_error = exc
-    raise last_error or RuntimeError(f"No control named {name}")
 
 
 class BrowserTool(Tool):
@@ -188,18 +144,7 @@ class BrowserTool(Tool):
         async with _lock:
             try:
                 if action == "close":
-                    global _playwright, _browser, _context, _page, _pages
-                    if not _context and not _page:
-                        return ToolResult(True, "Browser was not running")
-                    if _context:
-                        await _context.close()
-                    if _playwright:
-                        await _playwright.stop()
-                    _context = None
-                    _playwright = None
-                    _page = None
-                    _pages = []
-                    return ToolResult(True, "Browser closed")
+                    return await _close_browser()
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs["url"]

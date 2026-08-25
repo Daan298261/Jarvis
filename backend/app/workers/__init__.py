@@ -1,9 +1,10 @@
-"""Optional execution workers. Jarvis stays the orchestrator."""
+"""Optional worker adapters. Jarvis stays the orchestrator; these never replace native tools."""
 
-from .code import OpenInterpreterBackend, open_interpreter_status, resolve_code_backend
+from .computer import CuaBackend, NativeWindowsBackend, UFOBackend, preferred_computer_backend
 
 __all__ = [
-    "OpenInterpreterBackend",
-    "open_interpreter_status",
-    "resolve_code_backend",
+    "CuaBackend",
+    "NativeWindowsBackend",
+    "UFOBackend",
+    "preferred_computer_backend",
 ]

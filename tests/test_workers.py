@@ -1,73 +1,54 @@
-from __future__ import annotations
-
-from pathlib import Path
+import sys
 
 import pytest
 
-from app.tools.base import ToolResult
-from app.workers.code import (
-    OpenInterpreterBackend,
-    open_interpreter_status,
-    resolve_code_backend,
-    sandbox_working_directory,
-)
+from app.tools.capabilities import optional_workers
+from app.tools.computer_use import CuaTool, UFOTool
+from app.workers.computer import CuaBackend, NativeWindowsBackend, UFOBackend, preferred_computer_backend
 
 
-def test_open_interpreter_is_catalogued_even_when_missing():
-    status = open_interpreter_status()
-    assert status["id"] == "open-interpreter"
-    assert status["status"] in {"ready", "missing"}
-    if not status["available"]:
-        assert status["status"] == "missing"
-        native = resolve_code_backend()
-        assert native.name == "native"
+def test_ufo_and_cua_are_integrated_even_when_missing():
+    workers = {item["id"]: item for item in optional_workers()}
+    assert workers["ufo"]["status"] in {"missing", "ready"}
+    assert workers["cua"]["status"] in {"missing", "ready"}
+    assert workers["ufo"]["status"] != "not_integrated"
+    assert workers["cua"]["status"] != "not_integrated"
 
 
-def test_sandbox_rejects_paths_outside_allowed(tmp_path):
-    allowed = [str(tmp_path)]
-    inside = sandbox_working_directory(str(tmp_path / "proj"), allowed)
-    assert inside == (tmp_path / "proj").resolve()
-    with pytest.raises(PermissionError):
-        sandbox_working_directory("/etc", allowed)
+def test_ufo_command_builder_uses_module_or_cli():
+    backend = UFOBackend()
+    module_cmd = backend.build_command("click Save in Notepad", app="Notepad", kind="python-module:ufo")
+    assert module_cmd[:4] == [sys.executable, "-m", "ufo", "--task"]
+    assert "click Save in Notepad" in module_cmd
+    assert module_cmd[-2:] == ["--app", "Notepad"]
+    cli_cmd = backend.build_command("open Calculator", kind="cli:ufo")
+    assert cli_cmd[:3] == ["ufo", "--task", "open Calculator"]
 
 
-async def test_open_interpreter_missing_points_at_native_tools(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "app.workers.code.open_interpreter_status",
-        lambda: {"available": False, "module": False, "cli": None, "status": "missing"},
-    )
-    result = await OpenInterpreterBackend().run(
-        "write hello.py",
-        tmp_path,
-        api_base="http://127.0.0.1:8088/v1",
-        api_key="local",
-        model="openai/Qwen3.5-27B",
-        timeout=5,
-    )
-    assert result.success is False
-    assert "not installed" in result.error.lower()
-    assert "python" in result.error.lower()
+def test_cua_command_builder_uses_run_for_cli():
+    backend = CuaBackend()
+    cli_cmd = backend.build_command("focus the window", app="Word", kind="cli:cua")
+    assert cli_cmd[:4] == ["cua", "run", "--task", "focus the window"]
+    assert cli_cmd[-2:] == ["--app", "Word"]
+    module_cmd = backend.build_command("type hello", kind="python-module:cua")
+    assert module_cmd[:4] == [sys.executable, "-m", "cua", "--task"]
 
 
-async def test_open_interpreter_runs_injected_backend(tmp_path, monkeypatch):
-    async def fake_run(self, instruction, working_directory, **kwargs):
-        Path(working_directory, "ok.txt").write_text(instruction, encoding="utf-8")
-        return ToolResult(True, "wrote ok.txt", data={"backend": "open-interpreter"})
-
-    monkeypatch.setattr(
-        "app.workers.code.open_interpreter_status",
-        lambda: {"available": True, "module": True, "cli": None, "status": "ready"},
-    )
-    monkeypatch.setattr(OpenInterpreterBackend, "run", fake_run)
-    backend = OpenInterpreterBackend()
-    result = await backend.run("hello", tmp_path, api_base="http://x", api_key="k", model="m", timeout=5)
-    assert result.success is True
-    assert (tmp_path / "ok.txt").read_text(encoding="utf-8") == "hello"
+@pytest.mark.asyncio
+async def test_missing_ufo_and_cua_point_at_native_desktop():
+    ufo = await UFOTool().execute(action="run", goal="click File in Notepad")
+    cua = await CuaTool().execute(action="run", goal="click File in Notepad")
+    assert ufo.success is False
+    assert cua.success is False
+    assert "desktop" in (ufo.error or "").lower()
+    assert "desktop" in (cua.error or "").lower()
+    empty = await UFOTool().execute(action="run", goal="  ")
+    assert empty.success is False
+    assert "goal is required" in (empty.error or "")
 
 
-async def test_code_worker_tool_requires_instruction(jarvis_env):
-    from app.tools.registry import REGISTRY
-
-    result = await REGISTRY.execute("code_worker", {})
-    assert result.success is False
-    assert "instruction" in result.error
+def test_preferred_backend_falls_back_to_native_when_workers_missing():
+    chosen = preferred_computer_backend()
+    assert isinstance(chosen, (NativeWindowsBackend, UFOBackend, CuaBackend))
+    if not UFOBackend().available() and not CuaBackend().available():
+        assert isinstance(chosen, NativeWindowsBackend)

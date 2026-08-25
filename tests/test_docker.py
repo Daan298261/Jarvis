@@ -1,21 +1,20 @@
+import pytest
+
 from app.tools.docker_tools import DockerTool
 
 
-async def test_docker_run_logs_inspect_require_targets(monkeypatch):
-    tool = DockerTool()
-    monkeypatch.setattr("app.tools.docker_tools.shutil.which", lambda name: "/usr/bin/docker")
-    ran = await tool.execute(action="run")
-    assert ran.success is False
-    assert "image is required" in ran.error
-    logs = await tool.execute(action="logs")
-    assert "container is required" in logs.error
-    inspect = await tool.execute(action="inspect")
-    assert "container or image is required" in inspect.error
+@pytest.mark.asyncio
+async def test_docker_run_requires_an_image():
+    result = await DockerTool().execute(action="run", args="-d")
+    assert result.success is False
+    assert "requires an image" in (result.error or "")
 
 
-async def test_docker_missing_binary():
-    tool = DockerTool()
-    result = await tool.execute(action="ps")
-    if result.success:
-        return
-    assert "not installed" in result.error
+@pytest.mark.asyncio
+async def test_docker_logs_and_inspect_require_a_target():
+    logs = await DockerTool().execute(action="logs")
+    inspect = await DockerTool().execute(action="inspect")
+    assert logs.success is False
+    assert "requires a container" in (logs.error or "")
+    assert inspect.success is False
+    assert "requires a container or image" in (inspect.error or "")

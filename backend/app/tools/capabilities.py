@@ -5,7 +5,7 @@ import platform
 import shutil
 from typing import Any
 
-from ..agent.coding_workers import coding_worker_catalog
+from ..workers.computer import CuaBackend, UFOBackend
 
 
 def _module_available(name: str) -> bool:
@@ -131,23 +131,16 @@ def optional_workers() -> list[dict[str, Any]]:
                 "Playwright remains the deterministic default."
             ),
         },
+        UFOBackend().probe(),
+        CuaBackend().probe(),
         {
-            "id": "ufo",
-            "name": "Microsoft UFO",
+            "id": "open-interpreter",
+            "name": "Open Interpreter",
             "kind": "optional",
             "available": False,
             "status": "not_integrated",
-            "detail": "Windows HostAgent/AppAgent worker. Native UI Automation is the current fallback.",
+            "detail": "Optional code/shell worker behind an adapter.",
         },
-        {
-            "id": "cua",
-            "name": "Cua",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Computer-use worker. Not required for Jarvis to run.",
-        },
-        open_interpreter_status(),
         {
             "id": "openhands",
             "name": "OpenHands",

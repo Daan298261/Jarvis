@@ -57,6 +57,18 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("terminal", "drive the app through its CLI or PowerShell instead of the GUI"),
         Alternative("screenshot", "capture the screen and use vision when UI Automation cannot see the control"),
         Alternative("browser", "use the web interface if the app has one"),
+        Alternative("ufo", "Windows HostAgent worker when native UI Automation is not enough"),
+        Alternative("cua", "computer-use worker when accessibility lookup fails"),
+    ),
+    "ufo": (
+        Alternative("desktop", "use native UI Automation / pywinauto instead of UFO"),
+        Alternative("terminal", "drive the app through its CLI or PowerShell"),
+        Alternative("screenshot", "inspect the screen when the worker cannot see the control"),
+    ),
+    "cua": (
+        Alternative("desktop", "use native UI Automation / pywinauto instead of Cua"),
+        Alternative("terminal", "drive the app through its CLI or PowerShell"),
+        Alternative("screenshot", "inspect the screen when the worker cannot see the control"),
     ),
     "terminal": (
         Alternative("python", "do the work in a script instead of a shell one-liner"),

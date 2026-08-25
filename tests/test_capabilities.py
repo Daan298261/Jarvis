@@ -4,13 +4,12 @@ from app.tools.browser_backends import browser_use_available
 
 def test_browser_use_worker_reflects_install_state():
     workers = {item["id"]: item for item in optional_workers()}
-    for key in ("browser-use", "ufo", "cua", "openhands"):
+    for key in ("browser-use", "open-interpreter", "openhands"):
         assert workers[key]["available"] is False
         assert workers[key]["status"] == "not_integrated"
-    oi = workers["open-interpreter"]
-    assert oi["status"] in {"missing", "ready"}
-    if not oi["available"]:
-        assert oi["status"] == "missing"
+    for key in ("ufo", "cua"):
+        assert workers[key]["status"] in {"missing", "ready"}
+        assert workers[key]["status"] != "not_integrated"
 
 
 def test_capability_snapshot_includes_native_filesystem():

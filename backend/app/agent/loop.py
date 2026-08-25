@@ -44,8 +44,7 @@ from .escalation import build_escalation_package, persist_escalation_package
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
-from ..coding.routing import recommendation_prompt_block
-from ..coding.usage import record_task_usage
+from .tool_exposure import allowed_tool_names, apply_request, exposure_prompt_block
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .policy import policy_guidance
 from .prompts import (
@@ -263,19 +262,8 @@ class AgentRuntime:
                 working.goal = prompt.strip().splitlines()[0][:240]
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
-        coding_route = None
-        if not continue_existing and should_route(working.task_class, prompt):
-            coding_route = route_software_task(prompt, task_class=working.task_class)
-            working.coding_worker = coding_route.selected_worker
-            working.coding_tier = coding_route.tier_name
-            await record_coding_route(task_id, coding_route)
-            await BUS.publish(
-                task_id,
-                "progress",
-                f"Coding worker: {coding_route.selected_worker} (tier {coding_route.tier})",
-                coding_route.reason[:1500],
-                stage="understand",
-            )
+            if not isinstance(working.extra_tools, list):
+                working.extra_tools = []
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         recommended_context = recommend_context_size(
@@ -502,35 +490,17 @@ class AgentRuntime:
                     "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if think else "Model is responding")),
                     stage="verify" if verifying else "act",
                 )
-                messages = compact_history(messages, working_state_block=working.as_prompt_block())
-                if context_under_pressure(estimate_message_chars(messages), MANAGER.state.context_size or wanted_context):
-                    grown = bump_context_tier(MANAGER.state.context_size or wanted_context)
-                    grown = select_context_size(
-                        task_class=working.task_class,
-                        execution_mode=execution_mode,
-                        profile_name=profile.name,
-                        profile_cap=profile.context_size,
-                        prompt=prompt,
-                        current=grown,
-                    )
-                    if grown > (MANAGER.state.context_size or 0):
-                        await MANAGER.ensure_runtime(
-                            settings,
-                            profile_name,
-                            context_size=grown,
-                            vision=MANAGER.state.vision_loaded or need_vision,
-                        )
-                        await BUS.publish(
-                            task_id,
-                            "progress",
-                            f"Expanded context to {MANAGER.state.context_size}",
-                            stage="act",
-                        )
+                messages = compact_history(
+                    messages,
+                    working_state_block=working.as_prompt_block() + "\n" + exposure_prompt_block(working.task_class, working.extra_tools),
+                )
                 try:
                     result: ChatResult = await asyncio.wait_for(
                         provider.chat(
                             messages,
-                            tools=exposed,
+                            tools=None if force_final else REGISTRY.openai_tools(
+                                allowed_tool_names(working.task_class, working.extra_tools)
+                            ),
                             temperature=profile.temperature,
                             top_p=profile.top_p,
                             top_k=profile.top_k,
@@ -650,6 +620,16 @@ class AgentRuntime:
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
                         observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
                         failed = "ERROR:" in observation or observation.lower().startswith("error")
+                        if not failed and name == "request_tools":
+                            requested = arguments.get("names") if isinstance(arguments, dict) else []
+                            working.extra_tools = apply_request(working.extra_tools, requested)
+                            await BUS.publish(
+                                task_id,
+                                "progress",
+                                "Expanded tool set",
+                                ",".join(working.extra_tools)[:1500] or "all tools",
+                                stage="act",
+                            )
                         if failed:
                             consecutive_failures += 1
                             failures_by_tool[name] = failures_by_tool.get(name, 0) + 1

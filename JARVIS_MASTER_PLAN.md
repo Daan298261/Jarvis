@@ -3609,9 +3609,9 @@ This development session:
 ### Working Tools
 
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell on Windows (CMD/Python/Git/WSL/bash also supported). Linux defaults to bash. `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
-- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`; interpreter defaults to the Jarvis process executable
-- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
+- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
+- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
+- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs). `close` tears down the persistent context without launching Chromium and clears `_pages`.
 - Playwright: native backend present
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
 - Office: Word/Excel/PowerPoint. Windows COM when Office is installed; python-docx / openpyxl / python-pptx otherwise. Paths are sandboxed.
@@ -3620,16 +3620,15 @@ This development session:
 - Web fetch: HTTP GET/POST/HEAD with optional body, headers, and sandboxed download
 - Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
-- Git: status/diff/log/search plus `checkpoint` (backup branch + optional WIP ref; does not reset the working tree)
-- Docker: `run`/`logs`/`inspect` require a target even when Docker is missing
+- Tool exposure: task class selects a small schema (`agent/tool_exposure.py`); `request_tools` expands it. Mixed and long-horizon tasks still receive every enabled tool.
 
 ### Optional Workers
 
-- Optional workers stay listed as unavailable: Browser Use, UFO, Cua, OpenHands, Open Interpreter
-- Jarvis MCP server for Cursor: **implemented** (`GET /api/mcp/jarvis`, `python3 -m app.mcp_stdio`). Read-oriented plus verification/result reporting; recursive Cursor dispatch is refused.
-- Cursor ACP client: **code present** (JSON-RPC session lifecycle, persisted session IDs, auto-answer for isolated routine questions). Live `agent acp` is `not_connected` here.
-- EscalationContext packaging: **implemented** (compact package persisted after repeated tool failures; never a raw transcript dump)
-- Flagship benchmark `Away Mode — Autonomous Bug Fix`: **not implemented**
+- Browser Use: **not integrated** (catalog shows `not_integrated`)
+- UFO: **adapter present** — probes for a local `ufo`/`ufo2` install; reports `missing` here and falls back to the native `desktop` tool
+- Cua: **adapter present** — probes for a local `cua` install; reports `missing` here and falls back to the native `desktop` tool
+- Open Interpreter: **not integrated**
+- OpenHands: **not integrated**
 
 ### Jarvis 2.0
 
@@ -3680,10 +3679,7 @@ This development session:
 
 - Live Qwen3.5-27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
-- Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
-- Paid coding workers (Composer 2.5, Grok 4.6, frontier) are catalogued but not connected; routing falls back to the local worker
-- The 20-task agent suite exists as fixtures + scoring; live 9B vs 27B comparison has not run
-- Hardware purchases remain gated until that desktop comparison exists
+- Browser Use / OpenHands / Open Interpreter adapters are absent; UFO and Cua adapters are present and report `missing` until installed
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
 - Cursor ACP CLI is not on PATH in this environment; the client is catalogued `not_connected`
@@ -3695,11 +3691,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, Jarvis MCP server, EscalationContext packaging, ACP session auto-answer, tool QA guards
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **dynamic tool exposure**, **UFO/Cua adapters**, docker `run` image requirement, browser `close` without launching Chromium
 - Frontend (`npm run build`): TypeScript build
 - Portal: Command, Tools (`code_worker`, Open Interpreter `missing`), Guide (`browser-form` / `browser-procedure`), Settings Inference card (Ollama port 11434), Model Probe, System backends
 
-Results: **97 passed** on this tree after Jarvis MCP, EscalationContext, ACP session auto-answer, and tool QA guards. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **94 passed** on this tree (dynamic tool exposure, UFO/Cua adapters, docker/browser QA). Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3727,29 +3723,13 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: task cannot be marked successful without an independent verification pass.
   - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
 
-- [x] Dynamic thinking (P0.4)
-  - Acceptance: Fast never thinks; Balanced/Quality spend reasoning tokens on planning, recovery, and Reliable verification, not routine list/read/status calls.
-  - Status: VERIFIED in unit tests (`test_model_policy.py`). Live llama.cpp `enable_thinking` still needs the Windows desktop.
+- [x] Dynamic tool exposure (P0.7)
+  - Acceptance: classification selects a small relevant tool set; `request_tools` can expand it; mixed/long-horizon tasks still receive every enabled tool.
+  - Status: VERIFIED (`test_tool_exposure.py`)
 
-- [x] Lazy vision loading (P0.5)
-  - Acceptance: llama.cpp starts without `--mmproj` unless vision mode is always, the task is multimodal/Windows GUI, or a screenshot is attached.
-  - Status: VERIFIED in unit tests (`test_inference_backends.py`). Live projector attach/reload needs GGUF + mmproj.
-
-- [x] Dynamic context size (P0.6)
-  - Acceptance: simple 8K, normal 16K, long 32K; Fast never opens 32K; Reliable steps one tier up; mid-task shrink is forbidden; idle Balanced load is 16K not 32K.
-  - Status: VERIFIED in unit tests (`test_model_policy.py`, unloaded snapshot). Live VRAM effect not measured here.
-
-- [ ] Reliable P0 model stack on the Windows desktop
-  - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
-  - Status: TODO / IN PROGRESS by plan (current code still reflects the 27B implementation path; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must validate the new model stack and run `tests/run_e2e.py`.
-
-- [x] Representative 20-task agent benchmark suite (P0.9 dataset + scoring)
-  - Acceptance: at least 20 realistic autonomous tasks with prepare/check fixtures and the P0.9 metric set (success, intervention, timings, model/tool calls, retries, schema errors, incorrect actions, verification). Primary metric is successful autonomous tasks per minute.
-  - Status: VERIFIED in unit tests (`test_agent_benchmark.py`). Live 9B Q8 vs 9B Q6 vs 27B Q4 comparison remains blocked (no GPU/GGUF).
-
-- [x] Hardware purchasing gate (P0.12)
-  - Acceptance: Jarvis reports bottleneck signals from hardware + stored samples and does not recommend extra RAM/Tesla/V100/NPU hardware until the desktop suite has run.
-  - Status: VERIFIED in unit tests (`test_hardware_gate.py`) and Model page (`GET /api/model/hardware-gate`). Decision is `defer_purchase` until Windows evidence exists.
+- [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
+  - Acceptance: model loads, API responds, tool calls work, vision projector loads.
+  - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`.
 
 ### P1
 
@@ -3843,35 +3823,15 @@ These items make the existing machine a one-node swarm first. They must not requ
 
 - [ ] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
 - [ ] Phone / Android client against the local API
-- [x] Dedicated LAN inference server
-  - Acceptance: remote/Ollama/LM Studio/vLLM/SGLang backends probe health and advertised models; Settings and Model pages can point Jarvis at a LAN GPU box without local GGUF files.
-  - Status: VERIFIED in unit tests (`test_inference_backends.py`); live LAN endpoint untested in this environment
-- [ ] UFO adapter
-- [ ] Cua adapter
-- [x] Open Interpreter adapter
-  - Acceptance: optional `code_worker` behind `OpenInterpreterBackend`; catalog `missing`/`ready`; native tools remain default; Jarvis still verifies.
-  - Status: VERIFIED in unit tests (`test_workers.py`, `test_capabilities.py`)
-- [x] Browser workflow promotion (BrowserCode-style skills)
-  - Acceptance: repeated stable browser procedures (named controls / CSS / URLs) promote and replay; snapshot-id clicks do not.
-  - Status: VERIFIED in unit tests (`test_skills.py`) plus Guide templates `browser-form` and `browser-procedure`
-
-#### P3 — Multi-node swarm (`SWARM_ARCHITECTURE.md`)
-
-- [ ] Secure node discovery and pairing.
-- [ ] Remote worker execution and authenticated node protocol.
-- [ ] Heartbeats, node health, capability/resource telemetry, and node-loss handling.
-- [ ] Cross-node placement using resource availability, transfer cost/data locality, warm models/workers, user role policy, battery/thermal/network state, and task priority.
-- [ ] Swarm UI for Nodes, Roles, Resources, Network, and Failover configuration.
-- [ ] Universal conceptual installer/join flow across supported operating systems.
-- [ ] Dynamic role recommendations and re-evaluation while respecting hard user policy.
-
-### P4 — Swarm resilience / advanced infrastructure
-
-- [ ] Active/passive standby Orchestrator support.
-- [ ] Restart-safe Orchestrator state replication and controlled failover.
-- [ ] Affinity/anti-affinity and advanced placement constraints.
-- [ ] Optional separation/replication of database, memory, storage, edge, and other specialized services only when separately specified and justified.
-- [ ] Security/SIEM/forensics remain deferred until a dedicated specification explicitly promotes them.
+- [ ] Dedicated LAN inference server
+- [x] UFO adapter
+  - Acceptance: optional Windows HostAgent worker behind `ComputerUseBackend`; native UI Automation remains default; missing install reports `missing` and names the desktop fallback.
+  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
+- [x] Cua adapter
+  - Acceptance: optional computer-use worker behind `ComputerUseBackend`; missing install reports `missing` and names the desktop fallback.
+  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
+- [ ] Open Interpreter adapter
+- [ ] Browser workflow promotion (BrowserCode-style skills)
 
 ### Jarvis 2.0 — specified, not implemented
 
@@ -4087,11 +4047,27 @@ Switching tools does not grant more rights. Suggesting one would only teach the 
 
 Decision: optional workers are displayed even when absent
 
-The Tools and System pages list Browser Use, UFO, Cua, and OpenHands as `not_integrated`. Open Interpreter is listed as `missing` or `ready` depending on whether the package is installed.
+The Tools and System pages list Browser Use, Open Interpreter, and OpenHands as `not_integrated`. UFO and Cua are listed as `missing` until a local install is detected.
 
 Reason:
 
-Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions.
+A blank Tools page looks like a crash. Listing unavailable workers makes graceful degradation visible.
+
+Decision: only expose tools the current task class needs
+
+Classification already exists. Filesystem work should not pay for browser, Office, UFO, and Docker schemas on every turn. `request_tools` is the escape hatch; mixed and long-horizon tasks still receive the full set.
+
+Reason:
+
+P0.7. Smaller schemas cut prompt tokens, latency, and incorrect tool selection.
+
+Decision: UFO and Cua are ComputerUseBackend workers, not the primary Windows path
+
+Native pywinauto stays first. UFO and Cua run only when installed; a missing package is an error that names the desktop tool, not a crash.
+
+Reason:
+
+Same orchestrator-plus-workers rule as Browser Use / OpenHands. UI Automation is more deterministic than a computer-use agent.
 
 Decision: editable workflow templates with chained prompt dispatch
 

@@ -15,7 +15,11 @@ All tools are registered in `backend/app/tools/registry.py` and can be enabled o
 | `web_fetch` | HTTP GET/POST distinct from the browser. |
 | `screenshot` | Desktop capture for Qwen3.5 vision. Images are attached to the next model turn. |
 | `mcp_call` | Invokes tools from user-configured MCP servers (stdio or HTTP). |
-| `code_worker` | Optional Open Interpreter adapter for substantial coding jobs. Missing unless `open-interpreter` is installed. Forced onto Jarvis's local OpenAI-compatible endpoint. Native python/terminal/filesystem remain the default. Jarvis still verifies. |
+| `request_tools` | Escape hatch: add more tools for the current task (names or categories: browser, coding, windows, office, mcp, all). |
+| `ufo` | Optional Microsoft UFO HostAgent/AppAgent worker. Missing package degrades to the native `desktop` tool. |
+| `cua` | Optional Cua computer-use worker. Missing package degrades to the native `desktop` tool. |
+
+The agent does **not** send every tool schema on every model turn. Task classification (filesystem, software engineering, browser, Windows GUI, …) selects a small relevant set plus `filesystem` and `request_tools`. Mixed and long-horizon tasks still receive the full set.
 
 ## Memory and skills
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -8,9 +9,11 @@ from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent.loop import AGENT
+from ..agent.tool_exposure import allowed_tool_names, schema_names
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
+from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -28,6 +31,17 @@ class ContinueBody(BaseModel):
 
 
 def _task_dict(task: Task) -> dict[str, Any]:
+    extra: list[str] = []
+    raw = getattr(task, "compact_memory", None) or ""
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and isinstance(parsed.get("extra_tools"), list):
+                extra = [str(item) for item in parsed["extra_tools"]]
+        except (TypeError, json.JSONDecodeError):
+            extra = []
+    allowed = allowed_tool_names(getattr(task, "task_class", None) or "", extra)
+    exposed = sorted(allowed) if allowed is not None else schema_names(REGISTRY.openai_tools())
     return {
         "id": task.id,
         "title": task.title,
@@ -38,6 +52,7 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "profile": task.profile,
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
         "task_class": getattr(task, "task_class", None) or "",
+        "exposed_tools": exposed,
         "acceptance_criteria": task.acceptance_criteria,
         "current_action": task.current_action,
         "current_tool": task.current_tool,
