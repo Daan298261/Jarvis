@@ -239,3 +239,124 @@ export async function putNodeRolePolicy(
     },
   )
 }
+
+export type SwarmBudgetPreset = "minimal" | "balanced" | "high" | "maximum" | "custom"
+
+export type SwarmBudgetMode = "static" | "dynamic"
+
+export type SwarmBudgetLimitCap = "HARD" | "SOFT"
+
+export type SwarmBudgetLimit = {
+  percent?: number
+  cap?: SwarmBudgetLimitCap
+}
+
+export type SwarmBudgetLimits = {
+  cpu?: SwarmBudgetLimit
+  ram?: SwarmBudgetLimit
+  gpu?: SwarmBudgetLimit
+  vram?: SwarmBudgetLimit
+  disk?: SwarmBudgetLimit
+  network?: SwarmBudgetLimit
+}
+
+export type SwarmResourceAmounts = {
+  cpu?: number
+  ram?: number
+  gpu?: number
+  vram?: number
+  disk?: number
+  network?: number
+}
+
+export type SwarmNodeBudget = {
+  node_id: string
+  preset: SwarmBudgetPreset
+  mode: SwarmBudgetMode
+  global_percent: number
+  limits: SwarmBudgetLimits
+  updated_at: string | null
+  effective?: SwarmResourceAmounts
+  remaining?: SwarmResourceAmounts
+}
+
+export type SwarmBudgetUpdate = {
+  preset?: SwarmBudgetPreset
+  mode?: SwarmBudgetMode
+  global_percent?: number
+  limits?: SwarmBudgetLimits
+}
+
+export const SWARM_BUDGET_PRESETS: SwarmBudgetPreset[] = [
+  "minimal",
+  "balanced",
+  "high",
+  "maximum",
+  "custom",
+]
+
+export async function getNodeBudget(nodeId: string): Promise<SwarmNodeBudget> {
+  return api<SwarmNodeBudget>(`/api/swarm/nodes/${encodeURIComponent(nodeId)}/budget`)
+}
+
+export async function putNodeBudget(
+  nodeId: string,
+  body: SwarmBudgetUpdate,
+): Promise<SwarmNodeBudget> {
+  return api<SwarmNodeBudget>(`/api/swarm/nodes/${encodeURIComponent(nodeId)}/budget`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export type SwarmLeaseClaim = {
+  cpu_threads?: number
+  ram_gb?: number
+  gpu_percent?: number
+  vram_mib?: number
+  disk_gb?: number
+  network_mbps?: number
+}
+
+export type SwarmLeaseStatus = "active" | "released" | "expired"
+
+export type SwarmLease = {
+  id: string
+  node_id: string
+  claim: SwarmLeaseClaim
+  status: SwarmLeaseStatus
+  created_at: string | null
+  expires_at: string | null
+  released_at: string | null
+}
+
+export type SwarmNodeLeasesResponse = {
+  node_id: string
+  leases: SwarmLease[]
+}
+
+export type SwarmLeaseCreate = {
+  claim: SwarmLeaseClaim
+  ttl_seconds?: number
+}
+
+export async function listNodeLeases(nodeId: string): Promise<SwarmNodeLeasesResponse> {
+  return api<SwarmNodeLeasesResponse>(`/api/swarm/nodes/${encodeURIComponent(nodeId)}/leases`)
+}
+
+export async function createNodeLease(
+  nodeId: string,
+  body: SwarmLeaseCreate,
+): Promise<SwarmLease> {
+  return api<SwarmLease>(`/api/swarm/nodes/${encodeURIComponent(nodeId)}/leases`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function releaseNodeLease(nodeId: string, leaseId: string): Promise<SwarmLease> {
+  return api<SwarmLease>(
+    `/api/swarm/nodes/${encodeURIComponent(nodeId)}/leases/${encodeURIComponent(leaseId)}`,
+    { method: "DELETE" },
+  )
+}
