@@ -83,12 +83,12 @@ PROFILES: dict[str, ModelProfile] = {
         mmproj_filename=PRIMARY_MMPROJ,
         thinking=True,
         thinking_mode="selective",
-        context_size=16384,
+        context_size=32768,
         temperature=0.6,
         top_p=0.95,
         top_k=20,
         presence_penalty=0.0,
-        description="Default. 9B Abliterated Q8_0, 16K context, thinking only for planning/recovery.",
+        description="Default. 9B Abliterated Q8_0, 32K cap with 16K start, thinking only for planning/recovery.",
         fallbacks=("fast", "expert"),
     ),
     "quality": ModelProfile(
@@ -144,6 +144,35 @@ def profile_gguf(profile: ModelProfile) -> Path:
 
 def mmproj_path(profile: ModelProfile) -> Path:
     return models_dir() / profile.repo_dir / profile.mmproj_filename
+
+
+def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:
+    """First existing projector: this profile's file, then 9B, then 27B.
+
+    Used only when a vision request actually starts llama.cpp with vision=True.
+    Idle text loads must not attach mmproj.
+    """
+    candidates: list[Path] = []
+    if profile is not None:
+        candidates.append(mmproj_path(profile))
+    paths = model_paths()
+    for key in ("mmproj_9b", "mmproj"):
+        raw = paths.get(key)
+        if raw:
+            candidates.append(Path(raw))
+    seen: set[str] = set()
+    for candidate in candidates:
+        try:
+            resolved = Path(candidate)
+        except TypeError:
+            continue
+        marker = str(resolved)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        if resolved.exists():
+            return resolved
+    return None
 
 
 def model_paths() -> dict[str, Path]:
@@ -222,4 +251,4 @@ def expert_profile() -> ModelProfile:
     quality = PROFILES["quality"]
     if (paths["root"] / quality.filename).exists():
         return with_context(quality, 16384)
-    return PROFILES["expert"]
+    return with_context(PROFILES["expert"], 16384)

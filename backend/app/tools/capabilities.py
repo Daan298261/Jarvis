@@ -122,27 +122,8 @@ def native_capabilities() -> list[dict[str, Any]]:
 
 
 def optional_workers() -> list[dict[str, Any]]:
-    from ..agent.acp import acp_status
-
-    acp = acp_status()
     return [
         BrowserUseBackend().probe(),
-        {
-            "id": "ufo",
-            "name": "Microsoft UFO",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Windows HostAgent/AppAgent worker. Native UI Automation is the current fallback.",
-        },
-        {
-            "id": "cua",
-            "name": "Cua",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Computer-use worker. Not required for Jarvis to run.",
-        },
         UFOBackend().probe(),
         CuaBackend().probe(),
         OpenInterpreterBackend().probe(),

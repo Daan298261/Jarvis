@@ -10,7 +10,7 @@ async def test_docker_run_logs_inspect_require_targets():
     assert "image is required" in (run.error or "")
     logs = await tool.execute(action="logs")
     assert logs.success is False
-    assert "container or image" in (logs.error or "")
+    assert "container is required" in (logs.error or "")
     inspect = await tool.execute(action="inspect")
     assert inspect.success is False
     assert "container or image" in (inspect.error or "")

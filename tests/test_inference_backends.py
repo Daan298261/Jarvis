@@ -108,7 +108,9 @@ def test_llama_cpp_reports_missing_local_files():
 
 
 def test_expert_profile_is_the_27b_escalation_alias():
-    expert = resolve_profile("expert")
+    from app.inference.profiles import PROFILES
+
+    expert = PROFILES["expert"]
     assert expert.name == "expert"
     assert "27B" in expert.filename
     assert expert.thinking is True
@@ -135,7 +137,7 @@ def test_llama_cpp_attaches_mmproj_only_when_vision_requested(tmp_path, monkeypa
     mmproj = tmp_path / "mmproj-F16.gguf"
     mmproj.write_bytes(b"fake")
     monkeypatch.setattr(
-        "app.inference.backends.model_paths",
+        "app.inference.profiles.model_paths",
         lambda: {"root": tmp_path, "mmproj": mmproj, "q4": tmp_path / "q4.gguf", "q5": tmp_path / "q5.gguf"},
     )
     backend = LlamaCppBackend(_settings())
@@ -146,6 +148,32 @@ def test_llama_cpp_attaches_mmproj_only_when_vision_requested(tmp_path, monkeypa
     assert "--mmproj" in with_vision
     assert with_vision[with_vision.index("--mmproj") + 1] == str(mmproj)
     assert "--image-min-tokens" in with_vision
+
+
+async def test_ensure_vision_attaches_then_release_detaches(jarvis_env):
+    from app.inference.manager import MANAGER, resolve_vision
+
+    settings = jarvis_env["settings"]
+    settings.inference.vision_mode = "lazy"
+    MANAGER.backend = None
+    MANAGER.state.vision_loaded = False
+    MANAGER.state.mmproj_path = ""
+    MANAGER.state.vision = False
+
+    assert resolve_vision(settings, None) is False
+    attached = await MANAGER.ensure_vision(settings)
+    assert attached.vision_loaded is True
+    assert attached.vision is True
+    released = await MANAGER.release_vision(settings)
+    assert released.vision_loaded is False
+    assert released.vision is False
+    assert released.mmproj_path == ""
+
+    settings.inference.vision_mode = "always"
+    MANAGER.state.vision_loaded = True
+    MANAGER.state.vision = True
+    kept = await MANAGER.release_vision(settings)
+    assert kept.vision_loaded is True
 
 
 async def test_unloaded_snapshot_starts_at_16k_with_selective_thinking():

@@ -11,15 +11,22 @@ import psutil
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, probe_remote_server, resolve_backend
-from .profiles import ModelProfile, model_paths, profile_gguf, resolve_profile, declared_profiles
+from .profiles import ModelProfile, profile_gguf, resolve_mmproj, resolve_profile, declared_profiles
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
-    mode = (settings.inference.vision or "lazy").strip().lower()
+    """Whether this start should attach mmproj.
+
+    Idle loads pass requested=None. Lazy mode never attaches until a vision
+    request sets requested=True. Settings.vision_mode "always" keeps the
+    projector after a request; it still does not attach at idle load.
+    """
+    mode = str(getattr(settings.inference, "vision_mode", None) or "lazy").strip().lower()
+    flag = settings.inference.vision
+    if isinstance(flag, str) and flag.strip():
+        mode = flag.strip().lower()
     if mode in {"off", "never", "disabled"}:
         return False
-    if mode in {"always", "on", "enabled"}:
-        return True
     return bool(requested)
 
 
@@ -166,12 +173,53 @@ class InferenceManager:
             )
 
     async def ensure_vision(self, settings: AppSettings) -> InferenceState:
+        """Attach mmproj for an in-flight vision request. Does not keep it at idle."""
+        if self.state.vision_loaded:
+            return self.state
+        manages = bool(self.backend and getattr(self.backend, "manages_process", False))
+        if not manages:
+            profile = resolve_profile(self.state.profile or settings.inference.profile)
+            projector = resolve_mmproj(profile)
+            self.state.vision_loaded = True
+            self.state.vision = True
+            if projector is not None:
+                self.state.mmproj_path = str(projector)
+            return self.state
         return await self.ensure_runtime(
             settings,
             self.state.profile,
             context_size=self.state.context_size,
             vision=True,
         )
+
+    async def release_vision(self, settings: AppSettings) -> InferenceState:
+        """Detach mmproj after a vision request finishes.
+
+        vision_mode "always" keeps the projector loaded. Lazy/off unload it so
+        the LLM no longer shares VRAM with mmproj.
+        """
+        mode = str(getattr(settings.inference, "vision_mode", None) or "lazy").strip().lower()
+        flag = settings.inference.vision
+        if isinstance(flag, str) and flag.strip():
+            mode = flag.strip().lower()
+        if mode in {"always", "on", "enabled"}:
+            return self.state
+        if not self.state.vision_loaded:
+            return self.state
+        manages = bool(self.backend and getattr(self.backend, "manages_process", False))
+        if not manages:
+            self.state.vision_loaded = False
+            self.state.vision = False
+            self.state.mmproj_path = ""
+            return self.state
+        async with self._lock:
+            return await self._load_locked(
+                settings,
+                self.state.profile,
+                context_size=self.state.context_size,
+                vision=False,
+                force=True,
+            )
 
     async def _load_locked(
         self,
@@ -184,7 +232,6 @@ class InferenceManager:
     ) -> InferenceState:
         profile = resolve_profile(profile_name or settings.inference.profile)
         backend = resolve_backend(settings)
-        paths = model_paths()
         model = profile_gguf(profile)
         want_vision = self._vision_requested(settings, vision)
         want_context = int(
@@ -210,7 +257,7 @@ class InferenceManager:
         if reusable:
             return self.state
 
-        self._apply_profile_state(settings, profile, backend, model, paths, want_context, want_vision)
+        self._apply_profile_state(settings, profile, backend, model, want_context, want_vision)
 
         probe = await probe_remote_server(
             settings.inference.host,
@@ -283,15 +330,15 @@ class InferenceManager:
         profile: ModelProfile,
         backend: InferenceBackend,
         model: Path,
-        paths: dict[str, Path],
         context_size: int,
         vision: bool,
     ) -> None:
         self.state.profile = profile.name
         self.state.quant = profile.quant
         self.state.model_path = str(model) if backend.requires_local_files else ""
-        self.state.vision_loaded = bool(vision and paths["mmproj"].exists())
-        self.state.mmproj_path = str(paths["mmproj"]) if self.state.vision_loaded else ""
+        projector = resolve_mmproj(profile) if vision else None
+        self.state.vision_loaded = bool(vision and projector is not None)
+        self.state.mmproj_path = str(projector) if self.state.vision_loaded else ""
         self.state.vision_mode = settings.inference.vision_mode or "lazy"
         self.state.vision = bool(vision)
         self.state.host = settings.inference.host

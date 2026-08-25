@@ -183,6 +183,9 @@ class OfficeTool(Tool):
             f"library_available={str(lib_ok).lower()}",
             f"com_available={str(com_ok).lower()}",
         ]
+        progid = _PROGID.get(app)
+        if progid:
+            bits.append(f"com_progid={progid}")
         if path:
             target = Path(path)
             if not target.exists():

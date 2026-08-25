@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from app.inference.profiles import resolve_profile
-from app.inference.vision import mmproj_args, should_load_vision, with_vision
+from app.inference.vision import messages_need_vision, mmproj_args, should_load_vision, with_vision
+from app.providers.base import ChatMessage
 
 
 def test_vision_stays_off_for_ordinary_tasks():
@@ -27,3 +28,16 @@ def test_mmproj_args_omitted_unless_vision_and_file_exist(tmp_path):
     args = mmproj_args(with_vision(profile, True), present)
     assert args[:2] == ["--mmproj", str(present)]
     assert "--image-min-tokens" in args
+
+
+def test_messages_need_vision_only_for_image_parts():
+    text = ChatMessage(role="user", content="describe the desktop")
+    image = ChatMessage(
+        role="user",
+        content=[
+            {"type": "text", "text": "what is on screen?"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,xx"}},
+        ],
+    )
+    assert messages_need_vision([text]) is False
+    assert messages_need_vision([text, image]) is True
