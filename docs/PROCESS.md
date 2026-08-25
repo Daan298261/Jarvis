@@ -36,8 +36,8 @@ or:
    git fetch origin cursor/local-qwen-desktop-agent
    git checkout cursor/local-qwen-desktop-agent
    git pull origin cursor/local-qwen-desktop-agent
-   git checkout -b cursor/<short-slug>-99ea
    ```
+   Then create your feature branch: `git checkout -b cursor/<short-slug>-99ea`
 3. **Implement only that ticket** — touch files listed in the RFC; no drive-by refactors, no new architecture in the master plan.
 4. **Test** — `python3 -m pytest`; if frontend changed, `npm --prefix frontend run build` (and `npm --prefix frontend run lint` if you touched TS).
 5. **Update docs minimally** — only the queue checkbox / Current State bullets that match **this** ticket (§57–58 and §59 Decision Log if you made a durable choice). Do not rewrite other sections.
