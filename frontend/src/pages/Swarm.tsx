@@ -1,16 +1,26 @@
 import { Fragment, useCallback, useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
+  createNodeLease,
+  getNodeBudget,
   getNodeRolePolicies,
   getSwarmNode,
+  listNodeLeases,
   listSwarmNodes,
   listSwarmRoles,
+  putNodeBudget,
   putNodeRolePolicy,
+  releaseNodeLease,
+  SWARM_BUDGET_PRESETS,
   SWARM_ROLE_NAMES,
   SWARM_ROLE_POLICY_LEVELS,
+  type SwarmLease,
   type SwarmNode,
+  type SwarmNodeBudget,
+  type SwarmBudgetUpdate,
   type SwarmNodeHardware,
   type SwarmNodeResources,
+  type SwarmResourceAmounts,
   type SwarmRoleHolder,
   type SwarmRolePolicy,
   type SwarmRolesResponse,
@@ -30,6 +40,42 @@ function workerStatusBadgeClass(status: string): string {
   if (normalized === "running" || normalized === "waiting") return "running"
   if (normalized === "error" || normalized === "failed" || normalized === "not_loaded") return "failed"
   return "queued"
+}
+
+function leaseStatusBadgeClass(status: string): string {
+  const normalized = status.toLowerCase()
+  if (normalized === "active") return "running"
+  if (normalized === "released") return "completed"
+  if (normalized === "expired") return "failed"
+  return "queued"
+}
+
+function formatResourceAmounts(amounts: SwarmResourceAmounts | undefined): string {
+  if (!amounts) return "—"
+  const parts: string[] = []
+  if (amounts.cpu != null) parts.push(`CPU ${formatNumber(amounts.cpu)} threads`)
+  if (amounts.ram != null) parts.push(`RAM ${formatNumber(amounts.ram)} GB`)
+  if (amounts.gpu != null) parts.push(`GPU ${formatNumber(amounts.gpu)}%`)
+  if (amounts.vram != null) parts.push(`VRAM ${formatNumber(amounts.vram)} MiB`)
+  if (amounts.disk != null) parts.push(`Disk ${formatNumber(amounts.disk)} GB`)
+  if (amounts.network != null) parts.push(`Network ${formatNumber(amounts.network)} Mbps`)
+  return parts.length ? parts.join(" · ") : "—"
+}
+
+function formatNumber(value: number): string {
+  if (Number.isInteger(value)) return String(value)
+  return value.toFixed(2).replace(/\.?0+$/, "")
+}
+
+function formatLeaseClaim(claim: SwarmLease["claim"]): string {
+  const parts: string[] = []
+  if (claim.cpu_threads != null) parts.push(`${claim.cpu_threads} threads`)
+  if (claim.ram_gb != null) parts.push(`${claim.ram_gb} GB RAM`)
+  if (claim.gpu_percent != null) parts.push(`${claim.gpu_percent}% GPU`)
+  if (claim.vram_mib != null) parts.push(`${claim.vram_mib} MiB VRAM`)
+  if (claim.disk_gb != null) parts.push(`${claim.disk_gb} GB disk`)
+  if (claim.network_mbps != null) parts.push(`${claim.network_mbps} Mbps`)
+  return parts.length ? parts.join(" · ") : "—"
 }
 
 function formatRoles(roles: string[] | undefined): string {
@@ -271,6 +317,327 @@ function WorkersSection({ workers }: { workers: SwarmWorker[] | undefined }) {
   )
 }
 
+function BudgetSection({
+  nodeId,
+  refreshKey = 0,
+}: {
+  nodeId: string
+  refreshKey?: number
+}) {
+  const [budget, setBudget] = useState<SwarmNodeBudget | null>(null)
+  const [preset, setPreset] = useState("")
+  const [globalPercent, setGlobalPercent] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const loadBudget = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const data = await getNodeBudget(nodeId)
+      setBudget(data)
+      setPreset(data.preset)
+      setGlobalPercent(String(data.global_percent))
+    } catch (err) {
+      setBudget(null)
+      setLoadError(err instanceof Error ? err.message : "Failed to load budget")
+    } finally {
+      setLoading(false)
+    }
+  }, [nodeId])
+
+  useEffect(() => {
+    loadBudget()
+  }, [loadBudget, refreshKey])
+
+  async function handleSave() {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const body: SwarmBudgetUpdate = { preset: preset as SwarmBudgetUpdate["preset"] }
+      if (preset === "custom") {
+        const percent = Number(globalPercent)
+        if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+          throw new Error("Custom preset requires global_percent between 0 and 100")
+        }
+        body.global_percent = percent
+      }
+      const updated = await putNodeBudget(nodeId, body)
+      setBudget(updated)
+      setPreset(updated.preset)
+      setGlobalPercent(String(updated.global_percent))
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save budget")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <h2 style={{ marginTop: 0 }}>Budget</h2>
+      {loadError && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>
+          {loadError}
+        </p>
+      )}
+      {saveError && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>
+          {saveError}
+        </p>
+      )}
+      {loading && !budget && !loadError ? (
+        <p className="lede">Loading budget…</p>
+      ) : budget ? (
+        <>
+          <div className="kv" style={{ marginBottom: 12 }}>
+            <b>Preset</b><span>{budget.preset}</span>
+            <b>Mode</b><span>{budget.mode}</span>
+            <b>Global %</b><span>{budget.global_percent}</span>
+            <b>Effective</b><span>{formatResourceAmounts(budget.effective)}</span>
+            <b>Remaining</b><span>{formatResourceAmounts(budget.remaining)}</span>
+            <b>Updated</b><span>{formatTimestamp(budget.updated_at)}</span>
+          </div>
+          <div className="grid" style={{ gap: 10, maxWidth: 420 }}>
+            <label className="row" style={{ alignItems: "center", gap: 12 }}>
+              <span style={{ minWidth: 110 }}>Preset</span>
+              <select
+                value={preset}
+                disabled={loading || saving}
+                onChange={(e) => setPreset(e.target.value)}
+              >
+                {SWARM_BUDGET_PRESETS.map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            {preset === "custom" && (
+              <label className="row" style={{ alignItems: "center", gap: 12 }}>
+                <span style={{ minWidth: 110 }}>Global %</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={globalPercent}
+                  disabled={loading || saving}
+                  onChange={(e) => setGlobalPercent(e.target.value)}
+                />
+              </label>
+            )}
+            <div className="row" style={{ gap: 8 }}>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={loading || saving}
+                onClick={handleSave}
+              >
+                {saving ? "Saving…" : "Save budget"}
+              </button>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+function LeasesSection({
+  nodeId,
+  onLeaseChange,
+}: {
+  nodeId: string
+  onLeaseChange?: () => Promise<void>
+}) {
+  const [leases, setLeases] = useState<SwarmLease[]>([])
+  const [cpuThreads, setCpuThreads] = useState("")
+  const [ramGb, setRamGb] = useState("")
+  const [ttlSeconds, setTtlSeconds] = useState("300")
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [releasingId, setReleasingId] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const loadLeases = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const data = await listNodeLeases(nodeId)
+      setLeases(data.leases || [])
+    } catch (err) {
+      setLeases([])
+      setLoadError(err instanceof Error ? err.message : "Failed to load leases")
+    } finally {
+      setLoading(false)
+    }
+  }, [nodeId])
+
+  useEffect(() => {
+    loadLeases()
+  }, [loadLeases])
+
+  async function handleCreate() {
+    setCreating(true)
+    setActionError(null)
+    try {
+      const claim: { cpu_threads?: number; ram_gb?: number } = {}
+      if (cpuThreads.trim()) {
+        const value = Number(cpuThreads)
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("cpu_threads must be a positive number")
+        }
+        claim.cpu_threads = value
+      }
+      if (ramGb.trim()) {
+        const value = Number(ramGb)
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("ram_gb must be a positive number")
+        }
+        claim.ram_gb = value
+      }
+      if (!Object.keys(claim).length) {
+        throw new Error("Enter at least one claim value (cpu_threads or ram_gb)")
+      }
+      const ttl = ttlSeconds.trim() ? Number(ttlSeconds) : 300
+      if (!Number.isFinite(ttl) || ttl <= 0) {
+        throw new Error("ttl_seconds must be a positive number")
+      }
+      await createNodeLease(nodeId, { claim, ttl_seconds: ttl })
+      setCpuThreads("")
+      setRamGb("")
+      await loadLeases()
+      await onLeaseChange?.()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to create lease")
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function handleRelease(leaseId: string) {
+    setReleasingId(leaseId)
+    setActionError(null)
+    try {
+      await releaseNodeLease(nodeId, leaseId)
+      await loadLeases()
+      await onLeaseChange?.()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to release lease")
+    } finally {
+      setReleasingId(null)
+    }
+  }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <h2 style={{ marginTop: 0 }}>Leases</h2>
+      {loadError && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>
+          {loadError}
+        </p>
+      )}
+      {actionError && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>
+          {actionError}
+        </p>
+      )}
+      {loading && !leases.length && !loadError ? (
+        <p className="lede">Loading leases…</p>
+      ) : leases.length === 0 ? (
+        <p className="lede" style={{ marginBottom: 12 }}>No leases yet.</p>
+      ) : (
+        <table style={{ marginBottom: 12 }}>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Claim</th>
+              <th>Created</th>
+              <th>Expires</th>
+              <th>Released</th>
+              <th>ID</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {leases.map((lease) => (
+              <tr key={lease.id}>
+                <td>
+                  <span className={`badge ${leaseStatusBadgeClass(lease.status)}`}>{lease.status}</span>
+                </td>
+                <td>{formatLeaseClaim(lease.claim)}</td>
+                <td className="stat">{formatTimestamp(lease.created_at)}</td>
+                <td className="stat">{formatTimestamp(lease.expires_at)}</td>
+                <td className="stat">{formatTimestamp(lease.released_at)}</td>
+                <td className="stat">{lease.id}</td>
+                <td>
+                  {lease.status === "active" && (
+                    <button
+                      className="btn secondary"
+                      type="button"
+                      disabled={releasingId === lease.id || creating}
+                      onClick={() => handleRelease(lease.id)}
+                    >
+                      {releasingId === lease.id ? "Releasing…" : "Release"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="grid" style={{ gap: 10, maxWidth: 520 }}>
+        <h3 style={{ margin: "4px 0 0", fontSize: "0.95rem" }}>Create lease</h3>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>CPU threads</span>
+          <input
+            type="number"
+            min={1}
+            value={cpuThreads}
+            disabled={creating || releasingId != null}
+            onChange={(e) => setCpuThreads(e.target.value)}
+            placeholder="optional"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>RAM (GB)</span>
+          <input
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={ramGb}
+            disabled={creating || releasingId != null}
+            onChange={(e) => setRamGb(e.target.value)}
+            placeholder="optional"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>TTL (seconds)</span>
+          <input
+            type="number"
+            min={1}
+            value={ttlSeconds}
+            disabled={creating || releasingId != null}
+            onChange={(e) => setTtlSeconds(e.target.value)}
+          />
+        </label>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={creating || releasingId != null || loading}
+            onClick={handleCreate}
+          >
+            {creating ? "Creating…" : "Create lease"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function NodeDetail({
   node,
   onRolesRefresh,
@@ -278,6 +645,8 @@ function NodeDetail({
   node: SwarmNode
   onRolesRefresh: () => Promise<void>
 }) {
+  const [budgetRefresh, setBudgetRefresh] = useState(0)
+
   return (
     <div className="card">
       <h2>{node.host_alias}</h2>
@@ -285,6 +654,11 @@ function NodeDetail({
         {node.is_local ? "Local node" : "Remote node"} · {node.address}
       </p>
       <RolePoliciesSection nodeId={node.id} onRolesRefresh={onRolesRefresh} />
+      <BudgetSection nodeId={node.id} refreshKey={budgetRefresh} />
+      <LeasesSection
+        nodeId={node.id}
+        onLeaseChange={async () => { setBudgetRefresh((key) => key + 1) }}
+      />
       <div className="kv" style={{ marginBottom: 16 }}>
         <b>ID</b><span className="stat">{node.id}</span>
         <b>Hostname</b><span>{node.hostname || "—"}</span>
