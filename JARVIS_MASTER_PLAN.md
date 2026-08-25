@@ -148,7 +148,7 @@ Reason: 27B does not stay fully GPU-resident on the user's 16 GB RTX 5070 Ti. Or
 
 The 9B model should still support reasoning, tool calling, coding, writing, agentic execution, and vision when the projector is loaded.
 
-**Lazy mmproj:** attach the vision projector only when a request actually needs vision, then unload it. Do not keep mmproj resident for ordinary text/tool work. VRAM on 16 GB is the constraint.
+**Lazy mmproj:** attach the vision projector only when a request actually needs vision, then unload it (`release_vision`). Do not keep mmproj resident for ordinary text/tool work. Idle llama.cpp does not pass `--mmproj`; `vision_mode=always` still does not attach at idle load. VRAM on 16 GB is the constraint. Landed in code (PR #50).
 
 Use reasoning/thinking for difficult autonomous tasks where supported. Use a faster mode for simple deterministic requests.
 
@@ -1812,7 +1812,7 @@ This documentation session:
 - Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
 - Playwright: native backend present
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
-- Vision: screenshot tool + llama.cpp `--mmproj`. Spec: lazy attach when a request needs vision, then unload (see §4 / queue). Live Windows vision not verified this session.
+- Vision: screenshot tool + llama.cpp `--mmproj`. Lazy attach in code (PR #50): projector only for a vision turn, then `release_vision`. Idle llama.cpp does not pass `--mmproj`; `vision_mode=always` still does not attach at idle load. Live Windows vision not verified this session.
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
 
 ### Optional Workers
@@ -1911,9 +1911,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
   - Acceptance: model loads, API responds, tool calls work, vision projector loads.
   - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`. Live 9B load is likewise unsigned-off.
 
-- [ ] Lazy mmproj (attach vision projector only when needed, then unload)
+- [x] Lazy mmproj (attach vision projector only when needed, then unload)
   - Acceptance: ordinary text/tool tasks do not keep `--mmproj` resident. When a request needs vision, attach the projector; when it no longer needs vision, unload it.
-  - Status: CODE PRESENT / partial (`vision_mode=lazy`; `--mmproj` only on vision loads). Unload-after-use is the remaining intent. Implementing bots apply this in product PRs; they must not edit spec files.
+  - Status: VERIFIED in code (PR #50, squash-merge onto canonical; not PR #47). Attach only for a vision turn, then `release_vision`. Idle llama.cpp does not pass `--mmproj`. `vision_mode=always` still does not attach at idle load. Live Windows vision remains desktop sign-off.
 
 ### P1
 
@@ -2155,7 +2155,7 @@ Taco confirmation. Red is not a product feature ordinary workers may grow into.
 
 Decision: lazy mmproj
 
-Attach the vision projector only when a request needs vision, then unload. Do not keep it resident.
+Attach the vision projector only when a request needs vision, then unload (`release_vision`). Do not keep it resident. Landed in code via squash-merge PR #50 (not #47): idle llama.cpp does not pass `--mmproj`; `vision_mode=always` still does not attach at idle load.
 
 Reason:
 
