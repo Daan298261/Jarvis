@@ -141,6 +141,18 @@ def optional_workers() -> list[dict[str, Any]]:
     ]
 
 
+def professional_analysis_policy() -> dict[str, Any]:
+    return {
+        "id": "professional-analysis",
+        "analyze_sensitive_material": True,
+        "operational_authorization_separate": True,
+        "detail": (
+            "Legitimate security, forensic, and investigative analysis is permitted. "
+            "Analysis is not authorization to attack, deploy exploits, or disable defenses."
+        ),
+    }
+
+
 def capability_snapshot() -> dict[str, Any]:
     native = native_capabilities()
     optional = optional_workers()
@@ -148,4 +160,5 @@ def capability_snapshot() -> dict[str, Any]:
         "native": native,
         "optional_workers": optional,
         "all": native + optional,
+        "professional_analysis": professional_analysis_policy(),
     }

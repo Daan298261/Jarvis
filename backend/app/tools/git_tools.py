@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a recoverable stash or commit-less backup branch named "
-        "jarvis-checkpoint-* before large autonomous edits."
+        "checkpoint. checkpoint creates a backup branch named jarvis-checkpoint-* without "
+        "changing the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -56,11 +57,18 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = Path(cwd).name
-                result = await self._git(["stash", "push", "-u", "-m", f"jarvis-checkpoint-{stamp}"], cwd)
-                if result.success:
-                    return ToolResult(True, "Created git stash checkpoint. Use git stash list / pop to recover.")
-                return await self._git(["status"], cwd)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                branch = f"jarvis-checkpoint-{stamp}"
+                created = await self._git(["stash", "create"], cwd)
+                oid = (created.output or "").strip().splitlines()[-1] if created.success else ""
+                if created.success and oid and all(ch in "0123456789abcdef" for ch in oid.lower()) and len(oid) >= 7:
+                    branched = await self._git(["branch", branch, oid], cwd)
+                    if branched.success:
+                        return ToolResult(True, f"Created backup branch {branch} (working tree unchanged).")
+                branched = await self._git(["branch", branch], cwd)
+                if branched.success:
+                    return ToolResult(True, f"Created backup branch {branch} from HEAD (working tree unchanged).")
+                return branched
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

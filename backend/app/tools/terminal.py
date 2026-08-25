@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import platform
 import shutil
 import sys
 import time
@@ -44,6 +45,10 @@ def _python_args(command: str) -> list[str]:
     return [python, "-c", command]
 
 
+def default_shell() -> str:
+    return "powershell" if platform.system() == "Windows" else "bash"
+
+
 def _command_args(command: str, shell: str) -> list[str] | ToolResult:
     if shell == "powershell":
         exe = shutil.which("powershell") or shutil.which("pwsh")
@@ -64,12 +69,16 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         if shutil.which("bash"):
             return ["bash", "-lc", command]
         return ToolResult(False, "", error="WSL/bash is not available on this machine")
+    if platform.system() != "Windows":
+        if shutil.which("bash"):
+            return ["bash", "-lc", command]
+        return [sys.executable or "python3", "-c", command]
     exe = shutil.which("powershell") or shutil.which("pwsh")
     if exe:
         return [exe, "-NoProfile", "-Command", command]
     if shutil.which("bash"):
         return ["bash", "-lc", command]
-    return ["python", "-c", command]
+    return [sys.executable or "python", "-c", command]
 
 
 async def _pump(job: BackgroundJob) -> None:
@@ -128,6 +137,7 @@ class TerminalTool(Tool):
     name = "terminal"
     description = (
         "Run a local command. shell can be powershell, cmd, python, git, or bash/wsl. "
+        "Default is PowerShell on Windows and bash elsewhere. "
         "action=run (default) waits for the process. action=start returns a PID immediately; "
         "then use inspect/wait/kill with that pid to see if it is still alive and to collect output. "
         "inspect also works for other local PIDs. Captures stdout, stderr, exit code and duration. "
@@ -142,6 +152,7 @@ class TerminalTool(Tool):
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
                 "default": "powershell",
+                "description": "Defaults to powershell on Windows and bash on Linux/macOS",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},
@@ -171,7 +182,7 @@ class TerminalTool(Tool):
         command = kwargs.get("command") or ""
         if not command.strip():
             return ToolResult(False, "", error="command is required for run/start")
-        shell = (kwargs.get("shell") or "powershell").lower()
+        shell = (kwargs.get("shell") or default_shell()).lower()
         cwd = kwargs.get("working_directory") or os.getcwd()
         timeout = int(kwargs.get("timeout_seconds") or 120)
         risk = classify_command(command)

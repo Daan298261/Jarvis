@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from .base import RiskLevel, Tool, ToolResult
+
+_ALLOWED_SCHEMES = {"http", "https"}
 
 
 class WebFetchTool(Tool):
@@ -28,6 +31,9 @@ class WebFetchTool(Tool):
         url = kwargs.get("url")
         method = (kwargs.get("method") or "GET").upper()
         limit = int(kwargs.get("max_chars") or 12000)
+        scheme = urlparse(url or "").scheme.lower()
+        if scheme not in _ALLOWED_SCHEMES:
+            return ToolResult(False, "", error=f"Blocked URL scheme {scheme or 'missing'}")
         try:
             async with httpx.AsyncClient(follow_redirects=True, timeout=30, headers={"User-Agent": "JarvisLocal/1.0"}) as client:
                 response = await client.request(method, url)

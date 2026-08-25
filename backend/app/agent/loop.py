@@ -34,6 +34,7 @@ from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
+from .policy import policy_guidance
 from .prompts import (
     CONTINUE_PROMPT,
     CRITIC_PROMPT,
@@ -259,7 +260,7 @@ class AgentRuntime:
             else:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
-            system_prompt = SYSTEM_PROMPT + _environment_block(settings)
+            system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(prompt) + _environment_block(settings)
             matched_skills = await relevant_skills(working.task_class, working.goal)
             skills = skills_prompt_block(matched_skills)
             if skills:

@@ -13,3 +13,6 @@ def test_capability_snapshot_includes_native_filesystem():
     native = {item["id"]: item for item in snap["native"]}
     assert native["filesystem"]["available"] is True
     assert len(snap["all"]) == len(snap["native"]) + len(snap["optional_workers"])
+    policy = snap["professional_analysis"]
+    assert policy["analyze_sensitive_material"] is True
+    assert policy["operational_authorization_separate"] is True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -81,17 +82,25 @@ def _office_installed() -> bool:
     if platform.system() != "Windows":
         return False
     try:
-        import win32com.client  # type: ignore
+        import winreg  # type: ignore
 
-        for progid in ("Word.Application", "Excel.Application", "PowerPoint.Application"):
+        for key in (
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WINWORD.EXE",
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\EXCEL.EXE",
+            r"SOFTWARE\Microsoft\Office\ClickToRun\Configuration",
+        ):
             try:
-                win32com.client.Dispatch(progid)
+                winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key)
                 return True
-            except Exception:
+            except OSError:
                 continue
     except Exception:
         pass
-    return False
+    roots = [
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Microsoft Office",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Office",
+    ]
+    return any(path.exists() for path in roots)
 
 
 def detect_hardware() -> HardwareInfo:

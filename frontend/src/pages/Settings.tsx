@@ -156,6 +156,14 @@ export function SettingsPage() {
         </label>
       </div>
 
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Professional analysis policy</h2>
+        <p className="lede">
+          Jarvis may analyze legitimate security, forensic, investigative, or otherwise sensitive material.
+          Analysis is not the same as authorization to attack, deploy exploits, change credentials, or disable defenses.
+        </p>
+      </div>
+
       {queueStatus && (
         <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
           <h2>Launch & Task Queue</h2>
