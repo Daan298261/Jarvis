@@ -82,3 +82,8 @@ def test_hardware_gate_endpoint_defers(jarvis_env):
     assert body["purchase_recommended"] is False
     assert body["decision"] == "defer_purchase"
     assert "additional RAM" in body["deferred_purchases"]
+    assert body["purchase_allowed"] is False
+    assert body["recommendation"]
+    assert body["deferred_until_measured"] == body["deferred_purchases"]
+    assert body["inference_samples"] == body["sample_count"]
+    assert isinstance(body["bottlenecks"], list)

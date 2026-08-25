@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.agent.recovery import NOT_FOUND, UNAVAILABLE, alternatives_for
 from app.tools.capabilities import capability_snapshot, optional_workers
 from app.tools.docker_tools import DockerTool
@@ -130,6 +132,35 @@ async def test_open_interpreter_backend_reminds_jarvis_to_verify(monkeypatch, tm
     assert result.success is True
     assert "independently inspect" in result.output.lower()
     assert result.data["backend"] == "open-interpreter"
+
+
+async def test_ufo_and_cua_tools_degrade_when_missing(jarvis_env):
+    ufo = await REGISTRY.execute("ufo", {"action": "run", "goal": "open notepad"})
+    assert ufo.success is False
+    assert "not installed" in ufo.error.lower()
+    cua = await REGISTRY.execute("cua", {"action": "run", "goal": "open calculator"})
+    assert cua.success is False
+    assert "not installed" in cua.error.lower()
+
+
+def test_open_interpreter_detects_alternate_module_and_cli(monkeypatch):
+    backend = OpenInterpreterBackend()
+    monkeypatch.setattr("app.workers.interpreter._module_available", lambda name: name == "open_interpreter")
+    monkeypatch.setattr("app.workers.interpreter.shutil.which", lambda _name: None)
+    assert backend.detect_kind() == "python-module"
+    command = backend.build_command("fix tests", Path("."))
+    assert command[1:3] == ["-m", "open_interpreter"]
+    assert command[3:6] == ["--os", "-y", "-c"]
+
+    monkeypatch.setattr("app.workers.interpreter._module_available", lambda _name: False)
+    monkeypatch.setattr(
+        "app.workers.interpreter.shutil.which",
+        lambda name: "/usr/bin/open-interpreter" if name == "open-interpreter" else None,
+    )
+    assert backend.detect_kind() == "cli"
+    command = backend.build_command("fix tests", Path("."))
+    assert command[0] == "open-interpreter"
+    assert command[1:4] == ["--os", "-y", "-c"]
 
 
 async def test_docker_run_requires_image(monkeypatch):

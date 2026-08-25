@@ -37,6 +37,21 @@ def test_unknown_capability_is_rejected():
     assert "Unknown capability" in message
 
 
+def test_optional_workers_can_be_granted_by_name_and_alias():
+    exposure = ToolExposure("filesystem")
+    for requested, canonical in (
+        ("browser_use", "browser_use"),
+        ("openhands", "code_worker"),
+        ("interpreter", "open_interpreter"),
+        ("ufo", "ufo"),
+        ("cua", "cua"),
+    ):
+        ok, message, added = exposure.grant(requested)
+        assert ok, message
+        assert canonical in added
+        assert canonical in exposure.names()
+
+
 async def test_agent_sends_only_exposed_tools(jarvis_env):
     from app.agent.loop import AGENT
     from app.providers.base import ChatResult

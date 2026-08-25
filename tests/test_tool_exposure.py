@@ -56,6 +56,15 @@ def test_request_tools_grants_aliases_and_mcp_flag():
     assert "desktop" in schema_names
 
 
+def test_request_tools_maps_optional_worker_aliases():
+    granted = grant_requested_tools({"capabilities": ["interpreter", "openhands", "ufo2"]})
+    assert granted == ["open_interpreter", "code_worker", "ufo"]
+    names = tool_names_for("filesystem", granted)
+    assert "open_interpreter" in names
+    assert "code_worker" in names
+    assert "ufo" in names
+
+
 def test_request_all_switches_to_full_exposure():
     assert is_full_exposure("filesystem", ["all"])
     names = tool_names_for("filesystem", ["all"])
