@@ -3605,12 +3605,12 @@ This development session:
 ### Working Tools
 
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
+- PowerShell: implemented as default `terminal` shell on Windows; bash is the default on Linux (CMD/Python/Git/WSL also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
 - Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
-- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs) via `BrowserBackend`; optional Browser Use `task` action when `browser-use` is installed
-- Playwright: default deterministic `BrowserBackend`
-- Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
-- Vision: screenshot tool + llama.cpp `--mmproj` only when a multimodal/GUI task requests it; not verified this session
+- Browser: Playwright Chromium (`open`/`title`/`wait`/`snapshot`, click by accessible name across button/link/tab, type, screenshot, tabs). `close` and missing-URL `open` do not launch Chromium.
+- Playwright: native backend present; live example.com e2e still Windows-only
+- Windows UI: `desktop` inspect + named-control click/type (`name` / `automation_id` first; coordinates last). UIA actions return a clear unavailable error on Linux; screenshot/apps still work.
+- Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
 
 ### Optional Workers
@@ -3652,7 +3652,8 @@ This development session:
 
 ### Portal / API
 
-- Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
+- Command, Phone, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
+- Phone / Android client: installable PWA (`/phone`, `manifest.webmanifest`) against the local API; `GET /api/mobile` is unauthenticated pairing metadata and never includes the private key
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
 - Model page persists tok/s, VRAM, RAM, load time, vision projector state, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`)
 - Settings can enable Professional / Forensic Audit Mode and vision lazy/always/off
@@ -3675,7 +3676,7 @@ This development session:
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell on Windows and bash on Linux; override with `shell=python` / `shell=cmd` when needed
+- Terminal default is PowerShell on Windows and bash on Linux
 
 ### Last End-to-End Test
 
@@ -3683,12 +3684,12 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building (including lazy `--mmproj`), failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **selective thinking, dynamic context, lazy vision**
-- Frontend (`npm run build`): TypeScript build
-- Portal smoke at `http://127.0.0.1:4780`: Command, Model (thinking=selective, vision=lazy/off, context=dynamic), Tools, System, Guide & Workflows, History, Memory, Settings, MCP
+- Unit tests (`python -m pytest tests -q`): previous coverage plus semantic UI resolution, desktop unavailable-off-Windows, browser close/open/title guards, docker run/logs/inspect target checks, terminal default shell, mobile pairing endpoint (no private key)
+- Frontend (`npm run build`): TypeScript build including Phone PWA
+- Portal smoke (Vite `localhost:5173`): Command submit, Phone pairing/copy, Settings → Phone, History/Tools/System/Workflows, mobile menu at 414px. Private key never shown on `/phone`.
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **96 passed** after P0.4/P0.5/P0.6 plus a QA pass (python interpreter, docker targets, browser close, Linux terminal default, Office probe). Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **89 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3784,15 +3785,15 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
-  - Status: TODO (Windows e2e)
+  - Status: IN PROGRESS — browser tool now exposes `title`/`wait`, retries `open`, clicks by accessible name (button/link/tab), and does not launch Chromium on `close`. Live Test 3 still **BLOCKED** here (no Windows desktop / headed Chromium session).
 
 - [x] Browser Use adapter
   - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
   - Status: VERIFIED in unit tests (`test_browser_backends.py`); live Browser Use + local LLM untested on Windows desktop
 
-- [ ] Windows semantic UI automation hardening
+- [x] Windows semantic UI automation hardening
   - Acceptance: named-control interaction works for at least one native app; coordinate click remains last resort.
-  - Status: TODO
+  - Status: VERIFIED in unit tests (`test_semantic_ui.py`) — inspect / name / automation_id resolution; coordinates only after a named miss. Live Notepad (or other native app) still needs the Windows desktop.
 
 - [ ] OpenHands worker adapter
   - Acceptance: large repo tasks can be delegated; Jarvis still verifies.
@@ -3840,7 +3841,9 @@ These items make the existing machine a one-node swarm first. They must not requ
 ### P3
 
 - [ ] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
-- [ ] Phone / Android client against the local API
+- [x] Phone / Android client against the local API
+  - Acceptance: the local API can be driven from a phone on the LAN without a separate native APK.
+  - Status: VERIFIED (PWA at `/phone`, `GET /api/mobile`, Settings pairing copy; live Android home-screen install still needs the Windows PC + LAN)
 - [ ] Dedicated LAN inference server
 - [ ] UFO adapter
 - [ ] Cua adapter
@@ -3980,6 +3983,22 @@ When remote or LAN exposure is active, authentication is required on every `/api
 Reason:
 
 Remote exposure without query-level authentication allows anyone on the local network or public internet to run arbitrary commands on the host machine. Private keys stored in `data/private_key.sec` or environment variables provide zero-leakage security.
+
+Decision: the Android client is a PWA against the existing local API
+
+Do not wait for a native APK. `/phone` plus `GET /api/mobile` is the first phone client. The pairing payload must never include the private key.
+
+Reason:
+
+Section 43 already treats the REST API as the phone/voice surface. A PWA ships on this tree without Play Store or Android SDK.
+
+Decision: desktop automation stays named-control first
+
+`desktop` inspects and resolves `name` / `automation_id` / control type before any coordinate click. Coordinates are an explicit last-resort fallback.
+
+Reason:
+
+Matches the deterministic-tools-first rule and the P1 semantic UI acceptance criterion.
 
 Decision: a skill requires repetition, not a single success
 

@@ -62,7 +62,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": windows and _module_available("pywinauto"),
             "status": "ready" if windows and _module_available("pywinauto") else "unavailable",
-            "detail": "pywinauto / UI Automation. Coordinate clicking is last resort.",
+            "detail": "Named-control UI Automation first (inspect / name / automation_id). Coordinate click is last resort.",
         },
         {
             "id": "office",

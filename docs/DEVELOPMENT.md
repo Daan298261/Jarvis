@@ -61,7 +61,7 @@ backend/app/
   tools/                  Native tools + MCP proxy
   db/                     SQLAlchemy models, aiosqlite session, light migrations
 frontend/src/
-  App.tsx                 Routes: Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System
+  App.tsx                 Routes: Command, Phone, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System
   api.ts                  fetch helper + X-Jarvis-Key from localStorage
   pages/                  One page per portal tab (Workflows.tsx is Guide & Workflows)
 config/default.json       Checked-in defaults (copied into data/settings.json)
@@ -134,7 +134,7 @@ On Linux you can still:
 - Run pytest for non-Windows modules
 - Build the frontend (`npm run build`)
 
-You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal defaults to bash on Linux and PowerShell on Windows.
+You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal default is PowerShell on Windows and bash on Linux.
 
 ---
 
@@ -164,6 +164,7 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | Method | Path | Role |
 | --- | --- | --- |
 | GET | `/api/health` | Liveness (no auth) |
+| GET | `/api/mobile` | Phone/PWA pairing info (no auth, never includes the private key) |
 | WS | `/api/ws` | Live task events |
 | GET | `/api/auth/status` | Whether auth is on / key present |
 | POST | `/api/auth/verify` | Check a key |
@@ -362,9 +363,10 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Skills guide the prompt; they do not execute a parameterized workflow themselves (Guide & Workflows templates compose one prompt)
+- Skills execute bound parameterized steps after three matching successes (`POST /api/memory/skills/{id}/run`)
 - Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
-- Whisper STT / local TTS are not wrapped around `/api/voice/command`
+- Whisper STT / local TTS are not wrapped around `/api/voice/command` (text intake only)
+- Phone/Android client is the `/phone` PWA + `GET /api/mobile`; there is no native APK
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
 
 ---

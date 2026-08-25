@@ -2,7 +2,7 @@
 
 Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal. Inference is **Qwen3.5-27B** through llama.cpp on this machine, or any OpenAI-compatible server you point at.
 
-The portal is [http://127.0.0.1:4780](http://127.0.0.1:4780). The same REST API can later drive voice, Android, or automations.
+The portal is [http://127.0.0.1:4780](http://127.0.0.1:4780). The same REST API drives the installable phone PWA at `/phone`, plus later voice or automations.
 
 This is a **Windows** product. Startup scripts, Office COM, and desktop UI automation assume Windows. Linux is only useful for unit tests; see [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -305,7 +305,16 @@ Every `/api` call and the WebSocket must then present the key as:
 2. `Authorization: Bearer <key>`
 3. `?key=<key>` (bookmarks and WebSockets)
 
-`/api/health`, `/api/auth/status`, and `/api/auth/verify` stay reachable without a key. Localhost can skip the key when `lan_access` is on but `auth_required` is still false. Treat Jarvis like a logged-in user on this PC — see [SECURITY.md](../SECURITY.md).
+`/api/health`, `/api/auth/status`, `/api/auth/verify`, and `/api/mobile` stay reachable without a key. `/api/mobile` lists LAN URLs and install steps; it never returns the private key. Localhost can skip the key when `lan_access` is on but `auth_required` is still false. Treat Jarvis like a logged-in user on this PC — see [SECURITY.md](../SECURITY.md).
+
+### Android / phone client
+
+1. On the PC: Settings → enable **Allow LAN / Remote exposure** and keep a private key.
+2. On the phone (same Wi-Fi): open `http://<pc-ipv4>:4780/phone` in Chrome or Samsung Internet.
+3. Menu → **Add to Home screen**. The PWA starts on `/phone`.
+4. Paste the private key once on the Phone page (or in Settings). Then use **Run on PC**.
+
+Do not mail or message the private key. Copy it from the PC Settings page while you are at the machine.
 
 ---
 

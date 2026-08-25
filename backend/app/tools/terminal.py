@@ -29,6 +29,14 @@ class BackgroundJob:
 _JOBS: dict[int, BackgroundJob] = {}
 
 
+def default_shell() -> str:
+    if sys.platform == "win32":
+        return "powershell"
+    if shutil.which("bash"):
+        return "bash"
+    return "python"
+
+
 def _decode(data: bytes | bytearray) -> str:
     return bytes(data).decode("utf-8", errors="replace")
 
@@ -152,7 +160,8 @@ class TerminalTool(Tool):
             "shell": {
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
-                "default": "powershell" if platform.system() == "Windows" else "bash",
+                "default": "powershell",
+                "description": "powershell on Windows; bash on Linux when omitted",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},
@@ -182,13 +191,7 @@ class TerminalTool(Tool):
         command = kwargs.get("command") or ""
         if not command.strip():
             return ToolResult(False, "", error="command is required for run/start")
-        requested = kwargs.get("shell")
-        if requested:
-            shell = str(requested).lower()
-        elif os.name == "nt":
-            shell = "powershell"
-        else:
-            shell = "bash"
+        shell = (kwargs.get("shell") or default_shell()).lower()
         cwd = kwargs.get("working_directory") or os.getcwd()
         timeout = int(kwargs.get("timeout_seconds") or 120)
         risk = classify_command(command)

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 
 export function SettingsPage() {
@@ -168,48 +169,14 @@ export function SettingsPage() {
       </div>
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Coding workers</h2>
+        <h2>Phone / Android</h2>
         <p className="lede">
-          Model identifiers used when Jarvis routes software work. Fast variants stay off unless you enable them.
-          Cursor ACP remains disconnected until <code>agent acp</code> is on PATH.
+          The portal is an installable PWA. On the PC enable LAN access, then open <a href="/phone">/phone</a> from Android Chrome and Add to Home screen.
+          Pairing details never include the private key.
         </p>
-        <label>Composer model
-          <input
-            value={settings.coding?.composer_model || "composer-2.5"}
-            onBlur={(e) => save({ composer_model: e.target.value })}
-            onChange={(e) => setSettings({ ...settings, coding: { ...settings.coding, composer_model: e.target.value } })}
-          />
-        </label>
-        <label>Grok model
-          <input
-            value={settings.coding?.grok_model || "grok-4.6"}
-            onBlur={(e) => save({ grok_model: e.target.value })}
-            onChange={(e) => setSettings({ ...settings, coding: { ...settings.coding, grok_model: e.target.value } })}
-          />
-        </label>
-        <label>Specialist model (optional)
-          <input
-            value={settings.coding?.specialist_model || ""}
-            placeholder="leave empty"
-            onBlur={(e) => save({ specialist_model: e.target.value })}
-            onChange={(e) => setSettings({ ...settings, coding: { ...settings.coding, specialist_model: e.target.value } })}
-          />
-        </label>
-        <label>Local attempts before paid escalation
-          <input
-            type="number"
-            value={settings.coding?.local_max_attempts ?? 2}
-            onChange={(e) => save({ local_max_attempts: Number(e.target.value) })}
-          />
-        </label>
-        <label className="row">
-          <input
-            type="checkbox"
-            checked={Boolean(settings.coding?.allow_fast_variants)}
-            onChange={(e) => save({ allow_fast_variants: e.target.checked })}
-          />
-          Allow Fast pricing tiers
-        </label>
+        <div className="row">
+          <Link className="btn" to="/phone">Open phone client</Link>
+        </div>
       </div>
 
       {queueStatus && (
