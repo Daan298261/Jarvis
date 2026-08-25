@@ -77,3 +77,15 @@ VERIFY_REQUIRED_PROMPT = """Verification is required before completion.
 
 Inspect the actual result with a tool (read the file, re-run the command, reopen the page, or equivalent).
 Do not declare success from memory. After the inspection, write the final report."""
+
+EXPERT_CONSULT_PROMPT = """You are the Expert model. The primary agent needs a focused second opinion.
+
+Do not call tools. Produce a compact analysis with these headings:
+PROBLEM:
+FAILED APPROACHES:
+WHAT TO TRY NEXT:
+PLAN:
+1. ...
+RISKS:
+
+Be specific. Do not recap the entire history. Prefer deterministic tools over GUI or screenshots."""

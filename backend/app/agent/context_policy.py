@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-SIMPLE = 8192
-NORMAL = 16384
-LONG = 32768
+from typing import Any
 
+CONTEXT_SIMPLE = 8192
+CONTEXT_NORMAL = 16384
+CONTEXT_LONG = 32768
+
+# Start these classes at 8K. Grow to 16K/32K only if the live prompt is under pressure.
 SIMPLE_CLASSES = {
     "filesystem",
     "shell",
@@ -11,42 +14,56 @@ SIMPLE_CLASSES = {
     "document processing",
     "data processing",
 }
+
+# Start at 16K even when the profile cap is 32K. Expand later if compaction is not enough.
 LONG_CLASSES = {
     "long-horizon autonomous",
-    "research",
-    "browser automation",
     "software engineering",
+    "research",
+    "mixed",
 }
 
 
-def recommend_context_size(
-    task_class: str | None,
-    execution_mode: str | None = "balanced",
-    profile_default: int = NORMAL,
-) -> int:
-    """Pick 8K / 16K / 32K from task class instead of always using the profile max.
+def profile_cap(profile: Any) -> int:
+    size = int(getattr(profile, "context_size", 0) or 0)
+    return size if size > 0 else CONTEXT_LONG
 
-    Fast mode never opens a 32K window. Reliable mode steps one tier up so
-    planning and verification fit. The result is also capped at the profile
-    default so a Fast GGUF profile cannot request more than it was loaded for.
+
+def initial_context_size(task_class: str | None, profile: Any) -> int:
+    """Pick a starting window from the task class. Never exceed the profile cap."""
+    cap = profile_cap(profile)
+    klass = (task_class or "").strip().lower()
+    if klass in SIMPLE_CLASSES:
+        return min(CONTEXT_SIMPLE, cap)
+    if klass in LONG_CLASSES:
+        return min(CONTEXT_NORMAL, cap)
+    return min(CONTEXT_NORMAL, cap)
+
+
+def next_context_size(
+    current: int,
+    cap: int,
+    estimated_tokens: int,
+    *,
+    compacted: bool = False,
+) -> int | None:
+    """Return a larger window when the live prompt is filling the current one.
+
+    Mid-task we only grow. Shrinking belongs at task start.
     """
-    cls = (task_class or "mixed").strip().lower()
-    mode = (execution_mode or "balanced").strip().lower()
-    ceiling = int(profile_default or NORMAL)
-
-    if cls in SIMPLE_CLASSES:
-        size = SIMPLE
-    elif cls in LONG_CLASSES:
-        size = LONG
-    else:
-        size = NORMAL
-
-    if mode == "fast":
-        size = min(size, NORMAL)
-    elif mode == "reliable":
-        if size == SIMPLE:
-            size = NORMAL
-        elif size == NORMAL:
-            size = LONG
-
-    return max(SIMPLE, min(size, max(ceiling, SIMPLE)))
+    current = int(current or 0)
+    cap = int(cap or 0) or CONTEXT_LONG
+    if current >= cap:
+        return None
+    if estimated_tokens <= 0:
+        return None
+    hot = estimated_tokens >= int(current * 0.7)
+    if compacted and estimated_tokens >= int(current * 0.5):
+        hot = True
+    if not hot:
+        return None
+    if current < CONTEXT_NORMAL:
+        return min(CONTEXT_NORMAL, cap)
+    if current < CONTEXT_LONG:
+        return min(CONTEXT_LONG, cap)
+    return None

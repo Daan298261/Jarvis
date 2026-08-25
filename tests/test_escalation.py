@@ -1,101 +1,102 @@
-from app.agent.escalation import context_from_working, persist_escalation_package
-from app.agent.planning import WorkingState
+from app.agent.escalation import (
+    consult_expert,
+    expert_packet,
+    should_escalate,
+    user_requests_expert,
+)
 from app.agent.loop import AGENT
-from app.db.models import EscalationPackage, Task
-from app.db.session import SessionLocal
+from app.agent.planning import WorkingState
 from app.providers.base import ChatResult
-import json
+from tests.test_verification_loop import ScriptedProvider, _finished, _tool
 
 
-def test_escalation_context_is_compact_not_a_transcript():
+def test_user_request_escalates_immediately():
+    decision = should_escalate(prompt="Please use the expert model for this architecture decision")
+    assert decision.should_escalate
+    assert "user requested" in decision.reason
+    assert user_requests_expert("give me a second opinion on this")
+
+
+def test_length_alone_does_not_escalate():
+    decision = should_escalate(
+        prompt="Keep going through this long checklist of file copies",
+        task_class="filesystem",
+        consecutive_failures=0,
+    )
+    assert decision.should_escalate is False
+
+
+def test_repeated_failures_escalate_once():
+    first = should_escalate(consecutive_failures=3, prompt="fix the build")
+    assert first.should_escalate
+    second = should_escalate(consecutive_failures=5, already_escalated=True)
+    assert second.should_escalate is False
+
+
+def test_multiple_strategies_and_contradictions():
+    assert should_escalate(distinct_failed_tools=3).should_escalate
+    assert should_escalate(observations=["wrote report.md", "ERROR: file not found"]).should_escalate
+    assert should_escalate(critic_rejected=True).should_escalate
+
+
+def test_expert_packet_is_compact():
     working = WorkingState(
-        goal="Add EscalationContext packaging",
-        acceptance_criteria=["package has goal and reason", "no raw transcript"],
+        goal="fix login",
+        acceptance_criteria=["tests pass"],
+        plan=["inspect auth"],
+        known_failures=["browser: timeout"],
+        observations=["filesystem: found auth.py"],
         task_class="software engineering",
-        known_failures=["python: pytest failed on test_foo"],
     )
-    package = context_from_working(
-        "task-1",
-        working,
-        reason="local worker failed twice",
-        relevant_files=["backend/app/agent/escalation.py"],
-        current_diff="- old\n+ new",
-        failing_tests="FAILED tests/test_foo.py",
-        important_logs="exit_code=1",
-        attempted_strategies=["python", "filesystem"],
-    )
-    prompt = package.as_prompt()
-    assert "EscalationContext" in prompt
-    assert "Add EscalationContext packaging" in prompt
-    assert "FAILED tests/test_foo.py" in prompt
-    assert "role=assistant" not in prompt
-    assert len(prompt) < 8000
+    packet = expert_packet(working, "repeated tool failure")
+    assert "GOAL: fix login" in packet
+    assert "UNRESOLVED PROBLEM: repeated tool failure" in packet
+    assert "timeout" in packet
+    assert len(packet) < 2000
 
 
-async def test_persist_escalation_package(jarvis_env):
-    working = WorkingState(goal="fix tests", task_class="software engineering", acceptance_criteria=["green"])
-    package = context_from_working("missing-task", working, reason="tests failed")
-    await persist_escalation_package(package)
-    async with SessionLocal() as session:
-        row = await session.get(EscalationPackage, package.id)
-    assert row is not None
-    payload = json.loads(row.payload_json)
-    assert payload["goal"] == "fix tests"
-    assert payload["reason"] == "tests failed"
+async def test_consult_expert_uses_current_provider_when_gguf_missing(jarvis_env):
+    provider = ScriptedProvider([ChatResult(content="PLAN:\n1. read the file\n2. patch it")])
+    jarvis_env["manager"].provider = provider
+    text = await consult_expert(jarvis_env["settings"], "GOAL: x\nUNRESOLVED PROBLEM: stuck", "balanced", provider=provider)
+    assert "read the file" in text
+    assert len(provider.turns) == 0
 
 
-def _tool(name: str, arguments: dict, call_id: str) -> dict:
-    return {"id": call_id, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}
-
-
-class ScriptedProvider:
-    def __init__(self, turns):
-        self.turns = list(turns)
-        self.calls = []
-
-    async def health(self):
-        return True
-
-    async def chat(self, messages, tools=None, **kwargs):
-        self.calls.append(messages)
-        if not self.turns:
-            return ChatResult(content="Final report.")
-        return self.turns.pop(0)
-
-
-async def test_repeated_software_failures_persist_escalation_package(jarvis_env):
+async def test_requested_expert_consult_runs_inside_the_loop(jarvis_env):
     tmp = jarvis_env["tmp"]
-    target = tmp / "done.txt"
-    missing = tmp / "nope.txt"
+    target = tmp / "expert.txt"
     provider = ScriptedProvider(
         [
-            ChatResult(
-                content="END STATE: done.txt exists\nACCEPTANCE CRITERIA:\n- file exists\nPLAN:\n1. read missing"
-            ),
-            ChatResult(tool_calls=[_tool("filesystem", {"action": "read", "path": str(missing)}, "c1")]),
-            ChatResult(tool_calls=[_tool("filesystem", {"action": "read", "path": str(missing) + "2"}, "c2")]),
+            ChatResult(content="PLAN:\n1. write the file with the filesystem tool"),
+            ChatResult(content="END STATE: expert.txt exists\nACCEPTANCE CRITERIA:\n- file contains EXPERT\nPLAN:\n1. write"),
             ChatResult(
                 tool_calls=[
-                    _tool("filesystem", {"action": "write", "path": str(target), "content": "OK", "create_backup": False}, "c3")
+                    _tool(
+                        "filesystem",
+                        {"action": "write", "path": str(target), "content": "EXPERT", "create_backup": False},
+                        "c1",
+                    )
                 ]
             ),
-            ChatResult(content="Recovered."),
-            ChatResult(tool_calls=[_tool("filesystem", {"action": "read", "path": str(target)}, "c4")]),
-            ChatResult(content="Verified done.txt."),
+            ChatResult(content="Wrote it."),
+            ChatResult(tool_calls=[_tool("filesystem", {"action": "read", "path": str(target)}, "c2")]),
+            ChatResult(content="Verified expert.txt contains EXPERT."),
         ]
     )
     jarvis_env["manager"].provider = provider
     created = await AGENT.create_task(
-        "Debug this repository and fix the pytest failure by writing done.txt.",
+        f"Use the expert model. Write {target} containing EXPERT.",
         autonomy="autonomous",
         profile="fast",
+        execution_mode="fast",
     )
-    await AGENT._tasks[created.id]
-    async with SessionLocal() as session:
-        task = await session.get(Task, created.id)
-        from sqlalchemy import select
-
-        packages = (await session.execute(select(EscalationPackage))).scalars().all()
+    task = await _finished(created.id)
     assert task.status == "completed"
-    assert packages, "two consecutive tool failures should persist an EscalationContext"
-    assert packages[0].task_id == created.id
+    assert target.read_text(encoding="utf-8") == "EXPERT"
+    injected = any(
+        "Expert analysis" in str(getattr(message, "content", ""))
+        for call in provider.calls
+        for message in call["messages"]
+    )
+    assert injected

@@ -144,7 +144,17 @@ class BrowserTool(Tool):
         async with _lock:
             try:
                 if action == "close":
-                    return await _close_browser()
+                    global _playwright, _browser, _context, _page, _pages
+                    if _context:
+                        await _context.close()
+                    if _playwright:
+                        await _playwright.stop()
+                    _context = None
+                    _playwright = None
+                    _browser = None
+                    _page = None
+                    _pages = []
+                    return ToolResult(True, "Browser closed")
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs["url"]
@@ -228,19 +238,6 @@ class BrowserTool(Tool):
                 if action == "upload":
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
-                if action == "close":
-                    global _playwright, _browser, _context, _page, _pages
-                    if _context:
-                        await _context.close()
-                    if _playwright:
-                        await _playwright.stop()
-                    _context = None
-                    _browser = None
-                    _playwright = None
-                    _browser = None
-                    _page = None
-                    _pages = []
-                    return ToolResult(True, "Browser closed")
                 return ToolResult(False, "", error=f"Unknown action {action}")
             except Exception as exc:
                 return ToolResult(False, "", error=str(exc))

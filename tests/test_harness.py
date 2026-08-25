@@ -1,38 +1,55 @@
-from app.inference.harness import HARNESS_CASES, run_harness
-from app.providers.base import ChatResult
+from app.inference.agent_bench import AGENT_TASKS, task_catalog, tasks_by_category
+from app.inference.harness import benchmark_matrix, harness_status, run_harness
 
 
-def test_harness_matrix_covers_context_vision_and_thinking():
-    contexts = {case["context_size"] for case in HARNESS_CASES}
-    thinking = {case["thinking"] for case in HARNESS_CASES}
-    assert {8192, 16384, 32768} <= contexts
-    assert {"off", "selective", "on"} <= thinking
-    assert any(case["vision"] for case in HARNESS_CASES)
-    assert any(not case["vision"] for case in HARNESS_CASES)
-    assert any(case["profile"] == "fast" for case in HARNESS_CASES)
-    assert any(case["profile"] == "quality" for case in HARNESS_CASES)
+REQUIRED_CATEGORIES = {
+    "filesystem",
+    "software engineering",
+    "shell",
+    "browser automation",
+    "mixed",
+    "multimodal",
+    "research",
+    "document processing",
+    "data processing",
+    "long-horizon autonomous",
+}
 
 
-async def test_dry_run_harness_skips_live_measurement(jarvis_env):
-    report = await run_harness(live=False, persist=True)
-    payload = report.as_dict()
-    assert payload["planned_cases"] == len(HARNESS_CASES)
-    assert payload["measured_cases"] == 0
-    assert payload["skipped_cases"] == len(HARNESS_CASES)
-    assert payload["primary_metric"].startswith("successful autonomous")
-    assert all(case["status"] == "skipped" for case in payload["cases"])
-    assert payload["host"]["cpu_cores"] >= 1
+def test_agent_catalog_has_at_least_twenty_realistic_tasks():
+    assert len(AGENT_TASKS) >= 20
+    catalog = task_catalog()
+    assert catalog[0]["id"] == "fs-organize"
+    categories = tasks_by_category()
+    missing = REQUIRED_CATEGORIES - set(categories)
+    assert not missing, missing
+    ids = [task.id for task in AGENT_TASKS]
+    assert len(ids) == len(set(ids))
 
 
-async def test_live_harness_with_scripted_provider_records_latency(jarvis_env):
-    class FastProvider:
-        async def chat(self, messages, tools=None, **kwargs):
-            return ChatResult(content="pong", timings={"prompt_per_second": 80.0, "predicted_per_second": 20.0})
+def test_benchmark_matrix_covers_models_context_thinking_and_vision():
+    matrix = benchmark_matrix()
+    assert len(matrix) >= 72
+    models = {row.model for row in matrix}
+    assert "qwen3.5-9b-abliterated" in models
+    assert "qwen3.5-27b" in models
+    quants = {row.quant for row in matrix if row.model == "qwen3.5-9b-abliterated"}
+    assert "Q8_0" in quants and "Q6_K" in quants
+    assert {row.context_size for row in matrix} >= {8192, 16384, 32768}
+    assert {row.thinking for row in matrix} == {"off", "selective", "on"}
+    assert {row.vision for row in matrix} == {False, True}
 
-    report = await run_harness(live=True, provider=FastProvider(), persist=False)
-    measured = [case for case in report.cases if case.status == "measured"]
-    skipped = [case for case in report.cases if case.status == "skipped"]
-    assert measured or skipped
-    if measured:
-        assert measured[0].time_to_first_token_seconds is not None
-        assert measured[0].tool_call_latency_ms is not None
+
+def test_dry_run_harness_skips_missing_ggufs_and_writes_report(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.inference.harness.data_dir", lambda: tmp_path)
+    report = run_harness(live=False)
+    assert report["agent_catalog_size"] >= 20
+    assert report["skipped"] == len(report["configurations"])
+    assert report["measured"] == 0
+    assert (tmp_path / "benchmarks" / "last-report.json").exists()
+    assert (tmp_path / "benchmarks" / "last-report.md").exists()
+    markdown = (tmp_path / "benchmarks" / "last-report.md").read_text(encoding="utf-8")
+    assert "successful autonomous tasks" in markdown
+    status = harness_status()
+    assert status["report"]["skipped"] == report["skipped"]
+    assert status["matrix_size"] == len(report["configurations"])

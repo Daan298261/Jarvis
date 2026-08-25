@@ -1,226 +1,360 @@
 from __future__ import annotations
 
-import os
+import asyncio
+import json
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-import psutil
+from ..config import AppSettings, data_dir, load_settings
+from .agent_bench import AGENT_TASKS, task_catalog
+from .profiles import MODEL_REPO, PROFILES, model_paths
 
-from ..config import AppSettings, load_settings
-from ..hardware import detect_hardware
-from ..providers.base import ChatMessage, ModelProvider
-from .backends import LlamaCppBackend
-from .benchmarks import record_benchmark_sample
-from .manager import MANAGER
-from .profiles import PROFILES, resolve_profile
+HARNESS_DIR_NAME = "benchmarks"
 
-# Combinations the plan requires. Live runs skip cases whose GGUF/server is missing.
-HARNESS_CASES: tuple[dict[str, Any], ...] = (
-    {"profile": "fast", "context_size": 8192, "vision": False, "thinking": "off"},
-    {"profile": "fast", "context_size": 16384, "vision": False, "thinking": "off"},
-    {"profile": "balanced", "context_size": 8192, "vision": False, "thinking": "selective"},
-    {"profile": "balanced", "context_size": 16384, "vision": False, "thinking": "selective"},
-    {"profile": "balanced", "context_size": 32768, "vision": False, "thinking": "selective"},
-    {"profile": "balanced", "context_size": 16384, "vision": True, "thinking": "selective"},
-    {"profile": "quality", "context_size": 16384, "vision": False, "thinking": "on"},
-    {"profile": "quality", "context_size": 32768, "vision": False, "thinking": "on"},
-)
 
-PRIMARY_METRIC = "successful autonomous tasks per wall-clock minute"
+def harness_dir() -> Path:
+    path = data_dir() / HARNESS_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def last_report_path() -> Path:
+    return harness_dir() / "last-report.json"
 
 
 @dataclass
-class HarnessCaseResult:
-    profile: str
+class BenchConfig:
+    id: str
+    model: str
+    quant: str
+    filename: str
+    repo: str
     context_size: int
-    vision: bool
     thinking: str
+    vision: bool
+    profile: str = ""
+
+    def gguf_path(self) -> Path:
+        if "9B" in self.model:
+            return model_paths()["root"].parent / "Qwen3.5-9B-abliterated-GGUF" / self.filename
+        return model_paths()["root"] / self.filename
+
+
+def benchmark_matrix() -> list[BenchConfig]:
+    """Model/quant/context/vision/thinking combinations from the master plan."""
+    nine_b = [
+        ("qwen3.5-9b-abliterated", "Q8_0", "Qwen3.5-9B-abliterated-Q8_0.gguf", "Abiray/Qwen3.5-9B-abliterated-GGUF"),
+        ("qwen3.5-9b-abliterated", "Q6_K", "Qwen3.5-9B-abliterated-Q6_K.gguf", "Abiray/Qwen3.5-9B-abliterated-GGUF"),
+        ("qwen3.5-9b-official", "Q8_0", "Qwen3.5-9B-Q8_0.gguf", "Qwen/Qwen3.5-9B-GGUF"),
+    ]
+    configs: list[BenchConfig] = []
+    for model, quant, filename, repo in nine_b:
+        for ctx in (8192, 16384, 32768):
+            for thinking in ("off", "selective", "on"):
+                for vision in (False, True):
+                    configs.append(
+                        BenchConfig(
+                            id=f"{model}-{quant}-c{ctx}-{thinking}-{'vision' if vision else 'text'}",
+                            model=model,
+                            quant=quant,
+                            filename=filename,
+                            repo=repo,
+                            context_size=ctx,
+                            thinking=thinking,
+                            vision=vision,
+                            profile="fast" if thinking == "off" else "balanced",
+                        )
+                    )
+    for ctx in (8192, 16384, 32768):
+        for thinking in ("off", "selective", "on"):
+            for vision in (False, True):
+                configs.append(
+                    BenchConfig(
+                        id=f"qwen3.5-27b-Q4_K_M-c{ctx}-{thinking}-{'vision' if vision else 'text'}",
+                        model="qwen3.5-27b",
+                        quant="Q4_K_M",
+                        filename=PROFILES["balanced"].filename,
+                        repo=MODEL_REPO,
+                        context_size=ctx,
+                        thinking=thinking,
+                        vision=vision,
+                        profile="fast" if thinking == "off" else "balanced",
+                    )
+                )
+    return configs
+
+
+@dataclass
+class ConfigResult:
+    id: str
     status: str
     skip_reason: str = ""
     load_time_seconds: float | None = None
-    time_to_first_token_seconds: float | None = None
+    time_to_first_token_ms: float | None = None
     prompt_tokens_per_second: float | None = None
     output_tokens_per_second: float | None = None
     vram_used_mib: int | None = None
     ram_used_gb: float | None = None
-    gpu_utilization_percent: float | None = None
-    cpu_utilization_percent: float | None = None
+    gpu_utilization: int | None = None
+    cpu_utilization: float | None = None
+    context_size: int = 0
     tool_call_latency_ms: float | None = None
-    notes: str = ""
+    thinking: str = ""
+    vision: bool = False
+    model: str = ""
+    quant: str = ""
+
+
+@dataclass
+class AgentTaskResult:
+    id: str
+    name: str
+    category: str
+    status: str
+    skip_reason: str = ""
+    success: bool | None = None
+    human_intervention: bool = False
+    total_seconds: float | None = None
+    model_calls: int | None = None
+    tool_calls: int | None = None
+    retries: int | None = None
+    verification: str = ""
 
 
 @dataclass
 class HarnessReport:
+    created_at: str
     live: bool
-    primary_metric: str = PRIMARY_METRIC
-    host: dict[str, Any] = field(default_factory=dict)
-    cases: list[HarnessCaseResult] = field(default_factory=list)
-    warning: str = ""
+    hardware: dict[str, Any] = field(default_factory=dict)
+    configurations: list[ConfigResult] = field(default_factory=list)
+    agent_tasks: list[AgentTaskResult] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    primary_metric: str = "successful autonomous tasks per unit of wall-clock time"
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "created_at": self.created_at,
             "live": self.live,
+            "hardware": self.hardware,
             "primary_metric": self.primary_metric,
-            "host": self.host,
-            "warning": self.warning,
-            "cases": [asdict(case) for case in self.cases],
-            "planned_cases": len(HARNESS_CASES),
-            "measured_cases": sum(1 for case in self.cases if case.status == "measured"),
-            "skipped_cases": sum(1 for case in self.cases if case.status == "skipped"),
+            "notes": self.notes,
+            "configurations": [asdict(row) for row in self.configurations],
+            "agent_tasks": [asdict(row) for row in self.agent_tasks],
+            "measured": sum(1 for row in self.configurations if row.status == "measured"),
+            "skipped": sum(1 for row in self.configurations if row.status == "skipped"),
+            "agent_catalog_size": len(AGENT_TASKS),
         }
 
 
-def _gpu_utilization() -> float | None:
-    try:
-        import subprocess
+_STATE: dict[str, Any] = {"running": False, "report": None, "error": ""}
 
+
+def harness_status() -> dict[str, Any]:
+    report = _STATE.get("report")
+    if report is None and last_report_path().exists():
+        try:
+            report = json.loads(last_report_path().read_text(encoding="utf-8"))
+            _STATE["report"] = report
+        except Exception:
+            report = None
+    return {
+        "running": bool(_STATE.get("running")),
+        "error": _STATE.get("error") or "",
+        "report": report,
+        "catalog": task_catalog(),
+        "matrix_size": len(benchmark_matrix()),
+    }
+
+
+def probe_gpu() -> dict[str, Any]:
+    import subprocess
+
+    try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.used,memory.total,utilization.gpu,utilization.memory",
+                "--format=csv,noheader,nounits",
+            ],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
         ).stdout.strip()
-        if out:
-            return float(out.splitlines()[0].strip())
     except Exception:
-        return None
-    return None
-
-
-def host_snapshot() -> dict[str, Any]:
-    info = detect_hardware()
+        return {}
+    if not out:
+        return {}
+    parts = [p.strip() for p in out.splitlines()[0].split(",")]
+    if len(parts) < 5:
+        return {"gpu_name": parts[0] if parts else None}
     return {
-        "os": info.os_name,
-        "cpu_name": info.cpu_name,
-        "cpu_cores": info.cpu_cores,
-        "ram_total_gb": info.ram_total_gb,
-        "gpu_name": info.gpu_name,
-        "vram_total_mib": info.vram_total_mib,
-        "vram_free_mib": info.vram_free_mib,
-        "cuda_version": info.cuda_version,
-        "cpu_utilization_percent": psutil.cpu_percent(interval=0.1),
-        "gpu_utilization_percent": _gpu_utilization(),
+        "gpu_name": parts[0],
+        "vram_used_mib": int(float(parts[1])),
+        "vram_total_mib": int(float(parts[2])),
+        "gpu_utilization": int(float(parts[3])),
+        "memory_utilization": int(float(parts[4])),
     }
 
 
-def _skip_reason(settings: AppSettings, spec: dict[str, Any], live: bool) -> str:
-    if not live:
-        return "dry-run; live llama.cpp measurement was not requested"
-    if os.environ.get("JARVIS_SKIP_MODEL") == "1":
-        return "JARVIS_SKIP_MODEL=1"
-    profile = resolve_profile(spec["profile"])
-    backend = LlamaCppBackend(settings)
-    missing = backend.missing_requirements(profile)
-    if missing:
-        return "; ".join(missing)
-    return ""
-
-
-async def _measure_provider(provider: ModelProvider) -> dict[str, Any]:
+def _tool_call_latency_ms() -> float:
     started = time.perf_counter()
-    ping = time.perf_counter()
-    result = await provider.chat(
-        [ChatMessage(role="user", content="Reply with the single word pong and nothing else.")],
-        tools=None,
-        thinking=False,
-        max_tokens=8,
-    )
-    elapsed = time.perf_counter() - started
-    tool_started = time.perf_counter()
-    await provider.chat(
-        [ChatMessage(role="user", content="Do not call tools. Reply with ok.")],
-        tools=[
-            {
-                "type": "function",
-                "function": {
-                    "name": "filesystem",
-                    "description": "unused latency probe",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            }
-        ],
-        thinking=False,
-        max_tokens=8,
-    )
-    tool_ms = round((time.perf_counter() - tool_started) * 1000, 1)
-    timings = result.timings or {}
-    return {
-        "time_to_first_token_seconds": round(elapsed, 4),
-        "prompt_tokens_per_second": timings.get("prompt_per_second"),
-        "output_tokens_per_second": timings.get("predicted_per_second"),
-        "tool_call_latency_ms": tool_ms,
-        "load_probe_seconds": round(ping - started, 4),
-    }
+    list(model_paths().values())
+    return round((time.perf_counter() - started) * 1000, 2)
 
 
-async def run_harness(
-    *,
-    live: bool = False,
-    settings: AppSettings | None = None,
-    provider: ModelProvider | None = None,
-    persist: bool = True,
-) -> HarnessReport:
-    settings = settings or load_settings()
-    report = HarnessReport(live=live, host=host_snapshot())
-    if live and not (provider or MANAGER.provider):
-        report.warning = "No chat provider is loaded; cases will be skipped unless llama.cpp files exist."
-    chat = provider or MANAGER.provider
-
-    for spec in HARNESS_CASES:
-        skip = _skip_reason(settings, spec, live)
-        if live and provider is not None:
-            skip = ""
-        case = HarnessCaseResult(
-            profile=spec["profile"],
-            context_size=int(spec["context_size"]),
-            vision=bool(spec["vision"]),
-            thinking=str(spec["thinking"]),
-            status="skipped" if skip else "measured",
-            skip_reason=skip,
+def evaluate_config(config: BenchConfig, *, live: bool) -> ConfigResult:
+    path = config.gguf_path()
+    if not path.exists():
+        return ConfigResult(
+            id=config.id,
+            status="skipped",
+            skip_reason=f"GGUF missing: {path}",
+            context_size=config.context_size,
+            thinking=config.thinking,
+            vision=config.vision,
+            model=config.model,
+            quant=config.quant,
         )
-        if not skip and chat is not None:
-            try:
-                metrics = await _measure_provider(chat)
-                await MANAGER.refresh_resources()
-                case.load_time_seconds = MANAGER.state.load_time_seconds
-                case.time_to_first_token_seconds = metrics["time_to_first_token_seconds"]
-                case.prompt_tokens_per_second = metrics["prompt_tokens_per_second"]
-                case.output_tokens_per_second = metrics["output_tokens_per_second"]
-                case.tool_call_latency_ms = metrics["tool_call_latency_ms"]
-                case.vram_used_mib = MANAGER.state.vram_used_mib
-                case.ram_used_gb = MANAGER.state.ram_used_gb
-                case.gpu_utilization_percent = report.host.get("gpu_utilization_percent")
-                case.cpu_utilization_percent = psutil.cpu_percent(interval=0.05)
-                case.notes = (
-                    f"vision={'on' if spec['vision'] else 'off'}; thinking={spec['thinking']}; "
-                    f"quant={PROFILES[spec['profile']].quant}"
-                )
-            except Exception as exc:
-                case.status = "skipped"
-                case.skip_reason = f"measurement failed: {exc}"
-        elif not skip and chat is None:
-            case.status = "skipped"
-            case.skip_reason = "no chat provider loaded"
-        report.cases.append(case)
-        if persist:
-            await record_benchmark_sample(
-                profile=case.profile,
-                quantization=PROFILES[case.profile].quant,
-                context_size=case.context_size,
-                prompt_tps=case.prompt_tokens_per_second,
-                generation_tps=case.output_tokens_per_second,
-                vram_used_mib=case.vram_used_mib,
-                ram_used_gb=case.ram_used_gb,
-                load_time_seconds=case.load_time_seconds,
-                source="harness" if case.status == "measured" else "harness-skip",
-                notes=case.skip_reason or case.notes,
+    if not live:
+        return ConfigResult(
+            id=config.id,
+            status="skipped",
+            skip_reason="dry run; pass live=true on a machine with the GGUF loaded to measure",
+            context_size=config.context_size,
+            thinking=config.thinking,
+            vision=config.vision,
+            model=config.model,
+            quant=config.quant,
+        )
+    from .manager import MANAGER
+
+    gpu = probe_gpu()
+    loaded = MANAGER.state.loaded and MANAGER.state.profile == config.profile and int(MANAGER.state.context_size or 0) == config.context_size
+    if not loaded:
+        return ConfigResult(
+            id=config.id,
+            status="skipped",
+            skip_reason="GGUF present but this configuration is not the currently loaded model (harness does not swap models mid-run)",
+            context_size=config.context_size,
+            thinking=config.thinking,
+            vision=config.vision,
+            model=config.model,
+            quant=config.quant,
+            vram_used_mib=gpu.get("vram_used_mib"),
+            gpu_utilization=gpu.get("gpu_utilization"),
+        )
+    return ConfigResult(
+        id=config.id,
+        status="measured",
+        context_size=config.context_size,
+        thinking=config.thinking,
+        vision=config.vision,
+        model=config.model,
+        quant=config.quant,
+        load_time_seconds=MANAGER.state.load_time_seconds,
+        prompt_tokens_per_second=MANAGER.state.prompt_tps,
+        output_tokens_per_second=MANAGER.state.generation_tps,
+        vram_used_mib=MANAGER.state.vram_used_mib or gpu.get("vram_used_mib"),
+        ram_used_gb=MANAGER.state.ram_used_gb,
+        gpu_utilization=gpu.get("gpu_utilization"),
+        tool_call_latency_ms=_tool_call_latency_ms(),
+    )
+
+
+def evaluate_agent_tasks(*, live: bool) -> list[AgentTaskResult]:
+    rows: list[AgentTaskResult] = []
+    for task in AGENT_TASKS:
+        skip = ""
+        status = "catalogued"
+        if "gpu" in task.requires and not probe_gpu():
+            skip = "no NVIDIA GPU in this environment"
+            status = "skipped"
+        if "windows" in task.requires:
+            import platform
+
+            if platform.system() != "Windows":
+                skip = skip or "Windows-only task"
+                status = "skipped"
+        if not live and status != "skipped":
+            status = "catalogued"
+        rows.append(
+            AgentTaskResult(
+                id=task.id,
+                name=task.name,
+                category=task.category,
+                status=status,
+                skip_reason=skip,
+                human_intervention=False,
             )
-    measured = sum(1 for case in report.cases if case.status == "measured")
-    if live and measured == 0:
-        report.warning = (
-            report.warning
-            or "Harness did not measure a live case. Tokens/sec must not be used to pick hardware until a live run exists."
         )
-    return report
+    return rows
+
+
+def run_harness(*, live: bool = False, settings: AppSettings | None = None) -> dict[str, Any]:
+    settings = settings or load_settings()
+    from ..hardware import hardware_dict
+
+    report = HarnessReport(
+        created_at=datetime.now(timezone.utc).isoformat(),
+        live=live,
+        hardware=hardware_dict(),
+        notes=[
+            "Do not pick a winner from tokens/sec alone.",
+            "Primary metric is successful autonomous tasks per unit of wall-clock time.",
+            "Missing GGUFs are skipped so the harness can run on machines without every quant.",
+            f"Inference host {settings.inference.host}:{settings.inference.port}.",
+        ],
+    )
+    report.configurations = [evaluate_config(cfg, live=live) for cfg in benchmark_matrix()]
+    report.agent_tasks = evaluate_agent_tasks(live=live)
+    payload = report.as_dict()
+    last_report_path().write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    markdown = render_markdown(payload)
+    (harness_dir() / "last-report.md").write_text(markdown, encoding="utf-8")
+    _STATE["report"] = payload
+    _STATE["error"] = ""
+    return payload
+
+
+def render_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        f"# Jarvis benchmark report",
+        "",
+        f"Created: {payload.get('created_at')}",
+        f"Live: {payload.get('live')}",
+        f"Measured configs: {payload.get('measured')} / skipped: {payload.get('skipped')}",
+        f"Agent catalog: {payload.get('agent_catalog_size')} tasks",
+        "",
+        f"Primary metric: {payload.get('primary_metric')}",
+        "",
+        "## Notes",
+    ]
+    for note in payload.get("notes") or []:
+        lines.append(f"- {note}")
+    lines += ["", "## Configurations", "", "| id | status | ctx | thinking | vision | skip |", "| --- | --- | --- | --- | --- | --- |"]
+    for row in payload.get("configurations") or []:
+        lines.append(
+            f"| {row.get('id')} | {row.get('status')} | {row.get('context_size')} | "
+            f"{row.get('thinking')} | {row.get('vision')} | {row.get('skip_reason') or ''} |"
+        )
+    lines += ["", "## Agent tasks", "", "| id | category | status | skip |", "| --- | --- | --- | --- |"]
+    for row in payload.get("agent_tasks") or []:
+        lines.append(f"| {row.get('id')} | {row.get('category')} | {row.get('status')} | {row.get('skip_reason') or ''} |")
+    return "\n".join(lines) + "\n"
+
+
+async def run_harness_background(*, live: bool = False) -> None:
+    if _STATE.get("running"):
+        return
+    _STATE["running"] = True
+    _STATE["error"] = ""
+    try:
+        await asyncio.to_thread(run_harness, live=live)
+    except Exception as exc:
+        _STATE["error"] = str(exc)
+    finally:
+        _STATE["running"] = False

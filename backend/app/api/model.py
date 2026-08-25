@@ -16,7 +16,7 @@ from ..agent.agent_benchmark import (
 )
 from ..config import data_dir, load_settings, save_settings
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
-from ..inference.hardware_gate import hardware_purchase_gate
+from ..inference.harness import harness_status, run_harness, run_harness_background
 from ..inference.manager import MANAGER
 from ..inference.profiles import declared_profiles, profile_as_dict
 
@@ -29,6 +29,7 @@ class LoadBody(BaseModel):
 
 class HarnessBody(BaseModel):
     live: bool = False
+    background: bool = False
 
 
 @router.get("")
@@ -171,31 +172,22 @@ async def unload_model():
     return await MANAGER.snapshot(settings)
 
 
-@router.get("/agent-benchmarks")
-async def agent_benchmarks():
-    return await build_report()
+@router.get("/harness")
+async def get_harness():
+    return harness_status()
 
 
-@router.get("/agent-benchmarks/suite")
-async def agent_benchmark_suite():
-    return {"tasks": list_suite(), "coverage": suite_coverage()}
+@router.post("/harness")
+async def start_harness(body: HarnessBody | None = None):
+    live = bool(body.live) if body else False
+    background = bool(body.background) if body else False
+    status = harness_status()
+    if status["running"]:
+        return {"ok": True, "running": True, "report": status.get("report")}
+    if background:
+        import asyncio
 
-
-@router.post("/agent-benchmarks/results")
-async def record_agent_benchmark(body: AgentResultBody):
-    spec_ok = any(item["id"] == body.task_id for item in list_suite())
-    if not spec_ok:
-        raise HTTPException(404, f"Unknown suite task {body.task_id}")
-    row = await record_result(TaskMetrics(**body.model_dump()))
-    return {"ok": True, "id": row.id, "report": await build_report()}
-
-
-@router.get("/hardware-gate")
-async def hardware_gate():
-    report = await build_report()
-    samples = await list_benchmarks(limit=50)
-    return evaluate_purchase_gate(
-        hardware=detect_hardware(),
-        inference_samples=samples,
-        agent_results=report["results"],
-    )
+        asyncio.create_task(run_harness_background(live=live))
+        return {"ok": True, "running": True}
+    report = run_harness(live=live)
+    return {"ok": True, "running": False, "report": report}

@@ -11,7 +11,7 @@ import psutil
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, resolve_backend
-from .profiles import ModelProfile, declared_profiles, mmproj_path, profile_as_dict, profile_gguf, resolve_profile
+from .profiles import ModelProfile, model_paths, resolve_profile, with_context
 
 
 @dataclass
@@ -45,17 +45,6 @@ class InferenceState:
     thinking_mode: str = ""
 
 
-def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
-    return replace(profile, context_size=context_size)
-
-
-def _default_load_context(profile: ModelProfile) -> int:
-    cap = int(profile.context_size or 16384)
-    if profile.name == "fast":
-        return min(8192, cap)
-    return min(16384, cap)
-
-
 class InferenceManager:
     """Owns model lifecycle. Process control is delegated to an InferenceBackend."""
 
@@ -68,27 +57,17 @@ class InferenceManager:
     def base_url(self, settings: AppSettings) -> str:
         return f"http://{settings.inference.host}:{settings.inference.port}/v1"
 
-    def provider_model(self, settings: AppSettings, advertised: list[str] | None = None) -> str:
-        chosen = (settings.inference.remote_model or "").strip()
-        if chosen:
-            return chosen
-        if advertised:
-            return advertised[0]
-        return "Qwen3.5-27B"
-
-    def provider_api_key(self, settings: AppSettings) -> str:
-        return (settings.inference.api_key or "").strip() or "local"
-
-    def _make_provider(self, settings: AppSettings, advertised: list[str] | None = None) -> OpenAICompatProvider:
-        return OpenAICompatProvider(
-            self.base_url(settings),
-            api_key=self.provider_api_key(settings),
-            model=self.provider_model(settings, advertised),
-        )
-
-    async def load(self, settings: AppSettings, profile_name: str | None = None) -> InferenceState:
+    async def load(
+        self,
+        settings: AppSettings,
+        profile_name: str | None = None,
+        context_size: int | None = None,
+        force: bool = False,
+    ) -> InferenceState:
         async with self._lock:
             profile = resolve_profile(profile_name or settings.inference.profile)
+            if context_size:
+                profile = with_context(profile, int(context_size))
             backend = resolve_backend(settings)
             model = profile_gguf(profile)
 
@@ -97,7 +76,14 @@ class InferenceManager:
                 self.state.last_error = "; ".join(missing)
                 raise FileNotFoundError(self.state.last_error)
 
-            if self.backend and self.state.loaded and self.state.profile == profile.name and self.backend.name == backend.name and self.state.vision == bool(settings.inference.vision):
+            same = (
+                self.backend
+                and self.state.loaded
+                and self.state.profile == profile.name
+                and self.backend.name == backend.name
+                and int(self.state.context_size or 0) == int(profile.context_size or 0)
+            )
+            if same and not force:
                 return self.state
 
             self._apply_profile_state(settings, profile, backend, model)
@@ -182,7 +168,7 @@ class InferenceManager:
             ready = await backend.start(profile, timeout=300)
             if not ready and backend.manages_process:
                 # Most first-load failures on a 16 GB card are context pressure.
-                fallback = _with_context(profile, 16384)
+                fallback = with_context(profile, 16384)
                 ready = await backend.start(fallback, timeout=240)
                 if ready:
                     self.state.context_size = fallback.context_size
@@ -277,6 +263,26 @@ class InferenceManager:
             self.state.mmproj_path = ""
             return self.state
 
+    async def apply_context(self, settings: AppSettings, context_size: int, *, allow_shrink: bool = False) -> int:
+        """Set the live context window. Mid-task callers pass allow_shrink=False so we only grow."""
+        target = int(context_size or 0)
+        if target <= 0:
+            return int(self.state.context_size or 0)
+        current = int(self.state.context_size or 0)
+        if current == target:
+            return current
+        if not allow_shrink and current >= target and current > 0:
+            return current
+        manages = bool(self.backend and getattr(self.backend, "manages_process", False))
+        if not manages:
+            self.state.context_size = target
+            return target
+        try:
+            await self.load(settings, self.state.profile or settings.inference.profile, context_size=target, force=True)
+        except Exception:
+            return int(self.state.context_size or current)
+        return int(self.state.context_size or target)
+
     async def refresh_resources(self) -> None:
         try:
             import subprocess
@@ -340,7 +346,11 @@ class InferenceManager:
             "vision": settings.inference.vision,
             "vision_loaded": self.state.vision_loaded,
             "thinking": profile.thinking,
-            "profiles": [profile_as_dict(item) for item in declared_profiles()],
+            "context_policy": {
+                "live": self.state.context_size or profile.context_size,
+                "profile_cap": profile.context_size,
+                "note": "Tasks start at 8K or 16K and expand to the profile cap only when the live prompt is under pressure.",
+            },
         }
 
     async def record_timings(self, timings: dict[str, Any]) -> None:

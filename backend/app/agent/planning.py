@@ -278,7 +278,7 @@ class WorkingState:
     next_action: str = ""
     task_class: str = ""
     verified: bool = False
-    extra_tools: list[str] = field(default_factory=list)
+    escalated: bool = False
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"
