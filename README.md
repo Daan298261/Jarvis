@@ -2,7 +2,9 @@
 
 Self-hosted local desktop agent. The default model is **Qwen3.5-9B Abliterated** running on this computer through llama.cpp (Qwen3.5-27B remains the Expert escalation model, or you can point at any OpenAI-compatible server). The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
 
-Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. That file is the persistent architecture, current state, and development queue. Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode) is specified in sections 64–85 and is not implemented yet.
+**Development process:** [`docs/PROCESS.md`](docs/PROCESS.md) — one RFC or one queue item per worker; branch from `cursor/local-qwen-desktop-agent`. Design specs go in [`docs/rfcs/`](docs/rfcs/), not wholesale edits to the master plan.
+
+Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) for architecture context and the Development Queue (§58). Update Current State (§57) only for the ticket you just shipped. Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode) is specified in sections 64–85 and is not implemented yet.
 
 Detailed P2+ swarm role, node placement, resource-control, and universal-UI requirements are maintained separately in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md). The master plan remains authoritative for priority and implementation status.
 
@@ -10,6 +12,8 @@ Detailed P2+ swarm role, node placement, resource-control, and universal-UI requ
 
 | Document | Contents |
 | --- | --- |
+| **[docs/PROCESS.md](docs/PROCESS.md)** | RFC workflow, one-ticket Cursor loop, cloud vs desktop sign-off |
+| **[docs/rfcs/](docs/rfcs/)** | Design RFCs (template + index) |
 | **[docs/INSTALL.md](docs/INSTALL.md)** | Full Windows install: Python, Node, llama.cpp, GGUFs, start options, LAN auth, updates |
 | **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** | Repo map, dev servers, API, agent loop, adding tools, tests |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Control plane, compaction, memory, autonomy |

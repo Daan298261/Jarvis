@@ -1,6 +1,8 @@
 # Develop Jarvis
 
-This guide is for changing the current codebase. Installation of models and llama.cpp is in [INSTALL.md](INSTALL.md). Product intent, unfinished work, and the session bootstrap live in [`JARVIS_MASTER_PLAN.md`](../JARVIS_MASTER_PLAN.md) — read that file before substantial changes, and keep its Current State / Development Queue accurate when you ship something.
+This guide is for changing the current codebase. Installation of models and llama.cpp is in [INSTALL.md](INSTALL.md).
+
+**Process first:** read [PROCESS.md](PROCESS.md). Implement **one** named RFC or **one** Development Queue item per session; branch from `cursor/local-qwen-desktop-agent`. Product intent and the queue live in [`JARVIS_MASTER_PLAN.md`](../JARVIS_MASTER_PLAN.md) §57–58 — update only the lines that match your shipped ticket.
 
 Jarvis is a local control plane, not a chatbot wrapper. Optimize for autonomous completion and verification, not for swapping the stack.
 
@@ -381,7 +383,7 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 - **No drive-by refactors.** Do not replace FastAPI + React + SQLite because a plan document is richer than the code.
 - **Windows paths in operator docs; keep tools working with `os.name` checks** where they already exist (llama-server filename, Python venv `Scripts` vs `bin`).
 - **Secrets.** Never commit `.env`, `data/private_key.sec`, MCP env values, or GGUFs.
-- **Master plan hygiene.** After a real change: update Current State, the queue item, and the decision log if you made a durable choice. Do not paste logs or chain-of-thought into that file.
+- **Master plan hygiene.** After a real change: update only the matching Current State bullets, queue checkbox, and decision log entry (§57–59). Do not re-audit the repo or rewrite the master plan. New design belongs in [`docs/rfcs/`](rfcs/) per [PROCESS.md](PROCESS.md).
 
 ---
 

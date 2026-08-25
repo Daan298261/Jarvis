@@ -10,9 +10,15 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 This file remains the overall source of truth for priorities, current state, and development status. Detailed swarm requirements intentionally live in the separate [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md) specification so this master plan does not duplicate a large evolving subsystem design.
 
+<<<<<<< HEAD
 **P4/P5 adaptive intelligence and domain packs** live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file specifies resilient adaptive learning, domain packs, and business operating workflows translated from useful Founder OS patterns into native Jarvis abstractions. Do not start P4/P5 implementation ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it.
 
 Every development session must read this file before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`. Work touching execution eventing, confidence-gated memory, adaptive routing, workflow patterns, domain packs, or business operations must also read `ADAPTIVE_DOMAIN_ARCHITECTURE.md`.
+=======
+**Worker process (mandatory):** [`docs/PROCESS.md`](docs/PROCESS.md) and [`AGENTS.md`](AGENTS.md). Implement **one** RFC or **one** Development Queue item per session. New design goes in [`docs/rfcs/`](docs/rfcs/) — do not paste large spec updates into this file. Integration branch: `cursor/local-qwen-desktop-agent`.
+
+Every development session must read this file for architecture context before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`.
+>>>>>>> 1aa09d1 (docs: encode one-ticket development process and RFC workflow)
 
 Cursor is responsible for keeping this document accurate.
 
@@ -3494,27 +3500,9 @@ Priority order:
 
 This project will be developed over many Cursor sessions.
 
-The user may configure automation to repeatedly trigger Cursor.
+**Follow [`docs/PROCESS.md`](docs/PROCESS.md):** each run implements exactly **one** named RFC (`docs/rfcs/`) or **one** Development Queue item (§58). Branch from `cursor/local-qwen-desktop-agent`. Do not use vague prompts ("continue development", "pick up priorities", "merge all PRs").
 
-Every development run should begin by reading this file.
-
-Then:
-
-1. inspect Git status;
-2. inspect current project;
-3. read the Current State section below;
-4. read the Development Queue below;
-5. select the highest-value actionable task;
-6. implement it;
-7. test it;
-8. diagnose failures;
-9. continue until a meaningful increment is complete;
-10. update Current State;
-11. update Development Queue;
-12. update architectural sections only when requirements change;
-13. leave a recoverable project state.
-
-Do not depend on the previous chat session being available.
+After merge, update only the matching bullets in §57 Current State and the corresponding §58 queue line (plus §59 Decision Log if needed). Do not re-audit the repository or rewrite this file wholesale.
 
 This file and the repository are the persistent development memory.
 
@@ -4346,33 +4334,21 @@ Jarvis 2.0 is not considered mature until the flagship benchmark in section 85 (
 
 ## 62. Instructions to Cursor for Every Future Run
 
-When a new Cursor session starts and the instruction is simply:
+**Superseded by [`docs/PROCESS.md`](docs/PROCESS.md) and [`AGENTS.md`](AGENTS.md).**
 
-«Continue Jarvis development.»
+The prompt «Continue Jarvis development» (or similar vague instructions) is **forbidden**. Every run must name exactly one RFC path or one §58 queue item.
 
-Perform the following automatically:
+When a ticket is named:
 
-1. Read this entire file, including Jarvis 2.0 (sections 64–85). If the selected work touches nodes, placement, resource control, distributed execution, role policy, or universal UI architecture, also read `SWARM_ARCHITECTURE.md` before changing code.
-2. Inspect Git status.
-3. Inspect relevant current code.
-4. Check the Current State section.
-5. Check the Development Queue (1.x first unless the user asked for 2.0 / Away Mode).
-6. Select the highest-value task that can be progressed.
-7. Implement actual functionality.
-8. Run relevant tests.
-9. Debug failures.
-10. Verify the implementation.
-11. Update Current State.
-12. Update Development Queue.
-13. Add durable architectural decisions to Decision Log if needed.
-14. Commit/checkpoint where appropriate.
-15. Leave the project runnable and recoverable.
+1. Read [`docs/PROCESS.md`](docs/PROCESS.md) and the ticket (RFC or queue item).
+2. Skim this file for architecture context; read Jarvis 2.0 (§64–85) only if the ticket requires it. Read `SWARM_ARCHITECTURE.md` only when the ticket touches swarm nodes/placement/UI.
+3. Branch from `cursor/local-qwen-desktop-agent`.
+4. Implement, test (`python3 -m pytest`), open one PR against the integration branch.
+5. Update only matching §57–58 lines (and §59 if a durable decision).
 
-Do not stop after producing a plan if implementation can continue.
+Do not merge unrelated PRs. PR #25 is superseded and closed — do not merge it.
 
-Do not ask the user routine implementation questions.
-
-Do not require the user to manually maintain this file.
+Linux cloud workers cannot sign off live 9B/27B or Windows e2e (see PROCESS.md).
 
 ---
 
