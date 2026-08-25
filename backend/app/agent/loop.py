@@ -30,6 +30,7 @@ from .planning import (
     resolve_execution_policy,
     select_best_plan,
 )
+from .escalation import build_escalation_package, persist_escalation_package
 from .recovery import recovery_hint
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
@@ -518,6 +519,21 @@ class AgentRuntime:
                         working.next_action = "recover with a different strategy"
                         await BUS.publish(task_id, "retry", "Choosing a recovery strategy", guidance[:1500], stage="diagnose")
                         messages.append(ChatMessage(role="user", content=guidance))
+                        if consecutive_failures >= 2:
+                            package = await build_escalation_package(
+                                task_id, working, reason="repeated tool failures"
+                            )
+                            if package:
+                                await persist_escalation_package(package)
+                                if working.task_class == "software engineering":
+                                    messages.append(ChatMessage(role="user", content=package.as_prompt()))
+                                    await BUS.publish(
+                                        task_id,
+                                        "progress",
+                                        "Packed EscalationContext for the next coding worker",
+                                        package.reason[:800],
+                                        stage="diagnose",
+                                    )
                     elif verifying and verify_tool_rounds >= policy.max_verify_tools:
                         force_final = True
                         messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))

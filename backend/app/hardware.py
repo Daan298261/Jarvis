@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -80,14 +81,26 @@ def _nvidia() -> dict[str, Any]:
 def _office_installed() -> bool:
     if platform.system() != "Windows":
         return False
+    program_files = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
+    program_files_x86 = Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
+    roots = [
+        program_files / "Microsoft Office",
+        program_files_x86 / "Microsoft Office",
+        program_files / "Microsoft Office" / "root" / "Office16",
+    ]
+    if any(root.exists() for root in roots):
+        return True
     try:
-        import win32com.client  # type: ignore
+        import winreg  # type: ignore
 
-        for progid in ("Word.Application", "Excel.Application", "PowerPoint.Application"):
+        for key in (
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WINWORD.EXE",
+            r"SOFTWARE\Microsoft\Office\16.0\Word",
+        ):
             try:
-                win32com.client.Dispatch(progid)
+                winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key)
                 return True
-            except Exception:
+            except OSError:
                 continue
     except Exception:
         pass

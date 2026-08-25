@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from ..agent.acp import acp_status
 from ..config import load_settings
 from ..hardware import hardware_dict
 from ..inference.manager import MANAGER
+from ..mcp_server import jarvis_mcp_manifest
 from ..tools.capabilities import capability_snapshot
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -25,4 +27,6 @@ async def system_info():
         "execution_mode": settings.execution_mode,
         "allowed_directories": settings.allowed_directories,
         "capabilities": capability_snapshot(),
+        "jarvis_mcp": jarvis_mcp_manifest(),
+        "cursor_acp": acp_status(),
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -26,6 +27,11 @@ class WebFetchTool(Tool):
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         url = kwargs.get("url")
+        if not url:
+            return ToolResult(False, "", error="url is required")
+        scheme = (urlparse(str(url)).scheme or "").lower()
+        if scheme not in {"http", "https"}:
+            return ToolResult(False, "", error="Only http and https URLs are allowed")
         method = (kwargs.get("method") or "GET").upper()
         limit = int(kwargs.get("max_chars") or 12000)
         try:

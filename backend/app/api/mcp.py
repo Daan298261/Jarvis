@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..config import load_settings, save_settings
+from ..mcp_server import jarvis_mcp_manifest
 from ..tools.mcp_runtime import MCP
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
@@ -20,6 +21,11 @@ class MCPServerIn(BaseModel):
     url: str | None = None
     env: dict[str, str] = {}
     enabled: bool = True
+
+
+@router.get("/jarvis")
+async def jarvis_mcp_server():
+    return jarvis_mcp_manifest()
 
 
 @router.get("")

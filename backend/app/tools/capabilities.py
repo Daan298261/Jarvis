@@ -75,7 +75,15 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": _module_available("mcp"),
             "status": "ready" if _module_available("mcp") else "missing",
-            "detail": "User-configured stdio or HTTP MCP servers.",
+            "detail": "User-configured stdio or HTTP MCP servers, plus the built-in Jarvis MCP server for Cursor.",
+        },
+        {
+            "id": "jarvis-mcp-server",
+            "name": "Jarvis MCP for Cursor",
+            "kind": "native",
+            "available": True,
+            "status": "ready",
+            "detail": "Read-oriented MCP server Cursor can attach to. Jarvis remains the supervisor.",
         },
         {
             "id": "git",
@@ -97,6 +105,9 @@ def native_capabilities() -> list[dict[str, Any]]:
 
 
 def optional_workers() -> list[dict[str, Any]]:
+    from ..agent.acp import acp_status
+
+    acp = acp_status()
     return [
         {
             "id": "browser-use",
@@ -137,6 +148,14 @@ def optional_workers() -> list[dict[str, Any]]:
             "available": False,
             "status": "not_integrated",
             "detail": "Optional software-engineering worker. Jarvis still verifies results.",
+        },
+        {
+            "id": "cursor-acp",
+            "name": "Cursor ACP",
+            "kind": "coding",
+            "available": bool(acp.get("available")),
+            "status": acp.get("status") or "not_connected",
+            "detail": acp.get("detail") or "ACP JSON-RPC client. Live CLI is optional; session IDs persist.",
         },
     ]
 

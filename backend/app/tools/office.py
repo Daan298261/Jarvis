@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -33,10 +34,36 @@ class OfficeTool(Tool):
         "required": ["app", "action"],
     }
 
+    def _info(self, app: str, path: str | None) -> ToolResult:
+        bits = [f"app={app or 'unspecified'}", f"os={platform.system()}"]
+        if path:
+            target = Path(path)
+            if not target.exists():
+                return ToolResult(False, "", error=f"Office file not found: {path}")
+            stat = target.stat()
+            bits.extend(
+                [
+                    f"path={target.resolve()}",
+                    f"size_bytes={stat.st_size}",
+                    f"suffix={target.suffix}",
+                ]
+            )
+            return ToolResult(True, "\n".join(bits) + "\nCOM was not launched.")
+        if platform.system() != "Windows":
+            return ToolResult(True, "\n".join(bits) + "\nOffice COM is only available on Windows. COM was not launched.")
+        from ..hardware import detect_hardware
+
+        installed = detect_hardware().office_installed
+        bits.append(f"office_installed={installed}")
+        bits.append("COM was not launched.")
+        return ToolResult(True, "\n".join(bits))
+
     async def execute(self, **kwargs: Any) -> ToolResult:
         app = (kwargs.get("app") or "").lower()
         action = kwargs.get("action")
         try:
+            if action == "info":
+                return self._info(app, kwargs.get("path"))
             if app == "word":
                 word = _dispatch("Word.Application")
                 word.Visible = False

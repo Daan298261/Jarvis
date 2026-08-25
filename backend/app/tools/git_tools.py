@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a recoverable stash or commit-less backup branch named "
-        "jarvis-checkpoint-* before large autonomous edits."
+        "checkpoint. checkpoint creates a jarvis-checkpoint-* backup branch and a stash-create SHA "
+        "without emptying the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -56,11 +57,22 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = Path(cwd).name
-                result = await self._git(["stash", "push", "-u", "-m", f"jarvis-checkpoint-{stamp}"], cwd)
-                if result.success:
-                    return ToolResult(True, "Created git stash checkpoint. Use git stash list / pop to recover.")
-                return await self._git(["status"], cwd)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                branch = f"jarvis-checkpoint-{stamp}"
+                branch_result = await self._git(["branch", branch], cwd)
+                if not branch_result.success:
+                    return ToolResult(
+                        False,
+                        branch_result.output,
+                        error=branch_result.error or "Could not create checkpoint branch",
+                    )
+                created = await self._git(["stash", "create"], cwd)
+                sha = (created.output or "").strip() if created.success else ""
+                note = (
+                    f"Backup branch {branch} points at HEAD. Working tree was not modified. "
+                    f"stash_create={sha or 'clean'}."
+                )
+                return ToolResult(True, note, data={"branch": branch, "stash_create": sha or None})
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))
