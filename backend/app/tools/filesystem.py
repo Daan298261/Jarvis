@@ -163,11 +163,11 @@ class FilesystemTool(Tool):
     name = "filesystem"
     description = (
         "Inspect and modify files and directories. Actions: list, search, read, write, edit, "
-        "copy, move, rename, mkdir, delete, hash, stat, compare, recent. Use this for organizing "
+        "copy, move, rename, mkdir, delete, hash, stat, compare, recent, restore. Use this for organizing "
         "files, creating documents, and inspecting project trees. Prefer write/edit over delete. "
         "compare shows a unified diff (or hashes for binaries). recent lists backup copies and "
-        "recent versions next to a file. Binary files are supported via hash/stat/copy; read "
-        "returns a note for large binaries."
+        "recent versions next to a file. restore copies the newest .bak sidecar back over the file. "
+        "Binary files are supported via hash/stat/copy; read returns a note for large binaries."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -190,6 +190,7 @@ class FilesystemTool(Tool):
                     "stat",
                     "compare",
                     "recent",
+                    "restore",
                 ],
             },
             "path": {"type": "string", "description": "Primary path"},
@@ -209,6 +210,36 @@ class FilesystemTool(Tool):
 
     def _path(self, raw: str) -> Path:
         return resolve_allowed_path(raw, _allowed(self.context_getter()))
+
+    def _want_backup(self, kwargs: dict[str, Any]) -> bool:
+        if not self.context_getter().get("backup_enabled", True):
+            return False
+        return bool(kwargs.get("create_backup", True))
+
+    def _backup_file(self, path: Path) -> Path:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        dest = path.with_name(path.name + f".bak-{stamp}")
+        shutil.copy2(path, dest)
+        self._prune_backups(path)
+        return dest
+
+    def _prune_backups(self, path: Path, keep: int = 3) -> None:
+        matches = sorted(
+            path.parent.glob(path.name + ".bak-*"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        for stale in matches[keep:]:
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+
+    def _latest_backup(self, path: Path) -> Path | None:
+        matches = list(path.parent.glob(path.name + ".bak*"))
+        if not matches:
+            return None
+        return max(matches, key=lambda item: item.stat().st_mtime)
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
@@ -239,9 +270,8 @@ class FilesystemTool(Tool):
                     return ToolResult(True, f"Binary file ({path.stat().st_size} bytes). sha256={digest}")
             if action == "write":
                 path.parent.mkdir(parents=True, exist_ok=True)
-                if path.exists() and kwargs.get("create_backup", True):
-                    backup = path.with_suffix(path.suffix + f".bak-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}")
-                    shutil.copy2(path, backup)
+                if path.exists() and self._want_backup(kwargs):
+                    self._backup_file(path)
                 path.write_text(kwargs.get("content") or "", encoding="utf-8")
                 return ToolResult(True, f"Wrote {path} ({path.stat().st_size} bytes)")
             if action == "edit":
@@ -252,8 +282,8 @@ class FilesystemTool(Tool):
                 new = kwargs.get("new_text") or ""
                 if old not in text:
                     return ToolResult(False, "", error="old_text not found in file")
-                if kwargs.get("create_backup", True):
-                    shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+                if self._want_backup(kwargs):
+                    self._backup_file(path)
                 path.write_text(text.replace(old, new, 1), encoding="utf-8")
                 return ToolResult(True, f"Edited {path}")
             if action in {"copy", "move", "rename"}:
@@ -273,11 +303,19 @@ class FilesystemTool(Tool):
             if action == "delete":
                 if not path.exists():
                     return ToolResult(False, "", error="Path does not exist")
+                if path.is_file() and self._want_backup(kwargs):
+                    self._backup_file(path)
                 if path.is_dir():
                     shutil.rmtree(path)
                 else:
                     path.unlink()
                 return ToolResult(True, f"Deleted {path}")
+            if action == "restore":
+                backup = self._latest_backup(path)
+                if backup is None:
+                    return ToolResult(False, "", error=f"No .bak sidecar found for {path}")
+                shutil.copy2(backup, path)
+                return ToolResult(True, f"Restored {path} from {backup.name}")
             if action == "hash":
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
                 return ToolResult(True, f"sha256 {digest}  {path}")

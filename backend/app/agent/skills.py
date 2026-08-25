@@ -2,401 +2,388 @@ from __future__ import annotations
 
 import json
 import re
-import uuid
-from collections import Counter, defaultdict
-from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
-from sqlalchemy import select
+from ..config import data_dir
+from .routing import classify_task
 
-from ..db.models import Skill, ToolCallRecord, Trajectory, utcnow
-from ..db.session import SessionLocal
-from ..tools.base import ToolResult
-from .trajectory import keywords
+MAX_SKILLS = 40
 
-MIN_REPEATS = 3
-MAX_PROMPT_SKILLS = 2
-_PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
-_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|/)[^\s\"']+")
-_FILE_RE = re.compile(r"\b[\w.-]+\.[A-Za-z0-9]{1,5}\b")
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def skill_store_path() -> Path:
+    return data_dir() / "skills.json"
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (text or "").lower()).strip("_")[:32] or "skill"
 
 
 @dataclass
-class SkillCandidate:
+class Skill:
+    name: str
+    description: str
+    parameters: list[dict[str, str]]
+    required_tools: list[str]
+    steps: list[dict[str, Any]]
+    verification: str
+    recovery: str
     task_class: str
-    tools: tuple[str, ...]
-    goals: list[str] = field(default_factory=list)
-    verifications: list[str] = field(default_factory=list)
-    task_ids: list[str] = field(default_factory=list)
-
-    @property
-    def occurrences(self) -> int:
-        return len(self.goals)
+    source: str
+    keywords: list[str] = field(default_factory=list)
+    builtin: bool = False
+    use_count: int = 0
+    updated_at: str = field(default_factory=_now)
 
 
-def _skill_name(goals: Iterable[str], task_class: str) -> str:
-    counter: Counter[str] = Counter()
-    for goal in goals:
-        counter.update(keywords(goal))
-    words = [word for word, _ in counter.most_common(3)]
-    if not words:
-        words = [task_class or "task"]
-    slug = "_".join(re.sub(r"[^a-z0-9]+", "", word) for word in words if word)
-    return slug[:80] or "reusable_workflow"
+BUILTIN_SKILLS: list[Skill] = [
+    Skill(
+        name="save_example_com_title",
+        description="Open https://example.com, read the live page title, and write it to a file.",
+        parameters=[{"name": "path", "description": "Output file for the page title"}],
+        required_tools=["browser", "web_fetch", "filesystem"],
+        steps=[
+            {"tool": "browser", "action": "save_title", "url": "https://example.com", "path": "{path}"},
+        ],
+        verification="The output file exists and contains the live page title (Example Domain).",
+        recovery="If Playwright fails, web_fetch https://example.com and write the title with filesystem.",
+        task_class="browser",
+        source="builtin-example-title",
+        keywords=["example.com", "page title", "page-title", "title"],
+        builtin=True,
+        use_count=2,
+    ),
+]
 
 
-def _looks_like_path(value: str) -> bool:
-    text = value or ""
-    return bool(_PATH_RE.search(text) or "\\" in text or text.startswith("/") or _FILE_RE.fullmatch(text.strip()))
+def derive_skill_name(task_class: str, steps: list[dict[str, Any]], goal: str = "") -> str:
+    tools = [str(step.get("tool") or "") for step in steps]
+    actions = [str(step.get("action") or "") for step in steps]
+    targets = [str(step.get("target") or step.get("url") or "") for step in steps if step.get("target") or step.get("url")]
+    stem = _slug(Path(targets[0]).stem) if targets else ""
+    if "browser" in tools and "save_title" in actions:
+        return f"save_{stem or 'page'}_title"
+    if "python" in tools:
+        return f"run_python_{stem or 'task'}"
+    if "desktop" in tools and "write" in actions:
+        return "desktop_notepad_write"
+    if "office" in tools:
+        return f"office_{stem or 'document'}"
+    if task_class == "software_engineering" and "fix" in (goal or "").lower():
+        return "build_or_fix_python_project"
+    if stem:
+        return f"{_slug(task_class)}_{stem}"
+    action = _slug(actions[0] if actions else "workflow")
+    return f"{_slug(task_class)}_{action}"
 
 
-def _param_kind(key: str, values: list[Any]) -> str:
-    if key in {"path", "destination", "working_directory", "file", "filename"}:
-        return "path"
-    strings = [v for v in values if isinstance(v, str)]
-    if strings and all(_looks_like_path(v) for v in strings):
-        return "path"
-    return "string"
+def _parameters_from_steps(steps: list[dict[str, Any]]) -> list[dict[str, str]]:
+    params: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for step in steps:
+        target = str(step.get("target") or "")
+        url = str(step.get("url") or "")
+        if target and "://" not in target and target not in seen:
+            seen.add(target)
+            params.append({"name": "path", "description": f"Output or input file (was {target})"})
+            break
+        if url.startswith("http") and "url" not in seen:
+            seen.add("url")
+            params.append({"name": "url", "description": f"Page URL (was {url})"})
+    if not params:
+        params.append({"name": "path", "description": "Primary file path for this task"})
+    return params
 
 
-def _param_name(key: str, used: set[str]) -> str:
-    base = re.sub(r"[^a-z0-9_]+", "_", (key or "value").lower()).strip("_") or "value"
-    name = base
-    index = 2
-    while name in used:
-        name = f"{base}_{index}"
-        index += 1
-    used.add(name)
-    return name
+def _verification_from(steps: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None) -> str:
+    targets = [str(step.get("target") or "") for step in steps if step.get("target")]
+    if any(step.get("note") == "verify" for step in steps):
+        return "Re-read the output file and confirm it exists and matches the requested content."
+    if targets:
+        return f"Confirm {targets[0]} exists on disk and matches the requested end state."
+    return "Confirm the requested files or UI end state exist."
 
 
-def parameterize_call_sequences(sequences: list[list[dict[str, Any]]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Turn aligned tool-call sequences into templated steps plus parameter specs."""
-    if not sequences:
-        return [], []
-    length = len(sequences[0])
-    if length == 0 or any(len(seq) != length for seq in sequences):
-        return [], []
-    for index in range(length):
-        tools = {seq[index].get("tool") for seq in sequences}
-        if len(tools) != 1:
-            return [], []
-
-    used_names: set[str] = set()
-    parameters: list[dict[str, Any]] = []
-    steps: list[dict[str, Any]] = []
-
-    for index in range(length):
-        tool = sequences[0][index].get("tool") or ""
-        keys: set[str] = set()
-        for seq in sequences:
-            args = seq[index].get("arguments") or {}
-            if isinstance(args, dict):
-                keys.update(args.keys())
-        templated: dict[str, Any] = {}
-        for key in sorted(keys):
-            values = []
-            for seq in sequences:
-                args = seq[index].get("arguments") or {}
-                values.append(args.get(key) if isinstance(args, dict) else None)
-            comparable = [json.dumps(v, sort_keys=True, default=str) for v in values]
-            if len(set(comparable)) <= 1:
-                templated[key] = values[0]
-                continue
-            name = _param_name(str(key), used_names)
-            kind = _param_kind(str(key), values)
-            examples = []
-            for value in values:
-                text = value if isinstance(value, str) else json.dumps(value, default=str)
-                if text and text not in examples:
-                    examples.append(text[:400])
-            parameters.append({"name": name, "kind": kind, "examples": examples[:6], "step": index, "key": key})
-            templated[key] = "{" + name + "}"
-        steps.append({"tool": tool, "arguments": templated})
-    return steps, parameters
+def _recovery_from(steps: list[dict[str, Any]], failures: list[dict[str, Any]] | None = None, recovered_with: str = "") -> str:
+    if recovered_with:
+        failed = ", ".join(sorted({str(item.get("tool") or "") for item in (failures or []) if item.get("tool")})) or "the first tool"
+        return f"If {failed} fails, switch to {recovered_with}. Do not retry the failing call."
+    tools = [str(step.get("tool") or "") for step in steps]
+    if "browser" in tools:
+        return "If Playwright fails, web_fetch the URL and still write the requested file."
+    if "desktop" in tools:
+        return "If UI Automation fails, write the file with filesystem."
+    return "If the preferred tool fails, switch to filesystem or python. Do not rediscover from scratch."
 
 
-def parse_steps(raw: str | None) -> list[Any]:
+def _load_learned() -> list[Skill]:
+    path = skill_store_path()
+    if not path.exists():
+        return []
     try:
-        data = json.loads(raw or "[]")
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return []
-    return data if isinstance(data, list) else []
-
-
-def normalize_parameters(raw: Any) -> list[dict[str, Any]]:
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError:
-            return []
-    if not isinstance(raw, list):
-        return []
-    out: list[dict[str, Any]] = []
-    for item in raw:
-        if isinstance(item, str) and item.strip():
-            out.append({"name": item.strip(), "kind": "string", "examples": []})
-        elif isinstance(item, dict) and item.get("name"):
-            out.append(item)
-    return out
-
-
-def extract_goal_tokens(goal: str) -> list[str]:
-    found: list[str] = []
-    for match in re.finditer(r'"([^"]+)"|\'([^\']+)\'', goal or ""):
-        token = match.group(1) or match.group(2)
-        if token and token not in found:
-            found.append(token)
-    for match in _PATH_RE.finditer(goal or ""):
-        token = match.group(0)
-        if token not in found:
-            found.append(token)
-    for match in _FILE_RE.finditer(goal or ""):
-        token = match.group(0)
-        if token not in found:
-            found.append(token)
-    return found
-
-
-def bind_parameters(skill: Skill, goal: str, extra: dict[str, Any] | None = None) -> dict[str, str] | None:
-    params = normalize_parameters(skill.parameters_json)
-    bound: dict[str, str] = {}
-    for key, value in (extra or {}).items():
-        if value is None or value == "":
-            continue
-        bound[str(key)] = value if isinstance(value, str) else json.dumps(value, default=str)
-    if not params:
-        return bound
-    tokens = extract_goal_tokens(goal)
-    for param in params:
-        name = str(param["name"])
-        if name in bound:
-            continue
-        kind = param.get("kind") or "string"
-        picked = None
-        if kind == "path":
-            picked = next((token for token in tokens if _looks_like_path(token)), None)
-        if picked is None and tokens:
-            picked = tokens[0]
-        if picked is None:
-            return None
-        if picked in tokens:
-            tokens.remove(picked)
-        bound[name] = picked
-    return bound
-
-
-def substitute(value: Any, bound: dict[str, str]) -> Any:
-    if isinstance(value, str):
-        def repl(match: re.Match[str]) -> str:
-            name = match.group(1)
-            return bound[name] if name in bound else match.group(0)
-
-        return _PLACEHOLDER.sub(repl, value)
-    if isinstance(value, dict):
-        return {key: substitute(item, bound) for key, item in value.items()}
-    if isinstance(value, list):
-        return [substitute(item, bound) for item in value]
-    return value
-
-
-def placeholders_in(value: Any) -> set[str]:
-    found: set[str] = set()
-    if isinstance(value, str):
-        found.update(_PLACEHOLDER.findall(value))
-    elif isinstance(value, dict):
-        for item in value.values():
-            found.update(placeholders_in(item))
-    elif isinstance(value, list):
-        for item in value:
-            found.update(placeholders_in(item))
-    return found
-
-
-def instantiate_steps(skill: Skill, bound: dict[str, str] | None) -> list[dict[str, Any]]:
-    steps = parse_steps(skill.steps_json)
-    templated = [step for step in steps if isinstance(step, dict) and step.get("tool")]
-    if not templated:
-        return []
-    return substitute(templated, bound or {})
-
-
-def steps_are_executable(steps: list[dict[str, Any]]) -> bool:
-    if not steps:
-        return False
-    if any(placeholders_in(step) for step in steps):
-        return False
-    return any(isinstance(step.get("arguments"), dict) and step.get("arguments") for step in steps)
-
-
-async def execute_bound_skill(
-    steps: list[dict[str, Any]],
-    runner: Callable[..., Any],
-) -> list[dict[str, Any]]:
-    """Run templated skill steps with an async (tool, arguments) -> ToolResult callback."""
-    results: list[dict[str, Any]] = []
-    for step in steps:
-        name = step.get("tool") or ""
-        arguments = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
-        result = await runner(name, arguments)
-        if isinstance(result, ToolResult):
-            payload = {"tool": name, "arguments": arguments, "success": result.success, "output": result.text(), "error": result.error}
-        elif isinstance(result, tuple) and len(result) >= 1:
-            observation = result[0]
-            failed = "ERROR:" in str(observation) or str(observation).lower().startswith("error")
-            payload = {
-                "tool": name,
-                "arguments": arguments,
-                "success": not failed,
-                "output": observation,
-                "attach": result[1] if len(result) > 1 else None,
-            }
-        else:
-            payload = {"tool": name, "arguments": arguments, "success": False, "output": str(result), "error": "unexpected skill runner result"}
-        results.append(payload)
-        if not payload.get("success"):
-            break
-    return results
-
-
-async def _successful_calls(session, task_id: str) -> list[dict[str, Any]]:
-    rows = (
-        await session.execute(
-            select(ToolCallRecord)
-            .where(ToolCallRecord.task_id == task_id, ToolCallRecord.success.is_(True))
-            .order_by(ToolCallRecord.id)
-        )
-    ).scalars().all()
-    out: list[dict[str, Any]] = []
+    rows = raw if isinstance(raw, list) else raw.get("skills") or []
+    out: list[Skill] = []
     for row in rows:
+        if not isinstance(row, dict) or row.get("builtin"):
+            continue
         try:
-            arguments = json.loads(row.arguments_json or "{}")
-        except json.JSONDecodeError:
-            arguments = {}
-        if not isinstance(arguments, dict):
-            arguments = {}
-        out.append({"tool": row.tool_name, "arguments": arguments})
+            skill = Skill(
+                name=str(row.get("name") or ""),
+                description=str(row.get("description") or ""),
+                parameters=list(row.get("parameters") or []),
+                required_tools=list(row.get("required_tools") or []),
+                steps=list(row.get("steps") or []),
+                verification=str(row.get("verification") or ""),
+                recovery=str(row.get("recovery") or ""),
+                task_class=str(row.get("task_class") or "mixed"),
+                source=str(row.get("source") or ""),
+                keywords=list(row.get("keywords") or []),
+                builtin=False,
+                use_count=int(row.get("use_count") or 0),
+                updated_at=str(row.get("updated_at") or _now()),
+            )
+        except (TypeError, ValueError):
+            continue
+        if skill.name and skill.steps:
+            out.append(skill)
     return out
 
 
-async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skill]:
-    """Turn repeated, stable, successful workflows into skills.
-
-    A workflow only becomes a skill once the same task class has been solved
-    with the same tool sequence several times. One-off successes stay as
-    trajectory memory. When the underlying tool arguments are recorded,
-    differing values become parameters so the skill can run itself later.
-    """
-    created: list[Skill] = []
-    async with SessionLocal() as session:
-        rows = (await session.execute(select(Trajectory).where(Trajectory.outcome == "completed"))).scalars().all()
-        existing = (await session.execute(select(Skill))).scalars().all()
-        known = {(skill.task_class, tuple(json.loads(skill.tools_json or "[]"))) for skill in existing}
-        used_names = {skill.name for skill in existing}
-
-        groups: dict[tuple[str, tuple[str, ...]], SkillCandidate] = defaultdict(lambda: SkillCandidate("", ()))
-        for row in rows:
-            tools = tuple(json.loads(row.tools_json or "[]"))
-            if not tools:
-                continue
-            key = (row.task_class or "", tools)
-            candidate = groups[key]
-            candidate.task_class, candidate.tools = key
-            candidate.goals.append(row.goal)
-            candidate.task_ids.append(row.task_id)
-            if row.verification:
-                candidate.verifications.append(row.verification)
-
-        for key, candidate in groups.items():
-            if candidate.occurrences < min_repeats or key in known:
-                continue
-            sequences = [await _successful_calls(session, task_id) for task_id in candidate.task_ids]
-            templated, parameters = parameterize_call_sequences(sequences)
-            if templated:
-                steps_payload: list[Any] = templated
-            else:
-                steps_payload = [f"use {tool}" for tool in candidate.tools]
-                parameters = sorted(keywords(" ".join(candidate.goals)))[:6]
-
-            name = _skill_name(candidate.goals, candidate.task_class)
-            if name in used_names:
-                name = f"{name}_{len(used_names) + 1}"
-            used_names.add(name)
-            skill = Skill(
-                id=str(uuid.uuid4()),
-                name=name,
-                description=(
-                    f"Repeatable {candidate.task_class or 'workflow'} solved {candidate.occurrences} times "
-                    f"with {', '.join(candidate.tools)}. Example goal: {candidate.goals[0][:200]}"
-                ),
-                task_class=candidate.task_class,
-                parameters_json=json.dumps(parameters),
-                tools_json=json.dumps(list(candidate.tools)),
-                steps_json=json.dumps(steps_payload),
-                verification=(candidate.verifications[0] if candidate.verifications else "")[:1000],
-                recovery="Fall back to the alternatives suggested for the failing tool.",
-                origin="promoted",
-            )
-            session.add(skill)
-            created.append(skill)
-        if created:
-            await session.commit()
-    return created
+def _trim(rows: list[Skill], protect: str | None = None) -> list[Skill]:
+    learned = [row for row in rows if not row.builtin]
+    if len(learned) <= MAX_SKILLS:
+        return learned
+    protected = next((row for row in learned if protect and row.name == protect), None)
+    rest = [row for row in learned if protected is None or row.name != protected.name]
+    rest.sort(key=lambda row: (row.use_count, row.updated_at))
+    budget = MAX_SKILLS - (1 if protected is not None else 0)
+    kept = rest[-budget:] if budget > 0 else []
+    if protected is not None:
+        kept.append(protected)
+    return kept
 
 
-async def relevant_skills(task_class: str, goal: str, limit: int = MAX_PROMPT_SKILLS) -> list[Skill]:
-    goal_keywords = keywords(goal)
-    async with SessionLocal() as session:
-        rows = (await session.execute(select(Skill).where(Skill.enabled.is_(True)))).scalars().all()
-        scored: list[tuple[Skill, float]] = []
-        for row in rows:
-            score = 2.0 if row.task_class and row.task_class == task_class else 0.0
-            score += float(len(keywords(f"{row.name} {row.description}") & goal_keywords))
-            if score >= 2.0:
-                scored.append((row, score))
-        picked = [row for row, _ in sorted(scored, key=lambda item: item[1], reverse=True)][:limit]
-        for row in picked:
-            row.times_used += 1
-            row.updated_at = utcnow()
-        if picked:
-            await session.commit()
-        return picked
+def _save(rows: list[Skill], protect: str | None = None) -> None:
+    payload = [asdict(row) for row in _trim(rows, protect)]
+    skill_store_path().write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-async def get_skill(skill_id: str) -> Skill | None:
-    async with SessionLocal() as session:
-        return await session.get(Skill, skill_id)
+def all_skills() -> list[Skill]:
+    learned = _load_learned()
+    builtin_names = {row.name for row in BUILTIN_SKILLS}
+    return list(BUILTIN_SKILLS) + [row for row in learned if row.name not in builtin_names]
 
 
-def as_prompt_block(skills: Iterable[Skill]) -> str:
-    entries = []
-    for skill in skills:
-        raw_steps = parse_steps(skill.steps_json)
-        rendered: list[str] = []
-        for step in raw_steps:
-            if isinstance(step, str):
-                rendered.append(step)
-            elif isinstance(step, dict):
-                tool = step.get("tool") or "tool"
-                arguments = step.get("arguments") or {}
-                if arguments:
-                    rendered.append(f"{tool}({json.dumps(arguments, ensure_ascii=False)})")
-                else:
-                    rendered.append(f"use {tool}")
-        params = normalize_parameters(skill.parameters_json)
-        line = f"- {skill.name}: {skill.description}"
-        if params:
-            line += "\n  Parameters: " + ", ".join(f"{{{item['name']}}}" for item in params)
-        if rendered:
-            line += f"\n  Steps: {', '.join(rendered)}"
-        if skill.verification:
-            line += f"\n  Verify: {skill.verification[:200]}"
-        if any(isinstance(step, dict) and step.get("arguments") for step in raw_steps):
-            line += "\n  This skill can run itself once parameters are bound. Prefer executing it over rediscovering the workflow."
-        entries.append(line)
-    if not entries:
-        return ""
-    return (
-        "Reusable skills already proven on this machine. Follow one when it fits instead of rediscovering the workflow:\n"
-        + "\n".join(entries)
+def list_skills() -> list[dict[str, Any]]:
+    sync_from_stores()
+    rows = sorted(all_skills(), key=lambda row: (row.builtin, row.use_count, row.updated_at), reverse=True)
+    return [
+        {
+            "name": row.name,
+            "description": row.description,
+            "task_class": row.task_class,
+            "required_tools": row.required_tools,
+            "parameters": row.parameters,
+            "steps": row.steps,
+            "verification": row.verification,
+            "recovery": row.recovery,
+            "builtin": row.builtin,
+            "source": row.source,
+            "use_count": row.use_count,
+        }
+        for row in rows
+    ]
+
+
+def get_skill(name: str) -> Skill | None:
+    key = (name or "").strip()
+    sync_from_stores()
+    for row in all_skills():
+        if row.name == key:
+            return row
+    return None
+
+
+def _upsert(skill: Skill) -> Skill:
+    learned = _load_learned()
+    for index, row in enumerate(learned):
+        if row.source == skill.source or row.name == skill.name:
+            skill.use_count = max(row.use_count, skill.use_count)
+            skill.updated_at = _now()
+            learned[index] = skill
+            _save(learned, protect=skill.name)
+            return skill
+    existing = {row.name for row in learned} | {row.name for row in BUILTIN_SKILLS}
+    name = skill.name
+    suffix = 2
+    while name in existing:
+        name = f"{skill.name}_{suffix}"
+        suffix += 1
+    skill.name = name
+    learned.append(skill)
+    _save(learned, protect=skill.name)
+    return skill
+
+
+def promote_from_trajectory(traj) -> Skill | None:
+    if not getattr(traj, "stable", False):
+        return None
+    steps = list(getattr(traj, "steps", []) or [])
+    if not steps:
+        return None
+    failures = list(getattr(traj, "failures", []) or [])
+    name = derive_skill_name(getattr(traj, "task_class", "mixed"), steps, getattr(traj, "goal", ""))
+    skill = Skill(
+        name=name,
+        description=(getattr(traj, "goal", "") or name)[:200],
+        parameters=_parameters_from_steps(steps),
+        required_tools=list(dict.fromkeys(str(step.get("tool") or "") for step in steps if step.get("tool"))),
+        steps=steps,
+        verification=_verification_from(steps, failures),
+        recovery=_recovery_from(steps, failures, getattr(traj, "recovered_with", "") or ""),
+        task_class=str(getattr(traj, "task_class", "") or "mixed"),
+        source=str(getattr(traj, "id", "") or name),
+        keywords=list(getattr(traj, "keywords", []) or []),
+        builtin=False,
+        use_count=int(getattr(traj, "success_count", 2) or 2),
     )
+    return _upsert(skill)
+
+
+def promote_from_workflow(workflow) -> Skill | None:
+    if not getattr(workflow, "stable", False):
+        return None
+    steps = list(getattr(workflow, "steps", []) or [])
+    if not steps:
+        return None
+    name = str(getattr(workflow, "name", "") or "") or derive_skill_name("browser", steps, getattr(workflow, "goal", ""))
+    if getattr(workflow, "builtin", False) and name == "save_example_com_title":
+        return BUILTIN_SKILLS[0]
+    skill = Skill(
+        name=_slug(name).replace("-", "_"),
+        description=(getattr(workflow, "goal", "") or name)[:200],
+        parameters=_parameters_from_steps(steps),
+        required_tools=list(dict.fromkeys(str(step.get("tool") or "") for step in steps if step.get("tool"))),
+        steps=steps,
+        verification="The requested title file exists and contains the live page title.",
+        recovery="If Playwright fails, web_fetch the URL and write the title with filesystem.",
+        task_class="browser",
+        source=str(getattr(workflow, "id", "") or name),
+        keywords=list(getattr(workflow, "keywords", []) or []),
+        builtin=False,
+        use_count=int(getattr(workflow, "success_count", 2) or 2),
+    )
+    return _upsert(skill)
+
+
+def sync_from_stores() -> None:
+    try:
+        from .trajectories import all_trajectories
+
+        for row in all_trajectories():
+            if row.stable:
+                promote_from_trajectory(row)
+    except Exception:
+        pass
+    try:
+        from .browser_workflows import all_workflows
+
+        for row in all_workflows():
+            if row.stable and not row.builtin:
+                promote_from_workflow(row)
+    except Exception:
+        pass
+
+
+def _score(skill: Skill, prompt: str, task_class: str) -> int:
+    text = (prompt or "").lower()
+    hosts = [
+        key.strip().lower().rstrip(".,);:]'\"")
+        for key in skill.keywords
+        if "." in (key or "")
+        and not str(key).lower().endswith((".txt", ".py", ".json", ".md", ".png", ".csv", ".xlsx", ".docx"))
+        and "/" not in str(key)
+        and "\\" not in str(key)
+    ]
+    if hosts and not any(host in text for host in hosts):
+        name = skill.name.replace("_", " ")
+        if skill.name not in text and name not in text:
+            return 0
+    score = 0
+    if skill.name.replace("_", " ") in text or skill.name in text:
+        score += 6
+    if skill.task_class == task_class:
+        score += 2
+    distinctive = 0
+    generic = {
+        "filesystem",
+        "python",
+        "terminal",
+        "browser",
+        "write",
+        "read",
+        "native",
+        "title",
+        "page",
+        "file",
+        "save",
+        skill.task_class,
+    }
+    for keyword in skill.keywords:
+        key = (keyword or "").lower()
+        if not key or key not in text or key in generic:
+            continue
+        distinctive += 1
+        score += 2
+    if distinctive == 0 and skill.task_class != task_class and score < 6:
+        return 0
+    return score
+
+
+def match_skills(prompt: str, task_class: str | None = None, limit: int = 2) -> list[Skill]:
+    if not task_class:
+        task_class = classify_task(prompt).task_class
+    sync_from_stores()
+    ranked: list[tuple[int, int, Skill]] = []
+    for skill in all_skills():
+        score = _score(skill, prompt, task_class)
+        if score >= 4:
+            ranked.append((score, skill.use_count, skill))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in ranked[:limit]]
+
+
+def format_skill_card(skill: Skill) -> str:
+    lines = [
+        f"Named skill `{skill.name}` — do not rediscover this workflow.",
+        f"Description: {skill.description}",
+        "Parameters: " + ", ".join(f"{item.get('name')} ({item.get('description')})" for item in skill.parameters),
+        "Required tools: " + ", ".join(skill.required_tools),
+        "Steps:",
+    ]
+    for index, step in enumerate(skill.steps, start=1):
+        extra = step.get("url") or step.get("target") or step.get("path") or step.get("note") or ""
+        lines.append(f"  {index}. {step.get('tool')} {step.get('action') or ''} {extra}".rstrip())
+    lines.append(f"Verification: {skill.verification}")
+    lines.append(f"Recovery: {skill.recovery}")
+    lines.append("Call the native tools in this order. Substitute this task's paths for the parameters.")
+    return "\n".join(lines)
+
+
+def format_skill_hint(prompt: str, task_class: str | None = None) -> str:
+    matches = match_skills(prompt, task_class)
+    if not matches:
+        return ""
+    blocks = ["Use a named Jarvis skill instead of rediscovering the workflow."]
+    for skill in matches:
+        blocks.append(format_skill_card(skill))
+    return "\n\n".join(blocks)

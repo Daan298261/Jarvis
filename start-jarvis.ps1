@@ -1,20 +1,36 @@
 #Requires -Version 5.1
 param(
     [switch]$NoBrowser,
-    [switch]$SkipModelLoad,
-    [string]$Prompt,
-    [string]$PromptFile,
-    [string]$PrivateKey,
-    [string]$ExecutionMode = "balanced",
-    [switch]$LanAccess,
-    [switch]$Wait
+    [switch]$SkipModelLoad
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
+try { $Host.UI.RawUI.WindowTitle = "Jarvis" } catch { }
 
 function Write-Step($message) { Write-Host "`n==> $message" -ForegroundColor Cyan }
+
+$launcher = Join-Path $Root "install-desktop-launcher.ps1"
+if (Test-Path $launcher) {
+    try {
+        & $launcher -Quiet
+        if ($LASTEXITCODE -notin 0, $null) {
+            Write-Host "Desktop launcher refresh failed (Jarvis will still start)." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "Desktop launcher refresh failed (Jarvis will still start): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+try {
+    $health = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4780/api/health -TimeoutSec 2
+    if ($health.StatusCode -eq 200) {
+        Write-Host "Jarvis is already running at http://127.0.0.1:4780" -ForegroundColor Green
+        if (-not $NoBrowser) { Start-Process "http://127.0.0.1:4780" }
+        return
+    }
+} catch { }
 
 Write-Step "Verifying dependencies"
 $python = (Get-Command python).Source
@@ -24,7 +40,7 @@ $q4 = Join-Path $Root "models\Qwen3.5-27B-GGUF\Qwen3.5-27B-Q4_K_M.gguf"
 $mmproj = Join-Path $Root "models\Qwen3.5-27B-GGUF\mmproj-F16.gguf"
 
 if (-not (Test-Path $llama)) { throw "llama-server.exe missing at $llama" }
-if (-not (Test-Path $q4)) { throw "Qwen3.5-27B Q4_K_M GGUF missing. See docs/INSTALL.md to download." }
+if (-not (Test-Path $q4)) { throw "Qwen3.5-27B Q4_K_M GGUF missing. See README.md to download." }
 if (-not (Test-Path $mmproj)) { throw "Vision projector mmproj-F16.gguf missing." }
 Write-Host "Python: $python"
 Write-Host "Node: $node"
@@ -40,36 +56,34 @@ if (-not (Test-Path $dist)) {
     Pop-Location
 }
 
-New-Item -ItemType Directory -Force -Path (Join-Path $Root "data"), (Join-Path $Root "logs"), (Join-Path $Root "data\queue\pending"), (Join-Path $Root "data\queue\processed"), (Join-Path $Root "data\queue\failed") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Root "data"), (Join-Path $Root "logs") | Out-Null
 $pidFile = Join-Path $Root "data\jarvis.pids"
-
-# Staging launch prompt if specified
-if ($Prompt) {
-    $ts = (Get-Date).ToString("yyyyMMdd_HHmmss_fff")
-    $qFile = Join-Path $Root "data\queue\pending\launch_$ts.json"
-    $taskDef = @{
-        prompt = $Prompt
-        autonomy = "autonomous"
-        execution_mode = $ExecutionMode
-        enqueued_at = (Get-Date).ToUniversalTime().ToString("o")
-    } | ConvertTo-Json
-    Set-Content -Path $qFile -Value $taskDef -Encoding UTF8
-    Write-Host "Enqueued launch prompt to $qFile" -ForegroundColor Yellow
-}
-elseif ($PromptFile) {
-    if (-not (Test-Path $PromptFile)) { throw "Prompt file not found at $PromptFile" }
-    $ts = (Get-Date).ToString("yyyyMMdd_HHmmss_fff")
-    $ext = [System.IO.Path]::GetExtension($PromptFile)
-    $dest = Join-Path $Root "data\queue\pending\launch_$ts$ext"
-    Copy-Item $PromptFile $dest
-    Write-Host "Copied launch prompt file to $dest" -ForegroundColor Yellow
-}
 
 Write-Step "Starting Jarvis API"
 $env:PYTHONPATH = Join-Path $Root "backend"
 if ($SkipModelLoad) { $env:JARVIS_SKIP_MODEL = "1" }
-if ($PrivateKey) { $env:JARVIS_PRIVATE_KEY = $PrivateKey }
-$bindHost = if ($LanAccess) { "0.0.0.0" } else { "127.0.0.1" }
+$bindHost = "127.0.0.1"
+try {
+    $resolved = (& $python -c 'from app.security import uvicorn_bind_host_from_files; print(uvicorn_bind_host_from_files())').Trim()
+    if ($resolved) { $bindHost = $resolved }
+} catch {
+    $bindHost = "127.0.0.1"
+}
+if ($bindHost -eq "127.0.0.1" -or $bindHost -eq "localhost") {
+    $settingsFile = Join-Path $Root "data\settings.json"
+    if ((Test-Path $settingsFile) -and -not [string]$env:JARVIS_AUTH_TOKEN) {
+        try {
+            $cfg = Get-Content $settingsFile -Raw | ConvertFrom-Json
+            if ($cfg.lan_access) {
+                Write-Host "LAN access is on in settings but JARVIS_AUTH_TOKEN is empty; binding 127.0.0.1 only." -ForegroundColor Yellow
+            }
+        } catch { }
+    }
+} else {
+    Write-Host "Binding API to ${bindHost}:4780. llama-server stays on 127.0.0.1:8088."
+    Write-Host "LAN clients must send Authorization: Bearer <JARVIS_AUTH_TOKEN> or X-Jarvis-Token."
+    Write-Host "If Windows Firewall prompts, allow Private network only - not Public."
+}
 $log = Join-Path $Root "logs\backend.log"
 $backend = Start-Process -FilePath $python -ArgumentList "-m","uvicorn","app.main:app","--host",$bindHost,"--port","4780","--app-dir","backend" -WorkingDirectory $Root -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Root "logs\backend.err.log")
 "$($backend.Id)" | Set-Content $pidFile
@@ -92,43 +106,7 @@ if (-not $ok) {
 }
 
 Write-Host "Jarvis is running at http://127.0.0.1:4780" -ForegroundColor Green
-if ($LanAccess) {
-    Write-Host "LAN Access is enabled (bound to 0.0.0.0). Private Key is required for API requests." -ForegroundColor Yellow
-}
-
-if ($Wait -and ($Prompt -or $PromptFile)) {
-    Write-Step "Waiting for launch task completion..."
-    $authHeaders = @{}
-    $keyFile = Join-Path $Root "data\private_key.sec"
-    if ($PrivateKey) {
-        $authHeaders["X-Jarvis-Key"] = $PrivateKey
-    } elseif (Test-Path $keyFile) {
-        $authHeaders["X-Jarvis-Key"] = (Get-Content $keyFile -Raw).Trim()
-    }
-
-    $finished = $false
-    while (-not $finished) {
-        Start-Sleep -Seconds 3
-        try {
-            $tasks = Invoke-RestMethod -Uri "http://127.0.0.1:4780/api/tasks" -Headers $authHeaders
-            if ($tasks -and $tasks.Count -gt 0) {
-                $latest = $tasks[0]
-                Write-Host "Task [$($latest.id)]: $($latest.status) - $($latest.stage) - $($latest.current_action)"
-                if ($latest.status -in @("completed", "failed", "cancelled")) {
-                    Write-Host "`nTask result: $($latest.result)" -ForegroundColor Cyan
-                    if ($latest.verification) {
-                        Write-Host "Verification: $($latest.verification)" -ForegroundColor Green
-                    }
-                    $finished = $true
-                }
-            }
-        } catch {
-            Write-Warning "Waiting on task poll: $_"
-        }
-    }
-}
-elseif (-not $NoBrowser) {
+if (-not $NoBrowser) {
     Start-Process "http://127.0.0.1:4780"
 }
-
-Write-Host "Stop with .\stop-jarvis.ps1"
+Write-Host 'Stop with .\stop-jarvis.ps1'

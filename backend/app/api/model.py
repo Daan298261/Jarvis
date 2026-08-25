@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..config import load_settings, save_settings
-from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
+from ..inference.benchmarks import recent_benchmarks, record_benchmark
 from ..inference.manager import MANAGER
 from ..inference.profiles import available_profiles
 
@@ -27,18 +27,17 @@ async def model_status():
             "thinking": p.thinking,
             "context_size": p.context_size,
             "description": p.description,
+            "family": getattr(p, "family", "official"),
+            "alias": getattr(p, "alias", "Qwen3.5-9B-Abliterated"),
         }
         for p in available_profiles()
     ]
-    snapshot["outcomes"] = await task_outcome_stats()
-    snapshot["benchmarks"] = await list_benchmarks(limit=12)
     return snapshot
 
 
 @router.get("/benchmarks")
 async def model_benchmarks(limit: int = 50):
-    outcomes = await task_outcome_stats()
-    return {"outcomes": outcomes, "samples": await list_benchmarks(limit=limit)}
+    return {"samples": recent_benchmarks(min(max(1, limit), 40))}
 
 
 @router.post("/benchmarks/snapshot")
@@ -46,25 +45,18 @@ async def capture_benchmark():
     settings = load_settings()
     await MANAGER.refresh_resources()
     state = MANAGER.state
-    row = await record_benchmark_sample(
+    sample = record_benchmark(
         profile=state.profile or settings.inference.profile,
-        quantization=state.quant,
+        quant=state.quant,
         context_size=state.context_size,
-        prompt_tps=state.prompt_tps,
-        generation_tps=state.generation_tps,
+        prompt_tokens_per_second=state.prompt_tps,
+        tokens_per_second=state.generation_tps,
         vram_used_mib=state.vram_used_mib,
         ram_used_gb=state.ram_used_gb,
         load_time_seconds=state.load_time_seconds,
         source="snapshot",
     )
-    return {"ok": True, "sample": None if row is None else {
-        "id": row.id,
-        "tokens_per_second": row.generation_tps,
-        "prompt_tokens_per_second": row.prompt_tps,
-        "vram_used_mib": row.vram_used_mib,
-        "task_success_rate": row.task_success_rate,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }}
+    return {"ok": True, "sample": sample}
 
 
 @router.post("/load")
@@ -86,3 +78,14 @@ async def unload_model():
     await MANAGER.unload()
     settings = load_settings()
     return await MANAGER.snapshot(settings)
+
+
+@router.post("/benchmark")
+async def run_benchmark():
+    settings = load_settings()
+    try:
+        return await MANAGER.run_benchmark(settings)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))

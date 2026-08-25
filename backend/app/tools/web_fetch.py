@@ -32,10 +32,22 @@ class WebFetchTool(Tool):
             async with httpx.AsyncClient(follow_redirects=True, timeout=30, headers={"User-Agent": "JarvisLocal/1.0"}) as client:
                 response = await client.request(method, url)
             text = response.text[:limit]
+            title = ""
+            lower_type = (response.headers.get("content-type") or "").lower()
+            if "html" in lower_type or "<title" in text.lower():
+                import re
+
+                match = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+                if match:
+                    title = re.sub(r"\s+", " ", match.group(1)).strip()
+            header = f"status={response.status_code}\ncontent-type={response.headers.get('content-type')}"
+            if title:
+                header += f"\ntitle={title}"
             return ToolResult(
                 response.is_success,
-                f"status={response.status_code}\ncontent-type={response.headers.get('content-type')}\n\n{text}",
+                f"{header}\n\n{text}",
                 error="" if response.is_success else f"HTTP {response.status_code}",
+                data={"title": title} if title else {},
             )
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

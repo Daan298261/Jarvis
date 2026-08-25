@@ -21,8 +21,16 @@ TIMEOUT = int(os.environ.get("JARVIS_TEST_TIMEOUT", "900"))
 def wait_task(client: httpx.Client, task_id: str, timeout: int = TIMEOUT) -> dict:
     deadline = time.time() + timeout
     last = {}
+    last_key = None
     while time.time() < deadline:
         last = client.get(f"/api/tasks/{task_id}").json()
+        key = (last.get("status"), last.get("stage"), last.get("current_tool"), last.get("current_action"))
+        if key != last_key:
+            print(
+                f"  {task_id[:8]} {last.get('status')} | {last.get('stage')} | {last.get('current_tool') or '-'} | {last.get('current_action')}",
+                flush=True,
+            )
+            last_key = key
         if last.get("status") in {"completed", "failed", "cancelled"}:
             return last
         time.sleep(3)
@@ -30,7 +38,15 @@ def wait_task(client: httpx.Client, task_id: str, timeout: int = TIMEOUT) -> dic
 
 
 def submit(client: httpx.Client, prompt: str, autonomy: str = "autonomous") -> dict:
-    task = client.post("/api/tasks", json={"prompt": prompt, "autonomy": autonomy, "profile": "fast"}).json()
+    task = client.post(
+        "/api/tasks",
+        json={
+            "prompt": prompt,
+            "autonomy": autonomy,
+            "profile": "fast",
+            "execution_mode": "balanced",
+        },
+    ).json()
     return wait_task(client, task["id"])
 
 
@@ -40,11 +56,33 @@ def main() -> None:
         health = client.get("/api/health").json()
         assert health.get("ok"), health
         model = client.get("/api/model").json()
-        if not model.get("loaded"):
-            print("Loading model...")
-            client.post("/api/model/load", json={"profile": "balanced"}, timeout=400)
+        needs_fast = (
+            not model.get("loaded")
+            or model.get("profile") != "fast"
+            or model.get("thinking_at_process") is not False
+        )
+        if needs_fast:
+            print("Loading Fast profile...")
+            client.post("/api/model/load", json={"profile": "fast"}, timeout=400)
             model = client.get("/api/model").json()
-        print("Model:", json.dumps({k: model.get(k) for k in ("active_model", "quantization", "loaded", "tokens_per_second", "vram_used_mib")}, indent=2))
+        print(
+            "Model:",
+            json.dumps(
+                {
+                    k: model.get(k)
+                    for k in (
+                        "active_model",
+                        "quantization",
+                        "loaded",
+                        "profile",
+                        "thinking_at_process",
+                        "tokens_per_second",
+                        "vram_used_mib",
+                    )
+                },
+                indent=2,
+            ),
+        )
 
         # TEST 1
         folder = DESKTOP / "Jarvis-Test"
@@ -59,6 +97,7 @@ def main() -> None:
             "file_exists": spec_file.exists(),
             "size": spec_file.stat().st_size if spec_file.exists() else 0,
         }
+        print("test1", results["test1"], flush=True)
 
         # TEST 2
         prompt2 = (
@@ -72,6 +111,7 @@ def main() -> None:
             text = primes_file.read_text(encoding="utf-8", errors="replace")
             primes_ok = "2" in text and "97" in text
         results["test2"] = {"status": t2["status"], "ok": primes_ok, "exists": primes_file.exists()}
+        print("test2", results["test2"], flush=True)
 
         # TEST 3
         title_file = folder / "page-title.txt"
@@ -81,6 +121,7 @@ def main() -> None:
         t3 = submit(client, prompt3)
         title_ok = title_file.exists() and "example" in title_file.read_text(encoding="utf-8", errors="replace").lower()
         results["test3"] = {"status": t3["status"], "ok": title_ok}
+        print("test3", results["test3"], flush=True)
 
         # TEST 4
         broken = create_broken_project(ROOT / "tests" / "output")
@@ -91,6 +132,7 @@ def main() -> None:
         t4 = submit(client, prompt4)
         out = broken / "output.txt"
         results["test4"] = {"status": t4["status"], "output_exists": out.exists(), "lines": len(out.read_text(encoding='utf-8').splitlines()) if out.exists() else 0}
+        print("test4", results["test4"], flush=True)
 
         # TEST 5
         image = ROOT / "tests" / "output" / "vision-target.png"
@@ -112,6 +154,7 @@ def main() -> None:
             "mentions_text": "jarvis-vision-ok" in vision_text or "jarvis" in (t5.get("result") or "").lower(),
             "file": vision_out.exists(),
         }
+        print("test5", results["test5"], flush=True)
 
         # TEST 6 recovery
         prompt6 = (
@@ -122,10 +165,17 @@ def main() -> None:
         t6 = submit(client, prompt6)
         rec = folder / "recovery.txt"
         results["test6"] = {"status": t6["status"], "ok": rec.exists() and "RECOVERED" in rec.read_text(encoding="utf-8", errors="replace")}
+        print("test6", results["test6"], flush=True)
 
         # TEST 7 persistence — recreate client after listing
         tasks = client.get("/api/tasks").json()
-        results["test7"] = {"history_count": len(tasks), "ok": len(tasks) >= 6}
+        stored = client.get(f"/api/tasks/{t1['id']}").json()
+        results["test7"] = {
+            "history_count": len(tasks),
+            "ok": len(tasks) >= 6 and stored.get("id") == t1["id"],
+            "stored_status": stored.get("status"),
+        }
+        print("test7", results["test7"], flush=True)
 
     (ROOT / "tests" / "output" / "e2e-results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(json.dumps(results, indent=2))

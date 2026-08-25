@@ -22,7 +22,7 @@ RTX 50-series needs a recent llama.cpp (this install uses **b10516**). Older CPU
 
 - Context too small: raise `inference.context_size` toward 32768 if RAM allows
 - Thinking/parser: server is started with `--jinja --reasoning-format deepseek`
-- For Fast profile, thinking is off on purpose
+- Fast profile launches llama-server with `--reasoning off`. If an older server was left running with reasoning on, loading Fast restarts it. Check `thinking_at_process` on `GET /api/model`.
 
 ## Browser tool fails
 
@@ -54,4 +54,16 @@ Stop Jarvis before copying `data/jarvis.db`. After restart, History should list 
 
 ## Port 4780 in use
 
-Change `bind_port` in `data/settings.json` or stop the other process. Update `start-jarvis.ps1` usage accordingly.
+Change `bind_port` in `data/settings.json` or stop the other process. `start-jarvis.ps1` still health-checks `http://127.0.0.1:4780/api/health`.
+
+## LAN access still on localhost
+
+Jarvis only binds `0.0.0.0` when Settings **Allow LAN access** is on **and** `JARVIS_AUTH_TOKEN` is set in the environment that launches `start-jarvis.ps1`. `setx` does not affect the current terminal until you open a new one. Enabling LAN without a token is rejected. A local llama-server process still binds `127.0.0.1:8088`. Remote inference is a client URL on the Model page, not a llama bind. See `SECURITY.md`.
+
+## Voice / microphone
+
+The portal must be opened as `http://127.0.0.1:4780` (or HTTPS) for the browser to allow the microphone. First Whisper transcription downloads `tiny.en` into `models/whisper` and can take a minute. Keep Whisper on CPU so it does not steal VRAM from Qwen (`JARVIS_WHISPER_DEVICE=cpu`). If Speak fails, Windows SAPI is missing or blocked; Piper is optional.
+
+## Phone cannot reach Jarvis
+
+Enable **Allow LAN access** with `JARVIS_AUTH_TOKEN` (16+ characters) and restart Jarvis. On the phone open a URL from Settings → Phone / Android (`http://<pc-ip>:4780/phone`) and paste the same token. The PC firewall must allow TCP 4780 on the Private network. llama-server stays on localhost.

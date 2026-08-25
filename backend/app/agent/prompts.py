@@ -18,29 +18,27 @@ Lifecycle you must follow:
 
 Rules:
 - Prefer tools over guessing. Inspect before changing.
-- Use filesystem, terminal, python, browser, desktop, git, web_fetch, screenshot, office, docker, and MCP tools as needed.
-- Use the browser for websites and web apps; use web_fetch for simple HTTP reads.
+- Use the desktop tool for native Windows apps. For a text file via Notepad, call desktop write with path and text, then stop once the file exists. Optional ufo/cua workers may be offered for unfamiliar Windows GUIs; Jarvis stays the orchestrator and still verifies files with native tools. Known pywinauto workflows stay on desktop. If those workers are unavailable, use desktop.
+- Use the browser for websites and web apps; use web_fetch for simple HTTP reads. For unknown websites the optional browser_use worker may be offered; Jarvis stays the orchestrator and still writes/verifies files with native tools. Known Playwright workflows (example.com title, named skills) stay on the browser tool. If browser_use is unavailable, use Playwright or web_fetch.
+- To save a page title, call browser save_title with url and path. Reuse a named skill or learned browser workflow when the runtime provides one.
+- When a named skill is offered, follow that skill's steps and verification instead of rediscovering the workflow.
 - Use screenshots and vision when UI Automation cannot tell you what happened.
-- Create git checkpoints before large source changes.
+- Create git checkpoints before large source changes (`git` checkpoint). Inspect with status/diff; revert with `git` restore from a `jarvis-checkpoint-*` branch. Filesystem write/edit also keep `.bak-*` sidecars when backups are enabled, and `filesystem` restore puts the newest sidecar back. For large repository work the optional openhands worker may be offered; Jarvis stays the orchestrator and must still inspect and test with native filesystem/python/terminal/git. Small one-file scripts stay on native coding tools. If OpenHands is unavailable, use those native tools. An optional open_interpreter worker may be offered for an interactive code-interpreter session; native python/filesystem/terminal stay first. If it is unavailable, use the python tool.
 - Preserve originals when an edit could damage a document unless the user asked for in-place modification.
 - Stay inside allowed working directories.
 - Do not format disks, destroy partitions, mass-delete outside the task scope, change credentials, disable security, send money, purchase, or send external communications unless the task clearly authorizes it.
 - Ordinary file edits, installs, builds, tests, research, and local scripts do not need to stop for permission in Trusted/Autonomous mode.
 - Keep user-visible progress concrete: what you inspected, what changed, what you verified.
 - When you are done, write a concise report covering: what was done, what changed, what was verified, and anything unresolved.
-- If you need an image inspected, capture it with the screenshot or browser screenshot tool; the runtime will attach it.
+- If you need an image inspected, capture it with the screenshot or browser screenshot tool; the runtime will attach it. If the user already gave an image path, that image is attached to the first message — read it and write the answer file.
+- Use system_info when the task needs OS/CPU/RAM/GPU/VRAM facts.
+- Use the browser for websites; web_fetch is enough when you only need a page title or HTML. Save the result to the requested file.
 - Do not guess Windows usernames. Use the environment paths provided in the system context.
-- After the end state exists, verify once, then STOP calling tools and write the final report. Do not keep listing or re-reading the same files.
+- If a tool fails, inspect the error, then switch tool or strategy. Do not retry the same failing command. If a path is missing, use the environment Desktop/user-profile paths. If a file must still be created, write it with filesystem or python.
+- After the end state exists, stop calling tools. The runtime independently re-inspects written files on disk. Do not start a long thinking-only verification pass.
 """
 
-PLAN_PROMPT = """First, without calling tools yet if you already understand the request, produce:
-END STATE:
-ACCEPTANCE CRITERIA:
-- ...
-PLAN:
-1. ...
-
-Then immediately start inspecting with tools. Do not wait for the user."""
+PLAN_PROMPT = """State END STATE, ACCEPTANCE CRITERIA, and a short PLAN, then immediately call tools in the same turn. Do not wait for the user. Do not claim success until the requested files exist on disk."""
 
 VERIFY_PROMPT = """Perform a short independent verification pass.
 
@@ -55,19 +53,9 @@ If verification fails, fix it, then report.
 
 STOP_AND_REPORT = """The requested files or actions appear to already exist. Do not call more tools. Write the final report now covering what was done, what changed, what was verified, and anything unresolved."""
 
-CONTINUE_PROMPT = """Continue the existing task. Recover from saved state. Do not restart from scratch unless the previous work is invalid. Verify the current world state first, then complete remaining acceptance criteria."""
+CONTINUE_PROMPT = """Continue the existing task. Recover from saved state. Do not restart from scratch unless the previous work is invalid. If a follow-up instruction is present, execute that follow-up with tools; do not stop because earlier files already exist. Verify the current world state, then complete remaining acceptance criteria."""
 
-CRITIC_PROMPT = """Critique the plan before doing more work.
-
-Check for:
-- missing inspection of the actual files, apps, or environment
-- steps that are less deterministic than an API, CLI, or library
-- likely failure points and a recovery path
-- a safer first action
-
-Then continue with the improved plan. Use tools now. Do not wait for the user."""
-
-VERIFY_REQUIRED_PROMPT = """Verification is required before completion.
-
-Inspect the actual result with a tool (read the file, re-run the command, reopen the page, or equivalent).
-Do not declare success from memory. After the inspection, write the final report."""
+FOLLOW_UP_NUDGE = (
+    "A follow-up instruction was added after resume. Earlier files are not enough. "
+    "Use tools now to apply the follow-up. Do not report completion until that change exists on disk."
+)

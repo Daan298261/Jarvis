@@ -5,15 +5,22 @@ from typing import Any, Callable
 from ..config import AppSettings, default_allowed_directories
 from .base import Tool, ToolResult
 from .browser import BrowserTool
+from .browser_use import BrowserUseTool
+from .cua import CuaTool
 from .desktop import DesktopTool
 from .docker_tools import DockerTool
 from .filesystem import FilesystemTool
 from .git_tools import GitTool
 from .mcp_runtime import MCP, MCPProxyTool
 from .office import OfficeTool
+from .openhands import OpenHandsTool
+from .open_interpreter import OpenInterpreterTool
 from .python_exec import PythonTool
 from .screenshot import ScreenshotTool
+from .skill import SkillTool
+from .system_info import SystemInfoTool
 from .terminal import TerminalTool
+from .ufo import UFOTool
 from .web_fetch import WebFetchTool
 
 
@@ -30,12 +37,19 @@ class ToolRegistry:
             TerminalTool(),
             PythonTool(),
             BrowserTool(getter),
-            DesktopTool(),
+            BrowserUseTool(),
+            UFOTool(),
+            CuaTool(),
+            DesktopTool(getter),
             OfficeTool(),
             GitTool(),
+            OpenHandsTool(getter),
+            OpenInterpreterTool(getter),
             DockerTool(),
             WebFetchTool(),
             ScreenshotTool(),
+            SystemInfoTool(),
+            SkillTool(),
             MCPProxyTool(),
         ]
         self.tools = {tool.name: tool for tool in items}

@@ -7,7 +7,9 @@
     "backend": "llama.cpp",
     "host": "127.0.0.1",
     "port": 8088,
-    "profile": "balanced",
+    "base_url": "",
+    "model": "Qwen3.5-9B-Abliterated",
+    "profile": "abliterated-balanced",
     "context_size": 32768,
     "flash_attn": "auto",
     "fit": true,
@@ -18,14 +20,19 @@
     "auto_load": true
   },
   "autonomy": "trusted",
+  "execution_mode": "balanced",
   "default_timeout_seconds": 1800,
   "retry_limit": 4,
   "execution_mode": "balanced",
   "logging_level": "INFO",
   "backup_enabled": true,
   "browser": {
-    "headless": false,
+    "headless": true,
     "timeout_ms": 30000
+  },
+  "voice": {
+    "stt_model": "tiny.en",
+    "speak_results": false
   },
   "allowed_directories": [],
   "mcp_servers": []

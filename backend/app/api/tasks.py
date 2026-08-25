@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from ..agent.loop import AGENT
-from ..db.models import Task, TaskEvent
+from ..db.models import Task, TaskEvent, ToolCallRecord
+from ..timeline import build_timeline, is_hidden_thought, serialize_tool_call
 from ..db.session import SessionLocal
 from ..events import BUS
 
@@ -38,7 +39,7 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "profile": task.profile,
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
         "task_class": getattr(task, "task_class", None) or "",
-        "acceptance_criteria": task.acceptance_criteria,
+        "selected_worker": getattr(task, "selected_worker", None) or "",
         "current_action": task.current_action,
         "current_tool": task.current_tool,
         "result": task.result,
@@ -64,7 +65,7 @@ async def create_task(body: TaskCreate):
 @router.get("")
 async def list_tasks():
     async with SessionLocal() as session:
-        rows = (await session.execute(select(Task).order_by(Task.created_at.desc()))).scalars().all()
+        rows = (await session.execute(select(Task).order_by(Task.updated_at.desc(), Task.created_at.desc()))).scalars().all()
         return [_task_dict(row) for row in rows]
 
 
@@ -77,6 +78,11 @@ async def get_task(task_id: str):
         events = (
             await session.execute(select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.id))
         ).scalars().all()
+        calls = (
+            await session.execute(
+                select(ToolCallRecord).where(ToolCallRecord.task_id == task_id).order_by(ToolCallRecord.id)
+            )
+        ).scalars().all()
         payload = _task_dict(task)
         payload["events"] = [
             {
@@ -87,7 +93,10 @@ async def get_task(task_id: str):
                 "created_at": e.created_at.isoformat() if e.created_at else None,
             }
             for e in events
+            if not is_hidden_thought(e)
         ]
+        payload["tool_calls"] = [serialize_tool_call(row) for row in calls]
+        payload["timeline"] = build_timeline(events, calls)
         return payload
 
 

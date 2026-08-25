@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from urllib.parse import urlparse
 
 from .base import RiskLevel, Tool, ToolResult
+from .mcp_presets import expand_args, missing_env, resolve_mcp_env, resolve_stdio_command
 
 
 class MCPRuntime:
@@ -20,8 +20,12 @@ class MCPRuntime:
                 if not server.get("enabled", True):
                     status[server.get("name", "unnamed")] = "disabled"
                     continue
+                missing = missing_env(server)
+                if missing:
+                    status[server.get("name", "unnamed")] = f"missing env: {', '.join(missing)}"
+                    continue
                 try:
-                    tools = await self._list_tools(server)
+                    tools = await asyncio.wait_for(self._list_tools(server), timeout=25)
                     for tool in tools:
                         key = f"mcp_{server.get('name')}_{tool['name']}"
                         self._tools[key] = {"server": server, "tool": tool}
@@ -37,9 +41,9 @@ class MCPRuntime:
         transport = (server.get("transport") or "stdio").lower()
         if transport == "stdio":
             params = StdioServerParameters(
-                command=server.get("command") or "npx",
-                args=server.get("args") or [],
-                env=server.get("env") or None,
+                command=resolve_stdio_command(server.get("command") or "npx"),
+                args=expand_args(server.get("args") or []),
+                env=resolve_mcp_env(server),
             )
             async with stdio_client(params) as (read, write):
                 async with ClientSession(read, write) as session:
@@ -70,9 +74,9 @@ class MCPRuntime:
             transport = (server.get("transport") or "stdio").lower()
             if transport == "stdio":
                 params = StdioServerParameters(
-                    command=server.get("command") or "npx",
-                    args=server.get("args") or [],
-                    env=server.get("env") or None,
+                    command=resolve_stdio_command(server.get("command") or "npx"),
+                    args=expand_args(server.get("args") or []),
+                    env=resolve_mcp_env(server),
                 )
                 async with stdio_client(params) as (read, write):
                     async with ClientSession(read, write) as session:
@@ -90,6 +94,9 @@ class MCPRuntime:
             return ToolResult(False, "", error="Unsupported transport")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))
+
+    def tool_count(self, server_name: str) -> int:
+        return sum(1 for spec in self._tools.values() if spec["server"].get("name") == server_name)
 
     def openai_tools(self) -> list[dict[str, Any]]:
         tools = []

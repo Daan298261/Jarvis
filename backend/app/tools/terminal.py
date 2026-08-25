@@ -133,7 +133,7 @@ class TerminalTool(Tool):
         "inspect also works for other local PIDs. Captures stdout, stderr, exit code and duration. "
         "Use working_directory when possible. Do not use this to format disks or destroy backups."
     )
-    risk = RiskLevel.HIGH
+    risk = RiskLevel.MEDIUM
     parameters = {
         "type": "object",
         "properties": {

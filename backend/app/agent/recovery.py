@@ -1,133 +1,140 @@
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
-
-BLOCKED = "blocked"
-PERMISSION = "permission"
-NOT_FOUND = "not_found"
-TIMEOUT = "timeout"
-UNAVAILABLE = "unavailable"
-USAGE = "usage"
-NETWORK = "network"
-UNKNOWN = "unknown"
-
-_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
-    (BLOCKED, (r"blocked irreversible", r"blocked identical", r"ask the user explicitly")),
-    (PERMISSION, (r"outside allowed directories", r"permission", r"access is denied", r"unauthorized", r"\b403\b")),
-    (UNAVAILABLE, (
-        r"is not available",
-        r"not installed",
-        r"is disabled",
-        r"no module named",
-        r"unknown tool",
-        r"is not recognized as",
-        r"command not found",
-        r"no distro",
-    )),
-    (TIMEOUT, (r"timed out", r"\btimeout\b")),
-    (NETWORK, (r"connection refused", r"connection error", r"failed to resolve", r"name or service not known", r"ssl", r"\bdns\b")),
-    (NOT_FOUND, (r"not found", r"does not exist", r"no such file", r"cannot find", r"\b404\b")),
-    (USAGE, (r"unknown action", r"is required", r"invalid", r"old_text not found", r"no packages or requirements")),
-]
+from dataclasses import dataclass, field
 
 
-@dataclass(frozen=True)
-class Alternative:
-    tool: str
-    why: str
-
-
-# Ordered by the plan's tool-selection priority: deterministic APIs and
-# libraries before DOM automation, accessibility, and finally vision.
-_ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
-    "browser": (
-        Alternative("web_fetch", "read the page or its API directly when no JavaScript is needed"),
-        Alternative("python", "call the site's API or parse the response with a library"),
-        Alternative("screenshot", "look at the page only when the DOM cannot answer the question"),
-    ),
-    "web_fetch": (
-        Alternative("browser", "the endpoint needs a real session, cookies, or JavaScript"),
-    ),
-    "office": (
-        Alternative("python", "edit the document with openpyxl / python-docx instead of COM"),
-        Alternative("filesystem", "inspect or copy the file directly"),
-    ),
-    "desktop": (
-        Alternative("terminal", "drive the app through its CLI or PowerShell instead of the GUI"),
-        Alternative("screenshot", "capture the screen and use vision when UI Automation cannot see the control"),
-        Alternative("browser", "use the web interface if the app has one"),
-    ),
-    "terminal": (
-        Alternative("python", "do the work in a script instead of a shell one-liner"),
-        Alternative("filesystem", "use direct file operations for file work"),
-    ),
-    "python": (
-        Alternative("terminal", "run the interpreter or tool directly and read stderr"),
-        Alternative("filesystem", "inspect the inputs before running code again"),
-    ),
-    "docker": (
-        Alternative("terminal", "run the process locally; Docker may not be installed"),
-        Alternative("python", "reproduce the job in a virtualenv"),
-    ),
-    "filesystem": (
-        Alternative("python", "glob, compare, or transform files in a script"),
-        Alternative("terminal", "inspect the path with a shell command"),
-    ),
-    "git": (
-        Alternative("terminal", "run the git command directly to see the full error"),
-    ),
-    "screenshot": (
-        Alternative("desktop", "query the UI Automation tree instead of pixels"),
-    ),
-}
-
-_NATIVE_FALLBACK = (
-    Alternative("filesystem", "use the native tool instead of the MCP server"),
-    Alternative("terminal", "use a local command instead of the MCP server"),
-)
-
-_KIND_GUIDANCE: dict[str, str] = {
-    BLOCKED: "This action is deliberately blocked. Achieve the goal a safer way, or explain why it cannot be done without the user.",
-    PERMISSION: "This is a permissions or sandbox boundary, not a transient error. Work inside the allowed directories, or use a path the task actually authorizes.",
-    NOT_FOUND: "The target does not exist where you looked. Inspect the parent directory or search for it before acting again.",
-    TIMEOUT: "The operation did not finish in time. Reduce the scope, raise the timeout deliberately, or run it as a background step.",
-    UNAVAILABLE: "That capability is missing on this machine. Do not retry it. Switch to an available tool.",
-    USAGE: "The call itself was malformed. Re-read the tool's parameters and send corrected arguments.",
-    NETWORK: "The network call failed. Verify the host and try a different endpoint or transport.",
-    UNKNOWN: "Read the error text and change one thing deliberately before retrying.",
+ALTERNATES: dict[str, list[str]] = {
+    "filesystem": ["python", "terminal"],
+    "terminal": ["python", "filesystem"],
+    "python": ["terminal", "filesystem", "openhands", "open_interpreter"],
+    "browser": ["web_fetch", "screenshot", "browser_use"],
+    "browser_use": ["browser", "web_fetch"],
+    "web_fetch": ["browser"],
+    "desktop": ["screenshot", "ufo", "cua", "browser", "filesystem"],
+    "ufo": ["cua", "desktop", "screenshot"],
+    "cua": ["desktop", "screenshot"],
+    "office": ["python", "filesystem"],
+    "screenshot": ["desktop", "browser"],
+    "docker": ["terminal", "python"],
+    "git": ["terminal", "openhands"],
+    "openhands": ["filesystem", "python", "terminal", "git"],
+    "open_interpreter": ["python", "terminal", "filesystem"],
 }
 
 
-def classify_failure(observation: str) -> str:
-    text = (observation or "").lower()
-    for kind, patterns in _PATTERNS:
-        for pattern in patterns:
-            if re.search(pattern, text):
-                return kind
-    return UNKNOWN
+def classify_error(tool: str, arguments: dict, output: str) -> str:
+    text = (output or "").lower()
+    if any(s in text for s in ("not exist", "not found", "no such", "cannot find", "missing")):
+        return "missing"
+    if any(s in text for s in ("permission", "access is denied", "denied", "unauthorized", "outside allowed")):
+        return "permission"
+    if "timeout" in text or "timed out" in text:
+        return "timeout"
+    if any(s in text for s in ("not installed", "unavailable", "not available", "no module")):
+        return "unavailable"
+    if "blocked" in text and "identical" in text:
+        return "repeat"
+    return "error"
 
 
-def alternatives_for(tool: str, kind: str) -> list[Alternative]:
-    options = _NATIVE_FALLBACK if tool.startswith("mcp_") else _ALTERNATIVES.get(tool, ())
-    if kind in {PERMISSION, BLOCKED}:
-        # A different tool does not grant more rights, so do not suggest one.
-        return []
-    return list(options)
+OPTIONAL_WORKERS = {"browser_use", "ufo", "cua", "openhands", "open_interpreter", "docker"}
 
 
-def recovery_hint(tool: str, observation: str, attempt: int = 1) -> str:
-    kind = classify_failure(observation)
-    lines = [f"{tool} failed ({kind.replace('_', ' ')}). {_KIND_GUIDANCE[kind]}"]
-    options = alternatives_for(tool, kind)
-    if options:
-        limit = 1 if attempt <= 1 else len(options)
-        lines.append("Alternative tools, most deterministic first:")
-        lines.extend(f"- {item.tool}: {item.why}" for item in options[:limit])
-    if attempt >= 3:
-        lines.append(
-            "Several strategies have now failed. Re-check your assumptions about the environment, "
-            "inspect the actual state before acting, and change approach rather than parameters."
+def alternate_tools(failed: str) -> list[str]:
+    names = [name for name in ALTERNATES.get(failed, ["filesystem", "python", "terminal"]) if name != failed]
+    try:
+        from .routing import get_workers
+
+        workers = get_workers()
+        names = [name for name in names if name not in workers or workers[name].available]
+    except Exception:
+        names = [name for name in names if name not in OPTIONAL_WORKERS]
+    return names
+
+
+@dataclass
+class RecoveryPlan:
+    failed_tool: str
+    classification: str
+    avoid_tools: list[str]
+    prefer_tools: list[str]
+    prompt: str
+
+
+@dataclass
+class RecoveryTracker:
+    """After repeated failure, force a different tool or strategy."""
+
+    fail_streak: int = 0
+    fail_by_tool: dict[str, int] = field(default_factory=dict)
+    last_tool: str = ""
+    last_error: str = ""
+    last_class: str = ""
+    last_action: str = ""
+    issued_for: set[str] = field(default_factory=set)
+    avoid_tools: set[str] = field(default_factory=set)
+    last_plan: RecoveryPlan | None = None
+    fail_after_tool: int = 2
+    fail_after_streak: int = 3
+
+    def record(self, name: str, arguments: dict, success: bool, output: str, blocked: bool = False) -> RecoveryPlan | None:
+        if success and not blocked:
+            self.fail_streak = 0
+            self.fail_by_tool[name] = 0
+            self.avoid_tools.clear()
+            return None
+        action = str(arguments.get("action") or arguments.get("command") or "")
+        kind = classify_error(name, arguments, output)
+        self.fail_streak += 1
+        self.fail_by_tool[name] = self.fail_by_tool.get(name, 0) + 1
+        self.last_tool = name
+        self.last_error = (output or "")[:800]
+        self.last_class = kind
+        self.last_action = action
+        if self.fail_by_tool[name] >= self.fail_after_tool or self.fail_streak >= self.fail_after_streak:
+            return self.make_plan(name, arguments, kind)
+        return None
+
+    def make_plan(self, failed: str, arguments: dict, kind: str) -> RecoveryPlan:
+        prefer = alternate_tools(failed)
+        avoid = [failed]
+        extra = ""
+        if kind == "missing":
+            extra = (
+                "A path was missing. Use the Windows user profile or Desktop from the environment "
+                "block. Do not retry the missing path."
+            )
+        elif kind == "unavailable":
+            extra = "That tool or dependency is unavailable. Use a native alternative."
+        elif kind == "permission":
+            extra = "Write under an allowed directory such as Desktop or the task folder."
+        elif kind == "repeat":
+            extra = "The identical call was blocked. Change both tool and arguments."
+        prompt = (
+            f"RECOVERY: `{failed}` failed repeatedly ({kind}). "
+            f"Do not call `{failed}` again for this sub-goal.\n"
+            f"Switch strategy. Preferred tools: {', '.join(prefer) or 'any other enabled tool'}.\n"
+            f"{extra}\n"
+            f"Last error:\n{self.last_error[:500]}"
+        ).strip()
+        plan = RecoveryPlan(
+            failed_tool=failed,
+            classification=kind,
+            avoid_tools=avoid,
+            prefer_tools=prefer,
+            prompt=prompt,
         )
-    lines.append("Do not repeat the call that just failed.")
-    return "\n".join(lines)
+        self.last_plan = plan
+        self.issued_for.add(failed)
+        self.avoid_tools.add(failed)
+        return plan
+
+    def tools_for_next_round(self, schemas: list[dict]) -> list[dict]:
+        if not self.avoid_tools:
+            return schemas
+        filtered = [
+            schema
+            for schema in schemas
+            if schema.get("function", {}).get("name") not in self.avoid_tools
+        ]
+        return filtered or schemas

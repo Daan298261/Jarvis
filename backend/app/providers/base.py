@@ -58,7 +58,7 @@ class ModelProvider:
         self,
         base_url: str,
         api_key: str = "local",
-        model: str = "Qwen3.5-27B",
+        model: str = "Qwen3.5-9B-Abliterated",
         timeout: float = 600,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -68,8 +68,11 @@ class ModelProvider:
 
     async def health(self) -> bool:
         root = self.base_url[:-3] if self.base_url.endswith("/v1") else self.base_url
+        headers: dict[str, str] = {}
+        if self.api_key and self.api_key not in {"local", "sk-local"}:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         try:
-            async with httpx.AsyncClient(timeout=4) as client:
+            async with httpx.AsyncClient(timeout=4, headers=headers) as client:
                 for path in ("/health", "/v1/models", "/models"):
                     try:
                         response = await client.get(root + path)

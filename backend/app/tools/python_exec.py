@@ -89,6 +89,7 @@ class PythonTool(Tool):
                 path = kwargs.get("path")
                 if not path:
                     return ToolResult(False, "", error="path is required")
+                cwd = cwd or str(Path(path).resolve().parent)
                 return await self._run([py, path], cwd, timeout)
             if action == "create_venv":
                 path = Path(kwargs.get("venv_path") or kwargs.get("path") or ".venv")

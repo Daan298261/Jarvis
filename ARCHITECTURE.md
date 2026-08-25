@@ -1,155 +1,77 @@
 # Architecture
 
-Jarvis is a local-first control plane for autonomous work. The current implementation is a single-machine FastAPI + React + SQLite application with a local/remote OpenAI-compatible model provider. The P0 model migration in `JARVIS_MASTER_PLAN.md` targets moving normal operation from Qwen3.5-27B hybrid inference toward a fully GPU-resident Qwen3.5-9B primary model while retaining 27B as an expert escalation model.
+Jarvis is a local-first control plane for autonomous work. The current implementation is a single-machine FastAPI + React + SQLite application with a local/remote OpenAI-compatible model provider. Long-term swarm design lives in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md); priority and queue in [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) and [`project_goals.md`](project_goals.md).
 
-Overall project priority and current implementation state live in [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md). Detailed P2+ swarm role, placement, resource-control, node-management, and universal-UI requirements live in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md).
+Default model path: Qwen3.5-9B Abliterated via llama.cpp (fully GPU-resident), with 27B profiles as fallbacks.
 
-## Current 1.x topology
-
-```text
+```
 Browser (localhost:4780)
         │  REST + SSE + WebSocket
         ▼
-FastAPI backend / Orchestrator
+FastAPI backend
   ├── Task store (SQLite)
   ├── Agent runtime (plan → act → observe → recover → verify)
   ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP)
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
-Inference backend
-  ├── local llama.cpp today
-  └── optional remote OpenAI-compatible endpoint
+llama-server (localhost:8088)  or  another OpenAI-compatible /v1 host
+  Qwen3.5-9B Abliterated GGUF + mmproj  (default, fully GPU-resident)
 ```
-
-Today the host PC implicitly performs every physical role. Swarm work must refactor that assumption incrementally rather than replace the working control plane.
-
-## Core terminology
-
-These concepts must remain distinct:
-
-- **Orchestrator** — Jarvis control plane: task decomposition, scheduling, policy, workflow state, tool/worker coordination, recovery, verification, and eventually node placement.
-- **Node** — a physical or virtual participating device/machine.
-- **Worker** — a software execution service or agent, such as a local coding worker, `CursorACPWorker`, browser worker, model worker, or multimedia worker. Workers run on eligible Nodes.
-- **Leader** — the strongest or most capable general-purpose execution Node currently available. It is an execution designation, not the control plane.
-- **Senior / Junior / Peripheral** — node execution classes from `SWARM_ARCHITECTURE.md`. In code these should be represented as Node class/role data rather than software Worker subclasses.
-- **Capability** — something a Node/Worker can technically perform.
-- **Role policy** — what the user/Jarvis prefers or requires a Node/service to perform.
-- **Resource budget / lease** — how much host capacity Jarvis may consume and what a task temporarily requires.
-
-The scheduler must ultimately answer two different questions: **which Worker/model should do the task?** and **which Node should host that execution?** Do not collapse intelligence routing into physical placement.
-
-## One-node swarm invariant
-
-Jarvis must become swarm-ready before it becomes distributed. P2 should make the existing desktop register as a Node and route work through Node/capability/resource abstractions even when every placement decision resolves to `localhost`.
-
-```text
-Current desktop
-Node class: Leader
-Possible roles: Orchestrator + Leader
-Workers: local model, tools, Cursor ACP, browser, desktop, future media workers
-```
-
-Adding another machine later should extend the registry/placement choices, not require a scheduler rewrite.
 
 ## Model provider
 
-`backend/app/providers/base.py` defines `ModelProvider`. The built-in `OpenAICompatProvider` can talk to local llama.cpp or another OpenAI-compatible endpoint. Server lifecycle is abstracted separately through inference backends.
+`backend/app/providers/base.py` defines `ModelProvider`. The only built-in implementation is `OpenAICompatProvider`, used for:
 
-Swarm architecture does not replace this abstraction. An inference endpoint becomes one capability exposed by a Node/Worker; physical node identity, resource policy, and placement remain separate concepts.
+- local llama.cpp
+- another machine on the LAN
+- a dedicated multi-GPU server
+
+Swap by pointing `inference.host`/`port` or `inference.base_url` at any OpenAI-compatible `/v1` endpoint (`backend: openai-compat`). Jarvis connects as a client; it does not spawn llama.cpp and does not bind llama-server to the LAN. No agent code changes. Default remains local llama.cpp on `127.0.0.1:8088`. Optional `JARVIS_INFERENCE_API_KEY` is read from the environment only.
 
 ## Agent lifecycle
 
 `backend/app/agent/loop.py` runs an explicit loop:
 
-1. Understand the requested end state.
-2. Capture acceptance criteria.
-3. In Reliable mode, generate candidate plans and select one.
-4. Inspect with deterministic tools.
-5. Plan and execute the next action.
-6. Persist the observation.
-7. Classify success vs failure.
-8. Diagnose failures and choose a materially different strategy.
-9. Repeat until acceptance criteria can be checked.
-10. Run an independent verification pass.
-11. Report completion only after verification.
+1. Understand the requested end state
+2. Capture acceptance criteria (model + prompt)
+3. Inspect with tools
+4. Plan
+5. Execute the next tool call
+6. Persist the observation
+7. Classify success vs failure
+8. Diagnose
+9. Choose a different strategy (identical retries are blocked)
+10. Repeat until criteria can be checked
+11. Independent verification prompt with tools still available
+12. Final report only after that pass
 
-Task state is checkpointed in SQLite after tool calls. `POST /api/tasks/{id}/continue` reloads compacted state.
+Task state is checkpointed in SQLite after every tool call. `POST /api/tasks/{id}/continue` reloads compacted conversation state.
 
-## Context, memory, and recovery
+## Context compaction
 
-Older tool traces are compacted so long tasks do not continually resend raw history. `trajectories` record useful execution outcomes and `skills` store repeatable workflows; hidden reasoning is not stored. Recovery classifies failures and prefers deterministic alternatives rather than identical retries.
-
-These systems remain Orchestrator-owned when Workers become remote. A remote Worker may report execution evidence, but the Orchestrator retains task state and final verification authority unless a later explicit architecture decision changes that boundary.
-
-## Intelligence and software-development workers
-
-Software-development routing is defined in the master plan. Jarvis selects the cheapest sufficiently capable worker, beginning with deterministic/local options and escalating to paid coding workers when necessary. `CursorACPWorker` is the preferred Cursor integration path; MCP complements it in the opposite direction.
-
-Worker selection must remain compatible with swarm placement:
-
-```text
-Task
-  ↓
-Intelligence / Worker routing
-  ↓
-Capability + policy + resource requirements
-  ↓
-Node placement
-  ↓
-Execution
-  ↓
-Independent verification
-```
-
-## P2 swarm-ready target
-
-P2 implements the local abstractions from `SWARM_ARCHITECTURE.md` without requiring networking:
-
-- first-class Node identity/state;
-- software Worker registration separate from Nodes;
-- Orchestrator vs Leader separation;
-- capability registry;
-- role policies (`AUTO`, `PREFERRED`, `FORCED`, `AVOID`, `DISABLED`);
-- host resource budgets and hard/soft caps;
-- resource leases;
-- task priority;
-- data-locality and warm-worker/model signals;
-- single-node placement scheduler;
-- universal dynamic UI contract / Swarm settings surface.
-
-## P3 multi-node target
-
-P3 adds actual distribution:
-
-- discovery and secure pairing;
-- authenticated remote execution;
-- heartbeats and resource telemetry;
-- cross-node placement;
-- network/data-transfer-aware scheduling;
-- role recommendations/re-evaluation;
-- universal join/install flow;
-- node management UI.
-
-## P4 resilience target
-
-P4 adds fault tolerance and advanced infrastructure:
-
-- active/passive standby Orchestrators;
-- restart-safe control-plane state replication/failover;
-- affinity/anti-affinity and advanced placement constraints;
-- optional service separation/replication when justified.
-
-Security/SIEM/forensics are future specialized roles only. Their appearance in the swarm specification reserves architectural placement semantics; it does not authorize implementation before those systems are separately specified.
-
-## Frontend
-
-The existing React + TypeScript + Vite portal is the basis of the universal UI. Do not create separate Windows/Linux/Pi frontends. Future desktop/mobile wrappers should reuse the same frontend and expose host-specific capabilities through APIs/bridges. Tauri is the preferred future desktop-shell candidate in the swarm specification, with Electron as an alternative.
+Older tool traces are summarized so long tasks do not dump the full history back into the 32K window.
 
 ## Autonomy
 
-`interactive`, `trusted`, and `autonomous` modes remain policy boundaries for execution. Swarm placement must not grant a Worker/Node more authority than the task already has. A placement decision changes **where** authorized work runs, not **what** it is allowed to do.
+`interactive` confirms medium+ tools, `trusted` confirms high/irreversible, `autonomous` only pauses for irreversible operations (disk format, credential changes, mass-delete patterns, purchases, unsolicited external communications).
 
-## Implementation rule
+## Frontend
 
-Do not replace the FastAPI + React + SQLite core merely to obtain swarm terminology. Introduce P2 abstractions incrementally, preserve the current one-machine behavior, test them locally, then add P3 networking. The detailed swarm spec is intentionally separate so `ARCHITECTURE.md` can describe the implemented/current shape without duplicating the full future requirement set.
+React + TypeScript + Vite, built into `frontend/dist` and served by FastAPI so there is a single local URL.
+
+## Voice
+
+Local Whisper (faster-whisper, CPU `tiny.en` by default) and local TTS wrap the same task API. The agent is unchanged.
+
+- `GET /api/voice/status`
+- `POST /api/voice/transcribe` — WAV upload → text
+- `POST /api/voice/speak` — text → `audio/wav`
+- `POST /api/voice/command` — already-transcribed text → task
+- `POST /api/voice/command-audio` — audio upload → Whisper → task
+
+Portal: **Voice**, plus Mic / Speak on Command. First transcription downloads the Whisper model into `models/whisper`. Optional Piper: put `piper.exe` in `runtime/piper` and an `.onnx` voice in `models/piper`. `JARVIS_WHISPER_DEVICE=cuda` is available but not the default (keeps VRAM for Qwen).
+
+## Phone client
+
+`/phone` is a mobile UI for the same task API (`POST/GET /api/tasks`, continue, cancel). Native Android can call those endpoints with `X-Jarvis-Token` (`clients/android/JarvisApi.kt`). Discovery: `GET /api/phone`.

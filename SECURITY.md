@@ -2,36 +2,37 @@
 
 Jarvis is a powerful local agent. Treat it like a logged-in user on this PC.
 
-## Network & Remote Exposure
+## Network
 
-- Default bind: `127.0.0.1:4780` (web) and `127.0.0.1:8088` (llama-server)
-- LAN / Remote exposure: When enabled, binds to `0.0.0.0`
-- **Private Key Authentication**: When enabled (`auth_required: true` or `lan_access: true`), every request to `/api` and WebSocket connections must present the valid private key.
+- Default bind: `127.0.0.1:4780` (web API and portal) and `127.0.0.1:8088` (llama-server)
+- Not exposed to the internet
+- LAN access is **off** by default
+- `start-jarvis.ps1` binds `127.0.0.1` unless Settings has LAN on **and** `JARVIS_AUTH_TOKEN` is set in the process environment
+- Enabling LAN without a usable token (16+ characters) is rejected; bind stays localhost
+- llama-server on this PC always binds loopback even when the portal is on the LAN
+- Pointing Jarvis at another OpenAI-compatible host is an outbound client connection (`inference.host` / `base_url`); it does not expose llama-server
 
-### Supplying the Private Key
-
-Clients can authenticate with any of the following:
-1. `X-Jarvis-Key: <private_key>` header
-2. `Authorization: Bearer <private_key>` header
-3. `?key=<private_key>` query parameter (e.g. for WebSockets or URL bookmarks)
-
-Set the private key in your environment or generate one in Settings:
+Set the token in the **user** environment, not in git or `data/settings.json`:
 
 ```powershell
-setx JARVIS_PRIVATE_KEY "jarvis_pk_your_custom_secret_key"
+setx JARVIS_AUTH_TOKEN "a-long-random-value"
 ```
 
-Or pass it at startup:
+Use at least 16 characters. Close and reopen the terminal (or sign out) so `start-jarvis.ps1` sees the variable. Then turn on **Allow LAN access** in Settings and restart Jarvis.
 
-```powershell
-.\start-jarvis.ps1 -LanAccess -PrivateKey "jarvis_pk_secret"
-```
+LAN clients must send `Authorization: Bearer <token>` or `X-Jarvis-Token: <token>`. Localhost requests from this machine do not need a token. HTTP query-string tokens are ignored so they do not leak in logs; WebSocket may use `?token=` so a browser can connect. The portal can store the token in `sessionStorage` for a remote browser; it is never written to settings.
+
+If Windows Firewall prompts when LAN bind is enabled, allow **Private** network only. Do not expose port 4780 to the internet.
+
+Optional: `JARVIS_BIND_HOST` selects a specific address when LAN+token are already in effect (ignored otherwise).
 
 ## Secrets
 
 - Never commit `.env`, `secrets.json`, or MCP env values
-- `data/settings.json` stores non-secret preferences
-- Auth token is read from the environment and stripped before settings are saved
+- MCP presets store `${VAR}` / `env_from` names only; GitHub tokens stay in the user environment
+- `data/settings.json` stores non-secret preferences; raw MCP env values are stripped on save
+- Auth token is read only from `JARVIS_AUTH_TOKEN` and is stripped before settings are saved
+- Inference API keys are read only from `JARVIS_INFERENCE_API_KEY` (optional `OPENAI_API_KEY`) and are stripped before settings are saved
 
 ## Filesystem policy
 
@@ -43,7 +44,7 @@ Playwright uses a persistent local profile under `data/browser-profile`. Cookies
 
 ## Model
 
-Weights never leave the computer. The OpenAI-compatible endpoint is localhost only.
+Weights stay on this computer by default. The local llama.cpp process binds localhost only. If you point Jarvis at another OpenAI-compatible host, prompts are sent to that host. Set `JARVIS_INFERENCE_API_KEY` in the environment if that host requires a key; it is never written to `settings.json`.
 
 ## Autonomy pauses
 
@@ -54,10 +55,3 @@ Autonomous mode still stops before:
 - changing account credentials
 - disabling core security controls
 - sending money, purchases, or unsolicited external communications
-
-## Future swarm boundary
-
-The current private-key/LAN mechanism protects the existing single-control-plane API; it is **not** a complete trust or pairing protocol for a future multi-node swarm. P3 remote-node work must define authenticated pairing and least-privilege node/worker access before remote execution is enabled. See `SWARM_ARCHITECTURE.md`.
-
-Security/SIEM/Sentinel/forensics mentioned in the swarm specification are future specialized roles only. Do not implement those subsystems from this note; they will be separately specified and promoted later.
-

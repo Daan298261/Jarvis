@@ -26,6 +26,7 @@ class Task(Base):
     profile: Mapped[str] = mapped_column(String(32), default="balanced")
     execution_mode: Mapped[str] = mapped_column(String(32), default="balanced")
     task_class: Mapped[str] = mapped_column(String(64), default="")
+    selected_worker: Mapped[str] = mapped_column(String(64), default="")
     acceptance_criteria: Mapped[str] = mapped_column(Text, default="")
     plan_json: Mapped[str] = mapped_column(Text, default="[]")
     summary: Mapped[str] = mapped_column(Text, default="")
@@ -38,7 +39,7 @@ class Task(Base):
     compact_memory: Mapped[str] = mapped_column(Text, default="")
     conversation_json: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_seconds: Mapped[float] = mapped_column(Float, default=0)
@@ -92,72 +93,6 @@ class Checkpoint(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     task: Mapped[Task] = relationship(back_populates="checkpoints")
-
-
-class Trajectory(Base):
-    """An actionable summary of how a task actually went.
-
-    Stores tool/worker choices, failures, and recoveries so later tasks can
-    reuse what worked. Never stores hidden reasoning.
-    """
-
-    __tablename__ = "trajectories"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    task_id: Mapped[str] = mapped_column(String(36), default="")
-    task_class: Mapped[str] = mapped_column(String(64), default="")
-    goal: Mapped[str] = mapped_column(Text, default="")
-    outcome: Mapped[str] = mapped_column(String(32), default="")
-    tools_json: Mapped[str] = mapped_column(Text, default="[]")
-    steps_json: Mapped[str] = mapped_column(Text, default="[]")
-    failures: Mapped[str] = mapped_column(Text, default="")
-    recovery: Mapped[str] = mapped_column(Text, default="")
-    verification: Mapped[str] = mapped_column(Text, default="")
-    duration_seconds: Mapped[float] = mapped_column(Float, default=0)
-    reuse_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class Skill(Base):
-    """A reusable workflow promoted from repeated successful trajectories."""
-
-    __tablename__ = "skills"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), unique=True)
-    description: Mapped[str] = mapped_column(Text, default="")
-    task_class: Mapped[str] = mapped_column(String(64), default="")
-    parameters_json: Mapped[str] = mapped_column(Text, default="[]")
-    tools_json: Mapped[str] = mapped_column(Text, default="[]")
-    steps_json: Mapped[str] = mapped_column(Text, default="[]")
-    verification: Mapped[str] = mapped_column(Text, default="")
-    recovery: Mapped[str] = mapped_column(Text, default="")
-    origin: Mapped[str] = mapped_column(String(32), default="promoted")
-    times_used: Mapped[int] = mapped_column(Integer, default=0)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class BenchmarkSample(Base):
-    """Persisted model/agent operational metrics for the Model page."""
-
-    __tablename__ = "benchmark_samples"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    profile: Mapped[str] = mapped_column(String(32), default="")
-    quantization: Mapped[str] = mapped_column(String(32), default="")
-    context_size: Mapped[int] = mapped_column(Integer, default=0)
-    prompt_tps: Mapped[float | None] = mapped_column(Float, nullable=True)
-    generation_tps: Mapped[float | None] = mapped_column(Float, nullable=True)
-    vram_used_mib: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    ram_used_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
-    load_time_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
-    task_success_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
-    tasks_completed: Mapped[int] = mapped_column(Integer, default=0)
-    tasks_failed: Mapped[int] = mapped_column(Integer, default=0)
-    source: Mapped[str] = mapped_column(String(32), default="timing")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Conversation(Base):
