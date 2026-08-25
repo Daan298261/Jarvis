@@ -40,3 +40,4 @@ async def jarvis_env(tmp_path, monkeypatch):
     yield {"tmp": tmp_path, "settings": settings, "manager": MANAGER}
     MANAGER.provider = None
     MANAGER.state.loaded = False
+    REGISTRY.bind_exposure(None)

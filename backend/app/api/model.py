@@ -7,7 +7,7 @@ from ..agent.agent_benchmark import TaskMetrics, build_report, list_suite, recor
 from ..config import load_settings, save_settings
 from ..hardware import detect_hardware
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
-from ..inference.hardware_gate import evaluate_purchase_gate
+from ..inference.harness import HARNESS_CASES, run_harness
 from ..inference.manager import MANAGER
 from ..inference.profiles import available_profiles
 
@@ -18,21 +18,8 @@ class LoadBody(BaseModel):
     profile: str | None = None
 
 
-class AgentResultBody(BaseModel):
-    task_id: str
-    profile: str = ""
-    success: bool = False
-    human_intervention: bool = False
-    total_seconds: float = 0
-    model_seconds: float = 0
-    tool_seconds: float = 0
-    model_calls: int = 0
-    tool_calls: int = 0
-    retries: int = 0
-    schema_errors: int = 0
-    incorrect_actions: int = 0
-    verification: str = ""
-    notes: str = ""
+class HarnessBody(BaseModel):
+    live: bool = False
 
 
 @router.get("")
@@ -54,7 +41,8 @@ async def model_status():
     ]
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
-    snapshot["agent_suite"] = suite_coverage()
+    snapshot["harness_cases"] = list(HARNESS_CASES)
+    snapshot["primary_metric"] = "successful autonomous tasks per wall-clock minute"
     return snapshot
 
 
@@ -88,6 +76,13 @@ async def capture_benchmark():
         "task_success_rate": row.task_success_rate,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }}
+
+
+@router.post("/benchmarks/run")
+async def run_model_harness(body: HarnessBody | None = None):
+    live = bool(body.live) if body else False
+    report = await run_harness(live=live, persist=True)
+    return report.as_dict()
 
 
 @router.post("/load")

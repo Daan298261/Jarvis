@@ -41,6 +41,10 @@ def _decode(data: bytes | bytearray) -> str:
     return bytes(data).decode("utf-8", errors="replace")
 
 
+def default_shell() -> str:
+    return "powershell" if platform.system() == "Windows" else "bash"
+
+
 def _python_args(command: str) -> list[str]:
     stripped = (command or "").strip()
     python = sys.executable or shutil.which("python") or shutil.which("python3") or "python3"
@@ -82,12 +86,8 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         return [exe, "-NoProfile", "-Command", command]
     if shutil.which("bash"):
         return ["bash", "-lc", command]
-    python = sys.executable or shutil.which("python3") or shutil.which("python") or "python3"
-    return [python, "-c", command]
-
-
-def default_shell() -> str:
-    return "powershell" if platform.system() == "Windows" else "bash"
+    exe = shutil.which("python") or shutil.which("python3") or sys.executable or "python3"
+    return [exe, "-c", command]
 
 
 async def _pump(job: BackgroundJob) -> None:
@@ -160,8 +160,7 @@ class TerminalTool(Tool):
             "shell": {
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
-                "default": "powershell",
-                "description": "powershell on Windows; bash on Linux when omitted",
+                "description": "powershell on Windows; bash on Linux/macOS when omitted",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},

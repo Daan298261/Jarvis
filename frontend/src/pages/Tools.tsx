@@ -5,40 +5,7 @@ type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
   optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
-  coding_workers?: { id: string; name: string; available: boolean; status: string; detail: string; tier?: number; cost_class?: string }[]
-}
-
-type CodingOverview = {
-  workers: { id: string; name: string; status: string; detail: string }[]
-  models: {
-    status: string
-    command: string | null
-    note: string
-    allow_fast_variants: boolean
-    composer_model: string
-    grok_model: string
-    models: { id: string; label: string; variant: string; selectable: boolean; role: string; detail: string }[]
-  }
-  usage: {
-    cost_per_verified_success_usd: number | null
-    verified_successes: number
-    samples: number
-    total_cost_usd: number
-    month_cost_usd: number
-    by_worker: { worker: string; samples: number; verified: number; cost_usd: number; success_rate: number | null; cost_per_verified_success: number | null }[]
-    by_task_class: { task_class: string; samples: number; local_success_rate: number | null; cost_per_verified_success: number | null }[]
-    note: string
-  }
-}
-
-function money(value: number | null | undefined) {
-  if (value == null) return "n/a"
-  return `$${value.toFixed(4)}`
-}
-
-function pct(value: number | null | undefined) {
-  if (value == null) return "n/a"
-  return `${Math.round(value * 1000) / 10}%`
+  exposure?: Record<string, string[]>
 }
 
 export function ToolsPage() {
@@ -57,7 +24,21 @@ export function ToolsPage() {
   return (
     <div>
       <h1>Tools</h1>
-      <p className="lede">Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing.</p>
+      <p className="lede">Native tools can be enabled or disabled. The agent only receives a task-class subset plus request_capability as an escape hatch. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing.</p>
+      {catalog.exposure && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Task-class exposure</h2>
+          <p className="lede">Filesystem tasks do not receive Office or Docker unless requested mid-run.</p>
+          {Object.entries(catalog.exposure).map(([taskClass, names]) => (
+            <div className="toggle" key={taskClass}>
+              <div>
+                <strong>{taskClass}</strong>
+                <div className="lede" style={{ margin: "4px 0 0" }}>{names.join(", ")}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="card">
         {catalog.tools.map((tool) => (
           <div className="toggle" key={tool.name}>

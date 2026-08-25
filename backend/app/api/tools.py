@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from ..agent.coding_workers import list_workers, route_coding_task, worker_stats
 from ..config import load_settings, save_settings
 from ..tools.capabilities import capability_snapshot
+from ..tools.exposure import exposure_catalog, tools_for_task
 from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
@@ -30,22 +31,13 @@ async def tool_catalog():
     settings = load_settings()
     REGISTRY.apply_settings(settings)
     caps = capability_snapshot()
-    return {"tools": REGISTRY.list_tools(), "coding_workers": list_workers(), **caps}
-
-
-@router.get("/coding-workers")
-async def coding_workers():
-    return {"workers": list_workers(), "stats": await worker_stats()}
-
-
-@router.post("/coding-workers/route")
-async def route_worker(body: RouteBody):
-    return await route_coding_task(
-        body.prompt,
-        task_class=body.task_class,
-        files_hint=body.files_hint,
-        previous_failures=body.previous_failures,
-    )
+    return {
+        "tools": REGISTRY.list_tools(),
+        "exposure": exposure_catalog(),
+        "example_filesystem": sorted(tools_for_task("filesystem")),
+        "example_software": sorted(tools_for_task("software engineering")),
+        **caps,
+    }
 
 
 @router.post("/{tool_name}/enable")

@@ -83,20 +83,19 @@ def _office_installed() -> bool:
     """Detect Office from install paths. Do not Dispatch COM — that launches Word."""
     if platform.system() != "Windows":
         return False
-    names = ("WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE")
-    if any(shutil.which(name) for name in names):
-        return True
     roots = [
         Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Microsoft Office",
         Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Microsoft Office",
     ]
-    for root in roots:
-        if not root.exists():
-            continue
-        for name in names:
-            if (root / "root" / "Office16" / name).exists() or (root / "Office16" / name).exists():
-                return True
-    return False
+    if any(root.exists() for root in roots):
+        return True
+    try:
+        import winreg
+
+        winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Office")
+        return True
+    except Exception:
+        return False
 
 
 def detect_hardware() -> HardwareInfo:

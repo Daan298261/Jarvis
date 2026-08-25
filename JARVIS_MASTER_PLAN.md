@@ -3587,9 +3587,10 @@ This development session:
 - Model: Qwen3.5-27B (Unsloth GGUF of `Qwen/Qwen3.5-27B`, plus `mmproj-F16.gguf`)
 - Quantization: Q4_K_M (fast/balanced), Q5_K_M (quality)
 - Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
-- Context: **dynamic** — 8K simple / 16K normal / 32K long-horizon, capped by the profile default; Fast mode never opens 32K; load failure still retries at 16K
-- Thinking: **selective** — planning, recovery, and Reliable verification only; Fast profiles stay off; routine tool calls do not spend reasoning tokens
-- Vision: **lazy** — `--mmproj` is omitted unless the task class is multimodal or Windows GUI
+- Context: 16K fast, 32K balanced/quality; load failure retries at 16K
+- Tool exposure: task-class subset plus `request_capability` escape hatch
+- Expert consult: compact-brief escalation after repeated failure (no swap merely because a task is long)
+- Local harness: POST `/api/model/benchmarks/run` (dry-run without GPU)
 - GPU offload: `--fit on` with `--fit-target 1024`
 - Tokens/sec: not measured this session
 - Status: **code present and unit-tested, Windows runtime not verified this session**
@@ -3676,7 +3677,10 @@ This development session:
 - Browser Use / UFO / Cua / OpenHands / Open Interpreter adapters are absent
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell on Windows and bash on Linux
+- Terminal default is PowerShell on Windows and bash on Linux/macOS
+- Office COM probe and `office` action=info do not Dispatch Word/Excel/PowerPoint
+- Git `checkpoint` creates a backup branch and does not stash-pop the working tree
+- Docker `run`/`logs`/`inspect` require an image or container name before invoking the CLI
 
 ### Last End-to-End Test
 
@@ -3684,12 +3688,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): previous coverage plus semantic UI resolution, desktop unavailable-off-Windows, browser close/open/title guards, docker run/logs/inspect target checks, terminal default shell, mobile pairing endpoint (no private key)
-- Frontend (`npm run build`): TypeScript build including Phone PWA
-- Portal smoke (Vite `localhost:5173`): Command submit, Phone pairing/copy, Settings → Phone, History/Tools/System/Workflows, mobile menu at 414px. Private key never shown on `/phone`.
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **task-class tool exposure**, **benchmark harness dry-run**, **expert escalation policy**, git checkpoint/docker/office/browser/python QA
+- Frontend (`npm run build`): TypeScript build
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **89 passed**. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **95 passed** on this tree. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3733,29 +3736,17 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Acceptance: Qwen3.5-9B Abliterated Q8_0 (or benchmark-selected fallback) loads as the normal fully/essentially GPU-resident model; API/tool calls work; vision path works when requested; 27B remains available as Expert escalation; the representative benchmark suite records actual performance.
   - Status: TODO / IN PROGRESS by plan (current code still reflects the 27B implementation path; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must validate the new model stack and run `tests/run_e2e.py`.
 
-- [x] Representative 20-task agent benchmark catalog and report (P0.9)
-  - Acceptance: at least 20 realistic autonomous tasks; metrics include success, intervention, durations, model/tool calls, retries, schema errors, verification; primary metric is successful tasks per hour; report is visible on the Model page.
-  - Status: VERIFIED in unit tests (`test_agent_benchmark.py`). Live 9B vs 27B comparison remains blocked without GPU.
+- [x] Dynamic tool exposure (P0.7)
+  - Acceptance: only a task-class subset of tools is sent each inference call; `request_capability` can expand the set mid-run.
+  - Status: VERIFIED in unit tests (`test_exposure.py`)
 
-- [x] Hardware purchasing gate (P0.12)
-  - Acceptance: Jarvis does not recommend extra RAM/GPUs/NPUs until inference samples and agent-suite results exist; bottlenecks are described from measurements.
-  - Status: VERIFIED in unit tests (`test_coding_workers.py` gate tests) and Model/System pages.
+- [x] Performance benchmark harness (P0.8)
+  - Acceptance: automated matrix for profile × context × vision × thinking; records load/TTFT/tok/s/VRAM/RAM/GPU/CPU/tool latency when a provider exists; dry-run skips live llama.cpp when files are missing. Tokens/sec is not the winner metric.
+  - Status: VERIFIED in unit tests (`test_harness.py`); live GPU measurement **BLOCKED here**
 
-- [x] Software-development worker router
-  - Acceptance: common `SoftwareDevelopmentWorker` interface; cheapest capable worker; local Jarvis always available; Composer/Grok/ACP catalogued but not invoked until connected; historical local success can override static thresholds; independent verification still required.
-  - Status: VERIFIED in unit tests (`test_coding_workers.py`). Paid workers remain `not_connected` here.
-
-- [x] Dynamic thinking (P0.4)
-  - Acceptance: expensive reasoning is not applied to simple list/read/status tool follow-ups; planning, recovery, Reliable verification, and complex task classes still think when the profile allows it.
-  - Status: VERIFIED in unit tests (`test_thinking.py`, `test_thinking_loop.py`)
-
-- [x] Lazy vision loading (P0.5)
-  - Acceptance: llama.cpp command omits `--mmproj` and `--image-min-tokens` until vision is requested; Settings vision mode lazy/always/off; screenshot attachment can enable the projector when Jarvis owns the process.
-  - Status: VERIFIED in unit tests (`test_inference_backends.py`, `test_vision.py`). Live VRAM savings not measured (no GPU here).
-
-- [x] Professional / Forensic Audit Mode (P0.11)
-  - Acceptance: Settings toggle plus automatic activation on security/forensic prompts; system prompt tells the model to analyze rather than refuse; operational authorization (safety.py) is unchanged.
-  - Status: VERIFIED in unit tests (`test_forensic.py`)
+- [x] Automatic Expert escalation (P0.10)
+  - Acceptance: escalate on repeated failure, stuck strategy, critic uncertainty, or explicit user request; send a compact brief; do not escalate merely because a task is long.
+  - Status: VERIFIED in unit tests (`test_escalation.py`); live 9B→27B process swap **BLOCKED here** (no GGUF)
 
 ### P1
 

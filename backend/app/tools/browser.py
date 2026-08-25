@@ -186,47 +186,25 @@ class BrowserTool(Tool):
         async with _lock:
             try:
                 if action == "close":
-                    return await _close_browser()
+                    global _playwright, _browser, _context, _page, _pages
+                    if not _context and not _page and not _playwright:
+                        return ToolResult(True, "Browser was not open")
+                    if _context:
+                        await _context.close()
+                    if _playwright:
+                        await _playwright.stop()
+                    _context = None
+                    _playwright = None
+                    _page = None
+                    _pages = []
+                    return ToolResult(True, "Browser closed")
+                if action == "open" and not kwargs.get("url"):
+                    return ToolResult(False, "", error="url is required")
+                page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs.get("url")
-                    if not url:
-                        return ToolResult(False, "", error="url is required")
-                    page = await _ensure_page(bool(headless))
-                    await _open_with_retry(page, url)
-                    title = await page.title()
-                    return ToolResult(
-                        True,
-                        f"Opened {page.url}\n{_title_payload(page.url, title)}",
-                        data={"url": page.url, "title": title},
-                    )
-                if action in PAGE_ACTIONS and not browser_is_running():
-                    return ToolResult(False, "", error="No page is open. Use action=open first.")
-                page = await _ensure_page(bool(headless))
-                if action == "title":
-                    title = await page.title()
-                    return ToolResult(
-                        True,
-                        _title_payload(page.url, title),
-                        data={"url": page.url, "title": title},
-                    )
-                if action == "wait":
-                    timeout_ms = int(kwargs.get("timeout_seconds") or 15) * 1000
-                    if kwargs.get("url"):
-                        await page.wait_for_url(kwargs["url"], timeout=timeout_ms)
-                    if kwargs.get("selector"):
-                        await page.wait_for_selector(kwargs["selector"], timeout=timeout_ms)
-                    if kwargs.get("text"):
-                        needle = str(kwargs["text"]).lower().replace("'", "\\'")
-                        await page.wait_for_function(
-                            f"() => document.title.toLowerCase().includes('{needle}')",
-                            timeout=timeout_ms,
-                        )
-                    title = await page.title()
-                    return ToolResult(
-                        True,
-                        f"Wait complete.\n{_title_payload(page.url, title)}",
-                        data={"url": page.url, "title": title},
-                    )
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    return ToolResult(True, f"Opened {page.url}\ntitle={await page.title()}")
                 if action == "snapshot":
                     title = await page.title()
                     a11y = await page.locator("body").inner_text()
