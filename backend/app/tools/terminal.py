@@ -30,11 +30,7 @@ _JOBS: dict[int, BackgroundJob] = {}
 
 
 def default_shell() -> str:
-    if sys.platform == "win32":
-        return "powershell"
-    if shutil.which("bash"):
-        return "bash"
-    return "python"
+    return "powershell" if platform.system() == "Windows" else "bash"
 
 
 def _decode(data: bytes | bytearray) -> str:
@@ -147,8 +143,7 @@ class TerminalTool(Tool):
     name = "terminal"
     description = (
         "Run a local command. shell can be powershell, cmd, python, git, or bash/wsl. "
-        "Default is PowerShell on Windows and bash on Linux. "
-        "Actions: run, start (background, returns pid), inspect, wait, kill."
+        "Default shell is PowerShell on Windows and bash on Linux. "
         "action=run (default) waits for the process. action=start returns a PID immediately; "
         "then use inspect/wait/kill with that pid to see if it is still alive and to collect output. "
         "inspect also works for other local PIDs. Captures stdout, stderr, exit code and duration. "
@@ -162,7 +157,7 @@ class TerminalTool(Tool):
             "shell": {
                 "type": "string",
                 "enum": ["powershell", "cmd", "python", "git", "bash", "wsl"],
-                "description": "powershell on Windows, bash on Linux",
+                "default": "powershell" if platform.system() == "Windows" else "bash",
             },
             "working_directory": {"type": "string"},
             "timeout_seconds": {"type": "integer", "default": 120},

@@ -50,7 +50,7 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("browser", "the endpoint needs a real session, cookies, or JavaScript"),
     ),
     "office": (
-        Alternative("python", "edit the document with openpyxl / python-docx instead of COM"),
+        Alternative("python", "edit the document with openpyxl / python-docx / python-pptx instead of COM"),
         Alternative("filesystem", "inspect or copy the file directly"),
     ),
     "desktop": (

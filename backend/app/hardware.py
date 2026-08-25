@@ -80,35 +80,24 @@ def _nvidia() -> dict[str, Any]:
 
 
 def _office_installed() -> bool:
-    """Detect Office from install paths / registry. Do not Dispatch COM (that launches Word)."""
+    """Detect Office from install paths. Do not launch Word/Excel just to probe."""
     if platform.system() != "Windows":
         return False
+    if shutil.which("WINWORD.EXE") or shutil.which("EXCEL.EXE") or shutil.which("POWERPNT.EXE"):
+        return True
     roots = [
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
-        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")),
+        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")),
     ]
     relatives = [
         Path("Microsoft Office") / "root" / "Office16" / "WINWORD.EXE",
         Path("Microsoft Office") / "Office16" / "WINWORD.EXE",
+        Path("Microsoft Office") / "root" / "Office15" / "WINWORD.EXE",
         Path("Microsoft Office") / "Office15" / "WINWORD.EXE",
         Path("Microsoft Office") / "root" / "Office16" / "EXCEL.EXE",
+        Path("Microsoft Office") / "Office16" / "EXCEL.EXE",
     ]
-    for root in roots:
-        for relative in relatives:
-            if (root / relative).exists():
-                return True
-        if (root / "Microsoft Office").is_dir():
-            return True
-    try:
-        import winreg  # type: ignore
-
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\WINWORD.EXE",
-        ):
-            return True
-    except Exception:
-        return False
+    return any((root / rel).is_file() for root in roots for rel in relatives)
 
 
 def detect_hardware() -> HardwareInfo:

@@ -136,7 +136,7 @@ On Linux you can still:
 - Run pytest for non-Windows modules
 - Build the frontend (`npm run build`)
 
-You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. Terminal default is PowerShell on Windows and bash on Linux.
+You cannot: run `start-jarvis.ps1`, load the desktop GGUF path this repo expects (`llama-server.exe`), or exercise Office/desktop COM. The `office` tool still works on Linux through python-docx/openpyxl/python-pptx. Terminal default is PowerShell on Windows and bash on Linux.
 
 ---
 
@@ -332,6 +332,12 @@ Current unit coverage (no GPU required):
 | `test_docker.py` | `docker run` requires an image |
 | `test_auth.py` | 401 without key; header / bearer / query |
 | `test_queue.py` | File-drop watcher |
+| `test_terminal.py` | Background PID inspect/wait/kill; Linux default shell is bash |
+| `test_benchmarks.py` | Model benchmark persistence |
+| `test_office.py` | Word/Excel/PowerPoint library backend + sandbox |
+| `test_git.py` | Non-destructive checkpoint / restore |
+| `test_web_fetch.py` | POST body, download sandbox, http(s) only |
+| `test_docker.py` | `run`/`logs`/`inspect` require targets |
 
 `conftest.py` fixture `jarvis_env` points SQLite at a temp path, marks the model loaded, and applies autonomous settings.
 

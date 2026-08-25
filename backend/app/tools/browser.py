@@ -294,6 +294,7 @@ class BrowserTool(Tool):
                         await _playwright.stop()
                     _context = None
                     _playwright = None
+                    _browser = None
                     _page = None
                     _pages = []
                     return ToolResult(True, "Browser closed")

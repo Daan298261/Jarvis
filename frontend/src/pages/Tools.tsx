@@ -69,6 +69,18 @@ export function ToolsPage() {
         </div>
       )}
       <div className="card" style={{ marginTop: 16 }}>
+        <h2>Native backends</h2>
+        {(catalog.native || []).map((item) => (
+          <div className="toggle" key={item.id}>
+            <div>
+              <strong>{item.name}</strong>
+              <div className="lede" style={{ margin: "4px 0 0" }}>{item.detail}</div>
+            </div>
+            <span className={`badge ${item.available ? "completed" : "queued"}`}>{item.status}</span>
+          </div>
+        ))}
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
         <h2>Optional workers</h2>
         {catalog.optional_workers.map((worker) => (
           <div className="toggle" key={worker.id}>

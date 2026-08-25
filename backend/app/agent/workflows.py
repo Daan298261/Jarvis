@@ -129,7 +129,7 @@ def builtin_workflows() -> list[Workflow]:
             steps=[
                 _step("Research", "Research {{topic}}. Prefer primary sources. Capture facts, not marketing copy."),
                 _step("Compare", "Compare the findings on: {{criteria}}. Drop anything you cannot verify."),
-                _step("Save", "Save a useful spreadsheet to {{output}} with headers, one row per item, and a short notes column."),
+                _step("Save", "Save a useful spreadsheet to {{output}} with headers, one row per item, and a short notes column. Use the office tool (app=excel). It uses COM when Office is installed and openpyxl otherwise."),
                 _step("Verify", "Reopen {{output}}, confirm it parses, and check that the requested columns and rows are present."),
             ],
         ),

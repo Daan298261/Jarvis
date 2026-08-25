@@ -3603,12 +3603,16 @@ This development session:
 ### Working Tools
 
 - Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as the default `terminal` shell on Windows; Linux defaults to bash. `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `sys.executable -c`.
-- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); uses `sys.executable` when no venv is given; venv lookup checks Windows `Scripts` and Unix `bin`
-- Browser: Playwright Chromium (accessibility snapshot, click by button/link/tab name, screenshot with `attach_image`). `close` and missing-URL `open` do not launch Chromium.
+- PowerShell: implemented as default `terminal` shell on Windows (CMD/Python/Git/WSL/bash also supported). Linux defaults to bash. `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
+- Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`; interpreter defaults to the Jarvis process executable
+- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
 - Playwright: native backend present
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
-- Vision: screenshot tool + llama.cpp `--mmproj` when vision is requested; lazy by default
+- Office: Word/Excel/PowerPoint. Windows COM when Office is installed; python-docx / openpyxl / python-pptx otherwise. Paths are sandboxed.
+- Git: status/diff/branch/log/search plus non-destructive `jarvis-checkpoint-*` backup branches (`checkpoint` / `list_checkpoints` / `restore`)
+- Docker: optional; `run`/`logs`/`inspect` require an image or container
+- Web fetch: HTTP GET/POST/HEAD with optional body, headers, and sandboxed download
+- Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
 - Git: status/diff/log/search plus `checkpoint` (backup branch + optional WIP ref; does not reset the working tree)
 - Docker: `run`/`logs`/`inspect` require a target even when Docker is missing
@@ -3673,9 +3677,8 @@ This development session:
 - Browser Use / UFO / Cua / OpenHands adapters are absent (`not_integrated`)
 - Open Interpreter adapter is present; the package is optional (`missing` until installed)
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
-- Office COM and Docker depend on software that may be missing on the target PC
-- Terminal default is PowerShell on Windows and bash on Linux; Linux-only environments no longer need to pass `shell=bash` for ordinary commands.
-- Office hardware probe looks at install paths / registry and does not Dispatch COM.
+- Office COM and Docker depend on software that may be missing on the target PC; the office tool falls back to python-docx/openpyxl/python-pptx
+- Terminal default is PowerShell on Windows and bash on Linux
 
 ### Last End-to-End Test
 
@@ -3683,11 +3686,11 @@ Date: 2026-08-25
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection (llama.cpp / remote / Ollama / LM Studio) and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, BrowserCode-style browser promotion (stable named controls vs ephemeral snapshot ids), Open Interpreter adapter, docker run requires an image, snapshot LAN fields, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence
+- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, Office library backend, git checkpoints, web_fetch POST/download, docker target guards
 - Frontend (`npm run build`): TypeScript build
 - Portal: Command, Tools (`code_worker`, Open Interpreter `missing`), Guide (`browser-form` / `browser-procedure`), Settings Inference card (Ollama port 11434), Model Probe, System backends
 
-Results: **88 passed** in this environment. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **91 passed** on this branch. Live Qwen/Windows e2e and live Office COM remain desktop-session P0/P2 checks.
 
 ---
 
@@ -3797,9 +3800,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
 - [x] Parameterized skill execution — VERIFIED (`test_skills.py`); bound steps run on matching tasks and via `POST /api/memory/skills/{id}/run`
 - [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
-- [ ] Office COM coverage when Office is installed (probe no longer launches Word; live COM still needs Windows Office)
+- [x] Office COM coverage when Office is installed
+  - Acceptance: Word/Excel/PowerPoint create/read/write/save_as/append/info; COM when Office is present; library backend otherwise; sandbox enforced.
+  - Status: VERIFIED in unit tests (`test_office.py`). Live COM on a Windows Office install was not exercised in this environment.
 - [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
-- [x] Git recoverable checkpoints — VERIFIED (`test_tool_qa.py`); `checkpoint` creates a backup branch without wiping the working tree
+- [x] Git recoverable checkpoints — VERIFIED (`test_git.py`); `checkpoint` creates `jarvis-checkpoint-*` without removing working-tree changes; `restore` overlays without switching branch
+- [x] web_fetch research completeness — VERIFIED (`test_web_fetch.py`); POST body, headers, sandboxed download, http(s) only
 
 #### P2 — Swarm-ready foundation (`SWARM_ARCHITECTURE.md`)
 

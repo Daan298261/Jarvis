@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -68,7 +69,7 @@ class PythonTool(Tool):
             ):
                 if candidate.exists():
                     return str(candidate)
-        return sys.executable or "python3"
+        return sys.executable or shutil.which("python3") or shutil.which("python") or "python3"
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")

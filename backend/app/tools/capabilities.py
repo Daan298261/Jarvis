@@ -22,6 +22,15 @@ def native_capabilities() -> list[dict[str, Any]]:
             office = detect_hardware().office_installed
         except Exception:
             office = False
+    office_lib = any(_module_available(name) for name in ("docx", "openpyxl", "pptx"))
+    if office and office_lib:
+        office_detail = "Word/Excel/PowerPoint via COM, with python-docx/openpyxl/python-pptx as fallback."
+    elif office:
+        office_detail = "Word/Excel/PowerPoint via Windows COM."
+    elif office_lib:
+        office_detail = "Word/Excel/PowerPoint via python-docx/openpyxl/python-pptx. COM is used when Office is installed."
+    else:
+        office_detail = "Install Microsoft Office (Windows) or python-docx/openpyxl/python-pptx."
     return [
         {
             "id": "filesystem",
@@ -37,7 +46,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": True,
             "status": "ready",
-            "detail": "PowerShell on Windows; bash on Linux.",
+            "detail": "PowerShell on Windows; bash on Linux when present.",
         },
         {
             "id": "python",
@@ -65,11 +74,11 @@ def native_capabilities() -> list[dict[str, Any]]:
         },
         {
             "id": "office",
-            "name": "Microsoft Office COM",
+            "name": "Microsoft Office",
             "kind": "native",
-            "available": office,
-            "status": "ready" if office else "unavailable",
-            "detail": "Word/Excel/PowerPoint when Office is installed.",
+            "available": office or office_lib,
+            "status": "ready" if (office or office_lib) else "unavailable",
+            "detail": office_detail,
         },
         {
             "id": "mcp",
@@ -85,7 +94,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": shutil.which("git") is not None,
             "status": "ready" if shutil.which("git") else "missing",
-            "detail": "Status, diff, recoverable checkpoints (backup branch + stash create), restore.",
+            "detail": "Status, diff, and non-destructive jarvis-checkpoint-* backup branches.",
         },
         {
             "id": "docker",
