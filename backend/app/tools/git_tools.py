@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a recoverable stash or commit-less backup branch named "
-        "jarvis-checkpoint-* before large autonomous edits."
+        "checkpoint. checkpoint creates a jarvis-checkpoint-* backup branch (and a WIP ref for "
+        "dirty files) without resetting or switching the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -56,11 +57,24 @@ class GitTool(Tool):
                 query = kwargs.get("query") or ""
                 return await self._git(["grep", "-n", query], cwd)
             if action == "checkpoint":
-                stamp = Path(cwd).name
-                result = await self._git(["stash", "push", "-u", "-m", f"jarvis-checkpoint-{stamp}"], cwd)
-                if result.success:
-                    return ToolResult(True, "Created git stash checkpoint. Use git stash list / pop to recover.")
-                return await self._git(["status"], cwd)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                branch = f"jarvis-checkpoint-{stamp}"
+                created = await self._git(["branch", branch], cwd)
+                if not created.success:
+                    return created
+                dirty = await self._git(["status", "--porcelain"], cwd)
+                wip_note = ""
+                if dirty.success and (dirty.output or "").strip():
+                    stash = await self._git(["stash", "create"], cwd)
+                    digest = (stash.output or "").strip().splitlines()[-1] if stash.success and stash.output.strip() else ""
+                    if digest and len(digest) >= 7 and " " not in digest:
+                        await self._git(["update-ref", f"refs/jarvis-wip/{branch}", digest], cwd)
+                        wip_note = f" Dirty work stored at refs/jarvis-wip/{branch} ({digest[:12]})."
+                return ToolResult(
+                    True,
+                    f"Created backup branch {branch} at HEAD without changing the working tree.{wip_note}",
+                    data={"branch": branch},
+                )
             return ToolResult(False, "", error=f"Unknown action {action}")
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

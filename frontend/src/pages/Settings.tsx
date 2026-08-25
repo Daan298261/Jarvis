@@ -142,6 +142,13 @@ export function SettingsPage() {
             <option value="quality">Quality</option>
           </select>
         </label>
+        <label>Vision
+          <select value={settings.inference?.vision_mode || "lazy"} onChange={(e) => save({ vision_mode: e.target.value })}>
+            <option value="lazy">Lazy (load projector only when needed)</option>
+            <option value="always">Always load mmproj</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
         <label>Allowed directories (one per line)
           <textarea className="field" rows={4} defaultValue={(settings.allowed_directories || []).join("\n")}
             onBlur={(e) => save({ allowed_directories: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })} />

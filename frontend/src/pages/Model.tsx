@@ -22,6 +22,7 @@ type ModelStatus = {
   active_model?: string
   quantization?: string
   context_size?: number
+  context_cap?: number
   inference_backend?: string
   gpu_layers?: string
   vram_used_mib?: number
@@ -31,6 +32,10 @@ type ModelStatus = {
   load_time_seconds?: number
   loaded?: boolean
   loading?: boolean
+  thinking?: boolean
+  thinking_mode?: string
+  vision_mode?: string
+  vision_loaded?: boolean
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
 }
@@ -75,13 +80,15 @@ export function ModelPage() {
   return (
     <div>
       <h1>Model</h1>
-      <p className="lede">Local Qwen3.5-27B served by llama.cpp. Profiles change quantization and thinking mode, not the model family. Benchmarks persist tok/s, VRAM, RAM, and task success so you can compare loads over time.</p>
+      <p className="lede">Local Qwen3.5-27B served by llama.cpp. Thinking is selective (planning/recovery, not every tool call). Vision and 32K context stay off until the task needs them.</p>
       <div className="grid two">
         <div className="card">
           <div className="kv">
             <b>Active</b><span>{model?.active_model || "unloaded"}</span>
             <b>Quantization</b><span>{model?.quantization}</span>
-            <b>Context</b><span>{model?.context_size}</span>
+            <b>Context</b><span>{model?.context_size}{model?.context_cap ? ` / cap ${model.context_cap}` : ""}</span>
+            <b>Thinking</b><span>{model?.thinking_mode || (model?.thinking ? "selective" : "off")}</span>
+            <b>Vision</b><span>{model?.vision_loaded ? "loaded" : (model?.vision_mode || "lazy")}</span>
             <b>Backend</b><span>{model?.inference_backend}</span>
             <b>GPU layers</b><span>{model?.gpu_layers}</span>
             <b>VRAM</b><span>{model?.vram_used_mib ? `${model.vram_used_mib} MiB` : "n/a"}</span>
@@ -103,9 +110,9 @@ export function ModelPage() {
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
           </div>
           <p className="lede" style={{ marginTop: 16 }}>
-            Fast: Q4_K_M, thinking off, 16K context.<br />
-            Balanced: Q4_K_M, thinking on, 32K context.<br />
-            Quality: Q5_K_M, thinking on, hybrid GPU/CPU.
+            Fast: thinking off, 8K–16K context, vision lazy.<br />
+            Balanced: selective thinking, 16K typical / 32K cap.<br />
+            Quality: selective thinking with more recovery reasoning, 32K cap.
           </p>
         </div>
       </div>

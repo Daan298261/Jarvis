@@ -53,7 +53,38 @@ def test_llama_cpp_command_reflects_profile_and_settings():
     assert args[args.index("--reasoning") + 1] == "on"
     assert args[args.index("--fit-target") + 1] == "2048"
     assert "--jinja" in args
+    assert "--mmproj" not in args
+    assert "--image-min-tokens" not in args
 
     fast = LlamaCppBackend(_settings(fit=False)).build_args(resolve_profile("fast"))
     assert fast[fast.index("--reasoning") + 1] == "off"
     assert fast[fast.index("--n-gpu-layers") + 1] == "99"
+
+
+def test_llama_cpp_attaches_mmproj_only_when_vision_requested(tmp_path, monkeypatch):
+    mmproj = tmp_path / "mmproj-F16.gguf"
+    mmproj.write_bytes(b"fake")
+    monkeypatch.setattr(
+        "app.inference.backends.model_paths",
+        lambda: {"root": tmp_path, "mmproj": mmproj, "q4": tmp_path / "q4.gguf", "q5": tmp_path / "q5.gguf"},
+    )
+    backend = LlamaCppBackend(_settings())
+    lazy = backend.build_args(resolve_profile("balanced"), context_size=8192, vision=False)
+    assert lazy[lazy.index("--ctx-size") + 1] == "8192"
+    assert "--mmproj" not in lazy
+    with_vision = backend.build_args(resolve_profile("balanced"), context_size=16384, vision=True)
+    assert "--mmproj" in with_vision
+    assert with_vision[with_vision.index("--mmproj") + 1] == str(mmproj)
+    assert "--image-min-tokens" in with_vision
+
+
+async def test_unloaded_snapshot_starts_at_16k_with_selective_thinking():
+    from app.config import AppSettings
+    from app.inference.manager import InferenceManager
+
+    snap = await InferenceManager().snapshot(AppSettings())
+    assert snap["context_size"] == 16384
+    assert snap["context_cap"] == 32768
+    assert snap["thinking_mode"] == "selective"
+    assert snap["vision_mode"] == "lazy"
+    assert snap["vision_loaded"] is False

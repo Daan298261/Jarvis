@@ -35,7 +35,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "kind": "native",
             "available": True,
             "status": "ready",
-            "detail": "PowerShell on Windows; bash available when present.",
+            "detail": "PowerShell on Windows; bash on Linux.",
         },
         {
             "id": "python",

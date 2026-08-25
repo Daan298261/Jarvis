@@ -74,6 +74,22 @@ class BrowserTool(Tool):
             headless = bool((settings.get("browser") or {}).get("headless", False))
         async with _lock:
             try:
+                if action == "close":
+                    global _playwright, _browser, _context, _page, _pages
+                    if not _context and not _page and not _playwright:
+                        _pages = []
+                        return ToolResult(True, "Browser was not running")
+                    if _context:
+                        await _context.close()
+                    if _playwright:
+                        await _playwright.stop()
+                    _context = None
+                    _playwright = None
+                    _page = None
+                    _pages = []
+                    return ToolResult(True, "Browser closed")
+                if action == "open" and not kwargs.get("url"):
+                    return ToolResult(False, "", error="url is required")
                 page = await _ensure_page(bool(headless))
                 if action == "open":
                     url = kwargs.get("url")
@@ -88,7 +104,17 @@ class BrowserTool(Tool):
                     return ToolResult(True, f"URL: {page.url}\nTitle: {title}\n\n{truncated}")
                 if action == "click":
                     if kwargs.get("name"):
-                        await page.get_by_role("button", name=kwargs["name"]).first.click(timeout=10000)
+                        name = kwargs["name"]
+                        clicked = False
+                        for role in ("button", "link", "tab"):
+                            try:
+                                await page.get_by_role(role, name=name).first.click(timeout=4000)
+                                clicked = True
+                                break
+                            except Exception:
+                                continue
+                        if not clicked:
+                            await page.get_by_text(name, exact=False).first.click(timeout=8000)
                     elif kwargs.get("selector"):
                         await page.locator(kwargs["selector"]).first.click(timeout=10000)
                     else:
@@ -119,7 +145,11 @@ class BrowserTool(Tool):
                     out.parent.mkdir(parents=True, exist_ok=True)
                     await page.screenshot(path=str(out), full_page=False)
                     encoded = base64.b64encode(out.read_bytes()).decode("ascii")
-                    return ToolResult(True, f"Saved screenshot to {out}", data={"path": str(out), "image_base64": encoded[:80] + "..."})
+                    return ToolResult(
+                        True,
+                        f"Saved screenshot to {out}",
+                        data={"path": str(out), "image_base64": encoded[:80] + "...", "attach_image": str(out)},
+                    )
                 if action == "tabs":
                     pages = page.context.pages
                     listing = "\n".join(f"{i}: {p.url}" for i, p in enumerate(pages))
@@ -136,16 +166,6 @@ class BrowserTool(Tool):
                 if action == "upload":
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
-                if action == "close":
-                    global _playwright, _browser, _context, _page
-                    if _context:
-                        await _context.close()
-                    if _playwright:
-                        await _playwright.stop()
-                    _context = None
-                    _playwright = None
-                    _page = None
-                    return ToolResult(True, "Browser closed")
                 return ToolResult(False, "", error=f"Unknown action {action}")
             except Exception as exc:
                 return ToolResult(False, "", error=str(exc))
