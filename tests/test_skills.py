@@ -9,9 +9,11 @@ from app.agent.skills import (
     as_prompt_block,
     bind_parameters,
     execute_bound_skill,
+    has_secret_parameters,
     instantiate_steps,
     promote_from_trajectories,
     relevant_skills,
+    skill_is_runnable,
     steps_are_executable,
 )
 from app.agent.trajectory import record_trajectory
@@ -249,3 +251,58 @@ async def test_stable_browser_procedure_is_promoted_with_url_parameter(jarvis_en
     assert bound["url"] == "https://cms.example/posts/final"
     block = as_prompt_block([skill])
     assert "BrowserCode-style" in block
+    actions = [step["arguments"].get("action") for step in steps]
+    assert "snapshot" not in actions
+
+
+async def test_browser_snapshot_steps_are_stripped_from_promoted_skill(jarvis_env):
+    for index in range(3):
+        await _completed_task(
+            index,
+            f"open the docs site run {index}",
+            "browser automation",
+            ["browser", "browser", "browser"],
+            [
+                {"action": "open", "url": "https://docs.example/start"},
+                {"action": "snapshot"},
+                {"action": "click", "role": "button", "name": "Continue"},
+            ],
+            prefix="snap",
+        )
+    created = await promote_from_trajectories()
+    assert len(created) == 1
+    skill = created[0]
+    assert skill.origin == "browser_promoted"
+    steps = json.loads(skill.steps_json)
+    assert [step["arguments"]["action"] for step in steps] == ["open", "click"]
+    assert steps[1]["arguments"]["role"] == "button"
+    assert steps[1]["arguments"]["name"] == "Continue"
+
+
+async def test_password_fields_are_secret_params_and_do_not_auto_bind(jarvis_env):
+    for index in range(3):
+        await _completed_task(
+            index,
+            "log into the cms admin",
+            "browser automation",
+            ["browser", "browser", "browser"],
+            [
+                {"action": "open", "url": "https://cms.example/login"},
+                {"action": "type", "name": "Password", "password": f"secret-{index}"},
+                {"action": "click", "name": "Sign in"},
+            ],
+            prefix="secret",
+        )
+    created = await promote_from_trajectories()
+    assert len(created) == 1
+    skill = created[0]
+    params = json.loads(skill.parameters_json)
+    secret = next(item for item in params if isinstance(item, dict) and item.get("kind") == "secret")
+    assert secret["examples"] == []
+    assert "{password}" in json.dumps(json.loads(skill.steps_json))
+    assert bind_parameters(skill, "log into the cms admin") is None
+    bound = bind_parameters(skill, "log into the cms admin", {"password": "typed-by-user"})
+    assert bound is not None
+    assert bound["password"] == "typed-by-user"
+    assert has_secret_parameters(skill) is True
+    assert skill_is_runnable(skill) is True

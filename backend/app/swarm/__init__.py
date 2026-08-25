@@ -14,6 +14,7 @@ from .nodes import get_node, list_nodes, register_localhost_node
 from .intelligence import dispatch_work, select_intelligence
 from .placement import place_work
 from .roles import get_swarm_roles
+from .snapshot import swarm_snapshot
 from .workers import bind_workers_to_node, worker_catalog
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "release_lease",
     "remaining_budget",
     "set_node_budget",
+    "swarm_snapshot",
     "worker_catalog",
 ]

@@ -21,8 +21,15 @@ from ..swarm.roles import (
     get_swarm_roles,
     set_node_role_policy,
 )
+from ..swarm.snapshot import swarm_snapshot
 
 router = APIRouter(prefix="/api/swarm", tags=["swarm"])
+
+
+@router.get("")
+async def swarm_overview():
+    """Additive summary of Orchestrator vs Leader plus Node/worker bindings."""
+    return await swarm_snapshot()
 
 
 class RolePolicyUpdate(BaseModel):

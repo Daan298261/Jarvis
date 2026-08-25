@@ -9,6 +9,7 @@ from ..inference.benchmarks import list_benchmarks
 from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.manager import MANAGER
 from ..mcp_server import jarvis_mcp_manifest
+from ..swarm.snapshot import swarm_snapshot
 from ..tools.capabilities import capability_snapshot
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -31,4 +32,5 @@ async def system_info():
         "capabilities": capability_snapshot(),
         "jarvis_mcp": jarvis_mcp_manifest(),
         "cursor_acp": acp_status(),
+        "swarm": await swarm_snapshot(),
     }

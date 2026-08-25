@@ -13,9 +13,11 @@ from sqlalchemy import select
 from ..agent.skills import (
     bind_parameters,
     execute_bound_skill,
+    has_secret_parameters,
     instantiate_steps,
     normalize_parameters,
     promote_from_trajectories,
+    skill_is_runnable,
     steps_are_executable,
 )
 from ..db.models import Skill, Trajectory
@@ -43,7 +45,7 @@ class SkillRunIn(BaseModel):
 
 def _skill_dict(skill: Skill) -> dict:
     steps = json.loads(skill.steps_json or "[]")
-    executable = steps_are_executable([step for step in steps if isinstance(step, dict)])
+    bound_now = steps_are_executable([step for step in steps if isinstance(step, dict)])
     return {
         "id": skill.id,
         "name": skill.name,
@@ -57,7 +59,9 @@ def _skill_dict(skill: Skill) -> dict:
         "origin": skill.origin,
         "times_used": skill.times_used,
         "enabled": skill.enabled,
-        "executable": executable,
+        "executable": bound_now or skill_is_runnable(skill),
+        "runnable": skill_is_runnable(skill),
+        "requires_secret": has_secret_parameters(skill),
         "created_at": skill.created_at.isoformat() if skill.created_at else None,
     }
 
