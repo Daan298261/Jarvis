@@ -292,7 +292,7 @@ class Node(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     hostname: Mapped[str] = mapped_column(String(255), default="")
     status: Mapped[str] = mapped_column(String(32), default="online")
-    node_class: Mapped[str] = mapped_column(String(64), default="leader")
+    node_class: Mapped[str] = mapped_column(String(64), default="senior_worker")
     roles_json: Mapped[str] = mapped_column(Text, default="[]")
     address: Mapped[str] = mapped_column(String(255), default="127.0.0.1")
     host_alias: Mapped[str] = mapped_column(String(64), default="localhost")
@@ -328,6 +328,24 @@ class NodeWorker(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     node: Mapped[Node] = relationship(back_populates="workers")
+
+
+class SwarmRole(Base):
+    """Distinct swarm role assignment (Orchestrator, Leader, etc.).
+
+    Each role is a separate record with its own holder node_id. A single Node may
+    hold multiple roles, but Orchestrator and Leader are never conflated into one
+    class or one combined record.
+    """
+
+    __tablename__ = "swarm_roles"
+
+    role: Mapped[str] = mapped_column(String(32), primary_key=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), index=True)
+    assignment: Mapped[str] = mapped_column(String(32), default="FORCED")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    node: Mapped[Node] = relationship()
 
 
 class WorkerReport(Base):

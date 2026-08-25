@@ -89,7 +89,7 @@ async def test_list_and_get_nodes(local_node_env):
     assert item["id"] == node.id
     assert item["host_alias"] == "localhost"
     assert item["status"] == "online"
-    assert item["class"] == "leader"
+    assert item["class"] == "senior_worker"
     assert item["roles"] == ["orchestrator", "leader"]
     assert isinstance(item["hardware"], dict)
     assert isinstance(item["resources"], dict)

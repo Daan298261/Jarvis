@@ -12,12 +12,12 @@ from ..config import data_dir
 from ..db.models import Node, NodeWorker
 from ..db.session import SessionLocal
 from ..hardware import hardware_dict
+from .roles import ensure_localhost_role_assignments
 
 LOCALHOST_ALIAS = "localhost"
 LOCALHOST_ADDRESS = "127.0.0.1"
 LOCAL_NODE_IDENTITY_FILE = "node_identity.json"
-DEFAULT_NODE_CLASS = "leader"
-DEFAULT_LOCAL_ROLES = ("orchestrator", "leader")
+DEFAULT_NODE_CLASS = "senior_worker"
 
 
 def _utcnow() -> datetime:
@@ -113,7 +113,6 @@ async def register_localhost_node() -> Node:
     resources = default_resources(hardware)
     hostname = socket.gethostname() or "localhost"
     now = _utcnow()
-    roles_json = json.dumps(list(DEFAULT_LOCAL_ROLES))
     hardware_json = json.dumps(hardware)
     resources_json = json.dumps(resources)
 
@@ -137,7 +136,6 @@ async def register_localhost_node() -> Node:
             existing.hostname = hostname
             existing.status = "online"
             existing.node_class = DEFAULT_NODE_CLASS
-            existing.roles_json = roles_json
             existing.address = LOCALHOST_ADDRESS
             existing.host_alias = LOCALHOST_ALIAS
             existing.hardware_json = hardware_json
@@ -147,6 +145,7 @@ async def register_localhost_node() -> Node:
             existing.last_seen_at = now
             await session.commit()
             await session.refresh(existing)
+            await ensure_localhost_role_assignments(existing.id)
             return existing
 
         node = Node(
@@ -154,7 +153,7 @@ async def register_localhost_node() -> Node:
             hostname=hostname,
             status="online",
             node_class=DEFAULT_NODE_CLASS,
-            roles_json=roles_json,
+            roles_json="[]",
             address=LOCALHOST_ADDRESS,
             host_alias=LOCALHOST_ALIAS,
             hardware_json=hardware_json,
@@ -167,6 +166,7 @@ async def register_localhost_node() -> Node:
         session.add(node)
         await session.commit()
         await session.refresh(node)
+        await ensure_localhost_role_assignments(node.id)
         return node
 
 
