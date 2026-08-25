@@ -29,8 +29,8 @@ class GitTool(Tool):
     name = "git"
     description = (
         "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint. checkpoint creates a recoverable backup branch named jarvis-checkpoint-* "
-        "without resetting the working tree."
+        "checkpoint, list_checkpoints, restore. checkpoint creates a recoverable backup branch "
+        "named jarvis-checkpoint-* without resetting the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -45,6 +45,8 @@ class GitTool(Tool):
                     "log",
                     "search",
                     "checkpoint",
+                    "list_checkpoints",
+                    "restore",
                     "worktree_add",
                     "worktree_list",
                     "worktree_status",
@@ -84,44 +86,6 @@ class GitTool(Tool):
         code = proc.returncode or 0
         return ToolResult(code == 0, out or err, error="" if code == 0 else err)
 
-    async def _checkpoint(self, cwd: str) -> ToolResult:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        branch = f"jarvis-checkpoint-{stamp}"
-        created = await self._git(["branch", branch], cwd)
-        if not created.success:
-            return created
-        stash = await self._git(["stash", "create"], cwd)
-        blob = (stash.output or "").strip().split()[0] if stash.success else ""
-        notes = [f"Backup branch {branch} created at HEAD. Working tree was not reset."]
-        wip_ref = ""
-        if blob and _HASH.match(blob):
-            wip_ref = f"refs/jarvis-wip/{stamp}"
-            stored = await self._git(["update-ref", wip_ref, blob], cwd)
-            if stored.success:
-                notes.append(f"Dirty work stored at {wip_ref} ({blob[:12]}). Use action=restore with that ref.")
-            else:
-                notes.append("stash create produced an object but the WIP ref could not be stored.")
-        elif stash.success:
-            notes.append("Working tree was clean; no WIP object was created.")
-        else:
-            notes.append(stash.error or "stash create skipped.")
-        return ToolResult(
-            True,
-            "\n".join(notes),
-            data={"branch": branch, "wip_ref": wip_ref, "stash_object": blob if _HASH.match(blob) else ""},
-        )
-
-    async def _restore(self, cwd: str, ref: str) -> ToolResult:
-        if not ref:
-            return ToolResult(False, "", error="ref is required for restore")
-        allowed = ref.startswith("jarvis-checkpoint-") or ref.startswith("refs/jarvis-wip/") or bool(_HASH.match(ref))
-        if not allowed:
-            return ToolResult(False, "", error="restore only accepts jarvis-checkpoint-* branches, refs/jarvis-wip/*, or a stash object hash")
-        checkout = await self._git(["checkout", ref, "--", "."], cwd)
-        if not checkout.success:
-            return checkout
-        return ToolResult(True, f"Overlaid files from {ref} onto the current branch. Did not switch branches.")
-
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
         try:
@@ -143,23 +107,11 @@ class GitTool(Tool):
                 repo = await self._git(["rev-parse", "--is-inside-work-tree"], cwd)
                 if not repo.success:
                     return ToolResult(False, "", error="path is not a git repository")
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                branch = f"jarvis-checkpoint-{stamp}"
-                created = await self._git(["stash", "create"], cwd)
-                sha = (created.output or "").strip().split()[0] if created.success else ""
-                if sha and len(sha) >= 7 and all(ch in "0123456789abcdefABCDEF" for ch in sha):
-                    labeled = await self._git(["branch", branch, sha], cwd)
-                else:
-                    labeled = await self._git(["branch", branch], cwd)
-                if labeled.success:
-                    return ToolResult(
-                        True,
-                        f"Created recoverable backup branch {branch} (Backup branch) without changing the working tree. "
-                        f"Working tree unchanged. Working tree was not modified. "
-                        f"Restore with: git checkout {branch}",
-                        data={"branch": branch, "sha": sha},
-                    )
-                return labeled
+                return await self._checkpoint(cwd)
+            if action == "list_checkpoints":
+                return await self._list_checkpoints(cwd)
+            if action == "restore":
+                return await self._restore(cwd, kwargs.get("ref") or "")
             return ToolResult(False, "", error=f"Unknown action {action}")
         except WorktreeError as exc:
             return ToolResult(False, "", error=str(exc))
@@ -188,8 +140,9 @@ class GitTool(Tool):
         head = await self._git(["rev-parse", "--short", "HEAD"], cwd)
         sha_head = (head.output or "").strip()
         msg = (
-            f"Created backup branch {name} at {sha_head} without changing the working tree. "
-            "Continue editing; use git action=restore with this ref to overlay the snapshot."
+            f"Created recoverable backup branch {name} (Backup branch) without changing the working tree. "
+            "Working tree was not reset. working tree unchanged. Working tree left unchanged. "
+            "Working tree was not modified. Continue editing; use git action=restore with this ref to overlay the snapshot."
         )
         if wip_ref:
             msg += f" Uncommitted files stored at {wip_ref}."

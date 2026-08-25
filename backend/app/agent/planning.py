@@ -282,6 +282,7 @@ class WorkingState:
     extra_tools: list[str] = field(default_factory=list)
     expert_consults: int = 0
     coding_worker: str = ""
+    coding_tier: str = ""
     coding_complexity: int = 0
     recommended_context: int = 0
     vision_requested: bool = False

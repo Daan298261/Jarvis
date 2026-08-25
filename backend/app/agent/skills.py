@@ -17,6 +17,8 @@ from .trajectory import keywords
 MIN_REPEATS = 3
 MAX_PROMPT_SKILLS = 2
 BROWSER_TOOLS = {"browser", "web_fetch"}
+DISCOVERY_ACTIONS = {"snapshot", "screenshot"}
+STABLE_TARGET_KEYS = ("name", "label", "role", "aria_label", "placeholder", "test_id", "testid")
 _PLACEHOLDER = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|/)[^\s\"']+")
 _FILE_RE = re.compile(r"\b[\w.-]+\.[A-Za-z0-9]{1,5}\b")
@@ -81,17 +83,40 @@ def is_browser_workflow(tools: Iterable[str]) -> bool:
     return any(tool in BROWSER_TOOLS for tool in tools)
 
 
+def is_discovery_step(step: dict[str, Any]) -> bool:
+    if step.get("tool") != "browser":
+        return False
+    args = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
+    return str(args.get("action") or "") in DISCOVERY_ACTIONS
+
+
+def replayable_calls(sequence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop snapshot/screenshot discovery so a promoted browser skill can replay."""
+    return [step for step in sequence if isinstance(step, dict) and not is_discovery_step(step)]
+
+
+def _has_stable_target(args: dict[str, Any]) -> bool:
+    selector = args.get("selector")
+    if isinstance(selector, str) and selector.strip() and not _is_ephemeral_selector(selector):
+        return True
+    for key in STABLE_TARGET_KEYS:
+        value = args.get(key)
+        if isinstance(value, str) and value.strip() and not _is_ephemeral_selector(value):
+            return True
+    return False
+
+
 def browser_sequence_is_stable(sequences: list[list[dict[str, Any]]]) -> bool:
     """Promote only browser procedures that can replay without snapshot element ids.
 
     Discovery runs that click `#e12`-style refs are one-off; named controls, CSS
-    selectors, and explicit URLs are BrowserCode-style and worth keeping.
+    selectors, roles, and explicit URLs are BrowserCode-style and worth keeping.
     """
     has_entry = False
     has_interaction = False
     has_stable_target = False
     for seq in sequences:
-        for step in seq:
+        for step in replayable_calls(seq):
             tool = step.get("tool")
             args = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
             action = str(args.get("action") or "")
@@ -101,11 +126,7 @@ def browser_sequence_is_stable(sequences: list[list[dict[str, Any]]]) -> bool:
                 has_entry = True
             if tool == "browser" and action in {"click", "type", "fill", "download", "upload"}:
                 has_interaction = True
-                name = args.get("name")
-                selector = args.get("selector")
-                if isinstance(name, str) and name.strip():
-                    has_stable_target = True
-                elif isinstance(selector, str) and selector.strip() and not _is_ephemeral_selector(selector):
+                if _has_stable_target(args):
                     has_stable_target = True
     if not has_entry:
         return False
@@ -121,7 +142,7 @@ def _param_kind(key: str, values: list[Any]) -> str:
         return "url"
     if key in {"selector"}:
         return "selector"
-    if key in {"name", "label"}:
+    if key in {"name", "label", "role", "aria_label", "placeholder", "test_id", "testid"}:
         return "name"
     if key in {"path", "destination", "working_directory", "file", "filename"}:
         return "path"
@@ -325,6 +346,16 @@ def steps_are_executable(steps: list[dict[str, Any]]) -> bool:
     return any(isinstance(step.get("arguments"), dict) and step.get("arguments") for step in steps)
 
 
+def skill_is_runnable(skill: Skill) -> bool:
+    """True when the skill has tool steps that can run after parameters are bound."""
+    steps = [step for step in parse_steps(skill.steps_json) if isinstance(step, dict) and step.get("tool")]
+    return any(isinstance(step.get("arguments"), dict) and step.get("arguments") for step in steps)
+
+
+def has_secret_parameters(skill: Skill) -> bool:
+    return any((item.get("kind") or "") == "secret" for item in normalize_parameters(skill.parameters_json))
+
+
 async def execute_bound_skill(
     steps: list[dict[str, Any]],
     runner: Callable[..., Any],
@@ -408,8 +439,10 @@ async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skil
                 continue
             sequences = [await _successful_calls(session, task_id) for task_id in candidate.task_ids]
             browserish = is_browser_workflow(candidate.tools)
-            if browserish and not browser_sequence_is_stable(sequences):
-                continue
+            if browserish:
+                sequences = [replayable_calls(seq) for seq in sequences]
+                if not browser_sequence_is_stable(sequences):
+                    continue
             templated, parameters = parameterize_call_sequences(sequences)
             if templated:
                 steps_payload: list[Any] = templated

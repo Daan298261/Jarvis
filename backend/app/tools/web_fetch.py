@@ -46,10 +46,10 @@ class WebFetchTool(Tool):
             return ToolResult(False, "", error="url is required")
         lowered = url.lower()
         if lowered.startswith("file:") or lowered.startswith("javascript:") or lowered.startswith("data:"):
-            return ToolResult(False, "", error="Only http and https URLs are allowed (http/https only)")
+            return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed (http/https only)")
         scheme = (urlparse(url).scheme or "").lower()
         if scheme not in _ALLOWED_SCHEMES:
-            return ToolResult(False, "", error="Only http and https URLs are allowed (http/https only)")
+            return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed (http/https only)")
         method = (kwargs.get("method") or "GET").upper()
         if method not in {"GET", "POST", "HEAD"}:
             return ToolResult(False, "", error=f"Unsupported method {method}")
@@ -80,18 +80,22 @@ class WebFetchTool(Tool):
                     request_kwargs["content"] = body
                 response = await client.request(method, url, **request_kwargs)
             content_type = response.headers.get("content-type") or ""
-            raw = response.content
+            raw = getattr(response, "content", None)
+            if raw is None:
+                raw = (getattr(response, "text", None) or "").encode("utf-8", errors="replace")
             truncated_bytes = len(raw) > _MAX_DOWNLOAD_BYTES
             if truncated_bytes:
                 raw = raw[:_MAX_DOWNLOAD_BYTES]
-            text = response.text[:limit]
+            text = (getattr(response, "text", None) or "")[:limit]
             saved = ""
             if resolved_path is not None:
                 resolved_path.parent.mkdir(parents=True, exist_ok=True)
                 resolved_path.write_bytes(raw)
                 saved = str(resolved_path)
+            status = int(getattr(response, "status_code", 200) or 200)
+            success = bool(getattr(response, "is_success", 200 <= status < 300))
             lines = [
-                f"status={response.status_code}",
+                f"status={status}",
                 f"content-type={content_type}",
             ]
             if saved:
@@ -99,16 +103,17 @@ class WebFetchTool(Tool):
             if text:
                 lines.append("")
                 lines.append(text)
+            full_text = getattr(response, "text", None) or ""
             return ToolResult(
-                response.is_success,
+                success,
                 "\n".join(lines),
                 data={
-                    "status_code": response.status_code,
+                    "status_code": status,
                     "content_type": content_type,
                     "path": saved,
-                    "truncated": truncated_bytes or len(response.text) > limit,
+                    "truncated": truncated_bytes or len(full_text) > limit,
                 },
-                error="" if response.is_success else f"HTTP {response.status_code}",
+                error="" if success else f"HTTP {status}",
             )
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

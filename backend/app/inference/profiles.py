@@ -143,6 +143,10 @@ def profile_gguf(profile: ModelProfile) -> Path:
 
 
 def mmproj_path(profile: ModelProfile) -> Path:
+    paths = model_paths()
+    custom = paths.get("mmproj")
+    if custom:
+        return Path(custom)
     return models_dir() / profile.repo_dir / profile.mmproj_filename
 
 
@@ -195,7 +199,7 @@ def resolve_profile(name: str) -> ModelProfile:
         if expert_path.exists() and key in {"fast", "balanced", "quality"}:
             return _with_alt_weights(profile, expert)
         if key == "expert" and not expert_path.exists():
-            return PROFILES["balanced"]
+            return PROFILES["expert"]
     return profile
 
 
@@ -217,9 +221,9 @@ def profile_as_dict(profile: ModelProfile) -> dict:
 
 
 def expert_profile() -> ModelProfile:
-    """Prefer Q5 when present; otherwise the dedicated Expert 27B Q4 consult profile."""
+    """Prefer Q5 when present; otherwise the dedicated Expert 27B Q4 consult profile at 16K."""
     paths = model_paths()
     quality = PROFILES["quality"]
     if (paths["root"] / quality.filename).exists():
         return with_context(quality, 16384)
-    return PROFILES["expert"]
+    return with_context(PROFILES["expert"], 16384)

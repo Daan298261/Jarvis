@@ -35,9 +35,12 @@ from .coding_workers import (
     complete_coding_route,
     format_routing_block,
     record_coding_outcome,
+    record_coding_route,
     route_coding_task,
+    route_software_task,
     should_route,
 )
+from .forensic import professional_prompt_block
 from .escalation import (
     EscalationSignals,
     build_expert_brief,
@@ -60,7 +63,14 @@ from .planning import (
 from .recovery import recovery_hint
 from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
-from .skills import bind_parameters, instantiate_steps, promote_from_trajectories, relevant_skills, steps_are_executable
+from .skills import (
+    bind_parameters,
+    has_secret_parameters,
+    instantiate_steps,
+    promote_from_trajectories,
+    relevant_skills,
+    steps_are_executable,
+)
 from .tooling import apply_capability_request, expose_called_tool, schemas_for as exposed_tool_schemas, should_enable_thinking, tools_for_task
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .policy import policy_guidance
@@ -374,6 +384,9 @@ class AgentRuntime:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
             system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(prompt) + _environment_block(settings)
+            audit = professional_prompt_block(prompt)
+            if audit:
+                system_prompt += "\n\n" + audit
             matched_skills = await relevant_skills(working.task_class, working.goal)
             skills = skills_prompt_block(matched_skills)
             if skills:
@@ -383,6 +396,8 @@ class AgentRuntime:
                 routing = await route_coding_task(prompt, task_class=working.task_class)
                 working.coding_worker = routing.get("execute_worker") or ""
                 working.coding_complexity = int(routing.get("complexity") or 0)
+                working.coding_tier = str(routing.get("tier_name") or "")
+                await record_coding_route(task_id, route_software_task(prompt, task_class=working.task_class))
                 system_prompt += "\n\n" + format_routing_block(routing)
                 await BUS.publish(task_id, "progress", "Coding worker selected", format_routing_block(routing)[:1500], stage="understand")
             lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
@@ -395,6 +410,8 @@ class AgentRuntime:
                 ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
             ]
             for skill in matched_skills:
+                if has_secret_parameters(skill):
+                    continue
                 bound = bind_parameters(skill, working.goal)
                 if bound is None:
                     continue

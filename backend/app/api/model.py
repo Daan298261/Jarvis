@@ -17,6 +17,7 @@ from ..agent.agent_benchmark import (
 from ..config import data_dir, load_settings, save_settings
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
 from ..inference.backends import probe_remote_server
+from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
 from ..inference.profiles import available_profiles, declared_profiles
@@ -28,9 +29,9 @@ class LoadBody(BaseModel):
     profile: str | None = None
 
 
-class HarnessBody(BaseModel):
-    live: bool = False
-    background: bool = False
+class AgentSuiteRunBody(BaseModel):
+    case_id: str | None = None
+    simulate_success: bool = False
 
 
 @router.get("")
@@ -103,6 +104,38 @@ async def capture_benchmark():
         "task_success_rate": row.task_success_rate,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }}
+
+
+@router.get("/hardware-gate")
+async def hardware_gate():
+    return await hardware_purchase_gate()
+
+
+@router.get("/agent-suite")
+async def agent_suite():
+    return list_suite()
+
+
+@router.post("/agent-suite/run")
+async def run_agent_suite_case(body: AgentSuiteRunBody | None = None):
+    body = body or AgentSuiteRunBody()
+    try:
+        case = get_case(body.case_id or "json-update")
+    except KeyError:
+        raise HTTPException(404, "Unknown agent-suite case")
+    workspace = data_dir() / "agent-suite" / case.id
+    ctx = prepare_case(case, workspace)
+    prompt = format_prompt(case, ctx)
+    if body.simulate_success:
+        apply_expected_solution(case, ctx)
+        ok, notes = check_case(case, workspace, ctx)
+        metrics = {**empty_metrics(), "success": True, "verification_result": notes}
+        await record_case_result(case=case, metrics=metrics, source="simulated", workspace=str(workspace), notes=notes)
+        return {"success": True, "prompt": prompt, "notes": notes, "case_id": case.id}
+    ok, notes = check_case(case, workspace, ctx)
+    metrics = {**empty_metrics(), "success": ok, "verification_result": notes}
+    await record_case_result(case=case, metrics=metrics, source="unsolved", workspace=str(workspace), notes=notes)
+    return {"success": ok, "prompt": prompt, "notes": notes, "case_id": case.id}
 
 
 @router.get("/harness")

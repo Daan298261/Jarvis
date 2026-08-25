@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import auth, coding, mcp, memory, mobile, model, queue, self_dev, settings, system, tasks, tools, voice, workflows
+from .api import auth, coding, mcp, memory, mobile, model, queue, self_dev, settings, swarm, system, tasks, tools, voice, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
 from .db import init_db
@@ -58,6 +58,7 @@ app.include_router(workflows.router)
 app.include_router(self_dev.router)
 app.include_router(coding.router)
 app.include_router(mobile.router)
+app.include_router(swarm.router)
 
 frontend_dist = repo_root() / "frontend" / "dist"
 
@@ -84,6 +85,12 @@ async def startup() -> None:
     REGISTRY.apply_settings(current)
     logs_dir().mkdir(exist_ok=True)
     Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
+    try:
+        from .swarm.nodes import ensure_local_node
+
+        await ensure_local_node()
+    except Exception:
+        logging.exception("Local swarm node identity failed")
     if current.mcp_servers:
         try:
             await MCP.refresh(current.mcp_servers)

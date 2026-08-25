@@ -231,7 +231,8 @@ class LlamaCppBackend(InferenceBackend):
     ) -> list[str]:
         hardware = detect_hardware()
         inference = self.settings.inference
-        projector = mmproj_path(profile)
+        paths = model_paths()
+        projector = Path(paths["mmproj"]) if paths.get("mmproj") else mmproj_path(profile)
         threads = inference.threads or hardware.cpu_cores
         ctx = int(context_size or profile.context_size or inference.context_size)
         args = [

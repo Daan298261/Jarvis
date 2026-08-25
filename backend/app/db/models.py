@@ -280,6 +280,26 @@ class AcpSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class SwarmNode(Base):
+    """A physical/virtual device in the swarm. Distinct from software Workers."""
+
+    __tablename__ = "swarm_nodes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(200), default="")
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    os_name: Mapped[str] = mapped_column(String(80), default="")
+    architecture: Mapped[str] = mapped_column(String(40), default="")
+    status: Mapped[str] = mapped_column(String(32), default="online")
+    node_class: Mapped[str] = mapped_column(String(32), default="leader")
+    is_local: Mapped[bool] = mapped_column(Boolean, default=False)
+    capabilities_json: Mapped[str] = mapped_column(Text, default="[]")
+    roles_json: Mapped[str] = mapped_column(Text, default="[]")
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class WorkerReport(Base):
     """Worker-reported results and verification requests. Never treated as completion."""
 

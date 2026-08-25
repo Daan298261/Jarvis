@@ -24,7 +24,7 @@ def docker_argv(action: str, kwargs: dict[str, Any]) -> tuple[list[str] | None, 
     if action == "logs":
         container = str(kwargs.get("container") or "").strip()
         if not container:
-            return None, "container is required for docker logs"
+            return None, "container is required for docker logs (container or image)"
         return ["logs", container], ""
     if action == "inspect":
         target = str(kwargs.get("container") or kwargs.get("image") or "").strip()

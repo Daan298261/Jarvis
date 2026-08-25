@@ -3629,7 +3629,7 @@ This development session:
 ### Jarvis 2.0
 
 - Specification: **appended** as sections 64–85 (Autonomous Operator / Away Mode)
-- Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers, `Node` registry / Worker placement / GPU scheduler: **not implemented**
+- Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers, GPU scheduler: **not implemented**. One-node `Node` identity, software-worker placement on localhost, and Orchestrator vs Leader roles: **implemented** (unit-tested; no second machine).
 - 1.x self-development isolation (worktrees, verification gate, trial budget, kill switch, end-of-run report): **implemented** (unit-tested; does not auto-merge; Cursor ACP still not wired)
 - Flagship benchmark `Away Mode — Autonomous Bug Fix`: **not implemented**
 - Hardware Stage 1 remains the existing desktop; no new GPU is required to continue development
@@ -3640,7 +3640,7 @@ This development session:
 - Resume: `POST /api/tasks/{id}/continue` reloads compacted conversation
 - Context compaction: older turns collapse into a structured summary that cannot orphan a tool result from its assistant `tool_calls` turn; the compact working state is refreshed (not stacked) on every pass
 - Trajectory memory: `trajectories` table stores ordered tools, failure kinds, the recovery that worked, and verification. Similar new tasks get those lessons injected. No hidden reasoning is stored.
-- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. Browser procedures that use named controls or CSS selectors (not snapshot ids) promote as BrowserCode-style skills (`origin=browser_promoted`) and are replayed instead of rediscovering the page. Password-like fields are parameterized with no stored examples and do not auto-run. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
+- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. Browser procedures that use named controls, roles, or CSS selectors (not snapshot ids) promote as BrowserCode-style skills (`origin=browser_promoted`); snapshot/screenshot discovery steps are stripped so replay is deterministic. Password-like fields are parameterized with no stored examples, use password inputs on Memory, and never auto-run. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
 
 ### Reliability
 
@@ -3662,6 +3662,7 @@ This development session:
 - Command live status shows task class and the currently exposed tool set
 - Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
 - Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`) plus a performance harness / hardware-gate card (`POST /api/model/harness/run`)
+- System page shows one-node swarm identity (localhost Node, Orchestrator vs Leader, software workers as services)
 - Live status shows execution mode, task class, and verification
 - Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
 - Memory page lists skills and trajectories with promote / enable / run controls
@@ -3677,7 +3678,7 @@ This development session:
 - 9B GPU residency, tok/s, and 20-task comparison vs 27B are still Windows-desktop work
 - Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
 - Browser Use / OpenHands adapters are present but the optional packages are not installed in this environment
-- UFO / Cua / Open Interpreter adapters are absent
+- UFO / Cua / Open Interpreter adapters are present (catalog `missing` until installed)
 - Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
 - Office COM and Docker depend on software that may be missing on the target PC
 - Live 9B→27B model swap is implemented as a consult flow but cannot run without GGUFs
@@ -3693,7 +3694,7 @@ Tests performed:
 - Frontend (`npm run build`): TypeScript build (this session)
 - Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
 
-Results: **312 passed** on this branch after merge-repair QA. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: **323 passed** on this branch after BrowserCode promotion, one-node swarm foundation, and QA repairs. Live Qwen/Windows e2e remains the next desktop-session P0.
 
 ---
 
@@ -3838,9 +3839,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 
 These items make the existing machine a one-node swarm first. They must not require a second computer. Detailed role/resource/UI semantics live in `SWARM_ARCHITECTURE.md`.
 
-- [ ] Introduce first-class `Node` identity/state separate from software Worker abstractions.
-- [ ] Preserve software workers (`LocalJarvisCodingWorker`, `CursorACPWorker`, browser/media workers, etc.) as services that execute on eligible Nodes.
-- [ ] Separate Orchestrator (control plane) from Leader (strongest general-purpose execution Node).
+- [x] Introduce first-class `Node` identity/state separate from software Worker abstractions.
+  - Status: VERIFIED (`test_swarm.py`; `swarm_nodes` table, stable `data/node_id`, `GET /api/swarm/nodes`). One-node localhost only.
+- [x] Preserve software workers (`LocalJarvisCodingWorker`, `CursorACPWorker`, browser/media workers, etc.) as services that execute on eligible Nodes.
+  - Status: VERIFIED (`test_swarm.py`; `GET /api/swarm/workers`). Workers stay services with `node_id`; they are not Nodes.
+- [x] Separate Orchestrator (control plane) from Leader (strongest general-purpose execution Node).
+  - Status: VERIFIED (`test_swarm.py`; distinct roles in `GET /api/swarm` even when colocated on localhost). No distributed failover.
 - [ ] Generalize capability registration so Nodes and Workers advertise capabilities and requirements.
 - [ ] Implement node role/class policy: `AUTO`, `PREFERRED`, `FORCED`, `AVOID`, `DISABLED`, including persistence and failover intent without implementing distributed failover yet.
 - [ ] Implement host resource budgets, hard/soft caps, reserved capacity, task priority, and resource-lease representation (CPU/RAM/GPU/VRAM/storage/network where meaningful).
@@ -3868,7 +3872,9 @@ These items make the existing machine a one-node swarm first. They must not requ
 - [x] Open Interpreter adapter
   - Acceptance: optional code/shell worker behind `open_interpreter`; missing install reports `missing` and names native filesystem/python/git/terminal fallback; Jarvis still verifies.
   - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
-- [ ] Browser workflow promotion (BrowserCode-style skills)
+- [x] Browser workflow promotion (BrowserCode-style skills)
+  - Acceptance: repeated stable browser procedures (named controls / roles / CSS, not snapshot ids) become replayable skills; secrets are not stored or auto-run.
+  - Status: VERIFIED (`test_skills.py`). Live CMS replay remains a desktop-session check.
 
 ### P4 — Adaptive intelligence (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
 
@@ -3965,6 +3971,14 @@ A Node is a physical/virtual participating device. A Worker is a software execut
 Reason:
 
 The existing code already uses worker to mean software agents. Separating placement from execution prevents scheduler and type-system ambiguity.
+
+Decision: BrowserCode-style skills skip discovery and never auto-fill secrets
+
+Promoted browser procedures drop snapshot/screenshot steps and require named controls, roles, or stable CSS selectors. Password-like arguments become secret parameters with no stored examples and are never auto-executed from a later goal; the Memory UI collects them in password fields.
+
+Reason:
+
+Snapshot element ids are one-off. Storing or replaying passwords would leak credentials into skills.
 
 Decision: one-node swarm first
 

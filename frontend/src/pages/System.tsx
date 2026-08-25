@@ -126,6 +126,33 @@ export function SystemPage() {
           )}
         </div>
       )}
+      {info?.swarm && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Swarm</h2>
+          <p className="lede">
+            This machine is a one-node swarm. The Orchestrator is the control plane; the Leader is the strongest execution node. Software workers run as services on eligible nodes — they are not nodes themselves.
+          </p>
+          <div className="kv">
+            <b>Mode</b><span>{info.swarm.mode || "one-node"}</span>
+            <b>Node</b><span>{info.swarm.leader?.hostname || "localhost"}</span>
+            <b>Class</b><span>{info.swarm.leader?.node_class || "leader"}</span>
+            <b>Orchestrator</b><span>{info.swarm.orchestrator?.kind || "control_plane"}</span>
+            <b>Leader</b><span>{info.swarm.leader?.role || "leader"}</span>
+            <b>Workers</b><span>{(info.swarm.workers || []).length}</span>
+          </div>
+          {(info.swarm.workers || []).slice(0, 12).map((worker: any) => (
+            <div className="toggle" key={worker.id}>
+              <div>
+                <strong>{worker.name}</strong>
+                <div className="lede" style={{ margin: "4px 0 0" }}>
+                  {worker.kind} service on this node · {worker.detail}
+                </div>
+              </div>
+              <span className={`badge ${worker.available ? "completed" : "queued"}`}>{worker.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {info?.capabilities && (
         <div className="card" style={{ marginTop: 16 }}>
           <h2>Backends</h2>

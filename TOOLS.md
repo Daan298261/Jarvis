@@ -26,15 +26,15 @@ The agent does **not** send every tool schema on every model turn. Task classifi
 
 Finished tasks write a trajectory: the ordered tools, which step failed and why, which tool worked instead, and the verification result. A later similar task gets those lessons in its system prompt.
 
-When the same task class succeeds three or more times with the same tool sequence, the workflow is promoted to a skill. If the tool arguments were recorded, values that differed across those runs become parameters (`{path}`, `{url}`, `{content}`, …) and the skill can **run itself**: matching later tasks execute the bound steps, then verify. Browser procedures that click named controls or CSS selectors (not snapshot ids like `e12`) promote as BrowserCode-style skills and are replayed instead of rediscovering the page. Password-like fields become parameters with no stored examples and do not auto-run. Inspect, promote, enable, disable, or run from the **Memory** page, or via `/api/memory/trajectories`, `/api/memory/skills`, and `POST /api/memory/skills/{id}/run`.
+When the same task class succeeds three or more times with the same tool sequence, the workflow is promoted to a skill. If the tool arguments were recorded, values that differed across those runs become parameters (`{path}`, `{url}`, `{content}`, …) and the skill can **run itself**: matching later tasks execute the bound steps, then verify. Browser procedures that click named controls, roles, or CSS selectors (not snapshot ids like `e12`) promote as BrowserCode-style skills; snapshot/screenshot discovery is stripped so replay does not rediscover the page. Password-like fields become secret parameters with no stored examples and do not auto-run. Inspect, promote, enable, disable, or run from the **Memory** page, or via `/api/memory/trajectories`, `/api/memory/skills`, and `POST /api/memory/skills/{id}/run`.
 
 Hidden reasoning is never stored — only tool choices, outcomes, and error summaries.
 
-## Swarm placement (future P2+)
+## Swarm placement (P2 one-node)
 
-The current tool registry is process-local. `SWARM_ARCHITECTURE.md` requires future placement to keep **tool/worker selection** separate from **Node placement**. A software Worker or tool capability may advertise requirements (OS, GPU/VRAM, desktop session, local files, etc.); the Orchestrator then selects an eligible Node subject to role policy, resource budgets/leases, data locality, and current load.
+`GET /api/swarm` exposes Node identity, software Workers as services on eligible Nodes, and distinct Orchestrator vs Leader roles. The current tool registry remains process-local. `SWARM_ARCHITECTURE.md` requires placement to keep **tool/worker selection** separate from **Node placement**. A software Worker or tool capability may advertise requirements; the Orchestrator then selects an eligible Node.
 
-P2 must preserve current one-machine behavior: the only eligible Node may be `localhost`. P3 adds remote execution. Do not rename existing software workers to `SeniorWorker` / `JuniorWorker`; those labels are node execution classes in the swarm spec.
+P2 preserves current one-machine behavior: the only eligible Node is `localhost`. P3 adds remote execution. Do not rename existing software workers to `SeniorWorker` / `JuniorWorker`; those labels are node execution classes in the swarm spec.
 
 ## MCP
 

@@ -392,7 +392,7 @@ class InferenceManager:
             "quantization": self.state.quant or profile.quant,
             "profile": self.state.profile or profile.name,
             "context_size": self.state.context_size if self.state.loaded else _default_load_context(profile),
-            "context_cap": profile.context_size,
+            "context_cap": max((p.context_size for p in declared_profiles()), default=profile.context_size),
             "inference_backend": self.state.backend,
             "manages_process": self.state.manages_process,
             "gpu_layers": "auto (--fit on)" if settings.inference.fit else "99",
