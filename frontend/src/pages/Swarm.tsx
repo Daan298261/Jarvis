@@ -9,6 +9,8 @@ import {
   listSwarmNodes,
   listSwarmRoles,
   postSwarmPlacement,
+  postSwarmIntelligence,
+  postSwarmDispatch,
   putNodeBudget,
   putNodeRolePolicy,
   releaseNodeLease,
@@ -23,6 +25,8 @@ import {
   type SwarmNodeResources,
   type SwarmResourceAmounts,
   type SwarmPlacementResult,
+  type SwarmIntelligenceResult,
+  type SwarmDispatchResult,
   type SwarmRoleHolder,
   type SwarmRolePolicy,
   type SwarmRolesResponse,
@@ -158,6 +162,343 @@ function RoleCard({ title, holder }: { title: string; holder: SwarmRoleHolder | 
         </span>
         <b>Assignment</b><span>{holder.assignment}</span>
       </div>
+    </div>
+  )
+}
+
+function PlacementResultPanel({ result }: { result: SwarmPlacementResult }) {
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "12px 14px",
+        borderLeft: `4px solid ${result.accepted ? "var(--good)" : "var(--bad)"}`,
+        background: "var(--panel)",
+      }}
+    >
+      <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+        <strong>Placement</strong>
+        <span className={`badge ${result.accepted ? "completed" : "failed"}`}>
+          {result.accepted ? "Accepted" : "Rejected"}
+        </span>
+      </div>
+      {result.accepted ? (
+        <div className="kv">
+          <b>Reason</b><span>{result.reason}</span>
+          <b>Node</b>
+          <span>
+            <Link to={`/swarm/${result.node_id}`} className="stat">
+              {result.hostname || result.node_id}
+            </Link>
+            <span className="stat" style={{ marginLeft: 8 }}>{result.node_id}</span>
+          </span>
+          <b>Worker</b>
+          <span>
+            {result.worker.name} ({result.worker.kind}) ·{" "}
+            <span className={`badge ${workerStatusBadgeClass(result.worker.status)}`}>
+              {result.worker.status}
+            </span>
+            <span className="stat" style={{ marginLeft: 8 }}>{result.worker.id}</span>
+          </span>
+          {result.lease && (
+            <>
+              <b>Lease</b>
+              <span>
+                <span className={`badge ${leaseStatusBadgeClass(result.lease.status)}`}>
+                  {result.lease.status}
+                </span>
+                {" · "}
+                {formatLeaseClaim(result.lease.claim)}
+                <span className="stat" style={{ marginLeft: 8 }}>{result.lease.id}</span>
+              </span>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="kv">
+          <b>Code</b><span className="stat">{result.code}</span>
+          <b>Reason</b><span>{result.reason}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IntelligenceResultPanel({ result }: { result: SwarmIntelligenceResult }) {
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "12px 14px",
+        borderLeft: "4px solid var(--accent)",
+        background: "var(--panel)",
+      }}
+    >
+      <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+        <strong>Intelligence</strong>
+        <span className="badge completed">Preview</span>
+      </div>
+      <div className="kv">
+        <b>Task class</b><span>{result.task_class}</span>
+        <b>Worker kind</b><span>{result.worker_kind}</span>
+        <b>Capabilities</b><span>{result.capabilities.join(", ") || "—"}</span>
+        {result.worker_id && (
+          <>
+            <b>Worker ID</b><span className="stat">{result.worker_id}</span>
+          </>
+        )}
+        {result.model && (
+          <>
+            <b>Model</b><span>{result.model}</span>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function buildDispatchBody(
+  prompt: string,
+  taskClass: string,
+  executionMode: string,
+  role: string,
+  cpuThreads: string,
+  ramGb: string,
+  ttlSeconds: string,
+) {
+  if (!prompt.trim()) {
+    throw new Error("prompt is required")
+  }
+  const body: {
+    prompt: string
+    task_class?: string
+    execution_mode?: string
+    role?: string
+    claim?: { cpu_threads?: number; ram_gb?: number }
+    ttl_seconds?: number
+  } = { prompt: prompt.trim() }
+  if (taskClass.trim()) body.task_class = taskClass.trim()
+  if (executionMode.trim()) body.execution_mode = executionMode.trim()
+  if (role) body.role = role
+
+  const claim: { cpu_threads?: number; ram_gb?: number } = {}
+  if (cpuThreads.trim()) {
+    const value = Number(cpuThreads)
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error("cpu_threads must be a positive number")
+    }
+    claim.cpu_threads = value
+  }
+  if (ramGb.trim()) {
+    const value = Number(ramGb)
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error("ram_gb must be a positive number")
+    }
+    claim.ram_gb = value
+  }
+  if (Object.keys(claim).length) body.claim = claim
+
+  if (ttlSeconds.trim()) {
+    const ttl = Number(ttlSeconds)
+    if (!Number.isFinite(ttl) || ttl <= 0) {
+      throw new Error("ttl_seconds must be a positive number")
+    }
+    body.ttl_seconds = ttl
+  }
+  return body
+}
+
+function IntelligenceDispatchSection({
+  onDispatched,
+}: {
+  onDispatched: () => Promise<void>
+}) {
+  const [prompt, setPrompt] = useState("")
+  const [taskClass, setTaskClass] = useState("")
+  const [executionMode, setExecutionMode] = useState("")
+  const [role, setRole] = useState("")
+  const [cpuThreads, setCpuThreads] = useState("")
+  const [ramGb, setRamGb] = useState("")
+  const [ttlSeconds, setTtlSeconds] = useState("300")
+  const [submitting, setSubmitting] = useState<"intelligence" | "dispatch" | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [intelligenceResult, setIntelligenceResult] = useState<SwarmIntelligenceResult | null>(null)
+  const [dispatchResult, setDispatchResult] = useState<SwarmDispatchResult | null>(null)
+
+  async function handleIntelligence() {
+    setSubmitting("intelligence")
+    setSubmitError(null)
+    try {
+      const body = buildDispatchBody(
+        prompt,
+        taskClass,
+        executionMode,
+        role,
+        cpuThreads,
+        ramGb,
+        ttlSeconds,
+      )
+      const result = await postSwarmIntelligence(body)
+      setIntelligenceResult(result)
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Intelligence request failed")
+    } finally {
+      setSubmitting(null)
+    }
+  }
+
+  async function handleDispatch() {
+    setSubmitting("dispatch")
+    setSubmitError(null)
+    try {
+      const body = buildDispatchBody(
+        prompt,
+        taskClass,
+        executionMode,
+        role,
+        cpuThreads,
+        ramGb,
+        ttlSeconds,
+      )
+      const result = await postSwarmDispatch(body)
+      setDispatchResult(result)
+      if (result.placement.accepted) {
+        await onDispatched()
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Dispatch request failed")
+    } finally {
+      setSubmitting(null)
+    }
+  }
+
+  const busy = submitting != null
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h2 style={{ marginTop: 0 }}>Intelligence &amp; Dispatch</h2>
+      <p className="lede" style={{ margin: "0 0 12px" }}>
+        Preview <strong>what</strong> to run via <code>POST /api/swarm/intelligence</code>, or run
+        intelligence then placement via <code>POST /api/swarm/dispatch</code>.
+      </p>
+      {submitError && (
+        <p className="lede" style={{ margin: "0 0 10px", color: "var(--bad)" }}>
+          {submitError}
+        </p>
+      )}
+      <div className="grid" style={{ gap: 10, maxWidth: 520 }}>
+        <label className="row" style={{ alignItems: "flex-start", gap: 12 }}>
+          <span style={{ minWidth: 110, paddingTop: 8 }}>Prompt</span>
+          <textarea
+            value={prompt}
+            disabled={busy}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Describe the work to classify and place"
+            rows={3}
+            style={{ flex: 1, resize: "vertical" }}
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>Task class</span>
+          <input
+            type="text"
+            value={taskClass}
+            disabled={busy}
+            onChange={(e) => setTaskClass(e.target.value)}
+            placeholder="optional (auto-classified from prompt)"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>Execution mode</span>
+          <input
+            type="text"
+            value={executionMode}
+            disabled={busy}
+            onChange={(e) => setExecutionMode(e.target.value)}
+            placeholder="optional"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>Role</span>
+          <select value={role} disabled={busy} onChange={(e) => setRole(e.target.value)}>
+            <option value="">none</option>
+            {SWARM_ROLE_NAMES.map((value) => (
+              <option key={value} value={value}>{formatRoleLabel(value)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>CPU threads</span>
+          <input
+            type="number"
+            min={1}
+            value={cpuThreads}
+            disabled={busy}
+            onChange={(e) => setCpuThreads(e.target.value)}
+            placeholder="optional claim"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>RAM (GB)</span>
+          <input
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={ramGb}
+            disabled={busy}
+            onChange={(e) => setRamGb(e.target.value)}
+            placeholder="optional claim"
+          />
+        </label>
+        <label className="row" style={{ alignItems: "center", gap: 12 }}>
+          <span style={{ minWidth: 110 }}>TTL (seconds)</span>
+          <input
+            type="number"
+            min={1}
+            value={ttlSeconds}
+            disabled={busy}
+            onChange={(e) => setTtlSeconds(e.target.value)}
+          />
+        </label>
+        <div className="row" style={{ gap: 8 }}>
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={busy || !prompt.trim()}
+            onClick={handleIntelligence}
+          >
+            {submitting === "intelligence" ? "Previewing…" : "Preview intelligence"}
+          </button>
+          <button
+            className="btn secondary"
+            type="button"
+            disabled={busy || !prompt.trim()}
+            onClick={handleDispatch}
+          >
+            {submitting === "dispatch" ? "Dispatching…" : "Dispatch"}
+          </button>
+        </div>
+      </div>
+      {intelligenceResult && (
+        <div style={{ marginTop: 16 }}>
+          <div className="row" style={{ gap: 10, marginBottom: 4 }}>
+            <strong>Last intelligence</strong>
+          </div>
+          <IntelligenceResultPanel result={intelligenceResult} />
+        </div>
+      )}
+      {dispatchResult && (
+        <div style={{ marginTop: 16 }}>
+          <div className="row" style={{ gap: 10, marginBottom: 4 }}>
+            <strong>Last dispatch</strong>
+            <span className={`badge ${dispatchResult.placement.accepted ? "completed" : "failed"}`}>
+              {dispatchResult.placement.accepted ? "Accepted" : "Rejected"}
+            </span>
+          </div>
+          <IntelligenceResultPanel result={dispatchResult.intelligence} />
+          <PlacementResultPanel result={dispatchResult.placement} />
+        </div>
+      )}
     </div>
   )
 }
@@ -300,58 +641,14 @@ function PlacementSection({
         </div>
       </div>
       {result && (
-        <div
-          style={{
-            marginTop: 16,
-            padding: "12px 14px",
-            borderLeft: `4px solid ${result.accepted ? "var(--good)" : "var(--bad)"}`,
-            background: "var(--panel)",
-          }}
-        >
-          <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+        <div style={{ marginTop: 16 }}>
+          <div className="row" style={{ gap: 10, marginBottom: 4 }}>
             <strong>Last result</strong>
             <span className={`badge ${result.accepted ? "completed" : "failed"}`}>
               {result.accepted ? "Accepted" : "Rejected"}
             </span>
           </div>
-          {result.accepted ? (
-            <div className="kv">
-              <b>Reason</b><span>{result.reason}</span>
-              <b>Node</b>
-              <span>
-                <Link to={`/swarm/${result.node_id}`} className="stat">
-                  {result.hostname || result.node_id}
-                </Link>
-                <span className="stat" style={{ marginLeft: 8 }}>{result.node_id}</span>
-              </span>
-              <b>Worker</b>
-              <span>
-                {result.worker.name} ({result.worker.kind}) ·{" "}
-                <span className={`badge ${workerStatusBadgeClass(result.worker.status)}`}>
-                  {result.worker.status}
-                </span>
-                <span className="stat" style={{ marginLeft: 8 }}>{result.worker.id}</span>
-              </span>
-              {result.lease && (
-                <>
-                  <b>Lease</b>
-                  <span>
-                    <span className={`badge ${leaseStatusBadgeClass(result.lease.status)}`}>
-                      {result.lease.status}
-                    </span>
-                    {" · "}
-                    {formatLeaseClaim(result.lease.claim)}
-                    <span className="stat" style={{ marginLeft: 8 }}>{result.lease.id}</span>
-                  </span>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="kv">
-              <b>Code</b><span className="stat">{result.code}</span>
-              <b>Reason</b><span>{result.reason}</span>
-            </div>
-          )}
+          <PlacementResultPanel result={result} />
         </div>
       )}
     </div>
@@ -967,6 +1264,12 @@ export function SwarmPage() {
         )}
       </div>
       <RolesSection roles={roles} error={rolesError} loading={loading} />
+      <IntelligenceDispatchSection
+        onDispatched={async () => {
+          await refreshList()
+          if (nodeId) await loadDetail(nodeId)
+        }}
+      />
       <PlacementSection
         onPlaced={async () => {
           await refreshList()
