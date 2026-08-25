@@ -1,8 +1,64 @@
 # AGENTS.md
 
-Read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) before making substantial changes. It is the persistent architecture, current state, and development queue.
+Instructions for **Cursor cloud workers** and other automated agents working in this repo.
 
-## Cursor Cloud specific instructions
+## Before you write code
+
+1. Read **[`docs/PROCESS.md`](docs/PROCESS.md)** — the one-ticket development loop (mandatory).
+2. Read your **named ticket**:
+   - an RFC under [`docs/rfcs/`](docs/rfcs/), **or**
+   - **one** item in [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) §58 Development Queue.
+3. Skim [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) for architecture context only. **Do not** re-audit the tree or rewrite §57 Current State unless your ticket requires updating specific bullets for work you just merged.
+
+### Launch prompt must name exactly one ticket
+
+Good:
+
+> Implement `docs/rfcs/0003-example.md`. Branch from `cursor/local-qwen-desktop-agent`. PR against that branch.
+
+Bad (forbidden):
+
+> Continue Jarvis development / pick up priority tasks / merge all PRs / audit and update the master plan
+
+## Implement
+
+| Step | Action |
+| --- | --- |
+| Base branch | `cursor/local-qwen-desktop-agent` (not `main`) |
+| New branch | `cursor/<short-slug>-99ea` |
+| Scope | One RFC or one queue item only |
+| Tests | `python3 -m pytest` |
+| Frontend | `npm --prefix frontend run build` (and `lint` if TS changed) |
+| Docs | Update **only** matching lines in master plan §57–58 (and §59 if a durable decision) |
+| PR target | `cursor/local-qwen-desktop-agent` |
+
+### Model selection (Cursor cloud)
+
+- **Default:** Composer 2.5 **standard** (not Fast) — cost control.
+- **Grok 4.6:** only when the ticket explicitly calls for a hard problem; use sparingly.
+
+### What cloud VMs cannot sign off
+
+Linux cloud agents have **no GPU** and **no Windows desktop tools**. You **cannot** verify:
+
+- Live Qwen 9B / 27B GGUF load and tool-calling
+- `tests/run_e2e.py` or `tests/smoke_task.py`
+- Live harness tok/s / VRAM measurements
+- Office / pywinauto automation
+
+Implement and unit-test; leave P0 live-model items as `TODO` / desktop sign-off in the PR.
+
+### Do not
+
+- Merge unrelated PRs (see superseded list in `docs/PROCESS.md`; **PR #25 is closed — do not merge**)
+- Rewrite `JARVIS_MASTER_PLAN.md` wholesale or paste large design specs into it
+- Start swarm / Browser Use / P4–P5 / model-stack work unless that is the named ticket
+
+Design work belongs in **`docs/rfcs/`** ([template](docs/rfcs/TEMPLATE.md)).
+
+---
+
+## Cursor Cloud environment
 
 ### GitHub repository mapping
 
