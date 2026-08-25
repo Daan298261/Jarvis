@@ -38,6 +38,20 @@ Default Leader port is whatever the Leader actually uses (`settings.bind_port`, 
 
 `GET /api/mobile` remains public enough to show LAN URLs and install hints. It must never leak the private key.
 
+## 1.1 Link device (start of pairing)
+
+When the user starts **linking a mobile device** (portal or `/phone`):
+
+1. **Ask for login / pairing then** — paste or confirm the existing private key on the phone. Do not skip pairing because the device is on LAN.
+2. **Explain off-LAN:** reaching Jarvis from cellular may require exposing the Leader API to the internet (one forwarded port, still private-key gated).
+3. **User chooses how WAN is set up:**
+   - they configure port-forward / overlay themselves, or
+   - Jarvis does it if they **supply router admin passwords** and run the AI-guided brand-agnostic walkthrough in §3.
+4. **Explain reuse:** router access granted here can later be used by the **home-network blue-team agent** (`BLUE_TEAM.md`) to read router logs and apply user-confirmed isolation on the user’s own LAN. Same secret store, same attended policy. Not a second login product.
+5. **Credentials:** local secret storage on the Windows Leader only (never git, never logs, never chat, never the Jarvis room).
+
+LAN-only linking is valid: skip WAN/router steps if the user stays on the home Wi-Fi.
+
 ## 2. Reachability: LAN first, then WAN
 
 On the home LAN the phone already opens `http://<leader-lan-ip>:<port>/phone` when LAN access is enabled.
@@ -130,6 +144,7 @@ Leader stays the Windows desktop. The phone does not run the model, tools, or sw
 
 ## 7. Acceptance (when implemented)
 
+- [ ] Link-device flow asks for pairing, explains WAN exposure, offers self-setup vs Jarvis-with-router-password, and notes later blue-team reuse of router access
 - [ ] Same `/phone` client (PWA/TWA/WebView) talks to the Leader API with the existing private key
 - [ ] `GET /api/mobile` still does not include the private key
 - [ ] UPnP/IGD attempted first; no password if it succeeds
@@ -146,7 +161,7 @@ Leader stays the Windows desktop. The phone does not run the model, tools, or sw
 
 Items in `JARVIS_MASTER_PLAN.md` §§1–63 that have **no Development Queue line** and are **not** covered by `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, or this Android spec. Do not invent product areas beyond that plan.
 
-Covered elsewhere (not gaps): core/portal/tools, verification/recovery/modes, skills/trajectory/best-of-N, Office, optional workers, voice, Phone PWA, LAN inference, swarm P2, P4/P5 headings, this Android client, lazy mmproj (queue overlay).
+Covered elsewhere (not gaps): core/portal/tools, verification/recovery/modes, skills/trajectory/best-of-N, Office, optional workers, voice, Phone PWA, LAN inference, swarm P2, P4/P5 headings, this Android client, home IoT, blue team, Jarvis 2.0 (`JARVIS_2.0.md`), lazy mmproj (queue overlay).
 
 | Plan section | Gap | Notes |
 | --- | --- | --- |
@@ -162,4 +177,4 @@ Covered elsewhere (not gaps): core/portal/tools, verification/recovery/modes, sk
 
 P4/P5 remain specified in `ADAPTIVE_DOMAIN_ARCHITECTURE.md` (Founder OS patterns from https://github.com/thecloudtips/founder-os translated into native Jarvis concepts; **not** a runtime dependency). Nothing in P4/P5 is implemented.
 
-Jarvis 2.0 Away Mode (§§64–85) stays out of the master spec (deferred; git history only).
+Jarvis 2.0 Away Mode is specified in `JARVIS_2.0.md` (approved sections 64–85). It is not current-session P0 unless the queue promotes an item.
