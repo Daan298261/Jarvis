@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.agent.compaction import WORKING_STATE_MARKER, compact_history
 from app.agent.planning import WorkingState
 from app.inference.backends import normalize_chat_messages
 from app.providers.base import ChatMessage
+
+
+def _voice_worker():
+    from app.api.voice import get_voice_status  # noqa: F401 - prime import graph
+
+    import app.workers.voice as voice_worker
+
+    return voice_worker
 
 
 def test_normalize_chat_messages_merges_system_blocks_to_front():
@@ -41,7 +51,7 @@ def test_normalize_chat_messages_preserves_non_system_order():
 
 
 def test_voice_status_includes_install_hint(monkeypatch):
-    import app.workers.voice as voice_worker
+    voice_worker = _voice_worker()
 
     monkeypatch.setattr(voice_worker, "stt_backend", lambda: "faster-whisper")
     monkeypatch.setattr(voice_worker, "tts_backend", lambda: "sapi")
@@ -52,7 +62,7 @@ def test_voice_status_includes_install_hint(monkeypatch):
 
 
 def test_voice_status_windows_sapi_ready(monkeypatch):
-    import app.workers.voice as voice_worker
+    voice_worker = _voice_worker()
 
     monkeypatch.setattr(voice_worker, "stt_backend", lambda: "windows-sapi")
     monkeypatch.setattr(voice_worker, "tts_backend", lambda: "sapi")
@@ -64,9 +74,46 @@ def test_voice_status_windows_sapi_ready(monkeypatch):
     assert status["ffmpeg_available"] is True
 
 
+def test_stt_backend_falls_back_to_windows_sapi_without_whisper_model(monkeypatch, tmp_path):
+    voice_worker = _voice_worker()
+
+    def module_available(name: str) -> bool:
+        return name == "faster_whisper"
+
+    monkeypatch.setattr(voice_worker, "local_whisper_model", lambda: None)
+    monkeypatch.setattr(voice_worker, "_module_available", module_available)
+    monkeypatch.setattr(voice_worker.sys, "platform", "win32")
+    assert voice_worker.stt_backend() == "windows-sapi"
+
+    model = tmp_path / "ggml-base.bin"
+    model.write_bytes(b"fake")
+    monkeypatch.setattr(voice_worker, "local_whisper_model", lambda: model)
+    assert voice_worker.stt_backend() == "faster-whisper"
+
+    monkeypatch.setattr(voice_worker, "local_whisper_model", lambda: None)
+    monkeypatch.setattr(voice_worker.sys, "platform", "linux")
+    assert voice_worker.stt_backend() == "faster-whisper"
+
+
+def test_temp_path_closes_mkstemp_fd(monkeypatch):
+    voice_worker = _voice_worker()
+
+    closed: list[int] = []
+
+    def fake_mkstemp(suffix: str = ".wav"):
+        return 7, "/tmp/jarvis-voice-test.wav"
+
+    monkeypatch.setattr(voice_worker.tempfile, "mkstemp", fake_mkstemp)
+    monkeypatch.setattr(voice_worker.os, "close", lambda fd: closed.append(fd))
+
+    path = voice_worker._temp_path(".wav")
+    assert path == Path("/tmp/jarvis-voice-test.wav")
+    assert closed == [7]
+
+
 @pytest.mark.asyncio
 async def test_transcribe_audio_reports_missing_stt(monkeypatch):
-    import app.workers.voice as voice_worker
+    voice_worker = _voice_worker()
 
     monkeypatch.setattr(
         voice_worker,

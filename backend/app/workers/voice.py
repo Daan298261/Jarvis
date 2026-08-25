@@ -73,8 +73,14 @@ def _find_ffmpeg() -> str | None:
     return None
 
 
+def _temp_path(suffix: str = ".wav") -> Path:
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    return Path(path)
+
+
 def stt_backend() -> str | None:
-    if _module_available("faster_whisper"):
+    if local_whisper_model() is not None and _module_available("faster_whisper"):
         return "faster-whisper"
     if sys.platform == "win32":
         return "windows-sapi"
@@ -82,6 +88,8 @@ def stt_backend() -> str | None:
         return "whisper.cpp"
     if _module_available("whisper"):
         return "openai-whisper"
+    if _module_available("faster_whisper"):
+        return "faster-whisper"
     return None
 
 
@@ -413,7 +421,7 @@ async def synthesize_speech(text: str) -> bytes:
 
 
 async def _speak_sapi(text: str) -> bytes:
-    out = Path(tempfile.mkstemp(suffix=".wav")[1])
+    out = _temp_path(".wav")
     escaped = text.replace("'", "''")
     script = (
         "Add-Type -AssemblyName System.Speech; "
@@ -443,7 +451,7 @@ async def _speak_sapi(text: str) -> bytes:
 
 async def _speak_espeak(text: str, binary_name: str) -> bytes:
     binary = shutil.which(binary_name) or binary_name
-    out = Path(tempfile.mkstemp(suffix=".wav")[1])
+    out = _temp_path(".wav")
     proc = await asyncio.create_subprocess_exec(
         binary,
         "-w",
@@ -466,7 +474,7 @@ async def _speak_espeak(text: str, binary_name: str) -> bytes:
 def _speak_pyttsx3(text: str) -> bytes:
     import pyttsx3
 
-    out = Path(tempfile.mkstemp(suffix=".wav")[1])
+    out = _temp_path(".wav")
     engine = pyttsx3.init()
     engine.save_to_file(text, str(out))
     engine.runAndWait()
