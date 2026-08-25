@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ..config import load_settings, save_settings
+from ..inference.backends import suggested_port
 from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -26,6 +27,8 @@ class SettingsUpdate(BaseModel):
     inference_backend: str | None = None
     inference_host: str | None = None
     inference_port: int | None = None
+    inference_api_key: str | None = None
+    inference_remote_model: str | None = None
     browser_headless: bool | None = None
     vision_mode: str | None = None
 
@@ -75,10 +78,16 @@ async def update_settings(body: SettingsUpdate):
         settings.execution_mode = body.execution_mode
     if body.inference_backend is not None:
         settings.inference.backend = body.inference_backend
+        if body.inference_port is None:
+            settings.inference.port = suggested_port(body.inference_backend, settings.inference.port)
     if body.inference_host is not None:
         settings.inference.host = body.inference_host
     if body.inference_port is not None:
         settings.inference.port = body.inference_port
+    if body.inference_api_key is not None:
+        settings.inference.api_key = body.inference_api_key
+    if body.inference_remote_model is not None:
+        settings.inference.remote_model = body.inference_remote_model
     if body.browser_headless is not None:
         settings.browser.headless = body.browser_headless
     if body.vision_mode is not None:

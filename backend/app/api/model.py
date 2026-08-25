@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from ..agent.agent_benchmark import TaskMetrics, build_report, list_suite, record_result, suite_coverage
 from ..config import load_settings, save_settings
-from ..hardware import detect_hardware
+from ..inference.backends import probe_remote_server
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
 from ..inference.harness import HARNESS_CASES, run_harness
 from ..inference.manager import MANAGER
@@ -44,6 +44,24 @@ async def model_status():
     snapshot["harness_cases"] = list(HARNESS_CASES)
     snapshot["primary_metric"] = "successful autonomous tasks per wall-clock minute"
     return snapshot
+
+
+@router.get("/probe")
+async def probe_inference():
+    settings = load_settings()
+    probe = await probe_remote_server(
+        settings.inference.host,
+        settings.inference.port,
+        settings.inference.api_key,
+        timeout=8,
+    )
+    return {
+        "backend": settings.inference.backend,
+        "host": settings.inference.host,
+        "port": settings.inference.port,
+        "base_url": f"http://{settings.inference.host}:{settings.inference.port}/v1",
+        **probe,
+    }
 
 
 @router.get("/benchmarks")

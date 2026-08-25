@@ -17,7 +17,8 @@
     "cache_type_v": "q8_0",
     "threads": 0,
     "auto_load": true,
-    "vision": "lazy"
+    "api_key": "",
+    "remote_model": ""
   },
   "autonomy": "trusted",
   "professional_mode": false,

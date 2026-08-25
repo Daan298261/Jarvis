@@ -65,6 +65,12 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
     "python": (
         Alternative("terminal", "run the interpreter or tool directly and read stderr"),
         Alternative("filesystem", "inspect the inputs before running code again"),
+        Alternative("code_worker", "delegate a larger coding job to Open Interpreter when it is installed"),
+    ),
+    "code_worker": (
+        Alternative("python", "write and run the script with the native python tool"),
+        Alternative("terminal", "run the commands directly"),
+        Alternative("filesystem", "inspect or edit the files yourself"),
     ),
     "docker": (
         Alternative("terminal", "run the process locally; Docker may not be installed"),

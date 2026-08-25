@@ -13,12 +13,12 @@ Browser (localhost:4780)
 FastAPI backend / Orchestrator
   ├── Task store (SQLite)
   ├── Agent runtime (plan → act → observe → recover → verify)
-  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP)
+  ├── Tool registry (filesystem, terminal, python, browser, desktop, office, git, docker, web_fetch, screenshot, MCP, code_worker)
   └── Model provider interface
             │  OpenAI-compatible HTTP
             ▼
-llama-server (localhost:8088)
-  Qwen3.5-27B GGUF; mmproj loaded lazily when a screenshot needs interpreting
+llama-server (localhost:8088)  or  LAN GPU / Ollama / LM Studio / vLLM / SGLang
+  Qwen3.5-27B GGUF + mmproj     or  whatever that server advertises
 ```
 
 Today the host PC implicitly performs every physical role. Swarm work must refactor that assumption incrementally rather than replace the working control plane.
@@ -55,7 +55,11 @@ Adding another machine later should extend the registry/placement choices, not r
 
 `backend/app/providers/base.py` defines `ModelProvider`. The built-in `OpenAICompatProvider` can talk to local llama.cpp or another OpenAI-compatible endpoint. Server lifecycle is abstracted separately through inference backends.
 
-Swarm architecture does not replace this abstraction. An inference endpoint becomes one capability exposed by a Node/Worker; physical node identity, resource policy, and placement remain separate concepts.
+- local llama.cpp
+- another machine on the LAN
+- a dedicated multi-GPU server
+
+Swap by pointing `inference.host`/`port` at any OpenAI-compatible `/v1` endpoint, or pick `ollama` / `lmstudio` / `vllm` / `sglang` / `remote` on Settings. `GET /api/model/probe` lists advertised models. No agent code changes.
 
 ## Agent lifecycle
 
@@ -81,7 +85,7 @@ Older tool traces are compacted so long tasks do not continually resend raw hist
 
 These systems remain Orchestrator-owned when Workers become remote. A remote Worker may report execution evidence, but the Orchestrator retains task state and final verification authority unless a later explicit architecture decision changes that boundary.
 
-## Intelligence and software-development workers
+`trajectories` records how each task actually went; `skills` holds workflows that succeeded repeatedly with the same tool sequence. Parameterized skills execute their bound tool steps instead of only injecting advice. Repeated stable browser procedures become BrowserCode-style skills. Both are injected into the system prompt of similar later tasks. See `TOOLS.md`.
 
 Live model timings (tok/s, VRAM, RAM, load time) and task success rates are persisted in `benchmark_samples` and shown on the Model page. llama.cpp starts without the vision projector unless vision mode is `always` or a screenshot is attached. Balanced/Quality profiles keep the reasoning parser available and toggle `enable_thinking` per turn.
 

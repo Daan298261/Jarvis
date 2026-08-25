@@ -115,6 +115,54 @@ export function SettingsPage() {
       </div>
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Inference server</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Local llama.cpp is started by Jarvis. A dedicated LAN GPU box, LM Studio, Ollama, vLLM, or SGLang is health-checked only — point host/port at its OpenAI-compatible <code>/v1</code> endpoint.
+        </p>
+        <label>Backend
+          <select value={settings.inference?.backend || "llama.cpp"} onChange={(e) => save({ inference_backend: e.target.value })}>
+            <option value="llama.cpp">llama.cpp (this PC)</option>
+            <option value="remote">Remote OpenAI-compatible</option>
+            <option value="ollama">Ollama</option>
+            <option value="lmstudio">LM Studio</option>
+            <option value="vllm">vLLM</option>
+            <option value="sglang">SGLang</option>
+          </select>
+        </label>
+        <label>Host
+          <input
+            value={settings.inference?.host || "127.0.0.1"}
+            onBlur={(e) => save({ inference_host: e.target.value.trim() || "127.0.0.1" })}
+            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, host: e.target.value } })}
+          />
+        </label>
+        <label>Port
+          <input
+            type="number"
+            value={settings.inference?.port || 8088}
+            onChange={(e) => save({ inference_port: Number(e.target.value) })}
+          />
+        </label>
+        <label>Remote model name (optional)
+          <input
+            value={settings.inference?.remote_model || ""}
+            placeholder="Leave blank to use the first advertised model"
+            onBlur={(e) => save({ inference_remote_model: e.target.value.trim() })}
+            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, remote_model: e.target.value } })}
+          />
+        </label>
+        <label>Inference API key (optional)
+          <input
+            type="password"
+            value={settings.inference?.api_key || ""}
+            placeholder="Usually empty for llama.cpp"
+            onBlur={(e) => save({ inference_api_key: e.target.value })}
+            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, api_key: e.target.value } })}
+          />
+        </label>
+      </div>
+
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
         <h2>Core Execution</h2>
         <label>Autonomy
           <select value={settings.autonomy} onChange={(e) => save({ autonomy: e.target.value })}>

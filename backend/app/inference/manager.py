@@ -10,7 +10,7 @@ import psutil
 
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
-from .backends import InferenceBackend, resolve_backend
+from .backends import InferenceBackend, probe_remote_server, resolve_backend
 from .profiles import ModelProfile, model_paths, resolve_profile
 from .vision import with_vision
 
@@ -49,7 +49,9 @@ class InferenceState:
     ram_used_gb: float | None = None
     last_error: str = ""
     llama_version: str = ""
-    vision: bool = False
+    advertised_models: list[str] | None = None
+    health_path: str = ""
+    remote_model: str = ""
 
 
 def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
@@ -88,22 +90,25 @@ class InferenceManager:
     def base_url(self, settings: AppSettings) -> str:
         return f"http://{settings.inference.host}:{settings.inference.port}/v1"
 
-    def _vision_requested(self, settings: AppSettings, vision: bool | None) -> bool:
-        mode = (settings.inference.vision_mode or "lazy").strip().lower()
-        if mode in {"off", "never", "disabled"}:
-            return False
-        if vision is not None:
-            return bool(vision)
-        return mode in {"always", "on"}
+    def provider_model(self, settings: AppSettings, advertised: list[str] | None = None) -> str:
+        chosen = (settings.inference.remote_model or "").strip()
+        if chosen:
+            return chosen
+        if advertised:
+            return advertised[0]
+        return "Qwen3.5-27B"
 
-    async def load(
-        self,
-        settings: AppSettings,
-        profile_name: str | None = None,
-        *,
-        context_size: int | None = None,
-        vision: bool | None = None,
-    ) -> InferenceState:
+    def provider_api_key(self, settings: AppSettings) -> str:
+        return (settings.inference.api_key or "").strip() or "local"
+
+    def _make_provider(self, settings: AppSettings, advertised: list[str] | None = None) -> OpenAICompatProvider:
+        return OpenAICompatProvider(
+            self.base_url(settings),
+            api_key=self.provider_api_key(settings),
+            model=self.provider_model(settings, advertised),
+        )
+
+    async def load(self, settings: AppSettings, profile_name: str | None = None) -> InferenceState:
         async with self._lock:
             return await self._load_locked(
                 settings,
@@ -131,11 +136,28 @@ class InferenceManager:
                 )
             if not (self.backend and self.backend.manages_process):
                 return self.state
-            need_context = bool(context_size and context_size > (self.state.context_size or 0))
-            need_vision = bool(vision and not self.state.vision_loaded)
-            profile = resolve_profile(profile_name or self.state.profile or settings.inference.profile)
-            need_profile = profile.name != self.state.profile
-            if not (need_context or need_vision or need_profile):
+
+            self._apply_profile_state(settings, profile, backend, model, paths)
+
+            advertised: list[str] = []
+            # Adopt a server that is already answering when we did not start one.
+            probe = await probe_remote_server(
+                settings.inference.host,
+                settings.inference.port,
+                settings.inference.api_key,
+                timeout=6,
+            )
+            already_running = (self.backend is None or self.backend.pid is None) and bool(probe.get("ok"))
+            if already_running:
+                advertised = list(probe.get("models") or [])
+                self._record_probe(probe, settings)
+                self.backend = backend
+                self.backend.last_probe = probe
+                self.provider = self._make_provider(settings, advertised)
+                self.state.loaded = True
+                self.state.loading = False
+                self.state.pid = backend.pid
+                await self.refresh_resources()
                 return self.state
             effective_ctx = max(int(context_size or 0), int(self.state.context_size or 0)) or None
             return await self._load_locked(
@@ -195,10 +217,30 @@ class InferenceManager:
         already_running = (self.backend is None or self.backend.pid is None) and await existing.health()
         if already_running:
             self.backend = backend
-            self.provider = existing
+            self.state.loading = True
+            self.state.last_error = ""
+            started = time.time()
+
+            ready = await backend.start(profile, timeout=300)
+            if not ready and backend.manages_process:
+                # Most first-load failures on a 16 GB card are context pressure.
+                fallback = _with_context(profile, 16384)
+                ready = await backend.start(fallback, timeout=240)
+                if ready:
+                    self.state.context_size = fallback.context_size
+            self.state.pid = backend.pid
+            if not ready:
+                self.state.loading = False
+                self.state.last_error = f"{backend.name} did not become ready"
+                detail = f". See {logs_dir() / 'llama-server.log'}" if backend.manages_process else f" at {self.base_url(settings)}"
+                raise RuntimeError(self.state.last_error + detail)
+
+            advertised = list((backend.last_probe or {}).get("models") or [])
+            self._record_probe(backend.last_probe or {}, settings)
             self.state.loaded = True
             self.state.loading = False
-            self.state.pid = backend.pid
+            self.state.load_time_seconds = round(time.time() - started, 2)
+            self.provider = self._make_provider(settings, advertised)
             await self.refresh_resources()
             return self.state
 
@@ -263,6 +305,12 @@ class InferenceManager:
         self.state.context_size = int(context_size or profile.context_size)
         self.state.backend = backend.name
         self.state.manages_process = backend.manages_process
+        self.state.remote_model = settings.inference.remote_model
+
+    def _record_probe(self, probe: dict[str, Any], settings: AppSettings) -> None:
+        self.state.advertised_models = list(probe.get("models") or [])
+        self.state.health_path = str(probe.get("health_path") or "")
+        self.state.remote_model = self.provider_model(settings, self.state.advertised_models)
 
     async def unload(self) -> InferenceState:
         async with self._lock:
@@ -308,7 +356,7 @@ class InferenceManager:
             "loaded": self.state.loaded,
             "loading": self.state.loading,
             "healthy": healthy,
-            "active_model": "Qwen3.5-27B" if self.state.loaded else None,
+            "active_model": (self.provider.model if self.provider else self.provider_model(settings, self.state.advertised_models)) if self.state.loaded else None,
             "official_model": "Qwen/Qwen3.5-27B",
             "quantization": self.state.quant or profile.quant,
             "profile": self.state.profile,
@@ -321,6 +369,10 @@ class InferenceManager:
             "host": settings.inference.host,
             "port": settings.inference.port,
             "base_url": self.base_url(settings),
+            "advertised_models": self.state.advertised_models or [],
+            "health_path": self.state.health_path,
+            "remote_model": self.state.remote_model or settings.inference.remote_model,
+            "api_key_configured": bool((settings.inference.api_key or "").strip()),
             "vram_used_mib": self.state.vram_used_mib,
             "ram_used_gb": self.state.ram_used_gb,
             "tokens_per_second": self.state.generation_tps,

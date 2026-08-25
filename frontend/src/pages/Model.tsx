@@ -43,10 +43,14 @@ type ModelStatus = {
   load_time_seconds?: number
   loaded?: boolean
   loading?: boolean
-  thinking?: boolean
-  thinking_mode?: string
-  vision_mode?: string
-  vision_loaded?: boolean
+  host?: string
+  port?: number
+  base_url?: string
+  advertised_models?: string[]
+  health_path?: string
+  remote_model?: string
+  api_key_configured?: boolean
+  last_error?: string
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
   harness_cases?: { profile: string; context_size: number; vision: boolean; thinking: string }[]
@@ -61,7 +65,7 @@ function pct(value: number | null | undefined) {
 export function ModelPage() {
   const [model, setModel] = useState<ModelStatus | null>(null)
   const [busy, setBusy] = useState(false)
-  const [harness, setHarness] = useState<{ cases: HarnessCase[]; warning?: string; live?: boolean; measured_cases?: number; skipped_cases?: number } | null>(null)
+  const [probe, setProbe] = useState<any>(null)
 
   async function refresh() {
     setModel(await api("/api/model"))
@@ -88,14 +92,10 @@ export function ModelPage() {
     }
   }
 
-  async function runHarness() {
+  async function runProbe() {
     setBusy(true)
     try {
-      const report = await api<{ cases: HarnessCase[]; warning?: string; live?: boolean; measured_cases?: number; skipped_cases?: number }>(
-        "/api/model/benchmarks/run",
-        { method: "POST", body: JSON.stringify({ live: false }) },
-      )
-      setHarness(report)
+      setProbe(await api("/api/model/probe"))
       await refresh()
     } finally {
       setBusy(false)
@@ -108,7 +108,7 @@ export function ModelPage() {
   return (
     <div>
       <h1>Model</h1>
-      <p className="lede">Local Qwen3.5-27B served by llama.cpp. Thinking is selective (planning/recovery, not every tool call). Vision and 32K context stay off until the task needs them.</p>
+      <p className="lede">Local Qwen3.5-27B served by llama.cpp, or any OpenAI-compatible server on this machine or the LAN. Profiles change quantization and thinking mode for local loads. Benchmarks persist tok/s, VRAM, RAM, and task success so you can compare loads over time.</p>
       <div className="grid two">
         <div className="card">
           <div className="kv">
@@ -118,6 +118,10 @@ export function ModelPage() {
             <b>Thinking</b><span>{model?.thinking_mode || (model?.thinking ? "selective" : "off")}</span>
             <b>Vision</b><span>{model?.vision_loaded ? "loaded" : (model?.vision_mode || "lazy")}</span>
             <b>Backend</b><span>{model?.inference_backend}</span>
+            <b>Endpoint</b><span>{model?.host ? `${model.host}:${model.port}` : "n/a"}</span>
+            <b>Remote model</b><span>{model?.remote_model || "default"}</span>
+            <b>Advertised</b><span>{(model?.advertised_models || []).join(", ") || "n/a"}</span>
+            <b>Health path</b><span>{model?.health_path || "n/a"}</span>
             <b>GPU layers</b><span>{model?.gpu_layers}</span>
             <b>VRAM</b><span>{model?.vram_used_mib ? `${model.vram_used_mib} MiB` : "n/a"}</span>
             <b>RAM</b><span>{model?.ram_used_gb ? `${model.ram_used_gb} GB` : "n/a"}</span>
@@ -138,8 +142,13 @@ export function ModelPage() {
             <button className="btn" disabled={busy} onClick={() => load("quality")}>Quality</button>
             <button className="btn secondary" disabled={busy} onClick={() => api("/api/model/unload", { method: "POST" }).then(refresh)}>Unload</button>
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
-            <button className="btn secondary" disabled={busy} onClick={runHarness}>Run local harness</button>
+            <button className="btn secondary" disabled={busy} onClick={runProbe}>Probe server</button>
           </div>
+          {probe && (
+            <p className="lede" style={{ marginTop: 12 }}>
+              Probe: {probe.ok ? "reachable" : "unreachable"} {probe.health_path || probe.error} {(probe.models || []).join(", ")}
+            </p>
+          )}
           <p className="lede" style={{ marginTop: 16 }}>
             Fast: thinking off, 8K–16K context, vision lazy.<br />
             Balanced: selective thinking, 16K typical / 32K cap.<br />

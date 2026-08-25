@@ -21,7 +21,7 @@ FastAPI (backend/app)
             ▼
 InferenceBackend
   ├── llama.cpp — Jarvis starts llama-server (localhost:8088)
-  └── remote — health-check only (LM Studio, Ollama, vLLM, SGLang, LAN GPU)
+  └── remote / ollama / lmstudio / vllm / sglang — probe only (LAN GPU box, LM Studio, Ollama, vLLM, SGLang)
 ```
 
 The React portal is built into `frontend/dist` and served by FastAPI so operators have a single local URL. Vite is for development only.
@@ -54,12 +54,13 @@ backend/app/
     policy.py             Professional analysis vs operational authorization
   inference/
     manager.py            Load/unload, adopt already-running server
-    backends.py           LlamaCppBackend vs RemoteOpenAICompatibleBackend; mmproj is opt-in
+    backends.py           LlamaCppBackend, Ollama/LM Studio/vLLM/SGLang, remote probe
     profiles.py           fast / balanced / quality GGUF profiles
     harness.py            Local benchmark matrix (context/vision/thinking); dry-run without GPU
     benchmarks.py         Persist tok/s samples for the Model page
   providers/              OpenAI-compatible chat + tool-call parsing
-  tools/                  Native tools + MCP proxy; exposure.py is task-class subsets + request_capability
+  workers/                Optional Open Interpreter adapter
+  tools/                  Native tools + MCP proxy + code_worker
   db/                     SQLAlchemy models, aiosqlite session, light migrations
 frontend/src/
   App.tsx                 Routes: Command, Phone, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System
@@ -179,12 +180,7 @@ All JSON. When `auth_required` or `lan_access` is on, send `X-Jarvis-Key`, `Auth
 | GET | `/api/tasks/{id}/events` | SSE stream |
 | GET/POST | `/api/queue`, `/enqueue`, `/process` | File-drop queue |
 | GET | `/api/model` | Load state + available profiles |
-| GET | `/api/model/benchmarks` | Persisted tok/s samples + task outcomes |
-| POST | `/api/model/benchmarks/snapshot` | Record a timing snapshot |
-| GET | `/api/model/agent-benchmarks` | 20-task suite catalog + comparison report |
-| GET | `/api/model/agent-benchmarks/suite` | Catalog only |
-| POST | `/api/model/agent-benchmarks/results` | Record one suite run (live desktop fills this) |
-| GET | `/api/model/hardware-gate` | P0.12 purchase recommendation from measured samples |
+| GET | `/api/model/probe` | Reachability + advertised models for the configured inference host |
 | POST | `/api/model/load` | `{ profile? }` |
 | POST | `/api/model/unload` | Stop llama-server if Jarvis owns it |
 | GET | `/api/tools`, `/api/tools/catalog` | Registry + optional-worker + coding-worker catalog |
@@ -277,7 +273,7 @@ Keep the portal low-maintenance: Command is the main surface; History, Guide & W
 - `DELETE /api/workflows/{id}` — delete a saved preset only
 - `POST /api/workflows/run` — fill `{{parameter}}` placeholders, concatenate stages into one prompt, `AGENT.create_task(...)`
 
-Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `browser-extract`, `web-scrape-save`, `maintenance-job`. Placeholders use `{{key}}`. Running a workflow is still **one task**; stages are prompt structure, not separate orchestrator jobs.
+Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `browser-extract`, `browser-form`, `browser-procedure`, `web-scrape-save`, `maintenance-job`. Placeholders use `{{key}}`. Running a workflow is still **one task**; stages are prompt structure, not separate orchestrator jobs.
 
 ---
 
@@ -285,8 +281,10 @@ Builtin templates: `debug-project`, `research-spreadsheet`, `organize-files`, `b
 
 - Chat always goes through `ModelProvider` (`providers/base.py` → `OpenAICompatProvider`).
 - Process ownership belongs in `InferenceBackend`, not in the agent.
-- Local: `LlamaCppBackend.build_args` — `--jinja`, `--reasoning-format deepseek`, `--fit on` (or `--n-gpu-layers 99` if fit is off), `--mmproj` only when the loaded profile has `vision=True`.
-- Remote: `RemoteOpenAICompatibleBackend` only waits on `/health`. Aliases include `remote`, `lmstudio`, `ollama`, `vllm`, `sglang`, `openai-compatible`.
+- Local: `LlamaCppBackend.build_args` — `--jinja`, `--reasoning-format deepseek`, `--fit on` (or `--n-gpu-layers 99` if fit is off), optional `--mmproj`.
+- Remote: `RemoteOpenAICompatibleBackend` (and Ollama/LM Studio/vLLM/SGLang subclasses) probe `/health`, `/v1/models`, and `/api/tags`. Aliases include `remote`, `lmstudio`, `ollama`, `vllm`, `sglang`, `openai-compatible`.
+- Optional `inference.api_key` and `inference.remote_model`. `GET /api/model/probe` reports reachability and advertised models.
+- Switching backend from a stock port also sets that family's default port (Ollama 11434, LM Studio 1234, …).
 - Unknown backend name + non-localhost host is treated as remote.
 - `InferenceManager.load` will adopt a server that is already healthy so a second Jarvis process does not spawn another llama-server.
 
@@ -326,10 +324,12 @@ Current unit coverage (no GPU required):
 | `test_capabilities.py` | Catalog includes missing workers as unavailable |
 | `test_verification_loop.py` | Cannot complete without verification; Reliable needs a verify tool |
 | `test_compaction.py` | Tool results stay paired |
-| `test_inference_backends.py` | llama.cpp vs remote selection and CLI flags |
+| `test_inference_backends.py` | llama.cpp vs remote/Ollama/LM Studio selection, CLI flags, model-list parsing |
 | `test_recovery.py` / `test_recovery_loop.py` | Failure class → alternative tool |
 | `test_trajectory.py` | Record / recall |
-| `test_skills.py` | Promotion needs 3 repeats |
+| `test_skills.py` | Promotion needs 3 repeats; BrowserCode-style browser skills |
+| `test_workers.py` | Open Interpreter adapter / sandbox |
+| `test_docker.py` | `docker run` requires an image |
 | `test_auth.py` | 401 without key; header / bearer / query |
 | `test_queue.py` | File-drop watcher |
 
@@ -364,10 +364,9 @@ When you change agent/tool/API behavior, add or extend a unit test. Do not treat
 From the current master-plan state:
 
 - Best-of-N is planning-only in Reliable mode (three candidates, one executed). It is not a full multi-attempt retry
-- Skills execute bound parameterized steps after three matching successes (`POST /api/memory/skills/{id}/run`)
-- Browser Use, UFO, Cua, OpenHands, Open Interpreter adapters are catalogued as `not_integrated`
-- Whisper STT / local TTS are not wrapped around `/api/voice/command` (text intake only)
-- Phone/Android client is the `/phone` PWA + `GET /api/mobile`; there is no native APK
+- Browser Use, UFO, Cua, OpenHands adapters are catalogued as `not_integrated`
+- Open Interpreter is catalogued as `missing` until `open-interpreter` is installed; the adapter is present
+- Whisper STT / local TTS are not wrapped around `/api/voice/command`
 - Live Qwen e2e is a Windows-desktop concern; cloud/Linux sessions cannot sign it off
 
 ---

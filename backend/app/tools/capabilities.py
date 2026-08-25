@@ -5,8 +5,7 @@ import platform
 import shutil
 from typing import Any
 
-from ..config import load_settings
-from .browser_backends import browser_use_available
+from ..workers.code import open_interpreter_status
 
 
 def _module_available(name: str) -> bool:
@@ -129,14 +128,7 @@ def optional_workers() -> list[dict[str, Any]]:
             "status": "not_integrated",
             "detail": "Computer-use worker. Not required for Jarvis to run.",
         },
-        {
-            "id": "open-interpreter",
-            "name": "Open Interpreter",
-            "kind": "optional",
-            "available": False,
-            "status": "not_integrated",
-            "detail": "Optional code/shell worker behind an adapter.",
-        },
+        open_interpreter_status(),
         {
             "id": "openhands",
             "name": "OpenHands",

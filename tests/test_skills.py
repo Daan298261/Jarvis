@@ -194,3 +194,58 @@ async def test_matching_task_auto_executes_parameterized_skill(jarvis_env):
         any(getattr(message, "content", None) == VERIFY_PROMPT for message in call)
         for call in provider.calls
     )
+
+
+async def test_ephemeral_browser_clicks_are_not_promoted(jarvis_env):
+    for index in range(3):
+        await _completed_task(
+            index,
+            "publish the article on the cms",
+            "browser automation",
+            ["browser", "browser", "browser"],
+            [
+                {"action": "open", "url": "https://cms.example/login"},
+                {"action": "snapshot"},
+                {"action": "click", "selector": f"e{index + 12}"},
+            ],
+            prefix="eph",
+        )
+    assert await promote_from_trajectories() == []
+
+
+async def test_stable_browser_procedure_is_promoted_with_url_parameter(jarvis_env):
+    urls = [
+        "https://cms.example/posts/one",
+        "https://cms.example/posts/two",
+        "https://cms.example/posts/three",
+    ]
+    for index, url in enumerate(urls):
+        await _completed_task(
+            index,
+            f"publish weekly notes on {url}",
+            "browser automation",
+            ["browser", "browser", "browser"],
+            [
+                {"action": "open", "url": url},
+                {"action": "click", "name": "Publish"},
+                {"action": "type", "name": "Title", "text": f"Notes {index}"},
+            ],
+            prefix="bcode",
+        )
+
+    created = await promote_from_trajectories()
+    assert len(created) == 1
+    skill = created[0]
+    assert skill.origin == "browser_promoted"
+    params = json.loads(skill.parameters_json)
+    kinds = {item["name"]: item["kind"] for item in params if isinstance(item, dict)}
+    assert kinds.get("url") == "url"
+    steps = json.loads(skill.steps_json)
+    assert steps[0]["arguments"]["url"] == "{url}"
+    assert steps[1]["arguments"]["name"] == "Publish"
+
+    bound = bind_parameters(skill, "publish weekly notes on https://cms.example/posts/final")
+    assert bound is not None
+    assert bound["url"] == "https://cms.example/posts/final"
+    block = as_prompt_block([skill])
+    assert "BrowserCode-style" in block
