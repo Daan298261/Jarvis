@@ -362,8 +362,27 @@ class SwarmRole(Base):
     __tablename__ = "swarm_roles"
 
     role: Mapped[str] = mapped_column(String(32), primary_key=True)
-    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), index=True)
+    node_id: Mapped[str | None] = mapped_column(ForeignKey("nodes.id"), index=True, nullable=True)
     assignment: Mapped[str] = mapped_column(String(32), default="FORCED")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    node: Mapped[Node | None] = relationship()
+
+
+class NodeRolePolicy(Base):
+    """User intent for a (node, swarm role) pair.
+
+    Distinct from SwarmRole holders: policy records persist across restarts and
+    express AUTO/PREFERRED/FORCED/AVOID/DISABLED assignment levels.
+    """
+
+    __tablename__ = "node_role_policies"
+    __table_args__ = (UniqueConstraint("node_id", "role", name="uq_node_role_policy"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), index=True)
+    role: Mapped[str] = mapped_column(String(32))
+    policy: Mapped[str] = mapped_column(String(32), default="FORCED")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     node: Mapped[Node] = relationship()
