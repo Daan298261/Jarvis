@@ -8,6 +8,7 @@ import { ToolsPage } from "./pages/Tools"
 import { McpPage } from "./pages/Mcp"
 import { SettingsPage } from "./pages/Settings"
 import { SystemPage } from "./pages/System"
+import { SwarmPage } from "./pages/Swarm"
 import { WorkflowsPage } from "./pages/Workflows"
 import { PhonePage } from "./pages/Phone"
 import { api } from "./api"
@@ -53,6 +54,7 @@ export default function App() {
           <NavLink to="/mcp">MCP</NavLink>
           <NavLink to="/settings">Settings</NavLink>
           <NavLink to="/system">System</NavLink>
+          <NavLink to="/swarm">Swarm</NavLink>
         </nav>
         <div className="side-status">
           <div>
@@ -75,6 +77,8 @@ export default function App() {
           <Route path="/mcp" element={<McpPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/system" element={<SystemPage />} />
+          <Route path="/swarm" element={<SwarmPage />} />
+          <Route path="/swarm/:nodeId" element={<SwarmPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
