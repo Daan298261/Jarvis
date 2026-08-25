@@ -10,15 +10,11 @@ Jarvis is a local-first autonomous desktop AI agent intended to perform real wor
 
 This file remains the overall source of truth for priorities, current state, and development status. Detailed swarm requirements intentionally live in the separate [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md) specification so this master plan does not duplicate a large evolving subsystem design.
 
-<<<<<<< HEAD
 **P4/P5 adaptive intelligence and domain packs** live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file specifies resilient adaptive learning, domain packs, and business operating workflows translated from useful Founder OS patterns into native Jarvis abstractions. Do not start P4/P5 implementation ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it.
 
 Every development session must read this file before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`. Work touching execution eventing, confidence-gated memory, adaptive routing, workflow patterns, domain packs, or business operations must also read `ADAPTIVE_DOMAIN_ARCHITECTURE.md`.
-=======
-**Worker process (mandatory):** [`docs/PROCESS.md`](docs/PROCESS.md) and [`AGENTS.md`](AGENTS.md). Implement **one** RFC or **one** Development Queue item per session. New design goes in [`docs/rfcs/`](docs/rfcs/) — do not paste large spec updates into this file. Integration branch: `cursor/local-qwen-desktop-agent`.
 
-Every development session must read this file for architecture context before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`.
->>>>>>> 1aa09d1 (docs: encode one-ticket development process and RFC workflow)
+**Worker process (mandatory):** [`docs/PROCESS.md`](docs/PROCESS.md) and [`AGENTS.md`](AGENTS.md). Implement **one** RFC or **one** Development Queue item per session. New design goes in [`docs/rfcs/`](docs/rfcs/) — do not paste large spec updates into this file. Integration branch: `cursor/local-qwen-desktop-agent`.
 
 Cursor is responsible for keeping this document accurate.
 
