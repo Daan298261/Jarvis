@@ -289,7 +289,7 @@ fn backend_status(state: State<'_, AppState>) -> BackendLifecycleStatus {
 #[tauri::command]
 fn minimize_window(app: AppHandle) -> Result<(), String> {
     app.get_webview_window("main")
-        .ok_or_else(|| "window missing".into())?
+        .ok_or_else(|| "window missing".to_string())?
         .minimize()
         .map_err(|e| e.to_string())
 }
