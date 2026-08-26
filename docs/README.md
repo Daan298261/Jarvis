@@ -14,5 +14,6 @@ These guides describe the **current** Jarvis repository: a local-first desktop a
 | [../SECURITY.md](../SECURITY.md) | Bind address, private-key auth, filesystem policy |
 | [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md) | Model load, CUDA, Playwright, Office, Docker |
 | [../JARVIS_MASTER_PLAN.md](../JARVIS_MASTER_PLAN.md) | Persistent architecture, current state, and development queue |
+| [../JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md](../JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md) | ZoeyOS/FounderOS parity: Agent Profiles, Specialist Packs, dashboard, licensing |
 
 Product intent and unfinished work live in the master plan. Installation and day-to-day development live here so those sections stay short and accurate.
