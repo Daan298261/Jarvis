@@ -1,4 +1,4 @@
-"""Cross-platform checks for the Windows installer sources (no Windows required)."""
+"""Cross-platform checks for Windows installer / desktop packaging sources."""
 
 from pathlib import Path
 
@@ -8,6 +8,10 @@ BOOTSTRAP = INSTALLER_DIR / "bootstrap.ps1"
 ISS = INSTALLER_DIR / "Jarvis.iss"
 BUILD_SCRIPT = INSTALLER_DIR / "build-installer.ps1"
 README = INSTALLER_DIR / "README.md"
+RELEASE = REPO_ROOT / "scripts" / "build-windows-release.ps1"
+SIDECAR = REPO_ROOT / "scripts" / "build-backend-sidecar.ps1"
+TAURI_CONF = REPO_ROOT / "frontend" / "src-tauri" / "tauri.conf.json"
+RFC = REPO_ROOT / "docs" / "rfcs" / "0002-desktop-application-and-installer.md"
 
 
 def _read(path: Path) -> str:
@@ -19,6 +23,10 @@ def test_installer_files_exist():
     assert ISS.is_file()
     assert BUILD_SCRIPT.is_file()
     assert README.is_file()
+    assert RELEASE.is_file()
+    assert SIDECAR.is_file()
+    assert TAURI_CONF.is_file()
+    assert RFC.is_file()
 
 
 def test_bootstrap_covers_required_steps():
@@ -39,11 +47,9 @@ def test_bootstrap_covers_required_steps():
 def test_bootstrap_27b_is_optional_switch_only():
     text = _read(BOOTSTRAP)
     assert "InstallExpert27B" in text
-    # Default path must not always download 27B.
     assert "if ($InstallExpert27B)" in text
     lower = text.lower()
     assert "install by default" not in lower
-    # 27B download should be gated behind the switch.
     assert text.index("if ($InstallExpert27B)") < text.index("Qwen3.5-27B")
 
 
@@ -68,5 +74,21 @@ def test_build_script_invokes_iscc():
 
 def test_readme_documents_build_oneliner():
     text = _read(README)
-    assert "build-installer.ps1" in text
-    assert "JarvisSetup.exe" in text
+    assert "build-installer.ps1" in text or "build-windows-release.ps1" in text
+    assert "JarvisSetup.exe" in text or "Tauri" in text
+
+
+def test_canonical_release_script_and_tauri():
+    release = _read(RELEASE).lower()
+    assert "build-backend-sidecar.ps1" in release
+    assert "tauri" in release
+    assert "nsis" in release or "bundle" in release
+    sidecar = _read(SIDECAR).lower()
+    assert "pyinstaller" in sidecar
+    assert "onedir" in sidecar or "one-folder" in sidecar or "--onedir" in sidecar
+    conf = _read(TAURI_CONF)
+    assert "Jarvis" in conf
+    assert "nsis" in conf.lower()
+    rfc = _read(RFC).lower()
+    assert "accepted" in rfc
+    assert "tauri" in rfc

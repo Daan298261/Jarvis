@@ -1,18 +1,22 @@
 import { useEffect, useState } from "react"
-import { api } from "../api"
+import { api, getDiagnostics, getDiagnosticsText } from "../api"
+import { DesktopBridge } from "../desktop/bridge"
 
 export function SystemPage() {
   const [info, setInfo] = useState<any>(null)
   const [selfDev, setSelfDev] = useState<any>(null)
+  const [diag, setDiag] = useState<Record<string, unknown> | null>(null)
   const [msg, setMsg] = useState("")
 
   async function refresh() {
-    const [sys, sd] = await Promise.all([
+    const [sys, sd, d] = await Promise.all([
       api("/api/system").catch(() => null),
       api("/api/self-dev").catch(() => null),
+      getDiagnostics().catch(() => null),
     ])
     if (sys) setInfo(sys)
     if (sd) setSelfDev(sd)
+    if (d) setDiag(d)
   }
 
   useEffect(() => { refresh() }, [])
@@ -28,11 +32,64 @@ export function SystemPage() {
           {msg}
         </div>
       )}
+      {diag && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Diagnostics</h2>
+          <p className="lede">Application and path status. Secrets are never included.</p>
+          <div className="kv">
+            {[
+              "application_version",
+              "frontend_version",
+              "backend_version",
+              "backend_status",
+              "backend_pid",
+              "api_port",
+              "inference_backend",
+              "inference_status",
+              "local_model",
+              "node_id",
+              "hostname",
+              "data_directory",
+              "logs_directory",
+              "runtime_directory",
+              "models_directory",
+            ].map((key) => (
+              <div key={key} style={{ display: "contents" }}>
+                <b>{key.replaceAll("_", " ")}</b>
+                <span className="stat">{String(diag[key] ?? "—")}</span>
+              </div>
+            ))}
+          </div>
+          <div className="row" style={{ marginTop: 12 }}>
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={async () => {
+                const payload = await getDiagnosticsText()
+                await navigator.clipboard.writeText(payload.text)
+                setMsg("Diagnostics copied (redacted).")
+              }}
+            >
+              Copy diagnostics
+            </button>
+            {DesktopBridge.isDesktop() && (
+              <>
+                <button className="btn secondary" type="button" onClick={() => DesktopBridge.openLogs()}>
+                  Open logs
+                </button>
+                <button className="btn secondary" type="button" onClick={() => DesktopBridge.restartBackend()}>
+                  Restart backend
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <div className="grid cards">
         {Object.entries(hw).map(([key, value]) => (
           <div className="card" key={key}>
             <div className="lede" style={{ marginBottom: 6 }}>{key.replaceAll("_", " ")}</div>
-            <strong>{String(value)}</strong>
+            <strong>{Array.isArray(value) ? value.join(", ") || "—" : String(value)}</strong>
           </div>
         ))}
       </div>
