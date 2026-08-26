@@ -12,7 +12,9 @@ This file remains the overall source of truth for priorities, current state, and
 
 **P4/P5 adaptive intelligence and domain packs** live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file specifies resilient adaptive learning, domain packs, and business operating workflows translated from useful Founder OS patterns into native Jarvis abstractions. Do not start P4/P5 implementation ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it.
 
-Every development session must read this file before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`. Work touching execution eventing, confidence-gated memory, adaptive routing, workflow patterns, domain packs, or business operations must also read `ADAPTIVE_DOMAIN_ARCHITECTURE.md`.
+**Extensible Agent OS (ZoeyOS / FounderOS feature parity)** lives in [`JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`](JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md). That file specifies persistent Agent Profiles, Specialist Packs, modular command-center dashboard, multi-agent delegation, hybrid inference, offline licensing, and the full owner-control UX needed to match Zoey-style specialist teams and FounderOS-style business autonomy. Do not start its P1–P6 roadmap ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it.
+
+Every development session must read this file before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`. Work touching execution eventing, confidence-gated memory, adaptive routing, workflow patterns, domain packs, or business operations must also read `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. Work touching Agent Profiles, Specialist Packs, dashboard systems/modules, Decision Inbox, Away Mode, licensing/entitlements, or ZoeyOS/FounderOS-style multi-agent UX must also read `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`.
 
 **Worker process (mandatory):** [`docs/PROCESS.md`](docs/PROCESS.md) and [`AGENTS.md`](AGENTS.md). Implement **one** RFC or **one** Development Queue item per session. New design goes in [`docs/rfcs/`](docs/rfcs/) — do not paste large spec updates into this file. Integration branch: `cursor/local-qwen-desktop-agent`.
 
@@ -3697,7 +3699,7 @@ Results: **312 passed** on this branch after merge-repair QA. Live Qwen/Windows 
 
 Statuses: TODO, IN PROGRESS, BLOCKED, VERIFIED
 
-Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/foundation or useful improvement, P3 multi-node/future capability, P4 adaptive intelligence/resilience, P5 domain/business platform, P4 (swarm) advanced long-term infrastructure per `SWARM_ARCHITECTURE.md`.
+Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/foundation or useful improvement, P3 multi-node/future capability, P4 adaptive intelligence/resilience, P5 domain/business platform, P4 (swarm) advanced long-term infrastructure per `SWARM_ARCHITECTURE.md`. Long-term ZoeyOS/FounderOS parity (Agent Profiles, Specialist Packs, command-center dashboard, offline licensing) is specified in `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md` — promote individual items into this queue via RFCs; do not bulk-import the full spec here.
 
 ### P0
 
@@ -3938,6 +3940,14 @@ Detailed P4/P5 requirements for execution eventing, confidence-gated memory, ada
 Reason:
 
 The adaptive/domain design is large and will evolve independently; keeping one detailed spec prevents the master plan from becoming contradictory or excessively duplicated. Founder OS is an architecture reference only — not a Jarvis dependency.
+
+Decision: extensible Agent OS requirements remain a separate authoritative specification
+
+Detailed product requirements for ZoeyOS/FounderOS-style feature parity — persistent Agent Profiles, Specialist Packs, modular command-center dashboard, multi-agent delegation, hybrid inference, offline licensing, and full owner-control UX — live in `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`. The master plan references that file and owns priority/status rather than duplicating the full specification.
+
+Reason:
+
+The extensible Agent OS design is large (83 sections) and will evolve independently; keeping one detailed spec prevents the master plan from becoming contradictory or excessively duplicated. ZoeyOS and FounderOS are product-pattern references only — not Jarvis dependencies.
 
 Decision: swarm architecture remains a separate authoritative specification
 
