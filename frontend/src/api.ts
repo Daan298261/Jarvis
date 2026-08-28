@@ -672,3 +672,154 @@ export async function routeRuntime(body: RuntimeRouteRequest): Promise<RuntimeRo
     body: JSON.stringify(body),
   })
 }
+
+export const PERSISTENCE_MODES = ["ONE_SHOT", "UNTIL_COMPLETE", "CONTINUOUS"] as const
+export type PersistenceMode = (typeof PERSISTENCE_MODES)[number]
+
+export const PROACTIVITY_MODES = [
+  "DISABLED",
+  "SUGGEST_ONLY",
+  "CREATE_TASKS",
+  "EXECUTE_WITHIN_POLICY",
+] as const
+export type ProactivityMode = (typeof PROACTIVITY_MODES)[number]
+
+export type AwayModeState = {
+  enabled: boolean
+  pause_proactivity: boolean
+  message: string
+  updated_at?: string
+}
+
+export type AwayModeUpdate = {
+  enabled?: boolean
+  pause_proactivity?: boolean
+  message?: string
+}
+
+export type EffectiveBehavior = {
+  persistence: string
+  configured_proactivity: string
+  effective_proactivity: string
+  away_mode: AwayModeState
+  can_suggest: boolean
+  can_create_tasks: boolean
+  can_execute_within_policy: boolean
+  requires_approval_for_execution: boolean
+}
+
+export type AutonomyProfile = {
+  id: string
+  name: string
+  persistence: string
+  proactivity: string
+  agent_id: string
+  created_at: string
+  updated_at: string
+  metadata: Record<string, unknown>
+  effective?: EffectiveBehavior
+}
+
+export type AutonomyProfileIn = {
+  name: string
+  persistence?: string
+  proactivity?: string
+  agent_id?: string
+  metadata?: Record<string, unknown>
+}
+
+export type AutonomyProfileUpdate = {
+  name?: string
+  persistence?: string
+  proactivity?: string
+  agent_id?: string
+  metadata?: Record<string, unknown>
+}
+
+export type AutonomyModes = {
+  persistence_modes: string[]
+  proactivity_modes: string[]
+}
+
+export type EffectiveProactivityRow = {
+  configured: string
+  effective: string
+  away_mode_active: boolean
+}
+
+export type ProactiveAction = {
+  id: string
+  parent_agent_id: string
+  trigger: string
+  evidence: Record<string, unknown>
+  rationale: string
+  budget: Record<string, unknown>
+  proactivity: string
+  persistence: string
+  status: string
+  requires_approval: boolean
+  created_at: string
+  approved_at?: string | null
+  executed_at?: string | null
+  capability?: string
+  node_id?: string
+}
+
+export async function listAutonomyModes(): Promise<AutonomyModes> {
+  return api<AutonomyModes>("/api/autonomy/modes")
+}
+
+export async function listAutonomyProfiles(): Promise<{ profiles: AutonomyProfile[] }> {
+  return api<{ profiles: AutonomyProfile[] }>("/api/autonomy/profiles")
+}
+
+export async function createAutonomyProfile(body: AutonomyProfileIn): Promise<AutonomyProfile> {
+  return api<AutonomyProfile>("/api/autonomy/profiles", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAutonomyProfile(profileId: string): Promise<AutonomyProfile> {
+  return api<AutonomyProfile>(`/api/autonomy/profiles/${encodeURIComponent(profileId)}`)
+}
+
+export async function updateAutonomyProfile(
+  profileId: string,
+  body: AutonomyProfileUpdate,
+): Promise<AutonomyProfile> {
+  return api<AutonomyProfile>(`/api/autonomy/profiles/${encodeURIComponent(profileId)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAutonomyProfileEffective(profileId: string): Promise<EffectiveBehavior> {
+  return api<EffectiveBehavior>(`/api/autonomy/profiles/${encodeURIComponent(profileId)}/effective`)
+}
+
+export async function getAwayMode(): Promise<AwayModeState> {
+  return api<AwayModeState>("/api/autonomy/away-mode")
+}
+
+export async function putAwayMode(body: AwayModeUpdate): Promise<AwayModeState> {
+  return api<AwayModeState>("/api/autonomy/away-mode", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function listProactiveActions(parentAgentId?: string): Promise<{ actions: ProactiveAction[] }> {
+  const query = parentAgentId ? `?parent_agent_id=${encodeURIComponent(parentAgentId)}` : ""
+  return api<{ actions: ProactiveAction[] }>(`/api/autonomy/proactive${query}`)
+}
+
+export async function approveProactiveAction(actionId: string): Promise<ProactiveAction> {
+  return api<ProactiveAction>(`/api/autonomy/proactive/${encodeURIComponent(actionId)}/approve`, {
+    method: "POST",
+  })
+}
+
+export async function getEffectiveProactivityMatrix(): Promise<{ rows: EffectiveProactivityRow[] }> {
+  return api<{ rows: EffectiveProactivityRow[] }>("/api/autonomy/matrix/effective-proactivity")
+}

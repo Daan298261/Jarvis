@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api, getPrivateKey, setPrivateKey } from "../api"
+import { AutonomySection } from "./Autonomy"
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -51,7 +52,9 @@ export function SettingsPage() {
         Preferences for this PC. To stop Jarvis entirely, use <strong>Stop</strong> on the Windows tray —
         it is not in this window.
       </p>
-      
+
+      <AutonomySection />
+
       {msg && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
           {msg}
@@ -166,7 +169,11 @@ export function SettingsPage() {
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
         <h2>Core Execution</h2>
-        <label>Autonomy
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          How strictly Jarvis asks before risky tools. How long a job stays open, and whether Jarvis
+          may start work on its own, is in Stay with a job &amp; Away Mode above.
+        </p>
+        <label>Ask before risky tools
           <select value={settings.autonomy} onChange={(e) => save({ autonomy: e.target.value })}>
             <option value="interactive">Interactive</option>
             <option value="trusted">Trusted</option>
