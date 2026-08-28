@@ -1266,3 +1266,24 @@ label { display: block; color: var(--muted); font-size: 13px; }
   margin-top: 10px;
   background: var(--panel-2);
 }
+
+.coding-page { max-width: 960px; }
+.coding-banner { margin-bottom: 16px; }
+.coding-banner.bad { border-left: 4px solid var(--bad); }
+.coding-banner.warn { border-left: 4px solid var(--gold); }
+.coding-callout {
+  margin-bottom: 16px;
+  border-left: 4px solid var(--gold);
+}
+.coding-path {
+  font-size: 12px;
+  word-break: break-all;
+}
+.coding-actions .btn { padding: 8px 12px; }
+.coding-integrate-result {
+  margin-top: 16px;
+  border-left: 4px solid var(--gold);
+}
+.coding-integrate-result.blocked {
+  border-left-color: var(--bad);
+}

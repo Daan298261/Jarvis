@@ -122,6 +122,19 @@ export function SettingsPage() {
         </div>
       </div>
 
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Coding isolation</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Parallel coding tasks each get a Git worktree. Integrate is blocked until a verifier or
+          you approve — nothing lands silently. Conflicts wait in Decision Inbox.
+        </p>
+        <div className="row">
+          <Link className="btn" to="/coding">
+            Open coding isolation
+          </Link>
+        </div>
+      </div>
+
       {msg && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
           {msg}

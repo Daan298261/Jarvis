@@ -3422,3 +3422,165 @@ export async function listPortableAgentAudit(options?: {
     `/api/agent-portability/audit${query ? `?${query}` : ""}`,
   )
 }
+
+export type CodingTaskDiff = {
+  base?: string
+  head?: string
+  stat?: string
+  files?: string
+  [key: string]: unknown
+}
+
+export type CodingTaskRecord = {
+  task_id: string
+  base_sha: string
+  branch: string
+  worktree_id: string
+  worktree_path: string
+  status: string
+  commits: string[]
+  tests: Record<string, unknown>
+  final_diff: CodingTaskDiff
+  integration_status: string
+  verifier_approved: boolean
+  approved_by: string
+  approved_at: string
+  created_at: string
+  completed_at: string
+  cleaned_up: boolean
+}
+
+export type CodingDecisionInboxItem = {
+  id: string
+  kind: string
+  title: string
+  detail: string
+  task_id: string
+  related_task_id: string
+  status: string
+  created_at: string
+  resolved_at: string
+  resolution: string
+}
+
+export type CodingOverview = {
+  workers?: { id?: string; name?: string; available?: boolean; status?: string }[]
+  models?: { status?: string }
+  usage?: Record<string, unknown>
+  coding?: Record<string, unknown>
+}
+
+export type CodingCompleteResult = {
+  task: CodingTaskRecord
+  conflicts: CodingDecisionInboxItem[]
+}
+
+export type CodingIntegrateResult = {
+  task_id?: string
+  integration_status: string
+  requires_approval?: boolean
+  conflicts?: CodingDecisionInboxItem[]
+  message?: string
+  branch?: string
+  base_sha?: string
+  commits?: string[]
+  final_diff?: CodingTaskDiff
+  task?: CodingTaskRecord
+}
+
+export function codingIntegrationBlocked(result: CodingIntegrateResult): boolean {
+  const status = (result.integration_status || "").toLowerCase()
+  if (status === "ready") return false
+  if (status === "approved") return false
+  return Boolean(result.requires_approval) || status === "awaiting_approval" || status === "blocked" || status === "pending"
+}
+
+export function formatCodingError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message
+  return "Could not update this coding task."
+}
+
+export async function getCodingOverview(): Promise<CodingOverview> {
+  return api<CodingOverview>("/api/coding")
+}
+
+export async function listCodingTasks(activeOnly = false): Promise<{ tasks: CodingTaskRecord[] }> {
+  const query = activeOnly ? "?active_only=true" : "?active_only=false"
+  return api<{ tasks: CodingTaskRecord[] }>(`/api/coding/tasks${query}`)
+}
+
+export async function getCodingTask(taskId: string): Promise<CodingTaskRecord> {
+  return api<CodingTaskRecord>(`/api/coding/tasks/${encodeURIComponent(taskId)}`)
+}
+
+export async function startCodingTask(body: {
+  task_id: string
+  repo?: string
+}): Promise<CodingTaskRecord> {
+  const payload: Record<string, unknown> = { task_id: body.task_id }
+  if (body.repo) payload.repo = body.repo
+  return api<CodingTaskRecord>("/api/coding/tasks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function completeCodingTask(
+  taskId: string,
+  tests?: Record<string, unknown>,
+): Promise<CodingCompleteResult> {
+  return api<CodingCompleteResult>(
+    `/api/coding/tasks/${encodeURIComponent(taskId)}/complete`,
+    {
+      method: "POST",
+      body: JSON.stringify({ tests: tests || {} }),
+    },
+  )
+}
+
+export async function approveCodingTask(
+  taskId: string,
+  approver = "human",
+): Promise<CodingTaskRecord> {
+  return api<CodingTaskRecord>(
+    `/api/coding/tasks/${encodeURIComponent(taskId)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ approver }),
+    },
+  )
+}
+
+export async function integrateCodingTask(taskId: string): Promise<CodingIntegrateResult> {
+  return api<CodingIntegrateResult>(
+    `/api/coding/tasks/${encodeURIComponent(taskId)}/integrate`,
+    { method: "POST" },
+  )
+}
+
+export async function cleanupCodingTask(taskId: string): Promise<CodingTaskRecord> {
+  return api<CodingTaskRecord>(
+    `/api/coding/tasks/${encodeURIComponent(taskId)}/cleanup`,
+    { method: "POST" },
+  )
+}
+
+export async function listCodingDecisionInbox(
+  openOnly = true,
+): Promise<{ items: CodingDecisionInboxItem[] }> {
+  const query = openOnly ? "?open_only=true" : "?open_only=false"
+  return api<{ items: CodingDecisionInboxItem[] }>(`/api/coding/decision-inbox${query}`)
+}
+
+export async function resolveCodingDecisionInboxItem(
+  itemId: string,
+  resolution: string,
+): Promise<CodingDecisionInboxItem> {
+  return api<CodingDecisionInboxItem>(
+    `/api/coding/decision-inbox/${encodeURIComponent(itemId)}/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ resolution }),
+    },
+  )
+}
