@@ -1192,3 +1192,42 @@ label { display: block; color: var(--muted); font-size: 13px; }
   .license-cred-form { grid-template-columns: 1fr; }
   .license-cred-form .span-2 { grid-column: auto; }
 }
+
+.context-page { max-width: 960px; }
+.context-page label {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.context-page label input,
+.context-page label select,
+.context-page label textarea { margin-top: 6px; }
+.context-entry {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+  background: var(--panel-2);
+}
+.context-entry.pinned { border-color: var(--gold-dim); }
+.context-entry.conflict { border-color: rgba(213, 154, 58, 0.7); }
+.context-entry.selected { border-color: var(--gold); }
+.context-entry-open {
+  background: transparent;
+  border: 0;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+.context-entry-preview {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  max-height: 4.4em;
+  overflow: hidden;
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { api } from "../api"
 
 type SkillParam = { name: string; kind?: string; examples?: string[] }
@@ -88,6 +89,9 @@ export function MemoryPage() {
       <h1>Memory</h1>
       <p className="lede">
         Skills are workflows Jarvis has repeated successfully. When tool arguments were recorded, they become parameters and the skill can run itself instead of only guiding the model.
+      </p>
+      <p className="lede" style={{ marginTop: -12 }}>
+        Identity, projects, lessons, and other saved notes live on <Link to="/context">Context</Link>.
       </p>
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>

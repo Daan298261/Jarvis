@@ -21,6 +21,7 @@ import { WorkerEnvironmentsPage } from "./pages/WorkerEnvironments"
 import { DelegationPage } from "./pages/Delegation"
 import { LicensePage } from "./pages/License"
 import { AdvisorPage } from "./pages/Advisor"
+import { ContextRepoPage } from "./pages/ContextRepo"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -47,6 +48,7 @@ const ADMIN_LINKS = [
   { to: "/advisor", label: "Advisor" },
   { to: "/guest-portals", label: "Guest portals" },
   { to: "/agents", label: "Agents" },
+  { to: "/context", label: "Context" },
   { to: "/environments", label: "Environments" },
   { to: "/packs", label: "Packs" },
   { to: "/ads", label: "Amazon Ads" },
@@ -428,6 +430,7 @@ function OwnerPortal() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/new" element={<AgentInterviewPage />} />
           <Route path="/agents/:id" element={<AgentInterviewPage />} />
+          <Route path="/context" element={<ContextRepoPage />} />
           <Route path="/environments" element={<WorkerEnvironmentsPage />} />
           <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
           <Route path="/packs" element={<PacksPage />} />
