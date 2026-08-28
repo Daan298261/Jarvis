@@ -396,7 +396,12 @@ export function AutonomySection() {
       <div className={`away-banner${away?.enabled ? " on" : ""}`}>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <h3>Away Mode</h3>
+            <div className="row" style={{ gap: 8, marginBottom: 4 }}>
+              <h3 style={{ margin: 0 }}>Away Mode</h3>
+              <span className={`badge ${away?.enabled ? "running" : "ok"}`}>
+                {away?.enabled ? "You're away" : "You're here"}
+              </span>
+            </div>
             <p>
               {away?.enabled
                 ? awayPauses
@@ -406,12 +411,12 @@ export function AutonomySection() {
             </p>
           </div>
           <button
-            className="btn"
+            className={away?.enabled ? "btn" : "btn secondary"}
             type="button"
             disabled={busy}
             onClick={() => onToggleAway(!away?.enabled)}
           >
-            {away?.enabled ? "I'm back" : "I'm away"}
+            {away?.enabled ? "I'm back" : "Turn on Away Mode"}
           </button>
         </div>
         <label className="row" style={{ marginTop: 10 }}>
