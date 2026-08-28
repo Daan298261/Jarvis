@@ -10,6 +10,7 @@ import {
   revokeGuestPortal,
   type GuestAction,
   type GuestAuditEntry,
+  type GuestEffectivePermissions,
   type GuestGrant,
   type GuestPortal,
   type GuestPortalCreateIn,
@@ -17,7 +18,7 @@ import {
   type Task,
   api,
 } from "../api"
-import { EffectivePermissionsView, formatGuestWhen } from "./guestPermissions"
+import { EffectivePermissionsView } from "./guestPermissions"
 
 type GrantDraft = {
   key: string
@@ -52,6 +53,13 @@ function toIsoExpiry(localValue: string): string | null {
   const parsed = new Date(trimmed)
   if (Number.isNaN(parsed.getTime())) return trimmed
   return parsed.toISOString()
+}
+
+function formatWhen(value: string | null | undefined): string {
+  if (!value) return "Never"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
 }
 
 function parseOptionalInt(value: string): number | null {
@@ -488,7 +496,7 @@ export function GuestPortalsPage() {
                 >
                   <td>{portal.label}</td>
                   <td>{portal.guest_label}</td>
-                  <td>{formatGuestWhen(portal.expires_at)}</td>
+                  <td>{formatWhen(portal.expires_at)}</td>
                   <td>
                     {portal.limits?.single_use ? "single-use" : "multi-use"}
                     {portal.limits?.max_sessions != null ? ` · ${portal.limits.max_sessions} sessions` : ""}
@@ -512,9 +520,9 @@ export function GuestPortalsPage() {
           <h2>{selected.label}</h2>
           <div className="kv">
             <b>Guest</b><span>{selected.guest_label}</span>
-            <b>Created</b><span>{formatGuestWhen(selected.created_at)}</span>
-            <b>Expires</b><span>{formatGuestWhen(selected.expires_at)}</span>
-            <b>Revoked</b><span>{selected.revoked ? formatGuestWhen(selected.revoked_at) : "No"}</span>
+            <b>Created</b><span>{formatWhen(selected.created_at)}</span>
+            <b>Expires</b><span>{formatWhen(selected.expires_at)}</span>
+            <b>Revoked</b><span>{selected.revoked ? formatWhen(selected.revoked_at) : "No"}</span>
             <b>Uses remaining</b><span>{selected.uses_remaining ?? "Unlimited"}</span>
             <b>Active sessions</b><span>{selected.active_sessions}</span>
           </div>
@@ -548,7 +556,7 @@ export function GuestPortalsPage() {
               <tbody>
                 {audit.map((row) => (
                   <tr key={row.id}>
-                    <td>{formatGuestWhen(row.created_at)}</td>
+                    <td>{formatWhen(row.created_at)}</td>
                     <td>{row.guest_label}</td>
                     <td>{row.action}</td>
                     <td>

@@ -1,13 +1,6 @@
-import type { GuestEffectivePermissions, GuestResourceType } from "../api"
+import type { GuestEffectivePermissions } from "../api"
 
-const RESOURCE_LABELS: Record<string, string> = {
-  task: "Task",
-  agent: "Agent",
-  project: "Project",
-  decision_inbox: "Decision inbox",
-}
-
-export function formatGuestWhen(value: string | null | undefined): string {
+function formatExpiry(value: string | null | undefined): string {
   if (!value) return "Never"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
@@ -33,7 +26,7 @@ export function EffectivePermissionsView({
       </p>
       <div className="kv" style={{ marginBottom: 12 }}>
         <b>Expires</b>
-        <span>{formatGuestWhen(perms.expires_at)}</span>
+        <span>{formatExpiry(perms.expires_at)}</span>
         <b>Single use</b>
         <span>{perms.limits?.single_use ? "Yes" : "No"}</span>
         <b>Max sessions</b>
@@ -47,9 +40,7 @@ export function EffectivePermissionsView({
         <ul className="grant-list">
           {grants.map((grant, index) => (
             <li key={`${grant.resource_type}:${grant.resource_id}:${index}`}>
-              <strong>
-                {RESOURCE_LABELS[grant.resource_type as GuestResourceType] || grant.resource_type}
-              </strong>
+              <strong>{grant.resource_type}</strong>
               {" "}
               <code>{grant.resource_id}</code>
               {" — "}

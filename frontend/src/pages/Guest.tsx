@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
   approveGuestTask,
@@ -54,10 +54,10 @@ export function GuestPage() {
   const [error, setError] = useState("")
   const bootstrapped = useRef(false)
 
-  const grants = session?.effective_permissions?.grants || []
+  const grants = session?.effective_permissions?.grants
 
   const selectedGrant = useMemo(() => {
-    if (!selected) return null
+    if (!selected || !grants) return null
     return grants.find((grant) => {
       if (selected.kind === "other") {
         return grant.resource_type === selected.type && grant.resource_id === selected.id
@@ -67,7 +67,7 @@ export function GuestPage() {
     }) || null
   }, [grants, selected])
 
-  async function connect(token: string) {
+  const connect = useCallback(async (token: string) => {
     const trimmed = token.trim()
     if (!trimmed) {
       setError("Paste a guest portal token to continue.")
@@ -88,7 +88,7 @@ export function GuestPage() {
     } finally {
       setBusy(false)
     }
-  }
+  }, [location.search, navigate])
 
   useEffect(() => {
     if (bootstrapped.current) return
@@ -96,7 +96,6 @@ export function GuestPage() {
     const fromUrl = tokenFromSearch(location.search)
     const stored = getGuestToken()
     if (fromUrl) {
-      setTokenInput(fromUrl)
       void connect(fromUrl)
       return
     }
@@ -113,7 +112,7 @@ export function GuestPage() {
           })
       })
       .finally(() => setBusy(false))
-  }, [location.search])
+  }, [connect, location.search])
 
   useEffect(() => {
     if (!selected) {
@@ -265,11 +264,11 @@ export function GuestPage() {
 
             <div className="card" style={{ marginTop: 16 }}>
               <h2>Granted resources</h2>
-              {grants.length === 0 ? (
+              {(grants || []).length === 0 ? (
                 <p className="lede">This portal grants nothing.</p>
               ) : (
                 <div className="grant-pick">
-                  {grants.map((grant, index) => (
+                  {(grants || []).map((grant, index) => (
                     <button
                       key={grantKey(grant, index)}
                       type="button"
