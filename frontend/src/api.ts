@@ -451,3 +451,224 @@ export async function postSwarmDispatch(body: SwarmDispatchRequest): Promise<Swa
   await throwIfNotOk(response)
   return response.json() as Promise<SwarmDispatchResult>
 }
+
+export const RUNTIME_PRIVACY_CLASSES = ["local-only", "trusted-remote", "public-remote"] as const
+export type RuntimePrivacyClass = (typeof RUNTIME_PRIVACY_CLASSES)[number]
+
+export const RUNTIME_SELECT_MODES = ["prefer", "force"] as const
+export type RuntimeSelectMode = (typeof RUNTIME_SELECT_MODES)[number]
+
+export const RUNTIME_PROFILE_PROVIDERS = [
+  "openai-compat",
+  "local-llama",
+  "ollama",
+  "lmstudio",
+  "vllm",
+  "sglang",
+  "anthropic",
+  "google",
+] as const
+
+export type RuntimeProfile = {
+  id: string
+  name: string
+  label: string
+  model: string
+  provider: string
+  endpoint: string
+  context_limit: number
+  quantization: string
+  privacy_class: string
+  cost_ceiling_usd: number | null
+  capability_tags: string[]
+  model_profile: string | null
+  specialization_tags: string[]
+  is_local: boolean
+  description: string
+}
+
+export type RuntimeProfileIn = {
+  name: string
+  label?: string | null
+  model: string
+  provider?: string
+  endpoint: string
+  context_limit?: number
+  quantization?: string
+  privacy_class?: string
+  cost_ceiling_usd?: number | null
+  capability_tags?: string[]
+  model_profile?: string | null
+  specialization_tags?: string[]
+  is_local?: boolean
+  description?: string
+}
+
+export type RuntimeProfileUpdate = {
+  label?: string | null
+  model?: string | null
+  provider?: string | null
+  endpoint?: string | null
+  context_limit?: number | null
+  quantization?: string | null
+  privacy_class?: string | null
+  cost_ceiling_usd?: number | null
+  capability_tags?: string[] | null
+  model_profile?: string | null
+  specialization_tags?: string[] | null
+  is_local?: boolean | null
+  description?: string | null
+}
+
+export type RuntimeProfilesListResponse = {
+  profiles: RuntimeProfile[]
+  policies: string[]
+}
+
+export type RuntimeRouteRequest = {
+  preferred_profiles?: string[]
+  forbidden_profiles?: string[]
+  force_profile?: string | null
+  policy?: string
+  required_capabilities?: string[]
+  task_specialization?: string | null
+  privacy_floor?: string
+  max_cost_usd?: number | null
+  warm_models?: string[]
+  node_id?: string
+  load_factor?: number
+}
+
+export type RuntimeRouteDecision = {
+  accepted: boolean
+  reason: string
+  code: string
+  alternatives?: unknown[]
+  runtime_profile?: RuntimeProfile
+  node?: {
+    node_id: string
+    hostname: string
+    is_local: boolean
+    warm_models: string[]
+    load_factor: number
+    hardware_fit: number
+  }
+  score?: {
+    total: number
+    expected_success: number
+    latency: number
+    cost: number
+    privacy: number
+    load: number
+    network: number
+    warm_bonus: number
+    specialization_bonus: number
+    preferred_bonus: number
+    reasons: string[]
+  }
+}
+
+const SELECTED_RUNTIME_KEY = "jarvis_selected_runtime_profile"
+const SELECTED_RUNTIME_MODE_KEY = "jarvis_selected_runtime_mode"
+const SELECTED_RUNTIME_POLICY_KEY = "jarvis_selected_runtime_policy"
+
+export function getSelectedRuntimeProfileId(): string {
+  try {
+    return localStorage.getItem(SELECTED_RUNTIME_KEY) || ""
+  } catch {
+    return ""
+  }
+}
+
+export function setSelectedRuntimeProfileId(id: string): void {
+  try {
+    if (id) localStorage.setItem(SELECTED_RUNTIME_KEY, id)
+    else localStorage.removeItem(SELECTED_RUNTIME_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+export function getSelectedRuntimeMode(): RuntimeSelectMode {
+  try {
+    const value = localStorage.getItem(SELECTED_RUNTIME_MODE_KEY)
+    if (value === "force") return "force"
+  } catch {
+    // ignore
+  }
+  return "prefer"
+}
+
+export function setSelectedRuntimeMode(mode: RuntimeSelectMode): void {
+  try {
+    localStorage.setItem(SELECTED_RUNTIME_MODE_KEY, mode)
+  } catch {
+    // ignore
+  }
+}
+
+export function getSelectedRuntimePolicy(): string {
+  try {
+    return localStorage.getItem(SELECTED_RUNTIME_POLICY_KEY) || "local-first"
+  } catch {
+    return "local-first"
+  }
+}
+
+export function setSelectedRuntimePolicy(policy: string): void {
+  try {
+    if (policy) localStorage.setItem(SELECTED_RUNTIME_POLICY_KEY, policy)
+    else localStorage.removeItem(SELECTED_RUNTIME_POLICY_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+export async function listRuntimeProfiles(): Promise<RuntimeProfilesListResponse> {
+  return api<RuntimeProfilesListResponse>("/api/runtime-profiles")
+}
+
+export async function getRuntimeProfile(profileId: string): Promise<RuntimeProfile> {
+  return api<RuntimeProfile>(`/api/runtime-profiles/${encodeURIComponent(profileId)}`)
+}
+
+export async function createRuntimeProfile(body: RuntimeProfileIn): Promise<RuntimeProfile> {
+  return api<RuntimeProfile>("/api/runtime-profiles", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function updateRuntimeProfile(
+  profileId: string,
+  body: RuntimeProfileUpdate,
+): Promise<RuntimeProfile> {
+  return api<RuntimeProfile>(`/api/runtime-profiles/${encodeURIComponent(profileId)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function deleteRuntimeProfile(profileId: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(`/api/runtime-profiles/${encodeURIComponent(profileId)}`, {
+    method: "DELETE",
+  })
+}
+
+export async function resetRuntimeProfiles(): Promise<{ profiles: RuntimeProfile[] }> {
+  return api<{ profiles: RuntimeProfile[] }>("/api/runtime-profiles/reset", { method: "POST" })
+}
+
+export async function previewRuntimeRoute(body: RuntimeRouteRequest): Promise<RuntimeRouteDecision> {
+  return api<RuntimeRouteDecision>("/api/runtime-profiles/route/preview", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function routeRuntime(body: RuntimeRouteRequest): Promise<RuntimeRouteDecision> {
+  return api<RuntimeRouteDecision>("/api/runtime-profiles/route", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}

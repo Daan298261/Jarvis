@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api } from "../api"
+import { RuntimeProfilesSection } from "./RuntimeProfiles"
 
 type Benchmark = {
   id: number
@@ -100,6 +101,7 @@ export function ModelPage() {
       <p className="lede">
         Local Qwen3.5 served by llama.cpp, or any OpenAI-compatible server on this machine or the LAN.
         Tasks start at 8K or 16K and expand only when the live prompt is under pressure. Expert is a compact 27B consult.
+        Named runtimes let you save and pick which model, address, privacy, and spend ceiling Jarvis should prefer.
       </p>
       <div className="grid two">
         <div className="card">
@@ -151,6 +153,7 @@ export function ModelPage() {
           </p>
         </div>
       </div>
+      <RuntimeProfilesSection />
       <AgentSuiteCard />
       <HardwareGateCard />
       <div className="card" style={{ marginTop: 16 }}>
