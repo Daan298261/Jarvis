@@ -1251,7 +1251,7 @@ export function SwarmPage() {
     <div>
       <h1>Swarm</h1>
       <p className="lede">
-        Registered nodes in the Jarvis swarm. The local machine appears as <code>localhost</code> until remote pairing ships in P3.
+        Other computers in this Jarvis setup. This PC shows as <code>localhost</code> until you pair more machines.
       </p>
       <div className="row" style={{ marginBottom: 16 }}>
         <button className="btn secondary" type="button" onClick={handleRefresh} disabled={loading}>
