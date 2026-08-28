@@ -1231,3 +1231,38 @@ label { display: block; color: var(--muted); font-size: 13px; }
   max-height: 4.4em;
   overflow: hidden;
 }
+
+.traj-page { max-width: 960px; }
+.traj-page label {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.traj-page label input,
+.traj-page label select,
+.traj-page label textarea { margin-top: 6px; }
+.traj-banner { margin-bottom: 0; }
+.traj-banner.untrusted { border-left: 4px solid var(--warn); }
+.traj-banner.trusted { border-left: 4px solid var(--ok); }
+.traj-banner.ok { border-left: 4px solid var(--ok); }
+.traj-banner.bad { border-left: 4px solid var(--bad); }
+.traj-row { cursor: pointer; }
+.traj-row:hover td { background: rgba(212, 160, 23, 0.06); }
+.traj-event-when {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.traj-args {
+  margin-top: 8px;
+  grid-template-columns: 120px 1fr;
+  font-size: 13px;
+}
+.traj-skill {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+  background: var(--panel-2);
+}

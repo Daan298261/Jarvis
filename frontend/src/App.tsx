@@ -22,6 +22,7 @@ import { DelegationPage } from "./pages/Delegation"
 import { LicensePage } from "./pages/License"
 import { AdvisorPage } from "./pages/Advisor"
 import { ContextRepoPage } from "./pages/ContextRepo"
+import { TrajectoriesPage } from "./pages/Trajectories"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -49,6 +50,7 @@ const ADMIN_LINKS = [
   { to: "/guest-portals", label: "Guest portals" },
   { to: "/agents", label: "Agents" },
   { to: "/context", label: "Context" },
+  { to: "/trajectories", label: "Trajectories" },
   { to: "/environments", label: "Environments" },
   { to: "/packs", label: "Packs" },
   { to: "/ads", label: "Amazon Ads" },
@@ -431,6 +433,8 @@ function OwnerPortal() {
           <Route path="/agents/new" element={<AgentInterviewPage />} />
           <Route path="/agents/:id" element={<AgentInterviewPage />} />
           <Route path="/context" element={<ContextRepoPage />} />
+          <Route path="/trajectories" element={<TrajectoriesPage />} />
+          <Route path="/trajectories/:trajectoryId" element={<TrajectoriesPage />} />
           <Route path="/environments" element={<WorkerEnvironmentsPage />} />
           <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
           <Route path="/packs" element={<PacksPage />} />

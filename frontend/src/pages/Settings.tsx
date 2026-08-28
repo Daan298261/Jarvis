@@ -109,6 +109,19 @@ export function SettingsPage() {
         </div>
       </div>
 
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Trajectories</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Import a Cursor transcript or record a finished Jarvis task. Imported records are
+          evidence only — they do not grant capabilities or change policy. Skills stay on Memory.
+        </p>
+        <div className="row">
+          <Link className="btn" to="/trajectories">
+            Open trajectories
+          </Link>
+        </div>
+      </div>
+
       {msg && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
           {msg}
