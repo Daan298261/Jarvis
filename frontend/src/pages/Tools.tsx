@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { api } from "../api"
 
 type Catalog = {
@@ -90,7 +91,10 @@ export function ToolsPage() {
       {!!codingWorkers.length && (
         <div className="card" style={{ marginTop: 16 }}>
           <h2>Software-development workers</h2>
-          <p className="lede">Jarvis routes coding work to the cheapest capable worker. Paid Cursor workers stay listed when they are not configured. A worker claiming success is never completion.</p>
+          <p className="lede">
+            Jarvis routes coding work to the cheapest capable worker. Paid Cursor workers stay listed when they are not configured. A worker claiming success is never completion. Isolated worktrees, approval, and Decision Inbox are on{" "}
+            <Link to="/coding">Coding isolation</Link>.
+          </p>
           {codingWorkers.map((worker) => (
             <div className="toggle" key={worker.id}>
               <div>

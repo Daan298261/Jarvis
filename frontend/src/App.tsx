@@ -24,6 +24,7 @@ import { AdvisorPage } from "./pages/Advisor"
 import { ContextRepoPage } from "./pages/ContextRepo"
 import { TrajectoriesPage } from "./pages/Trajectories"
 import { PortabilityPage } from "./pages/Portability"
+import { CodingPage } from "./pages/Coding"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -54,6 +55,7 @@ const ADMIN_LINKS = [
   { to: "/context", label: "Context" },
   { to: "/trajectories", label: "Trajectories" },
   { to: "/environments", label: "Environments" },
+  { to: "/coding", label: "Coding" },
   { to: "/packs", label: "Packs" },
   { to: "/ads", label: "Amazon Ads" },
   { to: "/delegation", label: "Helpers" },
@@ -441,6 +443,8 @@ function OwnerPortal() {
           <Route path="/trajectories/:trajectoryId" element={<TrajectoriesPage />} />
           <Route path="/environments" element={<WorkerEnvironmentsPage />} />
           <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
+          <Route path="/coding" element={<CodingPage />} />
+          <Route path="/coding/:taskId" element={<CodingPage />} />
           <Route path="/packs" element={<PacksPage />} />
           <Route path="/ads" element={<AdsPage />} />
           <Route path="/delegation" element={<DelegationPage />} />
