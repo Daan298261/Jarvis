@@ -1886,6 +1886,7 @@ Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, mai
 - Voice: Command Speak button; local STT/TTS when packages are present; JSON `/api/voice/command` still accepts text. Constraint: llama.cpp chat must keep the system message at the beginning; voice/listen must not inject a system turn mid-conversation (D1 P0; do not implement from Architect PRs).
 - Agent policy interviews (RFC-0002): guided interview UI PR #75; runtime `authorize()` before every tool PR #72 (`8265560`). Backend policy store PR #70.
 - Guest portals (RFC-0008): backend PR #71; owner/guest portal UI PR #76 (`f003c4e`).
+- Packs portal (RFC-0007): backend PR #61; portal UI PR #78 (`c1d2634`).
 
 ### Known Problems
 
@@ -1987,6 +1988,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [x] RFC-0008 Scoped guest portals
   - Acceptance: revocable guest portals with scoped tokens, deny-all default, owner revoke, permission preview, isolation tests, owner/guest UI.
   - Status: VERIFIED in code — backend PR #71; guest portal UI PR #76 (`f003c4e`). On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0007 Domain/workspace packs
+  - Acceptance: preview before install/upgrade/uninstall; rollback/export; trust keys.
+  - Status: VERIFIED in code — backend PR #61 (`8bb4145`); packs portal UI PR #78 (`c1d2634`). On `cursor/local-qwen-desktop-agent`. P5 Domain Pack architecture / business-platform list remains unimplemented.
 - [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
   - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
   - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
