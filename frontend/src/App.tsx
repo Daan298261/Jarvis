@@ -13,6 +13,8 @@ import { WorkflowsPage } from "./pages/Workflows"
 import { PhonePage } from "./pages/Phone"
 import { AgentsPage } from "./pages/Agents"
 import { AgentInterviewPage } from "./pages/AgentInterview"
+import { GuestPortalsPage } from "./pages/GuestPortals"
+import { GuestPage } from "./pages/Guest"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -35,6 +37,7 @@ const WORK_LINKS = [
 
 const ADMIN_LINKS = [
   { to: "/settings", label: "Settings" },
+  { to: "/guest-portals", label: "Guest portals" },
   { to: "/agents", label: "Agents" },
   { to: "/model", label: "Model" },
   { to: "/tools", label: "Tools" },
@@ -51,6 +54,10 @@ function isAdminPath(pathname: string): boolean {
   return ADMIN_LINKS.some((link) => pathname === link.to || pathname.startsWith(`${link.to}/`))
 }
 
+function isGuestPath(pathname: string): boolean {
+  return pathname === "/guest" || pathname.startsWith("/guest/")
+}
+
 function activeTaskId(pathname: string): string | undefined {
   const match = pathname.match(/^\/tasks\/([^/]+)/)
   return match?.[1]
@@ -61,6 +68,14 @@ function taskLabel(task: Task): string {
 }
 
 export default function App() {
+  const location = useLocation()
+  if (isGuestPath(location.pathname)) {
+    return <GuestPage />
+  }
+  return <OwnerPortal />
+}
+
+function OwnerPortal() {
   const location = useLocation()
   const [model, setModel] = useState<any>(null)
   const [away, setAway] = useState<AwayModeState | null>(null)
@@ -395,6 +410,7 @@ export default function App() {
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/mcp" element={<McpPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/guest-portals" element={<GuestPortalsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/new" element={<AgentInterviewPage />} />
           <Route path="/agents/:id" element={<AgentInterviewPage />} />

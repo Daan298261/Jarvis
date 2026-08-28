@@ -34,13 +34,29 @@ function authHeaders(extra?: HeadersInit): Record<string, string> {
   return headers
 }
 
+function formatApiDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string" && detail) return detail
+  if (detail && typeof detail === "object") {
+    const record = detail as { message?: unknown; code?: unknown; detail?: unknown }
+    if (typeof record.message === "string" && record.message) return record.message
+    if (typeof record.detail === "string" && record.detail) return record.detail
+    if (typeof record.code === "string" && record.code) return record.code
+    try {
+      return JSON.stringify(detail)
+    } catch {
+      return fallback
+    }
+  }
+  return fallback
+}
+
 async function throwIfNotOk(response: Response): Promise<void> {
   if (response.ok) return
   const text = await response.text()
   let errorDetail = text
   try {
     const parsed = JSON.parse(text)
-    errorDetail = parsed.detail || text
+    errorDetail = formatApiDetail(parsed.detail, text)
   } catch {
     // not JSON
   }
@@ -987,4 +1003,243 @@ export async function listAgentPolicyAudit(options?: {
   if (options?.limit != null) params.set("limit", String(options.limit))
   const query = params.toString()
   return api<{ events: AgentPolicyAuditEvent[] }>(`/api/agent-policy/audit${query ? `?${query}` : ""}`)
+}
+
+export const GUEST_RESOURCE_TYPES = ["task", "agent", "project", "decision_inbox"] as const
+export type GuestResourceType = (typeof GUEST_RESOURCE_TYPES)[number]
+
+export const GUEST_ACTIONS = ["read", "query", "approve"] as const
+export type GuestAction = (typeof GUEST_ACTIONS)[number]
+
+export type GuestGrant = {
+  resource_type: GuestResourceType | string
+  resource_id: string
+  actions: string[]
+}
+
+export type GuestPortalLimits = {
+  single_use: boolean
+  max_sessions: number | null
+  max_uses: number | null
+}
+
+export type GuestEffectivePermissions = {
+  grants: GuestGrant[]
+  denied_capabilities: string[]
+  allowed_actions_summary: Record<string, string[]>
+  limits: GuestPortalLimits
+  expires_at: string | null
+}
+
+export type GuestPortalPreviewIn = {
+  grants: GuestGrant[]
+  limits?: Partial<GuestPortalLimits>
+  expires_at?: string | null
+}
+
+export type GuestPortalCreateIn = GuestPortalPreviewIn & {
+  label: string
+  guest_label: string
+}
+
+export type GuestPortal = {
+  id: string
+  label: string
+  guest_label: string
+  scope: { grants: GuestGrant[] }
+  limits: GuestPortalLimits
+  created_at: string
+  expires_at: string | null
+  revoked: boolean
+  revoked_at: string | null
+  uses_remaining: number | null
+  active_sessions: number
+  token?: string
+  effective_permissions?: GuestEffectivePermissions
+}
+
+export type GuestAuditEntry = {
+  id: string
+  portal_id: string
+  session_id: string
+  guest_label: string
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  path: string | null
+  outcome: string
+  detail: string | null
+  created_at: string
+}
+
+export type GuestSession = {
+  session_id: string
+  guest_label: string
+  portal_id: string
+  effective_permissions: GuestEffectivePermissions
+}
+
+export type GuestTask = {
+  id: string
+  title: string
+  status: string
+  stage: string
+  result: string
+  error: string
+  waiting_for_confirmation: boolean
+  confirmation_payload?: unknown
+  created_at: string | null
+  updated_at: string | null
+  finished_at: string | null
+}
+
+export type GuestTaskEvents = {
+  task_id: string
+  events: {
+    kind: string
+    title: string
+    detail: string
+    stage: string
+    created_at: string | null
+  }[]
+}
+
+export type GuestDecision = {
+  id: string
+  status: string
+  detail: string
+}
+
+const GUEST_TOKEN_KEY = "jarvis_guest_token"
+const GUEST_SESSION_KEY = "jarvis_guest_session"
+
+export function getGuestToken(): string {
+  try {
+    return sessionStorage.getItem(GUEST_TOKEN_KEY) || ""
+  } catch {
+    return ""
+  }
+}
+
+export function setGuestToken(token: string): void {
+  try {
+    const trimmed = token.trim()
+    if (trimmed) sessionStorage.setItem(GUEST_TOKEN_KEY, trimmed)
+    else sessionStorage.removeItem(GUEST_TOKEN_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+export function getGuestSessionId(): string {
+  try {
+    return sessionStorage.getItem(GUEST_SESSION_KEY) || ""
+  } catch {
+    return ""
+  }
+}
+
+export function setGuestSessionId(id: string): void {
+  try {
+    const trimmed = id.trim()
+    if (trimmed) sessionStorage.setItem(GUEST_SESSION_KEY, trimmed)
+    else sessionStorage.removeItem(GUEST_SESSION_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+export function clearGuestSession(): void {
+  setGuestToken("")
+  setGuestSessionId("")
+}
+
+function guestAuthHeaders(extra?: HeadersInit): Record<string, string> {
+  const headers: Record<string, string> = { ...(extra as Record<string, string> || {}) }
+  const token = getGuestToken()
+  if (token) {
+    if (!headers["Authorization"] && !headers["authorization"]) {
+      headers["Authorization"] = `Bearer ${token}`
+    }
+    if (!headers["X-Jarvis-Guest-Token"]) {
+      headers["X-Jarvis-Guest-Token"] = token
+    }
+  }
+  const sessionId = getGuestSessionId()
+  if (sessionId && !headers["X-Jarvis-Guest-Session"]) {
+    headers["X-Jarvis-Guest-Session"] = sessionId
+  }
+  return headers
+}
+
+async function guestApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = guestAuthHeaders({
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> || {}),
+  })
+  const response = await fetch(path, { ...init, headers })
+  await throwIfNotOk(response)
+  return response.json() as Promise<T>
+}
+
+export async function previewGuestPortal(body: GuestPortalPreviewIn): Promise<GuestEffectivePermissions> {
+  return api<GuestEffectivePermissions>("/api/guest-portals/preview", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function createGuestPortal(body: GuestPortalCreateIn): Promise<GuestPortal> {
+  return api<GuestPortal>("/api/guest-portals", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function listGuestPortals(): Promise<GuestPortal[]> {
+  return api<GuestPortal[]>("/api/guest-portals")
+}
+
+export async function getGuestPortal(portalId: string): Promise<GuestPortal> {
+  return api<GuestPortal>(`/api/guest-portals/${encodeURIComponent(portalId)}`)
+}
+
+export async function revokeGuestPortal(portalId: string): Promise<GuestPortal> {
+  return api<GuestPortal>(`/api/guest-portals/${encodeURIComponent(portalId)}/revoke`, {
+    method: "POST",
+  })
+}
+
+export async function listGuestPortalAudit(portalId: string, limit = 200): Promise<GuestAuditEntry[]> {
+  const query = limit != null ? `?limit=${encodeURIComponent(String(limit))}` : ""
+  return api<GuestAuditEntry[]>(`/api/guest-portals/${encodeURIComponent(portalId)}/audit${query}`)
+}
+
+export async function startGuestSession(): Promise<GuestSession> {
+  const session = await guestApi<GuestSession>("/api/guest/session", { method: "POST" })
+  if (session.session_id) setGuestSessionId(session.session_id)
+  return session
+}
+
+export async function getGuestSession(): Promise<GuestSession> {
+  return guestApi<GuestSession>("/api/guest/session")
+}
+
+export async function getGuestTask(taskId: string): Promise<GuestTask> {
+  return guestApi<GuestTask>(`/api/guest/tasks/${encodeURIComponent(taskId)}`)
+}
+
+export async function getGuestTaskEvents(taskId: string): Promise<GuestTaskEvents> {
+  return guestApi<GuestTaskEvents>(`/api/guest/tasks/${encodeURIComponent(taskId)}/events`)
+}
+
+export async function approveGuestTask(taskId: string): Promise<GuestTask> {
+  return guestApi<GuestTask>(`/api/guest/tasks/${encodeURIComponent(taskId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+}
+
+export async function getGuestDecision(decisionId: string): Promise<GuestDecision> {
+  return guestApi<GuestDecision>(`/api/guest/decisions/${encodeURIComponent(decisionId)}`)
 }

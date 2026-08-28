@@ -69,6 +69,19 @@ export function SettingsPage() {
         </div>
       </div>
 
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Guest portals</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Issue a scoped, revocable link so a client can see one task or decision — not this PC&apos;s
+          files, tools, or settings. Preview effective permissions before the token is created.
+        </p>
+        <div className="row">
+          <Link className="btn" to="/guest-portals">
+            Open guest portals
+          </Link>
+        </div>
+      </div>
+
       {msg && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
           {msg}
