@@ -3490,9 +3490,7 @@ export type CodingIntegrateResult = {
 
 export function codingIntegrationBlocked(result: CodingIntegrateResult): boolean {
   const status = (result.integration_status || "").toLowerCase()
-  if (status === "ready") return false
-  if (status === "approved") return false
-  return Boolean(result.requires_approval) || status === "awaiting_approval" || status === "blocked" || status === "pending"
+  return status !== "ready"
 }
 
 export function formatCodingError(err: unknown): string {
