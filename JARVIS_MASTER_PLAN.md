@@ -1891,6 +1891,7 @@ Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, mai
 - Task tree (RFC-0006): backend PR #59; portal UI PR #81 (`d2a1fcc`).
 - License (RFC-0012): backend PR #66; portal UI PR #82 (`93e0555`).
 - Advisor disclosure (RFC-0013): backend PR #67; portal UI PR #83 (`ee745f9`).
+- Context repo (RFC-0011): backend PR #65; portal UI PR #84 (`fc111c9`).
 
 ### Known Problems
 
@@ -2007,6 +2008,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [x] RFC-0013 Compact local harness and advisor escalation
   - Acceptance: preview what leaves the box; advisor has no tools.
   - Status: VERIFIED in code — backend PR #67 (`1d614a0`); portal UI PR #83 (`ee745f9`). New files; no harness/compaction rewrite. On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0011 Versioned context repositories
+  - Acceptance: inspect/diff/revert/pin/delete; Memory page kept.
+  - Status: VERIFIED in code — backend PR #65 (`5c17b5e`); portal UI PR #84 (`fc111c9`). Does not replace the existing skills Memory page. On `cursor/local-qwen-desktop-agent`.
 - [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
   - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
   - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
