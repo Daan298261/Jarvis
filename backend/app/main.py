@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_portability, auth, autonomy, coding, context_repo, delegation, license, mcp, memory, mobile, model, packs, queue, runtime_profiles, self_dev, settings, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, auth, autonomy, coding, context_repo, delegation, license, mcp, memory, mobile, model, packs, queue, runtime_profiles, self_dev, settings, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
 from .db import init_db
@@ -72,6 +72,7 @@ app.include_router(context_repo.router)
 app.include_router(agent_portability.router)
 app.include_router(license.router)
 app.include_router(autonomy.router)
+app.include_router(agent_policy.router)
 
 frontend_dist = repo_root() / "frontend" / "dist"
 
