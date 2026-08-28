@@ -1079,3 +1079,36 @@ label { display: block; color: var(--muted); font-size: 13px; }
   .delegation-layout.two { grid-template-columns: 1fr; }
   .chat-helpers { padding-left: 14px; padding-right: 14px; }
 }
+
+.license-page { max-width: 920px; }
+.license-stories {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.license-story h2 { margin-bottom: 8px; }
+.license-story.subscription { border-left: 4px solid var(--gold); }
+.license-story.inference { border-left: 4px solid var(--line); }
+.license-kicker {
+  margin: 0 0 6px;
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.license-story.inference .license-kicker { color: var(--muted); }
+.license-banner { margin-bottom: 16px; }
+.license-banner.ok { border-left: 4px solid var(--ok); }
+.license-banner.bad { border-left: 4px solid var(--bad); }
+.license-cred-form {
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-top: 16px;
+}
+.license-cred-form .span-2 { grid-column: 1 / -1; }
+@media (max-width: 800px) {
+  .license-stories { grid-template-columns: 1fr; }
+  .license-cred-form { grid-template-columns: 1fr; }
+  .license-cred-form .span-2 { grid-column: auto; }
+}

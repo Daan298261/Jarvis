@@ -2304,3 +2304,184 @@ export async function failDelegatedWorker(workerId: string, error: string): Prom
     { method: "POST", body: JSON.stringify({ error }) },
   )
 }
+
+export type LicenseValidationStatus =
+  | "unlicensed"
+  | "tamper_detected"
+  | "invalid_signature"
+  | "cluster_mismatch"
+  | "not_yet_valid"
+  | "expired"
+  | "grace"
+  | "active"
+  | "valid"
+
+export type LicenseValidation = {
+  valid?: boolean
+  status?: string
+  message?: string
+  cluster_id?: string
+  lease_id?: string
+  tier?: string
+  features?: string[]
+  pack_entitlements?: string[]
+  issued_at?: string
+  expires_at?: string
+  grace_seconds?: number
+  in_grace?: boolean
+  last_validated_at?: string
+}
+
+export type LicenseStatus = {
+  cluster_id: string
+  validation: LicenseValidation
+  lease_present: boolean
+  last_status: string | null
+  last_message: string | null
+  last_validated_at: string | null
+}
+
+export type LicenseCluster = {
+  cluster_id: string
+}
+
+export type LicenseEntitlements = {
+  tier: string | null
+  features: string[]
+  pack_entitlements: string[]
+  cluster_wide?: boolean
+  cluster_id?: string
+}
+
+export type LicenseEntitlementsResponse = {
+  validation: LicenseValidation
+  entitlements: LicenseEntitlements
+}
+
+export type SignedLeaseObject = {
+  payload?: Record<string, unknown>
+  signature?: string
+  signer_key_id?: string
+  [key: string]: unknown
+}
+
+/** Public inference credential fields only. Never include secret. */
+export type InferenceCredentialPublic = {
+  id: string
+  provider: string
+  label: string
+  endpoint?: string | null
+}
+
+export type InferenceCredentialIn = {
+  provider: string
+  label: string
+  secret: string
+  endpoint?: string | null
+  credential_id?: string
+  metadata?: Record<string, unknown>
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined
+}
+
+function asStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => String(item)).filter(Boolean)
+}
+
+function publicInferenceCredential(raw: unknown): InferenceCredentialPublic | null {
+  if (!raw || typeof raw !== "object") return null
+  const row = raw as Record<string, unknown>
+  const id = asOptionalString(row.id) || asOptionalString(row.credential_id)
+  if (!id) return null
+  return {
+    id,
+    provider: asOptionalString(row.provider) || "",
+    label: asOptionalString(row.label) || "",
+    endpoint: asOptionalString(row.endpoint) || null,
+  }
+}
+
+function publicInferenceCredentials(raw: unknown): InferenceCredentialPublic[] {
+  const list = Array.isArray(raw) ? raw : []
+  const out: InferenceCredentialPublic[] = []
+  for (const item of list) {
+    const pub = publicInferenceCredential(item)
+    if (pub) out.push(pub)
+  }
+  return out
+}
+
+export async function getLicenseStatus(): Promise<LicenseStatus> {
+  return api<LicenseStatus>("/api/license/status")
+}
+
+export async function getLicenseCluster(): Promise<LicenseCluster> {
+  return api<LicenseCluster>("/api/license/cluster")
+}
+
+export async function validateLicenseOffline(): Promise<LicenseValidation> {
+  return api<LicenseValidation>("/api/license/validate", { method: "POST" })
+}
+
+export async function refreshLicenseLease(lease: SignedLeaseObject): Promise<LicenseValidation> {
+  return api<LicenseValidation>("/api/license/refresh", {
+    method: "POST",
+    body: JSON.stringify({ lease }),
+  })
+}
+
+export async function getLicenseEntitlements(): Promise<LicenseEntitlementsResponse> {
+  const data = await api<LicenseEntitlementsResponse>("/api/license/entitlements")
+  const entitlements = data.entitlements || {
+    tier: null,
+    features: [],
+    pack_entitlements: [],
+  }
+  return {
+    validation: data.validation || {},
+    entitlements: {
+      tier: entitlements.tier ?? null,
+      features: asStringList(entitlements.features),
+      pack_entitlements: asStringList(entitlements.pack_entitlements),
+      cluster_wide: entitlements.cluster_wide !== false,
+      cluster_id: asOptionalString(entitlements.cluster_id),
+    },
+  }
+}
+
+export async function listInferenceCredentials(): Promise<{ credentials: InferenceCredentialPublic[] }> {
+  const data = await api<{ credentials?: unknown }>("/api/license/inference-credentials")
+  return { credentials: publicInferenceCredentials(data.credentials) }
+}
+
+export async function upsertInferenceCredential(
+  body: InferenceCredentialIn,
+): Promise<{ credential: InferenceCredentialPublic }> {
+  const payload: Record<string, unknown> = {
+    provider: body.provider,
+    label: body.label,
+    secret: body.secret,
+  }
+  if (body.endpoint) payload.endpoint = body.endpoint
+  if (body.credential_id) payload.credential_id = body.credential_id
+  if (body.metadata && Object.keys(body.metadata).length) payload.metadata = body.metadata
+  const data = await api<{ credential?: unknown }>("/api/license/inference-credentials", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+  const credential = publicInferenceCredential(data.credential)
+  if (!credential) throw new Error("Saved, but Jarvis did not return a credential id.")
+  return { credential }
+}
+
+export async function deleteInferenceCredential(
+  credentialId: string,
+): Promise<{ deleted: boolean; id: string }> {
+  return api<{ deleted: boolean; id: string }>(
+    `/api/license/inference-credentials/${encodeURIComponent(credentialId)}`,
+    { method: "DELETE" },
+  )
+}
