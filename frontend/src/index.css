@@ -621,3 +621,113 @@ label { display: block; color: var(--muted); font-size: 13px; }
   .effective-compare { grid-template-columns: 1fr; }
   .axis-options { grid-template-columns: 1fr; }
 }
+
+.interview-page, .agents-page { max-width: 860px; }
+.interview-kicker {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.interview-kicker a { color: var(--gold); }
+.interview-progress {
+  height: 4px;
+  background: var(--panel-2);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 8px 0 12px;
+}
+.interview-progress-bar {
+  height: 100%;
+  background: var(--gold);
+}
+.interview-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.interview-dot {
+  min-width: 32px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.interview-dot.done { color: var(--text); }
+.interview-dot.on {
+  background: var(--gold);
+  color: #16120a;
+  border-color: var(--gold);
+  font-weight: 600;
+}
+.interview-card h2 { margin-bottom: 6px; }
+.interview-step-label {
+  margin: 0 0 4px;
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.chip:hover { border-color: var(--gold-dim); }
+.chip.on {
+  background: rgba(212, 160, 23, 0.16);
+  border-color: var(--gold);
+  color: var(--text);
+}
+.interview-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.summary-grid {
+  display: grid;
+  gap: 12px;
+}
+.summary-grid > div {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.summary-grid b {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.summary-grid span { white-space: pre-wrap; }
+.autonomy-rows { display: flex; flex-direction: column; gap: 8px; }
+.autonomy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.autonomy-row > :not(.btn) { flex: 1 1 140px; min-width: 0; }
+.autonomy-row > .btn { flex: 0 0 auto; }
+.policy-json {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}

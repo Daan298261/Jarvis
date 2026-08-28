@@ -11,6 +11,8 @@ import { SystemPage } from "./pages/System"
 import { SwarmPage } from "./pages/Swarm"
 import { WorkflowsPage } from "./pages/Workflows"
 import { PhonePage } from "./pages/Phone"
+import { AgentsPage } from "./pages/Agents"
+import { AgentInterviewPage } from "./pages/AgentInterview"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -33,6 +35,7 @@ const WORK_LINKS = [
 
 const ADMIN_LINKS = [
   { to: "/settings", label: "Settings" },
+  { to: "/agents", label: "Agents" },
   { to: "/model", label: "Model" },
   { to: "/tools", label: "Tools" },
   { to: "/mcp", label: "MCP" },
@@ -392,6 +395,9 @@ export default function App() {
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/mcp" element={<McpPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/agents/new" element={<AgentInterviewPage />} />
+          <Route path="/agents/:id" element={<AgentInterviewPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/swarm" element={<SwarmPage />} />
           <Route path="/swarm/:nodeId" element={<SwarmPage />} />

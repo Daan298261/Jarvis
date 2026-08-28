@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 import { AutonomySection } from "./Autonomy"
 
@@ -54,6 +55,19 @@ export function SettingsPage() {
       </p>
 
       <AutonomySection />
+
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Agent profiles</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          A short interview for how a specialist should behave — mission, tone, what it may do,
+          what needs your OK, and how much freedom it has. Not a server console.
+        </p>
+        <div className="row">
+          <Link className="btn" to="/agents">
+            Open agent interview
+          </Link>
+        </div>
+      </div>
 
       {msg && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>

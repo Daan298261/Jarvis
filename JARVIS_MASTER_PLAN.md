@@ -3668,6 +3668,7 @@ This development session:
 - Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
 - Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
 - Voice: Command Speak button; `POST /api/voice/listen` transcribes locally; `POST /api/voice/speak` returns WAV; JSON `/api/voice/command` still accepts text
+- Agent Profiles (RFC-0002 UI): guided behavior interview, answer summary, and advanced policy editor at `/agents` against `/api/agent-policy`. RFC-0002 stays open until the runtime `authorize()` hook (PR #72) is also on canonical.
 
 ### Known Problems
 
@@ -3816,6 +3817,10 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Trial budget, emergency kill switch, and end-of-run report
   - Acceptance: duration/spend/invocation/failure limits; `data/STOP_JARVIS` plus portal/API stop; report includes branch, commits, tests, cost, and merge candidates.
   - Status: VERIFIED (`test_self_dev.py` + Command/System/Settings UI)
+
+- [ ] RFC-0002 Agent policy interviews and per-capability autonomy
+  - Acceptance: guided interview UI + runtime `authorize()` before every tool. Portal UI is this ticket; the loop hook is PR #72.
+  - Status: IN PROGRESS — frontend interview UI against landed `/api/agent-policy`. Do not mark implemented until this UI and #72 are both on canonical.
 
 ### P2
 
