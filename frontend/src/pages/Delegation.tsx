@@ -128,7 +128,7 @@ function emptySpawn(authority: DelegationAuthority, parentWorkerId = ""): SpawnF
   return {
     parentWorkerId,
     task: "",
-    tools: [...authority.tools],
+    tools: [],
     autonomy: authority.autonomy,
     privacy: authority.privacy_class,
     contextKeys: [],
@@ -229,7 +229,8 @@ export function DelegationPanel({
 }) {
   const [workers, setWorkers] = useState<DelegatedWorker[]>([])
   const [events, setEvents] = useState<DelegationEvent[]>([])
-  const [error, setError] = useState("")
+  const [graphError, setGraphError] = useState("")
+  const [actionError, setActionError] = useState("")
   const [notice, setNotice] = useState("")
   const [busy, setBusy] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -247,9 +248,9 @@ export function DelegationPanel({
       ])
       setWorkers(graph)
       setEvents(timeline)
-      setError("")
+      setGraphError("")
     } catch (err: unknown) {
-      setError(formatDelegationError(err))
+      setGraphError(formatDelegationError(err))
     }
   }, [parentTaskId])
 
@@ -287,15 +288,15 @@ export function DelegationPanel({
     event.preventDefault()
     const taskText = form.task.trim()
     if (!taskText) {
-      setError("Describe what the helper should do.")
+      setActionError("Describe what the helper should do.")
       return
     }
     if (!autonomyOptions.includes(form.autonomy as (typeof autonomyOptions)[number])) {
-      setError("A helper cannot have more freedom than its parent.")
+      setActionError("A helper cannot have more freedom than its parent.")
       return
     }
     if (!privacyOptions.includes(form.privacy as (typeof privacyOptions)[number])) {
-      setError("A helper cannot have looser privacy than its parent.")
+      setActionError("A helper cannot have looser privacy than its parent.")
       return
     }
     const context: Record<string, unknown> = {}
@@ -310,7 +311,7 @@ export function DelegationPanel({
       if (Number.isFinite(parsed)) budget[key] = parsed
     }
     setBusy(true)
-    setError("")
+    setActionError("")
     setNotice("")
     try {
       const created = await spawnDelegatedChild(
@@ -333,7 +334,7 @@ export function DelegationPanel({
       setForm(emptySpawn(spawnAuthority, form.parentWorkerId))
       await load()
     } catch (err: unknown) {
-      setError(formatDelegationError(err))
+      setActionError(formatDelegationError(err))
     } finally {
       setBusy(false)
     }
@@ -341,14 +342,14 @@ export function DelegationPanel({
 
   async function runAction(action: () => Promise<unknown>, ok: string) {
     setBusy(true)
-    setError("")
+    setActionError("")
     setNotice("")
     try {
       await action()
       setNotice(ok)
       await load()
     } catch (err: unknown) {
-      setError(formatDelegationError(err))
+      setActionError(formatDelegationError(err))
     } finally {
       setBusy(false)
     }
@@ -390,9 +391,14 @@ export function DelegationPanel({
         Helpers cannot get extra tools, extra freedom, or looser privacy than the parent. The parent
         task stays accountable.
       </div>
-      {error && (
+      {graphError && (
         <div className="card delegation-banner bad" role="alert">
-          {error}
+          {graphError}
+        </div>
+      )}
+      {actionError && (
+        <div className="card delegation-banner bad" role="alert">
+          {actionError}
         </div>
       )}
       {notice && (
@@ -585,7 +591,7 @@ export function DelegationPanel({
             </label>
             <fieldset className="axis-fieldset">
               <legend>Tools this helper may use</legend>
-              <p>Only the parent’s tools are listed. Extra tools are not offered.</p>
+              <p>Only the parent’s tools are listed. Extra tools are not offered. None are selected until you pick them.</p>
               {spawnAuthority.tools.length === 0 && (
                 <p className="lede" style={{ margin: 0 }}>This parent has no tools to share.</p>
               )}
