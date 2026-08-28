@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import auth, coding, mcp, memory, mobile, model, queue, runtime_profiles, self_dev, settings, swarm, system, tasks, tools, voice, worker_environments, workflows
+from .api import auth, coding, delegation, mcp, memory, mobile, model, queue, runtime_profiles, self_dev, settings, swarm, system, tasks, tools, voice, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
 from .db import init_db
@@ -49,6 +49,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(tasks.router)
+app.include_router(delegation.router)
 app.include_router(queue.router)
 app.include_router(system.router)
 app.include_router(model.router)

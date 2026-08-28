@@ -434,3 +434,51 @@ class WorkerReport(Base):
     reported_success: Mapped[bool] = mapped_column(Boolean, default=False)
     summary: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DelegatedWorker(Base):
+    """Short-lived child worker spawned by a parent task or parent worker (RFC-0006)."""
+
+    __tablename__ = "delegated_workers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    parent_task_id: Mapped[str] = mapped_column(String(36), index=True)
+    parent_worker_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    depth: Mapped[int] = mapped_column(Integer, default=1)
+    task: Mapped[str] = mapped_column(Text)
+    context_json: Mapped[str] = mapped_column(Text, default="{}")
+    tools_json: Mapped[str] = mapped_column(Text, default="[]")
+    budget_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_schema_json: Mapped[str] = mapped_column(Text, default="{}")
+    autonomy: Mapped[str] = mapped_column(String(32), default="trusted")
+    privacy_class: Mapped[str] = mapped_column(String(32), default="internal")
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    result_json: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    events: Mapped[list["DelegationEvent"]] = relationship(
+        back_populates="worker",
+        cascade="all, delete-orphan",
+    )
+
+
+class DelegationEvent(Base):
+    """Structured child status/result/failure events delivered to the parent."""
+
+    __tablename__ = "delegation_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    parent_task_id: Mapped[str] = mapped_column(String(36), index=True)
+    worker_id: Mapped[str] = mapped_column(ForeignKey("delegated_workers.id"))
+    kind: Mapped[str] = mapped_column(String(40))
+    title: Mapped[str] = mapped_column(String(400), default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    worker: Mapped[DelegatedWorker] = relationship(back_populates="events")
