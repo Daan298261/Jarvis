@@ -343,7 +343,7 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font-size: 14px; }
 th { color: var(--muted); font-weight: 500; }
 
-input[type="text"], input[type="number"], input[type="password"], select, textarea.field {
+input[type="text"], input[type="number"], input[type="password"], input[type="datetime-local"], select, textarea.field {
   width: 100%;
   background: #0c1015;
   border: 1px solid var(--line);
@@ -730,4 +730,83 @@ label { display: block; color: var(--muted); font-size: 13px; }
   font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.guest-shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.guest-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  background: #0e1217;
+  border-bottom: 1px solid var(--line);
+}
+.guest-bar strong {
+  letter-spacing: 0.18em;
+  font-size: 13px;
+  color: var(--gold);
+}
+.guest-bar-meta {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.guest-main {
+  padding: 22px 24px 32px;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+}
+.guest-portals-page { max-width: 860px; }
+.grant-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  margin-bottom: 10px;
+}
+.grant-list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  color: var(--text);
+}
+.grant-list li { margin-bottom: 6px; }
+.grant-pick {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.token-once {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  background: #0c1015;
+  border: 1px solid var(--gold-dim);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--text);
+}
+.denied-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.denied-list span {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+@media (max-width: 800px) {
+  .guest-main { padding: 16px 14px 28px; }
 }
