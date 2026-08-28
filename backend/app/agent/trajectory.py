@@ -91,6 +91,14 @@ async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -
         )
         session.add(row)
         await session.commit()
+        try:
+            from ..trajectories.native import from_native_trajectory
+            from ..trajectories.consumer import enqueue_trajectory
+            from ..trajectories.store import save_trajectory
+
+            enqueue_trajectory(save_trajectory(from_native_trajectory(row)))
+        except Exception:
+            pass
         return row
 
 
