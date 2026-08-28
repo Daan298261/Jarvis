@@ -12,8 +12,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, auth, autonomy, coding, context_repo, delegation, license, mcp, memory, mobile, model, packs, queue, runtime_profiles, self_dev, settings, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, auth, autonomy, coding, context_repo, delegation, guest_portals, license, mcp, memory, mobile, model, packs, queue, runtime_profiles, self_dev, settings, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
+from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
 from .db import init_db
 from .events import BUS
@@ -70,6 +71,8 @@ app.include_router(packs.router)
 app.include_router(trajectories.router)
 app.include_router(context_repo.router)
 app.include_router(agent_portability.router)
+app.include_router(guest_portals.owner_router)
+app.include_router(guest_portals.guest_router)
 app.include_router(license.router)
 app.include_router(autonomy.router)
 app.include_router(agent_policy.router)
@@ -79,14 +82,28 @@ frontend_dist = repo_root() / "frontend" / "dist"
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    if not authenticate_request(request):
+    if authenticate_request(request):
+        return await call_next(request)
+
+    path = request.url.path
+    if path.startswith("/api/guest/"):
+        guest_ctx = authenticate_guest_request(request)
+        if guest_ctx is not None:
+            request.state.guest = guest_ctx
+            return await call_next(request)
+        if extract_guest_token_from_request(request):
+            return await call_next(request)
         return JSONResponse(
-            {
-                "detail": "Authentication required. Provide a valid private key via Authorization: Bearer, X-Jarvis-Key header, or ?key= query parameter."
-            },
+            {"detail": "Guest portal authentication required"},
             status_code=401,
         )
-    return await call_next(request)
+
+    return JSONResponse(
+        {
+            "detail": "Authentication required. Provide a valid private key via Authorization: Bearer, X-Jarvis-Key header, or ?key= query parameter."
+        },
+        status_code=401,
+    )
 
 
 @app.on_event("startup")
