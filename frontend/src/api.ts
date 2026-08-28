@@ -451,3 +451,143 @@ export async function postSwarmDispatch(body: SwarmDispatchRequest): Promise<Swa
   await throwIfNotOk(response)
   return response.json() as Promise<SwarmDispatchResult>
 }
+
+/* ---- Setup / diagnostics (RFC-0002) ---- */
+
+export type SetupWizardStep =
+  | "welcome"
+  | "system"
+  | "role"
+  | "resources"
+  | "inference"
+  | "runtime"
+  | "desktop"
+  | "verification"
+  | "done"
+
+export type SetupState = {
+  version: number
+  completed: boolean
+  current_step: SetupWizardStep
+  completed_steps: string[]
+  jarvis_role: string
+  recommended_class: string
+  role_policies: Record<string, string>
+  resource_preset: string
+  global_percent: number
+  resource_mode: string
+  resource_limits: Record<string, unknown>
+  inference_choice: string
+  inference_profile: string
+  remote_host: string
+  remote_port: number
+  install_expert_27b: boolean
+  install_playwright: boolean
+  desktop_prefs: {
+    start_with_windows?: boolean
+    start_minimized?: boolean
+    close_to_tray?: boolean
+  }
+  component_status: Record<string, unknown>
+  last_error: string
+  updated_at: string
+}
+
+export type SetupStatusResponse = {
+  needs_setup: boolean
+  state: SetupState
+  steps: SetupWizardStep[]
+  components: Record<string, ComponentInstallState>
+}
+
+export type ComponentInstallState = {
+  id: string
+  label: string
+  status: string
+  bytes_done: number
+  bytes_total: number
+  error: string
+  path: string
+  optional: boolean
+  detail: string
+}
+
+export type SetupRecommendation = {
+  recommended_class: string
+  suitable_for: string[]
+  capabilities: Record<string, boolean>
+  role_policies: Record<string, string>
+  resource_preset: string
+  inference_default: string
+  notes: string[]
+  hardware_summary: Record<string, unknown>
+}
+
+export async function getSetupStatus(): Promise<SetupStatusResponse> {
+  return api<SetupStatusResponse>("/api/setup/status")
+}
+
+export async function getSetupRecommend(): Promise<SetupRecommendation> {
+  return api<SetupRecommendation>("/api/setup/recommend")
+}
+
+export async function putSetupState(body: Partial<SetupState>): Promise<{ state: SetupState }> {
+  return api<{ state: SetupState }>("/api/setup/state", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function advanceSetup(
+  step: string,
+  next_step?: string,
+  patch?: Record<string, unknown>,
+): Promise<{ state: SetupState }> {
+  return api<{ state: SetupState }>("/api/setup/advance", {
+    method: "POST",
+    body: JSON.stringify({ step, next_step, patch: patch || {} }),
+  })
+}
+
+export async function applySetup(): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>("/api/setup/apply", { method: "POST", body: "{}" })
+}
+
+export async function completeSetup(opts?: {
+  apply?: boolean
+  without_local_model?: boolean
+}): Promise<{ ok: boolean; state: SetupState }> {
+  return api<{ ok: boolean; state: SetupState }>("/api/setup/complete", {
+    method: "POST",
+    body: JSON.stringify(opts || { apply: true }),
+  })
+}
+
+export async function installSetupComponent(component: string): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>("/api/setup/install", {
+    method: "POST",
+    body: JSON.stringify({ component }),
+  })
+}
+
+export async function installSelectedComponents(): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>("/api/setup/install", {
+    method: "POST",
+    body: JSON.stringify({ all_selected: true }),
+  })
+}
+
+export async function listSetupComponents(): Promise<{
+  components: Record<string, ComponentInstallState>
+  ids: string[]
+}> {
+  return api("/api/setup/components")
+}
+
+export async function getDiagnostics(): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>("/api/diagnostics")
+}
+
+export async function getDiagnosticsText(): Promise<{ text: string; diagnostics: Record<string, unknown> }> {
+  return api("/api/diagnostics/text")
+}

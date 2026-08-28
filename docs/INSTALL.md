@@ -1,12 +1,14 @@
 # Install Jarvis
 
-> **Nontechnical users:** after someone builds `JarvisSetup.exe` on Windows (see [`installer/windows/README.md`](../installer/windows/README.md)), double-click that installer instead of following the manual steps below. It runs the same setup automatically and adds **Start Jarvis** / **Stop Jarvis** shortcuts.
+> **Nontechnical users (preferred):** build the desktop installer on Windows with `.\scripts\build-windows-release.ps1` (see [`docs/DESKTOP.md`](DESKTOP.md) / RFC-0002), then run `JarvisSetup.exe`. Launch **Jarvis.exe** — the UI opens in a native window; first-run setup handles models/runtimes. No end-user Python or Node is required for the packaged product.
+>
+> **Legacy source installer:** [`installer/windows/README.md`](../installer/windows/README.md) still builds an Inno Setup package that bootstraps a repo checkout (Python/Node via winget). Prefer the Tauri path above.
 
-Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal. Inference defaults to **Qwen3.5-9B Abliterated** through llama.cpp on this machine. **Qwen3.5-27B** remains an optional Expert/escalation model. You can also point Jarvis at any OpenAI-compatible server.
+Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal (also embedded in the Tauri desktop shell). Inference defaults to **Qwen3.5-9B Abliterated** through llama.cpp on this machine. **Qwen3.5-27B** remains an optional Expert/escalation model. You can also point Jarvis at any OpenAI-compatible server.
 
-The portal is [http://127.0.0.1:4780](http://127.0.0.1:4780). The same REST API drives the installable phone PWA at `/phone`, plus later voice or automations.
+The portal remains available at [http://127.0.0.1:4780](http://127.0.0.1:4780) for browser/PWA use. The same REST API drives the phone PWA at `/phone`.
 
-This is a **Windows** product. Startup scripts, Office COM, and desktop UI automation assume Windows. Linux is only useful for unit tests; see [DEVELOPMENT.md](DEVELOPMENT.md).
+This is a **Windows** product. Desktop shell, Office COM, and desktop UI automation assume Windows. Linux is useful for unit tests; see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ---
 

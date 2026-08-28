@@ -20,6 +20,7 @@ class HardwareInfo:
     os_name: str
     os_version: str
     architecture: str
+    hostname: str
     cpu_name: str
     cpu_cores: int
     cpu_threads: int
@@ -32,6 +33,9 @@ class HardwareInfo:
     cuda_version: str | None
     disk_free_gb: float
     disk_total_gb: float
+    battery_percent: float | None
+    power_plugged: bool | None
+    network_adapters: list[str]
     python_version: str
     node_installed: bool
     git_installed: bool
@@ -103,6 +107,32 @@ def detect_hardware(*, force: bool = False) -> HardwareInfo:
     return info
 
 
+def _battery() -> tuple[float | None, bool | None]:
+    try:
+        bat = psutil.sensors_battery()
+    except Exception:
+        return None, None
+    if bat is None:
+        return None, None
+    return float(bat.percent), bool(bat.power_plugged)
+
+
+def _network_adapters() -> list[str]:
+    names: list[str] = []
+    try:
+        for name, addrs in psutil.net_if_addrs().items():
+            if not addrs:
+                continue
+            # Skip obvious loopback-only interfaces when possible.
+            lowered = name.lower()
+            if lowered.startswith("lo") or "loopback" in lowered:
+                continue
+            names.append(name)
+    except Exception:
+        pass
+    return names[:24]
+
+
 def _probe_hardware() -> HardwareInfo:
     vm = psutil.virtual_memory()
     disk = shutil.disk_usage(str(Path.home().anchor or "C:\\"))
@@ -118,10 +148,13 @@ def _probe_hardware() -> HardwareInfo:
         if cpu_ps:
             cpu = cpu_ps.splitlines()[-1].strip() or cpu
     nvidia = _nvidia()
+    battery_percent, power_plugged = _battery()
+    hostname = platform.node() or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or ""
     return HardwareInfo(
         os_name=platform.system(),
         os_version=platform.version(),
         architecture=platform.machine(),
+        hostname=hostname,
         cpu_name=cpu,
         cpu_cores=psutil.cpu_count(logical=False) or 1,
         cpu_threads=psutil.cpu_count(logical=True) or 1,
@@ -134,6 +167,9 @@ def _probe_hardware() -> HardwareInfo:
         cuda_version=nvidia["cuda_version"],
         disk_free_gb=round(disk.free / (1024**3), 2),
         disk_total_gb=round(disk.total / (1024**3), 2),
+        battery_percent=battery_percent,
+        power_plugged=power_plugged,
+        network_adapters=_network_adapters(),
         python_version=platform.python_version(),
         node_installed=shutil.which("node") is not None,
         git_installed=shutil.which("git") is not None,

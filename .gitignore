@@ -27,6 +27,14 @@ backend/.venv/
 frontend/node_modules/
 frontend/dist/
 
+# Tauri / Rust
+frontend/src-tauri/target/
+frontend/src-tauri/sidecars/jarvis-backend/
+
+# PyInstaller / packaged backend
+runtime/backend/
+*.spec
+
 # OS / editor
 Thumbs.db
 .DS_Store

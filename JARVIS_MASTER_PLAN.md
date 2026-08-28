@@ -3596,8 +3596,8 @@ This development session:
 - Backend: Python FastAPI (`backend/app`), served on `127.0.0.1:4780`
 - Frontend: React + TypeScript + Vite, built into `frontend/dist` and served by FastAPI
 - Database: SQLite `data/jarvis.db` (tasks, events, tool calls, checkpoints)
-- Startup: `start-jarvis.ps1` / `stop-jarvis.ps1`
-- Status: **working application skeleton with real APIs, agent loop, tools, and portal**
+- Startup: `start-jarvis.ps1` / `stop-jarvis.ps1` (dev); packaged product uses Tauri `Jarvis.exe` + backend sidecar (`docs/DESKTOP.md`, RFC-0002) — **desktop sign-off required** for `.exe` install
+- Status: **working application skeleton with real APIs, agent loop, tools, portal, and desktop shell sources**
 
 ### Working Tools
 
@@ -3776,6 +3776,10 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 - [x] Interactive Guide & Workflow Launcher Tab (Instructions, Example Library & Custom Event Chains)
   - Acceptance: New "Guide & Workflows" tab in the web portal containing clear usage instructions, pre-populated editable templates (e.g., project debugging, research + Excel export, multi-file transforms, browser workflows), an editor allowing prompt parameters / event chains customization, and 1-click execution dispatch.
   - Status: VERIFIED (portal tab + `/api/workflows` + unit tests)
+
+- [ ] Windows desktop application + installer (RFC-0002)
+  - Acceptance: Tauri shell embeds React UI; backend sidecar lifecycle; first-run setup; tray; one release build command; browser/PWA still works.
+  - Status: CODE PRESENT / unit-tested (`test_setup_*`, `test_desktop_*`, `test_diagnostics_redaction`, packaging source checks). **Desktop sign-off required** for `JarvisSetup.exe` install, tray, quit semantics, and data survival.
 
 - [x] Browser Use adapter
   - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
