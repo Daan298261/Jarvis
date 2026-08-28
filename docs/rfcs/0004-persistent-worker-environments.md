@@ -1,6 +1,6 @@
 # RFC-0004: Persistent worker environments
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Persistent workers / runtime state  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
@@ -17,13 +17,13 @@ Credentials must be capability-scoped and revocable. A worker environment may be
 
 ## Acceptance criteria
 
-- [ ] Worker runtime has durable workspace identity and lifecycle: create, start, suspend, resume, reset, delete.
-- [ ] Persistent state survives Jarvis restart where supported.
-- [ ] Credentials are stored outside plain workspace files and scoped to the worker/capability.
-- [ ] Resource quotas can cap disk, CPU, RAM, GPU, and background processes.
-- [ ] UI exposes environment status, disk usage, last active time, reset, and inspect actions.
-- [ ] Audit log records environment and credential lifecycle events.
-- [ ] Tests cover lifecycle and safe cleanup.
+- [x] Worker runtime has durable workspace identity and lifecycle: create, start, suspend, resume, reset, delete.
+- [x] Persistent state survives Jarvis restart where supported.
+- [x] Credentials are stored outside plain workspace files and scoped to the worker/capability.
+- [x] Resource quotas can cap disk, CPU, RAM, GPU, and background processes.
+- [x] UI exposes environment status, disk usage, last active time, reset, and inspect actions.
+- [x] Audit log records environment and credential lifecycle events.
+- [x] Tests cover lifecycle and safe cleanup.
 
 ## Likely files
 
@@ -41,3 +41,5 @@ Cross-node migration; that belongs to Agent Runtime Portability.
 ## Notes
 
 Inspiration: Manus Cloud Computer, adapted to local/self-hosted Jarvis workers. Recommendation: ADAPT.
+
+Landed on `cursor/local-qwen-desktop-agent`: backend PR #58 (`56cc70d`); portal UI PR #80 (`48ac107`).
