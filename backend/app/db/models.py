@@ -544,3 +544,151 @@ class AgentPortabilityAudit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     agent: Mapped[AgentProfileRecord] = relationship(back_populates="audit_events")
+
+
+class ContextRepository(Base):
+    """Versioned curated context repository linked to an agent (RFC-0011)."""
+
+    __tablename__ = "context_repositories"
+
+    agent_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    facts: Mapped[list["ContextFact"]] = relationship(
+        back_populates="repository",
+        cascade="all, delete-orphan",
+    )
+    mutations: Mapped[list["ContextMutation"]] = relationship(
+        back_populates="repository",
+        cascade="all, delete-orphan",
+    )
+
+
+class ContextFact(Base):
+    """Authoritative structured curated memory fact for an agent context repo."""
+
+    __tablename__ = "context_facts"
+    __table_args__ = (UniqueConstraint("agent_id", "id", name="uq_context_fact_agent"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("context_repositories.agent_id"), index=True)
+    category: Mapped[str] = mapped_column(String(32), default="lessons")
+    title: Mapped[str] = mapped_column(String(400), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    title_key: Mapped[str] = mapped_column(String(400), default="", index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    repo_version: Mapped[int] = mapped_column(Integer, default=1)
+    superseded_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    repository: Mapped[ContextRepository] = relationship(back_populates="facts")
+    provenance_rows: Mapped[list["ContextFactProvenance"]] = relationship(
+        back_populates="fact",
+        cascade="all, delete-orphan",
+    )
+    permissions: Mapped[list["ContextFactPermission"]] = relationship(
+        back_populates="fact",
+        cascade="all, delete-orphan",
+    )
+    indexes: Mapped[list["ContextFactIndex"]] = relationship(
+        back_populates="fact",
+        cascade="all, delete-orphan",
+    )
+
+
+class ContextFactProvenance(Base):
+    """Source provenance for a curated context fact."""
+
+    __tablename__ = "context_fact_provenance"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fact_id: Mapped[str] = mapped_column(ForeignKey("context_facts.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(String(36), index=True)
+    source_type: Mapped[str] = mapped_column(String(32), default="manual")
+    source_id: Mapped[str] = mapped_column(String(64), default="")
+    trajectory_id: Mapped[str] = mapped_column(String(64), default="")
+    mutation_id: Mapped[str] = mapped_column(String(36), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    fact: Mapped[ContextFact] = relationship(back_populates="provenance_rows")
+
+
+class ContextFactPermission(Base):
+    """Access control for curated context facts."""
+
+    __tablename__ = "context_fact_permissions"
+    __table_args__ = (
+        UniqueConstraint("fact_id", "principal_type", "principal_id", "permission", name="uq_context_fact_perm"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fact_id: Mapped[str] = mapped_column(ForeignKey("context_facts.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(String(36), index=True)
+    principal_type: Mapped[str] = mapped_column(String(32), default="agent")
+    principal_id: Mapped[str] = mapped_column(String(64), default="")
+    permission: Mapped[str] = mapped_column(String(32), default="read")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    fact: Mapped[ContextFact] = relationship(back_populates="permissions")
+
+
+class ContextFactIndex(Base):
+    """Lookup index for curated context facts."""
+
+    __tablename__ = "context_fact_indexes"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "index_kind", "index_key", "fact_id", name="uq_context_fact_index"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[str] = mapped_column(String(36), index=True)
+    fact_id: Mapped[str] = mapped_column(ForeignKey("context_facts.id"), index=True)
+    index_kind: Mapped[str] = mapped_column(String(32), default="title")
+    index_key: Mapped[str] = mapped_column(String(400), default="", index=True)
+    index_value: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    fact: Mapped[ContextFact] = relationship(back_populates="indexes")
+
+
+class ContextMutation(Base):
+    """Reversible mutation history for curated context repositories."""
+
+    __tablename__ = "context_mutations"
+
+    mutation_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("context_repositories.agent_id"), index=True)
+    version_before: Mapped[int] = mapped_column(Integer, default=0)
+    version_after: Mapped[int] = mapped_column(Integer, default=0)
+    action: Mapped[str] = mapped_column(String(32), default="")
+    fact_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source_json: Mapped[str] = mapped_column(Text, default="{}")
+    before_json: Mapped[str] = mapped_column(Text, default="")
+    after_json: Mapped[str] = mapped_column(Text, default="")
+    reversible: Mapped[bool] = mapped_column(Boolean, default=True)
+    reverted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    repository: Mapped[ContextRepository] = relationship(back_populates="mutations")
+
+
+class ContextFactConflict(Base):
+    """Flagged conflicting evidence between curated facts (never silently merged)."""
+
+    __tablename__ = "context_fact_conflicts"
+    __table_args__ = (UniqueConstraint("agent_id", "fact_id_a", "fact_id_b", name="uq_context_fact_conflict"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[str] = mapped_column(String(36), index=True)
+    fact_id_a: Mapped[str] = mapped_column(String(36), index=True)
+    fact_id_b: Mapped[str] = mapped_column(String(36), index=True)
+    reason: Mapped[str] = mapped_column(Text, default="conflicting_evidence")
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
