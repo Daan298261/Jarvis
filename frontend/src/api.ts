@@ -823,3 +823,168 @@ export async function approveProactiveAction(actionId: string): Promise<Proactiv
 export async function getEffectiveProactivityMatrix(): Promise<{ rows: EffectiveProactivityRow[] }> {
   return api<{ rows: EffectiveProactivityRow[] }>("/api/autonomy/matrix/effective-proactivity")
 }
+
+export const AGENT_AUTONOMY_LEVELS = [
+  "L0_OBSERVE",
+  "L1_SUGGEST",
+  "L2_EXECUTE_SAFE",
+  "L3_EXECUTE_WITH_GATES",
+  "L4_AUTONOMOUS",
+  "L5_OPERATOR",
+] as const
+
+export type AgentAutonomyLevel = (typeof AGENT_AUTONOMY_LEVELS)[number]
+
+export type InterviewAnswers = {
+  mission: string
+  success_criteria: string
+  tone: string
+  allowed_channels: string[]
+  approval_required_actions: string[]
+  budgets: Record<string, unknown>
+  privacy: Record<string, unknown>
+  scheduling: Record<string, unknown>
+  escalation: Record<string, unknown>
+  hard_prohibitions: string[]
+  default_autonomy: string | null
+}
+
+export type AgentPolicyDocument = {
+  autonomy?: Record<string, string>
+  approval_required_actions?: string[]
+  budgets?: Record<string, unknown>
+  privacy?: Record<string, unknown>
+  scheduling?: Record<string, unknown>
+  escalation?: Record<string, unknown>
+  channels?: string[]
+  hard_prohibitions?: string[]
+  [key: string]: unknown
+}
+
+export type AgentPolicyProfile = {
+  id: string
+  name: string
+  interview_answers: InterviewAnswers
+  policy: AgentPolicyDocument
+  generated_prompt: string
+  created_at: string
+  updated_at: string
+}
+
+export type AgentPolicyProfileIn = {
+  name: string
+  interview_answers: InterviewAnswers
+  policy?: AgentPolicyDocument | null
+  generated_prompt?: string | null
+  actor?: string
+}
+
+export type AgentPolicyProfileUpdate = {
+  name?: string | null
+  interview_answers?: InterviewAnswers | null
+  policy?: AgentPolicyDocument | null
+  generated_prompt?: string | null
+  actor?: string
+}
+
+export type PlatformAgentPolicy = {
+  autonomy_caps: Record<string, string>
+  default_agent_autonomy: string
+}
+
+export type PlatformAgentPolicyUpdate = {
+  autonomy_caps?: Record<string, string> | null
+  default_agent_autonomy?: string | null
+  actor?: string
+}
+
+export type AgentPolicyAuditEvent = {
+  id: string
+  actor: string
+  profile_id: string | null
+  field: string
+  old_value: unknown
+  new_value: unknown
+  timestamp: string
+}
+
+export function emptyInterviewAnswers(): InterviewAnswers {
+  return {
+    mission: "",
+    success_criteria: "",
+    tone: "professional",
+    allowed_channels: [],
+    approval_required_actions: [],
+    budgets: {},
+    privacy: {},
+    scheduling: {},
+    escalation: {},
+    hard_prohibitions: [],
+    default_autonomy: "L2_EXECUTE_SAFE",
+  }
+}
+
+export async function listAgentPolicyProfiles(): Promise<{ profiles: AgentPolicyProfile[] }> {
+  return api<{ profiles: AgentPolicyProfile[] }>("/api/agent-policy")
+}
+
+export async function createAgentPolicyProfile(body: AgentPolicyProfileIn): Promise<AgentPolicyProfile> {
+  return api<AgentPolicyProfile>("/api/agent-policy", {
+    method: "POST",
+    body: JSON.stringify({ actor: "portal", ...body }),
+  })
+}
+
+export async function getAgentPolicyProfile(profileId: string): Promise<AgentPolicyProfile> {
+  return api<AgentPolicyProfile>(`/api/agent-policy/${encodeURIComponent(profileId)}`)
+}
+
+export async function updateAgentPolicyProfile(
+  profileId: string,
+  body: AgentPolicyProfileUpdate,
+): Promise<AgentPolicyProfile> {
+  return api<AgentPolicyProfile>(`/api/agent-policy/${encodeURIComponent(profileId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ actor: "portal", ...body }),
+  })
+}
+
+export async function deleteAgentPolicyProfile(profileId: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(
+    `/api/agent-policy/${encodeURIComponent(profileId)}?actor=${encodeURIComponent("portal")}`,
+    { method: "DELETE" },
+  )
+}
+
+export async function normalizeInterviewAnswers(
+  answers: InterviewAnswers,
+): Promise<{ policy: AgentPolicyDocument }> {
+  return api<{ policy: AgentPolicyDocument }>("/api/agent-policy/normalize", {
+    method: "POST",
+    body: JSON.stringify(answers),
+  })
+}
+
+export async function getPlatformAgentPolicy(): Promise<PlatformAgentPolicy> {
+  return api<PlatformAgentPolicy>("/api/agent-policy/platform")
+}
+
+export async function putPlatformAgentPolicy(
+  body: PlatformAgentPolicyUpdate,
+): Promise<PlatformAgentPolicy> {
+  return api<PlatformAgentPolicy>("/api/agent-policy/platform", {
+    method: "PUT",
+    body: JSON.stringify({ actor: "portal", ...body }),
+  })
+}
+
+export async function listAgentPolicyAudit(options?: {
+  profileId?: string
+  limit?: number
+}): Promise<{ events: AgentPolicyAuditEvent[] }> {
+  const params = new URLSearchParams()
+  if (options?.profileId) params.set("profile_id", options.profileId)
+  if (options?.limit != null) params.set("limit", String(options.limit))
+  const query = params.toString()
+  return api<{ events: AgentPolicyAuditEvent[] }>(`/api/agent-policy/audit${query ? `?${query}` : ""}`)
+}
