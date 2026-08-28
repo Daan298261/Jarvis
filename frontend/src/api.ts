@@ -36,8 +36,13 @@ function authHeaders(extra?: HeadersInit): Record<string, string> {
 
 function formatApiDetail(detail: unknown, fallback: string): string {
   if (typeof detail === "string" && detail) return detail
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => formatApiDetail(item, "")).filter(Boolean)
+    return parts.length ? parts.join("; ") : fallback
+  }
   if (detail && typeof detail === "object") {
-    const record = detail as { message?: unknown; code?: unknown; detail?: unknown }
+    const record = detail as { message?: unknown; code?: unknown; detail?: unknown; msg?: unknown }
+    if (typeof record.msg === "string" && record.msg) return record.msg
     if (typeof record.message === "string" && record.message) return record.message
     if (typeof record.detail === "string" && record.detail) return record.detail
     if (typeof record.code === "string" && record.code) return record.code
@@ -1242,4 +1247,251 @@ export async function approveGuestTask(taskId: string): Promise<GuestTask> {
 
 export async function getGuestDecision(decisionId: string): Promise<GuestDecision> {
   return guestApi<GuestDecision>(`/api/guest/decisions/${encodeURIComponent(decisionId)}`)
+}
+
+export class PackApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "PackApiError"
+    this.status = status
+  }
+}
+
+export function formatPackError(err: unknown): string {
+  if (err instanceof PackApiError) {
+    if (err.status === 409) return `Conflict: ${err.message}`
+    if (err.status === 400) return err.message
+    if (err.status === 404) return err.message
+    return err.message
+  }
+  if (err instanceof Error) return err.message
+  return "Something went wrong with this pack."
+}
+
+export type PackManifestObject = Record<string, unknown>
+
+export type PackPreviewAction = "install" | "upgrade" | "uninstall"
+
+export type PackResourceChange = {
+  resource_id: string
+  resource_type: string
+  action: "create" | "update" | "skip" | "conflict" | "delete" | string
+  before?: Record<string, unknown> | null
+  after?: Record<string, unknown> | null
+  reason?: string
+}
+
+export type PackPreview = {
+  pack_id: string
+  version: string
+  action: PackPreviewAction | string
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+  changes: PackResourceChange[]
+  trust: Record<string, unknown>
+  capabilities: Record<string, unknown>
+  dependencies: Record<string, unknown>
+}
+
+export type InstalledPack = {
+  id: string
+  name: string
+  version: string
+  description?: string
+  status: string
+  installed_at: string
+  manifest_hash?: string
+  previous_version?: string | null
+  snapshot_id?: string | null
+  resource_ids?: string[]
+}
+
+export type PackResourceRecord = {
+  resource_id: string
+  pack_id: string
+  resource_type: string
+  user_modified: boolean
+  override?: string | null
+  data_hash?: string
+  installed_version?: string
+  data: Record<string, unknown>
+}
+
+export type PackDetail = {
+  installation: InstalledPack
+  resources: PackResourceRecord[]
+}
+
+export type PackApplyResult = {
+  installation: InstalledPack
+  preview?: PackPreview
+  snapshot_id?: string
+}
+
+export type PackUninstallResult = {
+  pack_id: string
+  removed_resources: string[]
+  kept_resources: string[]
+  preview?: PackPreview
+}
+
+export type PackRollbackResult = {
+  installation: InstalledPack
+  snapshot_id?: string
+  resources?: string[]
+}
+
+export type PackHistoryEvent = {
+  id: string
+  event: string
+  pack_id: string
+  version?: string | null
+  snapshot_id?: string | null
+  timestamp: string
+  details?: Record<string, unknown>
+}
+
+export type PackPreviewRequest = {
+  manifest: PackManifestObject
+  action?: PackPreviewAction
+  overrides?: Record<string, string>
+  require_signature?: boolean
+}
+
+export type PackInstallRequest = {
+  manifest: PackManifestObject
+  overrides?: Record<string, string>
+  require_signature?: boolean
+  enforce_policies?: boolean
+}
+
+export type PackExportRequest = {
+  pack_id: string
+  include_user_modifications?: boolean
+  name?: string
+  version?: string
+  description?: string
+}
+
+async function packApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = authHeaders({
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) || {}),
+  })
+  const response = await fetch(path, { ...init, headers })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = text || response.statusText
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown }
+      message = formatApiDetail(parsed.detail, message)
+    } catch {
+      // keep text
+    }
+    throw new PackApiError(message || response.statusText, response.status)
+  }
+  return response.json() as Promise<T>
+}
+
+export async function listPacks(): Promise<{ packs: InstalledPack[] }> {
+  return packApi<{ packs: InstalledPack[] }>("/api/packs")
+}
+
+export async function getPack(packId: string): Promise<PackDetail> {
+  return packApi<PackDetail>(`/api/packs/${encodeURIComponent(packId)}`)
+}
+
+export async function listPackHistory(): Promise<{ events: PackHistoryEvent[] }> {
+  return packApi<{ events: PackHistoryEvent[] }>("/api/packs/history")
+}
+
+export async function listPackTrust(): Promise<{ key_ids: string[] }> {
+  return packApi<{ key_ids: string[] }>("/api/packs/trust")
+}
+
+export async function addPackTrustKey(keyId: string, secret: string): Promise<{ key_ids: string[] }> {
+  return packApi<{ key_ids: string[] }>("/api/packs/trust", {
+    method: "POST",
+    body: JSON.stringify({ key_id: keyId, secret }),
+  })
+}
+
+export async function previewPack(body: PackPreviewRequest): Promise<PackPreview> {
+  return packApi<PackPreview>("/api/packs/preview", {
+    method: "POST",
+    body: JSON.stringify({
+      manifest: body.manifest,
+      action: body.action ?? "install",
+      overrides: body.overrides ?? {},
+      require_signature: Boolean(body.require_signature),
+    }),
+  })
+}
+
+export async function installPack(body: PackInstallRequest): Promise<PackApplyResult> {
+  return packApi<PackApplyResult>("/api/packs/install", {
+    method: "POST",
+    body: JSON.stringify({
+      manifest: body.manifest,
+      overrides: body.overrides ?? {},
+      require_signature: Boolean(body.require_signature),
+      enforce_policies: body.enforce_policies !== false,
+    }),
+  })
+}
+
+export async function upgradePack(body: PackInstallRequest): Promise<PackApplyResult> {
+  return packApi<PackApplyResult>("/api/packs/upgrade", {
+    method: "POST",
+    body: JSON.stringify({
+      manifest: body.manifest,
+      overrides: body.overrides ?? {},
+      require_signature: Boolean(body.require_signature),
+      enforce_policies: body.enforce_policies !== false,
+    }),
+  })
+}
+
+export async function exportPack(body: PackExportRequest): Promise<PackManifestObject> {
+  return packApi<PackManifestObject>("/api/packs/export", {
+    method: "POST",
+    body: JSON.stringify({
+      pack_id: body.pack_id,
+      include_user_modifications: Boolean(body.include_user_modifications),
+      name: body.name || undefined,
+      version: body.version || undefined,
+      description: body.description || undefined,
+    }),
+  })
+}
+
+export async function rollbackPack(packId: string): Promise<PackRollbackResult> {
+  return packApi<PackRollbackResult>(`/api/packs/${encodeURIComponent(packId)}/rollback`, {
+    method: "POST",
+  })
+}
+
+export async function uninstallPack(
+  packId: string,
+  keepUserModified = true,
+): Promise<PackUninstallResult> {
+  const query = `?keep_user_modified=${keepUserModified ? "true" : "false"}`
+  return packApi<PackUninstallResult>(`/api/packs/${encodeURIComponent(packId)}${query}`, {
+    method: "DELETE",
+  })
+}
+
+export async function markPackResourceUserModified(
+  resourceId: string,
+  data?: Record<string, unknown> | null,
+): Promise<PackResourceRecord> {
+  return packApi<PackResourceRecord>(
+    `/api/packs/resources/${encodeURIComponent(resourceId)}/user-modified`,
+    {
+      method: "POST",
+      body: JSON.stringify({ data: data ?? null }),
+    },
+  )
 }

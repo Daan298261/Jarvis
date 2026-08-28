@@ -810,3 +810,29 @@ label { display: block; color: var(--muted); font-size: 13px; }
 @media (max-width: 800px) {
   .guest-main { padding: 16px 14px 28px; }
 }
+
+.packs-page { max-width: 920px; }
+.pack-change {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+  background: var(--panel-2);
+}
+.pack-change.create { border-color: rgba(61, 186, 122, 0.45); }
+.pack-change.update { border-color: var(--gold-dim); }
+.pack-change.conflict,
+.pack-change.delete { border-color: rgba(212, 101, 90, 0.55); }
+.pack-change-json {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--muted);
+  max-height: 160px;
+  overflow: auto;
+  background: #0c1015;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}

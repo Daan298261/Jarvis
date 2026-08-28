@@ -15,6 +15,7 @@ import { AgentsPage } from "./pages/Agents"
 import { AgentInterviewPage } from "./pages/AgentInterview"
 import { GuestPortalsPage } from "./pages/GuestPortals"
 import { GuestPage } from "./pages/Guest"
+import { PacksPage } from "./pages/Packs"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -39,6 +40,7 @@ const ADMIN_LINKS = [
   { to: "/settings", label: "Settings" },
   { to: "/guest-portals", label: "Guest portals" },
   { to: "/agents", label: "Agents" },
+  { to: "/packs", label: "Packs" },
   { to: "/model", label: "Model" },
   { to: "/tools", label: "Tools" },
   { to: "/mcp", label: "MCP" },
@@ -414,6 +416,7 @@ function OwnerPortal() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/new" element={<AgentInterviewPage />} />
           <Route path="/agents/:id" element={<AgentInterviewPage />} />
+          <Route path="/packs" element={<PacksPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/swarm" element={<SwarmPage />} />
           <Route path="/swarm/:nodeId" element={<SwarmPage />} />
