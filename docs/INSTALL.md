@@ -200,7 +200,7 @@ Stop:
 .\stop-jarvis.ps1
 ```
 
-That kills the recorded backend PID, leftover `llama-server.exe`, and uvicorn processes whose command line matches `app.main:app`.
+That kills the recorded backend PID, leftover `llama-server.exe`, and uvicorn processes whose command line matches `app.main:app`. While Jarvis is running, a system tray icon also offers **Open portal**, **Start**, **Stop**, and **Quit** (local `http://127.0.0.1:4780` only).
 
 ### Start options
 

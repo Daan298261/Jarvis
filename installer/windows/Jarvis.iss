@@ -55,4 +55,35 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\windows\bootstrap.ps1"""; WorkingDir: "{app}"; StatusMsg: "Setting up Jarvis (downloads may take a while)..."; Flags: waituntilterminated
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Description: "Start Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 
+[UninstallRun]
+; Stop backend, llama-server, and tray helper before uninstall.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
+
+[Code]
+procedure StopJarvisProcesses;
+var
+  ResultCode: Integer;
+  StopScript: String;
+  AppDir: String;
+begin
+  AppDir := ExpandConstant('{app}');
+  StopScript := AppDir + '\stop-jarvis.ps1';
+  if not FileExists(StopScript) then
+    Exit;
+  if Exec('powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -File "' + StopScript + '" -IncludeTray',
+    AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Log('stop-jarvis.ps1 -IncludeTray finished with code ' + IntToStr(ResultCode))
+  else
+    Log('Failed to launch stop-jarvis.ps1 -IncludeTray');
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  { Settings -> Apps -> Modify re-runs setup; stop running Jarvis before files change. }
+  if IsUpgrade() then
+    StopJarvisProcesses;
+end;
+
 ; User data (data/, models/, runtime/) created after install is not removed by default.
