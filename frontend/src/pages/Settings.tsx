@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 import { AutonomySection } from "./Autonomy"
+import { LicenseSettings } from "./License"
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -9,6 +10,7 @@ export function SettingsPage() {
   const [showKey, setShowKey] = useState(false)
   const [authStatus, setAuthStatus] = useState<any>(null)
   const [queueStatus, setQueueStatus] = useState<any>(null)
+  const [inferenceKeyDraft, setInferenceKeyDraft] = useState("")
   const [msg, setMsg] = useState("")
 
   async function loadData() {
@@ -17,17 +19,21 @@ export function SettingsPage() {
       api<any>("/api/auth/status").catch(() => null),
       api<any>("/api/queue").catch(() => null),
     ])
-    if (s) setSettings(s)
+    if (s) {
+      const inference = s.inference && typeof s.inference === "object" ? { ...s.inference } : s.inference
+      if (inference && typeof inference === "object" && "api_key" in inference) {
+        delete inference.api_key
+      }
+      setSettings({ ...s, inference })
+    }
     if (a) setAuthStatus(a)
     if (q) setQueueStatus(q)
   }
 
   useEffect(() => { loadData() }, [])
-  if (!settings) return <div>Loading settings…</div>
 
   async function save(patch: any) {
-    const next = await api("/api/settings", { method: "PUT", body: JSON.stringify(patch) })
-    setSettings(next)
+    await api("/api/settings", { method: "PUT", body: JSON.stringify(patch) })
     await loadData()
   }
 
@@ -51,9 +57,17 @@ export function SettingsPage() {
       <h1>Settings</h1>
       <p className="lede">
         Preferences for this PC. To stop Jarvis entirely, use <strong>Stop</strong> on the Windows tray —
-        it is not in this window.
+        it is not in this window. Local models are yours; the license below is only for Jarvis the
+        orchestrator.{" "}
+        <Link to="/license">Open the license page</Link>.
       </p>
 
+      <LicenseSettings />
+
+      {!settings ? (
+        <div className="card" style={{ marginTop: 16 }}>Loading other settings…</div>
+      ) : (
+        <>
       <AutonomySection />
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
@@ -149,7 +163,7 @@ export function SettingsPage() {
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
         <h2>Inference server</h2>
         <p className="lede" style={{ margin: "0 0 12px" }}>
-          Local llama.cpp is started by Jarvis. A dedicated LAN GPU box, LM Studio, Ollama, vLLM, or SGLang is health-checked only — point host/port at its OpenAI-compatible <code>/v1</code> endpoint.
+          Your models, your PC or LAN box — this is not the Jarvis subscription. Local llama.cpp is started by Jarvis. A dedicated LAN GPU box, LM Studio, Ollama, vLLM, or SGLang is health-checked only — point host/port at its OpenAI-compatible <code>/v1</code> endpoint.
         </p>
         <label>Backend
           <select value={settings.inference?.backend || "llama.cpp"} onChange={(e) => save({ inference_backend: e.target.value })}>
@@ -186,10 +200,18 @@ export function SettingsPage() {
         <label>Inference API key (optional)
           <input
             type="password"
-            value={settings.inference?.api_key || ""}
-            placeholder="Usually empty for llama.cpp"
-            onBlur={(e) => save({ inference_api_key: e.target.value })}
-            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, api_key: e.target.value } })}
+            value={inferenceKeyDraft}
+            placeholder="Type to replace. Jarvis will not show a saved key."
+            autoComplete="new-password"
+            onChange={(e) => setInferenceKeyDraft(e.target.value)}
+            onBlur={() => {
+              const next = inferenceKeyDraft.trim()
+              if (!next) return
+              save({ inference_api_key: next }).then(() => {
+                setInferenceKeyDraft("")
+                setMsg("Inference key saved. It will not be shown again.")
+              })
+            }}
           />
         </label>
       </div>
@@ -287,6 +309,8 @@ export function SettingsPage() {
             <b>Failed files</b><span>{queueStatus.failed?.length || 0}</span>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   )
