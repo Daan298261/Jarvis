@@ -1080,6 +1080,86 @@ label { display: block; color: var(--muted); font-size: 13px; }
   .chat-helpers { padding-left: 14px; padding-right: 14px; }
 }
 
+.advisor-page { max-width: 920px; }
+.advisor-limits ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+.advisor-limits li { margin-bottom: 4px; }
+.advisor-banner { margin: 16px 0; }
+.advisor-banner.ok { border-left: 4px solid var(--ok); }
+.advisor-banner.bad { border-left: 4px solid var(--bad); }
+.advisor-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px 16px;
+}
+.advisor-estimates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+.advisor-estimates div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.advisor-estimates b {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.advisor-split {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 16px;
+}
+.advisor-column {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--panel-2);
+}
+.advisor-column.leave { border-left: 4px solid var(--gold); }
+.advisor-column.keep { border-left: 4px solid var(--ok); }
+.advisor-column h3 { margin: 0 0 6px; font-size: 16px; }
+.advisor-field { margin-top: 10px; }
+.advisor-field strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.advisor-json {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--muted);
+  max-height: 220px;
+  overflow: auto;
+  background: #0c1015;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+.advisor-raw { margin-top: 12px; color: var(--muted); font-size: 13px; }
+.advisor-keep-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.advisor-keep-list li { margin-bottom: 6px; }
+.advisor-confirm { margin: 16px 0 12px; align-items: flex-start; }
+.advisor-reply-block { margin-top: 16px; }
+.advisor-reply-block h3 { font-size: 15px; margin-bottom: 8px; }
+.advisor-reply-block p, .advisor-reply-block li { white-space: pre-wrap; }
+@media (max-width: 800px) {
+  .advisor-split { grid-template-columns: 1fr; }
+}
+
 .license-page { max-width: 920px; }
 .license-stories {
   display: grid;

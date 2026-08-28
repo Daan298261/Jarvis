@@ -20,6 +20,7 @@ import { AdsPage } from "./pages/Ads"
 import { WorkerEnvironmentsPage } from "./pages/WorkerEnvironments"
 import { DelegationPage } from "./pages/Delegation"
 import { LicensePage } from "./pages/License"
+import { AdvisorPage } from "./pages/Advisor"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -43,6 +44,7 @@ const WORK_LINKS = [
 const ADMIN_LINKS = [
   { to: "/settings", label: "Settings" },
   { to: "/license", label: "License" },
+  { to: "/advisor", label: "Advisor" },
   { to: "/guest-portals", label: "Guest portals" },
   { to: "/agents", label: "Agents" },
   { to: "/environments", label: "Environments" },
@@ -421,6 +423,7 @@ function OwnerPortal() {
           <Route path="/mcp" element={<McpPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/license" element={<LicensePage />} />
+          <Route path="/advisor" element={<AdvisorPage />} />
           <Route path="/guest-portals" element={<GuestPortalsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/new" element={<AgentInterviewPage />} />

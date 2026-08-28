@@ -2485,3 +2485,148 @@ export async function deleteInferenceCredential(
     { method: "DELETE" },
   )
 }
+
+export const ADVISOR_STUB_PROVIDER = "stub"
+
+export type AdvisorDisclosureField = {
+  key: string
+  label: string
+  value: unknown
+  bytes_estimate: number
+  leaves_local: boolean
+}
+
+export type AdvisorPreviewRequest = {
+  goal: string
+  task_class?: string
+  observations?: string[]
+  failed_approaches?: string[]
+  unresolved_problem?: string
+  relevant_files?: string[]
+  retained_facts?: string[]
+  consecutive_failures?: number
+  confidence?: number
+  local_attempts?: number
+  already_escalated?: number
+  user_requested?: boolean
+  max_cost_usd?: number
+  advisor_cost_usd?: number
+}
+
+export type AdvisorDisclosurePackage = {
+  id: string
+  version: string
+  created_at: string
+  goal: string
+  task_class: string
+  fields: AdvisorDisclosureField[]
+  local_only_retained: string[]
+  outbound: Record<string, unknown>
+  token_estimate: number
+  cost_estimate_usd: number | null
+  outbound_preview: Record<string, unknown>
+}
+
+export type AdvisorEscalateRequest = {
+  package_id: string
+  provider?: string
+  consecutive_failures?: number
+  confidence?: number
+  local_attempts?: number
+  already_escalated?: number
+  user_requested?: boolean
+  max_cost_usd?: number
+  advisor_cost_usd?: number
+}
+
+export type AdvisorResponse = {
+  analysis: string
+  recommendations: string[]
+  structured_plan: Record<string, unknown> | null
+  advisor_name: string
+  used: boolean
+  reason: string
+  execution_authority: string
+  tool_calls: unknown[] | null
+}
+
+export class AdvisorApiError extends Error {
+  status: number
+  code: string
+  constructor(message: string, status: number, code = "") {
+    super(message)
+    this.name = "AdvisorApiError"
+    this.status = status
+    this.code = code
+  }
+}
+
+export function formatAdvisorError(err: unknown): string {
+  if (err instanceof AdvisorApiError) {
+    if (err.code === "authority_violation" || err.status === 403) {
+      return "This advisor is blocked. Advisors cannot run tools, open files, spend money, or change anything on this PC. Only the local orchestrator can act."
+    }
+    if (err.code === "package_not_found" || err.status === 404) {
+      return "That preview is no longer available. Show a new preview of what would leave this PC before asking the advisor."
+    }
+    if (err.status === 400) {
+      return err.message || "The advisor request could not be completed. Check the details and try again."
+    }
+    return err.message
+  }
+  if (err instanceof Error && err.message) return err.message
+  return "Something went wrong talking to the advisor."
+}
+
+async function advisorApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = authHeaders({
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) || {}),
+  })
+  const response = await fetch(path, { ...init, headers })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = text || response.statusText
+    let code = ""
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown }
+      const detail = parsed.detail
+      if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+        const record = detail as { code?: unknown; message?: unknown }
+        if (typeof record.code === "string") code = record.code
+      }
+      message = formatApiDetail(parsed.detail, message)
+    } catch {
+      // keep text
+    }
+    if (!code) {
+      if (response.status === 403) code = "authority_violation"
+      else if (response.status === 404) code = "package_not_found"
+    }
+    throw new AdvisorApiError(message || response.statusText, response.status, code)
+  }
+  return response.json() as Promise<T>
+}
+
+export async function previewAdvisor(body: AdvisorPreviewRequest): Promise<AdvisorDisclosurePackage> {
+  return advisorApi<AdvisorDisclosurePackage>("/api/advisor/preview", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAdvisorPackage(packageId: string): Promise<AdvisorDisclosurePackage> {
+  return advisorApi<AdvisorDisclosurePackage>(
+    `/api/advisor/packages/${encodeURIComponent(packageId)}`,
+  )
+}
+
+export async function escalateAdvisor(body: AdvisorEscalateRequest): Promise<AdvisorResponse> {
+  return advisorApi<AdvisorResponse>("/api/advisor/escalate", {
+    method: "POST",
+    body: JSON.stringify({
+      ...body,
+      provider: body.provider || ADVISOR_STUB_PROVIDER,
+    }),
+  })
+}
