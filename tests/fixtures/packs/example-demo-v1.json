@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "id": "example.demo",
+  "name": "Example Demo Pack",
+  "version": "1.0.0",
+  "description": "Tiny fixture pack for install lifecycle tests",
+  "min_jarvis_version": "1.0.0",
+  "dependencies": [
+    {
+      "id": "example.base",
+      "version": ">=1.0.0",
+      "optional": false
+    }
+  ],
+  "trust": {
+    "trust_level": "user"
+  },
+  "capabilities": {
+    "required_tools": ["filesystem", "terminal"]
+  },
+  "resources": [
+    {
+      "id": "example.demo.workflow.briefing",
+      "type": "workflow",
+      "data": {
+        "name": "Daily Briefing",
+        "description": "Gather and summarize updates",
+        "category": "operations",
+        "steps": [
+          {
+            "title": "Collect",
+            "prompt": "Collect today's updates"
+          }
+        ]
+      },
+      "merge_strategy": "skip_if_user_modified"
+    },
+    {
+      "id": "example.demo.goal.operations",
+      "type": "goal",
+      "data": {
+        "title": "Keep operations current",
+        "priority": "medium"
+      },
+      "merge_strategy": "replace"
+    },
+    {
+      "id": "example.demo.integration.calendar",
+      "type": "integration",
+      "data": {
+        "provider": "calendar",
+        "api_key": "secret-should-be-stripped-on-export",
+        "enabled": true
+      },
+      "merge_strategy": "replace"
+    }
+  ],
+  "ui_defaults": {
+    "dashboard": "operations"
+  }
+}

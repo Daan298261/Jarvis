@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "id": "example.demo",
+  "name": "Example Demo Pack",
+  "version": "1.1.0",
+  "description": "Upgrade fixture for merge/override tests",
+  "min_jarvis_version": "1.0.0",
+  "dependencies": [
+    {
+      "id": "example.base",
+      "version": ">=1.0.0",
+      "optional": false
+    }
+  ],
+  "trust": {
+    "trust_level": "user"
+  },
+  "capabilities": {
+    "required_tools": ["filesystem", "terminal"]
+  },
+  "resources": [
+    {
+      "id": "example.demo.workflow.briefing",
+      "type": "workflow",
+      "data": {
+        "name": "Daily Briefing v2",
+        "description": "Gather, verify, and summarize updates",
+        "category": "operations",
+        "steps": [
+          {
+            "title": "Collect",
+            "prompt": "Collect today's updates"
+          },
+          {
+            "title": "Verify",
+            "prompt": "Verify source provenance"
+          }
+        ]
+      },
+      "merge_strategy": "skip_if_user_modified"
+    },
+    {
+      "id": "example.demo.goal.operations",
+      "type": "goal",
+      "data": {
+        "title": "Keep operations current and verified",
+        "priority": "high"
+      },
+      "merge_strategy": "merge"
+    },
+    {
+      "id": "example.demo.metric.uptime",
+      "type": "metric",
+      "data": {
+        "name": "uptime",
+        "unit": "percent"
+      },
+      "merge_strategy": "replace"
+    }
+  ]
+}
