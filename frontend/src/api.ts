@@ -2920,3 +2920,207 @@ export async function revertContextRepoMutation(
 export async function getContextRepoSchedulePreference(): Promise<ContextSchedulePreference> {
   return contextRepoApi<ContextSchedulePreference>("/api/context-repo/consolidate/schedule-preference")
 }
+
+export type TrajectoryOutcome = {
+  status: string
+  attempted?: boolean
+  verified?: boolean
+  summary?: string | null
+}
+
+export type TrajectoryProvenance = {
+  harness: string
+  harness_version?: string | null
+  model?: string | null
+  source_uri?: string | null
+  source_format?: string | null
+  imported_at: string
+  import_id?: string | null
+  trusted?: boolean
+}
+
+export type TrajectoryWorkspace = {
+  repository?: string | null
+  branch?: string | null
+  workspace_path?: string | null
+}
+
+export type TrajectoryEvent = {
+  sequence: number
+  timestamp: string
+  event_type: string
+  content?: string | null
+  tool_name?: string | null
+  tool_args?: Record<string, unknown> | null
+  tool_result?: string | null
+  success?: boolean | null
+  metadata?: Record<string, unknown>
+}
+
+export type TrajectoryVerification = {
+  attempted?: boolean
+  passed?: boolean
+  details?: string | null
+}
+
+export type TrajectoryCandidateSkill = {
+  name?: string | null
+  tools?: string[]
+  description?: string | null
+  confidence?: number
+}
+
+export type TrajectorySummary = {
+  trajectory_id: string
+  schema_version?: string
+  harness?: string | null
+  model?: string | null
+  goal?: string | null
+  outcome_status?: string | null
+  outcome_verified?: boolean
+  trusted?: boolean
+  imported_at?: string | null
+  event_count?: number
+}
+
+export type TrajectoryInspect = {
+  schema_version?: string
+  trajectory_id: string
+  goal?: string | null
+  task_class?: string | null
+  provenance: TrajectoryProvenance
+  workspace?: TrajectoryWorkspace | null
+  events: TrajectoryEvent[]
+  outcome: TrajectoryOutcome
+  verification?: TrajectoryVerification | null
+  failures?: string[]
+  recovery?: string | null
+  candidate_skills?: TrajectoryCandidateSkill[]
+  duration_seconds?: number | null
+}
+
+export type CursorTrajectoryImportIn = {
+  transcript: string
+  source_uri?: string
+  model?: string
+  repository?: string
+  branch?: string
+  workspace_path?: string
+}
+
+export type CursorTrajectoryImportResult = {
+  trajectory_id: string
+  harness: string
+  event_count: number
+  outcome: TrajectoryOutcome
+  trusted: boolean
+}
+
+export type NativeTrajectoryEmitIn = {
+  task_id: string
+  model?: string
+}
+
+export type NativeTrajectoryEmitResult = {
+  trajectory_id: string
+  harness: string
+  trusted: boolean
+}
+
+export type PendingTrajectoryItem = {
+  trajectory_id: string
+  harness: string
+}
+
+export class TrajectoryApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "TrajectoryApiError"
+    this.status = status
+  }
+}
+
+export function formatTrajectoryError(err: unknown): string {
+  if (err instanceof TrajectoryApiError) {
+    if (err.status === 404) {
+      const detail = err.message.toLowerCase()
+      if (detail.includes("no native trajectory") || detail.includes("task")) {
+        return "This task has no saved Jarvis run to record. Finish a task on this PC first, then try again."
+      }
+      return "That record was not found. It may have been removed."
+    }
+    if (err.status === 400) {
+      const detail = err.message.toLowerCase()
+      if (detail.includes("empty")) return "Paste a Cursor transcript first."
+      if (detail.includes("invalid json") || detail.includes("json object")) {
+        return "That Cursor transcript could not be read. Check it is a line-by-line JSON export and try again."
+      }
+      return err.message || "That transcript could not be imported."
+    }
+    return err.message
+  }
+  if (err instanceof Error && err.message) return err.message
+  return "Something went wrong with this record."
+}
+
+async function trajectoryApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = authHeaders({
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) || {}),
+  })
+  const response = await fetch(path, { ...init, headers })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = text || response.statusText
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown }
+      message = formatApiDetail(parsed.detail, message)
+    } catch {
+      // keep text
+    }
+    throw new TrajectoryApiError(message || response.statusText, response.status)
+  }
+  return response.json() as Promise<T>
+}
+
+export async function listTrajectories(limit = 50): Promise<TrajectorySummary[]> {
+  const capped = Math.max(1, Math.min(limit, 500))
+  return trajectoryApi<TrajectorySummary[]>(`/api/trajectories?limit=${encodeURIComponent(String(capped))}`)
+}
+
+export async function getTrajectory(trajectoryId: string): Promise<TrajectoryInspect> {
+  return trajectoryApi<TrajectoryInspect>(`/api/trajectories/${encodeURIComponent(trajectoryId)}`)
+}
+
+export async function importCursorTrajectory(
+  body: CursorTrajectoryImportIn,
+): Promise<CursorTrajectoryImportResult> {
+  return trajectoryApi<CursorTrajectoryImportResult>("/api/trajectories/import/cursor", {
+    method: "POST",
+    body: JSON.stringify({
+      transcript: body.transcript,
+      source_uri: body.source_uri || undefined,
+      model: body.model || undefined,
+      repository: body.repository || undefined,
+      branch: body.branch || undefined,
+      workspace_path: body.workspace_path || undefined,
+    }),
+  })
+}
+
+export async function emitNativeTrajectory(
+  body: NativeTrajectoryEmitIn,
+): Promise<NativeTrajectoryEmitResult> {
+  return trajectoryApi<NativeTrajectoryEmitResult>("/api/trajectories/emit/native", {
+    method: "POST",
+    body: JSON.stringify({
+      task_id: body.task_id,
+      model: body.model || undefined,
+    }),
+  })
+}
+
+export async function listPendingTrajectories(): Promise<PendingTrajectoryItem[]> {
+  return trajectoryApi<PendingTrajectoryItem[]>("/api/trajectories/queue/pending")
+}
