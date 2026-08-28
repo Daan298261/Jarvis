@@ -12,7 +12,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-<<<<<<< HEAD
 from .api import advisor, agent_portability, auth, coding, context_repo, delegation, mcp, memory, mobile, model, packs, queue, runtime_profiles, self_dev, settings, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
