@@ -482,3 +482,65 @@ class DelegationEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     worker: Mapped[DelegatedWorker] = relationship(back_populates="events")
+
+
+class AgentProfileRecord(Base):
+    """Durable logical agent identity (RFC-0009).
+
+    Model/runtime/node are execution leases — they do not define identity.
+    """
+
+    __tablename__ = "agent_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    state_version: Mapped[int] = mapped_column(Integer, default=1)
+    state_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(32), default="idle")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    leases: Mapped[list["AgentRuntimeLease"]] = relationship(
+        back_populates="agent",
+        cascade="all, delete-orphan",
+    )
+    audit_events: Mapped[list["AgentPortabilityAudit"]] = relationship(
+        back_populates="agent",
+        cascade="all, delete-orphan",
+    )
+
+
+class AgentRuntimeLease(Base):
+    """Time-bounded execution lease binding an agent to a runtime/node (RFC-0009)."""
+
+    __tablename__ = "agent_runtime_leases"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agent_profiles.id"), index=True)
+    runtime_profile_id: Mapped[str] = mapped_column(String(64), default="")
+    node_id: Mapped[str] = mapped_column(String(64), default="localhost")
+    model: Mapped[str] = mapped_column(String(120), default="")
+    endpoint: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    agent: Mapped[AgentProfileRecord] = relationship(back_populates="leases")
+
+
+class AgentPortabilityAudit(Base):
+    """Executor history for portable agents (RFC-0009)."""
+
+    __tablename__ = "agent_portability_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agent_profiles.id"), index=True)
+    event: Mapped[str] = mapped_column(String(40), default="")
+    runtime_profile_id: Mapped[str] = mapped_column(String(64), default="")
+    node_id: Mapped[str] = mapped_column(String(64), default="")
+    model: Mapped[str] = mapped_column(String(120), default="")
+    endpoint: Mapped[str] = mapped_column(String(255), default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    agent: Mapped[AgentProfileRecord] = relationship(back_populates="audit_events")
