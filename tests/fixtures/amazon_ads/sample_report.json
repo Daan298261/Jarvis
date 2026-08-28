@@ -1,0 +1,32 @@
+{
+  "profile_id": "fixture-profile",
+  "start_date": "2026-08-20",
+  "end_date": "2026-08-27",
+  "campaigns": [
+    {
+      "id": "camp-fixture",
+      "name": "Fixture Campaign",
+      "status": "enabled",
+      "budget": 200.0,
+      "metrics": [
+        {"date": "2026-08-27", "spend": 80.0, "sales": 30.0, "orders": 1, "clicks": 120, "impressions": 3000, "acos": 2.67, "roas": 0.375}
+      ]
+    }
+  ],
+  "ad_groups": [],
+  "keywords": [
+    {
+      "id": "kw-fixture-waste",
+      "ad_group_id": "ag-fixture",
+      "campaign_id": "camp-fixture",
+      "text": "fixture waste keyword",
+      "bid": 2.0,
+      "status": "enabled",
+      "metrics": [
+        {"date": "2026-08-27", "spend": 30.0, "sales": 0.0, "orders": 0, "clicks": 15, "impressions": 400}
+      ]
+    }
+  ],
+  "placements": [],
+  "search_terms": []
+}
