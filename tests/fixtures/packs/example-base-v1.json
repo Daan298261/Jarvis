@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "id": "example.base",
+  "name": "Example Base Pack",
+  "version": "1.0.0",
+  "description": "Base dependency pack for domain pack tests",
+  "min_jarvis_version": "1.0.0",
+  "dependencies": [],
+  "trust": {
+    "trust_level": "user"
+  },
+  "capabilities": {
+    "required_tools": ["filesystem"]
+  },
+  "resources": [
+    {
+      "id": "example.base.policy.default",
+      "type": "policy",
+      "data": {
+        "name": "Default Policy",
+        "autonomy": "trusted"
+      },
+      "merge_strategy": "replace"
+    }
+  ]
+}
