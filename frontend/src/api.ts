@@ -1763,3 +1763,207 @@ export async function startAmazonAdsOAuth(body: {
     }),
   })
 }
+
+export const WORKER_ENVIRONMENT_STATUSES = ["created", "running", "suspended"] as const
+export type WorkerEnvironmentLifecycle = (typeof WORKER_ENVIRONMENT_STATUSES)[number]
+
+export type WorkerEnvironmentQuotas = {
+  disk_mb?: number
+  cpu_threads?: number
+  ram_gb?: number
+  gpu_percent?: number
+  max_background_processes?: number
+  [key: string]: number | undefined
+}
+
+export type WorkerEnvironmentStatus = {
+  id: string
+  name: string
+  worker_kind: string
+  agent_profile: string
+  status: string
+  created_at: string
+  last_active_at: string
+  suspended_at?: string | null
+  quotas: WorkerEnvironmentQuotas | Record<string, unknown>
+  metadata: Record<string, unknown>
+  disk_usage_bytes: number
+  disk_usage_mb: number
+  quota_violations: string[]
+}
+
+export type WorkerEnvironmentCredential = {
+  id: string
+  environment_id: string
+  capability: string
+  label: string
+  created_at: string
+  revoked_at?: string | null
+}
+
+export type WorkerEnvironmentInspect = WorkerEnvironmentStatus & {
+  workspace_path: string
+  workspace_files: string[]
+  caches_path: string
+  browser_profile_path: string
+  logs_path: string
+  log_files: string[]
+  processes: unknown[]
+  task_state: Record<string, unknown>
+  credentials: WorkerEnvironmentCredential[]
+}
+
+export type WorkerEnvironmentCreateIn = {
+  name: string
+  worker_kind?: string
+  agent_profile?: string
+  quotas?: WorkerEnvironmentQuotas
+  metadata?: Record<string, unknown>
+}
+
+export type WorkerEnvironmentCredentialIn = {
+  capability: string
+  label: string
+  secret: string
+  credential_id?: string
+}
+
+export type WorkerEnvironmentAuditEvent = {
+  timestamp: string
+  event: string
+  environment_id?: string | null
+  credential_id?: string | null
+  details?: Record<string, unknown>
+}
+
+export type WorkerEnvironmentDeleteResult = {
+  deleted: boolean
+  id: string
+  name: string
+}
+
+export type WorkerEnvironmentsListResponse = {
+  environments: WorkerEnvironmentStatus[]
+}
+
+export async function listWorkerEnvironments(): Promise<WorkerEnvironmentsListResponse> {
+  return api<WorkerEnvironmentsListResponse>("/api/worker-environments")
+}
+
+export async function createWorkerEnvironment(
+  body: WorkerEnvironmentCreateIn,
+): Promise<WorkerEnvironmentStatus> {
+  return api<WorkerEnvironmentStatus>("/api/worker-environments", {
+    method: "POST",
+    body: JSON.stringify({
+      name: body.name,
+      worker_kind: body.worker_kind || "general",
+      agent_profile: body.agent_profile || "default",
+      quotas: body.quotas || {},
+      metadata: body.metadata || {},
+    }),
+  })
+}
+
+export async function listWorkerEnvironmentAudit(options?: {
+  environmentId?: string
+  limit?: number
+}): Promise<{ events: WorkerEnvironmentAuditEvent[] }> {
+  const params = new URLSearchParams()
+  if (options?.environmentId) params.set("environment_id", options.environmentId)
+  if (options?.limit != null) params.set("limit", String(options.limit))
+  const query = params.toString()
+  return api<{ events: WorkerEnvironmentAuditEvent[] }>(
+    `/api/worker-environments/audit${query ? `?${query}` : ""}`,
+  )
+}
+
+export async function inspectWorkerEnvironment(
+  environmentId: string,
+): Promise<WorkerEnvironmentInspect> {
+  return api<WorkerEnvironmentInspect>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}`,
+  )
+}
+
+export async function getWorkerEnvironmentStatus(
+  environmentId: string,
+): Promise<WorkerEnvironmentStatus> {
+  return api<WorkerEnvironmentStatus>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}/status`,
+  )
+}
+
+export async function startWorkerEnvironment(
+  environmentId: string,
+): Promise<WorkerEnvironmentStatus> {
+  return api<WorkerEnvironmentStatus>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}/start`,
+    { method: "POST" },
+  )
+}
+
+export async function suspendWorkerEnvironment(
+  environmentId: string,
+): Promise<WorkerEnvironmentStatus> {
+  return api<WorkerEnvironmentStatus>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}/suspend`,
+    { method: "POST" },
+  )
+}
+
+export async function resumeWorkerEnvironment(
+  environmentId: string,
+): Promise<WorkerEnvironmentStatus> {
+  return api<WorkerEnvironmentStatus>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}/resume`,
+    { method: "POST" },
+  )
+}
+
+export async function resetWorkerEnvironment(
+  environmentId: string,
+): Promise<WorkerEnvironmentStatus> {
+  return api<WorkerEnvironmentStatus>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}/reset`,
+    { method: "POST" },
+  )
+}
+
+export async function deleteWorkerEnvironment(
+  environmentId: string,
+): Promise<WorkerEnvironmentDeleteResult> {
+  return api<WorkerEnvironmentDeleteResult>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}`,
+    { method: "DELETE" },
+  )
+}
+
+export async function storeWorkerEnvironmentCredential(
+  environmentId: string,
+  body: WorkerEnvironmentCredentialIn,
+): Promise<WorkerEnvironmentCredential> {
+  const payload: WorkerEnvironmentCredentialIn = {
+    capability: body.capability,
+    label: body.label,
+    secret: body.secret,
+  }
+  if (body.credential_id) payload.credential_id = body.credential_id
+  return api<WorkerEnvironmentCredential>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}/credentials`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export async function revokeWorkerEnvironmentCredential(
+  environmentId: string,
+  credentialId: string,
+): Promise<WorkerEnvironmentCredential> {
+  return api<WorkerEnvironmentCredential>(
+    `/api/worker-environments/${encodeURIComponent(environmentId)}/credentials/${encodeURIComponent(credentialId)}`,
+    { method: "DELETE" },
+  )
+}
