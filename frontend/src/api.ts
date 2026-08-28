@@ -103,9 +103,11 @@ export type Task = {
   prompt: string
   status: string
   stage: string
+  autonomy?: string
   execution_mode?: string
   task_class?: string
   exposed_tools?: string[]
+  allowed_tools?: string[]
   acceptance_criteria?: string
   current_action: string
   current_tool: string
@@ -1965,5 +1967,340 @@ export async function revokeWorkerEnvironmentCredential(
   return api<WorkerEnvironmentCredential>(
     `/api/worker-environments/${encodeURIComponent(environmentId)}/credentials/${encodeURIComponent(credentialId)}`,
     { method: "DELETE" },
+  )
+}
+
+export const DELEGATION_STATUSES = ["pending", "running", "completed", "failed", "expired"] as const
+export type DelegatedWorkerStatus = (typeof DELEGATION_STATUSES)[number]
+
+export const DELEGATION_AUTONOMY = ["interactive", "trusted", "autonomous"] as const
+export type DelegationAutonomy = (typeof DELEGATION_AUTONOMY)[number]
+
+export const DELEGATION_PRIVACY = ["public", "internal", "confidential", "restricted"] as const
+export type DelegationPrivacy = (typeof DELEGATION_PRIVACY)[number]
+
+export const DELEGATION_AUTONOMY_RANK: Record<string, number> = {
+  interactive: 0,
+  trusted: 1,
+  autonomous: 2,
+}
+
+export const DELEGATION_PRIVACY_RANK: Record<string, number> = {
+  public: 0,
+  internal: 1,
+  confidential: 2,
+  restricted: 3,
+}
+
+export const TASK_PARENT_PRIVACY = "internal"
+export const PLATFORM_AUTONOMY_CAP = "autonomous"
+
+export type DelegatedWorker = {
+  id: string
+  parent_task_id: string
+  parent_worker_id: string | null
+  depth: number
+  task: string
+  context: Record<string, unknown>
+  tools: string[]
+  budget: Record<string, unknown>
+  result_schema: Record<string, unknown>
+  autonomy: string
+  privacy_class: string
+  status: string
+  result: Record<string, unknown> | null
+  error: string | null
+  created_at: string | null
+  updated_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  deadline_at: string | null
+  expires_at: string | null
+}
+
+export type DelegationEvent = {
+  id: string | number
+  parent_task_id: string
+  worker_id: string
+  kind: string
+  title: string
+  detail: string
+  created_at: string | null
+}
+
+export type SpawnDelegatedChild = {
+  task: string
+  parent_worker_id?: string | null
+  context?: Record<string, unknown>
+  tools?: string[]
+  budget?: Record<string, unknown>
+  deadline_at?: string | null
+  result_schema?: Record<string, unknown>
+  autonomy?: string | null
+  privacy_class?: string | null
+  ttl_seconds?: number | null
+}
+
+export type DelegationAuthority = {
+  tools: string[]
+  autonomy: string
+  privacy_class: string
+  context: Record<string, unknown>
+  budget: Record<string, number>
+}
+
+const DELEGATION_ERROR_COPY: Record<string, string> = {
+  max_depth_exceeded:
+    "This helper would sit too far below the parent. Jarvis limits how deep a chain of helpers can go.",
+  max_fan_out_exceeded:
+    "This parent already has as many active helpers as allowed. Wait for one to finish before adding another.",
+  tool_not_allowed: "That tool is not on the parent, so it cannot be given to a helper.",
+  context_not_allowed: "Helpers can only see details the parent already has.",
+  parent_not_found: "That parent task or helper was not found.",
+  parent_not_active: "Helpers can only be added under a helper that is still waiting or working.",
+  invalid_task: "Describe what the helper should do.",
+  worker_not_found: "That helper was not found.",
+  worker_not_active: "That helper is no longer waiting or working.",
+}
+
+export class DelegationApiError extends Error {
+  status: number
+  code: string
+  constructor(message: string, status: number, code = "") {
+    super(message)
+    this.name = "DelegationApiError"
+    this.status = status
+    this.code = code
+  }
+}
+
+export function formatDelegationError(err: unknown): string {
+  if (err instanceof DelegationApiError) {
+    if (err.code && DELEGATION_ERROR_COPY[err.code]) return DELEGATION_ERROR_COPY[err.code]
+    return err.message
+  }
+  if (err instanceof Error && err.message) return err.message
+  return "Could not update helpers."
+}
+
+function parentToolsForTask(task: Task): string[] {
+  if (task.allowed_tools?.length) return task.allowed_tools
+  if (task.exposed_tools?.length) return task.exposed_tools
+  return []
+}
+
+export function authorityFromTask(task: Task): DelegationAuthority {
+  return {
+    tools: parentToolsForTask(task),
+    autonomy: (task.autonomy || "trusted").toLowerCase(),
+    privacy_class: TASK_PARENT_PRIVACY,
+    context: {
+      task_prompt: task.prompt || "",
+      task_class: task.task_class || "",
+    },
+    budget: {},
+  }
+}
+
+export function authorityFromWorker(worker: DelegatedWorker): DelegationAuthority {
+  const budget: Record<string, number> = {}
+  for (const [key, value] of Object.entries(worker.budget || {})) {
+    if (typeof value === "number" && Number.isFinite(value)) budget[key] = value
+  }
+  return {
+    tools: (worker.tools || []).map((item) => String(item)),
+    autonomy: (worker.autonomy || "interactive").toLowerCase(),
+    privacy_class: (worker.privacy_class || TASK_PARENT_PRIVACY).toLowerCase(),
+    context: worker.context && typeof worker.context === "object" ? worker.context : {},
+    budget,
+  }
+}
+
+export function allowedDelegationAutonomy(parentAutonomy: string): DelegationAutonomy[] {
+  const max = Math.min(
+    DELEGATION_AUTONOMY_RANK[parentAutonomy.toLowerCase()] ?? 0,
+    DELEGATION_AUTONOMY_RANK[PLATFORM_AUTONOMY_CAP] ?? 2,
+  )
+  return DELEGATION_AUTONOMY.filter((item) => (DELEGATION_AUTONOMY_RANK[item] ?? 0) <= max)
+}
+
+export function allowedDelegationPrivacy(parentPrivacy: string): DelegationPrivacy[] {
+  const min = DELEGATION_PRIVACY_RANK[parentPrivacy.toLowerCase()] ?? DELEGATION_PRIVACY_RANK[TASK_PARENT_PRIVACY]
+  return DELEGATION_PRIVACY.filter((item) => (DELEGATION_PRIVACY_RANK[item] ?? 0) >= min)
+}
+
+export function subsetDelegationTools(requested: string[], parentTools: string[]): string[] {
+  const allowed = new Set(parentTools.map((item) => item.trim().toLowerCase()).filter(Boolean))
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of requested) {
+    const key = String(item || "").trim().toLowerCase()
+    if (!key || !allowed.has(key) || seen.has(key)) continue
+    seen.add(key)
+    out.push(key)
+  }
+  return out
+}
+
+export function clampDelegationSpawn(
+  body: SpawnDelegatedChild,
+  parent: DelegationAuthority,
+): SpawnDelegatedChild {
+  const allowedAuto = allowedDelegationAutonomy(parent.autonomy)
+  const requestedAuto = (body.autonomy || parent.autonomy).toLowerCase()
+  const autonomy = allowedAuto.includes(requestedAuto as DelegationAutonomy)
+    ? requestedAuto
+    : parent.autonomy
+
+  const allowedPriv = allowedDelegationPrivacy(parent.privacy_class)
+  const requestedPriv = (body.privacy_class || parent.privacy_class).toLowerCase()
+  const privacy_class = allowedPriv.includes(requestedPriv as DelegationPrivacy)
+    ? requestedPriv
+    : parent.privacy_class
+
+  const context: Record<string, unknown> = {}
+  for (const key of Object.keys(body.context || {})) {
+    if (Object.prototype.hasOwnProperty.call(parent.context, key)) {
+      context[key] = parent.context[key]
+    }
+  }
+
+  const budget: Record<string, unknown> = {}
+  const parentKeys = Object.keys(parent.budget)
+  for (const [key, value] of Object.entries(body.budget || {})) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue
+    if (parentKeys.length) {
+      if (!(key in parent.budget)) continue
+      budget[key] = Math.min(value, parent.budget[key])
+    } else {
+      budget[key] = value
+    }
+  }
+
+  return {
+    ...body,
+    tools: subsetDelegationTools(body.tools || [], parent.tools),
+    autonomy,
+    privacy_class,
+    context,
+    budget,
+  }
+}
+
+async function delegationApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = authHeaders({
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) || {}),
+  })
+  const response = await fetch(path, { ...init, headers })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = text || response.statusText
+    let code = ""
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown }
+      if (parsed.detail && typeof parsed.detail === "object" && !Array.isArray(parsed.detail)) {
+        const record = parsed.detail as { code?: unknown }
+        if (typeof record.code === "string") code = record.code
+      }
+      message = formatApiDetail(parsed.detail, message)
+    } catch {
+      // keep text
+    }
+    if (code && DELEGATION_ERROR_COPY[code]) message = DELEGATION_ERROR_COPY[code]
+    throw new DelegationApiError(message || response.statusText, response.status, code)
+  }
+  if (response.status === 204) return undefined as T
+  return response.json() as Promise<T>
+}
+
+export async function listDelegationChildren(
+  parentTaskId: string,
+  parentWorkerId?: string | null,
+): Promise<DelegatedWorker[]> {
+  const params = new URLSearchParams()
+  if (parentWorkerId) params.set("parent_worker_id", parentWorkerId)
+  const query = params.toString()
+  return delegationApi<DelegatedWorker[]>(
+    `/api/delegation/parents/${encodeURIComponent(parentTaskId)}/children${query ? `?${query}` : ""}`,
+  )
+}
+
+export async function listDelegationGraph(parentTaskId: string): Promise<DelegatedWorker[]> {
+  const out: DelegatedWorker[] = []
+  const seen = new Set<string>()
+
+  async function walk(parentWorkerId?: string, depth = 0): Promise<void> {
+    if (depth > 8) return
+    const kids = await listDelegationChildren(parentTaskId, parentWorkerId)
+    const next: DelegatedWorker[] = []
+    for (const kid of kids) {
+      if (seen.has(kid.id)) continue
+      seen.add(kid.id)
+      out.push(kid)
+      next.push(kid)
+    }
+    await Promise.all(next.map((kid) => walk(kid.id, depth + 1)))
+  }
+
+  await walk()
+  return out
+}
+
+export async function listDelegationEvents(parentTaskId: string): Promise<DelegationEvent[]> {
+  return delegationApi<DelegationEvent[]>(
+    `/api/delegation/parents/${encodeURIComponent(parentTaskId)}/events`,
+  )
+}
+
+export async function getDelegatedWorker(workerId: string): Promise<DelegatedWorker> {
+  return delegationApi<DelegatedWorker>(`/api/delegation/workers/${encodeURIComponent(workerId)}`)
+}
+
+export async function spawnDelegatedChild(
+  parentTaskId: string,
+  body: SpawnDelegatedChild,
+  parentAuthority?: DelegationAuthority,
+): Promise<DelegatedWorker> {
+  const payload = parentAuthority ? clampDelegationSpawn(body, parentAuthority) : { ...body }
+  const request: Record<string, unknown> = {
+    task: payload.task,
+    context: payload.context || {},
+    tools: payload.tools || [],
+    budget: payload.budget || {},
+    result_schema: payload.result_schema || {},
+  }
+  if (payload.parent_worker_id) request.parent_worker_id = payload.parent_worker_id
+  if (payload.deadline_at) request.deadline_at = payload.deadline_at
+  if (payload.autonomy) request.autonomy = payload.autonomy
+  if (payload.privacy_class) request.privacy_class = payload.privacy_class
+  if (payload.ttl_seconds != null) request.ttl_seconds = payload.ttl_seconds
+  return delegationApi<DelegatedWorker>(
+    `/api/delegation/parents/${encodeURIComponent(parentTaskId)}/children`,
+    { method: "POST", body: JSON.stringify(request) },
+  )
+}
+
+export async function startDelegatedWorker(workerId: string): Promise<DelegatedWorker> {
+  return delegationApi<DelegatedWorker>(
+    `/api/delegation/workers/${encodeURIComponent(workerId)}/start`,
+    { method: "POST" },
+  )
+}
+
+export async function completeDelegatedWorker(
+  workerId: string,
+  result: Record<string, unknown> = {},
+): Promise<DelegatedWorker> {
+  return delegationApi<DelegatedWorker>(
+    `/api/delegation/workers/${encodeURIComponent(workerId)}/complete`,
+    { method: "POST", body: JSON.stringify({ result }) },
+  )
+}
+
+export async function failDelegatedWorker(workerId: string, error: string): Promise<DelegatedWorker> {
+  return delegationApi<DelegatedWorker>(
+    `/api/delegation/workers/${encodeURIComponent(workerId)}/fail`,
+    { method: "POST", body: JSON.stringify({ error }) },
   )
 }

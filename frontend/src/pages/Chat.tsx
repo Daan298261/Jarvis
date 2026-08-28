@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { DelegationPanel } from "./Delegation"
 
 type VoiceStatus = {
   stt_ready?: boolean
@@ -20,6 +21,7 @@ export function ChatPage() {
   const [voice, setVoice] = useState<VoiceStatus | null>(null)
   const [recording, setRecording] = useState(false)
   const [speakResults, setSpeakResults] = useState(false)
+  const [helpersOpen, setHelpersOpen] = useState(true)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const spokenRef = useRef<string>("")
@@ -195,6 +197,14 @@ export function ChatPage() {
               {shown.current_tool ? ` · ${shown.current_tool}` : ""}
               {" · "}
               <span className="stat">{elapsed || Math.round(shown.duration_seconds || 0)}s</span>
+              {" · "}
+              <button
+                type="button"
+                className="rail-icon-btn"
+                onClick={() => setHelpersOpen((open) => !open)}
+              >
+                {helpersOpen ? "Hide helpers" : "Show helpers"}
+              </button>
             </p>
           </>
         ) : empty ? (
@@ -206,6 +216,12 @@ export function ChatPage() {
           <h1>Opening task…</h1>
         )}
       </header>
+
+      {shown && helpersOpen && (
+        <div className="chat-helpers">
+          <DelegationPanel key={shown.id} parentTaskId={shown.id} task={shown} compact />
+        </div>
+      )}
 
       {showAuthModal && (
         <div className="card auth-card">
