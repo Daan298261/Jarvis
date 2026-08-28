@@ -26,7 +26,7 @@ Detailed P2+ swarm role, node placement, resource-control, and universal-UI requ
 | [BLUE_TEAM.md](BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
 | [INSTALLER.md](INSTALLER.md) | Windows 11 consumer `.exe` onboarding (smoke PR #51; wizard/GPU/WAN still open) |
 | [WINDOWS_SHELL.md](WINDOWS_SHELL.md) | Tray / Stop / Uninstall (not Start Menu only) |
-| [PORTAL_UX.md](PORTAL_UX.md) | ChatGPT-style portal shell; orange/black; keep Swarm/Phone |
+| [PORTAL_UX.md](PORTAL_UX.md) | ChatGPT-style portal shell (PR #53); orange/black; Swarm/Phone kept |
 | [TOOLS.md](TOOLS.md) | Native tools, MCP, trajectories, skills |
 | [SECURITY.md](SECURITY.md) | Bind address, private keys, filesystem policy |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Unloaded model, CUDA, Playwright, Office, Docker |

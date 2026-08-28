@@ -31,7 +31,7 @@ Filter: if a **new** idea would make home-network JARVIS more real, spec it. Nev
 7. Architect owns all spec files (this file, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, `PORTAL_UX.md`). Executing bots do not edit them.
 8. [`INSTALLER.md`](INSTALLER.md): Windows 11 consumer `.exe` for non-technical onboarding. Smoke (PR #51): `JarvisSetup.exe`, Start Jarvis → health 200, Stop kills backend + llama-server, 9B Q8 on disk. Remaining P1: wizard copy, GPU fork, no-WAN first-run. Do not overwrite `installer/windows/` product files from Architect PRs.
 9. [`WINDOWS_SHELL.md`](WINDOWS_SHELL.md): tray Stop/Quit and Apps Uninstall/Modify must not leave `llama-server` orphaned.
-10. [`PORTAL_UX.md`](PORTAL_UX.md): ChatGPT-style app shell; orange/black; keep Swarm/Phone; no API redesign.
+10. [`PORTAL_UX.md`](PORTAL_UX.md): ChatGPT-style app shell; orange/black; keep Swarm/Phone; no API redesign. Shell landed PR #53; Stop/settings findability still open.
 
 
 Every development session must read this file before making substantial changes.
@@ -1861,7 +1861,7 @@ Specified in `INSTALLER.md`. Smoke on canonical (PR #51): `JarvisSetup.exe`; Sta
 
 ### Portal UX
 
-Specified in `PORTAL_UX.md`. Command is still a tab among admin pages. ChatGPT-style shell (left projects + main chat) is **not implemented**. Do not overwrite swarm backend from a UX ticket.
+Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, main chat/task, orange/black, Swarm/Phone kept, `api.ts` swarm contracts kept. Remaining: Stop/settings findability. Do not overwrite `frontend/src` or swarm backend from this Architect PR.
 
 ### Persistence
 
@@ -1894,7 +1894,7 @@ Specified in `PORTAL_UX.md`. Command is still a tab among admin pages. ChatGPT-s
 - Android WAN reachability / AI-guided router port-forward is specified, not implemented
 - Home IoT and security agents (Blue / Purple / Red-gated) are specified, not implemented
 - Windows consumer `.exe`: smoke PR #51 (`JarvisSetup.exe`, Start/Stop, health 200, 9B Q8 on disk). Remaining: wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`). Tray/Stop from Windows: specified (`WINDOWS_SHELL.md`), not implemented.
-- Portal UX shell (`PORTAL_UX.md`) specified, not implemented
+- Portal UX shell (`PORTAL_UX.md`): PR #53 (projects + recents, orange/black, Swarm/Phone, swarm API contracts). Remaining: Stop/settings findability
 
 ### Last End-to-End Test
 
@@ -1991,9 +1991,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [ ] Windows tray / Stop from Settings (`WINDOWS_SHELL.md`)
   - While running: tray with Open portal, Start, Stop, Quit. Quit = Stop backend + llama-server + tray helper. Stop must not leave llama-server orphaned. Uninstall/Modify from Settings → Apps → Jarvis must not leave those processes. Startup toggle (if any) matches §48. Not P3; no WAN. D1 is on voice P0; CoS assigns this later.
   - Status: TODO / specified. Do not touch `installer/windows/` or voice backend from this Architect PR.
-- [ ] Portal UX app shell (`PORTAL_UX.md`)
-  - ChatGPT-style shell: left rail projects + recents; main pane current chat/task; home is talk/work. Keep orange/black, existing destinations, Swarm and Phone. UX owns `frontend/src`; do not redesign the API or overwrite swarm backend.
-  - Status: TODO / specified. For Jarvis UX.
+- [x] Portal UX app shell (`PORTAL_UX.md`, PR #53)
+  - Orange/black; left projects + recents; main chat/task; existing destinations including Swarm and Phone; `api.ts` swarm contracts kept.
+  - Status: VERIFIED in code (PR #53 squash-merge onto `cursor/local-qwen-desktop-agent`). Remaining: Stop/settings findability (`PORTAL_UX.md`; tray Stop is `WINDOWS_SHELL.md`, D1 in flight). Do not overwrite `frontend/src` from Architect PRs.
 
 ### P2
 
@@ -2177,7 +2177,7 @@ Start Menu Stop is not enough for non-technical Windows users.
 
 Decision: portal UX is a ChatGPT-style app shell
 
-`PORTAL_UX.md`. Keep orange/black and existing destinations including Swarm and Phone. Home is talk/work: left projects + recents, main chat/task. Admin pages remain reachable, not the home screen. UX owns `frontend/src`; do not redesign the API or overwrite swarm backend.
+`PORTAL_UX.md`. Keep orange/black and existing destinations including Swarm and Phone. Home is talk/work: left projects + recents, main chat/task. Admin pages remain reachable, not the home screen. Shell landed in code via PR #53 (`api.ts` swarm contracts kept). Remaining: Stop/settings findability. Do not overwrite `frontend/src` from Architect PRs.
 
 Reason:
 
