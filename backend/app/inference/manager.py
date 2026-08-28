@@ -10,7 +10,7 @@ import psutil
 
 from ..config import AppSettings, logs_dir
 from ..providers.openai_compat import OpenAICompatProvider
-from .backends import InferenceBackend, probe_remote_server, resolve_backend
+from .backends import InferenceBackend, normalize_chat_messages, probe_remote_server, resolve_backend
 from .profiles import ModelProfile, profile_gguf, resolve_mmproj, resolve_profile, declared_profiles
 
 
@@ -104,6 +104,42 @@ class InferenceManager:
             self.base_url(settings),
             api_key=self.provider_api_key(settings),
             model=self.provider_model(settings, advertised),
+        )
+
+    def prepare_chat_messages(self, messages: list[Any]) -> list[Any]:
+        """Normalize message order before llama.cpp / Qwen chat template rendering."""
+        from ..providers.base import ChatMessage
+
+        typed = [
+            message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
+            for message in messages
+        ]
+        return normalize_chat_messages(typed)
+
+    async def chat(
+        self,
+        messages: list[Any],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        max_tokens: int | None = None,
+        thinking: bool | None = None,
+        extra: dict[str, Any] | None = None,
+    ):
+        if not self.provider:
+            raise RuntimeError("Inference model is not loaded")
+        prepared = self.prepare_chat_messages(messages)
+        return await self.provider.chat(
+            prepared,
+            tools=tools,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            max_tokens=max_tokens,
+            thinking=thinking,
+            extra=extra,
         )
 
     def _vision_requested(self, settings: AppSettings, vision: bool | None) -> bool:

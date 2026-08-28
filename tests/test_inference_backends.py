@@ -6,11 +6,13 @@ from app.inference.backends import (
     LMStudioBackend,
     OllamaBackend,
     RemoteOpenAICompatibleBackend,
+    normalize_chat_messages,
     parse_models_payload,
     resolve_backend,
     suggested_port,
 )
 from app.inference.profiles import resolve_profile
+from app.providers.base import ChatMessage
 
 
 def _settings(**inference) -> AppSettings:
@@ -21,6 +23,48 @@ def _settings(**inference) -> AppSettings:
 
 def test_llama_cpp_is_the_default_backend():
     assert isinstance(resolve_backend(_settings()), LlamaCppBackend)
+
+
+def test_normalize_chat_messages_keeps_single_system_first():
+    messages = [
+        ChatMessage(role="system", content="rules"),
+        ChatMessage(role="user", content="hello"),
+        ChatMessage(role="system", content="extra context"),
+        ChatMessage(role="assistant", content="hi"),
+    ]
+    normalized = normalize_chat_messages(messages)
+    assert [message.role for message in normalized] == ["system", "user", "assistant"]
+    assert "rules" in normalized[0].content
+    assert "extra context" in normalized[0].content
+
+
+async def test_manager_chat_normalizes_messages_before_provider(monkeypatch):
+    from app.inference.manager import InferenceManager
+
+    captured: dict[str, list] = {}
+
+    class FakeProvider:
+        model = "Qwen3.5-9B"
+
+        async def chat(self, messages, **kwargs):
+            captured["messages"] = messages
+            from app.providers.base import ChatResult
+
+            return ChatResult(content="ok")
+
+    mgr = InferenceManager()
+    mgr.provider = FakeProvider()
+    messages = [
+        ChatMessage(role="system", content="sys-a"),
+        ChatMessage(role="user", content="task"),
+        ChatMessage(role="system", content="sys-b"),
+    ]
+    result = await mgr.chat(messages)
+    assert result.content == "ok"
+    assert len(captured["messages"]) == 2
+    assert captured["messages"][0].role == "system"
+    assert "sys-a" in captured["messages"][0].content
+    assert "sys-b" in captured["messages"][0].content
 
 
 @pytest.mark.parametrize("name", ["remote", "lmstudio", "ollama", "vllm", "openai-compatible"])
