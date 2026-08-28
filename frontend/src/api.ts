@@ -3124,3 +3124,301 @@ export async function emitNativeTrajectory(
 export async function listPendingTrajectories(): Promise<PendingTrajectoryItem[]> {
   return trajectoryApi<PendingTrajectoryItem[]>("/api/trajectories/queue/pending")
 }
+
+export const PORTABLE_AGENT_STATUSES = ["idle", "running", "suspended"] as const
+export type PortableAgentStatus = (typeof PORTABLE_AGENT_STATUSES)[number]
+
+export const PORTABLE_LEASE_STATUSES = ["active", "released"] as const
+export type PortableLeaseStatus = (typeof PORTABLE_LEASE_STATUSES)[number]
+
+export type PortableAgentState = {
+  memory: Record<string, unknown>
+  policy: Record<string, unknown>
+  skill_refs: string[]
+  goals: Record<string, unknown>[]
+  task_state: Record<string, unknown>
+  provenance: Record<string, unknown>[]
+  required_tools: string[]
+  required_capabilities: string[]
+}
+
+export type PortableAgent = {
+  id: string
+  name: string
+  status: string
+  state_version: number
+  state: PortableAgentState
+  created_at: string | null
+  updated_at: string | null
+  active_lease?: AgentRuntimeLease | null
+  lease?: AgentRuntimeLease | null
+  previous_lease?: AgentRuntimeLease | null
+}
+
+export type AgentRuntimeLease = {
+  id: string
+  agent_id: string
+  runtime_profile_id: string
+  node_id: string
+  model: string
+  endpoint: string
+  status: string
+  created_at: string | null
+  released_at: string | null
+}
+
+export type PortabilityAuditEvent = {
+  id: string
+  agent_id: string
+  event: string
+  runtime_profile_id: string
+  node_id: string
+  model: string
+  endpoint: string
+  detail: string
+  created_at: string | null
+}
+
+export type PortableAgentCreateIn = {
+  name: string
+  memory?: Record<string, unknown>
+  skill_refs?: string[]
+  goals?: Record<string, unknown>[]
+  task_state?: Record<string, unknown>
+  required_tools?: string[]
+  required_capabilities?: string[]
+}
+
+/** Portable-state PATCH. Policy/autonomy is omitted so this portal cannot raise authority. */
+export type PortableAgentStateUpdate = {
+  memory?: Record<string, unknown>
+  skill_refs?: string[]
+  goals?: Record<string, unknown>[]
+  task_state?: Record<string, unknown>
+  provenance?: Record<string, unknown>[]
+  required_tools?: string[]
+  required_capabilities?: string[]
+}
+
+export type PortableLeaseRequest = {
+  runtime_profile_id: string
+  node_id?: string
+}
+
+export type PortableMigrateRequest = {
+  target_runtime_profile_id: string
+  node_id?: string
+}
+
+const PORTABILITY_ERROR_COPY: Record<string, string> = {
+  missing_capabilities:
+    "This runtime cannot run this agent. It is missing capabilities the agent needs. Jarvis did not silently pick a weaker setup. The Agent ID is unchanged.",
+  missing_tools:
+    "This runtime cannot run this agent. It does not have the tools the agent requires. Jarvis did not silently pick a weaker setup. The Agent ID is unchanged.",
+  runtime_incompatible:
+    "This runtime is not a match for this agent. Jarvis did not silently switch to a weaker setup. The Agent ID is unchanged.",
+  lease_active:
+    "This agent already has a runtime lease. Release it, or move the lease to a different runtime. The Agent ID is unchanged.",
+  runtime_not_found: "That runtime was not found. Pick one from the list under Model.",
+  agent_not_found: "That agent was not found.",
+  lease_not_found: "That lease was not found.",
+  lease_not_active: "That lease is no longer active.",
+  invalid_status: "This agent cannot resume in its current state. Idle or suspended agents can resume.",
+  invalid_state: "This agent’s portable state could not be read.",
+  unsupported_state_version: "This agent’s saved state uses a version this portal cannot restore.",
+}
+
+export class PortabilityApiError extends Error {
+  status: number
+  code: string
+  constructor(message: string, status: number, code = "") {
+    super(message)
+    this.name = "PortabilityApiError"
+    this.status = status
+    this.code = code
+  }
+}
+
+export function formatPortabilityError(err: unknown): string {
+  if (err instanceof PortabilityApiError) {
+    if (err.code && PORTABILITY_ERROR_COPY[err.code]) return PORTABILITY_ERROR_COPY[err.code]
+    if (err.status === 409) {
+      return "This runtime cannot take the agent. Jarvis did not silently switch to a weaker setup. The Agent ID is unchanged."
+    }
+    if (err.status === 404) {
+      return err.message || "That agent or lease was not found."
+    }
+    return err.message
+  }
+  if (err instanceof Error && err.message) return err.message
+  return "Could not update this agent’s runtime lease."
+}
+
+export function emptyPortableAgentState(): PortableAgentState {
+  return {
+    memory: {},
+    policy: {},
+    skill_refs: [],
+    goals: [],
+    task_state: {},
+    provenance: [],
+    required_tools: [],
+    required_capabilities: [],
+  }
+}
+
+function portabilityCodeFromDetail(detail: unknown): string {
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const record = detail as { code?: unknown }
+    if (typeof record.code === "string") return record.code
+  }
+  return ""
+}
+
+async function portabilityApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = authHeaders({
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) || {}),
+  })
+  const response = await fetch(path, { ...init, headers })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = text || response.statusText
+    let code = ""
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown }
+      code = portabilityCodeFromDetail(parsed.detail)
+      message = formatApiDetail(parsed.detail, message)
+    } catch {
+      // keep text
+    }
+    if (code && PORTABILITY_ERROR_COPY[code]) message = PORTABILITY_ERROR_COPY[code]
+    else if (response.status === 409 && !code) {
+      message =
+        "This runtime cannot take the agent. Jarvis did not silently switch to a weaker setup. The Agent ID is unchanged."
+    }
+    throw new PortabilityApiError(message || response.statusText, response.status, code)
+  }
+  if (response.status === 204) return undefined as T
+  return response.json() as Promise<T>
+}
+
+export async function listPortableAgents(limit = 100): Promise<{ agents: PortableAgent[] }> {
+  const capped = Math.max(1, Math.min(limit, 500))
+  return portabilityApi<{ agents: PortableAgent[] }>(
+    `/api/agent-portability?limit=${encodeURIComponent(String(capped))}`,
+  )
+}
+
+export async function createPortableAgent(body: PortableAgentCreateIn): Promise<PortableAgent> {
+  const payload: Record<string, unknown> = {
+    name: body.name,
+    memory: body.memory || {},
+    skill_refs: body.skill_refs || [],
+    goals: body.goals || [],
+    task_state: body.task_state || {},
+    required_tools: body.required_tools || [],
+    required_capabilities: body.required_capabilities || [],
+  }
+  return portabilityApi<PortableAgent>("/api/agent-portability", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getPortableAgent(agentId: string): Promise<PortableAgent> {
+  return portabilityApi<PortableAgent>(`/api/agent-portability/${encodeURIComponent(agentId)}`)
+}
+
+export async function updatePortableAgentState(
+  agentId: string,
+  body: PortableAgentStateUpdate,
+): Promise<PortableAgent> {
+  const payload: Record<string, unknown> = {}
+  if (body.memory !== undefined) payload.memory = body.memory
+  if (body.skill_refs !== undefined) payload.skill_refs = body.skill_refs
+  if (body.goals !== undefined) payload.goals = body.goals
+  if (body.task_state !== undefined) payload.task_state = body.task_state
+  if (body.provenance !== undefined) payload.provenance = body.provenance
+  if (body.required_tools !== undefined) payload.required_tools = body.required_tools
+  if (body.required_capabilities !== undefined) payload.required_capabilities = body.required_capabilities
+  return portabilityApi<PortableAgent>(
+    `/api/agent-portability/${encodeURIComponent(agentId)}/state`,
+    { method: "PUT", body: JSON.stringify(payload) },
+  )
+}
+
+export async function leasePortableAgent(
+  agentId: string,
+  body: PortableLeaseRequest,
+): Promise<AgentRuntimeLease> {
+  return portabilityApi<AgentRuntimeLease>(
+    `/api/agent-portability/${encodeURIComponent(agentId)}/lease`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        runtime_profile_id: body.runtime_profile_id,
+        node_id: body.node_id || "localhost",
+      }),
+    },
+  )
+}
+
+export async function migratePortableAgent(
+  agentId: string,
+  body: PortableMigrateRequest,
+): Promise<PortableAgent> {
+  return portabilityApi<PortableAgent>(
+    `/api/agent-portability/${encodeURIComponent(agentId)}/migrate`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        target_runtime_profile_id: body.target_runtime_profile_id,
+        node_id: body.node_id || "localhost",
+      }),
+    },
+  )
+}
+
+export async function suspendPortableAgent(agentId: string): Promise<PortableAgent> {
+  return portabilityApi<PortableAgent>(
+    `/api/agent-portability/${encodeURIComponent(agentId)}/suspend`,
+    { method: "POST" },
+  )
+}
+
+export async function resumePortableAgent(
+  agentId: string,
+  body: PortableLeaseRequest,
+): Promise<PortableAgent> {
+  return portabilityApi<PortableAgent>(
+    `/api/agent-portability/${encodeURIComponent(agentId)}/resume`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        runtime_profile_id: body.runtime_profile_id,
+        node_id: body.node_id || "localhost",
+      }),
+    },
+  )
+}
+
+export async function releasePortableAgentLease(leaseId: string): Promise<AgentRuntimeLease> {
+  return portabilityApi<AgentRuntimeLease>(
+    `/api/agent-portability/leases/${encodeURIComponent(leaseId)}`,
+    { method: "DELETE" },
+  )
+}
+
+export async function listPortableAgentAudit(options?: {
+  agentId?: string
+  limit?: number
+}): Promise<{ events: PortabilityAuditEvent[] }> {
+  const params = new URLSearchParams()
+  if (options?.agentId) params.set("agent_id", options.agentId)
+  if (options?.limit != null) params.set("limit", String(options.limit))
+  const query = params.toString()
+  return portabilityApi<{ events: PortabilityAuditEvent[] }>(
+    `/api/agent-portability/audit${query ? `?${query}` : ""}`,
+  )
+}
