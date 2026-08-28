@@ -323,7 +323,9 @@ export function CodingPage() {
           ? ` ${conflictCount} conflict${conflictCount === 1 ? "" : "s"} are in Decision Inbox.`
           : ""
         setError(
-          (result.message || "Integrate is blocked until a verifier or you approve.") + extra,
+          (result.message || "Integrate is blocked until a verifier or you approve.") +
+            extra +
+            " Nothing was merged.",
         )
       } else {
         setMsg(
@@ -333,7 +335,15 @@ export function CodingPage() {
       }
       await Promise.all([refreshList(), refreshInbox(), refreshDetail(selectedId).catch(() => undefined)])
     } catch (err: unknown) {
-      setError(formatCodingError(err))
+      const raw = formatCodingError(err)
+      const lower = raw.toLowerCase()
+      if (lower.includes("must be completed") || lower.includes("cannot be approved")) {
+        setError(
+          `${raw} Record the task, resolve Decision Inbox conflicts, then approve. Integrate still does not merge — nothing lands silently.`,
+        )
+      } else {
+        setError(raw)
+      }
     } finally {
       setBusy(false)
     }
