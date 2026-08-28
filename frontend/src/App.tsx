@@ -18,6 +18,7 @@ import { GuestPage } from "./pages/Guest"
 import { PacksPage } from "./pages/Packs"
 import { AdsPage } from "./pages/Ads"
 import { WorkerEnvironmentsPage } from "./pages/WorkerEnvironments"
+import { DelegationPage } from "./pages/Delegation"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -45,6 +46,7 @@ const ADMIN_LINKS = [
   { to: "/environments", label: "Environments" },
   { to: "/packs", label: "Packs" },
   { to: "/ads", label: "Amazon Ads" },
+  { to: "/delegation", label: "Helpers" },
   { to: "/model", label: "Model" },
   { to: "/tools", label: "Tools" },
   { to: "/mcp", label: "MCP" },
@@ -424,6 +426,8 @@ function OwnerPortal() {
           <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
           <Route path="/packs" element={<PacksPage />} />
           <Route path="/ads" element={<AdsPage />} />
+          <Route path="/delegation" element={<DelegationPage />} />
+          <Route path="/delegation/:taskId" element={<DelegationPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/swarm" element={<SwarmPage />} />
           <Route path="/swarm/:nodeId" element={<SwarmPage />} />
