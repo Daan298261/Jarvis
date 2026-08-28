@@ -478,6 +478,23 @@ async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skil
     return created
 
 
+async def note_imported_trajectory_evidence(trajectory: Any) -> dict[str, Any]:
+    """Record untrusted cross-harness trajectory evidence for later skill/memory review.
+
+    Imported trajectories do not promote skills or modify policy directly.
+    """
+    harness = getattr(getattr(trajectory, "provenance", None), "harness", "unknown")
+    verified = bool(getattr(getattr(trajectory, "outcome", None), "verified", False))
+    candidate_count = len(getattr(trajectory, "candidate_skills", []) or [])
+    return {
+        "accepted": True,
+        "harness": harness,
+        "verified": verified,
+        "candidate_skills": candidate_count,
+        "policy_modified": False,
+    }
+
+
 async def relevant_skills(task_class: str, goal: str, limit: int = MAX_PROMPT_SKILLS) -> list[Skill]:
     goal_keywords = keywords(goal)
     async with SessionLocal() as session:
