@@ -1894,6 +1894,7 @@ Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, mai
 - Context repo (RFC-0011): backend PR #65; portal UI PR #84 (`fc111c9`).
 - Trajectories (RFC-0010): backend PR #63; portal UI PR #85 (`599a30e`).
 - Portability (RFC-0009): backend PR #62; portal UI PR #86 (`7a8f526`); 409 visibility PR #87 (`ce557d4`).
+- Coding isolation (RFC-0005): backend PR #57; portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`).
 
 ### Known Problems
 
@@ -2019,6 +2020,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [x] RFC-0009 Agent runtime portability
   - Acceptance: stable identity across lease/migrate/suspend/resume; 409s visible; no extra authority.
   - Status: VERIFIED in code — backend PR #62 (`82a5ef7`); portal UI PR #86 (`7a8f526`); 409 visibility PR #87 (`ce557d4`). On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0005 Isolated parallel coding workers
+  - Acceptance: worktrees, decision inbox, no silent merge; integrate blocked unless ready.
+  - Status: VERIFIED in code — backend PR #57 (`430e31b`); portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`). On `cursor/local-qwen-desktop-agent`.
 - [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
   - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
   - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
