@@ -1,6 +1,8 @@
 # Portal UX — app shell
 
-Status: **separate specification** referenced by `JARVIS_MASTER_PLAN.md` §58. Architect-owned. **Not implemented.** For the **Jarvis UX** implementer.
+Status: **separate specification** referenced by `JARVIS_MASTER_PLAN.md` §58. Architect-owned. For the **Jarvis UX** implementer.
+
+**Landed (PR #53, squash-merge onto `cursor/local-qwen-desktop-agent`):** orange/black tokens; left **Projects** + **Recents**; main pane current chat/task; Swarm and Phone kept; `frontend/src/api.ts` swarm endpoints/contracts unchanged. Remaining: Stop/settings findability (tray Stop is `WINDOWS_SHELL.md`, D1 in flight). Do **not** overwrite `frontend/src` from this Architect PR.
 
 One frontend ticket. **Do not redesign the API.** **Do not overwrite swarm backend.** UX owns `frontend/src` (pages, CSS, layout). Swarm page may be restyled as part of the shell; keep `frontend/src/api.ts` swarm endpoints and payloads.
 
@@ -57,8 +59,14 @@ Less chrome. A non-technical user should find **Settings** (and understand that 
 
 ## 4. Acceptance
 
-- [ ] Orange/black preserved (`--gold` / `--bg`; no new palette)
-- [ ] Left projects + main chat/task (recents in the rail; home is talk/work)
-- [ ] Existing destinations still reachable (table in §1)
-- [ ] Swarm / Phone not removed
-- [ ] Non-technical user can find Stop/settings without feeling they opened a server console
+Covered by PR #53:
+
+- [x] Orange/black preserved (`--gold` / `--bg`; no new palette)
+- [x] Left projects + main chat/task (recents in the rail; home is talk/work)
+- [x] Existing destinations still reachable (table in §1)
+- [x] Swarm / Phone not removed
+- [x] `api.ts` swarm contracts kept (no swarm-backend overwrite)
+
+Still open:
+
+- [ ] Non-technical user can find Stop/settings without feeling they opened a server console (tray Stop is `WINDOWS_SHELL.md`; D1 in flight)
