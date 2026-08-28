@@ -11,7 +11,7 @@ from ..workers.credentials import (
     store_credential,
 )
 from ..integrations.amazon_ads.client import AmazonAdsClient, AmazonAdsError, TokenExpiredError
-from ..integrations.amazon_ads.mock_client import MockAmazonAdsClient
+from ..integrations.amazon_ads.factory import client_mode_info, create_amazon_ads_client
 from .audit import record_action_audit
 from .evaluation import evaluate_action
 from .ingestion import ingest_all_profiles, ingest_profile
@@ -39,7 +39,7 @@ OAUTH_CAPABILITY = "amazon_ads.oauth"
 
 class MarketingService:
     def __init__(self, client: AmazonAdsClient | None = None) -> None:
-        self._client = client or MockAmazonAdsClient()
+        self._client = client or create_amazon_ads_client()
 
     @property
     def client(self) -> AmazonAdsClient:
@@ -147,6 +147,7 @@ class MarketingService:
             "write_authority": get_write_authority().value,
             "break_even_roas": policy.get("break_even"),
             "connections": len(list_connections()),
+            "client": client_mode_info(),
         }
 
     def metrics(self, profile_id: str, *, end_date: str) -> dict[str, Any]:
