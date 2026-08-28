@@ -1495,3 +1495,271 @@ export async function markPackResourceUserModified(
     },
   )
 }
+
+/** Existing localhost portal callback for Amazon Ads OAuth. Not a secret. */
+export const AMAZON_ADS_PORTAL_CALLBACK = "http://localhost:4780/api/amazon-ads/oauth/callback"
+
+export const AMAZON_ADS_WRITE_AUTHORITY = {
+  SUGGEST_ONLY: "SUGGEST_ONLY",
+  EXECUTE_WITHIN_POLICY: "EXECUTE_WITHIN_POLICY",
+} as const
+
+export type AmazonAdsWriteAuthority =
+  (typeof AMAZON_ADS_WRITE_AUTHORITY)[keyof typeof AMAZON_ADS_WRITE_AUTHORITY]
+
+export const AMAZON_ADS_WINDOWS = [7, 14, 30] as const
+export type AmazonAdsWindowDays = (typeof AMAZON_ADS_WINDOWS)[number]
+export type AmazonAdsWindowKey = `${AmazonAdsWindowDays}d`
+
+export type AmazonAdsWindowMetrics = {
+  spend: number
+  sales: number
+  orders: number
+  clicks: number
+  impressions: number
+  roas: number | null
+  acos: number | null
+  ctr: number | null
+  cpc: number | null
+  conversion_rate: number | null
+}
+
+export type AmazonAdsConnection = {
+  id: string
+  label?: string
+  profile_ids?: string[]
+  status?: string
+  redirect_uri?: string
+  token_expires_at?: string | null
+  created_at?: string
+  updated_at?: string
+  revoked_at?: string | null
+}
+
+export type AmazonAdsBreakEven = {
+  royalty_rate?: number
+  margin_rate?: number
+  other_costs_pct?: number
+}
+
+export type AmazonAdsHealth = {
+  profile_id: string
+  has_data: boolean
+  updated_at?: string | null
+  write_authority?: string
+  break_even_roas?: AmazonAdsBreakEven | number | null
+  connections?: number
+}
+
+export type AmazonAdsMetrics = {
+  profile_id: string
+  windows: Partial<Record<AmazonAdsWindowKey, AmazonAdsWindowMetrics>>
+}
+
+export type AmazonAdsEntityRow = AmazonAdsWindowMetrics & {
+  entity_id?: string
+  text?: string
+  campaign_id?: string
+}
+
+export type AmazonAdsWinnersWaste = {
+  winners: AmazonAdsEntityRow[]
+  waste: AmazonAdsEntityRow[]
+}
+
+export type AmazonAdsRecommendation = {
+  id: string
+  provider?: string
+  profile_id: string
+  entity_type: string
+  entity_id: string
+  campaign_id?: string
+  evidence_window_days?: number
+  metrics?: Record<string, unknown>
+  rationale: string
+  proposed_action: string
+  proposed_change?: Record<string, unknown>
+  estimated_impact?: string
+  confidence?: number
+  originating_agent?: string
+  status: string
+  created_at?: string
+}
+
+export type AmazonAdsPolicy = {
+  write_authority?: string
+  max_bid_change_pct?: number
+  max_budget_change_pct?: number
+  absolute_daily_spend_ceiling?: number
+  protected_entities?: string[]
+  min_evidence_days?: number
+  break_even?: AmazonAdsBreakEven
+  acos_threshold?: number
+  roas_threshold?: number
+  high_spend_no_sale_threshold?: number
+  low_conversion_click_threshold?: number
+  cpc_change_threshold_pct?: number
+}
+
+export type AmazonAdsPolicyUpdate = {
+  write_authority?: string
+  max_bid_change_pct?: number
+  max_budget_change_pct?: number
+  absolute_daily_spend_ceiling?: number
+  protected_entities?: string[]
+  min_evidence_days?: number
+  break_even?: AmazonAdsBreakEven
+  acos_threshold?: number
+  roas_threshold?: number
+  high_spend_no_sale_threshold?: number
+  low_conversion_click_threshold?: number
+  cpc_change_threshold_pct?: number
+}
+
+export type AmazonAdsOAuthStart = {
+  connection_id: string
+  authorization_url: string
+  state: string
+}
+
+export type AmazonAdsIngestResult = {
+  ingested?: boolean
+  profile_id?: string
+  campaigns?: number
+  keywords?: number
+  recommendations?: number
+  start_date?: string
+  end_date?: string
+}
+
+export type AmazonAdsExecuteResult = {
+  executed: boolean
+  reason?: string
+  recommendation_id?: string
+  audit_id?: string
+  api_result?: Record<string, unknown>
+  evaluation?: unknown
+}
+
+export type AmazonAdsAuditEntry = {
+  id?: string
+  recommendation_id?: string
+  entity_type?: string
+  entity_id?: string
+  action?: string
+  actor?: string
+  approval_source?: string
+  timestamp?: string
+  api_result?: Record<string, unknown>
+}
+
+export async function listAmazonAdsConnections(): Promise<{ connections: AmazonAdsConnection[] }> {
+  return api<{ connections: AmazonAdsConnection[] }>("/api/amazon-ads/connections")
+}
+
+export async function getAmazonAdsHealth(profileId: string): Promise<AmazonAdsHealth> {
+  return api<AmazonAdsHealth>(`/api/amazon-ads/health/${encodeURIComponent(profileId)}`)
+}
+
+export async function getAmazonAdsMetrics(profileId: string, endDate: string): Promise<AmazonAdsMetrics> {
+  const query = `?end_date=${encodeURIComponent(endDate)}`
+  return api<AmazonAdsMetrics>(`/api/amazon-ads/metrics/${encodeURIComponent(profileId)}${query}`)
+}
+
+export async function getAmazonAdsWinnersWaste(
+  profileId: string,
+  endDate: string,
+  days: AmazonAdsWindowDays = 30,
+): Promise<AmazonAdsWinnersWaste> {
+  const query = `?end_date=${encodeURIComponent(endDate)}&days=${encodeURIComponent(String(days))}`
+  return api<AmazonAdsWinnersWaste>(
+    `/api/amazon-ads/winners-waste/${encodeURIComponent(profileId)}${query}`,
+  )
+}
+
+export async function listAmazonAdsRecommendations(
+  profileId?: string,
+): Promise<{ recommendations: AmazonAdsRecommendation[] }> {
+  const query = profileId ? `?profile_id=${encodeURIComponent(profileId)}` : ""
+  return api<{ recommendations: AmazonAdsRecommendation[] }>(`/api/amazon-ads/recommendations${query}`)
+}
+
+export async function listAmazonAdsPendingApprovals(): Promise<{ pending: AmazonAdsRecommendation[] }> {
+  return api<{ pending: AmazonAdsRecommendation[] }>("/api/amazon-ads/pending-approvals")
+}
+
+export async function approveAmazonAdsRecommendation(
+  recId: string,
+  actor = "portal-user",
+): Promise<AmazonAdsRecommendation> {
+  return api<AmazonAdsRecommendation>(
+    `/api/amazon-ads/recommendations/${encodeURIComponent(recId)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ actor }),
+    },
+  )
+}
+
+export async function executeAmazonAdsRecommendation(
+  recId: string,
+  body?: { actor?: string; approved?: boolean; approval_source?: string },
+): Promise<AmazonAdsExecuteResult> {
+  return api<AmazonAdsExecuteResult>(
+    `/api/amazon-ads/recommendations/${encodeURIComponent(recId)}/execute`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        actor: body?.actor ?? "portal-user",
+        approved: Boolean(body?.approved),
+        approval_source: body?.approval_source ?? "manual",
+      }),
+    },
+  )
+}
+
+export async function getAmazonAdsPolicy(): Promise<AmazonAdsPolicy> {
+  return api<AmazonAdsPolicy>("/api/amazon-ads/policy")
+}
+
+export async function updateAmazonAdsPolicy(body: AmazonAdsPolicyUpdate): Promise<AmazonAdsPolicy> {
+  return api<AmazonAdsPolicy>("/api/amazon-ads/policy", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function listAmazonAdsAudit(
+  recommendationId?: string,
+): Promise<{ entries: AmazonAdsAuditEntry[] }> {
+  const query = recommendationId
+    ? `?recommendation_id=${encodeURIComponent(recommendationId)}`
+    : ""
+  return api<{ entries: AmazonAdsAuditEntry[] }>(`/api/amazon-ads/audit${query}`)
+}
+
+export async function ingestAmazonAds(body: {
+  profile_id: string
+  start_date: string
+  end_date: string
+}): Promise<AmazonAdsIngestResult> {
+  return api<AmazonAdsIngestResult>("/api/amazon-ads/ingest", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function startAmazonAdsOAuth(body: {
+  label: string
+  profile_ids?: string[]
+  redirect_uri?: string
+}): Promise<AmazonAdsOAuthStart> {
+  return api<AmazonAdsOAuthStart>("/api/amazon-ads/oauth/start", {
+    method: "POST",
+    body: JSON.stringify({
+      label: body.label,
+      profile_ids: body.profile_ids ?? [],
+      redirect_uri: body.redirect_uri || AMAZON_ADS_PORTAL_CALLBACK,
+    }),
+  })
+}
