@@ -462,6 +462,62 @@ label { display: block; color: var(--muted); font-size: 13px; }
 .swarm-row { cursor: pointer; }
 .swarm-row.selected td { background: rgba(212, 160, 23, 0.06); }
 
+.env-row { cursor: pointer; }
+.env-row.selected td { background: rgba(212, 160, 23, 0.06); }
+.env-actions { gap: 6px; }
+.env-actions .btn { padding: 6px 10px; font-size: 12px; }
+.env-create-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.env-kpis { margin-bottom: 0; }
+.env-disk-track {
+  display: block;
+  height: 6px;
+  margin-top: 6px;
+  background: #0c1015;
+  border-radius: 999px;
+  overflow: hidden;
+  min-width: 72px;
+}
+.env-disk-fill {
+  display: block;
+  height: 100%;
+  background: var(--gold);
+  border-radius: 999px;
+}
+.env-subhead {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 16px 0 8px;
+  font-weight: 600;
+}
+.env-file-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+.env-file-list li { margin: 4px 0; }
+.env-json {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--muted);
+  max-height: 160px;
+  overflow: auto;
+  background: #0c1015;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+@media (max-width: 800px) {
+  .env-create-row { grid-template-columns: 1fr; }
+}
+
 .template-card.selected,
 .runtime-card.selected {
   border-color: var(--gold);
