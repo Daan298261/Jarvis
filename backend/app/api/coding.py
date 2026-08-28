@@ -6,7 +6,18 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..agent.acp import ACP_WORKER, acp_status, handle_blocking_request, list_acp_sessions
+from ..agent.coding_workers import (
+    approve_task_integration,
+    cleanup_coding_task,
+    complete_coding_task,
+    integrate_coding_task,
+    list_decision_inbox,
+    request_task_integration,
+    resolve_decision_inbox_item,
+    start_coding_task,
+)
 from ..agent.escalation import get_escalation_package, list_escalation_packages
+from ..agent.worktrees import WorktreeError, get_coding_task, list_coding_tasks
 from ..coding.catalog import probe_cursor_models
 from ..coding.routing import recommend_worker, recommendation_dict, workers_snapshot
 from ..coding.usage import record_usage, usage_summary
@@ -53,6 +64,29 @@ class UsageIn(BaseModel):
 class RouteIn(BaseModel):
     prompt: str
     task_class: str = "software engineering"
+
+
+class StartCodingTaskIn(BaseModel):
+    task_id: str
+    repo: str | None = None
+
+
+class CompleteCodingTaskIn(BaseModel):
+    tests: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApproveIntegrationIn(BaseModel):
+    approver: str = "human"
+
+
+class ResolveDecisionIn(BaseModel):
+    resolution: str = ""
+
+
+def _coding_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, WorktreeError):
+        return HTTPException(400, str(exc))
+    return HTTPException(500, str(exc))
 
 
 @router.get("")
@@ -135,3 +169,72 @@ async def acp_connect(body: AcpConnectIn):
 @router.post("/acp/answer")
 async def acp_answer(body: AcpAnswerIn):
     return handle_blocking_request(body.method, body.params, isolated=body.isolated, autonomy=body.autonomy)
+
+
+@router.get("/tasks")
+async def coding_tasks(active_only: bool = False):
+    return {"tasks": list_coding_tasks(active_only=active_only)}
+
+
+@router.get("/tasks/{task_id}")
+async def coding_task_detail(task_id: str):
+    try:
+        return get_coding_task(task_id).as_dict()
+    except WorktreeError as exc:
+        raise _coding_http_error(exc) from exc
+
+
+@router.post("/tasks")
+async def coding_task_start(body: StartCodingTaskIn):
+    try:
+        return start_coding_task(body.task_id, source=body.repo)
+    except WorktreeError as exc:
+        raise _coding_http_error(exc) from exc
+
+
+@router.post("/tasks/{task_id}/complete")
+async def coding_task_complete(task_id: str, body: CompleteCodingTaskIn | None = None):
+    body = body or CompleteCodingTaskIn()
+    try:
+        return complete_coding_task(task_id, tests=body.tests)
+    except WorktreeError as exc:
+        raise _coding_http_error(exc) from exc
+
+
+@router.post("/tasks/{task_id}/approve")
+async def coding_task_approve(task_id: str, body: ApproveIntegrationIn | None = None):
+    body = body or ApproveIntegrationIn()
+    try:
+        return approve_task_integration(task_id, approver=body.approver)
+    except WorktreeError as exc:
+        raise _coding_http_error(exc) from exc
+
+
+@router.post("/tasks/{task_id}/integrate")
+async def coding_task_integrate(task_id: str):
+    try:
+        return integrate_coding_task(task_id)
+    except WorktreeError as exc:
+        raise _coding_http_error(exc) from exc
+
+
+@router.post("/tasks/{task_id}/cleanup")
+async def coding_task_cleanup(task_id: str):
+    try:
+        return cleanup_coding_task(task_id)
+    except WorktreeError as exc:
+        raise _coding_http_error(exc) from exc
+
+
+@router.get("/decision-inbox")
+async def decision_inbox(open_only: bool = True):
+    return {"items": list_decision_inbox(open_only=open_only)}
+
+
+@router.post("/decision-inbox/{item_id}/resolve")
+async def decision_inbox_resolve(item_id: str, body: ResolveDecisionIn | None = None):
+    body = body or ResolveDecisionIn()
+    try:
+        return resolve_decision_inbox_item(item_id, resolution=body.resolution).as_dict()
+    except WorktreeError as exc:
+        raise _coding_http_error(exc) from exc
