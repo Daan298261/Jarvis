@@ -1888,6 +1888,7 @@ Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, mai
 - Guest portals (RFC-0008): backend PR #71; owner/guest portal UI PR #76 (`f003c4e`).
 - Packs portal (RFC-0007): backend PR #61; portal UI PR #78 (`c1d2634`).
 - Worker environments (RFC-0004): backend PR #58; portal UI PR #80 (`48ac107`).
+- Task tree (RFC-0006): backend PR #59; portal UI PR #81 (`d2a1fcc`).
 
 ### Known Problems
 
@@ -1995,6 +1996,9 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [x] RFC-0004 Persistent worker environments
   - Acceptance: lifecycle; status/disk/last-active; start/suspend/resume/reset/inspect.
   - Status: VERIFIED in code — backend PR #58 (`56cc70d`); portal UI PR #80 (`48ac107`). On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0006 Hierarchical short-lived task workers
+  - Acceptance: parent/child graph, status/events, spawn clamped so no extra authority.
+  - Status: VERIFIED in code — backend PR #59 (`4fd6be0`); portal UI PR #81 (`d2a1fcc`). On `cursor/local-qwen-desktop-agent`.
 - [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
   - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
   - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
