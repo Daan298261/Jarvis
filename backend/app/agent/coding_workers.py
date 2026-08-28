@@ -7,8 +7,12 @@ frontier workers are catalogued but stay unconfigured until credentials exist.
 
 from __future__ import annotations
 
+import json
 import re
+import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Protocol
 
 from sqlalchemy import select
@@ -456,3 +460,269 @@ async def list_coding_routes(limit: int = 50) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+# --- RFC-0005: isolated parallel coding worktrees ---------------------------------
+
+from ..config import load_settings
+from .worktrees import (
+    WorktreeError,
+    allocate_worktree_for_task,
+    changed_files_in_worktree,
+    finalize_coding_task,
+    get_coding_task,
+    load_coding_tasks,
+    record_task_tests,
+    release_worktree_for_task,
+    update_coding_task,
+    worktrees_root,
+)
+
+DECISION_INBOX_NAME = "decision_inbox.json"
+
+
+@dataclass
+class DecisionInboxItem:
+    id: str
+    kind: str
+    title: str
+    detail: str
+    task_id: str = ""
+    related_task_id: str = ""
+    status: str = "open"
+    created_at: str = ""
+    resolved_at: str = ""
+    resolution: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "title": self.title,
+            "detail": self.detail,
+            "task_id": self.task_id,
+            "related_task_id": self.related_task_id,
+            "status": self.status,
+            "created_at": self.created_at,
+            "resolved_at": self.resolved_at,
+            "resolution": self.resolution,
+        }
+
+
+def _decision_inbox_path() -> Path:
+    return worktrees_root() / DECISION_INBOX_NAME
+
+
+def load_decision_inbox() -> list[DecisionInboxItem]:
+    path = _decision_inbox_path()
+    if not path.exists():
+        return []
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    out: list[DecisionInboxItem] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        out.append(
+            DecisionInboxItem(
+                id=str(row.get("id") or ""),
+                kind=str(row.get("kind") or ""),
+                title=str(row.get("title") or ""),
+                detail=str(row.get("detail") or ""),
+                task_id=str(row.get("task_id") or ""),
+                related_task_id=str(row.get("related_task_id") or ""),
+                status=str(row.get("status") or "open"),
+                created_at=str(row.get("created_at") or ""),
+                resolved_at=str(row.get("resolved_at") or ""),
+                resolution=str(row.get("resolution") or ""),
+            )
+        )
+    return out
+
+
+def save_decision_inbox(items: list[DecisionInboxItem]) -> None:
+    _decision_inbox_path().write_text(
+        json.dumps([item.as_dict() for item in items], indent=2),
+        encoding="utf-8",
+    )
+
+
+def add_decision_inbox_item(
+    *,
+    kind: str,
+    title: str,
+    detail: str,
+    task_id: str = "",
+    related_task_id: str = "",
+) -> DecisionInboxItem:
+    item = DecisionInboxItem(
+        id=uuid.uuid4().hex[:12],
+        kind=kind,
+        title=title,
+        detail=detail,
+        task_id=task_id,
+        related_task_id=related_task_id,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    items = load_decision_inbox()
+    items.append(item)
+    save_decision_inbox(items)
+    return item
+
+
+def list_decision_inbox(open_only: bool = True) -> list[dict[str, Any]]:
+    items = load_decision_inbox()
+    if open_only:
+        items = [item for item in items if item.status == "open"]
+    return [item.as_dict() for item in items]
+
+
+def resolve_decision_inbox_item(item_id: str, resolution: str = "") -> DecisionInboxItem:
+    items = load_decision_inbox()
+    for index, item in enumerate(items):
+        if item.id != item_id:
+            continue
+        item.status = "resolved"
+        item.resolved_at = datetime.now(timezone.utc).isoformat()
+        item.resolution = (resolution or "").strip()
+        items[index] = item
+        save_decision_inbox(items)
+        return item
+    raise WorktreeError(f"Unknown decision inbox item {item_id}")
+
+
+def integration_requires_approval() -> bool:
+    settings = load_settings()
+    return not bool(getattr(getattr(settings, "self_dev", None), "auto_merge", False))
+
+
+def _changed_files_from_diff(diff: dict[str, Any]) -> set[str]:
+    files: set[str] = set()
+    for line in str(diff.get("files") or "").splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            files.add(parts[1].strip())
+    return files
+
+
+def detect_task_conflicts(task_id: str) -> list[DecisionInboxItem]:
+    """Surface overlapping file changes between parallel coding tasks."""
+    record = get_coding_task(task_id)
+    mine = _changed_files_from_diff(record.final_diff)
+    if not mine:
+        mine = changed_files_in_worktree(record.worktree_path, since=record.base_sha)
+    created: list[DecisionInboxItem] = []
+    for other in load_coding_tasks():
+        if other.task_id == task_id or other.cleaned_up:
+            continue
+        if other.status not in {"active", "completed"}:
+            continue
+        other_files = _changed_files_from_diff(other.final_diff)
+        if not other_files:
+            other_files = changed_files_in_worktree(other.worktree_path, since=other.base_sha)
+        overlap = sorted(mine & other_files)
+        if not overlap:
+            continue
+        created.append(
+            add_decision_inbox_item(
+                kind="merge_conflict",
+                title=f"Parallel coding conflict: {task_id} vs {other.task_id}",
+                detail="Overlapping files: " + ", ".join(overlap),
+                task_id=task_id,
+                related_task_id=other.task_id,
+            )
+        )
+    return created
+
+
+def start_coding_task(task_id: str, source: str | Path | None = None) -> dict[str, Any]:
+    record = allocate_worktree_for_task(task_id, source=source)
+    return record.as_dict()
+
+
+def complete_coding_task(task_id: str, tests: dict[str, Any] | None = None) -> dict[str, Any]:
+    if tests:
+        record_task_tests(task_id, tests)
+    record = finalize_coding_task(task_id)
+    conflicts = detect_task_conflicts(task_id)
+    return {
+        "task": record.as_dict(),
+        "conflicts": [item.as_dict() for item in conflicts],
+    }
+
+
+def approve_task_integration(task_id: str, approver: str = "human") -> dict[str, Any]:
+    record = get_coding_task(task_id)
+    if record.status not in {"completed", "active"}:
+        raise WorktreeError(f"Task {task_id} cannot be approved in status {record.status}")
+    open_conflicts = [
+        item
+        for item in load_decision_inbox()
+        if item.status == "open" and item.task_id == task_id and item.kind == "merge_conflict"
+    ]
+    if open_conflicts:
+        raise WorktreeError(
+            f"Task {task_id} has {len(open_conflicts)} open merge conflict(s) in the Decision Inbox"
+        )
+    updated = update_coding_task(
+        task_id,
+        verifier_approved=True,
+        approved_by=approver,
+        approved_at=datetime.now(timezone.utc).isoformat(),
+        integration_status="approved",
+    )
+    return updated.as_dict()
+
+
+def request_task_integration(task_id: str) -> dict[str, Any]:
+    record = get_coding_task(task_id)
+    if record.status != "completed":
+        raise WorktreeError(f"Task {task_id} must be completed before integration")
+    conflicts = detect_task_conflicts(task_id)
+    if conflicts:
+        return {
+            "task_id": task_id,
+            "integration_status": "blocked",
+            "requires_approval": True,
+            "conflicts": [item.as_dict() for item in conflicts],
+            "message": "Conflicts surfaced in Decision Inbox; resolve before integration.",
+        }
+    if integration_requires_approval() and not record.verifier_approved:
+        return {
+            "task_id": task_id,
+            "integration_status": "awaiting_approval",
+            "requires_approval": True,
+            "conflicts": [],
+            "message": "Verifier or human approval required before integration.",
+        }
+    updated = approve_task_integration(task_id, approver="verifier")
+    return {
+        "task_id": task_id,
+        "integration_status": updated["integration_status"],
+        "requires_approval": False,
+        "conflicts": [],
+        "task": updated,
+    }
+
+
+def integrate_coding_task(task_id: str) -> dict[str, Any]:
+    gate = request_task_integration(task_id)
+    if gate.get("integration_status") != "approved":
+        return gate
+    record = get_coding_task(task_id)
+    return {
+        "task_id": task_id,
+        "integration_status": "ready",
+        "branch": record.branch,
+        "base_sha": record.base_sha,
+        "commits": record.commits,
+        "final_diff": record.final_diff,
+        "message": "Integration approved. Candidate branch is ready for human merge (trusted branch is never auto-merged).",
+    }
+
+
+def cleanup_coding_task(task_id: str) -> dict[str, Any]:
+    record = release_worktree_for_task(task_id, discard=True)
+    return record.as_dict()

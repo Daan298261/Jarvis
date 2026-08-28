@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -13,7 +14,10 @@ from typing import Any
 from ..config import data_dir, repo_root
 
 TRIAL_BRANCH_PREFIX = "jarvis/autonomous-trial-"
+CODING_BRANCH_PREFIX = "jarvis/coding-task-"
 REGISTRY_NAME = "worktrees.json"
+CODING_TASKS_NAME = "coding_tasks.json"
+_lock = threading.RLock()
 
 
 class WorktreeError(ValueError):
@@ -154,7 +158,11 @@ def is_isolated_worktree(path: str | Path, repo: Path | None = None) -> bool:
     if listed and target in listed[1:]:
         return True
     branch = current_branch(target)
-    return branch.startswith(TRIAL_BRANCH_PREFIX) or branch.startswith("jarvis/self-dev-")
+    return (
+        branch.startswith(TRIAL_BRANCH_PREFIX)
+        or branch.startswith("jarvis/self-dev-")
+        or branch.startswith(CODING_BRANCH_PREFIX)
+    )
 
 
 def _unique_branch(when: datetime | None = None) -> str:
@@ -168,8 +176,10 @@ def create_worktree(source: str | Path | None = None, dest: str | Path | None = 
     trusted = production_checkout(repo)
     start = current_commit(repo)
     branch_name = branch or _unique_branch()
-    if not re.match(r"^jarvis/(autonomous-trial|self-dev)-", branch_name):
-        raise WorktreeError("Self-development branches must start with jarvis/autonomous-trial- or jarvis/self-dev-")
+    if not re.match(r"^jarvis/(autonomous-trial|self-dev|coding-task)-", branch_name):
+        raise WorktreeError(
+            "Self-development branches must start with jarvis/autonomous-trial-, jarvis/self-dev-, or jarvis/coding-task-"
+        )
     dest_path = Path(dest).expanduser().resolve() if dest else worktrees_root() / branch_name.replace("/", "-")
     if dest_path.exists():
         raise WorktreeError(f"Worktree destination already exists: {dest_path}")
@@ -304,3 +314,233 @@ def refuse_trusted_merge(target_branch: str = "main") -> None:
 
 def list_worktrees() -> list[dict[str, Any]]:
     return [item.as_dict() for item in load_registry()]
+
+
+@dataclass
+class CodingTaskRecord:
+    task_id: str
+    base_sha: str
+    branch: str
+    worktree_id: str
+    worktree_path: str
+    status: str = "active"
+    commits: list[str] = field(default_factory=list)
+    tests: dict[str, Any] = field(default_factory=dict)
+    final_diff: dict[str, Any] = field(default_factory=dict)
+    integration_status: str = "pending"
+    verifier_approved: bool = False
+    approved_by: str = ""
+    approved_at: str = ""
+    created_at: str = ""
+    completed_at: str = ""
+    cleaned_up: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _coding_tasks_path() -> Path:
+    return worktrees_root() / CODING_TASKS_NAME
+
+
+def load_coding_tasks() -> list[CodingTaskRecord]:
+    path = _coding_tasks_path()
+    if not path.exists():
+        return []
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    out: list[CodingTaskRecord] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        out.append(
+            CodingTaskRecord(
+                task_id=str(row.get("task_id") or ""),
+                base_sha=str(row.get("base_sha") or ""),
+                branch=str(row.get("branch") or ""),
+                worktree_id=str(row.get("worktree_id") or ""),
+                worktree_path=str(row.get("worktree_path") or ""),
+                status=str(row.get("status") or "active"),
+                commits=list(row.get("commits") or []),
+                tests=dict(row.get("tests") or {}),
+                final_diff=dict(row.get("final_diff") or {}),
+                integration_status=str(row.get("integration_status") or "pending"),
+                verifier_approved=bool(row.get("verifier_approved")),
+                approved_by=str(row.get("approved_by") or ""),
+                approved_at=str(row.get("approved_at") or ""),
+                created_at=str(row.get("created_at") or ""),
+                completed_at=str(row.get("completed_at") or ""),
+                cleaned_up=bool(row.get("cleaned_up")),
+            )
+        )
+    return out
+
+
+def save_coding_tasks(items: list[CodingTaskRecord]) -> None:
+    _coding_tasks_path().write_text(
+        json.dumps([item.as_dict() for item in items], indent=2),
+        encoding="utf-8",
+    )
+
+
+def get_coding_task(task_id: str) -> CodingTaskRecord:
+    for item in load_coding_tasks():
+        if item.task_id == task_id:
+            return item
+    raise WorktreeError(f"Unknown coding task {task_id}")
+
+
+def _coding_branch(task_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", task_id).strip("-")[:48] or uuid.uuid4().hex[:8]
+    return f"{CODING_BRANCH_PREFIX}{safe}"
+
+
+def _task_for_worktree(worktree_id: str) -> CodingTaskRecord | None:
+    for item in load_coding_tasks():
+        if item.worktree_id == worktree_id and item.status == "active" and not item.cleaned_up:
+            return item
+    return None
+
+
+def _task_for_path(path: str | Path) -> CodingTaskRecord | None:
+    target = Path(path).expanduser().resolve()
+    for item in load_coding_tasks():
+        if Path(item.worktree_path).resolve() == target and item.status == "active" and not item.cleaned_up:
+            return item
+    return None
+
+
+def allocate_worktree_for_task(task_id: str, source: str | Path | None = None) -> CodingTaskRecord:
+    """Create an isolated worktree exclusively bound to one coding task."""
+    with _lock:
+        tasks = load_coding_tasks()
+        for existing in tasks:
+            if existing.task_id == task_id and existing.status == "active" and not existing.cleaned_up:
+                raise WorktreeError(f"Coding task {task_id} already has an active worktree")
+        branch = _coding_branch(task_id)
+        spec = create_worktree(source, branch=branch)
+        if _task_for_worktree(spec.id):
+            raise WorktreeError(f"Worktree {spec.id} is already bound to another coding task")
+        record = CodingTaskRecord(
+            task_id=task_id,
+            base_sha=spec.start_commit,
+            branch=spec.branch,
+            worktree_id=spec.id,
+            worktree_path=spec.path,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        tasks.append(record)
+        save_coding_tasks(tasks)
+        return record
+
+
+def assert_task_write_path(task_id: str, path: str | Path) -> Path:
+    """Refuse writes outside the task worktree or to the production checkout."""
+    record = get_coding_task(task_id)
+    if record.status != "active" or record.cleaned_up:
+        raise WorktreeError(f"Coding task {task_id} is not active")
+    target = Path(path).expanduser().resolve()
+    worktree = Path(record.worktree_path).resolve()
+    spec = get_worktree(record.worktree_id)
+    trusted = production_checkout(Path(spec.source_repo).resolve())
+    if target == trusted:
+        raise WorktreeError("Refusing to write to the trusted production checkout")
+    try:
+        target.relative_to(trusted)
+    except ValueError:
+        pass
+    else:
+        raise WorktreeError("Refusing to write to the trusted production checkout")
+    try:
+        target.relative_to(worktree)
+    except ValueError as exc:
+        raise WorktreeError(
+            f"Coding task {task_id} may only write inside its worktree ({worktree})"
+        ) from exc
+    owner = _task_for_path(worktree)
+    if owner and owner.task_id != task_id:
+        raise WorktreeError(f"Worktree is owned by coding task {owner.task_id}, not {task_id}")
+    return target
+
+
+def update_coding_task(task_id: str, **updates: Any) -> CodingTaskRecord:
+    with _lock:
+        tasks = load_coding_tasks()
+        for index, item in enumerate(tasks):
+            if item.task_id != task_id:
+                continue
+            data = item.as_dict()
+            data.update(updates)
+            tasks[index] = CodingTaskRecord(**data)
+            save_coding_tasks(tasks)
+            return tasks[index]
+    raise WorktreeError(f"Unknown coding task {task_id}")
+
+
+def record_task_commit(task_id: str, message: str) -> dict[str, Any]:
+    record = get_coding_task(task_id)
+    result = checkpoint_commit(record.worktree_path, message)
+    if result.get("created") and result.get("commit"):
+        commits = list(record.commits)
+        commits.append(str(result["commit"]))
+        update_coding_task(task_id, commits=commits)
+    return result
+
+
+def record_task_tests(task_id: str, tests: dict[str, Any]) -> CodingTaskRecord:
+    return update_coding_task(task_id, tests=dict(tests or {}))
+
+
+def finalize_coding_task(task_id: str) -> CodingTaskRecord:
+    record = get_coding_task(task_id)
+    diff = diff_summary(record.worktree_path, since=record.base_sha)
+    return update_coding_task(
+        task_id,
+        status="completed",
+        completed_at=datetime.now(timezone.utc).isoformat(),
+        final_diff=diff,
+    )
+
+
+def release_worktree_for_task(task_id: str, *, discard: bool = True) -> CodingTaskRecord:
+    """Remove the task worktree and mark the task cleaned up."""
+    with _lock:
+        record = get_coding_task(task_id)
+        if discard and not record.cleaned_up:
+            try:
+                discard_worktree(record.worktree_id)
+            except WorktreeError:
+                pass
+        return update_coding_task(task_id, cleaned_up=True, status="discarded" if discard else record.status)
+
+
+def list_coding_tasks(active_only: bool = False) -> list[dict[str, Any]]:
+    items = load_coding_tasks()
+    if active_only:
+        items = [item for item in items if item.status == "active" and not item.cleaned_up]
+    return [item.as_dict() for item in items]
+
+
+def changed_files_in_worktree(path: str | Path, since: str | None = None) -> set[str]:
+    repo = Path(path).expanduser().resolve()
+    files: set[str] = set()
+    diff = diff_summary(repo, since=since)
+    for line in str(diff.get("files") or "").splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            files.add(parts[1].strip())
+    status = run_git(repo, ["status", "--porcelain=v1"], check=False)
+    for line in (status.stdout or "").splitlines():
+        if len(line) >= 4:
+            files.add(line[3:].strip())
+    return files
+
+
+def active_worktree_paths() -> set[str]:
+    return {
+        str(Path(item.worktree_path).resolve())
+        for item in load_coding_tasks()
+        if item.status == "active" and not item.cleaned_up
+    }
