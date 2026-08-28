@@ -266,8 +266,8 @@ export function PortabilityPage() {
           const currentLease = activeLeaseOf(agent)
           if (currentLease?.runtime_profile_id) setRuntimeId(currentLease.runtime_profile_id)
           if (currentLease?.node_id) setNodeId(currentLease.node_id)
+          setError("")
         }
-        setError("")
         setDetailReady(true)
       } catch (err: unknown) {
         if (!cancelled) {
@@ -528,6 +528,7 @@ export function PortabilityPage() {
           onResume={onResume}
           onRelease={onRelease}
           onSaveState={onSaveState}
+          error={error}
         />
       ) : selectedId && !detailReady ? (
         <div className="card" style={{ marginBottom: 16 }}>
@@ -672,6 +673,7 @@ function AgentDetail({
   onResume,
   onRelease,
   onSaveState,
+  error,
 }: {
   agent: PortableAgent
   lease: AgentRuntimeLease | null
@@ -698,6 +700,7 @@ function AgentDetail({
   onResume: () => void
   onRelease: () => void
   onSaveState: (event: FormEvent) => void
+  error: string
 }) {
   const leaseProfile = lease ? profileById.get(lease.runtime_profile_id) : undefined
   const knownNodeIds = new Set(nodes.map((node) => node.id))
@@ -762,6 +765,11 @@ function AgentDetail({
 
         <div className="card">
           <h2>Attach or move a lease</h2>
+          {error && (
+            <div className="card" style={{ marginBottom: 12, borderLeft: "4px solid var(--bad)", padding: "12px 16px" }} role="alert">
+              {error}
+            </div>
+          )}
           <p className="lede" style={{ margin: "0 0 12px" }}>
             Choose where this same agent should run. Incompatible runtimes are rejected in plain
             language — nothing is silently downgraded.{" "}
