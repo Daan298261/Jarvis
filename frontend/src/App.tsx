@@ -23,6 +23,7 @@ import { LicensePage } from "./pages/License"
 import { AdvisorPage } from "./pages/Advisor"
 import { ContextRepoPage } from "./pages/ContextRepo"
 import { TrajectoriesPage } from "./pages/Trajectories"
+import { PortabilityPage } from "./pages/Portability"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -49,6 +50,7 @@ const ADMIN_LINKS = [
   { to: "/advisor", label: "Advisor" },
   { to: "/guest-portals", label: "Guest portals" },
   { to: "/agents", label: "Agents" },
+  { to: "/portability", label: "Portability" },
   { to: "/context", label: "Context" },
   { to: "/trajectories", label: "Trajectories" },
   { to: "/environments", label: "Environments" },
@@ -432,6 +434,8 @@ function OwnerPortal() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/new" element={<AgentInterviewPage />} />
           <Route path="/agents/:id" element={<AgentInterviewPage />} />
+          <Route path="/portability" element={<PortabilityPage />} />
+          <Route path="/portability/:agentId" element={<PortabilityPage />} />
           <Route path="/context" element={<ContextRepoPage />} />
           <Route path="/trajectories" element={<TrajectoriesPage />} />
           <Route path="/trajectories/:trajectoryId" element={<TrajectoriesPage />} />
