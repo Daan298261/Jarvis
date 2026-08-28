@@ -20,9 +20,10 @@ from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
 from ..inference.vision import messages_need_vision, should_load_vision
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
+from ..policy.authorize import AuthorizationResult, authorize
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
-from ..tools.safety import RiskLevel, needs_confirmation
+from ..tools.safety import RiskLevel, classify_command, needs_confirmation
 from .compaction import (
     compact_history,
     deserialize_messages,
@@ -124,6 +125,29 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 def _exposed_csv(working: WorkingState) -> str:
     return ",".join(tool_names_for(working.task_class, working.requested_tools))
+
+
+def _authorization_observation(result: AuthorizationResult) -> str:
+    payload = json.dumps({"authorization": result.as_dict()})
+    if result.requires_approval:
+        return f"ERROR: Authorization approval required: {result.reason}\n{payload}"
+    return f"ERROR: Authorization denied: {result.reason}\n{payload}"
+
+
+def _tool_authorization(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    approved: bool = False,
+    profile_id: str | None = None,
+) -> AuthorizationResult:
+    tool_meta = REGISTRY.tools.get(name)
+    risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
+    command = arguments.get("command") if isinstance(arguments, dict) else None
+    if command:
+        risk = max(risk, classify_command(command), key=lambda item: list(RiskLevel).index(item))
+    action = arguments.get("action") if isinstance(arguments, dict) else None
+    return authorize(name, action=action, risk=risk, profile_id=profile_id, approved=approved)
 
 
 class AgentRuntime:
@@ -495,7 +519,14 @@ class AgentRuntime:
                     break
 
         if pending_tool:
-            result_text = await self._execute_tool(task_id, pending_tool["name"], pending_tool["arguments"], autonomy, settings)
+            result_text = await self._execute_tool(
+                task_id,
+                pending_tool["name"],
+                pending_tool["arguments"],
+                autonomy,
+                settings,
+                approved=True,
+            )
             messages.append(
                 ChatMessage(
                     role="tool",
@@ -902,9 +933,28 @@ class AgentRuntime:
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
 
     async def _execute_tool(
-        self, task_id: str, name: str, arguments: dict[str, Any], autonomy: str, settings: AppSettings
+        self,
+        task_id: str,
+        name: str,
+        arguments: dict[str, Any],
+        autonomy: str,
+        settings: AppSettings,
+        *,
+        approved: bool = False,
+        profile_id: str | None = None,
     ) -> str:
-        text, _ = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
+        authz = _tool_authorization(name, arguments, approved=approved, profile_id=profile_id)
+        if not authz.allowed:
+            return _authorization_observation(authz)
+        text, _ = await self._execute_tool_ex(
+            task_id,
+            name,
+            arguments,
+            autonomy,
+            settings,
+            approved=approved,
+            profile_id=profile_id,
+        )
         return text
 
     async def _execute_tool_ex(
@@ -916,7 +966,13 @@ class AgentRuntime:
         settings: AppSettings,
         metrics: LiveTaskMetrics | None = None,
         schema_error: bool = False,
+        *,
+        approved: bool = False,
+        profile_id: str | None = None,
     ) -> tuple[str, str | None]:
+        authz = _tool_authorization(name, arguments, approved=approved, profile_id=profile_id)
+        if not authz.allowed:
+            return _authorization_observation(authz), None
         started = datetime.now(timezone.utc)
         result = await REGISTRY.execute(name, arguments)
         duration = (datetime.now(timezone.utc) - started).total_seconds() * 1000
