@@ -11,7 +11,7 @@ import { SystemPage } from "./pages/System"
 import { SwarmPage } from "./pages/Swarm"
 import { WorkflowsPage } from "./pages/Workflows"
 import { PhonePage } from "./pages/Phone"
-import { api, type Task } from "./api"
+import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
   createProject,
@@ -60,6 +60,7 @@ function taskLabel(task: Task): string {
 export default function App() {
   const location = useLocation()
   const [model, setModel] = useState<any>(null)
+  const [away, setAway] = useState<AwayModeState | null>(null)
   const [navOpen, setNavOpen] = useState(false)
   const [recents, setRecents] = useState<Task[]>([])
   const [projects, setProjects] = useState<PortalProject[]>(() => loadProjects())
@@ -76,6 +77,13 @@ export default function App() {
 
   useEffect(() => {
     const tick = () => api<any>("/api/model").then(setModel).catch(() => undefined)
+    tick()
+    const id = window.setInterval(tick, 8000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    const tick = () => getAwayMode().then(setAway).catch(() => undefined)
     tick()
     const id = window.setInterval(tick, 8000)
     return () => window.clearInterval(id)
@@ -365,6 +373,11 @@ export default function App() {
             {status.label}
           </div>
           {model?.active_model && <div className="side-status-meta">{model.active_model}</div>}
+          {away?.enabled && (
+            <div className="side-status-meta">
+              Away Mode{away.pause_proactivity ? " — new work paused" : ""}
+            </div>
+          )}
         </div>
       </aside>
       <main className={`main${chat ? " chat-main" : ""}`}>
