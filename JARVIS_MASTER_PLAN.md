@@ -1884,6 +1884,8 @@ Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, mai
 - Live status now shows execution mode, task class, and verification
 - Tools/System pages list optional workers as unavailable instead of crashing
 - Voice: Command Speak button; local STT/TTS when packages are present; JSON `/api/voice/command` still accepts text. Constraint: llama.cpp chat must keep the system message at the beginning; voice/listen must not inject a system turn mid-conversation (D1 P0; do not implement from Architect PRs).
+- Agent policy interviews (RFC-0002): guided interview UI PR #75; runtime `authorize()` before every tool PR #72 (`8265560`). Backend policy store PR #70.
+- Guest portals (RFC-0008): backend PR #71; owner/guest portal UI PR #76 (`f003c4e`).
 
 ### Known Problems
 
@@ -1979,9 +1981,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
   - Acceptance: large repo tasks can be delegated; Jarvis still verifies.
   - Status: VERIFIED in code (PR #4)
 
-- [ ] RFC-0002 Agent policy interviews and per-capability autonomy
-  - Acceptance: guided interview UI + runtime `authorize()` before every tool. Portal UI is this ticket; the loop hook is PR #72.
-  - Status: IN PROGRESS — frontend interview UI against landed `/api/agent-policy`. Do not mark implemented until this UI and #72 are both on canonical.
+- [x] RFC-0002 Agent policy interviews and per-capability autonomy
+  - Acceptance: guided interview UI + runtime `authorize()` before every tool.
+  - Status: VERIFIED in code — interview UI PR #75; `authorize()` loop hook PR #72 (`8265560`); backend policy store PR #70. Both UI and hook are on `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0008 Scoped guest portals
+  - Acceptance: revocable guest portals with scoped tokens, deny-all default, owner revoke, permission preview, isolation tests, owner/guest UI.
+  - Status: VERIFIED in code — backend PR #71; guest portal UI PR #76 (`f003c4e`). On `cursor/local-qwen-desktop-agent`.
 - [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
   - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
   - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
