@@ -2630,3 +2630,293 @@ export async function escalateAdvisor(body: AdvisorEscalateRequest): Promise<Adv
     }),
   })
 }
+
+export const CONTEXT_ENTRY_CATEGORIES = [
+  "identity",
+  "projects",
+  "procedures",
+  "lessons",
+  "priorities",
+  "skills",
+] as const
+export type ContextEntryCategory = (typeof CONTEXT_ENTRY_CATEGORIES)[number]
+
+export type ContextEntryProvenance = {
+  source_type: string
+  source_id?: string | null
+  trajectory_id?: string | null
+  mutation_id?: string | null
+  note?: string | null
+  created_at: string
+}
+
+export type ContextEntry = {
+  id: string
+  category: string
+  title: string
+  content: string
+  pinned: boolean
+  active: boolean
+  conflicts_with: string[]
+  provenance: ContextEntryProvenance
+  superseded_by?: string | null
+  metadata?: Record<string, unknown>
+}
+
+export type ContextRepoVersion = {
+  schema_version: string
+  agent_id: string
+  version: number
+  created_at: string
+  parent_version?: number | null
+  entries: ContextEntry[]
+}
+
+export type ContextRepoVersionSummary = {
+  version: number
+  created_at: string
+  parent_version?: number | null
+  entry_count: number
+}
+
+export type ContextMutationRecord = {
+  mutation_id: string
+  agent_id: string
+  version_before: number
+  version_after: number
+  action: string
+  entry_id?: string | null
+  source: ContextEntryProvenance
+  before?: ContextEntry | null
+  after?: ContextEntry | null
+  reversible: boolean
+  reverted_by?: string | null
+  created_at: string
+}
+
+export type ContextVersionDiffChange = {
+  before: ContextEntry
+  after: ContextEntry
+}
+
+export type ContextVersionDiff = {
+  agent_id: string
+  from_version: number
+  to_version: number
+  added: ContextEntry[]
+  removed: ContextEntry[]
+  changed: ContextVersionDiffChange[]
+  conflicts_flagged: string[]
+}
+
+export type ContextEntryPermission = {
+  principal_type: string
+  principal_id: string
+  permission: string
+  created_at?: string | null
+}
+
+export type ContextEntryInspect = ContextEntry & {
+  permissions?: ContextEntryPermission[]
+}
+
+export type ContextEntryCreate = {
+  category: string
+  title: string
+  content: string
+  source_type?: string
+  source_id?: string | null
+  trajectory_id?: string | null
+  note?: string | null
+}
+
+export type ContextEntryCreateResult = {
+  entry: ContextEntry
+  version: number
+  mutation_id: string
+}
+
+export type ContextConsolidationNode = {
+  node_id?: string
+  hostname?: string
+  score?: number
+  status?: string
+  class?: string
+  utilization?: number
+  reasons?: string[]
+  preferred?: boolean
+}
+
+export type ContextSchedulePreference = {
+  nodes: ContextConsolidationNode[]
+  preferred: ContextConsolidationNode[]
+}
+
+export class ContextRepoApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "ContextRepoApiError"
+    this.status = status
+  }
+}
+
+function plainContextMessage(message: string): string {
+  const trimmed = message.trim()
+  const lower = trimmed.toLowerCase()
+  if (lower.includes("duplicate")) {
+    return "This note already exists. Nothing was added."
+  }
+  if (lower.includes("already reverted")) {
+    return "That change was already undone."
+  }
+  if (lower.includes("pinned entries cannot be deleted")) {
+    return "Pinned notes cannot be removed. Unpin first, then try again."
+  }
+  if (lower.includes("not reversible") || lower.includes("cannot revert this mutation")) {
+    return "This change cannot be undone."
+  }
+  if (lower.includes("one or both versions do not exist")) {
+    return "One of those versions is missing. Pick two versions that are on file."
+  }
+  if (lower.includes("unsupported category")) {
+    return "That kind of note is not supported."
+  }
+  if (lower.includes("entry not found")) {
+    return "That note is no longer here."
+  }
+  if (lower.includes("version not found")) {
+    return "That version is not on file."
+  }
+  if (lower.includes("mutation not found")) {
+    return "That change is not on file."
+  }
+  return trimmed || "Something went wrong with saved notes."
+}
+
+export function formatContextRepoError(err: unknown): string {
+  if (err instanceof ContextRepoApiError) {
+    const plain = plainContextMessage(err.message)
+    if (err.status === 409) {
+      if (plain === err.message) {
+        return `This note conflicts with one already saved. ${plain}`
+      }
+      return plain
+    }
+    return plain
+  }
+  if (err instanceof Error && err.message) return plainContextMessage(err.message)
+  return "Something went wrong with saved notes."
+}
+
+async function contextRepoApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = authHeaders({
+    "Content-Type": "application/json",
+    ...((init?.headers as Record<string, string>) || {}),
+  })
+  const response = await fetch(path, { ...init, headers })
+  if (!response.ok) {
+    const text = await response.text()
+    let message = text || response.statusText
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown }
+      message = formatApiDetail(parsed.detail, message)
+    } catch {
+      // keep text
+    }
+    throw new ContextRepoApiError(message || response.statusText, response.status)
+  }
+  return response.json() as Promise<T>
+}
+
+function contextRepoPath(agentId: string, suffix = ""): string {
+  return `/api/context-repo/${encodeURIComponent(agentId)}${suffix}`
+}
+
+export async function getContextRepo(agentId: string): Promise<ContextRepoVersion> {
+  return contextRepoApi<ContextRepoVersion>(contextRepoPath(agentId))
+}
+
+export async function listContextRepoVersions(agentId: string): Promise<ContextRepoVersionSummary[]> {
+  return contextRepoApi<ContextRepoVersionSummary[]>(contextRepoPath(agentId, "/versions"))
+}
+
+export async function getContextRepoVersion(agentId: string, version: number): Promise<ContextRepoVersion> {
+  return contextRepoApi<ContextRepoVersion>(contextRepoPath(agentId, `/versions/${encodeURIComponent(String(version))}`))
+}
+
+export async function getContextRepoDiff(
+  agentId: string,
+  fromVersion: number,
+  toVersion: number,
+): Promise<ContextVersionDiff> {
+  const query = `?from_version=${encodeURIComponent(String(fromVersion))}&to_version=${encodeURIComponent(String(toVersion))}`
+  return contextRepoApi<ContextVersionDiff>(contextRepoPath(agentId, `/diff${query}`))
+}
+
+export async function listContextRepoHistory(
+  agentId: string,
+  limit = 100,
+): Promise<ContextMutationRecord[]> {
+  const query = `?limit=${encodeURIComponent(String(limit))}`
+  return contextRepoApi<ContextMutationRecord[]>(contextRepoPath(agentId, `/history${query}`))
+}
+
+export async function getContextRepoEntry(agentId: string, entryId: string): Promise<ContextEntryInspect> {
+  return contextRepoApi<ContextEntryInspect>(
+    contextRepoPath(agentId, `/entries/${encodeURIComponent(entryId)}`),
+  )
+}
+
+export async function createContextRepoEntry(
+  agentId: string,
+  body: ContextEntryCreate,
+): Promise<ContextEntryCreateResult> {
+  return contextRepoApi<ContextEntryCreateResult>(contextRepoPath(agentId, "/entries"), {
+    method: "POST",
+    body: JSON.stringify({
+      category: body.category,
+      title: body.title,
+      content: body.content,
+      source_type: body.source_type || "manual",
+      source_id: body.source_id || null,
+      trajectory_id: body.trajectory_id || null,
+      note: body.note || null,
+    }),
+  })
+}
+
+export async function pinContextRepoEntry(
+  agentId: string,
+  entryId: string,
+  pinned: boolean,
+): Promise<ContextEntry> {
+  return contextRepoApi<ContextEntry>(
+    contextRepoPath(agentId, `/entries/${encodeURIComponent(entryId)}/pin`),
+    {
+      method: "POST",
+      body: JSON.stringify({ pinned }),
+    },
+  )
+}
+
+export async function deleteContextRepoEntry(agentId: string, entryId: string): Promise<ContextEntry> {
+  return contextRepoApi<ContextEntry>(
+    contextRepoPath(agentId, `/entries/${encodeURIComponent(entryId)}`),
+    { method: "DELETE" },
+  )
+}
+
+export async function revertContextRepoMutation(
+  agentId: string,
+  mutationId: string,
+): Promise<ContextRepoVersion> {
+  return contextRepoApi<ContextRepoVersion>(
+    contextRepoPath(agentId, `/revert/${encodeURIComponent(mutationId)}`),
+    { method: "POST" },
+  )
+}
+
+export async function getContextRepoSchedulePreference(): Promise<ContextSchedulePreference> {
+  return contextRepoApi<ContextSchedulePreference>("/api/context-repo/consolidate/schedule-preference")
+}
