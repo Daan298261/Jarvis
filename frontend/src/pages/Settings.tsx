@@ -96,6 +96,19 @@ export function SettingsPage() {
         </div>
       </div>
 
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Advisor</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          When a local job is stuck, preview exactly what would leave this PC, then ask for
+          recommendations. The advisor has no tools and cannot act. You keep execution.
+        </p>
+        <div className="row">
+          <Link className="btn" to="/advisor">
+            Open advisor
+          </Link>
+        </div>
+      </div>
+
       {msg && (
         <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
           {msg}
