@@ -55,4 +55,8 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\windows\bootstrap.ps1"""; WorkingDir: "{app}"; StatusMsg: "Setting up Jarvis (downloads may take a while)..."; Flags: waituntilterminated
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Description: "Start Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 
+[UninstallRun]
+; Stop backend, llama-server, and tray helper before uninstall or modify.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated
+
 ; User data (data/, models/, runtime/) created after install is not removed by default.

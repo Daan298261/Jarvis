@@ -102,6 +102,34 @@ if ($LanAccess) {
     Write-Host "LAN Access is enabled (bound to 0.0.0.0). Private Key is required for API requests." -ForegroundColor Yellow
 }
 
+function Start-TrayHelper {
+    $trayScript = Join-Path $Root "installer\windows\jarvis-tray.ps1"
+    $trayPidFile = Join-Path $Root "data\jarvis-tray.pid"
+    if (-not (Test-Path $trayScript)) { return }
+
+    $trayRunning = $false
+    if (Test-Path $trayPidFile) {
+        $trayPid = Get-Content $trayPidFile -ErrorAction SilentlyContinue
+        if ($trayPid -match "^\d+$") {
+            $trayRunning = [bool](Get-Process -Id ([int]$trayPid) -ErrorAction SilentlyContinue)
+        }
+    }
+    if (-not $trayRunning) {
+        $tray = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+            "-NoProfile",
+            "-STA",
+            "-WindowStyle", "Hidden",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $trayScript
+        ) -WorkingDirectory $Root -PassThru
+        New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
+        $tray.Id | Set-Content $trayPidFile
+        Write-Host "Tray helper started (PID $($tray.Id))"
+    }
+}
+
+Start-TrayHelper
+
 if ($Wait -and ($Prompt -or $PromptFile)) {
     Write-Step "Waiting for launch task completion..."
     $authHeaders = @{}
@@ -137,4 +165,4 @@ elseif (-not $NoBrowser) {
     Start-Process "http://127.0.0.1:4780"
 }
 
-Write-Host "Stop with .\stop-jarvis.ps1"
+Write-Host "Stop with .\stop-jarvis.ps1 or use the system tray icon (Stop / Quit)."
