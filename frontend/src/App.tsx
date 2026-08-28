@@ -16,6 +16,7 @@ import { AgentInterviewPage } from "./pages/AgentInterview"
 import { GuestPortalsPage } from "./pages/GuestPortals"
 import { GuestPage } from "./pages/Guest"
 import { PacksPage } from "./pages/Packs"
+import { AdsPage } from "./pages/Ads"
 import { api, getAwayMode, type AwayModeState, type Task } from "./api"
 import {
   assignTask,
@@ -41,6 +42,7 @@ const ADMIN_LINKS = [
   { to: "/guest-portals", label: "Guest portals" },
   { to: "/agents", label: "Agents" },
   { to: "/packs", label: "Packs" },
+  { to: "/ads", label: "Amazon Ads" },
   { to: "/model", label: "Model" },
   { to: "/tools", label: "Tools" },
   { to: "/mcp", label: "MCP" },
@@ -417,6 +419,7 @@ function OwnerPortal() {
           <Route path="/agents/new" element={<AgentInterviewPage />} />
           <Route path="/agents/:id" element={<AgentInterviewPage />} />
           <Route path="/packs" element={<PacksPage />} />
+          <Route path="/ads" element={<AdsPage />} />
           <Route path="/system" element={<SystemPage />} />
           <Route path="/swarm" element={<SwarmPage />} />
           <Route path="/swarm/:nodeId" element={<SwarmPage />} />
