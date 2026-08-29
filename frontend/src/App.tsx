@@ -1,4 +1,4 @@
-import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom"
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { ChatPage } from "./pages/Chat"
 import { HistoryPage } from "./pages/History"
@@ -11,6 +11,7 @@ import { SystemPage } from "./pages/System"
 import { SwarmPage } from "./pages/Swarm"
 import { WorkflowsPage } from "./pages/Workflows"
 import { PhonePage } from "./pages/Phone"
+import { SetupPage } from "./pages/Setup"
 import { AgentsPage } from "./pages/Agents"
 import { AgentInterviewPage } from "./pages/AgentInterview"
 import { GuestPortalsPage } from "./pages/GuestPortals"
@@ -25,7 +26,8 @@ import { ContextRepoPage } from "./pages/ContextRepo"
 import { TrajectoriesPage } from "./pages/Trajectories"
 import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
-import { api, getAwayMode, type AwayModeState, type Task } from "./api"
+import { api, getAwayMode, getSetupStatus, type AwayModeState, type Task } from "./api"
+import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
 import {
   assignTask,
   createProject,
@@ -97,9 +99,12 @@ export default function App() {
 
 function OwnerPortal() {
   const location = useLocation()
+  const navigate = useNavigate()
   const [model, setModel] = useState<any>(null)
   const [away, setAway] = useState<AwayModeState | null>(null)
   const [navOpen, setNavOpen] = useState(false)
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
+  const [shellStatus, setShellStatus] = useState<BackendLifecycleStatus>("unknown")
   const [recents, setRecents] = useState<Task[]>([])
   const [projects, setProjects] = useState<PortalProject[]>(() => loadProjects())
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -112,6 +117,7 @@ function OwnerPortal() {
   const chat = isChatPath(location.pathname)
   const currentTaskId = activeTaskId(location.pathname)
   const showAdmin = adminOpen || isAdminPath(location.pathname)
+  const isSetup = location.pathname.startsWith("/setup")
 
   useEffect(() => {
     const tick = () => api<any>("/api/model").then(setModel).catch(() => undefined)
@@ -137,6 +143,29 @@ function OwnerPortal() {
   useEffect(() => {
     saveProjects(projects)
   }, [projects])
+
+  useEffect(() => {
+    getSetupStatus()
+      .then((status) => {
+        setNeedsSetup(status.needs_setup)
+        if (
+          status.needs_setup &&
+          !location.pathname.startsWith("/setup") &&
+          !location.pathname.startsWith("/phone")
+        ) {
+          navigate("/setup", { replace: true })
+        }
+      })
+      .catch(() => setNeedsSetup(false))
+  }, [location.pathname, navigate])
+
+  useEffect(() => {
+    if (!DesktopBridge.isDesktop()) return
+    const tick = () => DesktopBridge.backendStatus().then(setShellStatus).catch(() => undefined)
+    tick()
+    const id = window.setInterval(tick, 4000)
+    return () => window.clearInterval(id)
+  }, [])
 
   const tasksById = useMemo(() => {
     const map = new Map<string, Task>()
@@ -180,6 +209,17 @@ function OwnerPortal() {
   }
 
   const status = modelStatus()
+
+  if (isSetup) {
+    return (
+      <div className="app setup-mode">
+        <Routes>
+          <Route path="/setup" element={<SetupPage />} />
+          <Route path="*" element={<Navigate to="/setup" replace />} />
+        </Routes>
+      </div>
+    )
+  }
 
   return (
     <div className={`app${navOpen ? " nav-open" : ""}${chat ? " chat-shell" : ""}`}>
@@ -370,6 +410,7 @@ function OwnerPortal() {
               {link.label}
             </NavLink>
           ))}
+          {needsSetup && <NavLink to="/setup">Setup</NavLink>}
         </nav>
 
         <div className="rail-admin">
@@ -416,6 +457,7 @@ function OwnerPortal() {
               Away Mode{away.pause_proactivity ? " — new work paused" : ""}
             </div>
           )}
+          {DesktopBridge.isDesktop() && <div className="side-status-meta">Shell: {shellStatus}</div>}
         </div>
       </aside>
       <main className={`main${chat ? " chat-main" : ""}`}>
@@ -450,6 +492,7 @@ function OwnerPortal() {
           <Route path="/delegation" element={<DelegationPage />} />
           <Route path="/delegation/:taskId" element={<DelegationPage />} />
           <Route path="/system" element={<SystemPage />} />
+          <Route path="/setup" element={<SetupPage />} />
           <Route path="/swarm" element={<SwarmPage />} />
           <Route path="/swarm/:nodeId" element={<SwarmPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

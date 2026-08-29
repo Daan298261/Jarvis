@@ -1,6 +1,8 @@
 # Install Jarvis
 
 > **Nontechnical users:** after someone builds `JarvisSetup.exe` on Windows (see [`installer/windows/README.md`](../installer/windows/README.md)), double-click that installer instead of following the manual steps below. It runs the same setup automatically and adds **Start Jarvis** / **Stop Jarvis** shortcuts.
+>
+> **Optional desktop shell:** a Tauri window + backend sidecar lives under `frontend/src-tauri` and can be built with `.\scripts\build-windows-release.ps1`. That is an optional native shell, not a replacement for `JarvisSetup.exe` (Inno). End-user install remains the Inno first-run path above.
 
 Jarvis is a **self-hosted local desktop agent**. The control plane is a FastAPI app plus a React portal. Inference defaults to **Qwen3.5-9B Abliterated** through llama.cpp on this machine. **Qwen3.5-27B** remains an optional Expert/escalation model. You can also point Jarvis at any OpenAI-compatible server.
 

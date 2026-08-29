@@ -91,7 +91,13 @@ def is_auth_required_for_request(request: Request, settings: AppSettings) -> boo
 
     # Skip health check & auth status check
     path = request.url.path
-    if path in {"/api/health", "/api/auth/status", "/api/auth/verify", "/api/mobile"}:
+    if path in {
+        "/api/health",
+        "/api/auth/status",
+        "/api/auth/verify",
+        "/api/mobile",
+        "/api/setup/status",
+    }:
         return False
 
     # Only protect /api routes
