@@ -70,3 +70,23 @@ def test_readme_documents_build_oneliner():
     text = _read(README)
     assert "build-installer.ps1" in text
     assert "JarvisSetup.exe" in text
+
+
+def test_optional_tauri_shell_sources():
+    """Tauri + sidecar are additive; Inno remains the landed JarvisSetup.exe path."""
+    release = REPO_ROOT / "scripts" / "build-windows-release.ps1"
+    sidecar = REPO_ROOT / "scripts" / "build-backend-sidecar.ps1"
+    tauri_conf = REPO_ROOT / "frontend" / "src-tauri" / "tauri.conf.json"
+    assert release.is_file()
+    assert sidecar.is_file()
+    assert tauri_conf.is_file()
+    release_text = _read(release).lower()
+    assert "build-backend-sidecar.ps1" in release_text
+    assert "tauri" in release_text
+    assert "inno" in release_text or "installer\\windows" in release_text
+    sidecar_text = _read(sidecar).lower()
+    assert "pyinstaller" in sidecar_text
+    assert "onedir" in sidecar_text or "one-folder" in sidecar_text or "--onedir" in sidecar_text
+    conf = _read(tauri_conf)
+    assert "Jarvis" in conf
+    assert "nsis" in conf.lower()
