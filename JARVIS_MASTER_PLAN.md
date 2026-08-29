@@ -1895,6 +1895,8 @@ Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, mai
 - Trajectories (RFC-0010): backend PR #63; portal UI PR #85 (`599a30e`).
 - Portability (RFC-0009): backend PR #62; portal UI PR #86 (`7a8f526`); 409 visibility PR #87 (`ce557d4`).
 - Coding isolation (RFC-0005): backend PR #57; portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`).
+- Event subscriptions / goal lifecycle (RFC-0016): specified, not implemented (`docs/rfcs/0016-event-subscriptions-and-goal-lifecycle.md`).
+- MCP 2026-07-28 protocol upgrade (RFC-0017): specified, not implemented (`docs/rfcs/0017-mcp-2026-07-28-protocol-upgrade.md`).
 
 ### Known Problems
 
@@ -1904,6 +1906,8 @@ Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, mai
 - P3 multi-node swarm (discovery, pairing, remote execution) is not started
 - Android WAN reachability / AI-guided router port-forward is specified, not implemented
 - Home IoT and security agents (Blue / Purple / Red-gated) are specified, not implemented
+- RFC-0016 (event subscriptions / goal lifecycle) and RFC-0017 (MCP 2026-07-28) are specified, not implemented
+- RFC-0015 Amazon Ads stays unimplemented until real OAuth (dashboard UI already on canonical; do not tick)
 - Windows consumer `.exe`: smoke PR #51 (`JarvisSetup.exe`, Start/Stop, health 200, 9B Q8 on disk). Remaining: wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`). Tray/Stop from Windows: specified (`WINDOWS_SHELL.md`), not implemented.
 - Portal UX shell (`PORTAL_UX.md`): PR #53 (projects + recents, orange/black, Swarm/Phone, swarm API contracts). Remaining: Stop/settings findability
 
@@ -2023,6 +2027,12 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 - [x] RFC-0005 Isolated parallel coding workers
   - Acceptance: worktrees, decision inbox, no silent merge; integrate blocked unless ready.
   - Status: VERIFIED in code — backend PR #57 (`430e31b`); portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`). On `cursor/local-qwen-desktop-agent`.
+- [ ] RFC-0016 Event subscriptions and durable goal lifecycle
+  - Acceptance: EventSubscription + GoalRun with explicit pause/cancel; event-driven wakeup without continuous LLM polling.
+  - Status: TODO / specified (`docs/rfcs/0016-event-subscriptions-and-goal-lifecycle.md`). Not implemented.
+- [ ] RFC-0017 MCP 2026-07-28 protocol upgrade
+  - Acceptance: version-aware MCP client targeting 2026-07-28; Tasks/Apps/auth map into Jarvis policy and GoalRun lifecycle.
+  - Status: TODO / specified (`docs/rfcs/0017-mcp-2026-07-28-protocol-upgrade.md`). Not implemented.
 - [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
   - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
   - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
