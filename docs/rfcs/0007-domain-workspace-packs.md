@@ -1,6 +1,6 @@
 # RFC-0007: Domain/workspace packs
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Specialist packs / reusable domains  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
@@ -17,13 +17,13 @@ A pack may instantiate a complete workspace such as Publishing, Software Company
 
 ## Acceptance criteria
 
-- [ ] Define a versioned pack manifest/schema.
-- [ ] Pack installation previews every created/changed resource before apply.
-- [ ] Packs can declare dependencies and minimum Jarvis version.
-- [ ] User modifications survive pack upgrades through explicit merge/override semantics.
-- [ ] Pack code/tools are subject to signature/trust and capability policy.
-- [ ] Export supports user-created packs with secrets excluded.
-- [ ] Tests cover install, upgrade, conflict, rollback, and uninstall.
+- [x] Define a versioned pack manifest/schema.
+- [x] Pack installation previews every created/changed resource before apply.
+- [x] Packs can declare dependencies and minimum Jarvis version.
+- [x] User modifications survive pack upgrades through explicit merge/override semantics.
+- [x] Pack code/tools are subject to signature/trust and capability policy.
+- [x] Export supports user-created packs with secrets excluded.
+- [x] Tests cover install, upgrade, conflict, rollback, and uninstall.
 
 ## Likely files
 
@@ -41,3 +41,5 @@ A public commercial marketplace; this RFC only creates the pack format/runtime.
 ## Notes
 
 Inspiration: FounderOS encoded-company/workspace concept and Zoey marketplace direction. Recommendation: ADAPT STRONGLY.
+
+Landed on `cursor/local-qwen-desktop-agent`: backend runtime/APIs PR #61 (`8bb4145`); packs portal UI PR #78 (`c1d2634`). P5 Domain Pack architecture / business-platform workflows stay unimplemented.

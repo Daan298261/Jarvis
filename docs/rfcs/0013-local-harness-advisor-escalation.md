@@ -1,6 +1,6 @@
 # RFC-0013: Compact local harness and advisor escalation
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Local agent harness optimization  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
@@ -17,14 +17,14 @@ Add an `Advisor` interface. An advisor may receive a policy-approved context pac
 
 ## Acceptance criteria
 
-- [ ] Core prompt and core tool surface are independently measurable/versioned.
-- [ ] Tools/skills are loaded dynamically from task requirements and policy.
-- [ ] Context compaction produces a provenance-linked summary plus retained critical facts.
-- [ ] Autonomous execution fails closed when required sandboxing is unavailable.
-- [ ] Advisor request shows exactly what context/data will leave the local system.
-- [ ] Advisor has no direct Jarvis capability token or tool-call channel.
-- [ ] Router can escalate locally failed/low-confidence tasks to advisor under policy/cost limits.
-- [ ] Tests cover tool-surface restriction, compaction, sandbox failure, and advisor authority isolation.
+- [x] Core prompt and core tool surface are independently measurable/versioned.
+- [x] Tools/skills are loaded dynamically from task requirements and policy.
+- [x] Context compaction produces a provenance-linked summary plus retained critical facts.
+- [x] Autonomous execution fails closed when required sandboxing is unavailable.
+- [x] Advisor request shows exactly what context/data will leave the local system.
+- [x] Advisor has no direct Jarvis capability token or tool-call channel.
+- [x] Router can escalate locally failed/low-confidence tasks to advisor under policy/cost limits.
+- [x] Tests cover tool-surface restriction, compaction, sandbox failure, and advisor authority isolation.
 
 ## Likely files
 
@@ -42,3 +42,5 @@ Implementing a specific commercial cloud provider beyond the generic interface.
 ## Notes
 
 Inspiration: Perplexity Portable Computer/local-first agent architecture. Recommendation: ADAPT STRONGLY.
+
+Landed on `cursor/local-qwen-desktop-agent`: backend PR #67 (`1d614a0`) — new files; advisor has no tools; no harness/compaction rewrite; portal UI PR #83 (`ee745f9`).

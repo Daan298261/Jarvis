@@ -8,7 +8,7 @@ Instructions for **Cursor cloud workers** and other automated agents working in 
 2. Read your **named ticket**:
    - an RFC under [`docs/rfcs/`](docs/rfcs/), **or**
    - **one** item in [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) §58 Development Queue.
-3. Skim [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) for architecture context only. **Do not** re-audit the tree or rewrite §57 Current State unless your ticket requires updating specific bullets for work you just merged.
+3. Skim [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) for architecture context only. **Do not** re-audit the tree or rewrite §57 Current State. **Do not** edit spec docs.
 
 ### Launch prompt must name exactly one ticket
 
@@ -29,7 +29,7 @@ Bad (forbidden):
 | Scope | One RFC or one queue item only |
 | Tests | `python3 -m pytest` |
 | Frontend | `npm --prefix frontend run build` (and `lint` if TS changed) |
-| Docs | Update **only** matching lines in master plan §57–58 (and §59 if a durable decision) |
+| Docs | Do **not** edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, `PORTAL_UX.md`). Architect-only. Note status in the PR. |
 | PR target | `cursor/local-qwen-desktop-agent` |
 
 ### Model selection (Cursor cloud)
@@ -51,8 +51,10 @@ Implement and unit-test; leave P0 live-model items as `TODO` / desktop sign-off 
 ### Do not
 
 - Merge unrelated PRs (see superseded list in `docs/PROCESS.md`; **PR #25 is closed — do not merge**)
+- Edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, `PORTAL_UX.md`) — Jarvis Architect is the sole editor; spec-change requests come from Taco or Chief of Staff
 - Rewrite `JARVIS_MASTER_PLAN.md` wholesale or paste large design specs into it
 - Start swarm / Browser Use / P4–P5 / model-stack work unless that is the named ticket
+- Add offensive / red / counter-response capability. **Hard guardrail:** only Taco (manual) or PolitieGPT (named LE bot, under the LE gate) may add it. Developers, PR fixer, CoS, generic cloud agents, and home Jarvis self-dev must not. Home/product workers have no API to register offensive tools, payloads, or hack-back skills. See `SECURITY_AGENTS.md` §3.4.
 
 Design work belongs in **`docs/rfcs/`** ([template](docs/rfcs/TEMPLATE.md)).
 

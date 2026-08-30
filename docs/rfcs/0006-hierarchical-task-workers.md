@@ -1,6 +1,6 @@
 # RFC-0006: Hierarchical short-lived task workers
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Multi-agent delegation  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
@@ -15,14 +15,14 @@ Allow eligible senior/logical agents to spawn short-lived child workers for boun
 
 ## Acceptance criteria
 
-- [ ] Parent can spawn child workers through a typed delegation API.
-- [ ] Child authority is always equal to or lower than the parent and platform caps.
-- [ ] Delegation includes task, context subset, tool allowlist, budget, deadline, and expected artifact/result schema.
-- [ ] Parent receives structured child status/result/failure events.
-- [ ] Child workers automatically expire and release resources.
-- [ ] Delegation graph is visible in the UI and audit log.
-- [ ] Configurable maximum depth/fan-out prevents runaway spawning.
-- [ ] Tests cover authority inheritance, expiry, and depth/fan-out limits.
+- [x] Parent can spawn child workers through a typed delegation API.
+- [x] Child authority is always equal to or lower than the parent and platform caps.
+- [x] Delegation includes task, context subset, tool allowlist, budget, deadline, and expected artifact/result schema.
+- [x] Parent receives structured child status/result/failure events.
+- [x] Child workers automatically expire and release resources.
+- [x] Delegation graph is visible in the UI and audit log.
+- [x] Configurable maximum depth/fan-out prevents runaway spawning.
+- [x] Tests cover authority inheritance, expiry, and depth/fan-out limits.
 
 ## Likely files
 
@@ -39,3 +39,5 @@ Permanent organization hierarchy and marketplace-distributed agent teams.
 ## Notes
 
 Inspiration: Zoey companion-to-bot hierarchy and modern multi-agent orchestration patterns. Recommendation: ADAPT.
+
+Landed on `cursor/local-qwen-desktop-agent`: backend PR #59 (`4fd6be0`); portal UI PR #81 (`d2a1fcc`).

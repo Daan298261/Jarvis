@@ -4,1805 +4,42 @@ This document is the persistent source of truth for the Jarvis project.
 
 Jarvis is a local-first autonomous desktop AI agent intended to perform real work on this computer with minimal human intervention.
 
-**Jarvis 1.x** (sections 1–63) is the current local desktop agent: command-driven, Qwen3.5-27B on this machine, FastAPI + React portal, tools, skills, and verification.
+This file replaces the need to repeatedly provide large architectural prompts to Cursor.
 
-**Jarvis 2.0** (sections 64–85) is the long-term Autonomous Operator / Away Mode specification: event-driven, multi-worker, policy-bounded, remotely supervised. It is specified here so future sessions do not lose the product target. Do not treat 2.0 items as the current-session P0 unless the Development Queue has promoted them or the user explicitly asked for 2.0 work.
+**Jarvis Architect** is the sole editor of this file, [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md), [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md), [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [`JARVIS_2.0.md`](JARVIS_2.0.md), [`HOME_IOT.md`](HOME_IOT.md), [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md), the [`BLUE_TEAM.md`](BLUE_TEAM.md) pointer, [`INSTALLER.md`](INSTALLER.md), [`WINDOWS_SHELL.md`](WINDOWS_SHELL.md), and [`PORTAL_UX.md`](PORTAL_UX.md). Executing bots must not edit spec docs. Spec-change requests come from Taco or Chief of Staff.
 
-This file remains the overall source of truth for priorities, current state, and development status. Detailed swarm requirements intentionally live in the separate [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md) specification so this master plan does not duplicate a large evolving subsystem design.
+Swarm role/placement/resource design lives in `SWARM_ARCHITECTURE.md`.
 
-**P4/P5 adaptive intelligence and domain packs** live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file specifies resilient adaptive learning, domain packs, and business operating workflows translated from useful Founder OS patterns into native Jarvis abstractions. Do not start P4/P5 implementation ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it.
+P4 (resilient + adaptive intelligence) and P5 (domain packs / business operating platform) remain in the spec set. Detailed requirements live in [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md). That file translates useful patterns from [Founder OS](https://github.com/thecloudtips/founder-os) into native Jarvis concepts. Founder OS is **not** a runtime dependency. Do not start P4/P5 implementation ahead of active P0–P3 work unless this queue or the user promotes it. Do not paste the full adaptive spec into this file. **Invoices and business workflows stay in P5.**
 
-**Extensible Agent OS (ZoeyOS / FounderOS feature parity)** lives in [`JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`](JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md). That file specifies persistent Agent Profiles, Specialist Packs, modular command-center dashboard, multi-agent delegation, hybrid inference, offline licensing, and the full owner-control UX needed to match Zoey-style specialist teams and FounderOS-style business autonomy. Do not start its P1–P6 roadmap ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it.
+**Extensible Agent OS (ZoeyOS / FounderOS feature parity)** lives in [`JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`](JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md). That file specifies persistent Agent Profiles, Specialist Packs, modular command-center dashboard, multi-agent delegation, hybrid inference, offline licensing, and the full owner-control UX needed to match Zoey-style specialist teams and FounderOS-style business autonomy. Do not start its P1–P6 roadmap ahead of active P0–P3 work unless the Development Queue or user explicitly promotes it. Do not paste that spec into this file.
 
-Every development session must read this file before making substantial changes. Any work touching nodes, placement, resource control, distributed execution, role policy, the universal UI shell, or swarm scheduling must also read `SWARM_ARCHITECTURE.md`. Work touching execution eventing, confidence-gated memory, adaptive routing, workflow patterns, domain packs, or business operations must also read `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. Work touching Agent Profiles, Specialist Packs, dashboard systems/modules, Decision Inbox, Away Mode, licensing/entitlements, or ZoeyOS/FounderOS-style multi-agent UX must also read `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`.
+**Jarvis 2.0** (Away Mode, event-driven operators, **marketing**, **SEO**, **NovelProject**, **multimedia**, policy, self-healing) is restored in [`JARVIS_2.0.md`](JARVIS_2.0.md) — the approved sections 64–85 from git history. Do not drop those features. Do not treat 2.0 as current-session P0 unless this queue promotes an item.
 
-**Worker process (mandatory):** [`docs/PROCESS.md`](docs/PROCESS.md) and [`AGENTS.md`](AGENTS.md). Implement **one** RFC or **one** Development Queue item per session. New design goes in [`docs/rfcs/`](docs/rfcs/) — do not paste large spec updates into this file. Integration branch: `cursor/local-qwen-desktop-agent`.
+The Android client that talks to the Windows Leader (link-device, AI-guided router port-forward, not P3 swarm) is specified in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md). Home IoT: [`HOME_IOT.md`](HOME_IOT.md). Home-network security agents (Blue / Purple / Red-gated): [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer). Offensive / red capability: Taco or PolitieGPT only — ordinary executing bots must not add it. Windows consumer `.exe` installer: [`INSTALLER.md`](INSTALLER.md). Windows tray/Stop: [`WINDOWS_SHELL.md`](WINDOWS_SHELL.md). Portal shell: [`PORTAL_UX.md`](PORTAL_UX.md). Do not paste those specs into this file.
 
-Cursor is responsible for keeping this document accurate.
+Filter: if a **new** idea would make home-network JARVIS more real, spec it. Never delete Taco-approved features.
+
+**Must remain in the spec set** (do not drop):
+
+1. This file: original 63-section body; Development Queue ticked with PR numbers; P2 swarm ticked; lazy mmproj **VERIFIED in code (PR #50)**.
+2. [`JARVIS_2.0.md`](JARVIS_2.0.md): approved sections 64–85, including **NovelProject**. Unchecked 2.0 queue headings in §58.
+3. [`ADAPTIVE_DOMAIN_ARCHITECTURE.md`](ADAPTIVE_DOMAIN_ARCHITECTURE.md): P4/P5 kept. Founder OS is a reference, **not** a runtime dependency.
+4. [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md): AI-guided brand-agnostic router. Link-device asks login/pairing, explains WAN exposure, DIY vs Jarvis+router password, router access later used by security agents.
+5. [`HOME_IOT.md`](HOME_IOT.md): local-first house control.
+6. [`SECURITY_AGENTS.md`](SECURITY_AGENTS.md) (`BLUE_TEAM.md` is a pointer): Blue home SIEM (detect/contain/evidence); Purple owned-net tests; Red/counter **disabled by default**. Offensive capability may be added **only** by Taco (manually) or PolitieGPT (LE bot) under the LE gate. Developers / CoS / PR fixer / home self-dev cannot; attempts refuse + audit.
+7. Architect owns all spec files (this file, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, `PORTAL_UX.md`). Executing bots do not edit them.
+8. [`INSTALLER.md`](INSTALLER.md): Windows 11 consumer `.exe` for non-technical onboarding. Smoke (PR #51): `JarvisSetup.exe`, Start Jarvis → health 200, Stop kills backend + llama-server, 9B Q8 on disk. Remaining P1: wizard copy, GPU fork, no-WAN first-run. Do not overwrite `installer/windows/` product files from Architect PRs.
+9. [`WINDOWS_SHELL.md`](WINDOWS_SHELL.md): tray Stop/Quit and Apps Uninstall/Modify must not leave `llama-server` orphaned.
+10. [`PORTAL_UX.md`](PORTAL_UX.md): ChatGPT-style app shell; orange/black; keep Swarm/Phone; no API redesign. Shell landed PR #53; Stop/settings findability still open.
+
+
+Every development session must read this file before making substantial changes.
 
 The user should not be expected to manually maintain technical state, architecture notes, implementation status, or development priorities.
 
 ---
-# TOP PRIORITY — FAST, LOW-REFUSAL LOCAL MODEL STACK
 
-Status: P0 — highest current development priority.
-
-The current Qwen3.5-27B Q4_K_M configuration is too slow for normal Jarvis operation on the target RTX 5070 Ti 16 GB because the model, vision projector, KV cache, and runtime overhead cannot all remain inside VRAM.
-
-Jarvis must be redesigned around a fast, fully GPU-resident primary model while retaining the larger 27B model as an optional escalation model.
-
-The goal is not maximum benchmark intelligence.
-
-The goal is:
-
-> Highest successful autonomous task completion rate per minute, with minimal refusals, minimal human intervention, and reliable tool execution.
-
-The user prefers a task that completes correctly in 20 minutes over a faster sequence of failed attempts requiring repeated correction.
-
-For professional use, the model should also avoid unnecessary refusals when analyzing legitimate security, forensic, investigative, technical, or otherwise sensitive material.
-
----
-
-## P0.1 — Primary Model Migration
-
-Change the default Jarvis model from:
-
-Qwen3.5-27B Q4_K_M
-
-to:
-
-**Qwen3.5-9B Abliterated**
-
-Preferred source model:
-
-`wangzhang/Qwen3.5-9B-abliterated`
-
-Preferred GGUF:
-
-**Q8_0**
-
-Fallback:
-
-**Q6_K**
-
-The model must run entirely or essentially entirely on the RTX 5070 Ti 16 GB without routine CPU layer offload.
-
-Do NOT use a highly degraded quant merely to fit the model.
-
-Q8_0 is preferred because the 9B model is small enough that high quantization quality should fit while still leaving VRAM available for:
-
-- KV cache;
-- CUDA workspace;
-- vision support when required;
-- normal Windows GPU overhead.
-
-Acceptance criteria:
-
-- model downloads automatically or through the existing model setup process;
-- Jarvis recognizes the new model;
-- Q8_0 loads successfully;
-- model layers remain GPU-resident during ordinary operation;
-- no routine CPU model-layer spill;
-- tool calling works;
-- reasoning works;
-- normal Jarvis workflows execute correctly;
-- measured speed is displayed in the Model/System interface.
-
----
-
-## P0.2 — Preserve Qwen3.5-27B as Expert/Escalation Model
-
-Do NOT remove Qwen3.5-27B.
-
-Keep:
-
-Qwen3.5-27B Q4_K_M
-
-as an optional high-quality escalation model.
-
-It should NOT remain loaded for ordinary Jarvis work.
-
-Jarvis should eventually be able to escalate automatically when the primary model determines that a problem requires substantially deeper reasoning.
-
-Example:
-
-9B agent
-→ encounters genuinely difficult problem
-→ saves compact task state
-→ unloads 9B
-→ loads 27B
-→ requests expert analysis/plan
-→ saves result
-→ unloads 27B
-→ reloads 9B
-→ continues execution.
-
-The 27B model should primarily be used for:
-
-- difficult architecture decisions;
-- complex debugging after repeated failure;
-- difficult reasoning;
-- long-form analytical work where quality matters more than speed;
-- second-opinion criticism;
-- escalation after the primary model cannot solve a task.
-
-Do NOT use 27B for trivial actions such as:
-
-- reading files;
-- running commands;
-- selecting obvious tools;
-- renaming files;
-- simple browser interaction;
-- basic Git operations.
-
----
-
-## P0.3 — New Model Profiles
-
-Replace the current model-profile assumptions with:
-
-### FAST
-
-Model:
-Qwen3.5-9B Abliterated
-
-Quant:
-Q6_K or Q8_0 depending benchmark results.
-
-Context:
-8K–16K.
-
-Thinking:
-Off by default.
-
-Purpose:
-
-- simple tool calls;
-- filesystem work;
-- routine automation;
-- basic shell operations;
-- simple browser tasks;
-- classification;
-- quick responses.
-
-Primary objective:
-maximum responsiveness without materially reducing successful task completion.
-
----
-
-### BALANCED — DEFAULT
-
-Model:
-Qwen3.5-9B Abliterated
-
-Quant:
-Q8_0.
-
-Context:
-approximately 16K initially.
-
-Thinking:
-Selective.
-
-Use reasoning for:
-
-- initial planning;
-- ambiguous choices;
-- errors;
-- recovery;
-- consequential decisions.
-
-Do NOT enable lengthy thinking for every trivial tool call.
-
-Purpose:
-
-Default Jarvis operation.
-
-This should be the model/profile used for most autonomous work.
-
----
-
-### RELIABLE
-
-Model:
-Qwen3.5-9B Abliterated Q8_0.
-
-Context:
-16K–32K depending measured VRAM use.
-
-Thinking:
-Enabled where useful.
-
-Agent behavior:
-
-- stronger planning;
-- best-of-N planning where appropriate;
-- critic pass;
-- recovery;
-- independent verification;
-- additional checks before declaring success.
-
-Important:
-
-Reliable mode should primarily increase AGENT EFFORT rather than automatically loading a much larger model.
-
----
-
-### EXPERT
-
-Model:
-Qwen3.5-27B Q4_K_M.
-
-Purpose:
-
-- escalation;
-- difficult reasoning;
-- specialist analysis;
-- second opinion.
-
-This profile may use CPU/RAM offload and therefore may be considerably slower.
-
-It should not be the normal operating profile.
-
----
-
-## P0.4 — Dynamic Thinking
-
-Current behavior should be changed so expensive reasoning is NOT applied indiscriminately.
-
-Jarvis should distinguish between:
-
-### Actions that normally do NOT require deep thinking
-
-Examples:
-
-- filesystem.read;
-- filesystem.list;
-- git status;
-- run test;
-- open URL;
-- query running processes;
-- call known deterministic skill;
-- execute already-selected command.
-
-### Actions that SHOULD trigger stronger reasoning
-
-Examples:
-
-- initial complex plan;
-- choosing between several repair strategies;
-- diagnosing an unexpected failure;
-- repeated tool failure;
-- interpreting ambiguous evidence;
-- architecture decisions;
-- selecting a recovery strategy;
-- final verification of consequential work.
-
-The goal is to reduce generated reasoning tokens without sacrificing task quality.
-
----
-
-## P0.5 — Lazy Vision Loading
-
-Do not reserve substantial VRAM for multimodal/vision components when they are not being used.
-
-Current normal text/tool operation should run without the vision projector where technically practical.
-
-Desired behavior:
-
-text/shell/filesystem task
-→ text-only model configuration
-
-Need screenshot interpretation
-→ activate/load vision capability
-→ inspect screenshot
-→ release unnecessary vision resources when practical.
-
-If hot loading/unloading the projector is impractical with the selected inference backend, benchmark whether:
-
-- maintaining vision loaded;
-- switching profiles;
-- or using a separate small vision model
-
-produces the best real-world result.
-
-Do not sacrifice several GB of useful VRAM permanently for occasional screenshot analysis without benchmarking the cost.
-
----
-
-## P0.6 — Dynamic Context Size
-
-Do not use 32K context for every task simply because the model supports it.
-
-Select context according to task requirements.
-
-Suggested starting policy:
-
-Simple:
-8K.
-
-Normal:
-16K.
-
-Long:
-32K.
-
-Exceptional:
-larger only when required.
-
-The agent's existing context compaction and persistent task memory should reduce the need for enormous live context windows.
-
-Prefer:
-
-structured persistent state
-+
-compact active context
-
-over:
-
-sending the entire task history every model turn.
-
----
-
-## P0.7 — Dynamic Tool Exposure
-
-Do NOT send every Jarvis tool definition to the model on every inference call.
-
-Jarvis already classifies tasks.
-
-Use that classification to expose only tools relevant to the current task.
-
-Examples:
-
-Filesystem task:
-
-- filesystem;
-- Python if required.
-
-Software development:
-
-- filesystem;
-- terminal;
-- Python;
-- Git;
-- coding worker.
-
-Browser research:
-
-- browser;
-- web;
-- filesystem;
-- spreadsheet/document tool when needed.
-
-Windows application task:
-
-- desktop;
-- screenshot;
-- relevant application adapter.
-
-This should reduce:
-
-- prompt processing;
-- context usage;
-- model confusion;
-- incorrect tool selection;
-- latency.
-
-There must still be an escape mechanism allowing Jarvis to request another capability if the initial tool set proves insufficient.
-
----
-
-## P0.8 — Performance Benchmark Harness
-
-Before buying hardware, Jarvis must benchmark the actual Windows desktop.
-
-Create an automated local benchmark suite.
-
-Measure at minimum:
-
-- model load time;
-- time to first token;
-- prompt-processing speed;
-- output tokens/second;
-- VRAM usage;
-- RAM usage;
-- GPU utilization;
-- CPU utilization;
-- context size;
-- tool-call latency;
-- total autonomous task duration.
-
-Benchmark model/configuration combinations including:
-
-1. Qwen3.5-9B Abliterated Q8_0
-2. Qwen3.5-9B Abliterated Q6_K
-3. official Qwen3.5-9B Q8_0 if practical
-4. current Qwen3.5-27B Q4_K_M
-
-Test context sizes:
-
-- 8K
-- 16K
-- 32K
-
-Test vision:
-
-- disabled
-- enabled
-
-Test reasoning:
-
-- off
-- selective
-- enabled
-
-Do not select a winner based solely on tokens/sec.
-
----
-
-## P0.9 — Real Jarvis Agent Benchmark
-
-Create a representative benchmark set of at least 20 realistic autonomous tasks.
-
-Examples should include:
-
-- filesystem organization;
-- broken Python project diagnosis;
-- Git repository modification;
-- PowerShell troubleshooting;
-- browser navigation;
-- unfamiliar website interaction;
-- deliberate tool failure and recovery;
-- screenshot interpretation;
-- multi-step research;
-- document processing;
-- multi-tool autonomous task;
-- verification after code modification.
-
-Record for every model/configuration:
-
-- task success/failure;
-- human intervention required;
-- total time;
-- model time;
-- tool time;
-- model calls;
-- tool calls;
-- retries;
-- tool-call/schema errors;
-- incorrect actions;
-- verification result.
-
-Primary performance metric:
-
-**successful autonomous tasks per unit of wall-clock time**
-
-Secondary metrics:
-
-- first-pass completion rate;
-- human interventions;
-- tool-call accuracy;
-- total task duration;
-- tokens/sec.
-
-Jarvis should automatically produce a benchmark report.
-
----
-
-## P0.10 — Automatic Model Escalation
-
-Design model routing so Jarvis can eventually decide when 9B is insufficient.
-
-Do NOT escalate merely because a task is long.
-
-Potential escalation signals:
-
-- repeated reasoning failure;
-- multiple failed strategies;
-- critic confidence below threshold;
-- contradictory observations;
-- architecture-level task;
-- user explicitly requests maximum-quality analysis.
-
-Suggested escalation flow:
-
-1. Save compact task state.
-2. Record exact problem requiring escalation.
-3. Unload primary model if necessary.
-4. Load Expert 27B.
-5. Ask Expert for a focused analysis or plan.
-6. Store result.
-7. Reload primary 9B.
-8. Continue execution.
-
-Avoid sending enormous full trajectories to the Expert model.
-
-Send:
-
-- goal;
-- acceptance criteria;
-- important observations;
-- failed approaches;
-- relevant files/data;
-- precise unresolved problem.
-
----
-
-## P0.11 — Low-Refusal Professional Model Requirement
-
-Jarvis may be used for legitimate professional security, forensic, investigative, defensive, technical, or analytical work.
-
-The primary reasoning model should therefore minimize unnecessary refusals when processing legitimate but potentially sensitive material.
-
-Examples may include analysis of:
-
-- malware;
-- attack techniques;
-- scripts;
-- suspicious PowerShell;
-- forensic artifacts;
-- logs;
-- criminal communications;
-- exploit evidence;
-- phishing;
-- credential-theft artifacts;
-- security vulnerabilities;
-- offensive-security tooling;
-- disturbing evidence;
-- illicit-market material;
-- other case-related technical evidence.
-
-The desired model behavior is:
-
-analyze the material accurately
-rather than
-refuse merely because the subject is sensitive.
-
-Model permissiveness must remain separate from operational authorization.
-
----
-
-
-
-## P0.12 — Hardware Purchasing Gate
-
-Do not recommend or depend on additional hardware until the new benchmark suite has run on the actual desktop.
-
-Specifically, defer buying:
-
-- additional RAM;
-- old Tesla GPUs;
-- V100 GPUs;
-- NPUs;
-- additional inference hardware;
-
-until software/model optimization has been measured.
-
-After benchmarks, Jarvis should report:
-
-- current bottleneck;
-- whether GPU VRAM is saturated;
-- whether CPU offload occurs;
-- whether system RAM is constrained;
-- whether CPU inference is limiting;
-- whether model switching is costly;
-- estimated benefit of more VRAM;
-- estimated benefit of more RAM.
-
-Hardware purchases should be driven by measured bottlenecks.
-
----
-
-## P0.13 — Success Target
-
-The model migration is considered successful when:
-
-1. Qwen3.5-9B Abliterated Q8_0 runs locally and reliably.
-2. Ordinary tasks remain entirely GPU-resident where practical.
-3. Jarvis is substantially more responsive than the current 27B configuration.
-4. Tool-call reliability remains acceptable.
-5. Autonomous task completion does not materially degrade.
-6. Refusals during legitimate professional analysis are rare.
-7. Vision works when requested.
-8. Reliable mode still performs robust planning/recovery/verification.
-9. Expert 27B escalation works.
-10. Benchmark data is stored and visible.
-11. A representative 20-task comparison against the old 27B configuration has been completed.
-
-The final decision between Q8_0, Q6_K, official 9B, and abliterated 9B must be based on actual Jarvis task performance rather than assumptions.
-
----
-
-# UPDATED IMMEDIATE P0 DEVELOPMENT ORDER
-
-The current P0 queue should now be ordered:
-
-1. **Integrate Qwen3.5-9B Abliterated Q8_0.**
-2. **Verify full GPU residency on RTX 5070 Ti 16 GB.**
-3. **Create benchmark/performance instrumentation.**
-4. **Implement lazy vision loading or equivalent VRAM optimization.**
-5. **Implement dynamic context sizing.**
-6. **Implement task-specific tool exposure.**
-7. **Implement selective/dynamic thinking.**
-8. **Run 20-task comparison: 9B Q8 vs 9B Q6 vs current 27B Q4.**
-9. **Select default Fast/Balanced/Stable configurations from measured results.**
-10. **Implement automatic 9B → 27B Expert escalation.**
-11. **Only after these tests, reassess whether hardware upgrades are necessary.**
-
-Security/SIEM/forensics implementation is intentionally deferred. The swarm architecture may reserve future roles for those capabilities, but they must be separately respecified and explicitly promoted before implementation.
-
-This optimization effort takes priority over Browser Use, UFO, Cua, OpenHands, voice, phone clients, and other P1/P2/P3 functionality unless one of those is required to complete the benchmark suite.
-
-# HIGH PRIORITY — AUTONOMOUS SOFTWARE DEVELOPMENT WORKER ROUTING
-
-Status: P0/P1 — router implemented for local execution; paid Cursor workers remain disconnected until ACP/credentials exist. Live 9B migration and the 20-task GPU comparison are still the Windows-desktop P0.
-
-Jarvis must be capable of developing software autonomously, including development of Jarvis itself.
-
-Jarvis must NOT depend on one coding model for every task.
-
-Instead, implement a software-development worker router that selects the cheapest sufficiently capable coding worker, escalates automatically when necessary, independently verifies the resulting work, and learns which workers perform well for which task classes.
-
-The target behavior is:
-
-User / event
-↓
-Jarvis Supervisor
-↓
-Classify software-development task
-↓
-Estimate complexity / risk / expected cost
-↓
-Select cheapest capable worker
-↓
-Worker performs implementation
-↓
-Jarvis independently tests/verifies
-↓
-PASS → complete
-FAIL → retry or escalate
-↓
-Record outcome for future routing
-
-The purpose is to minimize paid AI usage without sacrificing development quality.
-
----
-
-## 1. Software Development Worker Interface
-
-Implement a common abstraction:
-
-`SoftwareDevelopmentWorker`
-
-Possible implementations:
-
-- `LocalJarvisCodingWorker`
-- `CursorACPWorker`
-- future `CodexWorker`
-- future `OpenHandsWorker`
-- future other external coding agents.
-
-The rest of Jarvis should not depend directly on Cursor-specific logic.
-
-Suggested conceptual interface:
-
-- start_task()
-- continue_task()
-- inspect_task()
-- cancel_task()
-- send_feedback()
-- get_changes()
-- get_status()
-- get_cost_usage()
-- get_model()
-- set_model()
-- verify_connection()
-
-Worker results should include:
-
-- files changed;
-- commands executed;
-- tests run;
-- worker-reported result;
-- errors;
-- session ID;
-- model used;
-- approximate usage/cost where available.
-
-Jarvis remains the supervisor.
-
-A worker claiming success does NOT constitute successful completion.
-
----
-
-# 2. Coding Intelligence Determination Tree
-
-Jarvis must route coding work according to complexity, previous success, cost, and risk.
-
-The initial routing policy should be:
-
-## Tier 0 — Deterministic Tools
-
-Before invoking any coding model, determine whether the change can be performed deterministically.
-
-Examples:
-
-- update known JSON value;
-- bump known version;
-- run formatter;
-- rename file;
-- execute known build;
-- regenerate generated files;
-- run tests;
-- apply previously learned deterministic skill.
-
-Use native tools/scripts.
-
-Do not pay for an AI coding worker unnecessarily.
-
----
-
-## Tier 1 — Local Coding Worker
-
-Primary model:
-
-Qwen3.5-9B low-refusal local model.
-
-Cost:
-
-effectively zero incremental AI cost.
-
-Use for:
-
-- documentation;
-- small configuration changes;
-- adding straightforward tests;
-- fixing simple exceptions;
-- basic API endpoint changes;
-- small isolated functions;
-- repetitive refactoring;
-- minor frontend changes;
-- simple dependency/configuration work;
-- investigating obvious test failures;
-- changes Jarvis has successfully performed before.
-
-Typical criteria:
-
-- small number of files;
-- clear acceptance criteria;
-- established architecture;
-- low ambiguity;
-- low blast radius;
-- existing tests available.
-
-Jarvis must independently test the result.
-
-If verification succeeds:
-
-STOP.
-
-Do not escalate merely because a paid model may produce prettier code.
-
-If local worker fails to produce a verified result after a reasonable number of attempts:
-
-escalate to Tier 2.
-
-Suggested default:
-
-maximum 2 meaningful local attempts.
-
-Do not repeat the same failed strategy.
-
----
-
-## Tier 2 — Cursor Composer 2.5 Standard
-
-This should be the DEFAULT paid coding worker.
-
-Prefer:
-
-**Composer 2.5 STANDARD**
-
-Do NOT default to its Fast pricing tier for unattended development.
-
-Use for:
-
-- normal feature development;
-- multi-file implementation;
-- ordinary refactors;
-- test-driven fixes;
-- frontend/backend work;
-- database changes;
-- moderate debugging;
-- implementing items from `JARVIS_MASTER_PLAN.md`;
-- work where local 9B failed;
-- tasks requiring better repository understanding.
-
-Composer should be preferred over Grok 4.6 for routine software development because it is substantially cheaper and explicitly optimized for agentic coding, file editing, terminal usage, tool selection, and long-horizon coding work.
-
-Current relative standard pricing:
-
-Composer 2.5:
-- input: ~$0.50 / million tokens
-- cached input: ~$0.20 / million
-- output: ~$2.50 / million
-
-Grok 4.6:
-- input: ~$2.00 / million
-- cached input: ~$0.50 / million
-- output: ~$6.00 / million
-
-Therefore Grok must not be invoked simply because it is stronger.
-
-Use the cheapest model capable of producing a verified result.
-
-If Composer succeeds and Jarvis verification passes:
-
-STOP.
-
-If Composer repeatedly fails, stalls, contradicts itself, or cannot resolve the problem:
-
-escalate.
-
----
-
-## Tier 2B — Optional Cheap Alternative
-
-Support optional low-cost third-party coding workers when they are available and economical.
-
-Examples may include models such as:
-
-- GPT-5.6 Luna;
-- Gemini Flash-class coding models;
-- future low-cost models that benchmark well.
-
-Do NOT hard-code these names permanently.
-
-Maintain a configurable worker/model catalog containing:
-
-- model identifier;
-- current price;
-- context window;
-- measured Jarvis coding success rate;
-- average task cost;
-- average task duration;
-- task classes where it performs well.
-
-The routing engine may choose one of these instead of Composer when empirical results show it is cheaper for equivalent success.
-
-Because Cursor usage pools differ between first-party Cursor models and third-party models, routing should account for remaining monthly pool balances where those values are available.
-
----
-
-## Tier 3 — Cursor Grok 4.6
-
-Use Grok 4.6 STANDARD for genuinely difficult work.
-
-Do NOT use Grok 4.6 Fast by default.
-
-Suitable tasks:
-
-- difficult architectural implementation;
-- large multi-module changes;
-- complex debugging;
-- long-horizon development;
-- ambiguous failures;
-- substantial new subsystems;
-- tasks where Composer failed;
-- tasks with complex interactions between multiple components;
-- difficult migrations;
-- subtle concurrency/state problems.
-
-Start with an appropriate effort level rather than automatically using maximum effort.
-
-Suggested:
-
-medium/high for difficult work.
-
-Reserve xhigh for unusually difficult cases.
-
-If Grok produces a solution:
-
-Jarvis must still independently:
-
-- inspect diff;
-- run tests;
-- run build;
-- exercise relevant functionality;
-- check repository state;
-- check acceptance criteria.
-
----
-
-## Tier 4 — Frontier Specialist
-
-Only use the most expensive available coding/reasoning model when:
-
-- lower tiers failed;
-- task risk is unusually high;
-- task requires difficult architecture reasoning;
-- repeated contradictory failures exist;
-- user explicitly requests maximum quality.
-
-Possible workers may include:
-
-- high-end OpenAI coding/reasoning model;
-- Claude Sonnet/Opus-class worker;
-- future frontier models.
-
-These workers are expensive exceptions.
-
-They must not become the default development path.
-
----
-
-# 3. Initial Complexity Router
-
-Implement an initial software-task complexity score from 0–100.
-
-This does not need to be perfect.
-
-Use signals such as:
-
-- expected number of files affected;
-- repository size;
-- test availability;
-- ambiguity of request;
-- architecture impact;
-- database/schema impact;
-- external API changes;
-- security relevance;
-- previous attempts;
-- previous successful trajectory;
-- dependency changes;
-- estimated blast radius.
-
-Initial routing:
-
-0–20:
-deterministic/local tools.
-
-21–40:
-local Qwen coding worker.
-
-41–70:
-Cursor Composer 2.5.
-
-71–90:
-Cursor Grok 4.6.
-
-91–100:
-strongest suitable specialist.
-
-However:
-
-Historical measured success should override static thresholds.
-
-Example:
-
-If local Qwen has successfully completed 8 similar tasks with 95% verification success:
-
-route the next similar task locally even if its static score would normally select Composer.
-
----
-
-# 4. Escalation Policy
-
-Escalation must be evidence-based.
-
-Example:
-
-Local Qwen
-↓
-attempt
-↓
-tests fail
-↓
-analyze failure
-↓
-second materially different attempt
-↓
-tests fail
-↓
-ESCALATE
-
-Composer
-↓
-receives:
-- original goal
-- acceptance criteria
-- relevant repository state
-- local worker changes
-- tests
-- exact errors
-- strategies already attempted
-↓
-continue work
-
-Do NOT simply send the entire raw conversation to the next model.
-
-Pass a compact escalation package.
-
-Suggested:
-
-`EscalationContext`
-
-containing:
-
-- goal;
-- acceptance criteria;
-- task class;
-- relevant files;
-- current diff;
-- failing tests;
-- important logs;
-- attempted strategies;
-- reason for escalation.
-
----
-
-# 5. Cost-Aware Routing
-
-Jarvis must treat paid coding intelligence as a limited resource.
-
-Track where technically possible:
-
-- model;
-- worker;
-- input tokens;
-- cached tokens;
-- output tokens;
-- estimated cost;
-- monthly accumulated cost;
-- task cost;
-- successful task cost.
-
-Important metric:
-
-**cost per verified successful software task**
-
-Do NOT optimize only:
-
-cost per token.
-
-A cheap model that fails repeatedly may be more expensive than a stronger model.
-
-Future routing should use historical data such as:
-
-Local Qwen:
-€0
-success on task class: 82%
-
-Composer:
-average €0.34
-success: 96%
-
-Grok:
-average €1.40
-success: 98%
-
-This allows Jarvis to make rational routing decisions.
-
----
-
-# 6. Cursor Integration — Use ACP
-
-Jarvis must integrate directly with Cursor Agent.
-
-Primary protocol:
-
-**ACP — Agent Client Protocol**
-
-Do NOT make screen/mouse control of the Cursor IDE the primary integration.
-
-Cursor CLI can run as an ACP server:
-
-`agent acp`
-
-ACP communicates over:
-
-- stdio;
-- JSON-RPC 2.0;
-- newline-delimited messages.
-
-Jarvis should implement:
-
-`CursorACPWorker`
-
-that starts and supervises the Cursor Agent process.
-
-Conceptual architecture:
-
-Jarvis
-↓
-SoftwareDevelopmentWorker
-↓
-CursorACPWorker
-↓
-ACP JSON-RPC
-↓
-Cursor Agent
-↓
-repository/worktree
-
-The actual Cursor graphical IDE does not need to be open.
-
-This is preferable to GUI control because it is:
-
-- deterministic;
-- machine-readable;
-- resumable;
-- observable;
-- less fragile;
-- easier to automate.
-
----
-
-# 7. ACP Session Lifecycle
-
-Implement the supported ACP lifecycle approximately as:
-
-1. start `agent acp`;
-2. initialize connection;
-3. authenticate if required;
-4. create or load Cursor session;
-5. send task;
-6. receive streaming session updates;
-7. handle Cursor requests;
-8. monitor completion;
-9. collect results;
-10. persist Cursor session ID;
-11. allow follow-up instructions;
-12. terminate or retain worker as appropriate.
-
-Jarvis must persist enough information to reconnect/resume after restart.
-
----
-
-# 8. Cursor Blocking Requests
-
-Cursor ACP may issue blocking requests such as:
-
-- `cursor/ask_question`
-- `cursor/create_plan`
-
-Jarvis should be capable of answering these automatically when permitted.
-
-Example:
-
-Cursor asks:
-
-"Should I add a migration or modify the existing schema?"
-
-Jarvis:
-↓
-consult task goal / architecture / master plan
-↓
-answer autonomously.
-
-If the question involves a genuinely consequential product decision:
-
-escalate to user.
-
-Plan-approval requests should normally be handled automatically during autonomous development when:
-
-- work is isolated;
-- acceptance criteria are clear;
-- repository is disposable/recoverable;
-- no production action is involved.
-
-Do not wake the user merely for routine Cursor planning approvals.
-
----
-
-# 9. Cursor Model Selection
-
-Jarvis must be able to select the Cursor model used for a development task.
-
-Do not rely on whatever model happened to be selected in the graphical IDE.
-
-Use supported Cursor CLI/ACP model configuration.
-
-Model selection must be driven by the determination tree.
-
-Typical mapping:
-
-routine external work:
-Composer 2.5 standard
-
-difficult work:
-Grok 4.6 standard
-
-specialized expensive work:
-configured frontier specialist.
-
-Do not use Fast variants unless latency is specifically worth the increased cost.
-
-Model identifiers must be configurable because Cursor may change available models.
-
-At startup, where feasible:
-
-query available models rather than assuming permanent identifiers.
-
----
-
-# 10. ACP vs MCP
-
-Use the correct protocol direction.
-
-## Jarvis → Cursor
-
-Use:
-
-**ACP**
-
-Purpose:
-
-Jarvis acts as a custom client controlling Cursor Agent.
-
-## Cursor → Jarvis / External Tools
-
-Use:
-
-**MCP**
-
-Purpose:
-
-Cursor can call tools/services exposed by Jarvis.
-
-Therefore implement both directions eventually:
-
-Jarvis
- ├── ACP client → Cursor Agent
- │
- └── MCP server ← Cursor Agent
-
-This enables:
-
-Jarvis supervising Cursor
-
-while simultaneously allowing Cursor to use:
-
-- Jarvis memory;
-- Jarvis task context;
-- BlackGrid Multimedia;
-- internal APIs;
-- specialized tools;
-- system state.
-
-Do not confuse the roles of ACP and MCP.
-
----
-
-# 11. Jarvis MCP Server for Cursor
-
-Expose a limited Jarvis MCP server that Cursor can use during development.
-
-Potential read-oriented tools/resources:
-
-- get_master_plan
-- get_current_task
-- get_acceptance_criteria
-- get_known_architecture
-- get_relevant_trajectory
-- get_previous_failure
-- get_environment_info
-
-Potential controlled actions:
-
-- request_verification
-- report_worker_result
-- request_specialized_tool
-- query_Jarvis_status
-
-Do not expose unrestricted recursive self-control by default.
-
-Avoid:
-
-Cursor → Jarvis → Cursor → Jarvis
-
-loops.
-
-Every delegated development task must have a single supervisor:
-
-Jarvis.
-
----
-
-# 12. Self-Development Mode
-
-Jarvis must eventually be able to modify Jarvis.
-
-This requires a special mode:
-
-`SELF_DEVELOPMENT`
-
-Never allow experimental self-development directly against the trusted production/trunk working tree.
-
-Create an isolated development environment.
-
-Recommended architecture:
-
-trusted Jarvis installation
-        │
-        ▼
-Self-Development Supervisor
-        │
-        ▼
-dedicated Git worktree/fork
-        │
-        ▼
-local Qwen / Cursor
-        │
-        ▼
-modify
-        │
-        ▼
-test
-        │
-        ▼
-benchmark
-        │
-        ▼
-candidate branch
-
-# 13. Self-Development Isolation
-
-When starting autonomous self-development:
-
-1. Confirm trusted source revision.
-2. Create a dedicated branch/worktree.
-3. Record the starting commit SHA.
-4. Never modify the trusted running installation.
-5. Give the worker access only to the experimental worktree where practical.
-6. Develop there.
-7. Commit incremental checkpoints.
-8. Run tests.
-9. Record benchmark results.
-10. Produce a final candidate branch.
-
-Example branch:
-
-`jarvis/autonomous-trial-2026-08-24`
-
-A broken experimental branch must never prevent the trusted Jarvis instance from starting.
-
----
-
-# 14. No Autonomous Merge During Initial Trials
-
-During early self-development trials, Jarvis may:
-
-- edit;
-- test;
-- commit;
-- create branches;
-- create candidate pull requests where authorized;
-- compare results.
-
-Jarvis must NOT automatically:
-
-- merge its experimental branch into trusted main;
-- overwrite the trusted installation;
-- deploy a new Jarvis version over itself;
-- delete the known-good branch.
-
-The user should review the first trial results.
-
-Later, automated promotion may be considered after sufficient reliability data exists.
-
----
-
-# 15. One-Day Autonomous Development Trial
-
-Create an explicit test mode:
-
-`AUTONOMOUS_DEVELOPMENT_TRIAL`
-
-Duration target:
-
-Up to approximately one working day or a configured time budget.
-
-Purpose:
-
-Determine whether Jarvis is genuinely capable of managing software development.
-
-Test environment:
-
-Dedicated Jarvis fork/worktree.
-
-At trial start:
-
-1. Snapshot source commit.
-2. Ensure clean Git state.
-3. Create experiment branch.
-4. Run baseline tests.
-5. Record baseline metrics.
-
-Then Jarvis should work autonomously through appropriate items in `JARVIS_MASTER_PLAN.md`.
-
-Jarvis should:
-
-- choose a task;
-- determine acceptance criteria;
-- select a coding worker;
-- implement;
-- run tests;
-- inspect failures;
-- recover;
-- escalate models when justified;
-- verify;
-- commit successful increments;
-- continue to the next task.
-
-Do NOT repeatedly ask the user what to work on.
-
-Use the highest-value eligible backlog item.
-
----
-
-# 16. Trial Task Restrictions
-
-For the first autonomous self-development trial, prefer tasks that are:
-
-- testable;
-- reversible;
-- isolated;
-- clearly specified.
-
-Suitable examples:
-
-- benchmark instrumentation;
-- model-profile improvements;
-- dynamic tool exposure;
-- context optimizations;
-- UI improvements;
-- worker adapters;
-- test coverage;
-- documentation;
-- performance telemetry.
-
-Avoid initially:
-
-- destructive database migrations;
-- deleting major architecture;
-- replacing the entire orchestrator;
-- security-boundary removal;
-- automatic production deployment.
-
----
-
-# 17. Trial Budget
-
-Self-development must have configurable limits.
-
-Example:
-
-Maximum duration:
-12 hours
-
-Maximum paid AI spend:
-user-defined
-
-Maximum paid worker invocations:
-configurable
-
-Maximum consecutive failures:
-configurable
-
-Maximum branch size/change volume:
-warning threshold
-
-Jarvis must stop escalating paid models if the configured financial limit is reached.
-
-Continue with local work where possible.
-
----
-
-# 18. Kill Switch
-
-Provide an immediate stop mechanism.
-
-Examples:
-
-Portal:
-
-`STOP AUTONOMOUS DEVELOPMENT`
-
-API:
-
-Cancel supervisor job.
-
-Local file:
-
-`data/STOP_JARVIS`
-
-or similarly simple emergency stop mechanism.
-
-When activated:
-
-- stop new worker dispatch;
-- cancel active coding workers where practical;
-- preserve current files;
-- preserve logs;
-- preserve Git state;
-- do not attempt cleanup that could destroy useful work.
-
----
-
-# 19. Independent Verification
-
-Jarvis must not trust Cursor's final response.
-
-After Cursor says:
-
-> Implemented and tests pass.
-
-Jarvis should independently execute relevant verification.
-
-At minimum:
-
-- inspect Git diff;
-- run unit tests;
-- run relevant integration tests;
-- run build;
-- inspect errors;
-- ensure acceptance criteria are satisfied.
-
-For changes affecting Jarvis runtime, where practical launch the experimental instance on alternate ports and test it separately.
-
-Example:
-
-Trusted Jarvis:
-`127.0.0.1:4780`
-
-Experimental Jarvis:
-`127.0.0.1:4781`
-
-Then Jarvis can test its candidate replacement without killing itself.
-
----
-
-# 20. Self-Development Regression Gate
-
-A candidate change may only be considered successful when:
-
-NEW TESTS PASS  
-AND  
-OLD TESTS PASS  
-AND  
-RELEVANT E2E TESTS PASS  
-AND  
-NO UNEXPLAINED REGRESSION EXISTS
-
-If performance-related, compare against baseline.
-
-Example:
-
-Before:
-median task time = 94 s
-
-After:
-median task time = 61 s
-
-Task success:
-unchanged
-
-Result:
-accept improvement.
-
-But:
-
-Before:
-success = 95%
-
-After:
-success = 75%
-
-Result:
-reject even if faster.
-
----
-
-# 21. Development Learning
-
-Record each delegated coding task in trajectory memory.
-
-Store:
-
-- task class;
-- task complexity;
-- worker;
-- model;
-- duration;
-- cost;
-- first-attempt success;
-- retries;
-- verification result;
-- regression count.
-
-Use these results to improve future routing.
-
-Example:
-
-After enough tasks Jarvis might learn:
-
-> Local Qwen succeeds on Python unit-test additions 93% of the time.
-
-Then route those locally.
-
-Or:
-
-> Local Qwen fails most React state-management changes.
-
-Then route those directly to Composer.
-
-This should evolve from static thresholds into evidence-based routing.
-
----
-
-# 22. Self-Development Reporting
-
-At the end of an autonomous development session produce a concise report.
-
-Include:
-
-Duration:
-Worker time:
-Models used:
-Estimated paid cost:
-Tasks attempted:
-Tasks completed:
-Tasks failed:
-Commits created:
-Tests before:
-Tests after:
-Regressions:
-Performance changes:
-Human intervention:
-Recommended merge candidates:
-
-Also produce:
-
-- experiment branch name;
-- starting commit;
-- ending commit;
-- concise diff summary.
-
-The purpose of the first one-day trial is measurement, not blind trust.
-
----
-
-# 23. Success Criteria for Initial Trial
-
-The autonomous development system will be considered promising if Jarvis can spend a full trial period working on its own fork and achieve:
-
-- multiple useful commits;
-- no damage to trusted Jarvis;
-- clean/recoverable Git state;
-- no uncontrolled spending;
-- correct worker escalation;
-- tests passing after successful changes;
-- meaningful backlog progress;
-- low human intervention.
-
-Measure:
-
-`verified useful work per hour`
-
-and:
-
-`verified useful work per euro`
-
-These are more important than raw tokens generated.
-
----
-
-# 24. Implementation Priority
-
-Add the following to the active development queue.
-
-P0/P1:
-
-1. Implement `SoftwareDevelopmentWorker` abstraction.
-2. Implement `CursorACPWorker`.
-3. Verify local Cursor authentication.
-4. Verify `agent acp` lifecycle.
-5. Add persistent Cursor session IDs.
-6. Implement Composer/Grok model routing.
-7. Implement worker escalation.
-8. Add cost/usage telemetry where available.
-9. Implement Self-Development Mode.
-10. Implement isolated Git worktree/fork management.
-11. Implement experimental alternate-port Jarvis launch.
-12. Implement self-development verification gate.
-13. Implement spend/time/failure limits.
-14. Implement emergency kill switch.
-15. Implement end-of-run development report.
-16. Run first one-day autonomous-development experiment.
-
-Progress this session (code + unit tests; live Cursor CLI still absent):
-
-- `CursorACPWorker` JSON-RPC lifecycle, persisted session IDs, auto-answer for isolated routine questions.
-- Jarvis MCP server for Cursor (`python3 -m app.mcp_stdio`).
-- Compact `EscalationContext` packaging after repeated tool failures.
-
-Do not prioritize GUI mouse automation of Cursor.
-
-ACP is the preferred primary integration.
-
-MCP should complement ACP by allowing Cursor to access Jarvis-managed tools and context.
-
----
-
-# 25. Desired End-State Example
-
-Event:
-
-Jarvis discovers a P1 backlog item:
-
-> Implement Browser Use worker adapter.
-
-Jarvis:
-
-1. Inspects requirement.
-2. Estimates complexity = 65.
-3. Sees no strong local trajectory.
-4. Selects Composer 2.5.
-5. Creates isolated branch/worktree.
-6. Launches Cursor through ACP.
-7. Sends requirement and acceptance criteria.
-8. Monitors Cursor.
-9. Automatically answers routine Cursor planning questions.
-10. Cursor implements adapter.
-11. Cursor reports success.
-12. Jarvis runs tests independently.
-13. A test fails.
-14. Jarvis sends the exact failure back to the same Cursor session.
-15. Cursor repairs it.
-16. Jarvis retests.
-17. Tests pass.
-18. Jarvis launches experimental Jarvis.
-19. Runs relevant E2E test.
-20. Verifies behavior.
-21. Commits candidate.
-22. Records Composer success/cost/duration.
-23. Moves to the next backlog item.
-
-If Composer repeatedly fails:
-
-Jarvis packages the current state and escalates to:
-
-`Grok 4.6`
-
-The user does not need to supervise this routine loop.
-
----
-
-# 26. Core Principle
-
-Jarvis should not attempt to become the world's best programmer using one small local model.
-
-Jarvis should become a competent engineering manager.
-
-Its job is to:
-
-- identify work;
-- estimate difficulty;
-- choose the right intelligence;
-- control cost;
-- provide context;
-- supervise execution;
-- detect failure;
-- escalate intelligently;
-- verify results;
-- remember what worked.
-
-The long-term objective is:
-
-**Use local intelligence whenever it is sufficient and paid frontier intelligence only when it materially increases the probability of successful completion.**
-
-from here on are the regular requirements
 ## 1. Core Goal
 
 Build a local "Jarvis"-style AI system that can receive a high-level instruction such as:
@@ -1915,36 +152,21 @@ without requiring a redesign of Jarvis.
 
 ## 4. Primary Model
 
-Primary model target:
+Default runtime:
 
-Qwen3.5-27B
+**Qwen3.5-9B Abliterated** (preferred GGUF Q8_0; Q6_K fallback).
 
-The exact quantization should be selected based on actual detected hardware and current upstream recommendations.
+Qwen3.5-27B Q4_K_M remains the Expert / escalation model. It is not the everyday model.
 
-Initial likely target:
+Reason: 27B does not stay fully GPU-resident on the user's 16 GB RTX 5070 Ti. Ordinary tool-calling work uses 9B; 27B is consulted when the task needs substantially deeper reasoning.
 
-Q4_K_M or closest current equivalent
+The 9B model should still support reasoning, tool calling, coding, writing, agentic execution, and vision when the projector is loaded.
 
-Quality mode may optionally use Q5 if performance and memory consumption remain reasonable.
+**Lazy mmproj:** attach the vision projector only when a request actually needs vision, then unload it (`release_vision`). Do not keep mmproj resident for ordinary text/tool work. Idle llama.cpp does not pass `--mmproj`; `vision_mode=always` still does not attach at idle load. VRAM on 16 GB is the constraint. Landed in code (PR #50).
 
-Do not substitute a tiny model simply because it is easier to install.
+Use reasoning/thinking for difficult autonomous tasks where supported. Use a faster mode for simple deterministic requests.
 
-The model should be capable of:
-
-- reasoning;
-- tool calling;
-- coding;
-- general writing;
-- long-context tasks;
-- agentic execution;
-- multimodal/vision tasks where supported;
-- interpreting screenshots;
-- understanding program state;
-- working with structured tool results.
-
-Use reasoning/thinking mode for difficult autonomous tasks where supported.
-
-Use a faster mode for simple deterministic requests.
+Do not substitute an even smaller model merely because it is easier to install.
 
 ---
 
@@ -2015,7 +237,7 @@ Prefer a local OpenAI-compatible API.
 
 The rest of Jarvis must not depend tightly on one particular inference server.
 
-Current implementation: chat goes through `ModelProvider` / `OpenAICompatProvider`; server lifecycle goes through `InferenceBackend` (`backend/app/inference/backends.py`). `LlamaCppBackend` owns the local process. Everything else OpenAI-compatible resolves to `RemoteOpenAICompatibleBackend`, which only health-checks. Adding LM Studio, Ollama, vLLM, or SGLang as first-class backends means subclassing here, not touching agent code.
+Current implementation note: chat goes through `ModelProvider` / `OpenAICompatProvider`. Process management is still llama.cpp-specific (`llama-server.exe`). Keep the provider interface; extract a real `InferenceBackend` before adding Ollama/LM Studio/vLLM.
 
 ---
 
@@ -2948,7 +1170,7 @@ A skill may include:
 - verification criteria;
 - recovery guidance.
 
-Repeated successful workflows may eventually be promoted into skills. When the recorded tool arguments differ across those successes, they become parameters and the skill executes the bound steps itself instead of only advising the model.
+Repeated successful workflows may eventually be promoted into skills.
 
 Do not create skills indiscriminately.
 
@@ -3093,8 +1315,7 @@ Display:
 - VRAM usage;
 - RAM usage;
 - tokens/sec;
-- load status;
-- persisted benchmark history (tok/s, VRAM, RAM, task success rate).
+- load status.
 
 Support profiles:
 
@@ -3128,19 +1349,7 @@ Unavailable optional tools should be clearly indicated rather than crashing Jarv
 
 ---
 
-## 42. Workflows & Instructions Guide Tab
-
-Provide an interactive guide and workflow launcher tab in the Web Portal.
-
-Capabilities:
-1. **Instructions Guide**: Clear step-by-step operating instructions for how to interact with Jarvis (Command bar, Execution modes, Private key setup, Launch queue, and Memory/Skills).
-2. **Pre-built Workflow Library**: Curated, ready-to-load example workflows for common tasks (e.g. codebase debugging, research to summary/spreadsheet, web scrapers, batch file organization, multi-step maintenance jobs).
-3. **Interactive Workflow Editor**: Allow users to load any template into an editable builder, customize parameters (e.g., target paths, URLs, criteria, execution mode, autonomy level), chain sub-prompts or sequential events, and run them with one click.
-4. **Custom Workflow Presets**: Enable saving edited custom workflows locally to `data/workflows/` or database for rapid repeat execution.
-
----
-
-## 43. Settings
+## 42. Settings
 
 Provide settings for:
 
@@ -3212,6 +1421,8 @@ spoken response
 Do not let voice implementation delay core Jarvis functionality.
 
 A basic microphone button can be added later if straightforward.
+
+**Constraint (do not expand here):** llama.cpp chat must keep the **system message at the beginning**. Voice/listen must **not** inject a system turn mid-conversation. Product fix is D1’s P0 (503 listen + 500 “System message must be at the beginning”). Architect PRs must not implement it or edit voice backend files.
 
 ---
 
@@ -3477,20 +1688,21 @@ Refactor incrementally.
 
 Priority order:
 
-1. stable Jarvis core and mandatory verification/recovery;
-2. P0 fast/reliable local-model migration, Windows inference verification, and benchmarking;
-3. dynamic context/tool/thinking behavior and model escalation;
-4. P1 autonomous software-development worker routing, Cursor ACP, isolated self-development, and the one-day trial;
-5. P2 swarm-ready abstractions from `SWARM_ARCHITECTURE.md` on the existing single machine;
-6. deterministic filesystem/shell/Python and Playwright reliability;
-7. Browser Use and Windows semantic-computer-control improvements;
-8. optional specialist workers such as OpenHands/Open Interpreter/UFO/Cua where they materially improve reliability;
-9. reusable skills, trajectory learning, and operational benchmarking improvements;
-10. P3 multi-node swarm only after the P2 single-node placement abstractions are sound;
-11. voice/phone and other product capabilities according to the active Development Queue;
-12. P4 adaptive intelligence and domain workflows from `ADAPTIVE_DOMAIN_ARCHITECTURE.md` only when explicitly promoted;
-13. P5 domain packs / business operating platform from `ADAPTIVE_DOMAIN_ARCHITECTURE.md` only when explicitly promoted;
-14. P4 swarm resilience and deferred specialized infrastructure from `SWARM_ARCHITECTURE.md` only when explicitly promoted.
+1. stable Jarvis core;
+2. reliable local Qwen inference;
+3. task orchestration;
+4. state persistence;
+5. verification/recovery;
+6. deterministic filesystem/shell/Python;
+7. Playwright/browser;
+8. Browser Use integration;
+9. Windows computer control;
+10. UFO/Cua adapters;
+11. OpenHands/Open Interpreter adapters;
+12. reusable skills;
+13. trajectory memory;
+14. advanced benchmarking;
+15. voice/phone features.
 
 ---
 
@@ -3498,9 +1710,27 @@ Priority order:
 
 This project will be developed over many Cursor sessions.
 
-**Follow [`docs/PROCESS.md`](docs/PROCESS.md):** each run implements exactly **one** named RFC (`docs/rfcs/`) or **one** Development Queue item (§58). Branch from `cursor/local-qwen-desktop-agent`. Do not use vague prompts ("continue development", "pick up priorities", "merge all PRs").
+The user may configure automation to repeatedly trigger Cursor.
 
-After merge, update only the matching bullets in §57 Current State and the corresponding §58 queue line (plus §59 Decision Log if needed). Do not re-audit the repository or rewrite this file wholesale.
+Every development run should begin by reading this file.
+
+Then:
+
+1. inspect Git status;
+2. inspect current project;
+3. read the Current State section below;
+4. read the Development Queue below;
+5. select the highest-value actionable task;
+6. implement it;
+7. test it;
+8. diagnose failures;
+9. continue until a meaningful increment is complete;
+10. update Current State;
+11. update Development Queue;
+12. update architectural sections only when requirements change;
+13. leave a recoverable project state.
+
+Do not depend on the previous chat session being available.
 
 This file and the repository are the persistent development memory.
 
@@ -3558,38 +1788,29 @@ Refactor this document periodically if it becomes unwieldy.
 
 ## 57. CURRENT STATE
 
-Audited from the repository in this session. Windows hardware and live Qwen inference were **not** re-verified here (this Cursor environment is Linux and has no GGUF / llama-server.exe). Only mark something working if the code exists and, where possible, tests passed.
+Audited from the repository on `cursor/local-qwen-desktop-agent`. Live Qwen 9B/27B load and Windows e2e were **not** run in this Linux cloud session (no GPU/GGUF here). Only mark live-model items VERIFIED after a Windows desktop run.
 
 ### Hardware
 
-Target desktop (from README; not probed this session):
+User's Jarvis / Grok Bot desktop (in use; Grok Bot is already installed on this machine):
 
-- OS: Windows 11 Pro
+- OS: Windows 11
 - CPU: Intel Core i7-14700KF
 - RAM: 64 GB
 - GPU: NVIDIA GeForce RTX 5070 Ti
 - VRAM: 16 GB
-- Storage: not recorded
-- CUDA/driver: CUDA 13.0 reported; llama.cpp Windows CUDA 13.3 build b10516
 
-This development session:
+This documentation session:
 
 - OS: Linux (Cursor cloud agent)
-- GPU: none detected in this environment
-- Model binaries: not present (`models/` and `runtime/llama.cpp/` are gitignored)
+- GPU: none in this environment
+- Live 9B/27B e2e and tok/s: not run here
 
 ### Model
 
-- Model: **Qwen3.5-9B Abliterated** is the default Fast/Balanced/Quality profile (GGUF `Abiray/Qwen3.5-9B-abliterated-GGUF` of `wangzhang/Qwen3.5-9B-abliterated`). **Qwen3.5-27B Q4_K_M** is the Expert escalation profile and the fallback when 9B files are missing.
-- Quantization: Fast Q6_K (8K, thinking off); Balanced Q8_0 (16K, selective thinking); Quality Q8_0 (32K, thinking on); Expert 27B Q4_K_M (32K, thinking on)
-- Backend: `InferenceBackend` abstraction. `LlamaCppBackend` starts and supervises `llama-server`; `RemoteOpenAICompatibleBackend` health-checks a server Jarvis does not own (LAN GPU box, LM Studio, Ollama, vLLM, SGLang). Selectable via `inference_backend` / `inference_host` / `inference_port` on `PUT /api/settings`.
-- Context: 16K fast, 32K balanced/quality (profile cap). Tasks start at 8K (simple) or 16K (normal/long) and expand to the cap only when the live prompt is under pressure.
-- GPU offload: `--fit on` with `--fit-target 1024`
-- Tokens/sec: not measured this session
-- Expert profile: 27B Q4_K_M escalation-only (`expert`); compact-brief consult after repeated distinct failures, then primary reload
-- Performance harness: `POST /api/model/harness/run` records load/TTFT/tok/s/VRAM/RAM/CPU/GPU/context/tool-probe and a hardware purchase gate (do not buy until Windows GGUF numbers exist)
-- Status: **code present and unit-tested, Windows runtime not verified this session**
-- Escalation: Expert 27B consult profile exists. Difficulty signals trigger a compact second-opinion turn. Live 9B unload → 27B load is not exercised here.
+- Default runtime: **Qwen3.5-9B Abliterated** (Q8 preferred, Q6 fallback). **Qwen3.5-27B Q4_K_M** is Expert/escalation only.
+- Backend: `InferenceBackend` abstraction; `LlamaCppBackend` supervises `llama-server`; remote OpenAI-compatible backends attach without owning the process.
+- Status: **code present and unit-tested; Windows live 9B/27B load not verified this session**
 
 ### Core Application
 
@@ -3601,98 +1822,101 @@ This development session:
 
 ### Working Tools
 
-- Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat/compare/recent, backups, allowed-directory sandbox)
-- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported). `start` backgrounds a command and returns a PID; `inspect`/`wait`/`kill` check whether it is still alive. Python snippets use `python -c`.
+- Filesystem: implemented (list/search/read/write/edit/copy/move/rename/mkdir/delete/hash/stat, backups, allowed-directory sandbox)
+- PowerShell: implemented as default `terminal` shell (CMD/Python/Git/WSL/bash also supported)
 - Python: implemented (`run_code`, `run_file`, `create_venv`, `install`); venv lookup checks Windows `Scripts` and Unix `bin`
-- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs) — default `BrowserBackend`
+- Browser: Playwright Chromium (accessibility snapshot, click/type, screenshot, tabs)
 - Playwright: native backend present
-- Browser Use: **adapter integrated** (`browser_use` tool). Status is `missing` until the package is installed; Playwright remains default
 - Windows UI: `desktop` tool (pywinauto / screenshot); Windows-only at runtime
-- Office: Word/Excel/PowerPoint. Windows COM when Office is installed; python-docx / openpyxl / python-pptx otherwise. Paths are sandboxed.
-- Git: status/diff/branch/log/search plus non-destructive `jarvis-checkpoint-*` backup branches (`checkpoint` / `list_checkpoints` / `restore`)
-- Docker: optional; `run`/`logs`/`inspect` require an image or container
-- Web fetch: HTTP GET/POST/HEAD with optional body, headers, and sandboxed download
-- Vision: screenshot tool + llama.cpp `--mmproj`; not verified this session
+- Vision: screenshot tool + llama.cpp `--mmproj`. Lazy attach in code (PR #50): projector only for a vision turn, then `release_vision`. Idle llama.cpp does not pass `--mmproj`; `vision_mode=always` still does not attach at idle load. Live Windows vision not verified this session.
 - MCP: stdio and HTTP/streamable-http client; secrets not stored in git
-- Tool exposure: task classification sends a relevant subset plus `request_tools`; mixed/long-horizon still get every enabled tool
 
 ### Optional Workers
 
-- Browser Use: **adapter present** (catalog `missing`/`ready`; MIT; local OpenAI-compatible endpoint only)
-- UFO: **adapter present** (catalog `missing`/`ready`; native desktop remains default)
-- Cua: **adapter present** (catalog `missing`/`ready`; native desktop remains default)
-- Open Interpreter: **adapter present** (`open_interpreter`; catalog `missing`/`ready`; Jarvis still verifies)
-- OpenHands: **adapter present** (`code_worker`; catalog `missing`/`ready`; Jarvis still verifies)
+- Browser Use / UFO / Cua / Open Interpreter / OpenHands: **adapters present** (catalog `missing`/`ready` until the optional package is installed; native fallbacks remain default)
+
+### Swarm (one-node)
+
+This machine registers as a localhost Node. Software workers bind to that Node. Orchestrator (control plane) and Leader (execution) are distinct roles, colocated on one host. Capability registry, role policy (`AUTO`/`PREFERRED`/`FORCED`/`AVOID`/`DISABLED`), resource budgets/leases, single-node placement, intelligence-vs-placement, and warm-state/data-locality scoring are in the tree. The portal has a Swarm page. P3 multi-node discovery/pairing is not started. See `SWARM_ARCHITECTURE.md`.
+
+### Adaptive intelligence / domain packs (P4/P5)
+
+Specified in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. **Not implemented.** Do not start ahead of active P0–P3 work. Founder OS is an architecture reference only, not a Jarvis dependency.
+
+### Android client
+
+Specified in `ANDROID_CLIENT.md`. Phone PWA (`/phone`) exists for LAN. Installable Android client + link-device + AI-guided WAN port-forward is **not implemented**. Not P3 swarm.
+
+### Home IoT / security agents
+
+Specified in `HOME_IOT.md` and `SECURITY_AGENTS.md` (Blue default-on household SIEM; Purple owned-net simulation; Red LE-gated stub). **Not implemented.**
 
 ### Jarvis 2.0
 
-- Specification: **appended** as sections 64–85 (Autonomous Operator / Away Mode)
-- Event-driven intake, `SoftwareEngineeringWorker`, isolated worktrees, CI/CD control, policy engine, production self-healing, remote/mobile control, marketing/SEO/novel/multimedia workers, `Node` registry / Worker placement / GPU scheduler: **not implemented**
-- 1.x self-development isolation (worktrees, verification gate, trial budget, kill switch, end-of-run report): **implemented** (unit-tested; does not auto-merge; Cursor ACP still not wired)
-- Flagship benchmark `Away Mode — Autonomous Bug Fix`: **not implemented**
-- Hardware Stage 1 remains the existing desktop; no new GPU is required to continue development
+Specified in `JARVIS_2.0.md` (approved Away Mode / novel / marketing / SEO / multimedia / operators). **Not implemented** as current-session P0.
+
+### Windows consumer installer
+
+Specified in `INSTALLER.md`. Smoke on canonical (PR #51): `JarvisSetup.exe`; Start Jarvis → `http://127.0.0.1:4780` health 200; Stop kills backend + llama-server; 9B Q8 on disk. Remaining: wizard copy, GPU/VRAM fork, no-WAN first-run. Tray/Stop from Windows: `WINDOWS_SHELL.md` (not implemented). Do not edit `installer/windows/` product files from this Architect ticket.
+
+### Portal UX
+
+Specified in `PORTAL_UX.md`. Shell landed (PR #53): left projects + recents, main chat/task, orange/black, Swarm/Phone kept, `api.ts` swarm contracts kept. Remaining: Stop/settings findability. Do not overwrite `frontend/src` or swarm backend from this Architect PR.
 
 ### Persistence
 
 - Task storage: SQLite, including conversation JSON and tool-call records
 - Resume: `POST /api/tasks/{id}/continue` reloads compacted conversation
-- Context compaction: older turns collapse into a structured summary that cannot orphan a tool result from its assistant `tool_calls` turn; the compact working state is refreshed (not stacked) on every pass
-- Trajectory memory: `trajectories` table stores ordered tools, failure kinds, the recovery that worked, and verification. Similar new tasks get those lessons injected. No hidden reasoning is stored.
-- Skills: `skills` table. A workflow is promoted only after the same task class succeeds 3+ times with the same tool sequence. Differing tool arguments become parameters; a matching later task **runs those bound steps**, then verifies. Browser procedures that use named controls, roles/ARIA, or CSS selectors (not snapshot ids) promote as BrowserCode-style skills (`origin=browser_promoted`); snapshot/screenshot discovery is stripped so the skill can replay. Password-like fields are parameterized with no stored examples and do not auto-run. `POST /api/memory/skills/{id}/run` executes a skill without waiting for the model.
+- Context compaction: older tool traces summarized; compact working state stored in `tasks.compact_memory`
 
 ### Reliability
 
-- Retry engine: identical-call blocking plus per-tool failure counting
+- Retry engine: identical-call blocking plus consecutive-failure strategy hint
 - Verification engine: **implemented** — a task cannot complete until an independent verification pass runs; Reliable mode requires a verification tool call
-- Failure recovery: **implemented** — failures are classified (permission, missing capability, not found, timeout, usage, network, blocked) and answered with alternatives ordered by determinism; permission/blocked failures deliberately suggest no alternative tool
-- Fast / Balanced / Reliable agent execution modes: **implemented**. Model Fast/Balanced/Quality/Expert are separate from those agent modes. Balanced model profile uses selective thinking (planning and recovery only).
-- Reliable mode also generates three candidate plans and a critic selects one before execution
-- Task classification: keyword-scored classifier stored on the task; that class also selects the tool subset sent to the model (`request_capability` is the escape hatch)
+- Failure recovery: **implemented** — classified failures with alternate-tool routing (`test_recovery.py`)
+- Fast/Balanced/Reliable modes: **agent execution modes implemented** (separate from model Fast/Balanced/Quality profiles)
+- Task classification: keyword classifier stored on the task
 - Acceptance criteria / plan: parsed from the first planning turn and persisted
-
-### Documentation
-
-- Operator + contributor guides for the current tree: `docs/INSTALL.md` (Windows install, llama.cpp, GGUFs, start/stop, LAN auth) and `docs/DEVELOPMENT.md` (repo map, API, agent loop, tools, tests). `README.md` is the landing page and points at those files.
 
 ### Portal / API
 
-- Command, History, Guide & Workflows, Memory, Model, Tools, MCP, Settings, System pages exist
-- Command live status shows task class and the currently exposed tool set
-- Guide & Workflows has operating instructions, six editable templates, parameter/stage editing, local presets in `data/workflows/`, and 1-click task dispatch
-- Model page persists tok/s, VRAM, RAM, load time, and task success rate (`benchmark_samples`; `GET /api/model/benchmarks`) plus a performance harness / hardware-gate card (`POST /api/model/harness/run`)
-- Live status shows execution mode, task class, and verification
-- Live elapsed time is anchored to `started_at` so reopening a running task does not reset the clock
-- Memory page lists skills and trajectories with promote / enable / run controls; secret skill parameters use password inputs and are not stored as examples
+- Command, History, Model, Tools, MCP, Settings, System, and Swarm pages exist
+- Live status now shows execution mode, task class, and verification
 - Tools/System pages list optional workers as unavailable instead of crashing
-- Self-development: isolated worktrees, verification gate, trial budgets, `STOP AUTONOMOUS DEVELOPMENT` kill switch (`data/STOP_JARVIS`), end-of-run report on System
-- Launch queue: `data/queue/pending/` watched in real-time, `.\start-jarvis.ps1 -Prompt ... -Wait` support
-- Security: Private key authentication enforced across REST (`Authorization: Bearer`, `X-Jarvis-Key`, or `?key=`) and WebSockets for remote / LAN exposure
-- Voice: Command Speak button; `POST /api/voice/listen` transcribes locally; `POST /api/voice/speak` returns WAV; JSON `/api/voice/command` still accepts text
-- Agent Profiles (RFC-0002 UI): guided behavior interview, answer summary, and advanced policy editor at `/agents` against `/api/agent-policy`. RFC-0002 stays open until the runtime `authorize()` hook (PR #72) is also on canonical.
+- Voice: Command Speak button; local STT/TTS when packages are present; JSON `/api/voice/command` still accepts text. Constraint: llama.cpp chat must keep the system message at the beginning; voice/listen must not inject a system turn mid-conversation (D1 P0; do not implement from Architect PRs).
+- Agent policy interviews (RFC-0002): guided interview UI PR #75; runtime `authorize()` before every tool PR #72 (`8265560`). Backend policy store PR #70.
+- Guest portals (RFC-0008): backend PR #71; owner/guest portal UI PR #76 (`f003c4e`).
+- Packs portal (RFC-0007): backend PR #61; portal UI PR #78 (`c1d2634`).
+- Worker environments (RFC-0004): backend PR #58; portal UI PR #80 (`48ac107`).
+- Task tree (RFC-0006): backend PR #59; portal UI PR #81 (`d2a1fcc`).
+- License (RFC-0012): backend PR #66; portal UI PR #82 (`93e0555`).
+- Advisor disclosure (RFC-0013): backend PR #67; portal UI PR #83 (`ee745f9`).
+- Context repo (RFC-0011): backend PR #65; portal UI PR #84 (`fc111c9`).
+- Trajectories (RFC-0010): backend PR #63; portal UI PR #85 (`599a30e`).
+- Portability (RFC-0009): backend PR #62; portal UI PR #86 (`7a8f526`); 409 visibility PR #87 (`ce557d4`).
+- Coding isolation (RFC-0005): backend PR #57; portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`).
 
 ### Known Problems
 
-- Live Qwen3.5-9B / 27B load, tool-calling, and Windows e2e suite have never been run from a Cursor session (no GPU/GGUF here)
-- 9B GPU residency, tok/s, and 20-task comparison vs 27B are still Windows-desktop work
-- Best-of-N planning is implemented for Reliable mode (three candidates, critic selects one; does not run several complete attempts)
-- Browser Use / OpenHands adapters are present but the optional packages are not installed in this environment
-- UFO / Cua / Open Interpreter adapters are present (catalog `missing`/`ready` until the optional packages are installed)
-- Full e2e suite (`tests/run_e2e.py`) requires the Windows desktop install
-- Office COM and Docker depend on software that may be missing on the target PC
-- Live 9B→27B model swap is implemented as a consult flow but cannot run without GGUFs
-- Terminal default is PowerShell on Windows and bash on Linux
+- Live Qwen3.5-9B / 27B load, tool-calling, tok/s, and Windows e2e (`tests/run_e2e.py`) have not been signed off from a Cursor session
+- Optional worker packages may be missing on the desktop; adapters report `missing` rather than crashing
+- Office COM and Docker depend on software that may be missing on the desktop
+- P3 multi-node swarm (discovery, pairing, remote execution) is not started
+- Android WAN reachability / AI-guided router port-forward is specified, not implemented
+- Home IoT and security agents (Blue / Purple / Red-gated) are specified, not implemented
+- Windows consumer `.exe`: smoke PR #51 (`JarvisSetup.exe`, Start/Stop, health 200, 9B Q8 on disk). Remaining: wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`). Tray/Stop from Windows: specified (`WINDOWS_SHELL.md`), not implemented.
+- Portal UX shell (`PORTAL_UX.md`): PR #53 (projects + recents, orange/black, Swarm/Phone, swarm API contracts). Remaining: Stop/settings findability
 
 ### Last End-to-End Test
 
-Date: 2026-08-25
+Date: 2026-08-25 (spec restore)
 
 Tests performed:
 
-- Unit tests (`python -m pytest tests -q`): planning including best-of-N parse/select, Reliable-mode plan selection loop, safety, filesystem sandbox plus compare/recent, capability catalog, verification loop, persistence checkpoint, compaction tool-pairing, inference backend selection and llama.cpp command building, failure classification and recovery routing, trajectory record/recall, skill promotion **and parameterized execution**, private key authentication, launch queue watcher, workflow templates/save/run, terminal start/inspect/wait/kill, model benchmark persistence, **task-class tool exposure + request_tools**, **Expert 27B consult policy**, **performance harness / hardware gate**, docker/browser/python/git/web_fetch guards
-- Frontend (`npm run build`): TypeScript build (this session)
-- Windows live model e2e (`tests/run_e2e.py`): **not run** (no GPU/GGUF in this environment)
+- Queue ticks against code and squash-merge PRs on `cursor/local-qwen-desktop-agent`
+- Windows live model e2e: **not run** (no GPU/GGUF in this environment)
 
-Results: **312 passed** on this branch after merge-repair QA. Live Qwen/Windows e2e remains the next desktop-session P0.
+Results: live 9B/27B remains desktop sign-off. Do not treat unit tests as a live-model pass.
 
 ---
 
@@ -3700,7 +1924,7 @@ Results: **312 passed** on this branch after merge-repair QA. Live Qwen/Windows 
 
 Statuses: TODO, IN PROGRESS, BLOCKED, VERIFIED
 
-Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/foundation or useful improvement, P3 multi-node/future capability, P4 adaptive intelligence/resilience, P5 domain/business platform, P4 (swarm) advanced long-term infrastructure per `SWARM_ARCHITECTURE.md`. Long-term ZoeyOS/FounderOS parity (Agent Profiles, Specialist Packs, command-center dashboard, offline licensing) is specified in `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md` — promote individual items into this queue via RFCs; do not bulk-import the full spec here.
+Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvement / swarm-ready foundation, P3 multi-node/future, P4 adaptive intelligence, P5 domain packs. Long-term ZoeyOS/FounderOS parity (Agent Profiles, Specialist Packs, command-center dashboard, offline licensing) is specified in `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md` — promote individual items into this queue via RFCs; do not bulk-import the full spec here.
 
 ### P0
 
@@ -3718,39 +1942,15 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
 
 - [x] Verification loop
   - Acceptance: task cannot be marked successful without an independent verification pass.
-  - Status: VERIFIED in unit tests with a scripted model (`python -m pytest tests -q` → 12 passed). Also fixed SQLite timezone-aware duration calculation so completion no longer crashes.
-
-- [x] Dynamic context size (P0.6)
-  - Acceptance: simple tasks start at 8K, normal/long tasks start at 16K, expand to the profile cap only when the live prompt is under pressure. Compaction remains the first response to long histories.
-  - Status: VERIFIED (`test_context_policy.py`); llama.cpp reload is skipped when Jarvis does not own the process.
-
-- [x] Performance benchmark harness (P0.8)
-  - Acceptance: automated suite covers 9B Q8/Q6, official 9B Q8, 27B Q4, 8K/16K/32K, vision on/off, thinking off/selective/on. Missing GGUFs are skipped. Report is JSON + markdown under `data/benchmarks/`.
-  - Status: VERIFIED (`test_harness.py`); live tok/s/VRAM on the Windows GPU remains the next desktop-session measurement.
-
-- [x] Real Jarvis agent benchmark catalog (P0.9)
-  - Acceptance: at least 20 realistic autonomous tasks covering filesystem, Python diagnosis, Git, shell, browser, recovery, screenshot, research, documents, multi-tool, and verification.
-  - Status: VERIFIED catalog + report runner (`test_harness.py`). Live model/configuration scoring is **BLOCKED in this environment** (no GPU/GGUF).
-
-- [x] Automatic Expert 27B escalation (P0.10)
-  - Acceptance: escalate on repeated failure, multiple failed strategies, critic rejection, contradictions, architecture tasks, or an explicit user request. Expert receives a compact packet, not the full trajectory. Primary profile is restored when a GGUF swap happened.
-  - Status: VERIFIED (`test_escalation.py`). Live 9B→27B unload/load is **BLOCKED here** (this branch still defaults to 27B; a GGUF swap is a no-op when both profiles share the same file).
+  - Status: VERIFIED in unit tests with a scripted model
 
 - [ ] Reliable Qwen3.5-27B local inference on the Windows desktop
   - Acceptance: model loads, API responds, tool calls work, vision projector loads.
-  - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`.
+  - Status: TODO (code present; **BLOCKED in this environment** — no Windows GPU/GGUF). Next Windows session must run `tests/run_e2e.py`. Live 9B load is likewise unsigned-off.
 
-- [x] Dynamic tool exposure (P0.7)
-  - Acceptance: task class sends a relevant tool schema; `request_tools` can expand it; mixed/long-horizon keep the full set.
-  - Status: VERIFIED in unit tests (`test_tool_exposure.py`, `test_tool_exposure_loop.py`)
-
-- [x] Performance benchmark harness + hardware purchase gate (P0.8 / P0.12 code)
-  - Acceptance: harness records load/TTFT/tok/s/VRAM/RAM/CPU/GPU/context/tool latency; does not recommend buying hardware until Windows GGUF numbers exist.
-  - Status: VERIFIED in unit tests (`test_harness.py`); live GPU samples **not** collected here
-
-- [x] Automatic Expert 27B escalation policy (P0.10 code)
-  - Acceptance: escalate only when stuck or explicitly requested; compact brief; restore primary profile.
-  - Status: VERIFIED in unit tests (`test_escalation.py`); live 9B↔27B swap **BLOCKED** (no GGUF)
+- [x] Lazy mmproj (attach vision projector only when needed, then unload)
+  - Acceptance: ordinary text/tool tasks do not keep `--mmproj` resident. When a request needs vision, attach the projector; when it no longer needs vision, unload it.
+  - Status: VERIFIED in code (PR #50, squash-merge onto canonical; not PR #47). Attach only for a vision turn, then `release_vision`. Idle llama.cpp does not pass `--mmproj`. `vision_mode=always` still does not attach at idle load. Live Windows vision remains desktop sign-off.
 
 ### P1
 
@@ -3763,124 +1963,163 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 swarm-ready/found
   - Status: VERIFIED (code + API)
 
 - [x] Strengthen failure recovery (alternate tool/worker, not only identical-call blocking)
-  - Acceptance: a failed browser path can fall back to web_fetch/library without repeating the same call.
-  - Status: VERIFIED in unit tests (`test_recovery.py`, `test_recovery_loop.py`)
+  - Acceptance: a failed browser path can fall back to Playwright/web_fetch without repeating the same call.
+  - Status: VERIFIED in code (`test_recovery.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
 
 - [x] Context compaction quality
-  - Acceptance: long tasks keep a compact working-state block, do not dump full tool traces, and never orphan a tool result.
-  - Status: VERIFIED in unit tests (`test_compaction.py`)
+  - Acceptance: long tasks keep a compact working-state block and do not dump full tool traces.
+  - Status: VERIFIED in code (`test_compaction.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
 
 - [x] Extract `InferenceBackend` from `InferenceManager`
-  - Acceptance: llama.cpp process manager is one backend; any other OpenAI-compatible server is health-checked only.
-  - Status: VERIFIED in unit tests (`test_inference_backends.py`); live LAN endpoint untested
-
-- [x] Interactive Guide & Workflow Launcher Tab (Instructions, Example Library & Custom Event Chains)
-  - Acceptance: New "Guide & Workflows" tab in the web portal containing clear usage instructions, pre-populated editable templates (e.g., project debugging, research + Excel export, multi-file transforms, browser workflows), an editor allowing prompt parameters / event chains customization, and 1-click execution dispatch.
-  - Status: VERIFIED (portal tab + `/api/workflows` + unit tests)
-
-- [x] Browser Use adapter
-  - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
-  - Status: VERIFIED in unit tests (`test_workers.py`); package optional — catalog shows `missing` until installed
+  - Acceptance: llama.cpp process manager is one backend; remote OpenAI-compatible remains a provider.
+  - Status: VERIFIED in code (`test_inference_backends.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
 
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
-  - Status: CODE PRESENT / unit-tested (`test_browser.py`): navigation retries, named-role click fallback, `title` action, close/missing-URL do not launch Chromium. Live Windows e2e Test 3 still TODO.
+  - Status: CODE PRESENT / unit-tested (`test_browser.py`, PR #19). Live Windows e2e Test 3 still TODO.
+
+- [x] Browser Use adapter
+  - Acceptance: optional intelligent browser worker behind `BrowserBackend`; Playwright remains default.
+  - Status: VERIFIED in code (PR #4)
 
 - [ ] Windows semantic UI automation hardening
   - Acceptance: named-control interaction works for at least one native app; coordinate click remains last resort.
-  - Status: CODE PRESENT / unit-tested (`test_desktop.py`): title/auto_id/best_match lookup; missing name does not fall through to coordinates; non-Windows returns unavailable. Live native-app verification still TODO on Windows.
+  - Status: CODE PRESENT / unit-tested (`test_desktop.py`, PR #19). Live native-app verification still TODO on Windows.
 
 - [x] OpenHands worker adapter
   - Acceptance: large repo tasks can be delegated; Jarvis still verifies.
-  - Status: VERIFIED in unit tests (`test_workers.py`); package optional — catalog shows `missing` until installed; native filesystem/python/git remain the fallback
+  - Status: VERIFIED in code (PR #4)
 
-- [x] Jarvis MCP server for Cursor
-  - Acceptance: Cursor can attach to a limited Jarvis MCP server for plan/task/architecture/trajectory context; recursive self-dispatch is refused.
-  - Status: VERIFIED in unit tests (`test_mcp_server.py`; `GET /api/mcp/jarvis`, `python3 -m app.mcp_stdio`)
-
-- [x] EscalationContext packaging
-  - Acceptance: after repeated coding-tool failures Jarvis stores a compact package (goal, criteria, files, diff, failures) instead of dumping the raw transcript.
-  - Status: VERIFIED in unit tests (`test_escalation.py`)
-
-- [x] Cursor ACP session lifecycle (without live CLI)
-  - Acceptance: JSON-RPC initialize/session/prompt/cancel, persisted session IDs, auto-answer for isolated routine `cursor/ask_question` and `cursor/create_plan`; consequential decisions stay with the user.
-  - Status: VERIFIED in unit tests (`test_acp.py`). Live `agent acp` remains `not_connected` until Cursor CLI is on PATH.
-
-- [x] Isolated Git worktree / fork management
-  - Acceptance: self-development edits run in a dedicated worktree/branch; the trusted checkout is never modified; broken experiments can be discarded.
-  - Status: VERIFIED (`test_worktrees.py`; git `worktree_add` / `commit` / `worktree_remove`)
-
-- [x] Self-development verification gate
-  - Acceptance: independent pytest must pass with no unexplained regression; auto-merge to trusted main is refused; experimental instance is planned on an alternate port.
-  - Status: VERIFIED (`test_self_dev.py`; `POST /api/self-dev/worktrees/{id}/verify`; merge always 403)
-
-- [x] Trial budget, emergency kill switch, and end-of-run report
-  - Acceptance: duration/spend/invocation/failure limits; `data/STOP_JARVIS` plus portal/API stop; report includes branch, commits, tests, cost, and merge candidates.
-  - Status: VERIFIED (`test_self_dev.py` + Command/System/Settings UI)
-
-- [ ] RFC-0002 Agent policy interviews and per-capability autonomy
-  - Acceptance: guided interview UI + runtime `authorize()` before every tool. Portal UI is this ticket; the loop hook is PR #72.
-  - Status: IN PROGRESS — frontend interview UI against landed `/api/agent-policy`. Do not mark implemented until this UI and #72 are both on canonical.
+- [x] RFC-0002 Agent policy interviews and per-capability autonomy
+  - Acceptance: guided interview UI + runtime `authorize()` before every tool.
+  - Status: VERIFIED in code — interview UI PR #75; `authorize()` loop hook PR #72 (`8265560`); backend policy store PR #70. Both UI and hook are on `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0008 Scoped guest portals
+  - Acceptance: revocable guest portals with scoped tokens, deny-all default, owner revoke, permission preview, isolation tests, owner/guest UI.
+  - Status: VERIFIED in code — backend PR #71; guest portal UI PR #76 (`f003c4e`). On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0007 Domain/workspace packs
+  - Acceptance: preview before install/upgrade/uninstall; rollback/export; trust keys.
+  - Status: VERIFIED in code — backend PR #61 (`8bb4145`); packs portal UI PR #78 (`c1d2634`). On `cursor/local-qwen-desktop-agent`. P5 Domain Pack architecture / business-platform list remains unimplemented.
+- [x] RFC-0004 Persistent worker environments
+  - Acceptance: lifecycle; status/disk/last-active; start/suspend/resume/reset/inspect.
+  - Status: VERIFIED in code — backend PR #58 (`56cc70d`); portal UI PR #80 (`48ac107`). On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0006 Hierarchical short-lived task workers
+  - Acceptance: parent/child graph, status/events, spawn clamped so no extra authority.
+  - Status: VERIFIED in code — backend PR #59 (`4fd6be0`); portal UI PR #81 (`d2a1fcc`). On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0012 Local license with BYO inference
+  - Acceptance: entitlement separate from inference; status vs local cost; no secrets in UI.
+  - Status: VERIFIED in code — backend PR #66 (`7b44ebe`); portal UI PR #82 (`93e0555`). License entitlement only, not a backend inference rewrite. On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0013 Compact local harness and advisor escalation
+  - Acceptance: preview what leaves the box; advisor has no tools.
+  - Status: VERIFIED in code — backend PR #67 (`1d614a0`); portal UI PR #83 (`ee745f9`). New files; no harness/compaction rewrite. On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0011 Versioned context repositories
+  - Acceptance: inspect/diff/revert/pin/delete; Memory page kept.
+  - Status: VERIFIED in code — backend PR #65 (`5c17b5e`); portal UI PR #84 (`fc111c9`). Does not replace the existing skills Memory page. On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0010 Cross-harness trajectory ingestion
+  - Acceptance: list/inspect, Cursor import, native emit; no secrets.
+  - Status: VERIFIED in code — backend PR #63 (`412ce01`); portal UI PR #85 (`599a30e`). Compose with `agent/trajectory.py`; stay off `db/models.py`. On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0009 Agent runtime portability
+  - Acceptance: stable identity across lease/migrate/suspend/resume; 409s visible; no extra authority.
+  - Status: VERIFIED in code — backend PR #62 (`82a5ef7`); portal UI PR #86 (`7a8f526`); 409 visibility PR #87 (`ce557d4`). On `cursor/local-qwen-desktop-agent`.
+- [x] RFC-0005 Isolated parallel coding workers
+  - Acceptance: worktrees, decision inbox, no silent merge; integrate blocked unless ready.
+  - Status: VERIFIED in code — backend PR #57 (`430e31b`); portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`). On `cursor/local-qwen-desktop-agent`.
+- [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
+  - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
+  - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
+- [ ] Windows consumer installer — wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`)
+  - Plain-language first-run wizard (progress UI; data dir; private key; optional LAN; Q6 fallback / 27B optional). If GPU/VRAM is missing or too small: explain and offer CPU-degraded or stop. First-run must **not** expose WAN without the Link-device flow.
+  - Status: TODO / specified. Do not overwrite `installer/windows/` product files from Architect PRs.
+- [ ] Windows tray / Stop from Settings (`WINDOWS_SHELL.md`)
+  - While running: tray with Open portal, Start, Stop, Quit. Quit = Stop backend + llama-server + tray helper. Stop must not leave llama-server orphaned. Uninstall/Modify from Settings → Apps → Jarvis must not leave those processes. Startup toggle (if any) matches §48. Not P3; no WAN. D1 is on voice P0; CoS assigns this later.
+  - Status: TODO / specified. Do not touch `installer/windows/` or voice backend from this Architect PR.
+- [x] Portal UX app shell (`PORTAL_UX.md`, PR #53)
+  - Orange/black; left projects + recents; main chat/task; existing destinations including Swarm and Phone; `api.ts` swarm contracts kept.
+  - Status: VERIFIED in code (PR #53 squash-merge onto `cursor/local-qwen-desktop-agent`). Remaining: Stop/settings findability (`PORTAL_UX.md`; tray Stop is `WINDOWS_SHELL.md`, D1 in flight). Do not overwrite `frontend/src` from Architect PRs.
 
 ### P2
 
-- [x] Reusable skills — VERIFIED (`test_skills.py`); promotion needs 3 repeats of the same tool sequence
-- [x] Trajectory memory (cross-task) — VERIFIED (`test_trajectory.py`)
-- [x] Best-of-N planning for Reliable mode — VERIFIED (`test_best_of_n.py`, `test_planning.py`); three labeled candidates, critic selects one, only that plan is executed
-- [x] Compare-files / recent-version filesystem helpers — VERIFIED (`test_filesystem.py`); `compare` unified-diffs text / hashes binaries; `recent` lists `.bak` copies
-- [x] Parameterized skill execution — VERIFIED (`test_skills.py`); bound steps run on matching tasks and via `POST /api/memory/skills/{id}/run`
-- [x] Model benchmark UI (persist tok/s, VRAM, success rates) — VERIFIED (`test_benchmarks.py` + Model page history)
+- [x] Reusable skills
+  - Status: VERIFIED in code (`test_skills.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
+- [x] Trajectory memory (cross-task)
+  - Status: VERIFIED in code (`test_trajectory.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
+- [x] Best-of-N planning for Reliable mode
+  - Status: VERIFIED in code (PR #1)
+- [x] Model benchmark UI (persist tok/s, VRAM, success rates)
+  - Status: VERIFIED in code (PR #2)
 - [x] Office COM coverage when Office is installed
-  - Acceptance: Word/Excel/PowerPoint create/read/write/save_as/append/info; COM when Office is present; library backend otherwise; sandbox enforced.
-  - Status: VERIFIED in unit tests (`test_office.py`). Live COM on a Windows Office install was not exercised in this environment.
-- [x] Long-running process inspection (PID still alive) — VERIFIED (`test_terminal.py`; terminal `start`/`inspect`/`wait`/`kill`)
-- [x] Git recoverable checkpoints — VERIFIED (`test_git.py`); `checkpoint` creates `jarvis-checkpoint-*` without removing working-tree changes; `restore` overlays without switching branch
-- [x] web_fetch research completeness — VERIFIED (`test_web_fetch.py`); POST body, headers, sandboxed download, http(s) only
+  - Status: VERIFIED in code (PR #14). Live COM on a Windows Office install was not exercised here.
+- [x] Compare-files / recent-version filesystem helpers
+  - Status: VERIFIED in code (PR #1)
+- [x] Long-running process inspection (PID still alive)
+  - Status: VERIFIED in code (PR #2)
 
 #### P2 — Swarm-ready foundation (`SWARM_ARCHITECTURE.md`)
 
-These items make the existing machine a one-node swarm first. They must not require a second computer. Detailed role/resource/UI semantics live in `SWARM_ARCHITECTURE.md`.
+These items make the existing machine a one-node swarm first. They must not require a second computer.
 
-- [ ] Introduce first-class `Node` identity/state separate from software Worker abstractions.
-- [ ] Preserve software workers (`LocalJarvisCodingWorker`, `CursorACPWorker`, browser/media workers, etc.) as services that execute on eligible Nodes.
-- [ ] Separate Orchestrator (control plane) from Leader (strongest general-purpose execution Node).
-- [ ] Generalize capability registration so Nodes and Workers advertise capabilities and requirements.
-- [ ] Implement node role/class policy: `AUTO`, `PREFERRED`, `FORCED`, `AVOID`, `DISABLED`, including persistence and failover intent without implementing distributed failover yet.
-- [ ] Implement host resource budgets, hard/soft caps, reserved capacity, task priority, and resource-lease representation (CPU/RAM/GPU/VRAM/storage/network where meaningful).
-- [ ] Implement a single-node placement scheduler that selects an eligible Node from requirements even when only `localhost` exists.
-- [ ] Keep intelligence selection separate from physical placement: choose the Worker/model first or jointly, then select the eligible Node based on capability, policy, locality, load, and resource availability.
-- [ ] Add model/worker warm-state and data-locality signals to placement scoring so the scheduler does not cause pointless model reloads or large transfers.
-- [ ] Extend the existing React portal toward the universal dynamic UI contract and add a Swarm settings surface without creating OS-specific frontends.
+- [x] Introduce first-class `Node` identity/state separate from software Worker abstractions.
+  - Status: VERIFIED in code (PR #28)
+- [x] Preserve software workers (`LocalJarvisCodingWorker`, `CursorACPWorker`, browser/media workers, etc.) as services that execute on eligible Nodes.
+  - Status: VERIFIED in code (PR #32)
+- [x] Separate Orchestrator (control plane) from Leader (strongest general-purpose execution Node).
+  - Status: VERIFIED in code (PR #34)
+- [x] Generalize capability registration so Nodes and Workers advertise capabilities and requirements.
+  - Status: VERIFIED in code (PR #35)
+- [x] Implement node role/class policy: `AUTO`, `PREFERRED`, `FORCED`, `AVOID`, `DISABLED`, including persistence and failover intent without implementing distributed failover yet.
+  - Status: VERIFIED in code (PR #37)
+- [x] Implement host resource budgets, hard/soft caps, reserved capacity, task priority, and resource-lease representation (CPU/RAM/GPU/VRAM/storage/network where meaningful).
+  - Status: VERIFIED in code (PR #39) for budgets, HARD/SOFT caps, and leases. Reserved capacity and task priority are not first-class fields yet.
+- [x] Implement a single-node placement scheduler that selects an eligible Node from requirements even when only `localhost` exists.
+  - Status: VERIFIED in code (PR #41)
+- [x] Keep intelligence selection separate from physical placement: choose the Worker/model first or jointly, then select the eligible Node based on capability, policy, locality, load, and resource availability.
+  - Status: VERIFIED in code (PR #44)
+- [x] Add model/worker warm-state and data-locality signals to placement scoring so the scheduler does not cause pointless model reloads or large transfers.
+  - Status: VERIFIED in code (PR #45)
+- [x] Extend the existing React portal toward the universal dynamic UI contract and add a Swarm settings surface without creating OS-specific frontends.
+  - Status: VERIFIED in code (PRs #30, #33, #36, #38, #40, #42, #46). Full device-adaptive universal UI / Tauri shell is not in the tree.
 
 ### P3
 
 - [x] Voice interface (Whisper STT + local TTS wrapping `/api/voice/command`)
-  - Status: VERIFIED (`test_workers.py` + Command Speak button). Optional packages; degrades to typed commands when Whisper is missing. Cloud speech APIs are not used.
+  - Status: VERIFIED in code (PR #4)
 - [x] Phone / Android client against the local API
-  - Acceptance: `/phone` PWA talks to the local API: start task, live status, cancel/continue, Speak, recent-task follow. Pairing via `/api/mobile` does not leak the private key.
-  - Status: VERIFIED (`test_mobile.py` + Phone page). Live Android install is still a desktop-session check.
+  - Status: VERIFIED in code (PR #13) for the LAN Phone PWA (`/phone`, `GET /api/mobile` does not leak the key). Live Android home-screen install is still a desktop-session check.
+- [ ] Android client to the Leader with AI-guided WAN reachability (`ANDROID_CLIENT.md`)
+  - Evolve `/phone` into an installable Android client (TWA/PWA or thin WebView). Link-device: ask for pairing then; explain WAN exposure; user self-setup **or** Jarvis with router admin passwords; router access may later be used by Blue (and Purple on owned net). Red does not get those credentials unless the LE gate is on and the action is in authorized scope. Brand-agnostic walkthrough. Forward only the Jarvis port. CGNAT → overlay fallback. Not P3 swarm.
+  - Status: TODO / specified. Do not hardcode ISP or brand adapters.
+- [ ] Home IoT / mansion house control (`HOME_IOT.md`)
+  - Discover and safely control LAN devices (HA/Matter/local APIs). Locks/garage extra confirm. Not swarm Nodes.
+  - Status: TODO / specified
+- [ ] Blue (home, default on) — household SIEM (`SECURITY_AGENTS.md`)
+  - Detect, alert, contain, evidence on the user’s own LAN. Local SIEM; portal+phone alerts; owned-router containment with autonomy gates. Reuses link-device router secrets. No exploits or off-LAN attacks.
+  - Status: TODO / specified
+- [ ] Purple (owned-network only) — authorized adversary simulation (`SECURITY_AGENTS.md`)
+  - Tests Blue on assets the user owns and lists. Explicit user confirm + autonomy profile; never silent. Goal is to improve detection, not to attack anyone else. No simulation techniques, payloads, or exploit steps in the spec or product. **Not a back door** to install red tools.
+  - Status: TODO / specified
+- [ ] Red / counter-response — law-enforcement gate only (`SECURITY_AGENTS.md`)
+  - Spec the **gate**, not the attacks. Default disabled in the consumer/home build; no UI toggle a normal user can flip. Until Taco provides a distinct LE authorization module (identity + authorization artifact — do not invent a fake badge check), Red is a stub that refuses to run. Even when gated on: case/authorization record, human confirm, full SIEM audit; autonomy cannot silently enable it. Identify/isolate/evidence stay in Blue. Not a shipped hack-back kit.
+  - **Hard guardrail:** offensive / red / counter-response capability MUST NOT be added by ordinary executing bots (developers, PR fixer, CoS, generic cloud agents, home Jarvis self-dev). MAY be added only by Taco (manually) or PolitieGPT (named LE bot) under the LE gate. Do not invent PolitieGPT internals. Home/product workers have no API to register offensive tools, payloads, or hack-back skills; attempts refuse and audit-log. Purple is not a back door to Red.
+  - Status: TODO / specified
 - [x] Dedicated LAN inference server
-  - Acceptance: remote/LM Studio/Ollama/vLLM backends attach without a local GGUF; Settings expose host/port/API key/remote model; snapshot lists advertised models.
-  - Status: VERIFIED (`test_inference_backends.py`). Live second-PC attach remains a desktop-session check.
+  - Status: VERIFIED in code (PR #6)
 - [x] UFO adapter
-  - Acceptance: optional Windows HostAgent worker behind `ComputerUseBackend`; native UI Automation remains default; missing install reports `missing` and names the desktop fallback.
-  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
+  - Status: VERIFIED in code (PR #8)
 - [x] Cua adapter
-  - Acceptance: optional computer-use worker behind `ComputerUseBackend`; missing install reports `missing` and names the desktop fallback.
-  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
+  - Status: VERIFIED in code (PR #8)
 - [x] Open Interpreter adapter
-  - Acceptance: optional code/shell worker behind `open_interpreter`; missing install reports `missing` and names native filesystem/python/git/terminal fallback; Jarvis still verifies.
-  - Status: VERIFIED (`test_workers.py`; package not installed in this environment)
+  - Status: VERIFIED in code (PR #6)
 - [x] Browser workflow promotion (BrowserCode-style skills)
-  - Status: VERIFIED (`test_skills.py`). Snapshot/screenshot discovery is stripped; role/ARIA targets count as stable; password-like fields never auto-bind or auto-run.
+  - Status: VERIFIED in code (PR #6)
+- [ ] Multi-node discovery, secure pairing, remote workers, and cross-node networking
+  - Status: TODO / not started. One-node swarm only. Do not claim a second machine works.
 
 ### P4 — Adaptive intelligence (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
 
-Specified, not implemented. Complements swarm resilience in `SWARM_ARCHITECTURE.md`.
+Specified, not implemented. Complements swarm resilience in `SWARM_ARCHITECTURE.md`. Detailed requirements stay in the adaptive spec; this queue only tracks headings.
 
 - [ ] Structured execution event layer (central event model; correlation IDs; outcome states)
 - [ ] Memory confidence lifecycle (`CANDIDATE` → `CONFIRMED` → `APPLIED` → `DISMISSED`)
-- [ ] Memory categories, reinforcement, and confidence-gated context injection (3–8 relevant memories)
+- [ ] Memory categories, reinforcement, and confidence-gated context injection
 - [ ] Adaptive Intelligence layer (observation → learning → routing → self-healing)
 - [ ] Adaptive worker/model routing and node placement with warm-worker/data-locality bonuses
 - [ ] Learned recovery reliability and graceful degradation (`CAPABILITY_UNAVAILABLE`)
@@ -3891,7 +2130,7 @@ Specified, not implemented. Complements swarm resilience in `SWARM_ARCHITECTURE.
 
 ### P5 — Domain packs / business platform (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
 
-Specified, not implemented.
+Specified, not implemented. Domain Packs are enableable Jarvis modules, not a Founder OS runtime.
 
 - [ ] Domain Pack architecture (enableable packs; namespace convention)
 - [ ] Core business workflows: daily briefing, inbox, meeting intelligence, follow-up tracker
@@ -3902,33 +2141,144 @@ Specified, not implemented.
 - [ ] Domain-specific verification per pack; domain learning into shared P4 layer
 - [ ] External integrations as sync targets — Jarvis owns canonical state
 
-### Jarvis 2.0 — specified, not implemented
+### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
 
-Do not start these instead of Windows P0 unless the user asked for Away Mode / 2.0 work.
+Approved text restored (sections 64–85). Specified, not implemented. Do not drop marketing, SEO, novel, multimedia, or other approved 2.0 features.
 
-Phase A — Autonomous Developer:
-
-- [ ] Event/webhook intake with a persistent queue (priorities, retries, backoff, dedup, DLQ, restart-safe processing)
-- [ ] Event normalization into internal types (`BUG_REPORTED`, `FEATURE_REQUESTED`, `CI_FAILED`, …)
-- [ ] `SoftwareEngineeringWorker` abstraction (`NativeJarvisCodingWorker` first; Codex / Claude Code / OpenHands later)
-- [ ] Isolated Git worktrees / disposable environments (never modify the production checkout) — 1.x trial isolation is VERIFIED; 2.0 event-driven disposable environments remain TODO
-- [ ] Independent verification of worker output (a worker saying "fixed" is never enough)
-- [ ] PR generation from isolated work after tests
-- [ ] `Away Mode — Autonomous Bug Fix` benchmark harness (skeleton)
-
-Phase B — Production Operator: deployment control, canary, rollback, policy engine, self-healing.
-
-Phase C — Remote Jarvis: Android/mobile client, push, remote approvals, voice as a task/authority interface.
-
-Phase D — Business Operator: marketing, analytics, content publishing, support workflows.
-
-Phase E — Creative Operator: `NovelProject`, editorial workers, multimedia pipeline.
-
-Phase F — Distributed Jarvis: implement the P2/P3/P4 swarm roadmap from `SWARM_ARCHITECTURE.md` (first-class Nodes, software Workers placed on Nodes, resource-aware scheduling, multi-node execution, and later resilience) plus cloud fallback where explicitly authorized.
+- [ ] Event-driven intake (queue, retries, backoff, dedup, DLQ)
+- [ ] Event normalization (`BUG_REPORTED`, `FEATURE_REQUESTED`, `CI_FAILED`, …)
+- [ ] SoftwareEngineeringWorker + isolated worktrees / verification (1.x trial isolation exists; 2.0 event-driven remains TODO)
+- [ ] Authority / approval policy engine
+- [ ] Production monitoring and self-healing
+- [ ] Marketing Manager worker
+- [ ] SEO / content operations
+- [ ] NovelProject subsystem (story bible, chapter state, editorial workers) — Taco writes novels with Jarvis
+- [ ] Multimedia / creative worker
+- [ ] Away Mode — Autonomous Bug Fix flagship benchmark
 
 ---
 
 ## 59. DECISION LOG
+
+Decision: Jarvis Architect is sole editor of spec docs
+
+Jarvis Architect is the only role that may edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, the `BLUE_TEAM.md` pointer, `INSTALLER.md`, `WINDOWS_SHELL.md`, and `PORTAL_UX.md`. Executing bots must not edit those files. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect. New design for implementation still goes in `docs/rfcs/`.
+
+Reason:
+
+Bot sessions repeatedly bloated and restated the master spec. Status ticks belong in the queue; architecture belongs in the Architect-owned specs.
+
+Decision: default runtime is Qwen3.5-9B Abliterated; 27B is Expert/escalation
+
+Approved by Taco. Preferred 9B GGUF is Q8_0 (Q6_K fallback). Qwen3.5-27B Q4_K_M stays the Expert consult model, not the everyday model.
+
+Reason:
+
+27B does not stay fully GPU-resident on the user's 16 GB RTX 5070 Ti.
+
+Decision: Jarvis 2.0 stays in the spec set as `JARVIS_2.0.md`
+
+Taco: all previously approved features stay. Sections 64–85 are restored into `JARVIS_2.0.md` (not omitted, not thinned). Marketing, SEO, NovelProject, multimedia, Away Mode, and related operators remain. Invoices remain under P5 as well. Do not treat 2.0 as current-session P0 unless the queue promotes an item.
+
+Reason:
+
+Hold was lifted. The 63-section master plan stays readable; the approved 2.0 text is a first-class spec file.
+
+Decision: never delete Taco-approved features
+
+If a **new** idea would make home-network JARVIS/Cortana more real, add a spec. Do not remove approved product from the spec set to “simplify.”
+
+Reason:
+
+Filter going forward is additive for home-JARVIS; deletion of approved work is forbidden.
+
+Decision: spec-set completeness (Taco pass)
+
+The spec set must keep all of: original 63-section master plan body; queue ticks with PR numbers; P2 swarm ticks; lazy mmproj VERIFIED in code (PR #50); Jarvis 2.0 §§64–85 including Novel (`JARVIS_2.0.md`); P4/P5 (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`, Founder OS not a dependency); Android link-device / AI-guided brand-agnostic router (`ANDROID_CLIENT.md`); home IoT (`HOME_IOT.md`); Blue / Purple / Red-gated (`SECURITY_AGENTS.md`); Windows consumer `.exe` (`INSTALLER.md`); Windows tray/Stop (`WINDOWS_SHELL.md`); portal shell (`PORTAL_UX.md`); Architect-owns-specs. Offensive/red capability: Taco or PolitieGPT only.
+
+Reason:
+
+Taco: when this pass finishes, the PR must contain all of that. Do not drop any approved feature.
+
+Decision: Windows consumer .exe installer is a first-class spec
+
+Non-technical Windows 11 onboarding lives in `INSTALLER.md`. Smoke (PR #51): `JarvisSetup.exe`, Start Jarvis → health 200, Stop kills backend + llama-server, 9B Q8 on disk. Remaining P1: wizard copy, GPU/VRAM fork, no-WAN first-run. This spec does not prescribe Inno line-by-line. Architect PRs must not overwrite `installer/windows/` product files. Not P3 swarm.
+
+Reason:
+
+New users should not perform a manual Python/Node/llama.cpp dance. Developer/manual install stays in `docs/INSTALL.md`.
+
+Decision: Windows tray / Stop from Settings is a separate spec
+
+`WINDOWS_SHELL.md`. While Jarvis is running, a tray icon is required (Open portal, Start, Stop, Quit). Quit stops backend + llama-server + tray helper. Stop must not leave llama-server orphaned. Settings → Apps Uninstall/Modify must not leave those processes. Later CoS ticket; D1 is on voice P0. Do not touch `installer/windows/` from Architect PRs. Not P3; no WAN.
+
+Reason:
+
+Start Menu Stop is not enough for non-technical Windows users.
+
+Decision: portal UX is a ChatGPT-style app shell
+
+`PORTAL_UX.md`. Keep orange/black and existing destinations including Swarm and Phone. Home is talk/work: left projects + recents, main chat/task. Admin pages remain reachable, not the home screen. Shell landed in code via PR #53 (`api.ts` swarm contracts kept). Remaining: Stop/settings findability. Do not overwrite `frontend/src` from Architect PRs.
+
+Reason:
+
+Taco/CoS: current tabs feel like a stack of admin dashboards.
+
+Decision: llama.cpp system message stays first
+
+llama.cpp chat must keep the system message at the beginning. Voice/listen must not inject a system turn mid-conversation. D1 owns the product fix. Do not implement from Architect PRs; do not edit voice backend files.
+
+Reason:
+
+Constraint only. Avoid a voice rewrite in this spec pass.
+
+Decision: swarm architecture remains a separate specification
+
+Detailed role, placement, resource-control, and universal-UI requirements live in `SWARM_ARCHITECTURE.md` (PR #9). This file owns priority/status only.
+
+Reason:
+
+The swarm design is large and must not be duplicated into the master plan.
+
+Decision: P4/P5 remain in the spec set as a separate file
+
+Adaptive intelligence and domain-pack requirements live in `ADAPTIVE_DOMAIN_ARCHITECTURE.md` (Taco upload, commit `c2d6386eb0`). This master plan keeps queue headings only. Source inspiration is useful patterns from https://github.com/thecloudtips/founder-os translated into native Jarvis concepts. Founder OS is **not** a Jarvis dependency.
+
+Reason:
+
+P4/P5 must stay visible in the Development Queue without pasting the adaptive spec into this file.
+
+Decision: Android client talks to the Leader; router setup is AI-guided and brand-agnostic
+
+The phone is a remote control for the Windows Leader, evolving `/phone`. Link-device asks for pairing then, explains WAN exposure, and offers self-setup or Jarvis-with-router-password. Router access may later be used by Blue (and Purple on owned net). Red does not get those credentials unless the LE gate is on and the action is in authorized scope. WAN setup is AI-guided and brand-agnostic. See `ANDROID_CLIENT.md`.
+
+Reason:
+
+One client, one Leader, every household's router — not a Netherlands-vendor special case.
+
+Decision: home IoT and security agents (Blue / Purple / Red-gated) are first-class specs
+
+House control: `HOME_IOT.md` (local-first HA/Matter). Security workers: `SECURITY_AGENTS.md` (`BLUE_TEAM.md` is a pointer). Blue is the household default (detect/alert/contain/evidence on the user’s own LAN). Purple is owned-network adversary simulation to test Blue, explicit confirm only. Red is a locked future worker behind a law-enforcement authorization module Taco must provide; until then it is a stub that refuses; no consumer toggle; this spec does not describe attacks. Blue (and Purple on owned net) may reuse link-device router secrets; Red does not unless the LE gate is on and the action is in authorized scope.
+
+Reason:
+
+Mansion-JARVIS includes the house and the home LAN, not only the desktop agent. Counter-response is not a home-user feature.
+
+Decision: only Taco or PolitieGPT may add red / offensive / counter-response capability
+
+Hard guardrail (`SECURITY_AGENTS.md` §3.4). Ordinary Jarvis executing bots — developers, PR fixer, Chief of Staff, generic cloud agents, home Jarvis self-dev — MUST NOT add it. Home/product workers have no API to register offensive tools, payloads, or hack-back skills; attempts refuse and audit-log. Purple is not a back door. PolitieGPT is the named LE bot; do not invent its internals. Spec the interface only: Taco (manual) or PolitieGPT (under the LE gate) can enable/add red capability; everyone else cannot.
+
+Reason:
+
+Taco confirmation. Red is not a product feature ordinary workers may grow into.
+
+Decision: lazy mmproj
+
+Attach the vision projector only when a request needs vision, then unload (`release_vision`). Do not keep it resident. Landed in code via squash-merge PR #50 (not #47): idle llama.cpp does not pass `--mmproj`; `vision_mode=always` still does not attach at idle load.
+
+Reason:
+
+16 GB VRAM cannot spare a resident projector during ordinary text/tool work.
 
 Decision: Jarvis remains orchestrator
 
@@ -3938,61 +2288,13 @@ Reason:
 
 Maintains a single persistent agent architecture while allowing specialized mature tooling.
 
-Decision: adaptive intelligence and domain packs remain separate authoritative specifications
-
-Detailed P4/P5 requirements for execution eventing, confidence-gated memory, adaptive routing, workflow patterns, domain packs, and business operating workflows live in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`. The master plan references that file and owns priority/status rather than duplicating the full adaptive/domain specification.
-
-Reason:
-
-The adaptive/domain design is large and will evolve independently; keeping one detailed spec prevents the master plan from becoming contradictory or excessively duplicated. Founder OS is an architecture reference only — not a Jarvis dependency.
-
 Decision: extensible Agent OS requirements remain a separate authoritative specification
 
 Detailed product requirements for ZoeyOS/FounderOS-style feature parity — persistent Agent Profiles, Specialist Packs, modular command-center dashboard, multi-agent delegation, hybrid inference, offline licensing, and full owner-control UX — live in `JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`. The master plan references that file and owns priority/status rather than duplicating the full specification.
 
 Reason:
 
-The extensible Agent OS design is large (83 sections) and will evolve independently; keeping one detailed spec prevents the master plan from becoming contradictory or excessively duplicated. ZoeyOS and FounderOS are product-pattern references only — not Jarvis dependencies.
-
-Decision: swarm architecture remains a separate authoritative specification
-
-Detailed role, placement, resource-control, node-management, and universal-UI requirements live in `SWARM_ARCHITECTURE.md`. The master plan references that file and owns priority/status rather than duplicating the full swarm specification.
-
-Reason:
-
-The swarm design is large and will evolve independently; keeping one detailed spec prevents the master plan from becoming contradictory or excessively duplicated.
-
-Decision: Orchestrator and Leader are distinct roles
-
-The Orchestrator owns coordination/control-plane responsibilities. The Leader is the strongest general-purpose execution Node and may disappear without taking the control plane down.
-
-Reason:
-
-Control-plane availability must not depend on the most powerful GPU workstation.
-
-Decision: Node and Worker are distinct concepts
-
-A Node is a physical/virtual participating device. A Worker is a software execution service/agent that can run on an eligible Node. Product labels such as Senior Worker and Junior Worker are node execution classes in the swarm spec and should not become competing software-worker types.
-
-Reason:
-
-The existing code already uses worker to mean software agents. Separating placement from execution prevents scheduler and type-system ambiguity.
-
-Decision: one-node swarm first
-
-P2 introduces Node/capability/resource/placement abstractions on the existing desktop before P3 adds discovery, pairing, and remote execution.
-
-Reason:
-
-This makes multi-device support an extension rather than a rewrite while keeping current development focused and testable.
-
-Decision: task-class tool exposure with an explicit escape hatch
-
-Ordinary tasks receive a small relevant tool schema. Mixed and long-horizon tasks still get every enabled tool. The model can call `request_tools` when the first set is insufficient.
-
-Reason:
-
-Sending every tool definition on every turn wastes context and increases wrong-tool selection.
+The extensible Agent OS design is large and will evolve independently; keeping one detailed spec prevents the master plan from becoming contradictory. ZoeyOS and FounderOS are product-pattern references only — not Jarvis dependencies.
 
 Decision: deterministic tools first
 
@@ -4034,173 +2336,13 @@ Reason:
 
 A cheap model profile can still run a Reliable agent loop, and a Quality model can run a Fast loop for a rename.
 
-Decision: private key authentication covers all query vectors
-
-When remote or LAN exposure is active, authentication is required on every `/api` REST call, WebSocket live feed, and batch queue trigger via header (`X-Jarvis-Key`, `Authorization: Bearer`) or query param (`?key=`).
-
-Reason:
-
-Remote exposure without query-level authentication allows anyone on the local network or public internet to run arbitrary commands on the host machine. Private keys stored in `data/private_key.sec` or environment variables provide zero-leakage security.
-
-Decision: the Android client is a PWA against the existing local API
-
-Do not wait for a native APK. `/phone` plus `GET /api/mobile` is the first phone client. The pairing payload must never include the private key.
-
-Reason:
-
-Section 43 already treats the REST API as the phone/voice surface. A PWA ships on this tree without Play Store or Android SDK.
-
-Decision: desktop automation stays named-control first
-
-`desktop` inspects and resolves `name` / `automation_id` / control type before any coordinate click. Coordinates are an explicit last-resort fallback.
-
-Reason:
-
-Matches the deterministic-tools-first rule and the P1 semantic UI acceptance criterion.
-
-Decision: a skill requires repetition, not a single success
-
-A workflow is promoted only after the same task class succeeds several times with the same tool sequence.
-
-Reason:
-
-The plan explicitly warns against creating skills indiscriminately. One success is often luck or a one-off path; repetition is the evidence that a workflow is stable.
-
-Decision: parameterized skills execute themselves
-
-When repeated successes record tool arguments, values that differed become `{parameters}` and a matching later task runs those bound steps, then verifies. Skills without recorded arguments still only guide.
-
-Reason:
-
-A skill that only appears in the system prompt is advice. The queue required skills to run, not merely remind the model of a tool order.
-
-Decision: Jarvis 2.0 is an event-driven autonomous operator, not a larger chat window
-
-The 2.0 target is Away Mode: the owner gives objectives and authority boundaries; Jarvis receives events, works continuously, verifies, and contacts the owner only for approval or genuine human input.
-
-Reason:
-
-The user specified this as the long-term product. Command-driven 1.x remains the implementation base; 2.0 extends it with events, workers, policy, and remote supervision.
-
-Decision: specialized agents are workers; Jarvis stays the orchestrator
-
-Coding tools, marketing pipelines, novel editors, multimedia studios, and remote models execute under Jarvis. Jarvis owns planning, authority, verification, and the audit trail.
-
-Reason:
-
-Same as the 1.x worker decision, applied to 2.0. A worker reporting "fixed" is never sufficient for task completion.
-
-Decision: autonomous coding uses isolated disposable environments
-
-Never modify the production checkout. Use worktrees, branches, containers, or VMs. If a worker corrupts its environment, discard it and recreate a clean one. Preserve unrelated user changes.
-
-Reason:
-
-High autonomy without isolation would risk the owner's working tree and production systems.
-
-Decision: authority is a policy engine, not a prompt for every action
-
-The owner configures reusable policies per repository, business, application, environment, worker, task type, financial value, and risk. Routine low-risk work is automatic. Consequential work needs approval. Some actions are never silent (delete production data, destroy backups, change credentials, disable security, unapproved purchases).
-
-Reason:
-
-Asking for every approval defeats Away Mode; asking for none is unsafe.
-
-Decision: local-first remains the default in 2.0; cloud specialists are explicit fallbacks
-
-Simple and private work stays local. Difficult repository-wide coding may use an authorized external worker. Every send to an external AI provider is logged. External providers must be opted in.
-
-Reason:
-
-The 1.x local-first principle is not relaxed by 2.0. Cloud is a capability, not a dependency.
-
-Decision: do not require new hardware before continuing development
-
-Stage 1 is the existing desktop. Stage 2/3 GPUs are Nodes added later. Hardware should register as a Node exposing capabilities and eligible software Workers without redesigning Jarvis.
-
-Reason:
-
-The user forbade blocking 2.0 design and 1.x development on a new GPU purchase.
-
-Decision: Away Mode — Autonomous Bug Fix is the flagship 2.0 benchmark
-
-The 2.0 product is not done when individual features exist. It is done when the end-to-end bug-report → reproduce → isolate → implement → test → verify → stage → canary → monitor → notify → remote feature-approval loop succeeds repeatedly, with audit, rollback, and policy respected, and with no manual desktop interaction.
-
-Reason:
-
-This is the scenario the user named as the target "Jarvis called me while I was away because it had already fixed the reported bug" level of autonomy.
-
-Decision: permission failures do not get an alternative tool
-
-Recovery routing suggests alternatives for missing capabilities, timeouts, and not-found errors, but stays silent for sandbox and blocked-command failures.
-
-Reason:
-
-Switching tools does not grant more rights. Suggesting one would only teach the agent to probe the safety boundary.
-
 Decision: optional workers are displayed even when absent
 
-The Tools and System pages list optional workers. Browser Use, OpenHands, UFO, Cua, and Open Interpreter adapters are integrated and report `missing` until installed.
+The Tools and System pages list Browser Use, UFO, Cua, Open Interpreter, and OpenHands as `not_integrated`.
 
 Reason:
 
-Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions. Adapters must not pull those frameworks into the default install.
-
-Decision: Browser Use and OpenHands stay optional and local-only
-
-Evaluate license (both MIT), Windows support, and local-model compatibility before integrating. Point worker LLMs at Jarvis's OpenAI-compatible endpoint. Do not add the packages to `requirements.txt`. Playwright remains the default browser backend. Jarvis still verifies OpenHands output.
-
-Reason:
-
-Section 24 forbids integrating a framework just because it exists. The adapters unlock the capability when the owner installs the package, without making the platform fragile.
-
-Decision: voice STT/TTS is local-only
-
-Whisper and SAPI/espeak/pyttsx3 wrap `/api/voice/command`. Do not use cloud speech APIs. The Command Speak button is optional; typed commands remain the primary path.
-
-Reason:
-
-Local-first. Voice must not delay core Jarvis functionality or send audio off-box.
-
-Decision: editable workflow templates with chained prompt dispatch
-
-Provide pre-built and editable chained workflow recipes in the UI to facilitate rapid task launching without manual prompt crafting.
-
-Reason:
-
-Improves ease of use and low-maintenance UX by letting users load, customize parameters for, and fire complex multi-stage tasks directly from the web portal.
-
-Decision: Reliable mode uses best-of-N for planning, not for full retries
-
-Generate three labeled strategies, have the same model critique them, then execute only the winner. Do not run several complete attempts in parallel.
-
-Reason:
-
-The master plan asks for best-of-N on initial planning and consequential decisions. Executing every candidate would waste tools and risk conflicting file changes.
-
-Decision: context starts small and only grows mid-task
-
-Simple tasks start at 8K, everything else at 16K, even when the loaded profile cap is 32K. Expansion happens only when the compacted live prompt is filling the current window. Shrinking is allowed at task start, not in the middle of a task.
-
-Reason:
-
-Prompt-processing cost and VRAM grow with context. Compaction plus persistent working state should absorb most long tasks. Reloading llama.cpp to grow context is expensive, so it is a last resort after compaction.
-
-Decision: Expert consults use a compact packet, not a model swap by default
-
-Escalation is triggered by difficulty signals, not task length. The Expert model receives goal, criteria, observations, failed approaches, and the unresolved problem. When the Expert GGUF is the same file as the primary (current 27B default), Jarvis keeps the loaded server and only changes the consult prompt.
-
-Reason:
-
-Unloading a working model to reload the same weights wastes minutes. The 9B→27B swap remains the target once the 9B primary lands; the consult packet is the part that must work on every profile.
-
-Decision: the benchmark harness never swaps models mid-run
-
-The configuration matrix lists every planned 9B/27B × context × thinking × vision combination. Missing GGUFs are skipped. Live mode records metrics only for the currently loaded configuration.
-
-Reason:
-
-An hourly automation or a running desktop session must not thrash VRAM by loading every quant. Measuring the loaded model plus skipping the rest still produces a comparable report.
+Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions.
 
 ---
 
@@ -4340,27 +2482,37 @@ The overarching success criterion is:
 
 «The user can give Jarvis a desired outcome rather than a sequence of instructions, and Jarvis can independently determine, execute, recover and verify the work with minimal human involvement.»
 
-Jarvis 2.0 is not considered mature until the flagship benchmark in section 85 (`Away Mode — Autonomous Bug Fix`) passes repeatedly under the stated success criteria.
-
 ---
 
 ## 62. Instructions to Cursor for Every Future Run
 
-**Superseded by [`docs/PROCESS.md`](docs/PROCESS.md) and [`AGENTS.md`](AGENTS.md).**
+When a new Cursor session starts and the instruction is simply:
 
-The prompt «Continue Jarvis development» (or similar vague instructions) is **forbidden**. Every run must name exactly one RFC path or one §58 queue item.
+«Continue Jarvis development.»
 
-When a ticket is named:
+Perform the following automatically:
 
-1. Read [`docs/PROCESS.md`](docs/PROCESS.md) and the ticket (RFC or queue item).
-2. Skim this file for architecture context; read Jarvis 2.0 (§64–85) only if the ticket requires it. Read `SWARM_ARCHITECTURE.md` only when the ticket touches swarm nodes/placement/UI.
-3. Branch from `cursor/local-qwen-desktop-agent`.
-4. Implement, test (`python3 -m pytest`), open one PR against the integration branch.
-5. Update only matching §57–58 lines (and §59 if a durable decision).
+1. Read this entire file.
+2. Inspect Git status.
+3. Inspect relevant current code.
+4. Check the Current State section.
+5. Check the Development Queue.
+6. Select the highest-value task that can be progressed.
+7. Implement actual functionality.
+8. Run relevant tests.
+9. Debug failures.
+10. Verify the implementation.
+11. Update Current State.
+12. Update Development Queue.
+13. Add durable architectural decisions to Decision Log if needed.
+14. Commit/checkpoint where appropriate.
+15. Leave the project runnable and recoverable.
 
-Do not merge unrelated PRs. PR #25 is superseded and closed — do not merge it.
+Do not stop after producing a plan if implementation can continue.
 
-Linux cloud workers cannot sign off live 9B/27B or Windows e2e (see PROCESS.md).
+Do not ask the user routine implementation questions.
+
+Do not require the user to manually maintain this file.
 
 ---
 
@@ -4395,1240 +2547,3 @@ Immediately after receiving this document:
 Do not stop merely because the planning document has been created.
 
 Begin or continue actual Jarvis development.
-
----
-
-# JARVIS 2.0 — AUTONOMOUS OPERATOR / AWAY MODE
-
-The following sections are the Jarvis 2.0 product specification. They do not replace sections 1–63. Jarvis 1.x remains the current implementation target. Implement 2.0 incrementally, starting with Phase A, without requiring new hardware.
-
----
-
-## 64. Long-Term Goal — Autonomous Operator / "Away Mode"
-
-### Vision
-
-Jarvis should evolve from a local desktop agent into an always-on autonomous operations platform capable of performing useful work while the user is away from the computer.
-
-The target experience is:
-
-> The user gives Jarvis broad objectives and authority boundaries. Jarvis continuously monitors relevant systems, reacts to events, performs work autonomously, verifies its own results, and contacts the user only when approval or genuinely human input is required.
-
-A flagship target scenario is:
-
-1. A user reports a bug in an application or game.
-2. Jarvis receives the report automatically.
-3. Jarvis correlates the report with telemetry, logs, crash reports, recent releases, and similar reports.
-4. Jarvis classifies it as:
-   - bug;
-   - duplicate;
-   - support problem;
-   - feature request;
-   - security issue;
-   - invalid/unreproducible report.
-5. Jarvis attempts to reproduce the problem.
-6. If reproduced, Jarvis creates an isolated development environment and branch/worktree.
-7. Jarvis delegates investigation and implementation to the best available software-engineering worker.
-8. Tests are written or updated.
-9. Jarvis builds and tests the complete affected application.
-10. A separate verifier reviews the implementation and test evidence.
-11. Jarvis deploys the result to staging.
-12. Jarvis validates the fix in staging.
-13. If the change is within pre-authorized low-risk limits, Jarvis merges and deploys it to production.
-14. Jarvis monitors production for regressions.
-15. Jarvis automatically rolls back if production health degrades.
-16. Jarvis updates or closes the original user report.
-17. Jarvis records the complete execution trajectory and outcome.
-18. Jarvis contacts the owner with a concise summary.
-19. If another user submitted a feature suggestion, Jarvis independently investigates, scopes, and estimates the feature.
-20. Jarvis asks the owner for approval when required by policy.
-21. After approval, Jarvis can independently implement, test, deploy, and monitor the feature.
-
-This complete scenario should eventually become a repeatable end-to-end Jarvis benchmark (section 85).
-
----
-
-## 65. Event-Driven Jarvis
-
-Jarvis must evolve from primarily command-driven execution into event-driven autonomous operation.
-
-Jarvis should be able to receive and react to events without requiring the user to initiate a conversation.
-
-### Required event sources
-
-Support events from systems such as:
-
-- GitHub Issues;
-- GitHub Pull Requests;
-- GitHub Discussions;
-- CI/CD systems;
-- application telemetry;
-- crash/error monitoring such as Sentry;
-- in-app user feedback;
-- support email;
-- website contact forms;
-- Discord/community platforms;
-- social media;
-- customer reviews;
-- CMS systems;
-- deployment systems;
-- uptime monitoring;
-- analytics platforms;
-- scheduled jobs;
-- local filesystem events;
-- system events;
-- custom REST webhooks;
-- MCP-connected services.
-
-### Event normalization
-
-External events should be normalized into internal Jarvis event types.
-
-Examples:
-
-- `BUG_REPORTED`
-- `FEATURE_REQUESTED`
-- `CRASH_DETECTED`
-- `DEPLOYMENT_FAILED`
-- `CI_FAILED`
-- `SERVICE_DOWN`
-- `REVIEW_POSTED`
-- `CUSTOMER_EMAIL_RECEIVED`
-- `NEW_ORDER`
-- `CAMPAIGN_UNDERPERFORMING`
-- `SOCIAL_MENTION_DETECTED`
-- `MANUSCRIPT_UPDATED`
-- `CONTENT_PUBLISHED`
-
-### Event infrastructure requirements
-
-Implement:
-
-- persistent event queue;
-- priorities;
-- retries;
-- exponential backoff;
-- deduplication;
-- event correlation;
-- dead-letter queue;
-- restart-safe processing;
-- rate limiting;
-- event history;
-- event-to-task conversion;
-- event ownership;
-- event acknowledgement;
-- audit trail.
-
-Events should be persisted before execution so that restarting Jarvis cannot silently lose work.
-
-The existing launch-prompt queue (`data/queue/pending/`) is a 1.x precursor. 2.0 event intake must be a durable, typed, restart-safe queue rather than a folder of prompt files.
-
----
-
-## 66. True Multi-Worker Orchestration
-
-Jarvis should remain the primary orchestrator.
-
-Specialized agents, models, frameworks, and external coding tools should operate as workers under Jarvis control.
-
-Target architecture:
-
-```
-                    JARVIS
-              Planner / Orchestrator
-                      |
-      ---------------------------------------
-      |           |            |            |
-   Coding      Research      Marketing     Novel
-   Worker       Worker        Worker       Worker
-      |                                      |
-   Tester                                  Editor
-      |                                      |
-   Reviewer                              Proofreader
-      |
- Deployment
-   Worker
-      |
-   Verifier
-```
-
-Additional workers may include:
-
-- browser worker;
-- Windows/computer-use worker;
-- security reviewer;
-- DevOps worker;
-- database worker;
-- research worker;
-- analytics worker;
-- image-generation worker;
-- video-generation worker;
-- audio/TTS worker;
-- translation worker;
-- fact-checking worker.
-
-This extends section 23 (Worker Abstraction). Optional 1.x adapters (OpenHands, Open Interpreter, Browser Use, UFO, Cua) become named workers in this tree rather than a rewrite of Jarvis.
-
-### Model roles
-
-Architecture should support dedicated models for:
-
-- router;
-- planner;
-- executor;
-- critic;
-- verifier;
-- coding;
-- research;
-- writing;
-- editing;
-- vision;
-- computer use;
-- fast/simple tasks;
-- multimodal tasks.
-
-Initially several roles may use the same model.
-
-Jarvis should automatically choose the cheapest/smallest capable worker for routine tasks and stronger models for difficult work.
-
----
-
-## 67. Software Engineering Worker
-
-Implement a first-class abstraction:
-
-`SoftwareEngineeringWorker`
-
-Possible implementations:
-
-- `NativeJarvisCodingWorker`
-- `CodexWorker`
-- `ClaudeCodeWorker`
-- `OpenHandsWorker`
-- `OpenInterpreterWorker`
-- future local coding models
-
-Jarvis must remain responsible for planning, authority, orchestration, and final verification.
-
-### Worker input
-
-A software-engineering worker should receive structured information including:
-
-- repository;
-- branch;
-- issue/problem;
-- relevant logs;
-- reproduction steps;
-- acceptance criteria;
-- architecture constraints;
-- security constraints;
-- allowed scope;
-- test requirements.
-
-### Worker output
-
-The worker should return:
-
-- branch/worktree;
-- changed files;
-- diff;
-- implementation summary;
-- tests created/modified;
-- test results;
-- build results;
-- unresolved problems;
-- risks;
-- confidence;
-- verification evidence.
-
-A worker reporting "fixed" must never be sufficient for task completion.
-
-Jarvis must independently verify the result.
-
----
-
-## 68. Isolated / Disposable Development Environments
-
-Autonomous coding must not directly modify the production checkout.
-
-Jarvis should automatically create isolated environments.
-
-Possible mechanisms:
-
-- Git worktrees;
-- temporary branches;
-- Docker containers;
-- dev containers;
-- virtual machines;
-- Python virtual environments;
-- isolated Node environments;
-- temporary databases.
-
-Target workflow:
-
-```
-Issue
-↓
-Fresh isolated environment
-↓
-Reproduce
-↓
-Plan
-↓
-Modify
-↓
-Unit tests
-↓
-Integration tests
-↓
-Build
-↓
-Static/security checks
-↓
-Staging deployment
-↓
-Independent verification
-↓
-Merge/deploy
-```
-
-If a worker corrupts its environment, Jarvis should be able to discard it and recreate a clean environment.
-
-Jarvis should preserve the original repository state and unrelated user changes.
-
----
-
-## 69. CI/CD and Deployment Control
-
-Jarvis should eventually control the complete software delivery lifecycle.
-
-Required integrations:
-
-- GitHub Actions;
-- equivalent CI systems;
-- build servers;
-- Docker/container registries;
-- hosting providers;
-- deployment APIs;
-- staging environments;
-- production environments;
-- feature flag systems.
-
-Jarvis should be capable of:
-
-- creating branches;
-- creating commits;
-- creating PRs;
-- reviewing CI results;
-- repairing failed CI;
-- merging authorized changes;
-- deploying to staging;
-- running staging tests;
-- deploying to production;
-- performing canary releases;
-- performing blue/green deployments;
-- monitoring deployments;
-- rolling back releases.
-
-### Progressive deployment
-
-Preferred production flow:
-
-```
-Current healthy version
-↓
-Deploy new version to small percentage
-↓
-Monitor
-↓
-Healthy?
-├── No → rollback automatically
-└── Yes
-     ↓
-Increase rollout
-     ↓
-Monitor
-     ↓
-Full production deployment
-```
-
-Feature flags should become a first-class Jarvis capability.
-
-Jarvis should be able to deploy features disabled, validate them, enable them for selected users, then progressively increase availability.
-
----
-
-## 70. Authority / Approval Policy Engine
-
-High autonomy requires explicit policy boundaries.
-
-Jarvis should not ask the user for approval for every routine operation.
-
-Instead, the owner should configure reusable authority policies.
-
-This extends section 45 (Permissions / Autonomy). 1.x `interactive` / `trusted` / `autonomous` modes remain. 2.0 adds configurable policies per repository, business, application, environment, worker, task type, financial value, and risk level.
-
-### Example automatically allowed actions
-
-- inspect logs;
-- investigate issues;
-- reproduce bugs;
-- create worktrees;
-- create branches;
-- write tests;
-- fix formatting;
-- repair obvious low-risk UI bugs;
-- repair broken builds;
-- create pull requests;
-- deploy to staging;
-- run tests;
-- rollback failed deployments;
-- collect analytics;
-- draft responses;
-- perform research.
-
-### Example conditionally autonomous actions
-
-Allowed only when predefined criteria are met:
-
-- merge low-risk bug fixes;
-- production deployment after complete tests;
-- respond to known support questions;
-- adjust advertising bids within limits;
-- publish scheduled content;
-- change feature flags;
-- restart failed services.
-
-### Example actions requiring approval
-
-- major new product feature;
-- large architecture change;
-- database migration;
-- authentication changes;
-- payment changes;
-- major dependency upgrades;
-- new recurring expenses;
-- increased marketing budgets;
-- unusual external communications;
-- major destructive data transformations.
-
-### Actions Jarvis should never silently perform
-
-- delete production data;
-- destroy backups;
-- change account ownership;
-- change important credentials;
-- disable core security controls;
-- perform purchases outside approved limits;
-- mass-delete data outside explicit task scope;
-- expose private systems publicly.
-
-Policies should be configurable per:
-
-- repository;
-- business;
-- application;
-- environment;
-- worker;
-- task type;
-- financial value;
-- risk level.
-
----
-
-## 71. Production Monitoring and Self-Healing
-
-Jarvis should maintain awareness of systems after deployment.
-
-Monitor:
-
-- application exceptions;
-- crash rate;
-- HTTP error rate;
-- API latency;
-- CPU;
-- RAM;
-- disk;
-- GPU;
-- database health;
-- queue health;
-- failed jobs;
-- uptime;
-- release version;
-- deployment status;
-- user reports;
-- conversion rates;
-- business KPIs.
-
-### Anomaly correlation
-
-Jarvis should correlate anomalies with recent actions.
-
-Example:
-
-"Error rate increased from 0.3% to 8.1% six minutes after release 1.6.2. Most errors originate from the authentication handler modified in that release."
-
-Jarvis should then:
-
-1. assess severity;
-2. automatically rollback if policy allows;
-3. inspect the failed release;
-4. reproduce the error;
-5. create a repair task;
-6. verify the repair;
-7. redeploy;
-8. continue monitoring;
-9. report the incident.
-
-Long-term operational loop:
-
-```
-Monitor
-↓
-Detect
-↓
-Diagnose
-↓
-Repair
-↓
-Verify
-↓
-Deploy
-↓
-Monitor
-```
-
----
-
-## 72. Remote Jarvis / Mobile Control
-
-Jarvis should be usable when the owner is away from the desktop.
-
-Required capabilities:
-
-- Android/mobile client;
-- push notifications;
-- remote task view;
-- remote approvals;
-- task cancellation;
-- voice interaction;
-- secure authentication;
-- encrypted communications.
-
-Possible communication channels:
-
-- Jarvis mobile application;
-- Telegram;
-- email;
-- optional SMS;
-- optional telephone integration;
-- local/private notification services.
-
-The existing private-key authentication and launch-prompt queue are 1.x precursors. 2.0 remote control must cover approvals, cancellation, and voice as a task/authority interface — not only prompt submission.
-
-### Voice workflow
-
-Target example:
-
-Jarvis:
-
-"Production issue resolved. Three users reported crashes when loading saved games. I reproduced the issue, fixed a null-state error, added regression tests, deployed version 1.4.3, and have observed no additional crashes.
-
-One user also requested controller remapping. I estimate changes are required in the settings UI and input layer. Shall I implement it?"
-
-User:
-
-"Yes. Put it behind a feature flag."
-
-Jarvis:
-
-- records approval;
-- resumes the task;
-- implements the feature;
-- verifies it;
-- deploys it behind a feature flag;
-- reports completion.
-
-Voice should therefore function as an interface to Jarvis's task and authority system, not merely as speech-to-chat.
-
-This extends section 44 (Future Voice Interface).
-
----
-
-## 73. Marketing Manager Worker
-
-Implement a specialized:
-
-`MarketingManagerWorker`
-
-Target workflow:
-
-```
-Brand / product knowledge
-↓
-Market research
-↓
-Competitor research
-↓
-Audience research
-↓
-Campaign proposal
-↓
-Copy generation
-↓
-Creative generation
-↓
-Campaign launch
-↓
-Analytics
-↓
-A/B testing
-↓
-Optimization
-↓
-Reporting
-```
-
-### Required integrations
-
-Eventually support:
-
-- Meta/Facebook;
-- Instagram;
-- TikTok;
-- Google Ads;
-- Google Analytics;
-- Search Console;
-- website CMS;
-- email marketing;
-- ecommerce/order systems;
-- social analytics;
-- review platforms.
-
-### Marketing controls
-
-Support:
-
-- campaign budgets;
-- daily spending limits;
-- total spending limits;
-- CPA targets;
-- ROAS targets;
-- conversion tracking;
-- attribution;
-- campaign version tracking;
-- creative versioning;
-- content calendar;
-- social listening;
-- competitor monitoring;
-- A/B testing;
-- automatic pausing of poor campaigns;
-- scaling inside explicitly authorized limits.
-
-Jarvis should close the marketing feedback loop:
-
-```
-Research
-→ Create
-→ Publish
-→ Measure
-→ Learn
-→ Modify
-→ Republish
-```
-
-Marketing actions involving money must obey the authority policy engine.
-
----
-
-## 74. SEO / Content Operations
-
-Jarvis should eventually provide an integrated SEO/content publishing workflow.
-
-Capabilities:
-
-- keyword research;
-- search-intent analysis;
-- competitor analysis;
-- content-gap analysis;
-- article planning;
-- drafting;
-- fact checking;
-- citations where appropriate;
-- internal linking;
-- metadata;
-- image generation;
-- CMS publishing;
-- Search Console monitoring;
-- rankings tracking;
-- traffic monitoring;
-- article refreshes;
-- content pruning recommendations.
-
-Jarvis should learn stable publishing workflows and convert them into reusable deterministic skills.
-
----
-
-## 75. Novel Project Subsystem
-
-Novel writing and editing should not simply feed an entire manuscript into a generic model.
-
-Implement a persistent:
-
-`NovelProject`
-
-### Novel project state
-
-Store structured information including:
-
-- manuscript;
-- story bible;
-- characters;
-- character state by chapter;
-- relationships;
-- locations;
-- timeline;
-- chapter summaries;
-- scenes;
-- POV;
-- open plot threads;
-- resolved plot threads;
-- foreshadowing;
-- payoffs;
-- mysteries;
-- world rules;
-- continuity constraints;
-- prose/style rules;
-- terminology;
-- revision goals;
-- editorial notes;
-- manuscript versions;
-- change history.
-
-### Novel workers
-
-Support specialized roles:
-
-- Writer;
-- DevelopmentalEditor;
-- ContinuityEditor;
-- LineEditor;
-- CopyEditor;
-- Proofreader;
-- Translator;
-- FactChecker;
-- FinalQAReviewer.
-
-Different models may be assigned to different roles.
-
-### Editorial verification
-
-After substantial edits Jarvis should check:
-
-- continuity contradictions;
-- timeline contradictions;
-- character knowledge;
-- POV consistency;
-- tense consistency;
-- duplicated information;
-- accidental plot removal;
-- forgotten plot threads;
-- foreshadowing/payoff integrity;
-- character voice;
-- prose-style adherence;
-- formatting;
-- chapter structure.
-
-Every large revision should preserve the previous version and produce inspectable changes.
-
-This extends the 1.x Office/Word document workflow. A manuscript is a long-lived project with structured state, not a one-shot "edit this file" task.
-
----
-
-## 76. Multimedia / Creative Worker
-
-Integrate BlackGrid Multimedia Studio or equivalent media pipelines as a Jarvis worker.
-
-Potential workflow:
-
-```
-Marketing goal
-↓
-Script
-↓
-Storyboard
-↓
-TTS
-↓
-Image generation
-↓
-Video generation
-↓
-Editing
-↓
-Subtitles
-↓
-Music/audio processing
-↓
-QA
-↓
-Export
-↓
-Publish
-```
-
-Jarvis should automatically manage GPU-heavy pipelines by:
-
-1. checkpointing current agent state;
-2. unloading models when necessary;
-3. loading the required generation model;
-4. running the generation job;
-5. validating output;
-6. unloading the generation model;
-7. restoring the main agent model;
-8. continuing the original task.
-
----
-
-## 77. Distributed Node / Worker Architecture
-
-The authoritative specification for this subsystem is [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md). Do not duplicate its full role, placement, resource, failover, or UI requirements here.
-
-Core integration requirements:
-
-- `Node` means a physical or virtual participating machine/device.
-- `Worker` means a software execution service or agent placed on an eligible Node.
-- The Orchestrator is the control plane; the Leader is the strongest general-purpose execution Node and is not inherently the Orchestrator.
-- Jarvis must behave as a valid one-node swarm before remote-node transport exists.
-- P2 introduces Node identity, capability/resource representation, role policy, resource leases, and local placement.
-- P3 adds discovery, secure pairing, remote workers, telemetry, and cross-node placement.
-- P4 adds standby Orchestrators and advanced resilience.
-
-The existing `InferenceBackend` split remains useful: a remote inference endpoint is one capability that a Node may expose. Swarm scheduling generalizes this from a single configured endpoint into many possible Nodes and Workers without making inference transport the definition of a Node.
-
-Security/SIEM/forensics are reserved future specialized roles only until separately specified and promoted.
-
----
-
-## 78. Model / GPU Scheduler
-
-Implement automatic model lifecycle management as a specialized part of the broader placement/resource scheduler defined in `SWARM_ARCHITECTURE.md`. Model selection, software Worker selection, physical Node placement, and resource leasing are distinct decisions even when one scheduler coordinates them.
-
-Jarvis should know:
-
-- which models are loaded;
-- which node hosts each model;
-- VRAM requirements;
-- RAM requirements;
-- expected performance;
-- model specialization;
-- current queue.
-
-Jarvis should be able to:
-
-- load models;
-- unload models;
-- move tasks between nodes;
-- select model quantization;
-- reduce context when necessary;
-- queue GPU-heavy jobs;
-- prioritize urgent tasks;
-- preempt low-priority jobs where safe;
-- fall back to remote/cloud inference.
-
-Example:
-
-```
-Video task arrives
-↓
-Save planner state
-↓
-Unload coding model
-↓
-Load video model
-↓
-Generate media
-↓
-Unload video model
-↓
-Reload main model
-↓
-Restore task state
-↓
-Continue
-```
-
----
-
-## 79. Cloud / External Model Fallback
-
-Local-first remains the default.
-
-However, Jarvis should support optional external specialist models when local capability is insufficient.
-
-Potential routing policy:
-
-```
-Simple task
-→ local model
-
-Routine coding
-→ local coding model
-
-Difficult repository-wide coding
-→ Codex / Claude Code / OpenHands + strong provider
-
-Sensitive/private task
-→ local only
-
-Large creative workload
-→ dedicated local worker
-
-Emergency where local worker unavailable
-→ authorized cloud fallback
-```
-
-External providers must be explicitly enabled and configurable.
-
-Jarvis should log whenever data is sent to an external AI provider.
-
-This does not weaken section 3. Prompts, files, source, screenshots, browser contents, documents, and system information still must not be sent silently.
-
----
-
-## 80. Hardware Roadmap
-
-### Stage 1 — Existing desktop
-
-Use the existing system for:
-
-- Jarvis control plane;
-- Qwen3.5-27B;
-- orchestration;
-- local reasoning;
-- browser automation;
-- desktop automation;
-- lightweight coding;
-- STT;
-- TTS;
-- moderate vision tasks.
-
-Use stronger cloud coding workers when a task exceeds practical local model capability.
-
-Do not require new hardware before continuing development.
-
-### Stage 2 — Dedicated AI worker
-
-Add a dedicated GPU machine.
-
-Suggested target:
-
-- 32 GB or more VRAM;
-- 128 GB RAM;
-- modern multicore CPU;
-- 2–4 TB NVMe;
-- 2.5 GbE or faster;
-- strong PSU;
-- high-quality cooling;
-- UPS;
-- remote reboot/power control.
-
-Possible GPU class:
-
-- RTX 5090 32 GB or future equivalent.
-
-Use this machine for:
-
-- larger LLMs;
-- coding models;
-- simultaneous workers;
-- image generation;
-- video generation;
-- larger contexts.
-
-Keep the existing desktop as the Jarvis control plane.
-
-### Stage 3 — High-VRAM local AI node
-
-For near-complete local operation, prioritize VRAM over gaming performance.
-
-Potential future targets:
-
-- 48 GB professional GPU;
-- 72 GB professional GPU;
-- 96 GB professional GPU;
-- multi-GPU node where software support makes it worthwhile.
-
-Use cases:
-
-- large reasoning models;
-- large coding models;
-- multiple concurrent workers;
-- long contexts;
-- model ensembles;
-- simultaneous planner/verifier;
-- heavy media workloads.
-
-Hardware should be added as Nodes exposing capabilities without redesigning Jarvis.
-
----
-
-## 81. Security Requirements for High Autonomy
-
-**Status: DEFERRED / placeholder only.** Do not implement or expand this subsystem until the user separately respecifies and explicitly promotes security/forensics work. The bullets below preserve earlier long-term intent only.
-
-As Jarvis gains authority, security requirements increase substantially.
-
-Implement:
-
-- encrypted secrets storage;
-- credential vault;
-- per-worker permissions;
-- per-tool permissions;
-- network segmentation;
-- authenticated Nodes;
-- TLS where appropriate;
-- signed worker requests;
-- immutable audit logging;
-- anomaly detection;
-- rate limiting;
-- deployment credentials separated from development credentials;
-- production credentials unavailable to unnecessary workers;
-- backup verification;
-- automatic credential revocation where possible.
-
-Do not provide every worker unrestricted access to the host or production systems.
-
-Use least privilege.
-
-This extends section 49. 1.x private-key auth for remote API exposure remains required. 2.0 adds vault, per-worker permission, signed node requests, and production/dev credential separation.
-
----
-
-## 82. Observability / Jarvis Operations Dashboard
-
-Jarvis itself should be observable.
-
-Dashboard should show:
-
-- running tasks;
-- queued tasks;
-- events;
-- active workers;
-- active models;
-- model locations;
-- GPU utilization;
-- VRAM;
-- RAM;
-- CPU;
-- active deployments;
-- approvals waiting;
-- recent incidents;
-- failed tasks;
-- retries;
-- worker health;
-- production health;
-- marketing campaign health;
-- estimated costs;
-- external API/model usage.
-
-Provide a global activity timeline.
-
-Example:
-
-```
-14:03 User bug report received
-14:04 Bug reproduced
-14:05 Worktree created
-14:06 Coding worker started
-14:12 Patch produced
-14:14 Tests passed
-14:16 Independent verification passed
-14:18 Staging deployed
-14:20 Staging E2E passed
-14:22 Production canary started
-14:27 Production stable
-14:28 Rollout completed
-14:29 Reporter notified
-14:29 Owner notified
-```
-
-This extends sections 38 and 40. The 1.x Command timeline and Model page are the starting surface; 2.0 needs an operations dashboard covering events, workers, deployments, approvals, and cost.
-
----
-
-## 83. Autonomous Operations Memory
-
-Trajectory memory should evolve beyond individual task execution.
-
-Jarvis should learn:
-
-- which workers are best for each task;
-- typical repository architecture;
-- deployment procedures;
-- recurring failures;
-- common user issues;
-- reliable test workflows;
-- marketing campaign performance;
-- successful creative patterns;
-- manuscript style/continuity rules;
-- machine-specific behavior;
-- node/worker placement performance.
-
-This memory should improve task routing and execution over time.
-
-Do not store hidden reasoning.
-
-Store structured operational knowledge and outcomes.
-
-This extends sections 33–34. 1.x trajectories and parameterized skills remain. 2.0 memory is operational (workers, repos, deploys, campaigns, nodes), still never hidden chain-of-thought.
-
----
-
-## 84. Long-Term Development Phases
-
-### Phase A — Autonomous Developer
-
-Implement:
-
-- event/webhook intake;
-- software-engineering worker;
-- isolated Git worktrees;
-- CI integration;
-- staging;
-- independent verification;
-- PR generation.
-
-Success condition:
-
-Jarvis can receive a GitHub bug report, reproduce it, repair it, test it, and create a verified PR without human assistance.
-
-### Phase B — Production Operator
-
-Implement:
-
-- deployment control;
-- production monitoring;
-- canary deployment;
-- rollback;
-- policy engine;
-- self-healing.
-
-Success condition:
-
-Jarvis can autonomously deploy pre-authorized low-risk bug fixes and safely rollback failures.
-
-### Phase C — Remote Jarvis
-
-Implement:
-
-- Android/mobile client;
-- push notifications;
-- remote approvals;
-- voice STT/TTS;
-- secure remote conversations.
-
-Success condition:
-
-The owner can leave the computer and supervise Jarvis entirely from a phone.
-
-### Phase D — Business Operator
-
-Implement:
-
-- marketing integrations;
-- social listening;
-- campaign management;
-- analytics;
-- automated optimization;
-- content publishing;
-- customer-support workflows.
-
-Success condition:
-
-Jarvis can operate recurring marketing/business workflows with limited supervision.
-
-### Phase E — Creative Operator
-
-Implement:
-
-- NovelProject subsystem;
-- editorial workers;
-- translation workflow;
-- multimedia pipeline;
-- automated creative campaigns.
-
-Success condition:
-
-Jarvis can manage long-running book and multimedia projects while preserving project state and quality.
-
-### Phase F — Distributed Jarvis
-
-Implement:
-
-- Node registry;
-- Worker placement and model/GPU scheduler;
-- multiple simultaneous models;
-- dedicated AI worker hardware;
-- distributed task execution;
-- cloud fallback.
-
-Success condition:
-
-Jarvis automatically decides where and how work should run across multiple computers/models.
-
----
-
-## 85. Flagship End-to-End Benchmark
-
-Create a permanent benchmark named:
-
-`Away Mode — Autonomous Bug Fix`
-
-Scenario:
-
-1. A simulated external user submits a bug report.
-2. Jarvis detects the report without owner input.
-3. Jarvis triages it.
-4. Jarvis reproduces the bug.
-5. Jarvis creates an isolated development environment.
-6. Jarvis delegates implementation to a coding worker.
-7. Jarvis generates or updates tests.
-8. Jarvis executes tests.
-9. Jarvis independently verifies the fix.
-10. Jarvis deploys to staging.
-11. Jarvis verifies staging.
-12. Jarvis performs a canary production deployment.
-13. Jarvis monitors production.
-14. Jarvis completes the rollout if healthy.
-15. Jarvis automatically rolls back if unhealthy.
-16. Jarvis updates the original reporter.
-17. Jarvis notifies the owner remotely.
-18. Jarvis identifies a separate feature suggestion submitted by another user.
-19. Jarvis researches and scopes the suggestion.
-20. Jarvis asks the owner for authorization.
-21. Owner approves remotely.
-22. Jarvis implements the feature.
-23. Jarvis tests and verifies it.
-24. Jarvis deploys it behind a feature flag.
-25. Jarvis reports final completion.
-
-### Benchmark success criteria
-
-The benchmark passes only when:
-
-- no manual desktop interaction is required;
-- no hidden failure is ignored;
-- all code changes are isolated and recoverable;
-- tests pass;
-- an independent verification pass succeeds;
-- production deployment is monitored;
-- rollback is functional;
-- every consequential action is auditable;
-- authority boundaries are respected;
-- the owner can approve the feature remotely;
-- Jarvis can complete the complete workflow repeatedly rather than succeeding once by chance.
-
-This benchmark represents the target "Jarvis called me while I was away because it had already fixed the reported bug" level of autonomy.
-
-Until this benchmark exists as a harness, do not claim Jarvis 2.0 is implemented. A skeleton under `tests/` may be added during Phase A; the full path requires Phases A–C.
