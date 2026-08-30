@@ -1,6 +1,6 @@
 # RFC-0005: Isolated parallel coding workers
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Developer agents / parallel execution  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
@@ -15,13 +15,13 @@ Every concurrent coding task receives an isolated Git worktree (or equivalent sa
 
 ## Acceptance criteria
 
-- [ ] Parallel coding tasks cannot write to the same worktree.
-- [ ] Jarvis automatically creates and cleans task branches/worktrees.
-- [ ] Uncommitted or user-owned changes in the primary checkout are never modified.
-- [ ] Each task records base SHA, branch, worktree, commits, tests, and final diff.
-- [ ] Integration requires verifier approval or configured human approval.
-- [ ] Conflicts are surfaced as Decision Inbox items rather than silently resolved.
-- [ ] Tests cover concurrent task isolation and cleanup.
+- [x] Parallel coding tasks cannot write to the same worktree.
+- [x] Jarvis automatically creates and cleans task branches/worktrees.
+- [x] Uncommitted or user-owned changes in the primary checkout are never modified.
+- [x] Each task records base SHA, branch, worktree, commits, tests, and final diff.
+- [x] Integration requires verifier approval or configured human approval.
+- [x] Conflicts are surfaced as Decision Inbox items rather than silently resolved.
+- [x] Tests cover concurrent task isolation and cleanup.
 
 ## Likely files
 
@@ -38,3 +38,5 @@ General non-code sandboxing and swarm scheduling.
 ## Notes
 
 Inspiration: OpenHands Agent Canvas isolated Git worktrees. Recommendation: ADAPT.
+
+Landed on `cursor/local-qwen-desktop-agent`: backend PR #57 (`430e31b`); portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`).

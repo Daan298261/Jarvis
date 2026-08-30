@@ -15,5 +15,15 @@ These guides describe the **current** Jarvis repository: a local-first desktop a
 | [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md) | Model load, CUDA, Playwright, Office, Docker |
 | [../JARVIS_MASTER_PLAN.md](../JARVIS_MASTER_PLAN.md) | Persistent architecture, current state, and development queue |
 | [../JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md](../JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md) | ZoeyOS/FounderOS parity: Agent Profiles, Specialist Packs, dashboard, licensing |
+| [../SWARM_ARCHITECTURE.md](../SWARM_ARCHITECTURE.md) | P2–P4 swarm role, placement, resources (separate spec) |
+| [../ADAPTIVE_DOMAIN_ARCHITECTURE.md](../ADAPTIVE_DOMAIN_ARCHITECTURE.md) | P4/P5 adaptive intelligence and domain packs (separate spec) |
+| [../ANDROID_CLIENT.md](../ANDROID_CLIENT.md) | Android client to the Leader; AI-guided WAN reachability (separate spec) |
+| [../JARVIS_2.0.md](../JARVIS_2.0.md) | Approved Jarvis 2.0 Away Mode spec (sections 64–85) |
+| [../HOME_IOT.md](../HOME_IOT.md) | Home IoT / mansion house control |
+| [../SECURITY_AGENTS.md](../SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical) |
+| [../BLUE_TEAM.md](../BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
+| [../INSTALLER.md](../INSTALLER.md) | Windows 11 consumer `.exe` onboarding (smoke PR #51; wizard/GPU/WAN still open) |
+| [../WINDOWS_SHELL.md](../WINDOWS_SHELL.md) | Tray / Stop / Uninstall |
+| [../PORTAL_UX.md](../PORTAL_UX.md) | Portal app-shell UX (PR #53; Stop/settings findability still open) |
 
 Product intent and unfinished work live in the master plan. Installation and day-to-day development live here so those sections stay short and accurate.
