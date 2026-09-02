@@ -21,6 +21,30 @@ Generated or modified skills execute first in an isolated test environment using
 
 Keep skill content versioned and immutable after activation; edits create a new version. Preserve previous active versions for one-click rollback. Record measured before/after success rate, latency, cost, retries, and verifier outcomes so Jarvis can automatically recommend rollback when a new version regresses.
 
+Treat this as a cumulative capability-improvement loop rather than only a memory feature:
+
+`work -> observe -> learn -> propose skill -> sandbox -> verify -> approve/activate -> measure -> retain or rollback`.
+
+The loop must consume the structured trajectories and learned observations already produced by Jarvis instead of requiring model retraining. A successful skill version becomes reusable execution capability; a failed or regressing version remains evidence but must not remain active by default.
+
+## Implementation recommendation
+
+Implement this RFC before more ambitious self-modifying-agent work. It is the preferred foundation for Jarvis self-development because it makes improvement measurable, reversible, policy-bounded, and independent of the model currently serving the agent.
+
+Phase 1 should support explicit/manual skill proposals plus sandbox, verifier, versioning, activation, and rollback. Phase 2 may enable automatic candidate generation from repeated verified trajectories. Phase 3 may permit bounded automatic activation only for low-risk scopes where an existing policy explicitly allows it.
+
+Candidate generation should require evidence rather than novelty alone. Suggested starting thresholds are configurable and should include a minimum number of equivalent successful trajectories, verifier pass rate, and estimated benefit. User-requested proposals may bypass the repetition threshold but not sandboxing, verification, or capability policy.
+
+Evaluation must compare the candidate against the current active version or baseline on representative tasks. Prefer task-success rate and human-intervention rate over token speed alone. Also track wall-clock time, retries, model/tool calls, cost, and verifier outcome. A candidate that is faster but materially less reliable should not automatically win.
+
+Jarvis should support shadow evaluation where practical: run the candidate against recorded fixtures/trajectories without affecting production state. After activation, maintain a configurable probation window. Regression signals during probation can automatically quarantine the new version and restore the previous version when policy permits; otherwise create a Decision Inbox rollback recommendation.
+
+Self-improvement must remain scoped. A Publishing agent may create or improve Publishing skills without silently changing global Development behavior. Every candidate therefore needs `GLOBAL`, `DOMAIN`, `PROJECT`, `REPOSITORY`, `WORKFLOW`, or agent-specific scope compatible with the learning scopes already defined by Jarvis.
+
+Generated skills should be portable with Agent Profiles where dependencies allow, but runtime-specific assumptions must be declared explicitly. Skill metadata should state required tools, runtimes, packages, operating systems, hardware capabilities, secrets/integrations, and compatible RuntimeProfiles so the scheduler can reject incompatible nodes before execution.
+
+The UI should show why a candidate exists, the evidence used, what changed from the previous version, required authority, test/verifier results, measured expected benefit, current probation state, and a clear Activate/Reject/Roll Back action. Do not expose hidden chain-of-thought; display observable evidence and concise generated rationale only.
+
 ## Acceptance criteria
 
 - [ ] Add a persistent `SkillCandidate`/`SkillVersion` model with source trajectory/proposal IDs, scope, required capabilities, files/config, status, created-by agent, test evidence, and rollback target.
@@ -32,7 +56,13 @@ Keep skill content versioned and immutable after activation; edits create a new 
 - [ ] Active versions are immutable; updates create a new version with parent-version provenance.
 - [ ] Rollback restores the prior active version without deleting evidence from the failed version.
 - [ ] Jarvis stores comparison metrics for old vs new versions and can flag statistically/operationally meaningful regression.
-- [ ] UI shows proposed, verifying, active, quarantined, and rollback-able skill versions with source evidence and effective permissions.
+- [ ] Candidate evaluation prioritizes verified task success and human-intervention rate, while also recording latency, cost, retries, model/tool calls, and verifier outcomes.
+- [ ] Support shadow/offline evaluation against fixtures or recorded trajectories without mutating production state.
+- [ ] Newly activated self-generated versions can enter a configurable probation period with regression monitoring.
+- [ ] A regression during probation can quarantine the candidate and either restore the previous version within policy or create a Decision Inbox rollback recommendation.
+- [ ] Every candidate has an explicit learning/execution scope and cannot silently promote itself to a broader scope.
+- [ ] Skill metadata declares runtime/tool/package/hardware/integration requirements and incompatible nodes are rejected before execution.
+- [ ] UI shows proposed, verifying, active, probationary, quarantined, and rollback-able skill versions with source evidence, diff/summary, effective permissions, measured benefit, and verifier results.
 - [ ] Existing P4 learning controls can disable self-generated skill proposals independently of ordinary memory learning.
 - [ ] Unit tests pass (`python3 -m pytest`).
 - [ ] If portal is touched, `npm --prefix frontend run build` passes.
@@ -56,3 +86,5 @@ Source: https://www.letta.com/agent/ and https://www.letta.com/blog/our-next-pha
 Discovery date: 2026-08-31  
 Recommendation: ADAPT STRONGLY.  
 Jarvis is adapting the self-improving harness/skill pattern into a policy-bounded, verifier-gated, versioned lifecycle. It is not copying Letta's storage or runtime implementation.
+
+Recommended dependency order: build on RFC-0010 trajectory ingestion, RFC-0011 memory/context consolidation, existing verifier/sandbox capabilities, and RFC-0002 policy/autonomy. This RFC should be implemented before any proposal to let agents directly rewrite active Jarvis core code.
