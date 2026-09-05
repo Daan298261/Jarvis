@@ -1,6 +1,6 @@
 # RFC-0002: Agent policy interviews and per-capability autonomy
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Agent configuration / autonomy controls  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
@@ -23,20 +23,21 @@ By default, irreversible external side effects require an explicit human approva
 
 ## Acceptance criteria
 
-- [ ] Agent Profile stores interview answers and normalized policy separately from generated prompts.
-- [ ] Autonomy is configurable per capability/tool/action class with explicit inheritance.
-- [ ] Platform/cluster policy always caps agent-level authority.
-- [ ] Runtime authorization checks effective autonomy before every tool execution.
+- [x] Agent Profile stores interview answers and normalized policy separately from generated prompts.
+- [x] Autonomy is configurable per capability/tool/action class with explicit inheritance.
+- [x] Platform/cluster policy always caps agent-level authority.
+- [x] Runtime authorization checks effective autonomy before every tool execution.
 - [ ] Tool/action metadata supports reversibility and external/financial/credential/destructive side-effect classification.
 - [ ] Policy evaluation treats effect risk as orthogonal to autonomy level.
 - [ ] Irreversible external side effects require approval by default even when the agent has `L4_AUTONOMOUS` or `L5_OPERATOR` for that capability.
 - [ ] Persistent approval exceptions are narrowly scoped, user-visible, revocable, and audited with actor, rationale, scope, and expiry/limit where applicable.
 - [ ] Decision Inbox entries surface why an action was gated, including reversibility/effect-risk fields.
-- [ ] UI provides guided interview, summary, and advanced policy editor.
-- [ ] Policy changes are audited with actor, timestamp, old value, and new value.
-- [ ] Tests cover inheritance, denial, approvals, effect-risk gates, scoped exceptions, and policy edits.
-- [ ] Unit tests pass (`python3 -m pytest`).
-- [ ] `npm --prefix frontend run build` passes.
+- [x] UI provides guided interview, summary, and advanced policy editor.
+- [x] Policy changes are audited with actor, timestamp, old value, and new value.
+- [x] Tests cover inheritance, denial, approvals, and policy edits.
+- [ ] Tests cover effect-risk gates and scoped exceptions.
+- [x] Unit tests pass (`python3 -m pytest`).
+- [x] `npm --prefix frontend run build` passes.
 
 ## Likely files
 
@@ -55,4 +56,6 @@ Marketplace distribution of profiles; organization-wide RBAC beyond existing clu
 
 Initial inspiration: Zoey behavior interviews and FounderOS-style autonomy/permission controls. Recommendation: ADAPT.
 
-2026-08-31 update — Heliox OS v0.13.0 (released 2026-08-27) explicitly tracks irreversibility independently of permission tier and keeps confirmation requirements for effects that cannot be undone by rollback. Source: https://www.helioxos.dev/ and https://github.com/VyomKulshrestha/Heliox-OS. Recommendation: ADAPT STRONGLY. Jarvis is adapting the underlying safety invariant, not Heliox's tier model: authority and consequence risk remain separate axes, with owner-controlled narrow exceptions instead of a blanket hard-coded confirmation rule.
+Landed on `cursor/local-qwen-desktop-agent`: backend policy store PR #70; interview UI PR #75 (`2852d29`); loop `authorize()` hook PR #72 (`8265560`).
+
+2026-08-31 update — Heliox OS v0.13.0 (released 2026-08-27) explicitly tracks irreversibility independently of permission tier and keeps confirmation requirements for effects that cannot be undone by rollback. Source: https://www.helioxos.dev/ and https://github.com/VyomKulshrestha/Heliox-OS. Recommendation: ADAPT STRONGLY. Jarvis is adapting the underlying safety invariant, not Heliox's tier model: authority and consequence risk remain separate axes, with owner-controlled narrow exceptions instead of a blanket hard-coded confirmation rule. Effect-risk gates remain specified; implementation is a follow-on ticket.

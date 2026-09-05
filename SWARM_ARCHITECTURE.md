@@ -1,6 +1,6 @@
 # Jarvis Swarm Architecture — Role, Placement, UI & Resource-Control Specification
 
-Status: **separate long-term architecture specification** referenced by `JARVIS_MASTER_PLAN.md`.
+Status: **separate swarm specification** referenced by `JARVIS_MASTER_PLAN.md`. P2 one-node foundation is implemented on `cursor/local-qwen-desktop-agent`. P3 multi-node discovery/pairing/networking is **not started**.
 
 Priority mapping:
 
@@ -8,7 +8,21 @@ Priority mapping:
 - **P3 — Multi-node swarm:** discovery, secure pairing, remote workers, node telemetry, cross-node placement, role recommendations, swarm management UI, universal join/install flow.
 - **P4 — Resilience and advanced placement:** standby Orchestrators, failover/state replication, advanced affinity/anti-affinity, service separation/replication, and other fault-tolerance work.
 
-This document is authoritative for swarm role, placement, resource-control, node-management, and universal-UI requirements. The master plan owns overall project priority and implementation status; this file owns the detailed swarm design.
+P2 implementation status (tick, do not delete; one-node only):
+
+- [x] Node identity/state — VERIFIED in code (PR #28)
+- [x] Workers-on-nodes — VERIFIED in code (PR #32)
+- [x] Orchestrator vs Leader — VERIFIED in code (PR #34)
+- [x] Capability registry — VERIFIED in code (PR #35)
+- [x] Role policy AUTO/PREFERRED/FORCED/AVOID/DISABLED — VERIFIED in code (PR #37)
+- [x] Resource budgets and leases — VERIFIED in code (PR #39). Reserved capacity and task priority are not first-class fields yet.
+- [x] Single-node placement scheduler — VERIFIED in code (PR #41)
+- [x] Intelligence selection separate from placement — VERIFIED in code (PR #44)
+- [x] Warm-state and data-locality scoring — VERIFIED in code (PR #45)
+- [x] Swarm portal surface — VERIFIED in code (PRs #30, #33, #36, #38, #40, #42, #46)
+- [ ] P3 discovery, secure pairing, remote workers, cross-node networking — not started
+
+This document is authoritative for swarm role, placement, resource-control, node-management, and universal-UI requirements. The master plan owns overall project priority and implementation status; this file owns the detailed swarm design. **Jarvis Architect** is the sole editor of this file.
 
 ## 0. Terminology and implementation boundaries
 
@@ -23,7 +37,7 @@ The following distinction is mandatory in code and documentation:
 - **Role assignment** — what Jarvis currently asks a Node/service to perform.
 - **Resource budget** — how much host capacity Jarvis may consume.
 
-Jarvis is a **one-node swarm by default**. P2 must introduce the abstractions without requiring a second computer or a networking rewrite. Multi-device transport belongs to P3.
+Jarvis is a **one-node swarm by default**. P2 introduced the abstractions without requiring a second computer or a networking rewrite. Multi-device transport belongs to P3 and is not implemented.
 
 Security, SIEM, Sentinel, and forensic examples in this document define future placement/role requirements only. They are **not current implementation scope** and must not be promoted merely because they appear in this architecture specification. Those subsystems will be separately specified before implementation.
 

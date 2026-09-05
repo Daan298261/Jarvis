@@ -1,6 +1,6 @@
 # RFC-0012: Local license with BYO inference entitlement
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Licensing / local-first commercial model  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
@@ -17,14 +17,14 @@ Entitlements govern product/pack features, not access to the customer's own loca
 
 ## Acceptance criteria
 
-- [ ] Platform entitlement and model/provider credentials are separate concepts.
-- [ ] Signed lease includes cluster identity, product tier/features, issue/expiry times, and offline grace policy.
-- [ ] Offline validation requires no vendor network request during valid lease/grace.
-- [ ] Reconnect handles time validation/tamper detection and lease refresh.
-- [ ] Entitlement failure never deletes customer data/models.
-- [ ] Specialist/Domain Pack entitlements can be evaluated cluster-wide.
-- [ ] UI clearly distinguishes local inference cost from Jarvis subscription/licensing.
-- [ ] Unit tests cover signature, expiry, grace, tamper, and cluster identity.
+- [x] Platform entitlement and model/provider credentials are separate concepts.
+- [x] Signed lease includes cluster identity, product tier/features, issue/expiry times, and offline grace policy.
+- [x] Offline validation requires no vendor network request during valid lease/grace.
+- [x] Reconnect handles time validation/tamper detection and lease refresh.
+- [x] Entitlement failure never deletes customer data/models.
+- [x] Specialist/Domain Pack entitlements can be evaluated cluster-wide.
+- [x] UI clearly distinguishes local inference cost from Jarvis subscription/licensing.
+- [x] Unit tests cover signature, expiry, grace, tamper, and cluster identity.
 
 ## Likely files
 
@@ -42,3 +42,5 @@ Final pricing levels, payment processor integration, DRM of customer-owned model
 ## Notes
 
 Inspiration: Zoey BYO Architect/local license direction. Recommendation: ADAPT.
+
+Landed on `cursor/local-qwen-desktop-agent`: backend PR #66 (`7b44ebe`) — license entitlement only, not a `RemoteOpenAICompatibleBackend` rewrite; portal UI PR #82 (`93e0555`).
