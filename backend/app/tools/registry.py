@@ -22,6 +22,7 @@ from .request_tools import RequestToolsTool
 from .screenshot import ScreenshotTool
 from .terminal import TerminalTool
 from .verify_code import VerifyCodeTool
+from .external_ingest import ExternalIngestTool
 from .web_fetch import WebFetchTool
 
 
@@ -46,6 +47,7 @@ class ToolRegistry:
             GitTool(getter),
             DockerTool(),
             WebFetchTool(getter),
+            ExternalIngestTool(getter),
             ScreenshotTool(),
             VerifyCodeTool(getter),
             RequestToolsTool(),
