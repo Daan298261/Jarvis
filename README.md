@@ -4,7 +4,7 @@ Self-hosted local desktop agent. The default model is **Qwen3.5-9B Abliterated**
 
 **Development process:** [`docs/PROCESS.md`](docs/PROCESS.md) — one RFC or one queue item per worker; branch from `cursor/local-qwen-desktop-agent`. Design specs go in [`docs/rfcs/`](docs/rfcs/), not wholesale edits to the master plan.
 
-Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) for architecture context and the Development Queue (§58). Update Current State (§57) only for the ticket you just shipped. Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode) is specified in sections 64–85 and is not implemented yet.
+Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) for architecture context and the Development Queue (§58). Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode, including novel/marketing/SEO/multimedia) lives in [`JARVIS_2.0.md`](JARVIS_2.0.md) and is not current-session P0 unless the queue promotes it.
 
 Detailed P2+ swarm role, node placement, resource-control, and universal-UI requirements are maintained separately in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md). The master plan remains authoritative for priority and implementation status.
 
@@ -18,6 +18,15 @@ Detailed P2+ swarm role, node placement, resource-control, and universal-UI requ
 | **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** | Repo map, dev servers, API, agent loop, adding tools, tests |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Control plane, compaction, memory, autonomy |
 | [SWARM_ARCHITECTURE.md](SWARM_ARCHITECTURE.md) | P2–P4 node roles, placement, resources, swarm UI, multi-node and resilience requirements |
+| [ADAPTIVE_DOMAIN_ARCHITECTURE.md](ADAPTIVE_DOMAIN_ARCHITECTURE.md) | P4/P5 adaptive intelligence and domain packs |
+| [ANDROID_CLIENT.md](ANDROID_CLIENT.md) | Android client to the Leader; AI-guided WAN reachability |
+| [JARVIS_2.0.md](JARVIS_2.0.md) | Approved Away Mode / novel / marketing / SEO / multimedia (sections 64–85) |
+| [HOME_IOT.md](HOME_IOT.md) | Home IoT / mansion house control |
+| [SECURITY_AGENTS.md](SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical). `BLUE_TEAM.md` is a pointer |
+| [BLUE_TEAM.md](BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
+| [INSTALLER.md](INSTALLER.md) | Windows 11 consumer `.exe` onboarding (smoke PR #51; wizard/GPU/WAN still open) |
+| [WINDOWS_SHELL.md](WINDOWS_SHELL.md) | Tray / Stop / Uninstall (not Start Menu only) |
+| [PORTAL_UX.md](PORTAL_UX.md) | ChatGPT-style portal shell (PR #53); orange/black; Swarm/Phone kept |
 | [TOOLS.md](TOOLS.md) | Native tools, MCP, trajectories, skills |
 | [SECURITY.md](SECURITY.md) | Bind address, private keys, filesystem policy |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Unloaded model, CUDA, Playwright, Office, Docker |

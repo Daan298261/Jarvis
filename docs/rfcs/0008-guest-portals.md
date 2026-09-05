@@ -1,6 +1,6 @@
 # RFC-0008: Scoped guest portals
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** External/customer access  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
@@ -15,13 +15,13 @@ Add revocable Guest Portals using scoped capability tokens. A portal can grant r
 
 ## Acceptance criteria
 
-- [ ] Portal tokens have scope, expiry, revocation, and optional single-use/session limits.
-- [ ] Default portal capability set is deny-all except explicitly granted resources/actions.
-- [ ] Every portal action is audited and attributable to a guest identity/session.
-- [ ] Owner can revoke access immediately.
-- [ ] UI previews effective guest permissions before issuing access.
-- [ ] Portal cannot traverse to unrelated agents, files, tools, or settings.
-- [ ] Tests cover scope isolation, expiry, and revocation.
+- [x] Portal tokens have scope, expiry, revocation, and optional single-use/session limits.
+- [x] Default portal capability set is deny-all except explicitly granted resources/actions.
+- [x] Every portal action is audited and attributable to a guest identity/session.
+- [x] Owner can revoke access immediately.
+- [x] UI previews effective guest permissions before issuing access.
+- [x] Portal cannot traverse to unrelated agents, files, tools, or settings.
+- [x] Tests cover scope isolation, expiry, and revocation.
 
 ## Likely files
 
@@ -38,3 +38,5 @@ Full multi-tenant SaaS billing and organization management.
 ## Notes
 
 Inspiration: Zoey portals. Recommendation: ADAPT.
+
+Landed on `cursor/local-qwen-desktop-agent`: backend guest portals PR #71 (`63bb39d`); guest portal UI PR #76 (`f003c4e`).
