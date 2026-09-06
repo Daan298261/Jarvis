@@ -82,8 +82,8 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
   { Settings -> Apps -> Modify re-runs setup; stop running Jarvis before files change. }
-  if IsUpgrade() then
-    StopJarvisProcesses;
+  { Always stop Jarvis before file changes; IsUpgrade unavailable in Inno 6.7+. }
+  StopJarvisProcesses;
 end;
 
-; User data (data/, models/, runtime/) created after install is not removed by default.
+{ User data (data/, models/, runtime/) created after install is not removed by default. }
