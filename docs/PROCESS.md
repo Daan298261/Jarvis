@@ -3,7 +3,8 @@
 This document fixes the broken loop where vague prompts ("continue Jarvis development", "pick up priority tasks", "merge all PRs") caused workers to re-audit the tree, rewrite **Current State**, and open colliding branches.
 
 **Canonical repo:** [Daan298261/Jarvis](https://github.com/Daan298261/Jarvis)  
-**Integration branch:** `main` (canonical; fast-forwarded from former `cursor/local-qwen-desktop-agent`)  
+**Integration / daily PR base:** `development` — branch from latest `development`; open one PR against `development`.  
+**Stable / release:** `main` — GitHub default branch; promote `development` → `main` only when CoS or Taco call an explicit stable cut (no casual lands on `main`).  
 **Origin mirror:** `taco-1/Jarvis` may lag; always branch and PR against **Daan298261/Jarvis**.
 
 ---
@@ -14,7 +15,8 @@ This document fixes the broken loop where vague prompts ("continue Jarvis develo
 | --- | --- | --- |
 | **Jarvis Architect** | Sole editor of `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, the `BLUE_TEAM.md` pointer, `INSTALLER.md`, `WINDOWS_SHELL.md`, and `PORTAL_UX.md`. Applies spec-change requests from Taco or Chief of Staff. | Execute product tickets; paste megabyte dumps into the master plan |
 | **ChatGPT / Codex (design)** | Write RFCs under [`docs/rfcs/`](rfcs/) | Edit spec docs; rewrite `JARVIS_MASTER_PLAN.md`; paste megabyte spec updates into the master plan |
-| **Cursor cloud worker (implement)** | Implement **one** named RFC or **one** named Development Queue item | Edit spec docs; "Continue all development"; merge unrelated PRs; re-audit the repo; rewrite §57 Current State |
+| **Cursor cloud worker (implement)** | Implement **one** named RFC or **one** named Development Queue item; branch from `development`, open PR against `development` | Edit spec docs; "Continue all development"; merge unrelated PRs; re-audit the repo; rewrite §57 Current State |
+| **Chief of Staff / PR fixer** | Land fixes and queue hygiene onto `development` | Casual lands on `main` |
 | **Windows desktop session (sign-off)** | Live 9B/27B load, `tests/run_e2e.py`, GPU/tok/s harness | Cannot be done on Linux cloud VMs (see below) |
 
 ---
@@ -23,7 +25,7 @@ This document fixes the broken loop where vague prompts ("continue Jarvis develo
 
 Every Cursor cloud run must be launched with a **named ticket**, for example:
 
-> Implement RFC `docs/rfcs/0007-playwright-retry.md` on branch `cursor/playwright-retry-99ea` against `main`.
+> Implement RFC `docs/rfcs/0007-playwright-retry.md` on branch `cursor/playwright-retry-99ea` against `development`.
 
 or:
 
@@ -32,17 +34,17 @@ or:
 ### Steps
 
 1. **Read the ticket** — the RFC file or the single queue item in `JARVIS_MASTER_PLAN.md` §58.
-2. **Branch** from latest `main`:
+2. **Branch** from latest `development`:
    ```bash
-   git fetch origin main
-   git checkout main
-   git pull origin main
+   git fetch origin development
+   git checkout development
+   git pull origin development
    ```
    Then create your feature branch: `git checkout -b cursor/<short-slug>-99ea`
 3. **Implement only that ticket** — touch files listed in the RFC; no drive-by refactors, no new architecture in the master plan.
 4. **Test** — `python3 -m pytest`; if frontend changed, `npm --prefix frontend run build` (and `npm --prefix frontend run lint` if you touched TS).
 5. **Do not edit spec docs.** Executing agents must not edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, or `PORTAL_UX.md`. Note queue/status implications in the PR for Jarvis Architect. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect.
-6. **Open one PR** against `main` with the RFC id or queue item in the title.
+6. **Open one PR** against `development` with the RFC id or queue item in the title.
 
 ### Forbidden prompts (do not use)
 
@@ -101,7 +103,9 @@ Cloud agents run headless Linux **without GPU** and **without Windows COM/deskto
 
 | Setting | Value |
 | --- | --- |
-| **Base branch** | `main` |
+| **Base branch** | `development` |
+| **PR target** | `development` |
+| **Stable / release** | `main` (promote only on explicit cut) |
 | **Default model** | **Composer 2.5** (standard — not Fast) for cost |
 | **Grok 4.6** | Sparingly — only for genuinely difficult tasks named in the ticket |
 | **Branch naming** | `cursor/<short-slug>-99ea` |
@@ -128,7 +132,7 @@ If GitHub API access from a mirror is blocked, leave this table in place and men
 
 **Cursor worker — implement**
 
-> Implement `docs/rfcs/NNNN-slug.md` only. Branch from `main` as `cursor/<slug>-99ea`. Run pytest. Do not edit spec docs. Open PR against `main`. Do not merge other PRs. Composer 2.5 standard model.
+> Implement `docs/rfcs/NNNN-slug.md` only. Branch from `development` as `cursor/<slug>-99ea`. Run pytest. Do not edit spec docs. Open PR against `development`. Do not merge other PRs. Composer 2.5 standard model.
 
 **Desktop sign-off (human)**
 

@@ -14,7 +14,7 @@ Vague worker prompts caused repeated full-repo audits, wholesale **Current State
 Encode a durable process in `docs/PROCESS.md`, `docs/rfcs/`, and `AGENTS.md`:
 
 - Design → short RFCs under `docs/rfcs/` (one concern each).
-- Implementation → one named RFC or one queue item per Cursor run, branching from `main`.
+- Implementation → one named RFC or one queue item per Cursor run, branching from `development` and opening PRs against `development` (`main` is stable/release; promote on explicit cut).
 - Master plan → architecture + §57–58 summary only; updated after merge, not before design.
 - Close superseded PR #25; document in `docs/PROCESS.md`.
 
@@ -42,4 +42,4 @@ Encode a durable process in `docs/PROCESS.md`, `docs/rfcs/`, and `AGENTS.md`:
 
 ## Notes
 
-Canonical repo: **Daan298261/Jarvis**. Integration branch: **main**.
+Canonical repo: **Daan298261/Jarvis**. Integration / daily PR base: **development**. Stable / release: **main** (GitHub default; promote only on explicit cut).

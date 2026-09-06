@@ -1716,19 +1716,20 @@ Every development run should begin by reading this file.
 
 Then:
 
-1. inspect Git status;
-2. inspect current project;
-3. read the Current State section below;
-4. read the Development Queue below;
-5. select the highest-value actionable task;
-6. implement it;
-7. test it;
-8. diagnose failures;
-9. continue until a meaningful increment is complete;
-10. update Current State;
-11. update Development Queue;
-12. update architectural sections only when requirements change;
-13. leave a recoverable project state.
+1. pull latest `development` (`git fetch origin development && git checkout development && git pull origin development`);
+2. inspect Git status;
+3. inspect current project;
+4. read the Current State section below;
+5. read the Development Queue below;
+6. select the highest-value actionable task;
+7. implement it;
+8. test it;
+9. diagnose failures;
+10. continue until a meaningful increment is complete;
+11. update Current State;
+12. update Development Queue;
+13. update architectural sections only when requirements change;
+14. leave a recoverable project state.
 
 Do not depend on the previous chat session being available.
 
@@ -1788,7 +1789,9 @@ Refactor this document periodically if it becomes unwieldy.
 
 ## 57. CURRENT STATE
 
-Audited from the repository on `main`. Live Qwen 9B/27B load and Windows e2e were **not** run in this Linux cloud session (no GPU/GGUF here). Only mark live-model items VERIFIED after a Windows desktop run.
+**Branch model:** daily work and open PRs land on `development` (integration). `main` is stable/release (GitHub default); promote `development` → `main` only when CoS or Taco call an explicit stable cut.
+
+Audited from the repository on `main` (stable tip at audit time). Live Qwen 9B/27B load and Windows e2e were **not** run in this Linux cloud session (no GPU/GGUF here). Only mark live-model items VERIFIED after a Windows desktop run.
 
 ### Hardware
 
@@ -1913,7 +1916,7 @@ Date: 2026-08-25 (spec restore)
 
 Tests performed:
 
-- Queue ticks against code and squash-merge PRs on `main`
+- Queue ticks against code; daily PRs squash-merge onto `development`; promote to `main` only on explicit stable cut
 - Windows live model e2e: **not run** (no GPU/GGUF in this environment)
 
 Results: live 9B/27B remains desktop sign-off. Do not treat unit tests as a live-model pass.

@@ -14,7 +14,9 @@ ChatGPT/Codex and human design work lands here as **short RFCs** — one concern
 ```
 ChatGPT/Codex  →  docs/rfcs/NNNN-title.md  →  queue line in master plan (optional)
                                                       ↓
-Cursor worker  →  branch from main  →  PR  →  merge
+Cursor worker  →  branch from development  →  PR against development  →  merge
+                                                      ↓
+                                            promote development → main on explicit stable cut
                                                       ↓
                                             update §57–58 + decision log only
 ```
