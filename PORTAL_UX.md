@@ -2,7 +2,7 @@
 
 Status: **separate specification** referenced by `JARVIS_MASTER_PLAN.md` §58. Architect-owned. For the **Jarvis UX** implementer.
 
-**Landed (PR #53, squash-merge onto `cursor/local-qwen-desktop-agent`):** orange/black tokens; left **Projects** + **Recents**; main pane current chat/task; Swarm and Phone kept; `frontend/src/api.ts` swarm endpoints/contracts unchanged. Remaining: Stop/settings findability (tray Stop is `WINDOWS_SHELL.md`, D1 in flight). Do **not** overwrite `frontend/src` from this Architect PR.
+**Landed (PR #53, squash-merge onto `main` via cursor/local-qwen-desktop-agent):** orange/black tokens; left **Projects** + **Recents**; main pane current chat/task; Swarm and Phone kept; `frontend/src/api.ts` swarm endpoints/contracts unchanged. Remaining: Stop/settings findability (tray Stop is `WINDOWS_SHELL.md`, D1 in flight). Do **not** overwrite `frontend/src` from this Architect PR.
 
 One frontend ticket. **Do not redesign the API.** **Do not overwrite swarm backend.** UX owns `frontend/src` (pages, CSS, layout). Swarm page may be restyled as part of the shell; keep `frontend/src/api.ts` swarm endpoints and payloads.
 

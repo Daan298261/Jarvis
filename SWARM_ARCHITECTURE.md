@@ -1,6 +1,6 @@
 # Jarvis Swarm Architecture — Role, Placement, UI & Resource-Control Specification
 
-Status: **separate swarm specification** referenced by `JARVIS_MASTER_PLAN.md`. P2 one-node foundation is implemented on `cursor/local-qwen-desktop-agent`. P3 multi-node discovery/pairing/networking is **not started**.
+Status: **separate swarm specification** referenced by `JARVIS_MASTER_PLAN.md`. P2 one-node foundation is implemented on `main`. P3 multi-node discovery/pairing/networking is **not started**.
 
 Priority mapping:
 

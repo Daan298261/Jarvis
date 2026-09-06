@@ -3,7 +3,7 @@
 This document fixes the broken loop where vague prompts ("continue Jarvis development", "pick up priority tasks", "merge all PRs") caused workers to re-audit the tree, rewrite **Current State**, and open colliding branches.
 
 **Canonical repo:** [Daan298261/Jarvis](https://github.com/Daan298261/Jarvis)  
-**Integration branch:** `cursor/local-qwen-desktop-agent` (treat as default; `main` is stale)  
+**Integration branch:** `main` (canonical; fast-forwarded from former `cursor/local-qwen-desktop-agent`)  
 **Origin mirror:** `taco-1/Jarvis` may lag; always branch and PR against **Daan298261/Jarvis**.
 
 ---
@@ -23,7 +23,7 @@ This document fixes the broken loop where vague prompts ("continue Jarvis develo
 
 Every Cursor cloud run must be launched with a **named ticket**, for example:
 
-> Implement RFC `docs/rfcs/0007-playwright-retry.md` on branch `cursor/playwright-retry-99ea` against `cursor/local-qwen-desktop-agent`.
+> Implement RFC `docs/rfcs/0007-playwright-retry.md` on branch `cursor/playwright-retry-99ea` against `main`.
 
 or:
 
@@ -32,17 +32,17 @@ or:
 ### Steps
 
 1. **Read the ticket** — the RFC file or the single queue item in `JARVIS_MASTER_PLAN.md` §58.
-2. **Branch** from latest `cursor/local-qwen-desktop-agent`:
+2. **Branch** from latest `main`:
    ```bash
-   git fetch origin cursor/local-qwen-desktop-agent
-   git checkout cursor/local-qwen-desktop-agent
-   git pull origin cursor/local-qwen-desktop-agent
+   git fetch origin main
+   git checkout main
+   git pull origin main
    ```
    Then create your feature branch: `git checkout -b cursor/<short-slug>-99ea`
 3. **Implement only that ticket** — touch files listed in the RFC; no drive-by refactors, no new architecture in the master plan.
 4. **Test** — `python3 -m pytest`; if frontend changed, `npm --prefix frontend run build` (and `npm --prefix frontend run lint` if you touched TS).
 5. **Do not edit spec docs.** Executing agents must not edit `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, or `PORTAL_UX.md`. Note queue/status implications in the PR for Jarvis Architect. Spec-change requests come from Taco or Chief of Staff and are implemented only by Architect.
-6. **Open one PR** against `cursor/local-qwen-desktop-agent` with the RFC id or queue item in the title.
+6. **Open one PR** against `main` with the RFC id or queue item in the title.
 
 ### Forbidden prompts (do not use)
 
@@ -101,7 +101,7 @@ Cloud agents run headless Linux **without GPU** and **without Windows COM/deskto
 
 | Setting | Value |
 | --- | --- |
-| **Base branch** | `cursor/local-qwen-desktop-agent` |
+| **Base branch** | `main` |
 | **Default model** | **Composer 2.5** (standard — not Fast) for cost |
 | **Grok 4.6** | Sparingly — only for genuinely difficult tasks named in the ticket |
 | **Branch naming** | `cursor/<short-slug>-99ea` |
@@ -128,7 +128,7 @@ If GitHub API access from a mirror is blocked, leave this table in place and men
 
 **Cursor worker — implement**
 
-> Implement `docs/rfcs/NNNN-slug.md` only. Branch from `cursor/local-qwen-desktop-agent` as `cursor/<slug>-99ea`. Run pytest. Do not edit spec docs. Open PR against `cursor/local-qwen-desktop-agent`. Do not merge other PRs. Composer 2.5 standard model.
+> Implement `docs/rfcs/NNNN-slug.md` only. Branch from `main` as `cursor/<slug>-99ea`. Run pytest. Do not edit spec docs. Open PR against `main`. Do not merge other PRs. Composer 2.5 standard model.
 
 **Desktop sign-off (human)**
 
