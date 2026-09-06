@@ -14,7 +14,7 @@ Vague worker prompts caused repeated full-repo audits, wholesale **Current State
 Encode a durable process in `docs/PROCESS.md`, `docs/rfcs/`, and `AGENTS.md`:
 
 - Design → short RFCs under `docs/rfcs/` (one concern each).
-- Implementation → one named RFC or one queue item per Cursor run, branching from `cursor/local-qwen-desktop-agent`.
+- Implementation → one named RFC or one queue item per Cursor run, branching from `main`.
 - Master plan → architecture + §57–58 summary only; updated after merge, not before design.
 - Close superseded PR #25; document in `docs/PROCESS.md`.
 
@@ -42,4 +42,4 @@ Encode a durable process in `docs/PROCESS.md`, `docs/rfcs/`, and `AGENTS.md`:
 
 ## Notes
 
-Canonical repo: **Daan298261/Jarvis**. Integration branch: **cursor/local-qwen-desktop-agent**.
+Canonical repo: **Daan298261/Jarvis**. Integration branch: **main**.

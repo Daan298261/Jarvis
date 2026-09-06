@@ -2,7 +2,7 @@
 
 Status: **approved product specification**, Architect-owned, referenced by `JARVIS_MASTER_PLAN.md`. **Not implemented** as current-session P0 unless the Development Queue promotes an item.
 
-This file restores the Taco-approved Jarvis 2.0 text (original master-plan sections 64–85) from git history on `cursor/local-qwen-desktop-agent`. Every feature in this file stays in the spec set: Away Mode, event-driven intake, multi-worker orchestration, software-engineering worker, isolated environments, CI/CD, policy engine, production self-healing, remote/mobile, **marketing**, **SEO/content**, **NovelProject**, **multimedia**, distributed nodes (see also `SWARM_ARCHITECTURE.md`), GPU scheduler, cloud fallback, hardware roadmap, high-autonomy security, operations dashboard, and the Away Mode flagship benchmark.
+This file restores the Taco-approved Jarvis 2.0 text (original master-plan sections 64–85) from git history on `main`. Every feature in this file stays in the spec set: Away Mode, event-driven intake, multi-worker orchestration, software-engineering worker, isolated environments, CI/CD, policy engine, production self-healing, remote/mobile, **marketing**, **SEO/content**, **NovelProject**, **multimedia**, distributed nodes (see also `SWARM_ARCHITECTURE.md`), GPU scheduler, cloud fallback, hardware roadmap, high-autonomy security, operations dashboard, and the Away Mode flagship benchmark.
 
 Do not invent a thinner replacement that omits approved features. Do not drop marketing, SEO, novel, invoices (invoices also remain under P5 in `ADAPTIVE_DOMAIN_ARCHITECTURE.md`), or multimedia.
 

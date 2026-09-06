@@ -1788,7 +1788,7 @@ Refactor this document periodically if it becomes unwieldy.
 
 ## 57. CURRENT STATE
 
-Audited from the repository on `cursor/local-qwen-desktop-agent`. Live Qwen 9B/27B load and Windows e2e were **not** run in this Linux cloud session (no GPU/GGUF here). Only mark live-model items VERIFIED after a Windows desktop run.
+Audited from the repository on `main`. Live Qwen 9B/27B load and Windows e2e were **not** run in this Linux cloud session (no GPU/GGUF here). Only mark live-model items VERIFIED after a Windows desktop run.
 
 ### Hardware
 
@@ -1913,7 +1913,7 @@ Date: 2026-08-25 (spec restore)
 
 Tests performed:
 
-- Queue ticks against code and squash-merge PRs on `cursor/local-qwen-desktop-agent`
+- Queue ticks against code and squash-merge PRs on `main`
 - Windows live model e2e: **not run** (no GPU/GGUF in this environment)
 
 Results: live 9B/27B remains desktop sign-off. Do not treat unit tests as a live-model pass.
@@ -1964,15 +1964,15 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 
 - [x] Strengthen failure recovery (alternate tool/worker, not only identical-call blocking)
   - Acceptance: a failed browser path can fall back to Playwright/web_fetch without repeating the same call.
-  - Status: VERIFIED in code (`test_recovery.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
+  - Status: VERIFIED in code (`test_recovery.py`; PR unknown, landed on `main`)
 
 - [x] Context compaction quality
   - Acceptance: long tasks keep a compact working-state block and do not dump full tool traces.
-  - Status: VERIFIED in code (`test_compaction.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
+  - Status: VERIFIED in code (`test_compaction.py`; PR unknown, landed on `main`)
 
 - [x] Extract `InferenceBackend` from `InferenceManager`
   - Acceptance: llama.cpp process manager is one backend; remote OpenAI-compatible remains a provider.
-  - Status: VERIFIED in code (`test_inference_backends.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
+  - Status: VERIFIED in code (`test_inference_backends.py`; PR unknown, landed on `main`)
 
 - [ ] Playwright reliability on the target PC
   - Acceptance: e2e Test 3 (example.com title) passes without human help.
@@ -1992,40 +1992,40 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
 
 - [x] RFC-0002 Agent policy interviews and per-capability autonomy
   - Acceptance: guided interview UI + runtime `authorize()` before every tool.
-  - Status: VERIFIED in code — interview UI PR #75; `authorize()` loop hook PR #72 (`8265560`); backend policy store PR #70. Both UI and hook are on `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — interview UI PR #75; `authorize()` loop hook PR #72 (`8265560`); backend policy store PR #70. Both UI and hook are on `main`.
 - [x] RFC-0008 Scoped guest portals
   - Acceptance: revocable guest portals with scoped tokens, deny-all default, owner revoke, permission preview, isolation tests, owner/guest UI.
-  - Status: VERIFIED in code — backend PR #71; guest portal UI PR #76 (`f003c4e`). On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #71; guest portal UI PR #76 (`f003c4e`). On `main`.
 - [x] RFC-0007 Domain/workspace packs
   - Acceptance: preview before install/upgrade/uninstall; rollback/export; trust keys.
-  - Status: VERIFIED in code — backend PR #61 (`8bb4145`); packs portal UI PR #78 (`c1d2634`). On `cursor/local-qwen-desktop-agent`. P5 Domain Pack architecture / business-platform list remains unimplemented.
+  - Status: VERIFIED in code — backend PR #61 (`8bb4145`); packs portal UI PR #78 (`c1d2634`). On `main`. P5 Domain Pack architecture / business-platform list remains unimplemented.
 - [x] RFC-0004 Persistent worker environments
   - Acceptance: lifecycle; status/disk/last-active; start/suspend/resume/reset/inspect.
-  - Status: VERIFIED in code — backend PR #58 (`56cc70d`); portal UI PR #80 (`48ac107`). On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #58 (`56cc70d`); portal UI PR #80 (`48ac107`). On `main`.
 - [x] RFC-0006 Hierarchical short-lived task workers
   - Acceptance: parent/child graph, status/events, spawn clamped so no extra authority.
-  - Status: VERIFIED in code — backend PR #59 (`4fd6be0`); portal UI PR #81 (`d2a1fcc`). On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #59 (`4fd6be0`); portal UI PR #81 (`d2a1fcc`). On `main`.
 - [x] RFC-0012 Local license with BYO inference
   - Acceptance: entitlement separate from inference; status vs local cost; no secrets in UI.
-  - Status: VERIFIED in code — backend PR #66 (`7b44ebe`); portal UI PR #82 (`93e0555`). License entitlement only, not a backend inference rewrite. On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #66 (`7b44ebe`); portal UI PR #82 (`93e0555`). License entitlement only, not a backend inference rewrite. On `main`.
 - [x] RFC-0013 Compact local harness and advisor escalation
   - Acceptance: preview what leaves the box; advisor has no tools.
-  - Status: VERIFIED in code — backend PR #67 (`1d614a0`); portal UI PR #83 (`ee745f9`). New files; no harness/compaction rewrite. On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #67 (`1d614a0`); portal UI PR #83 (`ee745f9`). New files; no harness/compaction rewrite. On `main`.
 - [x] RFC-0011 Versioned context repositories
   - Acceptance: inspect/diff/revert/pin/delete; Memory page kept.
-  - Status: VERIFIED in code — backend PR #65 (`5c17b5e`); portal UI PR #84 (`fc111c9`). Does not replace the existing skills Memory page. On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #65 (`5c17b5e`); portal UI PR #84 (`fc111c9`). Does not replace the existing skills Memory page. On `main`.
 - [x] RFC-0010 Cross-harness trajectory ingestion
   - Acceptance: list/inspect, Cursor import, native emit; no secrets.
-  - Status: VERIFIED in code — backend PR #63 (`412ce01`); portal UI PR #85 (`599a30e`). Compose with `agent/trajectory.py`; stay off `db/models.py`. On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #63 (`412ce01`); portal UI PR #85 (`599a30e`). Compose with `agent/trajectory.py`; stay off `db/models.py`. On `main`.
 - [x] RFC-0009 Agent runtime portability
   - Acceptance: stable identity across lease/migrate/suspend/resume; 409s visible; no extra authority.
-  - Status: VERIFIED in code — backend PR #62 (`82a5ef7`); portal UI PR #86 (`7a8f526`); 409 visibility PR #87 (`ce557d4`). On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #62 (`82a5ef7`); portal UI PR #86 (`7a8f526`); 409 visibility PR #87 (`ce557d4`). On `main`.
 - [x] RFC-0005 Isolated parallel coding workers
   - Acceptance: worktrees, decision inbox, no silent merge; integrate blocked unless ready.
-  - Status: VERIFIED in code — backend PR #57 (`430e31b`); portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`). On `cursor/local-qwen-desktop-agent`.
+  - Status: VERIFIED in code — backend PR #57 (`430e31b`); portal UI PR #88 (`ba1bb66`); blocked-integrate PR #89 (`1ff1135`). On `main`.
 - [x] Windows consumer .exe installer — smoke (`INSTALLER.md`, PR #51)
   - `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**.
-  - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `cursor/local-qwen-desktop-agent`). Not a live 9B tool-calling e2e.
+  - Status: VERIFIED by Windows smoke (PR #51 squash-merge onto `main` (via cursor/local-qwen-desktop-agent)). Not a live 9B tool-calling e2e.
 - [ ] Windows consumer installer — wizard copy, GPU fork, no-WAN first-run (`INSTALLER.md`)
   - Plain-language first-run wizard (progress UI; data dir; private key; optional LAN; Q6 fallback / 27B optional). If GPU/VRAM is missing or too small: explain and offer CPU-degraded or stop. First-run must **not** expose WAN without the Link-device flow.
   - Status: TODO / specified. Do not overwrite `installer/windows/` product files from Architect PRs.
@@ -2034,14 +2034,14 @@ Priority: P0 core blocker, P1 major capability/reliability, P2 useful improvemen
   - Status: TODO / specified. Do not touch `installer/windows/` or voice backend from this Architect PR.
 - [x] Portal UX app shell (`PORTAL_UX.md`, PR #53)
   - Orange/black; left projects + recents; main chat/task; existing destinations including Swarm and Phone; `api.ts` swarm contracts kept.
-  - Status: VERIFIED in code (PR #53 squash-merge onto `cursor/local-qwen-desktop-agent`). Remaining: Stop/settings findability (`PORTAL_UX.md`; tray Stop is `WINDOWS_SHELL.md`, D1 in flight). Do not overwrite `frontend/src` from Architect PRs.
+  - Status: VERIFIED in code (PR #53 squash-merge onto `main` (via cursor/local-qwen-desktop-agent)). Remaining: Stop/settings findability (`PORTAL_UX.md`; tray Stop is `WINDOWS_SHELL.md`, D1 in flight). Do not overwrite `frontend/src` from Architect PRs.
 
 ### P2
 
 - [x] Reusable skills
-  - Status: VERIFIED in code (`test_skills.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
+  - Status: VERIFIED in code (`test_skills.py`; PR unknown, landed on `main`)
 - [x] Trajectory memory (cross-task)
-  - Status: VERIFIED in code (`test_trajectory.py`; PR unknown, landed on cursor/local-qwen-desktop-agent)
+  - Status: VERIFIED in code (`test_trajectory.py`; PR unknown, landed on `main`)
 - [x] Best-of-N planning for Reliable mode
   - Status: VERIFIED in code (PR #1)
 - [x] Model benchmark UI (persist tok/s, VRAM, success rates)

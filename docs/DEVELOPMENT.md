@@ -2,7 +2,7 @@
 
 This guide is for changing the current codebase. Installation of models and llama.cpp is in [INSTALL.md](INSTALL.md).
 
-**Process first:** read [PROCESS.md](PROCESS.md). Implement **one** named RFC or **one** Development Queue item per session; branch from `cursor/local-qwen-desktop-agent`. Product intent and the queue live in [`JARVIS_MASTER_PLAN.md`](../JARVIS_MASTER_PLAN.md) §57–58 — update only the lines that match your shipped ticket.
+**Process first:** read [PROCESS.md](PROCESS.md). Implement **one** named RFC or **one** Development Queue item per session; branch from `main`. Product intent and the queue live in [`JARVIS_MASTER_PLAN.md`](../JARVIS_MASTER_PLAN.md) §57–58 — update only the lines that match your shipped ticket.
 
 Jarvis is a local control plane, not a chatbot wrapper. Optimize for autonomous completion and verification, not for swapping the stack.
 

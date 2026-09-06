@@ -2,7 +2,7 @@
 
 Status: **separate specification** referenced by `JARVIS_MASTER_PLAN.md` §58 P1. Architect-owned.
 
-**Smoke (PR #51, squash-merge onto `cursor/local-qwen-desktop-agent`):** `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**. Remaining: wizard copy, GPU/VRAM fork, no-WAN first-run.
+**Smoke (PR #51, squash-merge onto `main` via cursor/local-qwen-desktop-agent):** `JarvisSetup.exe`; **Start Jarvis** → `http://127.0.0.1:4780` health **200**; **Stop** kills backend + `llama-server`; **9B Q8 on disk**. Remaining: wizard copy, GPU/VRAM fork, no-WAN first-run.
 
 This is the **non-technical onboarding** path: a new Windows 11 user downloads Jarvis and double-clicks one installer. It is **not** a second product, **not** P3 swarm, and **not** a replacement for the developer/manual path in [`docs/INSTALL.md`](docs/INSTALL.md).
 
