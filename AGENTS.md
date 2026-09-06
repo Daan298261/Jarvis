@@ -14,7 +14,7 @@ Instructions for **Cursor cloud workers** and other automated agents working in 
 
 Good:
 
-> Implement `docs/rfcs/0003-example.md`. Branch from `main`. PR against that branch.
+> Implement `docs/rfcs/0003-example.md`. Branch from `development`. PR against `development`.
 
 Bad (forbidden):
 
@@ -24,13 +24,14 @@ Bad (forbidden):
 
 | Step | Action |
 | --- | --- |
-| Base branch | `main` |
+| Base branch | `development` |
 | New branch | `cursor/<short-slug>-99ea` |
 | Scope | One RFC or one queue item only |
 | Tests | `python3 -m pytest` |
 | Frontend | `npm --prefix frontend run build` (and `lint` if TS changed) |
 | Docs | Do **not** edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, `PORTAL_UX.md`). Architect-only. Note status in the PR. |
-| PR target | `main` |
+| PR target | `development` |
+| Stable / release | `main` (promote `development` → `main` only on explicit stable cut; GitHub default stays `main`) |
 
 ### Model selection (Cursor cloud)
 

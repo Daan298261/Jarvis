@@ -2,7 +2,7 @@
 
 Self-hosted local desktop agent. The default model is **Qwen3.5-9B Abliterated** running on this computer through llama.cpp (Qwen3.5-27B remains the Expert escalation model, or you can point at any OpenAI-compatible server). The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
 
-**Development process:** [`docs/PROCESS.md`](docs/PROCESS.md) — one RFC or one queue item per worker; branch from `main`. Design specs go in [`docs/rfcs/`](docs/rfcs/), not wholesale edits to the master plan.
+**Development process:** [`docs/PROCESS.md`](docs/PROCESS.md) — one RFC or one queue item per worker; branch from `development` and open PRs against `development`. `main` is the stable release branch (GitHub default); promote only on an explicit cut. Design specs go in [`docs/rfcs/`](docs/rfcs/), not wholesale edits to the master plan.
 
 Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) for architecture context and the Development Queue (§58). Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode, including novel/marketing/SEO/multimedia) lives in [`JARVIS_2.0.md`](JARVIS_2.0.md) and is not current-session P0 unless the queue promotes it.
 
