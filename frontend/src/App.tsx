@@ -1,5 +1,5 @@
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
 import { ChatPage } from "./pages/Chat"
 import { HistoryPage } from "./pages/History"
 import { MemoryPage } from "./pages/Memory"
@@ -26,8 +26,12 @@ import { ContextRepoPage } from "./pages/ContextRepo"
 import { TrajectoriesPage } from "./pages/Trajectories"
 import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
-import { api, getAwayMode, getSetupStatus, type AwayModeState, type Task } from "./api"
+import { api, getAwayMode, getDiagnostics, getLicenseStatus, getSetupStatus, listCodingDecisionInbox, listSwarmNodes, type AwayModeState, type LicenseStatus, type SwarmNode, type Task } from "./api"
 import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
+import { HudShell } from "./hud/HudShell"
+import { HudChatHome } from "./hud/HudChatHome"
+import { getUiMode, setUiMode as persistUiMode, type UiMode } from "./hud/uiMode"
+import "./hud/hud.css"
 import {
   assignTask,
   createProject,
@@ -113,6 +117,16 @@ function OwnerPortal() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [adminOpen, setAdminOpen] = useState(false)
+  const [uiMode, setUiModeState] = useState<UiMode>(() => getUiMode())
+  const [license, setLicense] = useState<LicenseStatus | null>(null)
+  const [swarmNodes, setSwarmNodes] = useState<SwarmNode[]>([])
+  const [decisionInboxCount, setDecisionInboxCount] = useState(0)
+  const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null)
+
+  const setUiMode = useCallback((mode: UiMode) => {
+    setUiModeState(mode)
+    persistUiMode(mode)
+  }, [])
 
   const chat = isChatPath(location.pathname)
   const currentTaskId = activeTaskId(location.pathname)
@@ -167,6 +181,23 @@ function OwnerPortal() {
     return () => window.clearInterval(id)
   }, [])
 
+  useEffect(() => {
+    if (uiMode !== "hud") return
+    const tick = () => {
+      getLicenseStatus().then(setLicense).catch(() => undefined)
+      listSwarmNodes()
+        .then((res) => setSwarmNodes(res.nodes || []))
+        .catch(() => undefined)
+      listCodingDecisionInbox(true)
+        .then((res) => setDecisionInboxCount(res.items?.length || 0))
+        .catch(() => undefined)
+      getDiagnostics().then(setDiagnostics).catch(() => undefined)
+    }
+    tick()
+    const id = window.setInterval(tick, 8000)
+    return () => window.clearInterval(id)
+  }, [uiMode])
+
   const tasksById = useMemo(() => {
     const map = new Map<string, Task>()
     for (const task of recents) map.set(task.id, task)
@@ -210,6 +241,62 @@ function OwnerPortal() {
 
   const status = modelStatus()
 
+  const licenseBad = useMemo(() => {
+    const code = String(license?.validation?.status || license?.last_status || "").toLowerCase()
+    return ["tamper_detected", "invalid_signature", "expired", "cluster_mismatch"].includes(code)
+  }, [license])
+
+  const systemDegraded = ((!model?.loaded && !model?.loading && !!model?.last_error) || licenseBad)
+  const statusOnline = !systemDegraded
+
+  const appVersion = String(diagnostics?.application_version || "0.0.0")
+  const coreLabel = model?.loaded ? "STABLE" : model?.loading ? "STARTING" : "STANDBY"
+  const cryptoLabel = "Keys stay on this PC"
+  const sandboxLabel = String(diagnostics?.inference_backend || "local inference")
+  const swarmOnline = swarmNodes.filter((n) => String(n.status).toLowerCase() === "online").length
+  const swarmLabel = swarmNodes.length
+    ? `${swarmOnline}/${swarmNodes.length} nodes online`
+    : "Local node"
+
+  const routes = (
+    <Routes>
+      <Route path="/" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
+      <Route path="/phone" element={<PhonePage />} />
+      <Route path="/tasks/:id" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
+      <Route path="/history" element={<HistoryPage />} />
+      <Route path="/workflows" element={<WorkflowsPage />} />
+      <Route path="/memory" element={<MemoryPage />} />
+      <Route path="/model" element={<ModelPage />} />
+      <Route path="/tools" element={<ToolsPage />} />
+      <Route path="/mcp" element={<McpPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/license" element={<LicensePage />} />
+      <Route path="/advisor" element={<AdvisorPage />} />
+      <Route path="/guest-portals" element={<GuestPortalsPage />} />
+      <Route path="/agents" element={<AgentsPage />} />
+      <Route path="/agents/new" element={<AgentInterviewPage />} />
+      <Route path="/agents/:id" element={<AgentInterviewPage />} />
+      <Route path="/portability" element={<PortabilityPage />} />
+      <Route path="/portability/:agentId" element={<PortabilityPage />} />
+      <Route path="/context" element={<ContextRepoPage />} />
+      <Route path="/trajectories" element={<TrajectoriesPage />} />
+      <Route path="/trajectories/:trajectoryId" element={<TrajectoriesPage />} />
+      <Route path="/environments" element={<WorkerEnvironmentsPage />} />
+      <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
+      <Route path="/coding" element={<CodingPage />} />
+      <Route path="/coding/:taskId" element={<CodingPage />} />
+      <Route path="/packs" element={<PacksPage />} />
+      <Route path="/ads" element={<AdsPage />} />
+      <Route path="/delegation" element={<DelegationPage />} />
+      <Route path="/delegation/:taskId" element={<DelegationPage />} />
+      <Route path="/system" element={<SystemPage />} />
+      <Route path="/setup" element={<SetupPage />} />
+      <Route path="/swarm" element={<SwarmPage />} />
+      <Route path="/swarm/:nodeId" element={<SwarmPage />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+
   if (isSetup) {
     return (
       <div className="app setup-mode">
@@ -218,6 +305,32 @@ function OwnerPortal() {
           <Route path="*" element={<Navigate to="/setup" replace />} />
         </Routes>
       </div>
+    )
+  }
+
+  if (uiMode === "hud") {
+    return (
+      <HudShell
+        isChat={chat}
+        uiMode={uiMode}
+        onUiModeChange={setUiMode}
+        version={appVersion}
+        statusOnline={statusOnline}
+        coreLabel={coreLabel}
+        cryptoLabel={cryptoLabel}
+        sandboxLabel={sandboxLabel}
+        swarmLabel={swarmLabel}
+        tasks={recents}
+        activeTaskId={currentTaskId}
+        model={model}
+        license={license}
+        away={away}
+        swarmNodes={swarmNodes}
+        decisionInboxCount={decisionInboxCount}
+        systemDegraded={systemDegraded}
+      >
+        {routes}
+      </HudShell>
     )
   }
 
@@ -459,44 +572,12 @@ function OwnerPortal() {
           )}
           {DesktopBridge.isDesktop() && <div className="side-status-meta">Shell: {shellStatus}</div>}
         </div>
+        <button type="button" className="classic-mode-toggle" onClick={() => setUiMode("hud")}>
+          Switch to HUD UI
+        </button>
       </aside>
       <main className={`main${chat ? " chat-main" : ""}`}>
-        <Routes>
-          <Route path="/" element={<ChatPage />} />
-          <Route path="/phone" element={<PhonePage />} />
-          <Route path="/tasks/:id" element={<ChatPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/workflows" element={<WorkflowsPage />} />
-          <Route path="/memory" element={<MemoryPage />} />
-          <Route path="/model" element={<ModelPage />} />
-          <Route path="/tools" element={<ToolsPage />} />
-          <Route path="/mcp" element={<McpPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/license" element={<LicensePage />} />
-          <Route path="/advisor" element={<AdvisorPage />} />
-          <Route path="/guest-portals" element={<GuestPortalsPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/agents/new" element={<AgentInterviewPage />} />
-          <Route path="/agents/:id" element={<AgentInterviewPage />} />
-          <Route path="/portability" element={<PortabilityPage />} />
-          <Route path="/portability/:agentId" element={<PortabilityPage />} />
-          <Route path="/context" element={<ContextRepoPage />} />
-          <Route path="/trajectories" element={<TrajectoriesPage />} />
-          <Route path="/trajectories/:trajectoryId" element={<TrajectoriesPage />} />
-          <Route path="/environments" element={<WorkerEnvironmentsPage />} />
-          <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
-          <Route path="/coding" element={<CodingPage />} />
-          <Route path="/coding/:taskId" element={<CodingPage />} />
-          <Route path="/packs" element={<PacksPage />} />
-          <Route path="/ads" element={<AdsPage />} />
-          <Route path="/delegation" element={<DelegationPage />} />
-          <Route path="/delegation/:taskId" element={<DelegationPage />} />
-          <Route path="/system" element={<SystemPage />} />
-          <Route path="/setup" element={<SetupPage />} />
-          <Route path="/swarm" element={<SwarmPage />} />
-          <Route path="/swarm/:nodeId" element={<SwarmPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        {routes}
       </main>
     </div>
   )
