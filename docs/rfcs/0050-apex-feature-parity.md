@@ -1,9 +1,18 @@
 # RFC 0050 — APEX Feature Parity
 
-Status: Proposed / implementation started
-Owner: Jarvis
-Scope: Product-wide
+Status: Proposed / implementation started  
+Owner: Jarvis  
+Scope: Product-wide  
 Reference implementation: `RubenM1990/APEX-UI` (MIT, UI only)
+
+## Related specifications (reconciled with development tip)
+
+This document complements, and does not replace, the RFC-0050 presence work merged in PR #127:
+
+- [`0050-ui-v3-presence-architecture.md`](0050-ui-v3-presence-architecture.md) — accepted UI v3 **presence-layer** architecture (shell vs renderer selection, `PresenceHost`, classic / neural / humanoid modes, bootstrap persistence). The APEX Command Deck uses the ported `JarvisOrb` as the HUD core visual while presentation settings and `AppearancePresenceControls` remain the migration/fallback path described there.
+- [`0058-apex-feature-parity.md`](0058-apex-feature-parity.md) — umbrella **competitor-parity epic catalog** from the same tip. Epic numbering and slide-sourced benchmark detail in 0058 stay authoritative for backlog distillation. This RFC keeps the unique UI foundation decision (§2), parity completion criteria (§3), PBI distillation process (§6), and the `feat/apex-ui-foundation` implementation slice (§7).
+
+When decomposing work, prefer 0058 for slide-level epic coverage and this RFC for Command Deck / APEX-UI foundation rules and initial PBI sequencing.
 
 ## 1. Purpose
 
