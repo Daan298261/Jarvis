@@ -49,6 +49,16 @@ def _time(seconds: float = 0.0) -> datetime:
     return datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc) + timedelta(seconds=seconds)
 
 
+def _resolve(resolver: IdentityResolver, vector, *, quality: float = 1.0, seconds: float = 0.0, model: str = "test-model", version: int = 1):
+    return resolver.resolve_embedding(
+        vector,
+        quality=quality,
+        embedding_model=model,
+        embedding_version=version,
+        observed_at=_time(seconds),
+    )
+
+
 def test_identity_recognition_defaults_disabled_and_validates_confirmation_window():
     settings = IdentityRecognitionSettings()
     assert settings.enabled is False
@@ -107,7 +117,7 @@ def test_disabled_recognition_never_matches(tmp_path):
     resolver = _resolver(tmp_path, enabled=False)
     resolver.enroll_embeddings(_request(), [_vector(1.0)])
 
-    result = resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time())
+    result = _resolve(resolver, _vector(1.0))
     assert result.state == "disabled"
     assert result.identity_id is None
 
@@ -116,16 +126,30 @@ def test_low_face_quality_returns_unknown(tmp_path):
     resolver = _resolver(tmp_path)
     resolver.enroll_embeddings(_request(), [_vector(1.0)])
 
-    result = resolver.resolve_embedding(_vector(1.0), quality=0.2, observed_at=_time())
+    result = _resolve(resolver, _vector(1.0), quality=0.2)
     assert result.state == "unknown"
     assert result.reason == "insufficient_face_quality"
+
+
+def test_embedding_model_and_version_must_match_enrollment(tmp_path):
+    resolver = _resolver(tmp_path)
+    resolver.enroll_embeddings(_request(), [_vector(1.0)])
+
+    missing = resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time())
+    wrong_model = _resolve(resolver, _vector(1.0), model="different-model")
+    wrong_version = _resolve(resolver, _vector(1.0), version=2)
+
+    assert missing.state == "unknown"
+    assert missing.reason == "embedding_model_required"
+    assert wrong_model.reason == "no_compatible_enrollments"
+    assert wrong_version.reason == "no_compatible_enrollments"
 
 
 def test_below_match_threshold_stays_unknown(tmp_path):
     resolver = _resolver(tmp_path, match_threshold=0.90)
     resolver.enroll_embeddings(_request(), [_vector(1.0)])
 
-    result = resolver.resolve_embedding(_vector(0.0, 1.0), quality=1.0, observed_at=_time())
+    result = _resolve(resolver, _vector(0.0, 1.0))
     assert result.state == "unknown"
     assert result.reason == "below_match_threshold"
 
@@ -138,7 +162,7 @@ def test_ambiguous_second_best_margin_stays_unknown(tmp_path):
         [_vector(0.99, 0.10)],
     )
 
-    result = resolver.resolve_embedding(_vector(1.0, 0.0), quality=1.0, observed_at=_time())
+    result = _resolve(resolver, _vector(1.0, 0.0))
     assert result.state == "unknown"
     assert result.reason == "ambiguous_match"
 
@@ -147,9 +171,9 @@ def test_temporal_confirmation_requires_multiple_hits(tmp_path):
     resolver = _resolver(tmp_path, confirmation_window=5, confirmation_hits=3)
     resolver.enroll_embeddings(_request(), [_vector(1.0)])
 
-    first = resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time(0))
-    second = resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time(1))
-    third = resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time(2))
+    first = _resolve(resolver, _vector(1.0), seconds=0)
+    second = _resolve(resolver, _vector(1.0), seconds=1)
+    third = _resolve(resolver, _vector(1.0), seconds=2)
 
     assert first.state == "provisional"
     assert second.state == "provisional"
@@ -161,8 +185,8 @@ def test_temporal_confirmation_requires_multiple_hits(tmp_path):
 def test_short_occlusion_holds_confirmed_identity_then_times_out(tmp_path):
     resolver = _resolver(tmp_path, confirmation_hits=2, lost_timeout_seconds=3.0)
     resolver.enroll_embeddings(_request(), [_vector(1.0)])
-    resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time(0))
-    confirmed = resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time(1))
+    _resolve(resolver, _vector(1.0), seconds=0)
+    confirmed = _resolve(resolver, _vector(1.0), seconds=1)
     assert confirmed.state == "confirmed"
 
     held = resolver.resolve_embedding(None, quality=0.0, observed_at=_time(2))
@@ -178,13 +202,13 @@ def test_short_occlusion_holds_confirmed_identity_then_times_out(tmp_path):
 def test_delete_identity_removes_embedding_and_cached_confirmation(tmp_path):
     resolver = _resolver(tmp_path, confirmation_hits=1)
     resolver.enroll_embeddings(_request(), [_vector(1.0)])
-    matched = resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time())
+    matched = _resolve(resolver, _vector(1.0))
     assert matched.state == "confirmed"
 
     assert resolver.delete_identity("owner") is True
     assert resolver.store.get("owner") is None
 
-    after = resolver.resolve_embedding(_vector(1.0), quality=1.0, observed_at=_time(1))
+    after = _resolve(resolver, _vector(1.0), seconds=1)
     assert after.state == "unknown"
     assert after.reason == "no_compatible_enrollments"
 
