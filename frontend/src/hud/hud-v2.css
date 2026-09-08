@@ -1,0 +1,749 @@
+/* Neural HUD v2 — sparse local-first home with the neural core as the primary surface. */
+
+.hud-app {
+  --hud-bg: #05070a;
+  --hud-bg-raised: rgba(9, 13, 18, 0.88);
+  --hud-panel: rgba(10, 15, 21, 0.9);
+  --hud-cyan: #67dcff;
+  --hud-cyan-dim: #79b8ca;
+  --hud-orange: #ff8a3d;
+  --hud-alert: #ff6a55;
+  --hud-line: rgba(143, 218, 239, 0.12);
+  --hud-line-strong: rgba(143, 218, 239, 0.22);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 62% 50% at 50% 43%, rgba(40, 147, 184, 0.095), transparent 70%),
+    radial-gradient(circle at 50% 100%, rgba(28, 88, 112, 0.07), transparent 42%),
+    linear-gradient(180deg, #07090c 0%, #040609 100%);
+  color: #edf7fb;
+}
+
+.hud-app::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.28;
+  background-image:
+    radial-gradient(circle at 18% 23%, rgba(196, 239, 255, 0.34) 0 0.6px, transparent 0.8px),
+    radial-gradient(circle at 74% 39%, rgba(196, 239, 255, 0.23) 0 0.55px, transparent 0.75px),
+    radial-gradient(circle at 45% 81%, rgba(196, 239, 255, 0.2) 0 0.5px, transparent 0.7px);
+  background-size: 137px 149px, 181px 173px, 211px 197px;
+  mask-image: radial-gradient(ellipse at center, black 0%, transparent 78%);
+}
+
+/* Top chrome: quiet by default, controls only when needed. */
+.hud-top {
+  min-height: 58px;
+  grid-template-columns: minmax(210px, 1fr) auto minmax(210px, 1fr);
+  padding: 10px 18px;
+  border-bottom: 1px solid rgba(143, 218, 239, 0.075);
+  background: linear-gradient(180deg, rgba(5, 8, 12, 0.88), rgba(5, 8, 12, 0.34));
+  backdrop-filter: blur(18px);
+}
+
+.hud-top-left {
+  gap: 12px;
+  align-items: center;
+}
+
+.hud-brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.hud-brand-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--hud-cyan);
+  box-shadow: 0 0 14px rgba(103, 220, 255, 0.72);
+}
+
+.hud-brand-mark.degraded {
+  background: var(--hud-alert);
+  box-shadow: 0 0 14px rgba(255, 106, 85, 0.7);
+}
+
+.hud-top-left strong {
+  color: #f2fbff;
+  font-size: 12px;
+  letter-spacing: 0.19em;
+  white-space: nowrap;
+}
+
+.hud-top-meta {
+  color: rgba(201, 224, 234, 0.44);
+  font-size: 10px;
+}
+
+.hud-local-state {
+  color: rgba(192, 225, 236, 0.58);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.hud-local-state.degraded { color: var(--hud-alert); }
+
+.hud-top-center {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  justify-self: center;
+}
+
+.hud-top-right {
+  gap: 5px;
+}
+
+.hud-icon-btn,
+.hud-panel-toggle {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: rgba(215, 234, 242, 0.7);
+  background: transparent;
+  font-size: 11px;
+  letter-spacing: 0.015em;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.hud-icon-btn:hover,
+.hud-panel-toggle:hover,
+.hud-panel-toggle.active {
+  color: #eefbff;
+  border-color: var(--hud-line-strong);
+  background: rgba(122, 212, 239, 0.055);
+}
+
+.hud-panel-toggle .hud-count {
+  display: inline-flex;
+  min-width: 17px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  border-radius: 999px;
+  padding: 0 5px;
+  color: var(--hud-cyan);
+  background: rgba(103, 220, 255, 0.1);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+}
+
+.hud-panel-toggle.attention,
+.hud-panel-toggle.attention .hud-count {
+  color: var(--hud-orange);
+}
+
+.hud-panel-toggle.attention .hud-count {
+  background: rgba(255, 138, 61, 0.1);
+}
+
+.hud-mode-toggle {
+  border-color: transparent;
+  color: rgba(190, 214, 224, 0.5);
+}
+
+.hud-admin-drawer {
+  top: calc(100% + 8px);
+  right: 18px;
+  grid-template-columns: repeat(3, minmax(118px, 1fr));
+  gap: 3px;
+  padding: 9px;
+  background: rgba(8, 12, 17, 0.96);
+  border: 1px solid var(--hud-line-strong);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(22px);
+}
+
+.hud-admin-drawer a {
+  border-radius: 9px;
+  color: rgba(211, 232, 240, 0.7);
+}
+
+.hud-admin-drawer a:hover,
+.hud-admin-drawer a.active {
+  color: #f0fbff;
+  background: rgba(103, 220, 255, 0.065);
+}
+
+/* Home stage — one focal column. Rails are drawers now. */
+.hud-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  padding: 4px 18px 8px;
+  overflow: hidden;
+}
+
+.hud-center {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 4px 0 6px;
+}
+
+.hud-home {
+  width: min(900px, 100%);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(8px, 1.6vh, 18px);
+  padding: clamp(8px, 1.8vh, 20px) 0;
+}
+
+.hud-orb-zone {
+  position: relative;
+  width: min(620px, 76vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 300px;
+}
+
+.hud-orb-caption {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: -24px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.hud-orb-state {
+  color: rgba(222, 244, 251, 0.9);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.hud-orb-detail {
+  max-width: 560px;
+  color: rgba(187, 216, 227, 0.5);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.hud-orb-state.alert { color: var(--hud-orange); }
+
+/* High-resolution neural core. WebGL sits over a CSS fallback. */
+.jarvis-neural-orb {
+  --jarvis-orb-size: 520px;
+  position: relative;
+  width: min(var(--jarvis-orb-size), 100%);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  flex: 0 1 auto;
+  filter: saturate(1.08);
+}
+
+.jarvis-orb-webgl,
+.jarvis-neural-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.jarvis-neural-canvas {
+  display: block;
+  pointer-events: none;
+}
+
+.jarvis-orb-aura {
+  position: absolute;
+  inset: 19%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(94, 213, 255, 0.27) 0%, rgba(36, 142, 181, 0.11) 35%, transparent 72%);
+  filter: blur(32px);
+  transform: scale(1.26);
+  animation: jarvis-aura-breathe 5.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.jarvis-orb-fallback {
+  position: absolute;
+  inset: 29%;
+  border-radius: 50%;
+  opacity: 0.72;
+  background:
+    radial-gradient(circle at 38% 32%, rgba(224, 249, 255, 0.55) 0%, rgba(118, 226, 255, 0.18) 9%, transparent 26%),
+    radial-gradient(circle at 50% 55%, rgba(49, 185, 224, 0.19), rgba(15, 77, 102, 0.08) 48%, transparent 70%);
+  border: 1px solid rgba(122, 225, 255, 0.18);
+  box-shadow:
+    0 0 36px rgba(80, 208, 249, 0.24),
+    0 0 94px rgba(39, 161, 205, 0.14),
+    inset 0 0 34px rgba(103, 220, 255, 0.16);
+  pointer-events: none;
+}
+
+.jarvis-orb-glass {
+  position: absolute;
+  inset: 25.5%;
+  z-index: 3;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 37% 28%, rgba(255, 255, 255, 0.14), transparent 15%),
+    radial-gradient(circle at 54% 64%, transparent 36%, rgba(134, 228, 255, 0.045) 65%, transparent 72%);
+  box-shadow:
+    inset -16px -18px 35px rgba(0, 0, 0, 0.18),
+    inset 9px 8px 22px rgba(190, 242, 255, 0.055);
+}
+
+.jarvis-orb-orbit {
+  position: absolute;
+  z-index: 2;
+  width: 75%;
+  height: 28%;
+  border-radius: 50%;
+  border: 1px solid rgba(124, 222, 251, 0.14);
+  box-shadow: 0 0 18px rgba(83, 201, 238, 0.055);
+  pointer-events: none;
+}
+
+.jarvis-orb-orbit::after {
+  content: "";
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  left: 13%;
+  top: 50%;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: rgba(222, 249, 255, 0.84);
+  box-shadow: 0 0 11px rgba(103, 220, 255, 0.82);
+}
+
+.jarvis-orb-orbit-a {
+  transform: rotate(18deg);
+  animation: jarvis-orbit-a 13s linear infinite;
+}
+
+.jarvis-orb-orbit-b {
+  width: 66%;
+  height: 34%;
+  opacity: 0.72;
+  transform: rotate(-48deg);
+  animation: jarvis-orbit-b 17s linear infinite reverse;
+}
+
+.jarvis-orb-orbit-c {
+  width: 58%;
+  height: 23%;
+  opacity: 0.48;
+  transform: rotate(72deg);
+  animation: jarvis-orbit-c 20s linear infinite;
+}
+
+.jarvis-neural-orb.mood-thinking .jarvis-orb-aura,
+.jarvis-neural-orb.mood-listening .jarvis-orb-aura {
+  opacity: 1;
+  filter: blur(27px);
+}
+
+.jarvis-neural-orb.mood-speaking .jarvis-orb-aura {
+  transform: scale(1.34);
+  filter: blur(25px);
+}
+
+.jarvis-neural-orb.mood-alert .jarvis-orb-aura {
+  background: radial-gradient(circle, rgba(255, 138, 61, 0.3) 0%, rgba(181, 74, 31, 0.12) 38%, transparent 73%);
+}
+
+.jarvis-neural-orb.mood-alert .jarvis-orb-fallback,
+.jarvis-neural-orb.mood-alert .jarvis-orb-orbit {
+  border-color: rgba(255, 138, 61, 0.25);
+  box-shadow: 0 0 26px rgba(255, 138, 61, 0.09);
+}
+
+@keyframes jarvis-aura-breathe {
+  0%, 100% { opacity: 0.62; transform: scale(1.2); }
+  50% { opacity: 0.92; transform: scale(1.32); }
+}
+
+@keyframes jarvis-orbit-a {
+  from { transform: rotate(18deg) rotateZ(0deg); }
+  to { transform: rotate(378deg) rotateZ(360deg); }
+}
+
+@keyframes jarvis-orbit-b {
+  from { transform: rotate(-48deg) rotateZ(0deg); }
+  to { transform: rotate(312deg) rotateZ(360deg); }
+}
+
+@keyframes jarvis-orbit-c {
+  from { transform: rotate(72deg) rotateZ(0deg); }
+  to { transform: rotate(432deg) rotateZ(360deg); }
+}
+
+/* Chat: conversation appears only when there is one; the composer stays quiet under the orb. */
+.hud-chat {
+  width: min(780px, 100%);
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.hud-thread {
+  max-height: min(30vh, 285px);
+  min-height: 0;
+  padding: 4px 4px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  scrollbar-width: thin;
+  mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 12px), transparent 100%);
+}
+
+.hud-bubble {
+  max-width: 92%;
+  margin: 0 0 7px;
+  padding: 9px 12px;
+  border: 1px solid rgba(142, 219, 241, 0.1);
+  border-radius: 13px;
+  background: rgba(12, 18, 25, 0.52);
+  backdrop-filter: blur(9px);
+  font-size: 12px;
+}
+
+.hud-bubble-user {
+  margin-left: auto;
+  border-color: rgba(130, 219, 246, 0.15);
+  background: rgba(24, 47, 59, 0.35);
+}
+
+.hud-bubble-result {
+  max-width: 100%;
+  border-color: rgba(130, 219, 246, 0.13);
+}
+
+.hud-bubble-label {
+  color: rgba(132, 210, 234, 0.58);
+  font-size: 9px;
+}
+
+.hud-composer {
+  position: relative;
+  padding: 9px 10px 9px 13px;
+  border: 1px solid rgba(152, 222, 242, 0.16);
+  border-radius: 21px;
+  background: linear-gradient(180deg, rgba(15, 22, 29, 0.76), rgba(8, 13, 18, 0.82));
+  box-shadow:
+    0 15px 42px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(230, 249, 255, 0.025);
+  backdrop-filter: blur(18px);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.hud-composer:focus-within {
+  border-color: rgba(126, 221, 249, 0.29);
+  box-shadow:
+    0 17px 52px rgba(0, 0, 0, 0.27),
+    0 0 0 1px rgba(103, 220, 255, 0.035),
+    0 0 26px rgba(57, 181, 219, 0.055);
+}
+
+.hud-command {
+  min-height: 42px;
+  max-height: 145px;
+  padding: 8px 6px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #eef8fb;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.hud-command::placeholder { color: rgba(189, 216, 226, 0.38); }
+
+.hud-composer-actions {
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 3px;
+  gap: 6px;
+}
+
+.hud-send,
+.hud-app .btn.hud-send {
+  min-width: 64px;
+  border-radius: 12px;
+  border-color: rgba(128, 223, 250, 0.22);
+  background: rgba(116, 218, 247, 0.1);
+  color: #e9faff;
+}
+
+.hud-send:hover:not(:disabled),
+.hud-app .btn.hud-send:hover:not(:disabled) {
+  border-color: rgba(128, 223, 250, 0.38);
+  background: rgba(116, 218, 247, 0.16);
+}
+
+.hud-auth-card {
+  border-color: rgba(255, 138, 61, 0.28);
+  border-radius: 13px;
+  background: rgba(27, 17, 11, 0.66);
+}
+
+/* On-demand activity/health drawers. */
+.hud-panel-backdrop {
+  position: absolute;
+  inset: 58px 0 37px;
+  z-index: 20;
+  border: 0;
+  background: rgba(1, 3, 5, 0.22);
+  backdrop-filter: blur(1px);
+  cursor: default;
+}
+
+.hud-drawer {
+  position: absolute;
+  z-index: 21;
+  top: 70px;
+  bottom: 49px;
+  width: min(370px, calc(100% - 32px));
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hud-line-strong);
+  border-radius: 16px;
+  background: rgba(7, 11, 16, 0.93);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(24px);
+  overflow: hidden;
+}
+
+.hud-drawer-left { left: 16px; }
+.hud-drawer-right { right: 16px; }
+
+.hud-drawer-close {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 4;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(111, 205, 233, 0.05);
+  color: rgba(215, 235, 242, 0.58);
+  cursor: pointer;
+}
+
+.hud-drawer-close:hover {
+  background: rgba(111, 205, 233, 0.1);
+  color: #f0fbff;
+}
+
+.hud-drawer .hud-rail {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.hud-drawer .hud-rail-head {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 45px 0 13px;
+  border-bottom-color: rgba(143, 218, 239, 0.08);
+  color: rgba(160, 211, 226, 0.54);
+}
+
+.hud-log,
+.hud-cards,
+.hud-catalog-panel {
+  scrollbar-width: thin;
+}
+
+.hud-log-row {
+  border-radius: 9px;
+}
+
+.hud-card {
+  border-color: rgba(143, 218, 239, 0.09);
+  border-radius: 11px;
+  background: rgba(10, 16, 22, 0.46);
+}
+
+.hud-card:hover { border-color: rgba(143, 218, 239, 0.18); }
+.hud-card.tone-warn .hud-card-value { color: var(--hud-orange); }
+
+/* One unobtrusive telemetry line instead of four dashboard blocks. */
+.hud-bottom {
+  min-height: 37px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 6px 18px 8px;
+  border-top: 1px solid rgba(143, 218, 239, 0.065);
+  background: linear-gradient(0deg, rgba(5, 8, 12, 0.82), rgba(5, 8, 12, 0.3));
+  color: rgba(189, 215, 225, 0.42);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.045em;
+}
+
+.hud-bottom-group {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-bottom-group:last-child {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.hud-bottom-live {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgba(103, 220, 255, 0.68);
+  box-shadow: 0 0 8px rgba(103, 220, 255, 0.5);
+}
+
+.hud-bottom-sep { color: rgba(143, 218, 239, 0.14); }
+
+/* Admin pages inherit the same restrained visual language. */
+.hud-admin-main {
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 22px 24px 28px;
+}
+
+.hud-admin-main .card {
+  border-color: rgba(143, 218, 239, 0.1);
+  border-radius: 15px;
+  background: rgba(10, 15, 21, 0.63);
+  box-shadow: none;
+}
+
+.hud-admin-main input,
+.hud-admin-main select,
+.hud-admin-main textarea {
+  border-color: rgba(143, 218, 239, 0.13);
+  border-radius: 10px;
+  background: rgba(3, 7, 10, 0.48);
+}
+
+.hud-admin-main .btn {
+  border-radius: 10px;
+}
+
+@media (max-width: 900px) {
+  .hud-top {
+    grid-template-columns: 1fr auto;
+  }
+
+  .hud-top-center {
+    order: 3;
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: center;
+    padding-top: 2px;
+  }
+
+  .hud-top-right { justify-self: end; }
+  .hud-stage { padding-inline: 12px; }
+  .hud-orb-zone { width: min(560px, 92vw); }
+  .hud-bottom-group:last-child { display: none; }
+}
+
+@media (max-width: 640px) {
+  .hud-app { overflow: auto; }
+  .hud-top {
+    min-height: auto;
+    grid-template-columns: 1fr auto;
+    padding: 9px 10px;
+  }
+
+  .hud-top-left { gap: 7px; }
+  .hud-local-state,
+  .hud-top-meta { display: none; }
+  .hud-top-right .hud-mode-toggle { display: none; }
+  .hud-top-center { overflow-x: auto; justify-content: flex-start; }
+  .hud-panel-toggle { flex: 0 0 auto; }
+
+  .hud-home {
+    min-height: auto;
+    justify-content: flex-start;
+    padding-top: 4px;
+  }
+
+  .hud-orb-zone {
+    width: min(420px, 100vw);
+    min-height: 260px;
+  }
+
+  .jarvis-neural-orb { width: min(var(--jarvis-orb-size), 108vw); }
+  .hud-orb-caption { margin-top: -18px; }
+  .hud-chat { padding-inline: 2px; }
+  .hud-composer { border-radius: 18px; }
+
+  .hud-drawer {
+    top: 96px;
+    bottom: 42px;
+    width: calc(100% - 20px);
+  }
+  .hud-drawer-left,
+  .hud-drawer-right { left: 10px; right: 10px; }
+
+  .hud-admin-drawer {
+    left: 10px;
+    right: 10px;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .hud-bottom {
+    min-height: 32px;
+    padding-inline: 10px;
+  }
+
+  .hud-bottom-group:first-child span:not(.hud-bottom-live):not(:nth-child(2)) { display: none; }
+  .hud-admin-main { padding: 14px 12px 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jarvis-orb-aura,
+  .jarvis-orb-orbit-a,
+  .jarvis-orb-orbit-b,
+  .jarvis-orb-orbit-c {
+    animation: none !important;
+  }
+}

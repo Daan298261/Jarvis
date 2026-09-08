@@ -1,0 +1,277 @@
+.setup-conversation {
+  width: min(940px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: clamp(24px, 5vh, 64px) 0;
+  color: #edf8fb;
+}
+
+.setup-conversation-head {
+  max-width: 700px;
+  margin: 0 auto 28px;
+  text-align: center;
+}
+
+.setup-kicker {
+  color: rgba(103, 220, 255, 0.72);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+}
+
+.setup-conversation-head h1 {
+  margin: 9px 0 8px;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.05;
+  font-weight: 620;
+}
+
+.setup-interview-card,
+.setup-plan-card {
+  border: 1px solid rgba(124, 218, 245, 0.15);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(12, 18, 25, 0.78), rgba(6, 10, 15, 0.86));
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(22px);
+}
+
+.setup-interview-card { padding: clamp(20px, 4vw, 38px); }
+.setup-plan-card { padding: clamp(18px, 3vw, 32px); }
+
+.setup-progress {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 30px;
+}
+
+.setup-progress span {
+  height: 2px;
+  border-radius: 99px;
+  background: rgba(143, 218, 239, 0.1);
+}
+
+.setup-progress span.active {
+  background: rgba(103, 220, 255, 0.72);
+  box-shadow: 0 0 9px rgba(103, 220, 255, 0.34);
+}
+
+.setup-jarvis-line {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.setup-ai-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: #67dcff;
+  box-shadow: 0 0 17px rgba(103, 220, 255, 0.72);
+}
+
+.setup-jarvis-line small {
+  color: rgba(165, 218, 234, 0.58);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+}
+
+.setup-jarvis-line h2 {
+  margin: 4px 0 6px;
+  font-size: clamp(20px, 3vw, 28px);
+  font-weight: 580;
+}
+
+.setup-jarvis-line p {
+  margin: 0;
+  color: rgba(194, 220, 229, 0.58);
+  line-height: 1.55;
+}
+
+.setup-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 9px;
+  margin: 28px 0 16px;
+}
+
+.setup-choice-grid button {
+  min-height: 50px;
+  padding: 11px 14px;
+  border: 1px solid rgba(129, 216, 242, 0.13);
+  border-radius: 13px;
+  background: rgba(104, 198, 227, 0.045);
+  color: rgba(229, 246, 251, 0.88);
+  text-align: left;
+  cursor: pointer;
+  transition: 140ms ease;
+}
+
+.setup-choice-grid button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(103, 220, 255, 0.35);
+  background: rgba(103, 220, 255, 0.09);
+}
+
+.setup-answer-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 7px;
+  padding: 7px;
+  border: 1px solid rgba(143, 218, 239, 0.15);
+  border-radius: 16px;
+  background: rgba(3, 7, 11, 0.5);
+}
+
+.setup-answer-box input {
+  min-height: 40px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #effaff;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.setup-answer-box input::placeholder { color: rgba(188, 215, 225, 0.35); }
+
+.setup-mic {
+  min-width: 66px;
+  border: 1px solid rgba(143, 218, 239, 0.13);
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(210, 234, 242, 0.65);
+  cursor: pointer;
+}
+
+.setup-mic.listening {
+  color: #ffb176;
+  border-color: rgba(255, 138, 61, 0.32);
+  background: rgba(255, 138, 61, 0.07);
+}
+
+.setup-interview-actions,
+.setup-plan-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 15px;
+  flex-wrap: wrap;
+}
+
+.setup-link {
+  border: 0;
+  padding: 5px 0;
+  background: transparent;
+  color: rgba(176, 211, 223, 0.52);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.setup-link:hover { color: #dff6fc; }
+.setup-interview-actions .setup-link:first-child { margin-right: auto; }
+
+.setup-inline-error {
+  margin: 0 0 14px;
+  padding: 10px 13px;
+  border: 1px solid rgba(255, 106, 85, 0.28);
+  border-radius: 11px;
+  background: rgba(255, 106, 85, 0.07);
+  color: #ffd0c7;
+}
+
+.setup-plan-hardware {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 0 18px;
+  border-bottom: 1px solid rgba(143, 218, 239, 0.09);
+}
+
+.setup-plan-hardware span {
+  color: rgba(188, 218, 228, 0.48);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.setup-plan-hardware strong { text-align: right; font-size: 13px; }
+
+.setup-plan-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 28px;
+  padding: 22px 0 12px;
+}
+
+.setup-plan-grid h3,
+.setup-model-title { margin: 0 0 12px; font-size: 13px; letter-spacing: 0.04em; }
+
+.setup-plan-grid dl {
+  display: grid;
+  grid-template-columns: 105px 1fr;
+  gap: 9px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.setup-plan-grid dt { color: rgba(184, 215, 225, 0.47); }
+.setup-plan-grid dd { margin: 0; text-transform: capitalize; }
+.setup-plan-grid ul { margin: 0; padding-left: 18px; color: rgba(211, 231, 238, 0.68); font-size: 12px; line-height: 1.55; }
+
+.setup-model-list { display: grid; gap: 7px; }
+
+.setup-model-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(220px, 1.4fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 13px;
+  border: 1px solid rgba(143, 218, 239, 0.08);
+  border-radius: 12px;
+  background: rgba(9, 15, 20, 0.42);
+  opacity: 0.58;
+}
+
+.setup-model-row.selected {
+  opacity: 1;
+  border-color: rgba(103, 220, 255, 0.17);
+}
+
+.setup-model-row > div { display: flex; flex-direction: column; gap: 3px; }
+.setup-model-row strong { font-size: 12px; }
+.setup-model-row > div span { color: rgba(160, 213, 228, 0.52); font-size: 10px; }
+.setup-model-row p { margin: 0; color: rgba(206, 229, 236, 0.58); font-size: 11px; line-height: 1.45; }
+
+.setup-model-status {
+  color: rgba(133, 221, 246, 0.75);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.setup-download-note,
+.setup-advanced-note {
+  margin: 16px 0 0;
+  color: rgba(190, 218, 227, 0.5);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.setup-download-note code { color: rgba(137, 222, 247, 0.77); }
+.setup-advanced-note { text-align: right; }
+
+@media (max-width: 720px) {
+  .setup-conversation { width: min(100% - 20px, 940px); padding-top: 24px; }
+  .setup-choice-grid { grid-template-columns: 1fr; }
+  .setup-answer-box { grid-template-columns: 1fr auto; }
+  .setup-answer-box .btn { grid-column: 1 / -1; }
+  .setup-plan-grid { grid-template-columns: 1fr; gap: 18px; }
+  .setup-model-row { grid-template-columns: 1fr; gap: 7px; }
+  .setup-model-status { justify-self: start; }
+}

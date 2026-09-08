@@ -10,15 +10,23 @@ from app.inference.profiles import (
 )
 
 
-def test_default_profiles_are_nine_b_abliterated():
+EXPECTED_PROFILES = {"bootstrap", "fast", "balanced", "quality", "expert", "ornith_9b", "ornith_35b"}
+
+
+def test_declared_profiles_include_primary_expert_and_ornith_candidates():
     names = {p.name for p in declared_profiles()}
-    assert names == {"fast", "balanced", "quality", "expert"}
+    assert names == EXPECTED_PROFILES
     for name in ("fast", "balanced", "quality"):
         profile = PROFILES[name]
         assert profile.family == "9b-abliterated"
         assert profile.alias == "Qwen3.5-9B"
         assert profile.repo == PRIMARY_GGUF_REPO
         assert "9B-abliterated" in profile.filename
+
+    assert PROFILES["bootstrap"].family == "ornith-1.5-9b"
+    assert PROFILES["bootstrap"].filename == "Ornith-1.5-9B-Q4_K_M.gguf"
+    assert PROFILES["ornith_9b"].family == "ornith-1.5-9b"
+    assert PROFILES["ornith_35b"].family == "ornith-1.5-35b-a3b"
 
 
 def test_expert_keeps_twenty_seven_b():
@@ -112,6 +120,6 @@ def test_unloaded_snapshot_uses_profile_context():
         assert snap["thinking_mode"] == "selective"
         assert snap["context_size"] == 16384
         assert snap["vision"] is False
-        assert {p["name"] for p in snap["profiles"]} == {"fast", "balanced", "quality", "expert"}
+        assert {p["name"] for p in snap["profiles"]} == EXPECTED_PROFILES
 
     asyncio.run(_run())

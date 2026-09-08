@@ -16,6 +16,7 @@ from ..runtime_install import (
     start_component_install,
     start_selected_installs,
 )
+from ..setup_interview import interview_questions, plan_interview, render_download_script, save_download_script
 from ..setup_recommend import recommend_from_hardware
 from ..setup_state import (
     WIZARD_STEPS,
@@ -36,6 +37,11 @@ router = APIRouter(prefix="/api/setup", tags=["setup"])
 class SetupPatch(BaseModel):
     current_step: str | None = None
     completed_steps: list[str] | None = None
+    onboarding_version: int | None = None
+    interview_answers: dict[str, Any] | None = None
+    interview_plan: dict[str, Any] | None = None
+    selected_models: list[str] | None = None
+    download_script_path: str | None = None
     jarvis_role: str | None = None
     recommended_class: str | None = None
     role_policies: dict[str, str] | None = None
@@ -65,6 +71,10 @@ class InstallBody(BaseModel):
     all_selected: bool = False
 
 
+class InterviewBody(BaseModel):
+    answers: dict[str, Any] = Field(default_factory=dict)
+
+
 @router.get("/status")
 async def setup_status():
     state = load_setup_state()
@@ -84,6 +94,46 @@ async def setup_recommend():
 @router.get("/hardware")
 async def setup_hardware():
     return {"hardware": hardware_dict(), "recommendation": recommend_from_hardware()}
+
+
+@router.get("/interview")
+async def setup_interview():
+    state = load_setup_state()
+    return {
+        "version": 1,
+        "questions": interview_questions(),
+        "answers": state.get("interview_answers") or {},
+        "plan": state.get("interview_plan") or {},
+        "completed": bool(state.get("completed")),
+    }
+
+
+@router.post("/interview/plan")
+async def setup_interview_plan(body: InterviewBody):
+    plan = plan_interview(body.answers)
+    patch = dict(plan["setup_state_patch"])
+    patch["interview_plan"] = plan
+    state = save_setup_state(patch)
+    return {"plan": plan, "state": state}
+
+
+@router.post("/interview/download-script")
+async def setup_interview_download_script(body: InterviewBody | None = None):
+    state = load_setup_state()
+    if body and body.answers:
+        plan = plan_interview(body.answers)
+        save_setup_state({**plan["setup_state_patch"], "interview_plan": plan})
+    else:
+        plan = state.get("interview_plan") or plan_interview(state.get("interview_answers") or {})
+    path = save_download_script(plan)
+    state = save_setup_state({"download_script_path": str(path)})
+    return {
+        "ok": True,
+        "path": str(path),
+        "script": render_download_script(plan),
+        "models": plan.get("download_models") or [],
+        "state": state,
+    }
 
 
 @router.put("/state")
@@ -122,7 +172,7 @@ async def apply_setup():
         settings.inference.auto_load = False
     else:
         settings.inference.backend = "llama.cpp"
-        settings.inference.profile = str(state.get("inference_profile") or "balanced")
+        settings.inference.profile = str(state.get("inference_profile") or "bootstrap")
         settings.inference.auto_load = True
     save_settings(settings)
 
@@ -150,7 +200,6 @@ async def apply_setup():
         if str(state.get("resource_preset")) == "custom" or state.get("resource_mode") == "dynamic":
             budget["global_percent"] = int(state["global_percent"])
             if str(state.get("resource_preset")) != "custom":
-                # Keep named preset but honor percent for dynamic slider.
                 if str(state.get("resource_preset")) == "dynamic":
                     budget["global_percent"] = int(state["global_percent"])
 
@@ -191,6 +240,27 @@ async def apply_setup():
             "port": settings.inference.port,
         },
         "desktop_prefs": state.get("desktop_prefs") or {},
+    }
+
+
+@router.post("/interview/apply")
+async def setup_interview_apply(body: InterviewBody | None = None):
+    state = load_setup_state()
+    if body and body.answers:
+        plan = plan_interview(body.answers)
+    else:
+        plan = state.get("interview_plan") or plan_interview(state.get("interview_answers") or {})
+    save_setup_state({**plan["setup_state_patch"], "interview_plan": plan})
+    applied = await apply_setup()
+    script_path = save_download_script(plan)
+    save_setup_state({"download_script_path": str(script_path)})
+    completed = complete_setup()
+    return {
+        "ok": True,
+        "plan": plan,
+        "applied": applied,
+        "download_script_path": str(script_path),
+        "state": completed,
     }
 
 

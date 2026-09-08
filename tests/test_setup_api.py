@@ -67,3 +67,22 @@ async def test_setup_apply_and_diagnostics(setup_env):
     text = client.get("/api/diagnostics/text")
     assert text.status_code == 200
     assert "node_id:" in text.json()["text"]
+
+
+async def test_setup_interview_plan(setup_env):
+    await register_localhost_node()
+    client = TestClient(app)
+    interview = client.get("/api/setup/interview")
+    assert interview.status_code == 200
+    body = interview.json()
+    assert body["completed"] is False
+    assert any(q["id"] == "use" for q in body["questions"])
+
+    planned = client.post(
+        "/api/setup/interview/plan",
+        json={"answers": {"use": "A bit of everything", "policy": "Local first", "resources": "Balanced (~50%)"}},
+    )
+    assert planned.status_code == 200
+    plan = planned.json()["plan"]
+    assert plan["recommended_models"]
+    assert any(model["id"] == "bootstrap_ornith" for model in plan["recommended_models"])

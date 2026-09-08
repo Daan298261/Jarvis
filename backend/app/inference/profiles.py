@@ -29,7 +29,7 @@ class ModelProfile:
     fallbacks: tuple[str, ...] = ()
 
 
-# Community GGUF of wangzhang/Qwen3.5-9B-abliterated (preferred primary model).
+# Community GGUF of wangzhang/Qwen3.5-9B-abliterated (legacy primary model).
 PRIMARY_SOURCE = "wangzhang/Qwen3.5-9B-abliterated"
 PRIMARY_GGUF_REPO = "Abiray/Qwen3.5-9B-abliterated-GGUF"
 PRIMARY_DIR = "Qwen3.5-9B-abliterated-GGUF"
@@ -40,7 +40,13 @@ EXPERT_GGUF_REPO = "unsloth/Qwen3.5-27B-GGUF"
 EXPERT_DIR = "Qwen3.5-27B-GGUF"
 EXPERT_MMPROJ = "mmproj-F16.gguf"
 
-# Official Ornith 1.5 GGUFs are benchmark candidates, not automatic replacements.
+# Smallest official Ornith 1.5 release. A Q4_K_M GGUF is staged into release
+# installers as Jarvis' offline-capable bootstrap model.
+BOOTSTRAP_SOURCE = "ornith-ai/Ornith-1.5-9B"
+BOOTSTRAP_GGUF_REPO = "ornith-ai/Ornith-1.5-9B-GGUF"
+BOOTSTRAP_DIR = "bootstrap"
+BOOTSTRAP_FILENAME = "Ornith-1.5-9B-Q4_K_M.gguf"
+
 ORNITH_9B_SOURCE = "ornith-ai/Ornith-1.5-9B"
 ORNITH_9B_GGUF_REPO = "ornith-ai/Ornith-1.5-9B-GGUF"
 ORNITH_9B_DIR = "Ornith-1.5-9B-GGUF"
@@ -62,6 +68,27 @@ def with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
 
 
 PROFILES: dict[str, ModelProfile] = {
+    "bootstrap": ModelProfile(
+        name="bootstrap",
+        label="Bootstrap · Ornith 1.5 9B",
+        quant="Q4_K_M",
+        filename=BOOTSTRAP_FILENAME,
+        family="ornith-1.5-9b",
+        alias="Ornith-1.5-9B",
+        repo=BOOTSTRAP_GGUF_REPO,
+        repo_dir=BOOTSTRAP_DIR,
+        mmproj_filename="",
+        thinking=True,
+        thinking_mode="selective",
+        context_size=16384,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        presence_penalty=0.0,
+        description="Bundled local fallback. Good for setup, chat, orchestration, tool routing and recovery; heavier models can take difficult work.",
+        vision=False,
+        fallbacks=("ornith_9b", "balanced", "quality", "expert"),
+    ),
     "fast": ModelProfile(
         name="fast",
         label="Fast",
@@ -80,7 +107,7 @@ PROFILES: dict[str, ModelProfile] = {
         top_k=20,
         presence_penalty=0.0,
         description="9B Abliterated Q6_K, thinking off, 8K context. Maximum responsiveness.",
-        fallbacks=("quality", "expert"),
+        fallbacks=("bootstrap", "quality", "expert"),
     ),
     "balanced": ModelProfile(
         name="balanced",
@@ -99,8 +126,8 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.95,
         top_k=20,
         presence_penalty=0.0,
-        description="Default. 9B Abliterated Q8_0, 32K cap with 16K start, thinking only for planning/recovery.",
-        fallbacks=("fast", "expert"),
+        description="Legacy 9B Q8_0 primary profile with selective thinking.",
+        fallbacks=("bootstrap", "fast", "expert"),
     ),
     "quality": ModelProfile(
         name="quality",
@@ -119,8 +146,8 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.95,
         top_k=20,
         presence_penalty=0.0,
-        description="9B Abliterated Q8_0 with thinking on and 32K context. Still the 9B primary model.",
-        fallbacks=("balanced", "fast", "expert"),
+        description="9B Abliterated Q8_0 with thinking on and 32K context.",
+        fallbacks=("bootstrap", "balanced", "fast", "expert"),
     ),
     "expert": ModelProfile(
         name="expert",
@@ -140,7 +167,7 @@ PROFILES: dict[str, ModelProfile] = {
         top_k=20,
         presence_penalty=0.0,
         description="Optional 27B Q4_K_M escalation model. Not for ordinary tasks; may offload to CPU.",
-        fallbacks=(),
+        fallbacks=("bootstrap",),
     ),
     "ornith_9b": ModelProfile(
         name="ornith_9b",
@@ -159,9 +186,9 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.95,
         top_k=20,
         presence_penalty=0.0,
-        description="Official Ornith 1.5 9B Q8_0 candidate for primary agent/tool workloads. Benchmark before promotion to default routing.",
+        description="Official Ornith 1.5 9B high-quality quant for primary agent/tool workloads.",
         vision=True,
-        fallbacks=("balanced", "quality", "expert"),
+        fallbacks=("bootstrap", "balanced", "quality", "expert"),
     ),
     "ornith_35b": ModelProfile(
         name="ornith_35b",
@@ -182,7 +209,7 @@ PROFILES: dict[str, ModelProfile] = {
         presence_penalty=0.0,
         description="Official Ornith 1.5 35B-A3B Q4_K_M candidate for Senior Worker/Expert workloads. Requires substantially more model memory than the 9B profile.",
         vision=True,
-        fallbacks=("expert", "ornith_9b", "quality"),
+        fallbacks=("expert", "ornith_9b", "bootstrap", "quality"),
     ),
 }
 
@@ -200,13 +227,9 @@ def mmproj_path(profile: ModelProfile) -> Path:
 
 
 def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:
-    """First existing projector: this profile's file, then known primary/expert projectors.
-
-    Used only when a vision request actually starts llama.cpp with vision=True.
-    Idle text loads must not attach mmproj.
-    """
+    """First existing projector. Used only when a vision request needs it."""
     candidates: list[Path] = []
-    if profile is not None:
+    if profile is not None and profile.mmproj_filename:
         candidates.append(mmproj_path(profile))
     paths = model_paths()
     for key in ("mmproj_9b", "mmproj_ornith_9b", "mmproj_ornith_35b", "mmproj"):
@@ -229,13 +252,16 @@ def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:
 
 
 def model_paths() -> dict[str, Path]:
-    """Known Qwen and Ornith model trees."""
+    """Known bootstrap, Qwen and Ornith model trees."""
+    bootstrap_root = models_dir() / BOOTSTRAP_DIR
     expert_root = models_dir() / EXPERT_DIR
     primary_root = models_dir() / PRIMARY_DIR
     ornith_9b_root = models_dir() / ORNITH_9B_DIR
     ornith_35b_root = models_dir() / ORNITH_35B_DIR
     return {
         "root": expert_root,
+        "bootstrap_root": bootstrap_root,
+        "bootstrap": bootstrap_root / BOOTSTRAP_FILENAME,
         "primary_root": primary_root,
         "ornith_9b_root": ornith_9b_root,
         "ornith_35b_root": ornith_35b_root,
@@ -267,25 +293,30 @@ def _with_alt_weights(requested: ModelProfile, alt: ModelProfile) -> ModelProfil
         repo=alt.repo,
         repo_dir=alt.repo_dir,
         mmproj_filename=alt.mmproj_filename,
+        vision=alt.vision,
         description=f"{requested.description} Using {alt.label} weights because the preferred GGUF is not installed.",
     )
 
 
 def resolve_profile(name: str) -> ModelProfile:
-    key = (name or "balanced").lower()
+    key = (name or "bootstrap").lower()
     if key == "reliable":
         key = "quality"
     if key not in PROFILES:
-        key = "balanced"
+        key = "bootstrap" if profile_gguf(PROFILES["bootstrap"]).exists() else "balanced"
     profile = PROFILES[key]
-    gguf = profile_gguf(profile)
-    if not gguf.exists():
-        expert = PROFILES["expert"]
-        expert_path = profile_gguf(expert)
-        if expert_path.exists() and key in {"fast", "balanced", "quality"}:
-            return _with_alt_weights(profile, expert)
-        if key == "expert" and not expert_path.exists():
-            return PROFILES["balanced"]
+    if profile_gguf(profile).exists():
+        return profile
+
+    bootstrap = PROFILES["bootstrap"]
+    if key != "bootstrap" and profile_gguf(bootstrap).exists():
+        return _with_alt_weights(profile, bootstrap)
+
+    expert = PROFILES["expert"]
+    if key in {"fast", "balanced", "quality"} and profile_gguf(expert).exists():
+        return _with_alt_weights(profile, expert)
+    if key == "expert" and not profile_gguf(expert).exists():
+        return PROFILES["balanced"]
     return profile
 
 

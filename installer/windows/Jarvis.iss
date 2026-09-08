@@ -40,19 +40,30 @@ Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDesc
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
 ; Exclude heavy or machine-local dirs — bootstrap recreates them on first run.
-Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,installer\windows\dist\*,installer\windows\dist\**"
+Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**"
 ; Always ship bootstrap beside the installed tree (also under installer\windows in source).
 Source: "bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
+#ifndef SkipBootstrapModel
+; Release distributions carry a local bootstrap brain. The multi-GB file is staged
+; by build-installer.ps1 and is not committed to the repository.
+Source: "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"; DestDir: "{app}\models\bootstrap"; Flags: ignoreversion
+#endif
 
 [Icons]
 Name: "{group}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start the Jarvis local agent portal"
-Name: "{group}\Stop Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Stop Jarvis backend and llama.cpp"
+Name: "{group}\Stop Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Comment: "Stop Jarvis backend and llama.cpp"
 Name: "{autodesktop}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Start the Jarvis local agent portal"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
-; First-run bootstrap: Python venv, pip, playwright, npm build, llama.cpp, 9B GGUF.
+; First-run bootstrap: Python venv, pip, Playwright, portal build and llama.cpp.
+; Normal release installers already contain the bootstrap GGUF and therefore skip
+; model downloads entirely during target-machine bootstrap.
+#ifndef SkipBootstrapModel
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\windows\bootstrap.ps1"" -SkipModelDownload"; WorkingDir: "{app}"; StatusMsg: "Setting up Jarvis..."; Flags: waituntilterminated
+#else
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\windows\bootstrap.ps1"""; WorkingDir: "{app}"; StatusMsg: "Setting up Jarvis (downloads may take a while)..."; Flags: waituntilterminated
+#endif
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Description: "Start Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 
 [UninstallRun]

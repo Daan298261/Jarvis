@@ -25,6 +25,6 @@ def test_setup_page_exists():
     setup = ROOT / "frontend" / "src" / "pages" / "Setup.tsx"
     assert setup.is_file()
     text = setup.read_text(encoding="utf-8")
-    assert "First-run setup" in text
-    assert "Finish setup without local model" in text
-    assert "Not yet implemented (P3)" in text
+    assert "JARVIS · FIRST RUN" in text
+    assert "/api/setup/interview" in text
+    assert "A few questions. That’s it." in text
