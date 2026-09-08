@@ -9,6 +9,8 @@ import { NavLink } from "react-router-dom"
 import type { Task } from "../api"
 import { HudChat } from "../hud/HudChat"
 import { deriveOrbMood, type OrbMood } from "../hud/orbMood"
+import { AppearancePresenceControls } from "../presence/AppearancePresenceControls"
+import { usePresentationSettings } from "../presence/presentationSettings"
 import { JarvisOrb, type JarvisOrbState } from "./JarvisOrb"
 import "./apex-ui.css"
 
@@ -66,6 +68,7 @@ function moodToOrb(mood: OrbMood): JarvisOrbState {
 }
 
 export function JarvisCommandDeck() {
+  const presentation = usePresentationSettings()
   const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null }>({
     recording: false,
     speaking: false,
@@ -130,6 +133,7 @@ export function JarvisCommandDeck() {
             <span>·</span>
             <span>{taskDetail(moodState.task, mood)}</span>
           </div>
+          <AppearancePresenceControls settings={presentation} />
         </div>
       </section>
 
