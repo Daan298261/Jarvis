@@ -40,6 +40,17 @@ EXPERT_GGUF_REPO = "unsloth/Qwen3.5-27B-GGUF"
 EXPERT_DIR = "Qwen3.5-27B-GGUF"
 EXPERT_MMPROJ = "mmproj-F16.gguf"
 
+# Official Ornith 1.5 GGUFs are benchmark candidates, not automatic replacements.
+ORNITH_9B_SOURCE = "ornith-ai/Ornith-1.5-9B"
+ORNITH_9B_GGUF_REPO = "ornith-ai/Ornith-1.5-9B-GGUF"
+ORNITH_9B_DIR = "Ornith-1.5-9B-GGUF"
+ORNITH_9B_MMPROJ = "mmproj-Ornith-1.5-9B-BF16.gguf"
+
+ORNITH_35B_SOURCE = "ornith-ai/Ornith-1.5-35B-A3B"
+ORNITH_35B_GGUF_REPO = "ornith-ai/Ornith-1.5-35B-A3B-GGUF"
+ORNITH_35B_DIR = "Ornith-1.5-35B-A3B-GGUF"
+ORNITH_35B_MMPROJ = "mmproj-Ornith-1.5-35B-BF16.gguf"
+
 # Backward-compatible names used by older docs and tests.
 MODEL_REPO = EXPERT_GGUF_REPO
 OFFICIAL_MODEL = EXPERT_SOURCE
@@ -131,6 +142,48 @@ PROFILES: dict[str, ModelProfile] = {
         description="Optional 27B Q4_K_M escalation model. Not for ordinary tasks; may offload to CPU.",
         fallbacks=(),
     ),
+    "ornith_9b": ModelProfile(
+        name="ornith_9b",
+        label="Ornith 1.5 9B",
+        quant="Q8_0",
+        filename="Ornith-1.5-9B-Q8_0.gguf",
+        family="ornith-1.5-9b",
+        alias="Ornith-1.5-9B",
+        repo=ORNITH_9B_GGUF_REPO,
+        repo_dir=ORNITH_9B_DIR,
+        mmproj_filename=ORNITH_9B_MMPROJ,
+        thinking=True,
+        thinking_mode="selective",
+        context_size=32768,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        presence_penalty=0.0,
+        description="Official Ornith 1.5 9B Q8_0 candidate for primary agent/tool workloads. Benchmark before promotion to default routing.",
+        vision=True,
+        fallbacks=("balanced", "quality", "expert"),
+    ),
+    "ornith_35b": ModelProfile(
+        name="ornith_35b",
+        label="Ornith 1.5 35B-A3B",
+        quant="Q4_K_M",
+        filename="Ornith-1.5-35B-Q4_K_M.gguf",
+        family="ornith-1.5-35b-a3b",
+        alias="Ornith-1.5-35B-A3B",
+        repo=ORNITH_35B_GGUF_REPO,
+        repo_dir=ORNITH_35B_DIR,
+        mmproj_filename=ORNITH_35B_MMPROJ,
+        thinking=True,
+        thinking_mode="on",
+        context_size=32768,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        presence_penalty=0.0,
+        description="Official Ornith 1.5 35B-A3B Q4_K_M candidate for Senior Worker/Expert workloads. Requires substantially more model memory than the 9B profile.",
+        vision=True,
+        fallbacks=("expert", "ornith_9b", "quality"),
+    ),
 }
 
 
@@ -147,7 +200,7 @@ def mmproj_path(profile: ModelProfile) -> Path:
 
 
 def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:
-    """First existing projector: this profile's file, then 9B, then 27B.
+    """First existing projector: this profile's file, then known primary/expert projectors.
 
     Used only when a vision request actually starts llama.cpp with vision=True.
     Idle text loads must not attach mmproj.
@@ -156,7 +209,7 @@ def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:
     if profile is not None:
         candidates.append(mmproj_path(profile))
     paths = model_paths()
-    for key in ("mmproj_9b", "mmproj"):
+    for key in ("mmproj_9b", "mmproj_ornith_9b", "mmproj_ornith_35b", "mmproj"):
         raw = paths.get(key)
         if raw:
             candidates.append(Path(raw))
@@ -176,18 +229,27 @@ def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:
 
 
 def model_paths() -> dict[str, Path]:
-    """Legacy 27B layout plus the 9B primary tree."""
+    """Known Qwen and Ornith model trees."""
     expert_root = models_dir() / EXPERT_DIR
     primary_root = models_dir() / PRIMARY_DIR
+    ornith_9b_root = models_dir() / ORNITH_9B_DIR
+    ornith_35b_root = models_dir() / ORNITH_35B_DIR
     return {
         "root": expert_root,
         "primary_root": primary_root,
+        "ornith_9b_root": ornith_9b_root,
+        "ornith_35b_root": ornith_35b_root,
         "q4": expert_root / "Qwen3.5-27B-Q4_K_M.gguf",
         "q5": expert_root / "Qwen3.5-27B-Q5_K_M.gguf",
         "mmproj": expert_root / EXPERT_MMPROJ,
         "q8_9b": primary_root / "Qwen3.5-9B-abliterated-Q8_0.gguf",
         "q6_9b": primary_root / "Qwen3.5-9B-abliterated-Q6_K.gguf",
         "mmproj_9b": primary_root / PRIMARY_MMPROJ,
+        "ornith_9b_q8": ornith_9b_root / "Ornith-1.5-9B-Q8_0.gguf",
+        "ornith_9b_q6": ornith_9b_root / "Ornith-1.5-9B-Q6_K.gguf",
+        "ornith_35b_q4": ornith_35b_root / "Ornith-1.5-35B-Q4_K_M.gguf",
+        "mmproj_ornith_9b": ornith_9b_root / ORNITH_9B_MMPROJ,
+        "mmproj_ornith_35b": ornith_35b_root / ORNITH_35B_MMPROJ,
     }
 
 
@@ -216,7 +278,6 @@ def resolve_profile(name: str) -> ModelProfile:
     if key not in PROFILES:
         key = "balanced"
     profile = PROFILES[key]
-    paths = model_paths()
     gguf = profile_gguf(profile)
     if not gguf.exists():
         expert = PROFILES["expert"]
