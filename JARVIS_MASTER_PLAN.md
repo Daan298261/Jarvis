@@ -2161,9 +2161,9 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [ ] RFC-0025 Multi-channel agent gateway — accepted
 - [ ] RFC-0026 Execution phase and verifier observability — accepted
 - [ ] RFC-0027 Semantic action firewall — accepted
-- [ ] RFC-0027 Trusted workspace app extensions — accepted
+- [ ] RFC-0046 Trusted workspace app extensions — accepted
 - [ ] RFC-0028 Off-context agent journal — accepted
-- [ ] RFC-0028 Portable automation packages — accepted
+- [ ] RFC-0047 Portable automation packages — accepted
 - [ ] RFC-0029 Transactional durable execution — accepted
 - [ ] RFC-0030 Selectable inference offload backends — accepted
 
