@@ -1,9 +1,11 @@
 # RFC-0048: Specialist model stack and capability routing
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Model-stack specialization and security-agent routing  
 **Author:** ChatGPT design session, requested by Taco  
 **Date:** 2026-09-08
+
+**VERIFIED —** specialist routing PR #109 (`92045ca`); security gates + HexStrike boundary PR #110 (`ef25ad2`). On `development`.
 
 ## Problem
 
@@ -101,25 +103,25 @@ The gateway is disabled by default and has no WAN listener. Upstream upgrades re
 
 ## Acceptance criteria
 
-- [ ] A specialist catalog exposes the recommended role/model mapping without auto-downloading models.
-- [ ] Runtime profiles can be enabled/disabled; disabled profiles are ignored by normal routing.
-- [ ] A disabled runtime profile cannot be selected through `force_profile`.
-- [ ] Existing runtime registry files remain backward compatible when `enabled` is absent.
-- [ ] `orchestrator` role prefers the Ornith 1.5 9B runtime when available.
-- [ ] `leader` role targets Qwen3.8-27B capability/specialization tags, with existing local expert profiles available as fallback.
-- [ ] `blue-team` role requires cybersecurity + blue-team capability and prefers RedSage.
-- [ ] `dfir` role requires cybersecurity + DFIR capability and prefers Imperum.
-- [ ] DeepHat is emitted only as a disabled generic runtime template.
-- [ ] Blue and Red password hashes persist locally using salted scrypt; plaintext passwords are never persisted.
-- [ ] Security-role unlock state survives process restart.
-- [ ] Generic profile update/create cannot enable a managed security specialist and bypass the role gate.
-- [ ] Generic Red Team role routing fails closed.
-- [ ] Authorized Red routing requires password-gate unlock + authorization/case reference + explicit human confirmation.
-- [ ] Unlocking Red does not make generic `/route` or `force_profile` able to select DeepHat.
-- [ ] HexStrike integration is behind a Jarvis-controlled gateway with scope validation, audit logging, and no raw generic command/Python/file-write proxy.
-- [ ] Security model routing adds no offensive payload-generation plumbing, hack-back behavior, persistence, credential-theft capability, or bypass of existing security gates.
-- [ ] Unit tests cover specialist role mapping, persistent gates, generic-bypass prevention, Red authorization checks, and forced disabled routing.
-- [ ] Unit tests pass (`python3 -m pytest`).
+- [x] A specialist catalog exposes the recommended role/model mapping without auto-downloading models.
+- [x] Runtime profiles can be enabled/disabled; disabled profiles are ignored by normal routing.
+- [x] A disabled runtime profile cannot be selected through `force_profile`.
+- [x] Existing runtime registry files remain backward compatible when `enabled` is absent.
+- [x] `orchestrator` role prefers the Ornith 1.5 9B runtime when available.
+- [x] `leader` role targets Qwen3.8-27B capability/specialization tags, with existing local expert profiles available as fallback.
+- [x] `blue-team` role requires cybersecurity + blue-team capability and prefers RedSage.
+- [x] `dfir` role requires cybersecurity + DFIR capability and prefers Imperum.
+- [x] DeepHat is emitted only as a disabled generic runtime template.
+- [x] Blue and Red password hashes persist locally using salted scrypt; plaintext passwords are never persisted.
+- [x] Security-role unlock state survives process restart.
+- [x] Generic profile update/create cannot enable a managed security specialist and bypass the role gate.
+- [x] Generic Red Team role routing fails closed.
+- [x] Authorized Red routing requires password-gate unlock + authorization/case reference + explicit human confirmation.
+- [x] Unlocking Red does not make generic `/route` or `force_profile` able to select DeepHat.
+- [x] HexStrike integration is behind a Jarvis-controlled gateway with scope validation, audit logging, and no raw generic command/Python/file-write proxy.
+- [x] Security model routing adds no offensive payload-generation plumbing, hack-back behavior, persistence, credential-theft capability, or bypass of existing security gates.
+- [x] Unit tests cover specialist role mapping, persistent gates, generic-bypass prevention, Red authorization checks, and forced disabled routing.
+- [x] Unit tests pass (`python3 -m pytest`).
 - [ ] Live local model load/performance remains a Windows desktop sign-off item.
 
 ## Likely files
