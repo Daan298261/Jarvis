@@ -5,16 +5,26 @@
 
 .DESCRIPTION
   Run from the repository root or from installer/windows.
-  Output: installer/windows/dist/JarvisSetup.exe (or dist/JarvisSetup.exe relative to .iss OutputDir).
+  By default the build first stages the Ornith 1.5 9B Q4_K_M bootstrap model,
+  producing an installer that can start with local inference without a model
+  download on the target PC.
 
-.EXAMPLE
-  .\installer\windows\build-installer.ps1
+  Output: installer/windows/dist/JarvisSetup.exe.
+
+.PARAMETER SkipBootstrapModel
+  Developer-only escape hatch. Builds an installer without the large offline
+  bootstrap payload; first-run local inference may then require a download.
 #>
+param(
+    [switch]$SkipBootstrapModel
+)
+
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Iss = Join-Path $ScriptDir "Jarvis.iss"
 $OutDir = Join-Path $ScriptDir "dist"
+$BootstrapModel = Join-Path $ScriptDir "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"
 
 function Find-Iscc {
     $cmd = Get-Command iscc -ErrorAction SilentlyContinue
@@ -40,12 +50,28 @@ Then re-run: .\installer\windows\build-installer.ps1
 "@
 }
 
+if (-not $SkipBootstrapModel) {
+    Write-Host "==> Staging bundled bootstrap model" -ForegroundColor Cyan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "stage-bootstrap-model.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "Bootstrap model staging failed with exit code $LASTEXITCODE" }
+    if (-not (Test-Path $BootstrapModel) -or (Get-Item $BootstrapModel).Length -le 0) {
+        throw "Bootstrap payload not ready: $BootstrapModel"
+    }
+} else {
+    Write-Warning "Building without bundled bootstrap model (-SkipBootstrapModel)."
+}
+
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Write-Host "Compiling $Iss ..."
-& $iscc "/O$OutDir" $Iss
+$defines = @()
+if ($SkipBootstrapModel) { $defines += "/DSkipBootstrapModel=1" }
+& $iscc @defines "/O$OutDir" $Iss
 if ($LASTEXITCODE -ne 0) { throw "iscc failed with exit code $LASTEXITCODE" }
 
 $exe = Join-Path $OutDir "JarvisSetup.exe"
 if (-not (Test-Path $exe)) { throw "Expected output not found: $exe" }
 Write-Host ""
 Write-Host "Built: $exe" -ForegroundColor Green
+if (-not $SkipBootstrapModel) {
+    Write-Host "Includes: Ornith 1.5 9B Q4_K_M bootstrap weights" -ForegroundColor Green
+}
