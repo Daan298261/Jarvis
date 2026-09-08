@@ -54,6 +54,36 @@ function pct(value: number | null | undefined) {
   return `${Math.round(value * 1000) / 10}%`
 }
 
+function LoadedNow({ model }: { model: ModelStatus | null }) {
+  const state = model?.loading ? "LOADING" : model?.loaded ? "LOADED" : "UNLOADED"
+  const advertised = model?.advertised_models || []
+  return (
+    <div className="card" style={{ marginBottom: 16, borderColor: model?.loaded ? "rgba(103,220,255,.28)" : undefined }}>
+      <div style={{ display: "flex", gap: 18, justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div>
+          <div className="stat" style={{ marginBottom: 5 }}>MODEL STATUS · {state}</div>
+          <div style={{ fontSize: 26, fontWeight: 650, lineHeight: 1.1 }}>{model?.active_model || "No model loaded"}</div>
+          <p className="lede" style={{ margin: "8px 0 0" }}>
+            {model?.loaded
+              ? `${model.inference_backend || "inference"} · ${model.quantization || "unknown quant"} · ${model.context_size || "?"} context${model.tokens_per_second ? ` · ${model.tokens_per_second} tok/s` : ""}`
+              : "Jarvis can still inspect configuration, but local inference is not currently resident."}
+          </p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div className={`badge ${model?.loaded ? "ok" : model?.loading ? "waiting" : "queued"}`}>{state}</div>
+          {model?.vram_used_mib != null && <div className="stat" style={{ marginTop: 8 }}>{Math.round(model.vram_used_mib / 102.4) / 10} GB VRAM in use</div>}
+        </div>
+      </div>
+      {advertised.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div className="stat">OTHER MODELS ADVERTISED BY THIS SERVER</div>
+          <div className="runtime-tags" style={{ marginTop: 7 }}>{advertised.map((name) => <span key={name}>{name}</span>)}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ModelPage() {
   const [model, setModel] = useState<ModelStatus | null>(null)
   const [busy, setBusy] = useState(false)
@@ -99,59 +129,56 @@ export function ModelPage() {
 
   return (
     <div>
-      <h1>Model</h1>
+      <h1>Models</h1>
       <p className="lede">
-        Local Qwen3.5 served by llama.cpp, or any OpenAI-compatible server on this machine or the LAN.
-        Tasks start at 8K or 16K and expand only when the live prompt is under pressure. Expert is a compact 27B consult.
-        Named runtimes let you save and pick which model, address, privacy, and spend ceiling Jarvis should prefer.
+        Jarvis always has an Ornith 1.5 9B bootstrap path in normal distributions, then routes harder work to larger local or remote models when configured.
+        Hover an installed-model scorecard to flip it over for Intelligence, Coding, Writing, Reasoning, Agent/tool use, Speed, Pricing/value, hardware fit and restriction-tolerance scores.
       </p>
+
+      <LoadedNow model={model} />
+
       <div className="grid two">
         <div className="card">
+          <h2>Live details</h2>
           <div className="kv">
             <b>Active</b><span>{model?.active_model || "unloaded"}</span>
             <b>Family</b><span>{model?.family || "—"}</span>
-            <b>Quantization</b><span>{model?.quantization}</span>
-            <b>Context</b><span>{model?.context_size}</span>
+            <b>Quantization</b><span>{model?.quantization || "—"}</span>
+            <b>Context</b><span>{model?.context_size ?? "—"}</span>
             <b>Context cap</b><span>{model?.context_cap ?? "n/a"}</span>
-            <b>Backend</b><span>{model?.inference_backend}</span>
+            <b>Backend</b><span>{model?.inference_backend || "—"}</span>
             <b>Endpoint</b><span>{model?.host ? `${model.host}:${model.port}` : "n/a"}</span>
             <b>Remote model</b><span>{model?.remote_model || "default"}</span>
-            <b>Advertised</b><span>{(model?.advertised_models || []).join(", ") || "n/a"}</span>
-            <b>Health path</b><span>{model?.health_path || "n/a"}</span>
-            <b>GPU layers</b><span>{model?.gpu_layers}</span>
+            <b>GPU layers</b><span>{model?.gpu_layers || "—"}</span>
             <b>VRAM</b><span>{model?.vram_used_mib ? `${model.vram_used_mib} MiB` : "n/a"}</span>
             <b>RAM</b><span>{model?.ram_used_gb ? `${model.ram_used_gb} GB` : "n/a"}</span>
             <b>tok/s</b><span>{model?.tokens_per_second ?? "n/a"}</span>
             <b>Prompt tok/s</b><span>{model?.prompt_tokens_per_second ?? "n/a"}</span>
             <b>Load time</b><span>{model?.load_time_seconds ? `${model.load_time_seconds}s` : "n/a"}</span>
-            <b>Vision</b><span>{model?.vision_loaded ? "projector loaded" : (model?.vision ? "enabled" : "lazy")}</span>
-            <b>Thinking</b><span>{model?.thinking ? "profile allows (selective per turn)" : "off"}</span>
+            <b>Vision</b><span>{model?.vision_loaded ? "projector loaded" : (model?.vision ? "enabled" : "not resident")}</span>
+            <b>Thinking</b><span>{model?.thinking ? "available" : "off"}</span>
             <b>Task success</b><span>{pct(outcomes?.task_success_rate)} ({outcomes?.tasks_completed || 0} ok / {outcomes?.tasks_failed || 0} failed)</span>
-            <b>State</b><span>{model?.loaded ? "loaded" : model?.loading ? "loading" : "unloaded"}</span>
           </div>
           {model?.last_error ? <p className="lede" style={{ marginTop: 12 }}>{model.last_error}</p> : null}
         </div>
         <div className="card">
-          <h2>Profiles</h2>
+          <h2>Local profiles</h2>
           <div className="row">
-            <button className="btn" disabled={busy} onClick={() => load("fast")}>Fast</button>
-            <button className="btn" disabled={busy} onClick={() => load("balanced")}>Balanced</button>
-            <button className="btn" disabled={busy} onClick={() => load("quality")}>Quality</button>
+            <button className="btn" disabled={busy} onClick={() => load("bootstrap")}>Bootstrap · Ornith</button>
+            <button className="btn secondary" disabled={busy} onClick={() => load("ornith_9b")}>Ornith 9B HQ</button>
+            <button className="btn secondary" disabled={busy} onClick={() => load("fast")}>Legacy fast 9B</button>
+            <button className="btn secondary" disabled={busy} onClick={() => load("balanced")}>Legacy balanced</button>
+            <button className="btn secondary" disabled={busy} onClick={() => load("quality")}>Legacy quality</button>
             <button className="btn secondary" disabled={busy} onClick={() => load("expert")}>Expert 27B</button>
             <button className="btn secondary" disabled={busy} onClick={() => api("/api/model/unload", { method: "POST" }).then(refresh)}>Unload</button>
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
             <button className="btn secondary" disabled={busy} onClick={runProbe}>Probe server</button>
           </div>
-          {probe && (
-            <p className="lede" style={{ marginTop: 12 }}>
-              Probe: {probe.ok ? "reachable" : "unreachable"} {probe.health_path || probe.error} {(probe.models || []).join(", ")}
-            </p>
-          )}
+          {probe && <p className="lede" style={{ marginTop: 12 }}>Probe: {probe.ok ? "reachable" : "unreachable"} {probe.health_path || probe.error} {(probe.models || []).join(", ")}</p>}
           <p className="lede" style={{ marginTop: 16 }}>
-            Fast: 9B Q6_K, thinking off, 8K context.<br />
-            Balanced: 9B Q8_0, selective thinking, 16K context.<br />
-            Quality: 9B Q8_0, thinking on, 32K context.<br />
-            Expert: 27B escalation only — not for ordinary tool work.
+            <strong>Bootstrap:</strong> always-available Ornith 1.5 9B Q4_K_M for chat, orchestration, routing and recovery.<br />
+            <strong>Ornith 9B HQ:</strong> larger quant for stronger always-on agent/tool work when installed.<br />
+            <strong>Expert 27B:</strong> heavier local escalation for difficult coding/reasoning; may use CPU/RAM offload.
           </p>
         </div>
       </div>
@@ -162,21 +189,10 @@ export function ModelPage() {
       <HardwareGateCard />
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Benchmark history</h2>
-        {!samples.length && <p className="lede">No samples yet. Load the model or record a snapshot after a few tasks.</p>}
+        {!samples.length && <p className="lede">No samples yet. Load a model or record a snapshot after a few tasks.</p>}
         {samples.length > 0 && (
           <table>
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Profile</th>
-                <th>tok/s</th>
-                <th>Prompt tok/s</th>
-                <th>VRAM</th>
-                <th>RAM</th>
-                <th>Success</th>
-                <th>Source</th>
-              </tr>
-            </thead>
+            <thead><tr><th>When</th><th>Profile</th><th>tok/s</th><th>Prompt tok/s</th><th>VRAM</th><th>RAM</th><th>Success</th><th>Source</th></tr></thead>
             <tbody>
               {samples.map((row) => (
                 <tr key={row.id}>
@@ -219,33 +235,12 @@ function AgentSuiteCard() {
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <h2>20-task agent suite</h2>
-      <p className="lede">
-        Representative autonomous tasks used to compare models. Primary metric: successful tasks per hour — not tok/s.
-        {report?.coverage ? ` Catalog has ${report.coverage.task_count} tasks.` : ""} {report?.live_status}
-      </p>
-      {comparison?.winner && (
-        <p>Current recorded leader: <strong>{comparison.winner}</strong> ({comparison.primary_metric}).</p>
-      )}
+      <p className="lede">Representative autonomous tasks used to compare models. Primary metric: successful tasks per hour — not tok/s. {report?.coverage ? ` Catalog has ${report.coverage.task_count} tasks.` : ""} {report?.live_status}</p>
+      {comparison?.winner && <p>Current recorded leader: <strong>{comparison.winner}</strong> ({comparison.primary_metric}).</p>}
       {tasks.length > 0 && (
         <table>
-          <thead>
-            <tr>
-              <th>Id</th>
-              <th>Task</th>
-              <th>Category</th>
-              <th>Live needs</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((task) => (
-              <tr key={task.id}>
-                <td>{task.id}</td>
-                <td>{task.title}</td>
-                <td>{task.category}</td>
-                <td>{task.live_requires || "unit-testable"}</td>
-              </tr>
-            ))}
-          </tbody>
+          <thead><tr><th>Id</th><th>Task</th><th>Category</th><th>Live needs</th></tr></thead>
+          <tbody>{tasks.map((task) => <tr key={task.id}><td>{task.id}</td><td>{task.title}</td><td>{task.category}</td><td>{task.live_requires || "unit-testable"}</td></tr>)}</tbody>
         </table>
       )}
     </div>
@@ -266,12 +261,8 @@ function HardwareGateCard() {
         <b>Inference samples</b><span>{gate.inference_samples ?? 0}</span>
         <b>Agent results</b><span>{gate.agent_results ?? 0}</span>
       </div>
-      <ul>
-        {(gate.bottlenecks || []).map((item) => <li key={item}>{item}</li>)}
-      </ul>
-      {!!gate.deferred_until_measured?.length && (
-        <p className="lede">Deferred until measured: {gate.deferred_until_measured.join(", ")}.</p>
-      )}
+      <ul>{(gate.bottlenecks || []).map((item) => <li key={item}>{item}</li>)}</ul>
+      {!!gate.deferred_until_measured?.length && <p className="lede">Deferred until measured: {gate.deferred_until_measured.join(", ")}.</p>}
     </div>
   )
 }
