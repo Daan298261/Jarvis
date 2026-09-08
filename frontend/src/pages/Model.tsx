@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { api } from "../api"
 import { LmStudioCatalogClassicSection } from "../lmstudio/LmStudioCatalogClassicSection"
 import { RuntimeProfilesSection } from "./RuntimeProfiles"
+import { SecurityModelGates } from "./SecurityModelGates"
 
 type Benchmark = {
   id: number
@@ -155,6 +156,7 @@ export function ModelPage() {
         </div>
       </div>
       <RuntimeProfilesSection />
+      <SecurityModelGates />
       <LmStudioCatalogClassicSection />
       <AgentSuiteCard />
       <HardwareGateCard />
