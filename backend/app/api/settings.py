@@ -47,6 +47,15 @@ class SettingsUpdate(BaseModel):
     social_perception_baseline_enabled: bool | None = None
     social_perception_retain_observation_summaries: bool | None = None
     social_perception_max_summary_retention_hours: int | None = Field(default=None, ge=1, le=168)
+    identity_recognition_enabled: bool | None = None
+    identity_recognition_backend: str | None = Field(default=None, min_length=1, max_length=64)
+    identity_recognition_match_threshold: float | None = Field(default=None, ge=-1.0, le=1.0)
+    identity_recognition_margin_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    identity_recognition_min_face_quality: float | None = Field(default=None, ge=0.0, le=1.0)
+    identity_recognition_confirmation_window: int | None = Field(default=None, ge=1, le=20)
+    identity_recognition_confirmation_hits: int | None = Field(default=None, ge=1, le=20)
+    identity_recognition_lost_timeout_seconds: float | None = Field(default=None, ge=0.0, le=60.0)
+    identity_recognition_expose_identity_to_dialogue: bool | None = None
 
 
 @router.get("")
@@ -144,6 +153,28 @@ async def update_settings(body: SettingsUpdate):
     if body.social_perception_max_summary_retention_hours is not None:
         perception.max_summary_retention_hours = body.social_perception_max_summary_retention_hours
 
+    recognition = settings.identity_recognition
+    if body.identity_recognition_enabled is not None:
+        recognition.enabled = body.identity_recognition_enabled
+    if body.identity_recognition_backend is not None:
+        recognition.backend = body.identity_recognition_backend
+    if body.identity_recognition_match_threshold is not None:
+        recognition.match_threshold = body.identity_recognition_match_threshold
+    if body.identity_recognition_margin_threshold is not None:
+        recognition.margin_threshold = body.identity_recognition_margin_threshold
+    if body.identity_recognition_min_face_quality is not None:
+        recognition.min_face_quality = body.identity_recognition_min_face_quality
+    if body.identity_recognition_confirmation_window is not None:
+        recognition.confirmation_window = body.identity_recognition_confirmation_window
+    if body.identity_recognition_confirmation_hits is not None:
+        recognition.confirmation_hits = body.identity_recognition_confirmation_hits
+    if body.identity_recognition_lost_timeout_seconds is not None:
+        recognition.lost_timeout_seconds = body.identity_recognition_lost_timeout_seconds
+    if body.identity_recognition_expose_identity_to_dialogue is not None:
+        recognition.expose_identity_to_dialogue = body.identity_recognition_expose_identity_to_dialogue
+
+    # Revalidate cross-field constraints such as confirmation_hits <= confirmation_window.
+    settings = type(settings).model_validate(settings.model_dump())
     save_settings(settings)
     REGISTRY.apply_settings(settings)
     return settings.model_dump()
