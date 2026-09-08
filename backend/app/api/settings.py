@@ -47,6 +47,15 @@ class SettingsUpdate(BaseModel):
     social_perception_baseline_enabled: bool | None = None
     social_perception_retain_observation_summaries: bool | None = None
     social_perception_max_summary_retention_hours: int | None = Field(default=None, ge=1, le=168)
+    identity_recognition_enabled: bool | None = None
+    identity_recognition_backend: str | None = Field(default=None, min_length=1, max_length=64)
+    identity_recognition_match_threshold: float | None = Field(default=None, ge=-1.0, le=1.0)
+    identity_recognition_margin_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    identity_recognition_min_face_quality: float | None = Field(default=None, ge=0.0, le=1.0)
+    identity_recognition_confirmation_window: int | None = Field(default=None, ge=1, le=20)
+    identity_recognition_confirmation_hits: int | None = Field(default=None, ge=1, le=20)
+    identity_recognition_lost_timeout_seconds: float | None = Field(default=None, ge=0.0, le=60.0)
+    identity_recognition_expose_identity_to_dialogue: bool | None = None
 
 
 @router.get("")
@@ -143,6 +152,23 @@ async def update_settings(body: SettingsUpdate):
         perception.retain_observation_summaries = body.social_perception_retain_observation_summaries
     if body.social_perception_max_summary_retention_hours is not None:
         perception.max_summary_retention_hours = body.social_perception_max_summary_retention_hours
+
+    recognition_values = settings.identity_recognition.model_dump()
+    recognition_updates = {
+        "enabled": body.identity_recognition_enabled,
+        "backend": body.identity_recognition_backend,
+        "match_threshold": body.identity_recognition_match_threshold,
+        "margin_threshold": body.identity_recognition_margin_threshold,
+        "min_face_quality": body.identity_recognition_min_face_quality,
+        "confirmation_window": body.identity_recognition_confirmation_window,
+        "confirmation_hits": body.identity_recognition_confirmation_hits,
+        "lost_timeout_seconds": body.identity_recognition_lost_timeout_seconds,
+        "expose_identity_to_dialogue": body.identity_recognition_expose_identity_to_dialogue,
+    }
+    for key, value in recognition_updates.items():
+        if value is not None:
+            recognition_values[key] = value
+    settings.identity_recognition = type(settings.identity_recognition).model_validate(recognition_values)
 
     save_settings(settings)
     REGISTRY.apply_settings(settings)

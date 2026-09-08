@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def repo_root() -> Path:
@@ -108,6 +108,28 @@ class SocialPerceptionSettings(BaseModel):
     max_summary_retention_hours: int = Field(default=24, ge=1, le=168)
 
 
+class IdentityRecognitionSettings(BaseModel):
+    """Explicit, local-only biometric identity matching. Disabled by default."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = False
+    backend: str = Field(default="none", min_length=1, max_length=64)
+    match_threshold: float = Field(default=0.45, ge=-1.0, le=1.0)
+    margin_threshold: float = Field(default=0.08, ge=0.0, le=1.0)
+    min_face_quality: float = Field(default=0.60, ge=0.0, le=1.0)
+    confirmation_window: int = Field(default=5, ge=1, le=20)
+    confirmation_hits: int = Field(default=3, ge=1, le=20)
+    lost_timeout_seconds: float = Field(default=3.0, ge=0.0, le=60.0)
+    expose_identity_to_dialogue: bool = True
+
+    @model_validator(mode="after")
+    def validate_confirmation_window(self):
+        if self.confirmation_hits > self.confirmation_window:
+            raise ValueError("confirmation_hits must not exceed confirmation_window")
+        return self
+
+
 class AppSettings(BaseModel):
     bind_host: str = "127.0.0.1"
     bind_port: int = 4780
@@ -124,6 +146,7 @@ class AppSettings(BaseModel):
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     self_dev: SelfDevSettings = Field(default_factory=SelfDevSettings)
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
+    identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)

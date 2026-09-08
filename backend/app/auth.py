@@ -85,6 +85,22 @@ def verify_key(provided_key: str, expected_key: str) -> bool:
     return secrets.compare_digest(provided_key, expected_key)
 
 
+def require_owner_private_key(request: Request) -> None:
+    """Require the Jarvis owner key even when ordinary localhost API auth is disabled.
+
+    Sensitive management surfaces (for example biometric enrollment/deletion) use
+    this as a route dependency so local convenience settings cannot silently make
+    them unauthenticated.
+    """
+    current = load_settings()
+    expected = get_effective_private_key(current)
+    if not expected:
+        raise HTTPException(status_code=403, detail="Owner private key is not configured")
+    provided = extract_key_from_request(request)
+    if not verify_key(provided, expected):
+        raise HTTPException(status_code=401, detail="Valid owner private key required")
+
+
 def is_auth_required_for_request(request: Request, settings: AppSettings) -> bool:
     if not (settings.auth_required or settings.lan_access):
         return False
