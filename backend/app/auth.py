@@ -42,32 +42,23 @@ def generate_private_key() -> str:
 
 
 def extract_key_from_request(request: Request) -> str:
-    # 1. Bearer token in Authorization header
     auth_hdr = request.headers.get("authorization", "")
     if auth_hdr.lower().startswith("bearer "):
         return auth_hdr[7:].strip()
-
-    # 2. X-Jarvis-Key or X-Jarvis-Token header
     if "x-jarvis-key" in request.headers:
         return request.headers["x-jarvis-key"].strip()
     if "x-jarvis-token" in request.headers:
         return request.headers["x-jarvis-token"].strip()
-
-    # 3. Query parameter (?key=... or ?token=...)
     query_key = request.query_params.get("key") or request.query_params.get("token")
     if query_key:
         return query_key.strip()
-
     return ""
 
 
 def extract_key_from_websocket(websocket: WebSocket) -> str:
-    # 1. Query parameter (?key=... or ?token=...)
     query_key = websocket.query_params.get("key") or websocket.query_params.get("token")
     if query_key:
         return query_key.strip()
-
-    # 2. Headers
     auth_hdr = websocket.headers.get("authorization", "")
     if auth_hdr.lower().startswith("bearer "):
         return auth_hdr[7:].strip()
@@ -75,7 +66,6 @@ def extract_key_from_websocket(websocket: WebSocket) -> str:
         return websocket.headers["x-jarvis-key"].strip()
     if "x-jarvis-token" in websocket.headers:
         return websocket.headers["x-jarvis-token"].strip()
-
     return ""
 
 
@@ -86,12 +76,7 @@ def verify_key(provided_key: str, expected_key: str) -> bool:
 
 
 def require_owner_private_key(request: Request) -> None:
-    """Require the Jarvis owner key even when ordinary localhost API auth is disabled.
-
-    Sensitive management surfaces (for example biometric enrollment/deletion) use
-    this as a route dependency so local convenience settings cannot silently make
-    them unauthenticated.
-    """
+    """Require the Jarvis owner key even when ordinary localhost API auth is disabled."""
     current = load_settings()
     expected = get_effective_private_key(current)
     if not expected:
@@ -105,27 +90,26 @@ def is_auth_required_for_request(request: Request, settings: AppSettings) -> boo
     if not (settings.auth_required or settings.lan_access):
         return False
 
-    # Skip health check & auth status check
+    # Pair exchange is intentionally unauthenticated: possession of the short-lived,
+    # one-time token is the bootstrap credential. It is removed immediately after use.
     path = request.url.path
     if path in {
         "/api/health",
         "/api/auth/status",
         "/api/auth/verify",
         "/api/mobile",
+        "/api/mobile/pair/exchange",
         "/api/setup/status",
     }:
         return False
 
-    # Only protect /api routes
     if not path.startswith("/api"):
         return False
 
-    # If LAN access is required, local connections can be exempted only if auth_required is false
     if settings.lan_access and not settings.auth_required:
         host = request.client.host if request.client else ""
         if host in {"127.0.0.1", "::1", "localhost"}:
             return False
-
     return True
 
 
@@ -133,12 +117,9 @@ def authenticate_request(request: Request, settings: AppSettings | None = None) 
     current = settings or load_settings()
     if not is_auth_required_for_request(request, current):
         return True
-
     expected = get_effective_private_key(current)
     if not expected:
-        # Auth is required but no key is configured: deny by default
         return False
-
     provided = extract_key_from_request(request)
     return verify_key(provided, expected)
 
@@ -147,15 +128,12 @@ def authenticate_websocket(websocket: WebSocket, settings: AppSettings | None = 
     current = settings or load_settings()
     if not (current.auth_required or current.lan_access):
         return True
-
     if current.lan_access and not current.auth_required:
         host = websocket.client.host if websocket.client else ""
         if host in {"127.0.0.1", "::1", "localhost"}:
             return True
-
     expected = get_effective_private_key(current)
     if not expected:
         return False
-
     provided = extract_key_from_websocket(websocket)
     return verify_key(provided, expected)
