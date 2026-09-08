@@ -4,8 +4,9 @@ from datetime import datetime, timedelta, timezone
 from threading import RLock
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from ..auth import require_owner_private_key
 from ..config import load_settings
 from ..perception.identity import (
     EnrollmentSession,
@@ -16,7 +17,11 @@ from ..perception.identity import (
 )
 from ..perception.identity_store import IdentityStore
 
-router = APIRouter(prefix="/api/perception/identity", tags=["perception", "identity"])
+router = APIRouter(
+    prefix="/api/perception/identity",
+    tags=["perception", "identity"],
+    dependencies=[Depends(require_owner_private_key)],
+)
 STORE = IdentityStore()
 RESOLVER = IdentityResolver(load_settings().identity_recognition, STORE)
 _SESSIONS: dict[str, tuple[EnrollmentSession, EnrollmentSessionRequest]] = {}
