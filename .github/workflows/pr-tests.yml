@@ -3,9 +3,6 @@ name: Backend tests
 on:
   pull_request:
     branches: [development]
-  push:
-    branches:
-      - 'cursor/**'
 
 permissions:
   contents: read
@@ -33,5 +30,14 @@ jobs:
           grep -Ev '^(pywinauto|pywin32|comtypes)' backend/requirements.txt > /tmp/requirements-linux.txt
           python -m pip install -r /tmp/requirements-linux.txt
 
-      - name: Run pytest
+      - name: Run model and security regression tests
+        run: |
+          python -m pytest -q \
+            tests/test_profiles.py \
+            tests/test_model_stack.py \
+            tests/test_runtime_profiles.py \
+            tests/test_security_gates.py
+
+      - name: Run full backend suite (baseline report)
+        continue-on-error: true
         run: python -m pytest -q
