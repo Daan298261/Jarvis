@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 import secrets
 import socket
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -13,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..auth import generate_private_key, get_effective_private_key
-from ..config import data_dir, load_settings
+from ..config import data_dir, load_settings, repo_root
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile"])
 PAIR_TTL_SECONDS = 10 * 60
@@ -21,6 +23,10 @@ PAIR_TTL_SECONDS = 10 * 60
 
 class PairExchange(BaseModel):
     token: str
+
+
+class ApkBuildRequest(BaseModel):
+    install_build_tools: bool = False
 
 
 def _lan_hosts() -> list[str]:
@@ -108,10 +114,10 @@ def mobile_snapshot() -> dict[str, Any]:
             "apk_ready": apk.exists() and apk.stat().st_size > 0,
             "apk_download": "/api/mobile/apk" if apk.exists() else "",
             "pwa_ready": True,
-            "build_script": "data/setup/build-android-client.ps1",
+            "build_script": "scripts/build-android-client.ps1",
         },
         "pairing": {
-            "install": "Open the LAN/Tailscale Phone URL. Android can install it as an app from Chrome; an APK can also be built from the generated script.",
+            "install": "Open the LAN/Tailscale Phone URL. Android can install it as an app from Chrome; an APK can also be built from the Phone page.",
             "auth": "Use Create pairing link on the PC. The link is one-time and expires after 10 minutes; the long-lived Jarvis key is not placed in the link.",
             "lan": "LAN access uses the private Windows firewall profile. Remote access should use Tailscale rather than a public router port.",
         },
@@ -159,6 +165,43 @@ async def exchange_pairing(body: PairExchange):
     if not key:
         raise HTTPException(409, "Jarvis private key is not configured")
     return {"ok": True, "private_key": key}
+
+
+@router.post("/apk/build")
+async def build_apk(body: ApkBuildRequest):
+    if platform.system() != "Windows":
+        raise HTTPException(400, "Android APK auto-build is currently supported on the Windows Jarvis host")
+    script = repo_root() / "scripts" / "build-android-client.ps1"
+    if not script.exists():
+        raise HTTPException(404, "Android build script is missing")
+    settings = load_settings()
+    args = [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script),
+        "-JarvisUrl",
+        f"http://127.0.0.1:{settings.bind_port}",
+    ]
+    if body.install_build_tools:
+        args.append("-InstallBuildTools")
+    log_path = data_dir() / "setup" / "android-build.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = open(log_path, "a", encoding="utf-8")
+    try:
+        subprocess.Popen(  # noqa: S603 - fixed local script, no user command input
+            args,
+            cwd=str(repo_root()),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception as exc:
+        log_handle.close()
+        raise HTTPException(500, f"Could not start Android build: {exc}") from exc
+    return {"started": True, "log": str(log_path), "apk": str(_apk_path())}
 
 
 @router.get("/apk")
