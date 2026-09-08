@@ -28,6 +28,8 @@ def test_bootstrap_covers_required_steps():
         "requirements.txt",
         "playwright",
         "npm",
+        "mcp\\package-lock.json",
+        "ensure-mcpconnectors",
         "llama-server",
         "qwen3.5-9b",
         "start-jarvis",
@@ -57,6 +59,8 @@ def test_jarvis_iss_wiring():
     assert "runtime" in lower
     assert "start-jarvis.ps1" in lower
     assert "diskspanning=yes" in lower
+    assert "step=integrations" in lower
+    assert "runhidden" in lower
 
 
 def test_build_script_invokes_iscc():

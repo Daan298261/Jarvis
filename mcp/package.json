@@ -1,0 +1,14 @@
+{
+  "name": "jarvis-mcp-connectors",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned third-party connectors managed by the Jarvis installer.",
+  "dependencies": {
+    "@codefuturist/email-mcp": "0.2.3",
+    "wappmcp": "0.4.0"
+  },
+  "overrides": {
+    "nodemailer": "10.0.1",
+    "puppeteer": "25.10.0"
+  }
+}

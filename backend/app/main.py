@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, context_repo, delegation, diagnostics, guest_portals, ingest, license, lmstudio, mcp, memory, mobile, model, packs, perception, perception_identity, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, context_repo, delegation, diagnostics, guest_portals, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, packs, perception, perception_identity, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -20,6 +20,7 @@ from .db import init_db
 from .events import BUS
 from .hardware import hardware_dict
 from .inference.manager import MANAGER
+from .integrations.setup import WHATSAPP_PAIRING
 from .swarm.capabilities import register_localhost_capabilities
 from .swarm.nodes import register_localhost_node
 from .swarm.workers import bind_workers_to_node
@@ -80,6 +81,7 @@ app.include_router(autonomy.router)
 app.include_router(agent_policy.router)
 app.include_router(amazon_ads.router)
 app.include_router(setup.router)
+app.include_router(integrations.router)
 app.include_router(diagnostics.router)
 app.include_router(ingest.router)
 app.include_router(perception.router)
@@ -154,6 +156,7 @@ async def startup() -> None:
 @app.on_event("shutdown")
 async def shutdown() -> None:
     QUEUE_WATCHER.stop()
+    await WHATSAPP_PAIRING.close()
 
 
 async def _autoload_model(current) -> None:
