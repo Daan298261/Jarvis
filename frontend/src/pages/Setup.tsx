@@ -19,19 +19,56 @@ type PlannedModel = {
   bundled: boolean
   installed: boolean
   downloadable: boolean
+  estimated_disk_gb?: number
   why: string
   limitations: string
   reason: string
 }
 
+type DiskPlan = {
+  free_gb: number
+  required_download_gb: number
+  jarvis_runtime_gb: number
+  lm_studio_gb: number
+  safety_reserve_gb: number
+  required_with_reserve_gb: number
+  free_after_gb: number
+  enough: boolean
+  shortfall_gb: number
+  message: string
+}
+
+type LmStudioPlan = {
+  required: boolean
+  installed: boolean
+  path?: string
+  reason: string
+  install_script: string
+}
+
+type MobilePlan = {
+  client: string
+  apk_supported: boolean
+  apk_script: string
+  pairing_script: string
+  same_lan: string
+  remote_access: string
+  router_forwarding_required: boolean
+  router_forwarding: string
+  reason: string
+}
+
 type InterviewPlan = {
   version: number
-  answers: Record<string, unknown>
+  answers: Record<string, any>
   hardware: Record<string, unknown>
   recommended_models: PlannedModel[]
   download_models: PlannedModel[]
   keep_loaded: string[]
   routing_policy: string
+  disk: DiskPlan
+  lm_studio: LmStudioPlan
+  mobile: MobilePlan
   reasoning: string[]
 }
 
@@ -71,6 +108,11 @@ function shortHardware(hw: Record<string, unknown>): string {
   if (ram) bits.push(`${Math.round(ram)} GB RAM`)
   if (vram) bits.push(`${vram.toFixed(0)} GB VRAM`)
   return bits.join(" · ") || "Hardware detected"
+}
+
+function fmtGb(value: number | undefined): string {
+  if (value == null || Number.isNaN(value)) return "—"
+  return `${Math.round(value * 10) / 10} GB`
 }
 
 export function SetupPage() {
@@ -178,6 +220,10 @@ export function SetupPage() {
   }
 
   async function apply() {
+    if (plan && !plan.disk.enough) {
+      setError(`Free about ${plan.disk.shortfall_gb} GB first, or change the setup choices.`)
+      return
+    }
     setBusy(true)
     setError("")
     try {
@@ -235,9 +281,7 @@ export function SetupPage() {
 
           <div className="setup-choice-grid">
             {(question.choices || []).map((choice) => (
-              <button key={choice} type="button" onClick={() => answer(choice)} disabled={busy}>
-                {choice}
-              </button>
+              <button key={choice} type="button" onClick={() => answer(choice)} disabled={busy}>{choice}</button>
             ))}
           </div>
 
@@ -245,20 +289,12 @@ export function SetupPage() {
             <input
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && input.trim()) void answer(input)
-              }}
+              onKeyDown={(event) => { if (event.key === "Enter" && input.trim()) void answer(input) }}
               placeholder="Or just tell Jarvis…"
               autoFocus
             />
             {speechAvailable && (
-              <button
-                className={`setup-mic${listening ? " listening" : ""}`}
-                type="button"
-                onClick={startListening}
-                disabled={busy || listening}
-                title="Answer by voice"
-              >
+              <button className={`setup-mic${listening ? " listening" : ""}`} type="button" onClick={startListening} disabled={busy || listening} title="Answer by voice">
                 {listening ? "Listening…" : "Mic"}
               </button>
             )}
@@ -280,6 +316,20 @@ export function SetupPage() {
             <strong>{shortHardware(plan.hardware)}</strong>
           </div>
 
+          <div className={`setup-space-verdict ${plan.disk.enough ? "ok" : "bad"}`}>
+            <div>
+              <small>Disk space</small>
+              <strong>{plan.disk.enough ? "Enough space" : "Not enough space"}</strong>
+              <p>{plan.disk.message}</p>
+            </div>
+            <dl>
+              <dt>Free now</dt><dd>{fmtGb(plan.disk.free_gb)}</dd>
+              <dt>Selected downloads</dt><dd>{fmtGb(plan.disk.required_download_gb)}</dd>
+              <dt>Reserved after setup</dt><dd>{fmtGb(plan.disk.safety_reserve_gb)}</dd>
+              {!plan.disk.enough && <><dt>Free this much more</dt><dd>{fmtGb(plan.disk.shortfall_gb)}</dd></>}
+            </dl>
+          </div>
+
           <div className="setup-plan-grid">
             <div>
               <h3>Configuration</h3>
@@ -287,12 +337,18 @@ export function SetupPage() {
                 <dt>Routing</dt><dd>{plan.routing_policy.replaceAll("-", " ")}</dd>
                 <dt>Resource use</dt><dd>{String(plan.answers.resources || "Balanced")}</dd>
                 <dt>Voice</dt><dd>{plan.answers.voice_enabled ? "enabled" : "off for now"}</dd>
-                <dt>Bootstrap</dt><dd>Ornith 1.5 9B · local</dd>
+                <dt>Bootstrap</dt><dd>Ornith 1.5 9B Q4_K_M · local</dd>
               </dl>
             </div>
             <div>
-              <h3>Why</h3>
-              <ul>{plan.reasoning.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+              <h3>Runtime</h3>
+              <dl>
+                <dt>llama.cpp</dt><dd>Built in · default</dd>
+                <dt>LM Studio</dt><dd>{plan.lm_studio.required ? (plan.lm_studio.installed ? "required · installed" : "required · Jarvis can install it") : "not required"}</dd>
+                <dt>Phone</dt><dd>LAN + {plan.mobile.remote_access}</dd>
+                <dt>Router port</dt><dd>{plan.mobile.router_forwarding_required ? "required" : "not required"}</dd>
+              </dl>
+              <p className="lede" style={{ marginTop: 10 }}>{plan.lm_studio.reason}</p>
             </div>
           </div>
 
@@ -306,27 +362,36 @@ export function SetupPage() {
                 </div>
                 <p>{model.reason}</p>
                 <span className="setup-model-status">
-                  {model.installed ? "Installed" : model.bundled ? "Included" : model.status}
+                  {model.installed ? "Installed" : model.bundled ? "Included in distro" : model.status}
+                  {model.estimated_disk_gb ? ` · ~${model.estimated_disk_gb} GB` : ""}
                 </span>
               </article>
             ))}
           </div>
 
+          <div className="setup-zero-config">
+            <h3>What Jarvis prepares for you</h3>
+            <ul>
+              <li><code>data/setup/download-models.ps1</code> — installs only the models this interview selected, with another disk-space check before download.</li>
+              <li><code>data/setup/install-lm-studio.ps1</code> — normally does nothing because LM Studio is not required; it becomes a zero-config installer if a future setup needs it.</li>
+              <li><code>data/setup/configure-mobile-access.ps1</code> — private firewall + Tailscale path; public UPnP router forwarding only when explicitly requested.</li>
+              <li><code>scripts/build-android-client.ps1</code> — can produce a one-time pre-paired Android APK; the Phone page remains installable as a PWA without Android build tools.</li>
+            </ul>
+          </div>
+
           {plan.download_models.length > 0 ? (
-            <p className="setup-download-note">
-              Jarvis will also create <code>data/setup/download-models.ps1</code> for {plan.download_models.length} selected model{plan.download_models.length === 1 ? "" : "s"} that are not already present.
-            </p>
+            <p className="setup-download-note">Jarvis selected {plan.download_models.length} model download{plan.download_models.length === 1 ? "" : "s"} in addition to the bundled bootstrap.</p>
           ) : (
             <p className="setup-download-note">No additional model download is required to start using Jarvis.</p>
           )}
 
           <div className="setup-plan-actions">
             <button type="button" className="btn secondary" onClick={restartInterview} disabled={busy}>Change answers</button>
-            <button type="button" className="btn" onClick={apply} disabled={busy}>{busy ? "Configuring…" : "Configure Jarvis"}</button>
+            <button type="button" className="btn" onClick={apply} disabled={busy || !plan.disk.enough}>
+              {busy ? "Configuring…" : plan.disk.enough ? "Configure Jarvis" : `Free ${fmtGb(plan.disk.shortfall_gb)} first`}
+            </button>
           </div>
-          <p className="setup-advanced-note">
-            Advanced controls remain available after setup under Model, Swarm, Settings and System. Security passwords are configured separately.
-          </p>
+          <p className="setup-advanced-note">Advanced controls remain available after setup under Model, Swarm, Settings and System. Security passwords are configured separately and are never unlocked by onboarding.</p>
         </section>
       )}
     </div>
