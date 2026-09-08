@@ -255,6 +255,8 @@ def _filter_candidates(
             return [], "Forced runtime profile not found", "forced_missing"
         if forced.name in prefs.forbidden_profiles or forced.id in prefs.forbidden_profiles:
             return [], "Forced runtime profile is forbidden", "forced_forbidden"
+        if not forced.enabled:
+            return [], "Forced runtime profile is disabled", "forced_disabled"
         if not _privacy_allows(forced, prefs.privacy_floor):
             return [], "Forced runtime profile violates privacy floor", "privacy_violation"
         if not _has_capabilities(forced, prefs.required_capabilities):
@@ -269,6 +271,8 @@ def _filter_candidates(
 
     for profile in profiles:
         if profile.name in prefs.forbidden_profiles or profile.id in prefs.forbidden_profiles:
+            continue
+        if not profile.enabled:
             continue
         if not _has_capabilities(profile, prefs.required_capabilities):
             continue
