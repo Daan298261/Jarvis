@@ -4,6 +4,9 @@ runtime/llama.cpp/
 runtime/*.zip
 runtime/llama-server-help.txt
 
+# Installer-staged multi-GB model payloads
+installer/windows/payload/models/
+
 # Application data
 data/
 logs/
