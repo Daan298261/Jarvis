@@ -3,6 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..inference.model_stack import (
+    list_specialist_models,
+    routing_preferences_for_role,
+)
 from ..inference.runtime_profiles import (
     create_runtime_profile,
     delete_runtime_profile,
@@ -70,11 +74,43 @@ class RouteRequest(BaseModel):
     load_factor: float = 0.0
 
 
+class RoleRouteRequest(BaseModel):
+    role: str
+    policy: str = "local-first"
+    privacy_floor: str = "public-remote"
+    max_cost_usd: float | None = None
+    warm_models: list[str] = Field(default_factory=list)
+    node_id: str = "localhost"
+    load_factor: float = 0.0
+
+
+def _node_from_request(
+    *,
+    node_id: str,
+    warm_models: list[str],
+    load_factor: float,
+) -> RuntimeNodeState:
+    return RuntimeNodeState(
+        node_id=node_id,
+        hostname=node_id,
+        is_local=node_id in {"localhost", "local"},
+        warm_models=tuple(warm_models),
+        load_factor=load_factor,
+    )
+
+
 @router.get("")
 async def list_profiles():
     return {
         "profiles": [profile.as_dict() for profile in list_runtime_profiles()],
         "policies": list(ROUTING_POLICIES),
+    }
+
+
+@router.get("/specialists")
+async def list_specialists(role: str | None = None):
+    return {
+        "models": [entry.as_dict() for entry in list_specialist_models(role=role)],
     }
 
 
@@ -121,11 +157,9 @@ async def select_runtime(body: RouteRequest):
         privacy_floor=body.privacy_floor,
         max_cost_usd=body.max_cost_usd,
     )
-    node = RuntimeNodeState(
+    node = _node_from_request(
         node_id=body.node_id,
-        hostname=body.node_id,
-        is_local=body.node_id in {"localhost", "local"},
-        warm_models=tuple(body.warm_models),
+        warm_models=body.warm_models,
         load_factor=body.load_factor,
     )
     decision = route_runtime(prefs, nodes=[node])
@@ -153,11 +187,38 @@ async def preview_route(body: RouteRequest):
         privacy_floor=body.privacy_floor,
         max_cost_usd=body.max_cost_usd,
     )
-    node = RuntimeNodeState(
+    node = _node_from_request(
         node_id=body.node_id,
-        hostname=body.node_id,
-        is_local=body.node_id in {"localhost", "local"},
-        warm_models=tuple(body.warm_models),
+        warm_models=body.warm_models,
+        load_factor=body.load_factor,
+    )
+    return route_runtime(prefs, nodes=[node]).as_dict()
+
+
+@router.post("/route-role/preview")
+async def preview_role_route(body: RoleRouteRequest):
+    """Resolve a Jarvis model role through the RFC-0048 specialist policy."""
+    try:
+        prefs = routing_preferences_for_role(
+            body.role,
+            policy=body.policy,
+            privacy_floor=body.privacy_floor,
+            max_cost_usd=body.max_cost_usd,
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"reason": str(exc), "code": "manual_gate"},
+        ) from exc
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason": str(exc), "code": "unknown_role"},
+        ) from exc
+
+    node = _node_from_request(
+        node_id=body.node_id,
+        warm_models=body.warm_models,
         load_factor=body.load_factor,
     )
     return route_runtime(prefs, nodes=[node]).as_dict()
