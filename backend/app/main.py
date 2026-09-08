@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, context_repo, delegation, diagnostics, guest_portals, ingest, license, mcp, memory, mobile, model, packs, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, context_repo, delegation, diagnostics, guest_portals, ingest, license, lmstudio, mcp, memory, mobile, model, packs, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -67,6 +67,7 @@ app.include_router(mobile.router)
 app.include_router(swarm.router)
 app.include_router(worker_environments.router)
 app.include_router(runtime_profiles.router)
+app.include_router(lmstudio.router)
 app.include_router(packs.router)
 app.include_router(trajectories.router)
 app.include_router(context_repo.router)
