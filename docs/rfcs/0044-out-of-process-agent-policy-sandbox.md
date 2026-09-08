@@ -1,4 +1,4 @@
-# RFC-0031: Out-of-process agent policy sandbox
+# RFC-0044: Out-of-process agent policy sandbox
 
 **Status:** accepted  
 **Queue item:** P2/P3 — autonomous execution safety  
