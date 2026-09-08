@@ -26,7 +26,7 @@ PRIVACY_ORDER = {
 
 @dataclass
 class RuntimeProfile:
-    """Named inference/runtime profile for policy-aware routing (RFC-0003)."""
+    """Named inference/runtime profile for policy-aware routing (RFC-0003/RFC-0014)."""
 
     id: str
     name: str
@@ -43,6 +43,8 @@ class RuntimeProfile:
     specialization_tags: tuple[str, ...] = ()
     is_local: bool = True
     description: str = ""
+    enabled: bool = True
+    required_authorizations: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -69,6 +71,10 @@ class RuntimeProfile:
             specialization_tags=tuple(str(tag) for tag in (raw.get("specialization_tags") or [])),
             is_local=bool(raw.get("is_local", True)),
             description=str(raw.get("description") or ""),
+            enabled=bool(raw.get("enabled", True)),
+            required_authorizations=tuple(
+                str(tag) for tag in (raw.get("required_authorizations") or [])
+            ),
         )
 
 
@@ -88,11 +94,19 @@ def _runtime_profile_from_model(profile: ModelProfile, *, endpoint: str = "127.0
         tags.append("vision")
     if profile.family == "27b":
         tags.append("high-quality")
+
     specialization: list[str] = []
     if profile.thinking_mode == "on":
         specialization.append("reasoning")
     if profile.name == "fast":
         specialization.append("low-latency")
+    if profile.name == "ornith_9b":
+        tags.extend(["agentic", "tool-use"])
+        specialization.extend(["orchestration", "agentic"])
+    elif profile.name == "ornith_35b":
+        tags.extend(["agentic", "coding", "high-quality"])
+        specialization.extend(["leader", "coding"])
+
     return RuntimeProfile(
         id=f"builtin-{profile.name}",
         name=profile.name,
@@ -104,16 +118,34 @@ def _runtime_profile_from_model(profile: ModelProfile, *, endpoint: str = "127.0
         quantization=profile.quant,
         privacy_class=PRIVACY_LOCAL_ONLY,
         cost_ceiling_usd=0.0,
-        capability_tags=tuple(tags),
+        capability_tags=tuple(dict.fromkeys(tags)),
         model_profile=profile.name,
-        specialization_tags=tuple(specialization),
+        specialization_tags=tuple(dict.fromkeys(specialization)),
         is_local=True,
         description=profile.description,
+        enabled=True,
     )
 
 
 def default_runtime_profiles(*, endpoint: str = "127.0.0.1:8088") -> list[RuntimeProfile]:
-    return [_runtime_profile_from_model(profile, endpoint=endpoint) for profile in PROFILES.values()]
+    profiles = [_runtime_profile_from_model(profile, endpoint=endpoint) for profile in PROFILES.values()]
+
+    # RFC-0014 templates are deliberately disabled. Import lazily to avoid a
+    # module cycle: model_stack uses RuntimeProfile as its persistence shape.
+    from .model_stack import recommended_specialist_runtime_profiles
+
+    profiles.extend(recommended_specialist_runtime_profiles())
+    return profiles
+
+
+def _merge_missing_defaults(items: list[RuntimeProfile]) -> list[RuntimeProfile]:
+    """Make newly shipped profiles visible without overwriting user configuration."""
+    known_names = {item.name for item in items}
+    for default in default_runtime_profiles():
+        if default.name not in known_names:
+            items.append(default)
+            known_names.add(default.name)
+    return items
 
 
 def _load_runtime_registry_unlocked() -> list[RuntimeProfile]:
@@ -126,7 +158,8 @@ def _load_runtime_registry_unlocked() -> list[RuntimeProfile]:
         return default_runtime_profiles()
     if not isinstance(rows, list) or not rows:
         return default_runtime_profiles()
-    return [RuntimeProfile.from_dict(row) for row in rows if isinstance(row, dict)]
+    items = [RuntimeProfile.from_dict(row) for row in rows if isinstance(row, dict)]
+    return _merge_missing_defaults(items)
 
 
 def _save_runtime_registry_unlocked(items: list[RuntimeProfile]) -> None:
@@ -185,6 +218,8 @@ def create_runtime_profile(
     specialization_tags: list[str] | None = None,
     is_local: bool = False,
     description: str = "",
+    enabled: bool = True,
+    required_authorizations: list[str] | None = None,
 ) -> RuntimeProfile:
     normalized = (name or "").strip().lower().replace(" ", "-")
     if not normalized:
@@ -209,6 +244,8 @@ def create_runtime_profile(
             specialization_tags=tuple(specialization_tags or []),
             is_local=is_local,
             description=description,
+            enabled=bool(enabled),
+            required_authorizations=tuple(required_authorizations or []),
         )
         items.append(profile)
         _save_runtime_registry_unlocked(items)
@@ -225,7 +262,7 @@ def update_runtime_profile(profile_id: str, **fields: Any) -> RuntimeProfile:
             for key, value in fields.items():
                 if value is None:
                     continue
-                if key in {"capability_tags", "specialization_tags"} and isinstance(value, list):
+                if key in {"capability_tags", "specialization_tags", "required_authorizations"} and isinstance(value, list):
                     data[key] = value
                 elif key in data:
                     data[key] = value
