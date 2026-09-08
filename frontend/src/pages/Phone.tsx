@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { MobileCompanionSetup } from "./MobileCompanionSetup"
 
 type VoiceStatus = { stt_ready?: boolean; tts_ready?: boolean; detail?: string }
 
@@ -171,6 +172,7 @@ export function PhonePage() {
   return (
     <div className="phone-page">
       <h1>Phone</h1>
+      <MobileCompanionSetup />
       <p className="lede">Command Jarvis from Android over the LAN. This page is the installable client.</p>
 
       {msg && (

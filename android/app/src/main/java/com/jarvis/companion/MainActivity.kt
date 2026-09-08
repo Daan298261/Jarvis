@@ -167,6 +167,8 @@ class MainActivity : ComponentActivity() {
     }
     AndroidView(modifier = Modifier.fillMaxWidth().height(310.dp), factory = { context ->
         WebView(context).apply {
+            val loader = androidx.webkit.WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", androidx.webkit.WebViewAssetLoader.AssetsPathHandler(context)).build()
             web = this
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             settings.javaScriptEnabled = true
@@ -176,11 +178,11 @@ class MainActivity : ComponentActivity() {
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest) = true
                 override fun shouldInterceptRequest(view: WebView, request: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? {
-                    if (!request.url.toString().startsWith("file:///android_asset/orb/")) return android.webkit.WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
-                    return null
+                    return loader.shouldInterceptRequest(request.url)
+                        ?: android.webkit.WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 }
             }
-            loadUrl("file:///android_asset/orb/index.html")
+            loadUrl("https://appassets.androidplatform.net/assets/orb/index.html")
         }
     }, update = { it.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null) })
 }

@@ -37,6 +37,14 @@ def server_identity(hostnames: list[str]):
             output.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
     public = key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     names = []
+    if cert_path.exists():
+        previous = x509.load_pem_x509_certificate(cert_path.read_bytes())
+        hostnames = list(hostnames)
+        try:
+            previous_names = previous.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            hostnames += [str(name.value) for name in previous_names]
+        except x509.ExtensionNotFound:
+            pass
     for hostname in set(hostnames + ["localhost", "127.0.0.1"]):
         try:
             names.append(x509.IPAddress(ipaddress.ip_address(hostname)))

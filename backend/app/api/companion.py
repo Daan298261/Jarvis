@@ -48,7 +48,7 @@ class Message(BaseModel):
 class Schedule(BaseModel):
     prompt: str = Field(min_length=1, max_length=32000)
     profile: str = "auto"
-    next_run: float = Field(gt=0)
+    next_run: float = Field(gt=0, lt=253402300799, allow_inf_nan=False)
     timezone: str = "Europe/Amsterdam"
     recurrence: Literal["once", "daily", "weekly"] = "once"
 
@@ -260,3 +260,52 @@ def confirm(device_id: uuid.UUID, body: Confirm):
 @owner_router.post("/devices/{device_id}/revoke")
 def revoke(device_id: uuid.UUID):
     return identity.set_status(str(device_id), "revoked")
+
+
+class Build(BaseModel):
+    endpoint: str = Field(max_length=1024)
+
+
+@owner_router.post("/builds")
+async def build_apk(body: Build):
+    from ..mobile.provision import start
+    from urllib.parse import urlsplit
+    parsed = urlsplit(body.endpoint)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.query or parsed.fragment or parsed.path.strip("/"):
+        raise HTTPException(400, "Supply an HTTPS gateway origin")
+    return await start(body.endpoint)
+
+
+@owner_router.get("/builds/{job_id}")
+def build_status(job_id: uuid.UUID):
+    from ..mobile.provision import job
+    return job(str(job_id))
+
+
+@owner_router.get("/builds/{job_id}/apk")
+def apk_download(job_id: uuid.UUID):
+    from ..mobile.provision import job
+    value = job(str(job_id))
+    if value["state"] != "completed":
+        raise HTTPException(409, "APK is not ready")
+    path = root() / "builds" / value["result"]["filename"]
+    return FileResponse(path, filename="Jarvis.apk", media_type="application/vnd.android.package-archive")
+
+
+class Contact(BaseModel):
+    incident_id: uuid.UUID
+    task_id: uuid.UUID | None = None
+
+
+@owner_router.post("/devices/{device_id}/call")
+async def contact(device_id: uuid.UUID, body: Contact):
+    from ..mobile.calls import create_call
+    from ..mobile.runtime import push
+    call = create_call(str(device_id), "incoming", task_id=str(body.task_id) if body.task_id else None, incident_id=str(body.incident_id))
+    with database() as db:
+        device = get(db, "device", str(device_id))
+    try:
+        delivered = await push(device, call["id"], "call")
+    except Exception:
+        delivered = False
+    return {**call, "push_delivered": delivered}

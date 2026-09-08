@@ -139,3 +139,29 @@ async def test_attachments_are_scoped_to_device(mobile_env):
         url = "/api/companion/attachments/" + response.json()["id"]
         assert (await client.get(url, headers=own)).content == b"example"
         assert (await client.get(url, headers=headers(otherkey, otherdevice))).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_submission_retry_repairs_crash_without_duplicate_messages(mobile_env, jarvis_env, monkeypatch):
+    import uuid
+    from app.mobile import service
+    from app.db.models import Conversation
+    from app.db.session import SessionLocal
+    calls = []
+    async def create(prompt, **kwargs):
+        calls.append(kwargs["request_id"])
+        if len(calls) == 1:
+            raise RuntimeError("simulated restart after conversation commit")
+    monkeypatch.setattr(service.AGENT, "create_task", create)
+    request = str(uuid.uuid4())
+    with pytest.raises(RuntimeError):
+        await service.submit("phone", request, "hello")
+    result = await service.submit("phone", request, "hello")
+    assert calls[0] == calls[1] == result["task_id"]
+    async with SessionLocal() as db:
+        conversation = await db.get(Conversation, result["conversation_id"])
+        import json
+        assert len(json.loads(conversation.messages_json)) == 1
+    with pytest.raises(HTTPException) as error:
+        await service.submit("phone", request, "different command")
+    assert error.value.status_code == 409

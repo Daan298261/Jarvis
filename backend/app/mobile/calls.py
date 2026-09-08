@@ -77,6 +77,8 @@ def create_call(device_id: str, direction: str, conversation_id: str | None = No
             if prior["device_id"] == device_id:
                 if incident_id and prior.get("incident_id") == incident_id:
                     return prior
+                if direction == "incoming" and time.time() - prior["created_at"] < 60:
+                    raise HTTPException(429, "Wait one minute before calling this device again")
                 if prior["state"] in ACTIVE_STATES and prior["expires_at"] > time.time():
                     raise HTTPException(409, "A call is already in progress")
         call = {"id": str(uuid.uuid4()), "device_id": device_id, "direction": direction,
