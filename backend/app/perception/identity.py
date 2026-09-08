@@ -135,6 +135,8 @@ class IdentityResolver:
         embedding: Iterable[float] | None,
         *,
         quality: float,
+        embedding_model: str | None = None,
+        embedding_version: int | None = None,
         observed_at: datetime | None = None,
         track_id: str = "primary",
     ) -> IdentityResolution:
@@ -148,6 +150,8 @@ class IdentityResolver:
                 track_id,
                 _TrackState(history=deque(maxlen=self.settings.confirmation_window)),
             )
+            if track.history.maxlen != self.settings.confirmation_window:
+                track.history = deque(track.history, maxlen=self.settings.confirmation_window)
 
             if not self.settings.enabled:
                 self._tracks.pop(track_id, None)
@@ -159,10 +163,19 @@ class IdentityResolver:
 
             if embedding is None or quality < self.settings.min_face_quality:
                 return self._handle_unknown(track, now, reason="insufficient_face_quality")
+            if not embedding_model or embedding_version is None:
+                return self._handle_unknown(track, now, reason="embedding_model_required")
 
             vector = _normalize_embedding(embedding)
             enrollments = self.store.list_all()
-            compatible = [item for item in enrollments if item.embeddings and len(item.embeddings[0]) == len(vector)]
+            compatible = [
+                item
+                for item in enrollments
+                if item.embeddings
+                and item.embedding_model == embedding_model
+                and item.embedding_version == embedding_version
+                and len(item.embeddings[0]) == len(vector)
+            ]
             if not compatible:
                 return self._handle_unknown(track, now, reason="no_compatible_enrollments")
 
@@ -196,8 +209,6 @@ class IdentityResolver:
                     reason="temporal_confirmation",
                 )
 
-            # If the same identity is already confirmed, keep it confirmed while
-            # receiving continued strong matches rather than dropping to provisional.
             if track.confirmed_identity == best.identity_id:
                 track.last_strong_seen_at = now
                 return IdentityResolution(
