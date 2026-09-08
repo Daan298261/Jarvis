@@ -1,0 +1,162 @@
+package com.jarvis.companion
+
+import android.app.*
+import android.content.Intent
+import android.os.IBinder
+import android.net.Uri
+import androidx.core.app.NotificationCompat
+import androidx.core.telecom.CallAttributesCompat
+import androidx.core.telecom.CallsManager
+import android.telecom.DisconnectCause
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.*
+import org.json.JSONObject
+import org.webrtc.*
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+private const val CALL_CHANNEL = "jarvis-calls"
+
+class JarvisPushService : FirebaseMessagingService() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    override fun onNewToken(token: String) {
+        scope.launch { runCatching { (application as JarvisApp).api.json("/preferences", "PUT", JSONObject().put("push_token", token)) } }
+    }
+    override fun onMessageReceived(message: RemoteMessage) {
+        val id = message.data["event_id"] ?: return
+        val kind = message.data["kind"] ?: return
+        if (kind == "call") {
+            // Push is a wake hint, not authority. Verify the live call before ringing.
+            scope.launch {
+                runCatching {
+                    val call = (application as JarvisApp).api.json("/calls/$id")
+                    if (call.optString("state") != "ringing") return@runCatching
+                    val manager = getSystemService(NotificationManager::class.java)
+                    manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Jarvis calls", NotificationManager.IMPORTANCE_HIGH))
+                    val open = PendingIntent.getActivity(this@JarvisPushService, id.hashCode(), Intent(this@JarvisPushService, MainActivity::class.java).putExtra("incoming_call", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                    val decline = PendingIntent.getService(this@JarvisPushService, id.hashCode(), Intent(this@JarvisPushService, CallService::class.java).setAction("decline").putExtra("call_id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                    val notification = NotificationCompat.Builder(this@JarvisPushService, CALL_CHANNEL).setSmallIcon(R.drawable.ic_jarvis)
+                        .setContentTitle("Jarvis is calling").setContentText("A critical event needs your attention")
+                        .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_MAX)
+                        .setContentIntent(open).setFullScreenIntent(open, true).setTimeoutAfter(45000)
+                        .addAction(0, "Open to answer", open).addAction(0, "Decline", decline).setAutoCancel(true).build()
+                    manager.notify(id.hashCode(), notification)
+                }
+            }
+        } else if (kind == "task") {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(NotificationChannel("jarvis-tasks", "Task updates", NotificationManager.IMPORTANCE_DEFAULT))
+            val open = PendingIntent.getActivity(this, id.hashCode(), Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            manager.notify(id.hashCode(), NotificationCompat.Builder(this, "jarvis-tasks").setSmallIcon(R.drawable.ic_jarvis)
+                .setContentTitle("Jarvis has an update").setContentText("Open Jarvis to view the task").setContentIntent(open).setAutoCancel(true).build())
+        }
+    }
+    override fun onDestroy() { scope.cancel(); super.onDestroy() }
+}
+
+class CallService : Service() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var media: RealtimeMediaClient? = null
+    private var callId: String? = null
+    private val api get() = (application as JarvisApp).api
+    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action in listOf("end", "decline")) {
+            scope.launch { val id = intent?.getStringExtra("call_id") ?: callId; if (id != null) runCatching { api.json("/calls/$id/end", "POST") }; stopSelf() }
+            return START_NOT_STICKY
+        }
+        if (callId != null) return START_NOT_STICKY
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Jarvis calls", NotificationManager.IMPORTANCE_HIGH))
+        val hangup = PendingIntent.getService(this, 1, Intent(this, CallService::class.java).setAction("end"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        startForeground(9, NotificationCompat.Builder(this, CALL_CHANNEL).setSmallIcon(R.drawable.ic_jarvis).setContentTitle("Calling Jarvis")
+            .setContentText("Connecting encrypted audio").setOngoing(true).addAction(0, "Hang up", hangup).build())
+        scope.launch {
+            try {
+                val incoming = intent?.getStringExtra("call_id")
+                val call = if (incoming != null) api.json("/calls/$incoming") else api.json("/calls", "POST", JSONObject())
+                callId = call.getString("id")
+                val callsManager = CallsManager(this@CallService)
+                callsManager.registerAppWithTelecom(CallsManager.CAPABILITY_BASELINE)
+                val attributes = CallAttributesCompat("Jarvis", Uri.parse("jarvis:swarm"), if (incoming != null) CallAttributesCompat.DIRECTION_INCOMING else CallAttributesCompat.DIRECTION_OUTGOING)
+                callsManager.addCall(attributes,
+                    onAnswer = { },
+                    onDisconnect = { stopSelf() },
+                    onSetActive = { },
+                    onSetInactive = { }) {
+                    val control = this
+                    scope.launch {
+                        try {
+                            media = RealtimeMediaClient(this@CallService)
+                            media!!.connect(api, call)
+                            if (incoming != null) control.answer(CallAttributesCompat.CALL_TYPE_AUDIO_CALL) else control.setActive()
+                        } catch (e: Exception) {
+                            control.disconnect(DisconnectCause(DisconnectCause.ERROR))
+                            stopSelf()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                if (e !is CancellationException) manager.notify(10, NotificationCompat.Builder(this@CallService, CALL_CHANNEL).setSmallIcon(R.drawable.ic_jarvis).setContentTitle("Jarvis call unavailable").setContentText(e.message ?: "Continue by text").build())
+                stopSelf()
+            }
+        }
+        return START_NOT_STICKY
+    }
+    override fun onDestroy() { media?.close(); scope.cancel(); callId?.let { id -> CoroutineScope(Dispatchers.IO).launch { runCatching { api.json("/calls/$id/end", "POST") } } }; super.onDestroy() }
+}
+
+class RealtimeMediaClient(context: android.content.Context) {
+    private val factory: PeerConnectionFactory
+    private var peer: PeerConnection? = null
+    private var source: AudioSource? = null
+    private var track: AudioTrack? = null
+    init {
+        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
+        factory = PeerConnectionFactory.builder().createPeerConnectionFactory()
+    }
+    suspend fun connect(api: JarvisApi, call: JSONObject) {
+        val servers = call.optJSONArray("ice_servers")?.objects()?.map { server ->
+            val urls = server.getJSONArray("urls")
+            PeerConnection.IceServer.builder((0 until urls.length()).map(urls::getString)).setUsername(server.optString("username")).setPassword(server.optString("credential")).createIceServer()
+        } ?: emptyList()
+        val gathered = CompletableDeferred<Unit>()
+        peer = factory.createPeerConnection(PeerConnection.RTCConfiguration(servers), object : PeerConnection.Observer {
+            override fun onSignalingChange(state: PeerConnection.SignalingState) {}
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {}
+            override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) { if (state == PeerConnection.IceGatheringState.COMPLETE) gathered.complete(Unit) }
+            override fun onIceCandidate(candidate: IceCandidate) {}
+            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
+            override fun onAddStream(stream: MediaStream) {}
+            override fun onRemoveStream(stream: MediaStream) {}
+            override fun onDataChannel(channel: DataChannel) {}
+            override fun onRenegotiationNeeded() {}
+            override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {}
+        }) ?: error("WebRTC could not initialize")
+        source = factory.createAudioSource(MediaConstraints())
+        track = factory.createAudioTrack("microphone", source)
+        peer!!.addTrack(track)
+        val offer = suspendCancellableCoroutine<SessionDescription> { continuation -> peer!!.createOffer(object : SdpObserver {
+            override fun onCreateSuccess(description: SessionDescription) { continuation.resume(description) }
+            override fun onCreateFailure(error: String) { continuation.resumeWithException(IllegalStateException(error)) }
+            override fun onSetSuccess() {}
+            override fun onSetFailure(error: String) {}
+        }, MediaConstraints()) }
+        setDescription(offer, true)
+        withTimeout(20000) { gathered.await() }
+        val response = api.json("/calls/${call.getString("id")}/offer", "POST", JSONObject().put("type", "offer").put("sdp", peer!!.localDescription.description))
+        setDescription(SessionDescription(SessionDescription.Type.ANSWER, response.getString("sdp")), false)
+    }
+    private suspend fun setDescription(description: SessionDescription, local: Boolean) = suspendCancellableCoroutine<Unit> { continuation ->
+        val observer = object : SdpObserver {
+            override fun onSetSuccess() { continuation.resume(Unit) }
+            override fun onSetFailure(error: String) { continuation.resumeWithException(IllegalStateException(error)) }
+            override fun onCreateSuccess(description: SessionDescription) {}
+            override fun onCreateFailure(error: String) {}
+        }
+        if (local) peer!!.setLocalDescription(observer, description) else peer!!.setRemoteDescription(observer, description)
+    }
+    fun close() { peer?.close(); peer?.dispose(); track?.dispose(); source?.dispose(); factory.dispose() }
+}

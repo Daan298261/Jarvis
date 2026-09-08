@@ -54,8 +54,8 @@ class Schedule(BaseModel):
 
 
 class Preferences(BaseModel):
-    notifications: bool = True
-    critical_calls: bool = False
+    notifications: bool | None = None
+    critical_calls: bool | None = None
     push_token: str | None = Field(default=None, max_length=4096)
 
 
