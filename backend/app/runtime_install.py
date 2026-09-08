@@ -9,17 +9,19 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import shutil
 import tempfile
 import threading
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 from urllib.request import urlopen
 
 from .config import models_dir, repo_root, runtime_dir
 from .inference.profiles import (
+    BOOTSTRAP_DIR,
+    BOOTSTRAP_FILENAME,
+    BOOTSTRAP_GGUF_REPO,
     EXPERT_DIR,
     EXPERT_GGUF_REPO,
     PRIMARY_DIR,
@@ -51,7 +53,7 @@ COMPONENT_IDS = (
 class ComponentState:
     id: str
     label: str
-    status: str = "pending"  # pending|ready|downloading|verifying|error|skipped
+    status: str = "pending"
     bytes_done: int = 0
     bytes_total: int = 0
     error: str = ""
@@ -63,15 +65,14 @@ class ComponentState:
 _LOCK = threading.Lock()
 _STATES: dict[str, ComponentState] = {}
 _TASKS: dict[str, asyncio.Task] = {}
-_PROGRESS_HOOK: Callable[[str, ComponentState], None] | None = None
 
 
 def _label(component_id: str) -> str:
     return {
         "llama_cpp": "llama.cpp server",
         "cuda_runtime": "CUDA runtime files",
-        "primary_model": "Primary model (9B)",
-        "vision_projector": "Vision projector",
+        "primary_model": "Bootstrap model (Ornith 1.5 9B)",
+        "vision_projector": "Legacy Qwen vision projector",
         "expert_model": "Expert model (27B, optional)",
         "playwright_chromium": "Playwright Chromium",
     }.get(component_id, component_id)
@@ -82,7 +83,7 @@ def _llama_exe() -> Path:
 
 
 def _primary_profile():
-    return PROFILES["balanced"]
+    return PROFILES["bootstrap"]
 
 
 def _expert_profile():
@@ -101,80 +102,52 @@ def discover_component_states(*, include_optional_expert: bool | None = None) ->
     states: dict[str, ComponentState] = {}
     llama = _llama_exe()
     states["llama_cpp"] = ComponentState(
-        id="llama_cpp",
-        label=_label("llama_cpp"),
-        status="ready" if llama.exists() else "pending",
-        path=str(llama),
+        id="llama_cpp", label=_label("llama_cpp"), status="ready" if llama.exists() else "pending", path=str(llama)
     )
-    # CUDA runtime is bundled with the same extract folder; treat ready when llama exists.
     states["cuda_runtime"] = ComponentState(
-        id="cuda_runtime",
-        label=_label("cuda_runtime"),
-        status="ready" if llama.exists() else "pending",
-        path=str(runtime_dir()),
+        id="cuda_runtime", label=_label("cuda_runtime"), status="ready" if llama.exists() else "pending", path=str(runtime_dir())
     )
     primary = profile_gguf(_primary_profile())
     states["primary_model"] = ComponentState(
-        id="primary_model",
-        label=_label("primary_model"),
-        status="ready" if primary.exists() else "pending",
-        path=str(primary),
+        id="primary_model", label=_label("primary_model"), status="ready" if primary.exists() else "pending", path=str(primary)
     )
+
     mmproj = _mmproj_primary()
     states["vision_projector"] = ComponentState(
         id="vision_projector",
         label=_label("vision_projector"),
-        status="ready" if mmproj.exists() else "pending",
+        status="ready" if mmproj.exists() else "skipped",
         path=str(mmproj),
         optional=True,
+        detail="Optional legacy projector; the bundled bootstrap model is text/tool focused.",
     )
+
     expert = profile_gguf(_expert_profile())
-    if want_expert:
-        states["expert_model"] = ComponentState(
-            id="expert_model",
-            label=_label("expert_model"),
-            status="ready" if expert.exists() else "pending",
-            path=str(expert),
-            optional=True,
-        )
-    else:
-        states["expert_model"] = ComponentState(
-            id="expert_model",
-            label=_label("expert_model"),
-            status="skipped" if not expert.exists() else "ready",
-            path=str(expert),
-            optional=True,
-            detail="Optional — not selected",
-        )
+    states["expert_model"] = ComponentState(
+        id="expert_model",
+        label=_label("expert_model"),
+        status="ready" if expert.exists() else ("pending" if want_expert else "skipped"),
+        path=str(expert),
+        optional=True,
+        detail="Selected by onboarding" if want_expert else "Optional — not selected",
+    )
+
     marker = repo_root() / ".venv" / ".playwright-chromium-ready"
-    if want_playwright:
-        states["playwright_chromium"] = ComponentState(
-            id="playwright_chromium",
-            label=_label("playwright_chromium"),
-            status="ready" if marker.exists() else "pending",
-            path=str(marker),
-            optional=True,
-        )
-    else:
-        states["playwright_chromium"] = ComponentState(
-            id="playwright_chromium",
-            label=_label("playwright_chromium"),
-            status="skipped",
-            optional=True,
-            detail="Optional — not selected",
-        )
+    states["playwright_chromium"] = ComponentState(
+        id="playwright_chromium",
+        label=_label("playwright_chromium"),
+        status="ready" if marker.exists() else ("pending" if want_playwright else "skipped"),
+        path=str(marker),
+        optional=True,
+        detail="Optional — not selected" if not want_playwright else "",
+    )
 
     with _LOCK:
         for key, discovered in states.items():
             current = _STATES.get(key)
-            if current and current.status in {"downloading", "verifying", "error"}:
-                # Keep live progress / last error unless the file became ready.
-                if discovered.status == "ready":
-                    _STATES[key] = discovered
-                else:
-                    continue
-            else:
-                _STATES[key] = discovered
+            if current and current.status in {"downloading", "verifying", "error"} and discovered.status != "ready":
+                continue
+            _STATES[key] = discovered
         return {k: _STATES[k] for k in COMPONENT_IDS if k in _STATES}
 
 
@@ -241,7 +214,6 @@ def _install_llama_and_cuda() -> None:
         cudart_zip = tmp_path / LLAMA_CUDART_ZIP
         _download_file(f"{LLAMA_BASE}/{LLAMA_SERVER_ZIP}", server_zip, "llama_cpp")
         _extract_zip(server_zip, runtime)
-        _set_state("cuda_runtime", status="downloading", error="")
         _download_file(f"{LLAMA_BASE}/{LLAMA_CUDART_ZIP}", cudart_zip, "cuda_runtime")
         _extract_zip(cudart_zip, runtime)
     if not llama.exists():
@@ -259,32 +231,14 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
     _set_state(component_id, status="downloading", error="", path=str(target))
     try:
         from huggingface_hub import hf_hub_download
-    except Exception as exc:  # pragma: no cover - optional dep failure path
+    except Exception as exc:  # pragma: no cover
         raise RuntimeError(f"huggingface_hub unavailable: {exc}") from exc
-
-    def _hook(progress: Any) -> None:
-        try:
-            done = int(getattr(progress, "n", 0) or 0)
-            total = int(getattr(progress, "total", 0) or 0)
-            _set_state(component_id, bytes_done=done, bytes_total=total or done, status="downloading")
-        except Exception:
-            pass
-
-    # hf_hub_download does not always accept a progress callback the same way; update best-effort.
-    path = hf_hub_download(
-        repo_id=repo_id,
-        filename=filename,
-        local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
-    )
+    path = hf_hub_download(repo_id=repo_id, filename=filename, local_dir=str(local_dir))
     resolved = Path(path)
-    if not resolved.exists():
-        raise FileNotFoundError(f"Download finished but {filename} missing")
-    # Light verification: non-empty + sha256 computed for diagnostics (not compared to a known digest).
+    if not resolved.exists() or resolved.stat().st_size <= 0:
+        raise FileNotFoundError(f"Download finished but {filename} is missing/empty")
     _set_state(component_id, status="verifying", path=str(resolved))
     size = resolved.stat().st_size
-    if size <= 0:
-        raise ValueError(f"{filename} is empty after download")
     digest = _sha256(resolved)
     _set_state(
         component_id,
@@ -300,15 +254,7 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
 
 def _install_primary() -> None:
     profile = _primary_profile()
-    fast = PROFILES["fast"]
-    local = models_dir() / PRIMARY_DIR
-    _hf_download(PRIMARY_GGUF_REPO, profile.filename, local, "primary_model")
-    # Also fetch Q6_K when missing (fast profile) — skip if already present.
-    if not profile_gguf(fast).exists():
-        try:
-            _hf_download(PRIMARY_GGUF_REPO, fast.filename, local, "primary_model")
-        except Exception as exc:
-            logger.warning("Optional fast quant download skipped: %s", exc)
+    _hf_download(BOOTSTRAP_GGUF_REPO, BOOTSTRAP_FILENAME, models_dir() / BOOTSTRAP_DIR, "primary_model")
 
 
 def _install_mmproj() -> None:
@@ -334,31 +280,23 @@ def _install_playwright() -> None:
         _set_state("playwright_chromium", status="ready", path=str(marker), error="")
         return
     _set_state("playwright_chromium", status="downloading", error="")
-    try:
-        import subprocess
-        import sys
+    import subprocess
+    import sys
 
-        result = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr or result.stdout or "playwright install failed")
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text("ok\n", encoding="utf-8")
-        _set_state("playwright_chromium", status="ready", path=str(marker), error="")
-    except Exception as exc:
-        # Optional capability — do not crash Jarvis.
-        _set_state(
-            "playwright_chromium",
-            status="error",
-            error=str(exc),
-            detail="Optional: browser tool may be unavailable until Chromium is installed.",
-        )
-        raise
+    result = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if result.returncode != 0:
+        error = result.stderr or result.stdout or "playwright install failed"
+        _set_state("playwright_chromium", status="error", error=error)
+        raise RuntimeError(error)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("ok\n", encoding="utf-8")
+    _set_state("playwright_chromium", status="ready", path=str(marker), error="")
 
 
 _INSTALLERS: dict[str, Callable[[], None]] = {
@@ -382,11 +320,7 @@ async def start_component_install(component_id: str) -> dict[str, Any]:
 
     async def _runner() -> None:
         try:
-            # cuda_runtime shares installer with llama_cpp
-            if component_id == "cuda_runtime":
-                await asyncio.to_thread(_install_llama_and_cuda)
-            else:
-                await asyncio.to_thread(_INSTALLERS[component_id])
+            await asyncio.to_thread(_INSTALLERS[component_id])
         except Exception as exc:
             logger.exception("Component install failed: %s", component_id)
             _set_state(component_id, status="error", error=str(exc))
@@ -400,7 +334,9 @@ async def start_component_install(component_id: str) -> dict[str, Any]:
 async def start_selected_installs() -> dict[str, Any]:
     setup = load_setup_state()
     discover_component_states()
-    order = ["llama_cpp", "primary_model", "vision_projector"]
+    # Vision is no longer required for first boot. It remains manually installable
+    # for legacy Qwen profiles from the advanced setup/model controls.
+    order = ["llama_cpp", "primary_model"]
     if setup.get("install_expert_27b"):
         order.append("expert_model")
     if setup.get("install_playwright", True):
@@ -408,10 +344,7 @@ async def start_selected_installs() -> dict[str, Any]:
     results = {}
     for cid in order:
         state = discover_component_states().get(cid)
-        if state and state.status == "ready":
-            results[cid] = asdict(state)
-            continue
-        if state and state.status == "skipped":
+        if state and state.status in {"ready", "skipped"}:
             results[cid] = asdict(state)
             continue
         results[cid] = await start_component_install(cid)
