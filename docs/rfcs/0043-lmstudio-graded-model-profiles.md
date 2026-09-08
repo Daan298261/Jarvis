@@ -1,9 +1,11 @@
 # RFC-0043: LM Studio graded model profiles
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** P1 — LM Studio graded model profiles  
 **Author:** Jarvis Architect (Taco ask via CoS)  
 **Date:** 2026-09-08
+
+**Verified:** backend PR #105 (`ebfd324`); portal PR #103 (`4fbab5d`). On `development`.
 
 ## Problem
 
@@ -29,17 +31,17 @@ Do **not** change `AUTO` routing scoring, download models, or claim absolute ben
 
 ## Acceptance criteria
 
-- [ ] LM Studio GGUF discovery scans the configured models root, indexes `.gguf` files, extracts size/quantization hints from filenames, and skips `mmproj` artifacts.
-- [ ] Catalog API returns graded profiles merged with discovery results: overall rank, per-axis scores (1–10), strength, weakness, weight GB, quantization, filesystem path, stable profile id, pin/favorite state, and RFC-0003 `RuntimeProfile` binding id when set.
-- [ ] List sort order is **overall grade descending**; pinned/favorited profiles sort above unpinned within the same band.
-- [ ] HUD and Classic portal model pickers consume the catalog API and show the videogame hover card (overall label, seven axis bars, strength, weakness, size/quant, path/id).
-- [ ] Selecting a catalog row creates or updates the bound `RuntimeProfile` (provider `lmstudio`, correct model id/path, quantization, local-only privacy) without altering `AUTO` router logic.
-- [ ] Node VRAM probe (RFC-0018) drives hide/warn: `>16 GB` footprint → hidden unless user opts in; `12–16 GB` → visible with warning.
-- [ ] Provisional grades, source citations, and per-profile notes are stored in versioned catalog data; user manual grade override persists locally.
-- [ ] Pin/favorite persists per profile id and is reflected in API and UI.
-- [ ] Unit tests cover discovery (including mmproj skip), catalog merge, sort order, VRAM hide/warn thresholds, profile binding, and override persistence.
-- [ ] Unit tests pass (`python3 -m pytest`).
-- [ ] If portal code changes, `npm --prefix frontend run build` passes.
+- [x] LM Studio GGUF discovery scans the configured models root, indexes `.gguf` files, extracts size/quantization hints from filenames, and skips `mmproj` artifacts.
+- [x] Catalog API returns graded profiles merged with discovery results: overall rank, per-axis scores (1–10), strength, weakness, weight GB, quantization, filesystem path, stable profile id, pin/favorite state, and RFC-0003 `RuntimeProfile` binding id when set.
+- [x] List sort order is **overall grade descending**; pinned/favorited profiles sort above unpinned within the same band.
+- [x] HUD and Classic portal model pickers consume the catalog API and show the videogame hover card (overall label, seven axis bars, strength, weakness, size/quant, path/id).
+- [x] Selecting a catalog row creates or updates the bound `RuntimeProfile` (provider `lmstudio`, correct model id/path, quantization, local-only privacy) without altering `AUTO` router logic.
+- [x] Node VRAM probe (RFC-0018) drives hide/warn: `>16 GB` footprint → hidden unless user opts in; `12–16 GB` → visible with warning.
+- [x] Provisional grades, source citations, and per-profile notes are stored in versioned catalog data; user manual grade override persists locally.
+- [x] Pin/favorite persists per profile id and is reflected in API and UI.
+- [x] Unit tests cover discovery (including mmproj skip), catalog merge, sort order, VRAM hide/warn thresholds, profile binding, and override persistence.
+- [x] Unit tests pass (`python3 -m pytest`).
+- [x] If portal code changes, `npm --prefix frontend run build` passes.
 
 ## Likely files
 
