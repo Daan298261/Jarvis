@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Jarvis</title>
+  <style>
+    html,body{height:100%;margin:0;background:#05070a;color:#eefbff;font-family:system-ui,sans-serif}
+    body{display:grid;place-items:center;text-align:center;padding:24px;box-sizing:border-box}
+    .orb{width:72px;height:72px;border-radius:50%;margin:0 auto 18px;background:radial-gradient(circle at 38% 32%,#e6fbff 0 3%,#67dcff 14%,#17617b 45%,transparent 72%);box-shadow:0 0 50px #2ea8cc88}
+    p{color:#9ab8c3;max-width:420px;line-height:1.5}.bad{color:#ff8a3d}
+  </style>
+</head>
+<body>
+  <main><div class="orb"></div><h1>Jarvis</h1><p id="status">Connecting to your Jarvis PC…</p></main>
+  <script>
+    (async () => {
+      const status = document.getElementById('status');
+      try {
+        const response = await fetch('./config.json', { cache: 'no-store' });
+        const config = await response.json();
+        if (!config.pairUrl) throw new Error('This APK has not been paired yet.');
+        status.textContent = 'Opening your paired Jarvis…';
+        window.location.replace(config.pairUrl);
+      } catch (error) {
+        status.className = 'bad';
+        status.textContent = error && error.message ? error.message : 'Could not open Jarvis.';
+      }
+    })();
+  </script>
+</body>
+</html>
