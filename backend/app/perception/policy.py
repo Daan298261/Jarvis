@@ -100,6 +100,7 @@ class PerceptionPolicy:
                         "count": 0,
                         "last_confidence": fact.confidence,
                         "last_emitted_at": None,
+                        "last_emitted_value": None,
                     }
                     fact_state[fact.key] = previous
 
@@ -114,8 +115,14 @@ class PerceptionPolicy:
                 if duplicate or novelty < self.settings.novelty_threshold:
                     continue
 
+                # Duplicate TTL applies to re-emitting the same value, not to a real
+                # state transition (e.g. tidy -> dishevelled).
                 since_fact_emit = _elapsed_seconds(now, previous.get("last_emitted_at"))
-                if since_fact_emit is not None and since_fact_emit < self.settings.duplicate_ttl_seconds:
+                if (
+                    since_fact_emit is not None
+                    and since_fact_emit < self.settings.duplicate_ttl_seconds
+                    and previous.get("last_emitted_value") == fact.value
+                ):
                     continue
 
                 reason = "first_seen" if first_seen else "changed_value"
@@ -156,6 +163,7 @@ class PerceptionPolicy:
             proposed.sort(key=lambda item: (item[0], item[1].novelty, item[1].confidence), reverse=True)
             candidate = proposed[0][1]
             fact_state[candidate.fact]["last_emitted_at"] = now_iso
+            fact_state[candidate.fact]["last_emitted_value"] = candidate.value
             state["last_candidate_at"] = now_iso
             return PolicyResult(
                 accepted=True,
