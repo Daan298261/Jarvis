@@ -1,8 +1,8 @@
 import { cloneElement, useEffect, useRef, useState, type ReactElement } from "react"
 import {
+  initializePresentation,
   PRESENTATION_CHANGED_EVENT,
   readPresentationBootstrap,
-  refreshPresentationFromBackend,
 } from "./presentationSettings"
 import type { PresentationSettings, ShellMode } from "./presenceTypes"
 
@@ -23,7 +23,7 @@ export function PresentationBootstrap({ children }: PresentationBootstrapProps) 
     }
 
     window.addEventListener(PRESENTATION_CHANGED_EVENT, onChanged)
-    refreshPresentationFromBackend().catch(() => undefined)
+    initializePresentation().catch(() => undefined)
     return () => window.removeEventListener(PRESENTATION_CHANGED_EVENT, onChanged)
   }, [])
 
