@@ -102,7 +102,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
 
   const shown = id && task?.id === id ? task : null
   const running = !!shown && ["running", "queued", "waiting"].includes(shown.status)
-  const empty = !id
+  const showThread = !!id
 
   return (
     <div className="hud-chat">
@@ -122,34 +122,34 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         </div>
       )}
 
-      <div className="hud-thread" ref={threadRef}>
-        {empty && !shown && (
-          <p className="hud-thread-empty">What should Jarvis do on this PC?</p>
-        )}
-        {shown && (
-          <>
-            {shown.prompt && (
-              <div className="hud-bubble hud-bubble-user">
-                <span className="hud-bubble-label">You</span>
-                <p>{shown.prompt}</p>
-              </div>
-            )}
-            {visible.slice(-6).map((event, index) => (
-              <div className="hud-bubble hud-bubble-event" key={`${event.created_at}-${index}`}>
-                <span className="hud-bubble-label">{event.title}</span>
-                {event.detail && <p>{event.detail.slice(0, 400)}</p>}
-              </div>
-            ))}
-            {!visible.length && running && <p className="hud-thread-empty">Working…</p>}
-            {(shown.result || shown.error) && (
-              <div className="hud-bubble hud-bubble-result">
-                <span className="hud-bubble-label">Result</span>
-                <div className="report">{shown.result || shown.error}</div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {showThread && (
+        <div className="hud-thread" ref={threadRef} aria-live="polite">
+          {!shown && <p className="hud-thread-empty">Loading task…</p>}
+          {shown && (
+            <>
+              {shown.prompt && (
+                <div className="hud-bubble hud-bubble-user">
+                  <span className="hud-bubble-label">You</span>
+                  <p>{shown.prompt}</p>
+                </div>
+              )}
+              {visible.slice(-6).map((event, index) => (
+                <div className="hud-bubble hud-bubble-event" key={`${event.created_at}-${index}`}>
+                  <span className="hud-bubble-label">{event.title}</span>
+                  {event.detail && <p>{event.detail.slice(0, 400)}</p>}
+                </div>
+              ))}
+              {!visible.length && running && <p className="hud-thread-empty">Working…</p>}
+              {(shown.result || shown.error) && (
+                <div className="hud-bubble hud-bubble-result">
+                  <span className="hud-bubble-label">Result</span>
+                  <div className="report">{shown.result || shown.error}</div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <div className="hud-composer">
         <textarea
@@ -157,16 +157,11 @@ export function HudChat({ onMoodChange }: HudChatProps) {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder={id ? "Follow up or press Send to continue…" : "Describe the end state…"}
+          placeholder={id ? "Follow up…" : "Ask Jarvis anything…"}
           rows={2}
+          aria-label="Message Jarvis"
         />
         <div className="hud-composer-actions">
-          <button className="btn hud-send" type="button" disabled={busy || (!id && !prompt.trim())} onClick={submit}>
-            {id ? (prompt.trim() ? "Send" : "Continue") : "Send"}
-          </button>
-          <button className="btn hud-mic-stub secondary" type="button" disabled title="Mic slot (stub)">
-            Mic
-          </button>
           {shown && running && (
             <button
               className="btn secondary"
@@ -176,6 +171,9 @@ export function HudChat({ onMoodChange }: HudChatProps) {
               Cancel
             </button>
           )}
+          <button className="btn hud-send" type="button" disabled={busy || (!id && !prompt.trim())} onClick={submit}>
+            {id ? (prompt.trim() ? "Send" : "Continue") : "Send"}
+          </button>
         </div>
       </div>
     </div>
