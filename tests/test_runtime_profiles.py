@@ -33,7 +33,7 @@ def runtime_store(jarvis_env, monkeypatch):
 
 def test_default_runtime_profiles_include_model_fields(runtime_store):
     profiles = list_runtime_profiles()
-    assert len(profiles) >= 4
+    assert len(profiles) >= len(PROFILES)
     balanced = get_runtime_profile("balanced")
     assert balanced is not None
     assert balanced.model == "Qwen3.5-9B"
@@ -44,17 +44,28 @@ def test_default_runtime_profiles_include_model_fields(runtime_store):
     assert balanced.privacy_class == PRIVACY_LOCAL_ONLY
     assert balanced.cost_ceiling_usd == 0.0
     assert "llm_inference" in balanced.capability_tags
+    assert balanced.enabled is True
 
 
 def test_default_runtime_profiles_link_model_profiles():
     profiles = default_runtime_profiles()
     by_name = {profile.name: profile for profile in profiles}
-    assert set(by_name) == {"fast", "balanced", "quality", "expert"}
-    balanced = by_name["balanced"]
-    assert isinstance(balanced, RuntimeProfile)
-    assert balanced.model_profile == "balanced"
-    assert balanced.context_limit == PROFILES["balanced"].context_size
-    assert balanced.quantization == PROFILES["balanced"].quant
+    assert set(PROFILES).issubset(by_name)
+    assert {"qwen38-27b", "redsage-8b", "imperum-cyber"}.issubset(by_name)
+
+    for name, model_profile in PROFILES.items():
+        runtime = by_name[name]
+        assert isinstance(runtime, RuntimeProfile)
+        assert runtime.model_profile == name
+        assert runtime.context_limit == model_profile.context_size
+        assert runtime.quantization == model_profile.quant
+        assert runtime.enabled is True
+
+    for name in ("qwen38-27b", "redsage-8b", "imperum-cyber"):
+        assert by_name[name].enabled is False
+
+    # The repository requires Red Team activation to remain outside generic routing.
+    assert "deephat-7b" not in by_name
 
 
 def test_runtime_profile_crud(runtime_store):
@@ -72,13 +83,21 @@ def test_runtime_profile_crud(runtime_store):
         specialization_tags=["low-latency"],
         is_local=False,
         description="Cheap remote endpoint",
+        enabled=False,
     )
     assert created.name == "cloud-fast"
+    assert created.enabled is False
     assert get_runtime_profile(created.id) is not None
 
-    updated = update_runtime_profile(created.id, label="Cloud Fast v2", context_limit=16384)
+    updated = update_runtime_profile(
+        created.id,
+        label="Cloud Fast v2",
+        context_limit=16384,
+        enabled=True,
+    )
     assert updated.label == "Cloud Fast v2"
     assert updated.context_limit == 16384
+    assert updated.enabled is True
 
     delete_runtime_profile(created.id)
     assert get_runtime_profile(created.id) is None
@@ -99,8 +118,9 @@ def test_route_prefers_preferred_profile(runtime_store):
 
 
 def test_route_respects_forbidden_profiles(runtime_store):
+    enabled_names = tuple(profile.name for profile in list_runtime_profiles() if profile.enabled)
     prefs = AgentRoutingPreferences(
-        forbidden_profiles=("fast", "balanced", "quality", "expert"),
+        forbidden_profiles=enabled_names,
         policy="best-result",
     )
     decision = route_runtime(prefs)
@@ -129,6 +149,16 @@ def test_route_force_forbidden_fails_closed(runtime_store):
     decision = route_runtime(prefs)
     assert decision.accepted is False
     assert decision.code == "forced_forbidden"
+
+
+def test_route_force_disabled_fails_closed(runtime_store):
+    prefs = AgentRoutingPreferences(
+        force_profile="qwen38-27b",
+        policy="best-result",
+    )
+    decision = route_runtime(prefs)
+    assert decision.accepted is False
+    assert decision.code == "forced_disabled"
 
 
 def test_route_local_only_policy(runtime_store):
@@ -264,7 +294,7 @@ def test_route_emits_explainable_score(runtime_store):
 def test_route_required_capabilities_filter(runtime_store):
     prefs = AgentRoutingPreferences(
         policy="best-result",
-        required_capabilities=("vision",),
+        required_capabilities=("capability-that-does-not-exist",),
     )
     decision = route_runtime(prefs)
     assert decision.accepted is False
@@ -293,7 +323,7 @@ def test_runtime_profiles_api(runtime_store, monkeypatch):
 
     listed = client.get("/api/runtime-profiles")
     assert listed.status_code == 200
-    assert len(listed.json()["profiles"]) >= 4
+    assert len(listed.json()["profiles"]) >= len(PROFILES)
     assert "local-first" in listed.json()["policies"]
 
     created = client.post(
@@ -303,10 +333,19 @@ def test_runtime_profiles_api(runtime_store, monkeypatch):
             "model": "gpt-4o-mini",
             "endpoint": "https://api.example.com/v1",
             "is_local": False,
+            "enabled": False,
         },
     )
     assert created.status_code == 200
+    assert created.json()["enabled"] is False
     profile_id = created.json()["id"]
+
+    enabled = client.put(
+        f"/api/runtime-profiles/{profile_id}",
+        json={"enabled": True},
+    )
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
 
     routed = client.post(
         "/api/runtime-profiles/route/preview",
