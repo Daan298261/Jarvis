@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
@@ -37,6 +39,17 @@ class SettingsUpdate(BaseModel):
     self_dev_max_paid_invocations: int | None = None
     self_dev_max_consecutive_failures: int | None = None
     self_dev_experimental_port: int | None = None
+    presentation_shell: Literal["classic", "hud"] | None = None
+    presentation_requested_presence: Literal["none", "neural", "humanoid"] | None = None
+    presentation_performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] | None = None
+    presentation_attention_mode: Literal["off", "pointer", "camera"] | None = None
+    presentation_reduced_motion: Literal["system", "reduce", "full"] | None = None
+    presentation_avatar_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9_.-]+$",
+    )
     social_perception_enabled: bool | None = None
     social_perception_semantic_observer: str | None = Field(default=None, min_length=1, max_length=64)
     social_perception_sample_interval_seconds: float | None = Field(default=None, ge=1.0, le=3600.0)
@@ -130,6 +143,20 @@ async def update_settings(body: SettingsUpdate):
         settings.self_dev.max_consecutive_failures = body.self_dev_max_consecutive_failures
     if body.self_dev_experimental_port is not None:
         settings.self_dev.experimental_port = body.self_dev_experimental_port
+
+    presentation_values = settings.presentation.model_dump()
+    presentation_updates = {
+        "shell": body.presentation_shell,
+        "requested_presence": body.presentation_requested_presence,
+        "performance_preset": body.presentation_performance_preset,
+        "attention_mode": body.presentation_attention_mode,
+        "reduced_motion": body.presentation_reduced_motion,
+        "avatar_id": body.presentation_avatar_id,
+    }
+    for key, value in presentation_updates.items():
+        if value is not None:
+            presentation_values[key] = value
+    settings.presentation = type(settings.presentation).model_validate(presentation_values)
 
     perception = settings.social_perception
     if body.social_perception_enabled is not None:
