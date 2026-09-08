@@ -56,6 +56,7 @@ def test_jarvis_iss_wiring():
     assert "models" in lower and "excludes" in lower
     assert "runtime" in lower
     assert "start-jarvis.ps1" in lower
+    assert "diskspanning=yes" in lower
 
 
 def test_build_script_invokes_iscc():
