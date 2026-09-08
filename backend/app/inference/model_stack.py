@@ -9,8 +9,6 @@ from .runtime_profiles import (
     RuntimeProfile,
 )
 
-RED_TEAM_AUTHORIZATION = "security:red-team"
-
 
 @dataclass(frozen=True)
 class SpecialistModel:
@@ -18,7 +16,8 @@ class SpecialistModel:
 
     The catalog is advisory. Capability/specialization tags are the stable
     contract; administrators may replace any concrete model without changing
-    role logic.
+    role logic. ``manual_gate`` marks recommendations that generic Jarvis
+    routing must not operationalize automatically.
     """
 
     key: str
@@ -35,15 +34,15 @@ class SpecialistModel:
     is_local: bool
     privacy_class: str
     enabled_by_default: bool
-    required_authorizations: tuple[str, ...] = ()
     description: str = ""
     ship_runtime_template: bool = True
+    manual_gate: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     def runtime_profile(self) -> RuntimeProfile | None:
-        if not self.ship_runtime_template:
+        if not self.ship_runtime_template or self.manual_gate:
             return None
         return RuntimeProfile(
             id=f"recommended-{self.runtime_profile_name}",
@@ -62,7 +61,6 @@ class SpecialistModel:
             is_local=self.is_local,
             description=self.description,
             enabled=self.enabled_by_default,
-            required_authorizations=self.required_authorizations,
         )
 
 
@@ -72,7 +70,6 @@ class RoleRoutingSpec:
     preferred_profiles: tuple[str, ...]
     required_capabilities: tuple[str, ...]
     specialization: str | None
-    required_authorizations: tuple[str, ...] = ()
 
 
 MODEL_CATALOG: dict[str, SpecialistModel] = {
@@ -177,8 +174,8 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         label="DeepHat V1 7B Red Team",
         model_id="DeepHat/DeepHat-V1-7B",
         role="red-team",
-        provider="openai-compat",
-        endpoint="http://127.0.0.1:8094/v1",
+        provider="manual-gated",
+        endpoint="",
         context_limit=32768,
         quantization="configure-local",
         capability_tags=(
@@ -193,11 +190,13 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         is_local=True,
         privacy_class=PRIVACY_LOCAL_ONLY,
         enabled_by_default=False,
-        required_authorizations=(RED_TEAM_AUTHORIZATION,),
         description=(
-            "Authorized red-team reasoning specialist. Model selection does not grant tools; "
-            "existing security/LE tool gates remain authoritative."
+            "Catalog-only red-team recommendation. Activation is reserved for Taco manual "
+            "configuration or the repository's PolitieGPT/LE security gate; generic routing "
+            "must not instantiate or enable it."
         ),
+        ship_runtime_template=False,
+        manual_gate=True,
     ),
     "frontier-general": SpecialistModel(
         key="frontier-general",
@@ -263,13 +262,6 @@ ROLE_SPECS: dict[str, RoleRoutingSpec] = {
         required_capabilities=("llm_inference", "cybersecurity", "dfir"),
         specialization="dfir",
     ),
-    "red-team": RoleRoutingSpec(
-        role="red-team",
-        preferred_profiles=("deephat-7b",),
-        required_capabilities=("llm_inference", "cybersecurity", "red-team"),
-        specialization="red-team",
-        required_authorizations=(RED_TEAM_AUTHORIZATION,),
-    ),
     "frontier": RoleRoutingSpec(
         role="frontier",
         preferred_profiles=("frontier-general",),
@@ -333,27 +325,25 @@ def routing_preferences_for_role(
     policy: str = "local-first",
     privacy_floor: str = PRIVACY_PUBLIC_REMOTE,
     max_cost_usd: float | None = None,
-    granted_authorizations: tuple[str, ...] | list[str] = (),
 ):
-    """Build RFC-0003 routing preferences for a Jarvis specialist role.
+    """Build RFC-0003 routing preferences for an allowed Jarvis model role.
 
-    Red-team selection is fail-closed here and again in the runtime router via
-    RuntimeProfile.required_authorizations. This function never changes tool
-    exposure or security permissions.
+    Red-team is deliberately catalog-only here. Generic routing cannot activate
+    it; activation belongs to Taco manual configuration or the repository's
+    PolitieGPT/LE gate. Model choice never changes tool exposure or permissions.
     """
     from .runtime_router import AgentRoutingPreferences
 
     normalized = normalize_role(role)
+    if normalized == "red-team":
+        raise PermissionError(
+            "red-team runtime activation is reserved for Taco manual configuration "
+            "or the repository's PolitieGPT/LE security gate"
+        )
+
     spec = ROLE_SPECS.get(normalized)
     if spec is None:
         raise KeyError(f"unknown model role: {role}")
-
-    granted = tuple(str(tag) for tag in granted_authorizations)
-    missing = set(spec.required_authorizations) - set(granted)
-    if missing:
-        raise PermissionError(
-            f"role {normalized} requires authorization: {', '.join(sorted(missing))}"
-        )
 
     return AgentRoutingPreferences(
         preferred_profiles=spec.preferred_profiles,
@@ -362,5 +352,4 @@ def routing_preferences_for_role(
         task_specialization=spec.specialization,
         privacy_floor=privacy_floor,
         max_cost_usd=max_cost_usd,
-        granted_authorizations=granted,
     )
