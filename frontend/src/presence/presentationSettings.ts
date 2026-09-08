@@ -86,7 +86,7 @@ export function cachePresentation(settings: PresentationSettings): void {
   } catch {
     // Local cache is best-effort. Backend settings remain authoritative.
   }
-  setUiMode(settings.shell)
+  setUiMode(settings.shell, false)
 }
 
 function announce(settings: PresentationSettings): void {
