@@ -29,6 +29,8 @@ backend/.venv/
 # Node
 frontend/node_modules/
 frontend/dist/
+mobile/android-client/node_modules/
+mobile/android-client/android/
 
 # Tauri / Rust
 frontend/src-tauri/target/
