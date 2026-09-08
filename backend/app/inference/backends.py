@@ -27,6 +27,18 @@ REMOTE_ALIASES = {
     "lan",
 } | OLLAMA_ALIASES | LMSTUDIO_ALIASES | VLLM_ALIASES | SGLANG_ALIASES
 
+def default_lmstudio_models_root() -> Path:
+    """Default LM Studio GGUF directory (%USERPROFILE%\\.lmstudio\\models on Windows)."""
+    override = (
+        os.environ.get("JARVIS_LMSTUDIO_MODELS_ROOT")
+        or os.environ.get("LMSTUDIO_MODELS_ROOT")
+        or ""
+    ).strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".lmstudio" / "models"
+
+
 DEFAULT_PORTS = {
     "llama.cpp": 8088,
     "ollama": 11434,

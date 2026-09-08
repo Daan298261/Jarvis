@@ -1,0 +1,157 @@
+{
+  "catalog_version": "2026.09.08",
+  "profiles": [
+    {
+      "id": "lm-best-overall",
+      "display_name": "Best overall",
+      "match_hint": "Qwen3.8-27B TurboFCFusion Q4",
+      "overall": 9.2,
+      "axes": {
+        "coding": 9,
+        "writing": 8,
+        "reasoning": 9,
+        "speed_cost": 6,
+        "vram_fit": 5,
+        "instruction": 9,
+        "uncensored": 7
+      },
+      "strength": "Strong all-rounder; best default for mixed Jarvis tasks",
+      "weakness": "~16 GB VRAM; slower than 9B",
+      "source_notes": "SWE-bench proxy; LMSYS Qwen3.8 trend — provisional",
+      "specialization_tags": ["generalist", "balanced"]
+    },
+    {
+      "id": "lm-coding-heavy",
+      "display_name": "Coding heavy",
+      "match_hint": "Qwen3.6-40B Deck-Opus NEO-CODE Q4_K_S",
+      "overall": 8.9,
+      "axes": {
+        "coding": 10,
+        "writing": 7,
+        "reasoning": 8,
+        "speed_cost": 4,
+        "vram_fit": 3,
+        "instruction": 8,
+        "uncensored": 8
+      },
+      "strength": "Top-tier code generation and refactors",
+      "weakness": "21 GB footprint; slow on 16 GB cards",
+      "source_notes": "HumanEval/SWE-bench coding proxy — provisional",
+      "specialization_tags": ["coding", "heavy"]
+    },
+    {
+      "id": "lm-coding-moe",
+      "display_name": "Coding MoE",
+      "match_hint": "Qwen3.6-35B-A3B Q2",
+      "overall": 8.4,
+      "axes": {
+        "coding": 9,
+        "writing": 7,
+        "reasoning": 8,
+        "speed_cost": 7,
+        "vram_fit": 6,
+        "instruction": 8,
+        "uncensored": 7
+      },
+      "strength": "MoE efficiency; good code/reasoning per GB",
+      "weakness": "Q2 quality loss; MoE runtime quirks",
+      "source_notes": "MoE efficiency benchmarks — provisional",
+      "specialization_tags": ["coding", "moe"]
+    },
+    {
+      "id": "lm-balanced-27b",
+      "display_name": "Balanced 27B",
+      "match_hint": "Qwen3.6-27B stock Q4",
+      "overall": 8.1,
+      "axes": {
+        "coding": 8,
+        "writing": 8,
+        "reasoning": 8,
+        "speed_cost": 6,
+        "vram_fit": 5,
+        "instruction": 8,
+        "uncensored": 6
+      },
+      "strength": "Stable Qwen3.6 generalist",
+      "weakness": "Superseded by 3.8 Turbo on same VRAM",
+      "source_notes": "MMLU-style reasoning proxy — provisional",
+      "specialization_tags": ["generalist", "balanced"]
+    },
+    {
+      "id": "lm-creative",
+      "display_name": "Creative / marketing",
+      "match_hint": "Ortenzya Gemma4-31B Q4",
+      "overall": 7.8,
+      "axes": {
+        "coding": 6,
+        "writing": 9,
+        "reasoning": 7,
+        "speed_cost": 5,
+        "vram_fit": 4,
+        "instruction": 8,
+        "uncensored": 8
+      },
+      "strength": "Voice, ads, long-form prose",
+      "weakness": "Weaker coding vs Qwen 27B/40B",
+      "source_notes": "MT-Bench writing proxy — provisional",
+      "specialization_tags": ["creative", "writing"]
+    },
+    {
+      "id": "lm-cheap-coding-9b",
+      "display_name": "Cheap coding 9B",
+      "match_hint": "Qwen3.5-9B Defiant Q4",
+      "overall": 7.2,
+      "axes": {
+        "coding": 8,
+        "writing": 6,
+        "reasoning": 7,
+        "speed_cost": 9,
+        "vram_fit": 9,
+        "instruction": 7,
+        "uncensored": 7
+      },
+      "strength": "Fast, low VRAM, solid tool loops",
+      "weakness": "Not for hardest reasoning",
+      "source_notes": "Small-model coding proxy — provisional",
+      "specialization_tags": ["coding", "low-latency"]
+    },
+    {
+      "id": "lm-agent-9b",
+      "display_name": "Agent 9B",
+      "match_hint": "Ornith-1.0-9B Q6",
+      "overall": 7.0,
+      "axes": {
+        "coding": 7,
+        "writing": 6,
+        "reasoning": 7,
+        "speed_cost": 8,
+        "vram_fit": 9,
+        "instruction": 8,
+        "uncensored": 6
+      },
+      "strength": "Tuned for agentic tool use",
+      "weakness": "Smaller context/world knowledge",
+      "source_notes": "Agentic tool-use benchmarks — provisional",
+      "specialization_tags": ["agentic", "tools"]
+    },
+    {
+      "id": "lm-legacy-cheap",
+      "display_name": "Legacy cheap",
+      "match_hint": "Llama-3.1-8B Q4",
+      "overall": 5.5,
+      "axes": {
+        "coding": 5,
+        "writing": 6,
+        "reasoning": 5,
+        "speed_cost": 10,
+        "vram_fit": 10,
+        "instruction": 6,
+        "uncensored": 5
+      },
+      "strength": "Tiny footprint, always fits",
+      "weakness": "Clearly below modern Qwen tiers",
+      "source_notes": "Legacy baseline — provisional",
+      "specialization_tags": ["legacy", "low-latency"]
+    }
+  ]
+}
