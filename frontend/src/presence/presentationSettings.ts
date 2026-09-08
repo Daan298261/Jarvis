@@ -56,6 +56,14 @@ export function normalizePresentation(value: unknown): PresentationSettings {
   }
 }
 
+export function hasPresentationCache(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY) !== null
+  } catch {
+    return false
+  }
+}
+
 export function readPresentationBootstrap(): PresentationSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -117,6 +125,17 @@ export async function updatePresentation(
   return settings
 }
 
+export async function initializePresentation(): Promise<PresentationSettings> {
+  if (!hasPresentationCache()) {
+    const migrated = readPresentationBootstrap()
+    return updatePresentation({
+      shell: migrated.shell,
+      requestedPresence: migrated.requestedPresence,
+    })
+  }
+  return refreshPresentationFromBackend()
+}
+
 export function usePresentationSettings(): PresentationSettings {
   const [settings, setSettings] = useState<PresentationSettings>(() => readPresentationBootstrap())
 
@@ -126,7 +145,7 @@ export function usePresentationSettings(): PresentationSettings {
       setSettings(normalizePresentation(custom.detail))
     }
     window.addEventListener(PRESENTATION_CHANGED_EVENT, onChanged)
-    refreshPresentationFromBackend().catch(() => undefined)
+    initializePresentation().catch(() => undefined)
     return () => window.removeEventListener(PRESENTATION_CHANGED_EVENT, onChanged)
   }, [])
 
