@@ -1,0 +1,9 @@
+{
+  "appId": "ai.jarvis.phone",
+  "appName": "Jarvis",
+  "webDir": "www",
+  "server": {
+    "cleartext": true,
+    "androidScheme": "https"
+  }
+}
