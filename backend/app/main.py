@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, context_repo, delegation, diagnostics, guest_portals, ingest, license, lmstudio, mcp, memory, mobile, model, packs, perception, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, context_repo, delegation, diagnostics, guest_portals, ingest, license, lmstudio, mcp, memory, mobile, model, packs, perception, perception_identity, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -82,6 +82,7 @@ app.include_router(setup.router)
 app.include_router(diagnostics.router)
 app.include_router(ingest.router)
 app.include_router(perception.router)
+app.include_router(perception_identity.router)
 
 frontend_dist = repo_root() / "frontend" / "dist"
 
@@ -133,7 +134,6 @@ async def startup() -> None:
     if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
         asyncio.create_task(_autoload_model(current))
 
-    # Check for startup launch prompt passed via environment
     launch_prompt = os.environ.get("JARVIS_LAUNCH_PROMPT")
     if launch_prompt:
         enqueue_prompt_file(launch_prompt)
@@ -146,7 +146,6 @@ async def startup() -> None:
         except Exception:
             logging.exception("Failed to read JARVIS_LAUNCH_PROMPT_FILE %s", launch_prompt_file)
 
-    # Start the background launch queue watcher
     QUEUE_WATCHER.start()
     await QUEUE_WATCHER.process_pending()
 
