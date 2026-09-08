@@ -1,4 +1,4 @@
-# RFC-0028: Portable automation packages
+# RFC-0047: Portable automation packages
 
 **Status:** accepted  
 **Queue item:** P4 — workflow automation / portability  

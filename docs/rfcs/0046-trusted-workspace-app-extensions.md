@@ -1,4 +1,4 @@
-# RFC-0027: Trusted workspace app extensions
+# RFC-0046: Trusted workspace app extensions
 
 **Status:** accepted  
 **Queue item:** Extensible Agent OS — modular command-center UI  
