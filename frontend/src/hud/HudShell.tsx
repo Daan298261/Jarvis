@@ -4,6 +4,7 @@ import type { AwayModeState, LicenseStatus, SwarmNode, Task } from "../api"
 import { HudHealthRail } from "./HudHealthRail"
 import { HudOpsRail } from "./HudOpsRail"
 import type { UiMode } from "./uiMode"
+import "./hud.css"
 import "./hud-v2.css"
 
 const ADMIN_QUICK = [
