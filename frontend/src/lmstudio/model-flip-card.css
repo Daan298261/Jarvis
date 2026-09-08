@@ -1,0 +1,141 @@
+.model-flip-card {
+  width: min(470px, calc(100vw - 48px));
+  min-height: 390px;
+  perspective: 1200px;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.model-flip-inner {
+  position: relative;
+  width: 100%;
+  min-height: 390px;
+  transform-style: preserve-3d;
+  transition: transform 360ms cubic-bezier(.2,.7,.2,1);
+}
+
+.model-flip-card:hover .model-flip-inner,
+.model-flip-card:focus-within .model-flip-inner {
+  transform: rotateY(180deg);
+}
+
+.model-flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  border: 1px solid rgba(130, 219, 246, 0.2);
+  border-radius: 16px;
+  padding: 16px;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 82% 8%, rgba(103,220,255,.09), transparent 34%),
+    rgba(8, 13, 18, .97);
+  box-shadow: 0 24px 70px rgba(0,0,0,.45);
+}
+
+.model-flip-back {
+  transform: rotateY(180deg);
+}
+
+.flip-hero-score {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 16px 0 14px;
+}
+.flip-hero-score strong {
+  font-size: 34px;
+  line-height: 1;
+  color: #dff9ff;
+  font-weight: 650;
+}
+.flip-hero-score span {
+  color: rgba(187, 220, 231, .58);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.flip-hint {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(143,218,239,.09);
+  color: rgba(163, 213, 228, .52);
+  font-size: 9px;
+  text-align: right;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.flip-back-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(143,218,239,.1);
+}
+.flip-back-head > div { display: flex; flex-direction: column; gap: 3px; }
+.flip-back-head strong { color: #eefbff; font-size: 12px; }
+.flip-back-head span { color: rgba(179,214,225,.5); font-size: 9px; }
+
+.flip-score-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+.flip-score-row {
+  display: grid;
+  grid-template-columns: 130px minmax(90px, 1fr) 54px;
+  align-items: center;
+  gap: 9px;
+  font-size: 10px;
+}
+.flip-score-row > span { color: rgba(213,235,242,.72); }
+.flip-score-row > strong {
+  color: #eafbff;
+  font-weight: 550;
+  text-align: right;
+}
+.flip-score-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(126,210,236,.08);
+}
+.flip-score-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(77,169,198,.72), rgba(103,220,255,.95));
+  box-shadow: 0 0 9px rgba(103,220,255,.26);
+}
+
+.flip-back-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(143,218,239,.09);
+  color: rgba(180,213,224,.54);
+  font-size: 9px;
+}
+.flip-back-foot small { line-height: 1.4; color: rgba(180,213,224,.4); }
+
+.model-flip-card .grade-card-head,
+.model-flip-card .grade-card-summary,
+.model-flip-card .grade-role-chips,
+.model-flip-card .grade-strength,
+.model-flip-card .grade-weakness {
+  font-family: "IBM Plex Mono", monospace;
+}
+
+@media (max-width: 600px) {
+  .model-flip-card,
+  .model-flip-inner { min-height: 430px; }
+  .flip-score-row { grid-template-columns: 112px 1fr 50px; gap: 7px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-flip-inner { transition: none; }
+}
