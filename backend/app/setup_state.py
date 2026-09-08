@@ -25,9 +25,14 @@ WIZARD_STEPS = (
 
 DEFAULT_STATE: dict[str, Any] = {
     "version": 1,
+    "onboarding_version": 0,
     "completed": False,
     "current_step": "welcome",
     "completed_steps": [],
+    "interview_answers": {},
+    "interview_plan": {},
+    "selected_models": [],
+    "download_script_path": "",
     "jarvis_role": "standalone",
     "recommended_class": "",
     "role_policies": {},
@@ -36,7 +41,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "resource_mode": "dynamic",
     "resource_limits": {},
     "inference_choice": "local",
-    "inference_profile": "balanced",
+    "inference_profile": "bootstrap",
     "remote_host": "127.0.0.1",
     "remote_port": 8088,
     "install_expert_27b": False,
@@ -84,6 +89,12 @@ def load_setup_state() -> dict[str, Any]:
         merged["role_policies"] = {}
     if not isinstance(merged.get("resource_limits"), dict):
         merged["resource_limits"] = {}
+    if not isinstance(merged.get("interview_answers"), dict):
+        merged["interview_answers"] = {}
+    if not isinstance(merged.get("interview_plan"), dict):
+        merged["interview_plan"] = {}
+    if not isinstance(merged.get("selected_models"), list):
+        merged["selected_models"] = []
     return merged
 
 
