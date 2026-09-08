@@ -10,7 +10,7 @@ from app.inference.profiles import (
 )
 
 
-EXPECTED_PROFILES = {"fast", "balanced", "quality", "expert", "ornith_9b", "ornith_35b"}
+EXPECTED_PROFILES = {"bootstrap", "fast", "balanced", "quality", "expert", "ornith_9b", "ornith_35b"}
 
 
 def test_declared_profiles_include_primary_expert_and_ornith_candidates():
@@ -23,6 +23,8 @@ def test_declared_profiles_include_primary_expert_and_ornith_candidates():
         assert profile.repo == PRIMARY_GGUF_REPO
         assert "9B-abliterated" in profile.filename
 
+    assert PROFILES["bootstrap"].family == "ornith-1.5-9b"
+    assert PROFILES["bootstrap"].filename == "Ornith-1.5-9B-Q4_K_M.gguf"
     assert PROFILES["ornith_9b"].family == "ornith-1.5-9b"
     assert PROFILES["ornith_35b"].family == "ornith-1.5-35b-a3b"
 
