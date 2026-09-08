@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode } from "../api"
+import { HudLmStudioCatalog } from "../lmstudio/HudLmStudioCatalog"
 
 type HudHealthRailProps = {
   model: { loaded?: boolean; loading?: boolean; active_model?: string; last_error?: string } | null
@@ -85,6 +86,9 @@ export function HudHealthRail({
             href="/system"
           />
         )}
+      </div>
+      <div className="hud-catalog-panel">
+        <HudLmStudioCatalog />
       </div>
     </aside>
   )

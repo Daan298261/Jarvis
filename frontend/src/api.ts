@@ -696,6 +696,96 @@ export async function routeRuntime(body: RuntimeRouteRequest): Promise<RuntimeRo
   })
 }
 
+/** RFC-0043 — LM Studio graded model catalog (provisional estimates). */
+export type LmStudioAxisScores = {
+  coding: number
+  writing: number
+  reasoning: number
+  speed_cost: number
+  vram_fit: number
+  instruction: number
+  uncensored: number
+}
+
+export type LmStudioVramState = "ok" | "warn" | "hidden"
+
+export type LmStudioGradedProfile = {
+  id: string
+  display_name: string
+  overall: number
+  axes: LmStudioAxisScores
+  strength: string
+  weakness: string
+  weight_gb: number
+  quantization: string
+  path: string
+  pinned: boolean
+  favorite: boolean
+  runtime_profile_id: string | null
+  vram_state: LmStudioVramState
+  source_notes?: string
+  matched: boolean
+}
+
+export type LmStudioUngradedModel = {
+  filename: string
+  path: string
+  weight_gb: number
+  quantization: string
+}
+
+export type LmStudioCatalogResponse = {
+  catalog_version: string
+  models_root: string
+  vram_gb: number | null
+  profiles: LmStudioGradedProfile[]
+  ungraded: LmStudioUngradedModel[]
+}
+
+export type LmStudioGradeOverride = {
+  overall?: number
+  axes?: Partial<LmStudioAxisScores>
+}
+
+/** Sort graded profiles: overall desc; pinned/favorited above unpinned within band. */
+export function sortLmStudioProfiles(profiles: LmStudioGradedProfile[]): LmStudioGradedProfile[] {
+  return [...profiles].sort((a, b) => {
+    const aBoost = a.pinned || a.favorite ? 1 : 0
+    const bBoost = b.pinned || b.favorite ? 1 : 0
+    if (aBoost !== bBoost) return bBoost - aBoost
+    if (a.overall !== b.overall) return b.overall - a.overall
+    return a.display_name.localeCompare(b.display_name)
+  })
+}
+
+export async function getLmStudioCatalog(showHidden = false): Promise<LmStudioCatalogResponse> {
+  const query = showHidden ? "?show_hidden=true" : "?show_hidden=false"
+  return api<LmStudioCatalogResponse>(`/api/lmstudio/catalog${query}`)
+}
+
+export async function pinLmStudioProfile(profileId: string, pinned: boolean): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(`/api/lmstudio/catalog/${encodeURIComponent(profileId)}/pin`, {
+    method: "POST",
+    body: JSON.stringify({ pinned }),
+  })
+}
+
+export async function overrideLmStudioProfile(
+  profileId: string,
+  body: LmStudioGradeOverride,
+): Promise<LmStudioGradedProfile> {
+  return api<LmStudioGradedProfile>(`/api/lmstudio/catalog/${encodeURIComponent(profileId)}/override`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function selectLmStudioProfile(profileId: string): Promise<RuntimeProfile> {
+  return api<RuntimeProfile>(`/api/lmstudio/catalog/${encodeURIComponent(profileId)}/select`, {
+    method: "POST",
+  })
+}
+
 export const PERSISTENCE_MODES = ["ONE_SHOT", "UNTIL_COMPLETE", "CONTINUOUS"] as const
 export type PersistenceMode = (typeof PERSISTENCE_MODES)[number]
 

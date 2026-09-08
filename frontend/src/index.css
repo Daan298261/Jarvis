@@ -1368,3 +1368,185 @@ label { display: block; color: var(--muted); font-size: 13px; }
   justify-content: space-between;
   gap: 12px;
 }
+
+/* RFC-0043 — LM Studio graded catalog (classic) */
+.lm-catalog-picker h3 { margin: 0 0 6px; font-size: 16px; color: var(--gold); }
+.lm-catalog-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.lm-catalog-vram {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+}
+.lm-catalog-disclaimer {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--warn);
+  line-height: 1.4;
+}
+.lm-catalog-msg {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--ok);
+}
+.lm-catalog-error {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--bad);
+}
+.lm-show-hidden {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.lm-catalog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lm-catalog-row {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+.lm-catalog-row.active { border-color: var(--gold-dim); box-shadow: 0 0 0 1px rgba(212, 160, 23, 0.25); }
+.lm-catalog-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: default;
+}
+.lm-catalog-row-main:focus {
+  outline: 2px solid var(--gold-dim);
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+.lm-catalog-name { display: block; font-weight: 600; font-size: 14px; }
+.lm-catalog-meta { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.lm-catalog-meta em { font-style: normal; color: var(--warn); font-size: 11px; }
+.lm-catalog-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.lm-vram-badge.warn { background: rgba(213, 154, 58, 0.2); color: var(--warn); }
+.lm-vram-badge.hidden { background: rgba(212, 101, 90, 0.2); color: var(--bad); }
+.lm-catalog-card-wrap {
+  padding: 0 10px 10px;
+}
+.lm-ungraded {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.lm-ungraded h4 { margin: 0 0 4px; font-size: 14px; color: var(--gold-dim); }
+.lm-ungraded ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lm-ungraded li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 8px;
+  background: var(--panel);
+  border-radius: 6px;
+}
+.lm-catalog-root { margin-top: 10px; font-size: 11px; word-break: break-all; }
+
+.grade-hover-card {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0e1217;
+  padding: 10px;
+  box-shadow: var(--shadow);
+}
+.grade-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+.grade-card-title { font-weight: 700; color: var(--gold); }
+.grade-card-overall { color: var(--text); white-space: nowrap; }
+.grade-card-overall strong { color: var(--gold); font-size: 13px; }
+.grade-estimate-tag {
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 9px;
+  color: var(--warn);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.grade-card-axes { display: flex; flex-direction: column; gap: 3px; }
+.grade-axis-row {
+  display: grid;
+  grid-template-columns: 88px 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+.grade-axis-label { color: var(--muted); }
+.grade-axis-bar { color: var(--gold-dim); letter-spacing: -0.5px; overflow: hidden; }
+.grade-axis-score { color: var(--text); text-align: right; white-space: nowrap; }
+.grade-axis-row.vram-ok .grade-axis-score { color: var(--ok); }
+.grade-axis-row.vram-warn .grade-axis-score { color: var(--warn); }
+.grade-axis-row.vram-hidden .grade-axis-score { color: var(--bad); }
+.grade-card-blurbs {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.grade-strength { margin: 0 0 4px; color: var(--ok); }
+.grade-weakness { margin: 0; color: var(--bad); }
+.grade-card-foot {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+}
+.grade-card-path { word-break: break-all; }
+.grade-source-notes { font-size: 10px; color: var(--muted); font-style: italic; }
+.grade-provisional-foot {
+  margin: 8px 0 0;
+  font-size: 10px;
+  color: var(--warn);
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
+.lm-catalog-picker.compact h3 { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+.lm-catalog-picker.compact .lm-catalog-disclaimer { font-size: 10px; }
+.lm-catalog-picker.compact .lm-catalog-row-main { padding: 8px; }
+.lm-catalog-picker.compact .lm-catalog-name { font-size: 12px; }
+.lm-catalog-picker.compact .lm-catalog-meta { font-size: 10px; }
+.lm-catalog-picker.compact .lm-ungraded { display: none; }
+.lm-catalog-picker.compact .lm-catalog-root { display: none; }
