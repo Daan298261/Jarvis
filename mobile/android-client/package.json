@@ -1,0 +1,16 @@
+{
+  "name": "jarvis-phone",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "sync": "npx cap sync android",
+    "android": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.1",
+    "@capacitor/core": "8.5.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.1"
+  }
+}
