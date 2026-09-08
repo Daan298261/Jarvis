@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def repo_root() -> Path:
@@ -91,6 +91,23 @@ class SelfDevSettings(BaseModel):
     auto_merge: bool = False
 
 
+class SocialPerceptionSettings(BaseModel):
+    """Local semantic-perception policy. Disabled means no semantic frame processing."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = False
+    semantic_observer: str = Field(default="none", min_length=1, max_length=64)
+    sample_interval_seconds: float = Field(default=5.0, ge=1.0, le=3600.0)
+    min_confidence: float = Field(default=0.75, ge=0.0, le=1.0)
+    novelty_threshold: float = Field(default=0.35, ge=0.0, le=1.0)
+    comment_cooldown_seconds: int = Field(default=900, ge=0, le=86400)
+    duplicate_ttl_seconds: int = Field(default=3600, ge=0, le=604800)
+    baseline_enabled: bool = True
+    retain_observation_summaries: bool = False
+    max_summary_retention_hours: int = Field(default=24, ge=1, le=168)
+
+
 class AppSettings(BaseModel):
     bind_host: str = "127.0.0.1"
     bind_port: int = 4780
@@ -106,6 +123,7 @@ class AppSettings(BaseModel):
     backup_enabled: bool = True
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     self_dev: SelfDevSettings = Field(default_factory=SelfDevSettings)
+    social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
