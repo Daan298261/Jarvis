@@ -26,6 +26,9 @@ from .swarm.nodes import register_localhost_node
 from .swarm.workers import bind_workers_to_node
 from .tools.mcp_runtime import MCP
 from .tools.registry import REGISTRY
+from .api import companion
+from .mobile.calls import router as companion_calls_router
+from .mobile.runtime import MobileRuntime
 
 logging.basicConfig(level=logging.INFO, filename=str(logs_dir() / "jarvis.log"), filemode="a")
 console = logging.StreamHandler()
@@ -86,12 +89,20 @@ app.include_router(diagnostics.router)
 app.include_router(ingest.router)
 app.include_router(perception.router)
 app.include_router(perception_identity.router)
+app.include_router(companion.router)
+app.include_router(companion.owner_router)
+app.include_router(companion_calls_router)
+mobile_runtime = MobileRuntime()
 
 frontend_dist = repo_root() / "frontend" / "dist"
 
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
+    # Companion routes enforce device proof/session auth even on localhost.
+    # They never inherit the owner's key or the desktop convenience exemption.
+    if request.url.path.startswith("/api/companion/"):
+        return await call_next(request)
     if authenticate_request(request):
         return await call_next(request)
 
@@ -150,6 +161,7 @@ async def startup() -> None:
             logging.exception("Failed to read JARVIS_LAUNCH_PROMPT_FILE %s", launch_prompt_file)
 
     QUEUE_WATCHER.start()
+    mobile_runtime.start()
     await QUEUE_WATCHER.process_pending()
 
 
@@ -157,6 +169,7 @@ async def startup() -> None:
 async def shutdown() -> None:
     QUEUE_WATCHER.stop()
     await WHATSAPP_PAIRING.close()
+    await mobile_runtime.stop()
 
 
 async def _autoload_model(current) -> None:

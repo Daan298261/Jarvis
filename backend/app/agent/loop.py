@@ -162,18 +162,27 @@ class AgentRuntime:
         autonomy: str | None = None,
         profile: str | None = None,
         execution_mode: str | None = None,
+        request_id: str | None = None,
     ) -> Task:
         if kill_switch_active():
             raise KillSwitchActive(
                 "Emergency stop is active (data/STOP_JARVIS). "
                 "New tasks are blocked until POST /api/self-dev/resume."
             )
+        # Mobile and scheduled submissions use a stable ID across retries/restarts.
+        if request_id:
+            async with SessionLocal() as session:
+                existing = await session.get(Task, request_id)
+                if existing:
+                    if existing.status == "queued" and request_id not in self._tasks:
+                        self._tasks[request_id] = asyncio.create_task(self._run(request_id, continue_existing=False))
+                    return existing
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
         task_class = classify_task(prompt)
         REGISTRY.apply_settings(settings)
         task = Task(
-            id=str(uuid.uuid4()),
+            id=request_id or str(uuid.uuid4()),
             title=prompt.strip().splitlines()[0][:120],
             prompt=prompt,
             status="queued",

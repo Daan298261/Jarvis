@@ -52,3 +52,12 @@ Thumbs.db
 # Test artifacts
 tests/output/
 desktop.ini
+
+# Android generated artifacts and per-swarm credentials
+android/.gradle/
+android/**/build/
+android/local.properties
+android/bootstrap.json
+android/*.jks
+android/*.keystore
+android/app/src/main/assets/orb/
