@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api } from "../api"
+import { LmStudioCatalogClassicSection } from "../lmstudio/LmStudioCatalogClassicSection"
 import { RuntimeProfilesSection } from "./RuntimeProfiles"
 
 type Benchmark = {
@@ -154,6 +155,7 @@ export function ModelPage() {
         </div>
       </div>
       <RuntimeProfilesSection />
+      <LmStudioCatalogClassicSection />
       <AgentSuiteCard />
       <HardwareGateCard />
       <div className="card" style={{ marginTop: 16 }}>

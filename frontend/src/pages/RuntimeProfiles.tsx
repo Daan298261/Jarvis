@@ -210,6 +210,17 @@ export function RuntimeProfilesSection() {
   }, [])
 
   useEffect(() => {
+    const onRuntimeChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string }>).detail
+      const id = detail?.id ?? getSelectedRuntimeProfileId()
+      setSelectedId(id)
+      setCatalogTick((tick) => tick + 1)
+    }
+    window.addEventListener("jarvis:runtime-profile-changed", onRuntimeChange)
+    return () => window.removeEventListener("jarvis:runtime-profile-changed", onRuntimeChange)
+  }, [])
+
+  useEffect(() => {
     void refreshPreview()
   }, [selectedId, selectMode, policy, catalogTick])
 
