@@ -22,6 +22,8 @@ OutputDir=dist
 OutputBaseFilename=JarvisSetup
 Compression=lzma2/ultra64
 SolidCompression=yes
+; Bundled Ornith Q4_K_M is ~5.4 GB; a single Setup.exe cannot exceed ~4.2 GB on Windows.
+DiskSpanning=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
