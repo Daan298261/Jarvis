@@ -36,6 +36,7 @@ class RuntimeProfileIn(BaseModel):
     specialization_tags: list[str] = Field(default_factory=list)
     is_local: bool = False
     description: str = ""
+    enabled: bool = True
 
 
 class RuntimeProfileUpdate(BaseModel):
@@ -52,6 +53,7 @@ class RuntimeProfileUpdate(BaseModel):
     specialization_tags: list[str] | None = None
     is_local: bool | None = None
     description: str | None = None
+    enabled: bool | None = None
 
 
 class RouteRequest(BaseModel):
@@ -94,6 +96,7 @@ async def create_profile(body: RuntimeProfileIn):
             specialization_tags=body.specialization_tags,
             is_local=body.is_local,
             description=body.description,
+            enabled=body.enabled,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
