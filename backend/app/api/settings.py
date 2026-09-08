@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import load_settings, save_settings
 from ..inference.backends import suggested_port
@@ -37,6 +37,16 @@ class SettingsUpdate(BaseModel):
     self_dev_max_paid_invocations: int | None = None
     self_dev_max_consecutive_failures: int | None = None
     self_dev_experimental_port: int | None = None
+    social_perception_enabled: bool | None = None
+    social_perception_semantic_observer: str | None = Field(default=None, min_length=1, max_length=64)
+    social_perception_sample_interval_seconds: float | None = Field(default=None, ge=1.0, le=3600.0)
+    social_perception_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    social_perception_novelty_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    social_perception_comment_cooldown_seconds: int | None = Field(default=None, ge=0, le=86400)
+    social_perception_duplicate_ttl_seconds: int | None = Field(default=None, ge=0, le=604800)
+    social_perception_baseline_enabled: bool | None = None
+    social_perception_retain_observation_summaries: bool | None = None
+    social_perception_max_summary_retention_hours: int | None = Field(default=None, ge=1, le=168)
 
 
 @router.get("")
@@ -111,6 +121,29 @@ async def update_settings(body: SettingsUpdate):
         settings.self_dev.max_consecutive_failures = body.self_dev_max_consecutive_failures
     if body.self_dev_experimental_port is not None:
         settings.self_dev.experimental_port = body.self_dev_experimental_port
+
+    perception = settings.social_perception
+    if body.social_perception_enabled is not None:
+        perception.enabled = body.social_perception_enabled
+    if body.social_perception_semantic_observer is not None:
+        perception.semantic_observer = body.social_perception_semantic_observer
+    if body.social_perception_sample_interval_seconds is not None:
+        perception.sample_interval_seconds = body.social_perception_sample_interval_seconds
+    if body.social_perception_min_confidence is not None:
+        perception.min_confidence = body.social_perception_min_confidence
+    if body.social_perception_novelty_threshold is not None:
+        perception.novelty_threshold = body.social_perception_novelty_threshold
+    if body.social_perception_comment_cooldown_seconds is not None:
+        perception.comment_cooldown_seconds = body.social_perception_comment_cooldown_seconds
+    if body.social_perception_duplicate_ttl_seconds is not None:
+        perception.duplicate_ttl_seconds = body.social_perception_duplicate_ttl_seconds
+    if body.social_perception_baseline_enabled is not None:
+        perception.baseline_enabled = body.social_perception_baseline_enabled
+    if body.social_perception_retain_observation_summaries is not None:
+        perception.retain_observation_summaries = body.social_perception_retain_observation_summaries
+    if body.social_perception_max_summary_retention_hours is not None:
+        perception.max_summary_retention_hours = body.social_perception_max_summary_retention_hours
+
     save_settings(settings)
     REGISTRY.apply_settings(settings)
     return settings.model_dump()
