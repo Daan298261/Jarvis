@@ -51,7 +51,7 @@ def test_default_runtime_profiles_link_model_profiles():
     profiles = default_runtime_profiles()
     by_name = {profile.name: profile for profile in profiles}
     assert set(PROFILES).issubset(by_name)
-    assert {"qwen38-27b", "redsage-8b", "imperum-cyber"}.issubset(by_name)
+    assert {"qwen38-27b", "redsage-8b", "imperum-cyber", "deephat-7b"}.issubset(by_name)
 
     for name, model_profile in PROFILES.items():
         runtime = by_name[name]
@@ -61,11 +61,8 @@ def test_default_runtime_profiles_link_model_profiles():
         assert runtime.quantization == model_profile.quant
         assert runtime.enabled is True
 
-    for name in ("qwen38-27b", "redsage-8b", "imperum-cyber"):
+    for name in ("qwen38-27b", "redsage-8b", "imperum-cyber", "deephat-7b"):
         assert by_name[name].enabled is False
-
-    # The repository requires Red Team activation to remain outside generic routing.
-    assert "deephat-7b" not in by_name
 
 
 def test_runtime_profile_crud(runtime_store):
@@ -319,12 +316,14 @@ def test_runtime_profiles_api(runtime_store, monkeypatch):
     from app.main import app
 
     monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: runtime_store)
+    monkeypatch.setattr("app.inference.security_gates.data_dir", lambda: runtime_store)
     client = TestClient(app)
 
     listed = client.get("/api/runtime-profiles")
     assert listed.status_code == 200
     assert len(listed.json()["profiles"]) >= len(PROFILES)
     assert "local-first" in listed.json()["policies"]
+    assert "security_gates" in listed.json()
 
     created = client.post(
         "/api/runtime-profiles",

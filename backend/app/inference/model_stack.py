@@ -42,7 +42,7 @@ class SpecialistModel:
         return asdict(self)
 
     def runtime_profile(self) -> RuntimeProfile | None:
-        if not self.ship_runtime_template or self.manual_gate:
+        if not self.ship_runtime_template:
             return None
         return RuntimeProfile(
             id=f"recommended-{self.runtime_profile_name}",
@@ -89,7 +89,6 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         privacy_class=PRIVACY_LOCAL_ONLY,
         enabled_by_default=True,
         description="Always-on orchestration and tool-use candidate.",
-        # Already represented by the built-in ModelProfile.
         ship_runtime_template=False,
     ),
     "qwen38-leader": SpecialistModel(
@@ -142,7 +141,7 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         is_local=True,
         privacy_class=PRIVACY_LOCAL_ONLY,
         enabled_by_default=False,
-        description="Local SOC/blue-team specialist. Disabled until its serving endpoint is configured.",
+        description="Local SOC/blue-team specialist. Password-gated and disabled until its serving endpoint is configured.",
     ),
     "imperum-dfir": SpecialistModel(
         key="imperum-dfir",
@@ -166,7 +165,7 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         is_local=True,
         privacy_class=PRIVACY_LOCAL_ONLY,
         enabled_by_default=False,
-        description="Deeper DFIR/detection-engineering consult model; expected to use CPU/RAM offload on smaller GPUs.",
+        description="Deeper DFIR/detection-engineering consult model; password-gated with the Blue security role.",
     ),
     "deephat-red": SpecialistModel(
         key="deephat-red",
@@ -174,8 +173,8 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         label="DeepHat V1 7B Red Team",
         model_id="DeepHat/DeepHat-V1-7B",
         role="red-team",
-        provider="manual-gated",
-        endpoint="",
+        provider="openai-compat",
+        endpoint="http://127.0.0.1:8094/v1",
         context_limit=32768,
         quantization="configure-local",
         capability_tags=(
@@ -191,11 +190,10 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         privacy_class=PRIVACY_LOCAL_ONLY,
         enabled_by_default=False,
         description=(
-            "Catalog-only red-team recommendation. Activation is reserved for Taco manual "
-            "configuration or the repository's PolitieGPT/LE security gate; generic routing "
-            "must not instantiate or enable it."
+            "Password-gated Red Team model template. Password unlock is only an operator "
+            "factor; role routing still requires explicit manual/case authorization."
         ),
-        ship_runtime_template=False,
+        ship_runtime_template=True,
         manual_gate=True,
     ),
     "frontier-general": SpecialistModel(
@@ -262,6 +260,12 @@ ROLE_SPECS: dict[str, RoleRoutingSpec] = {
         required_capabilities=("llm_inference", "cybersecurity", "dfir"),
         specialization="dfir",
     ),
+    "red-team": RoleRoutingSpec(
+        role="red-team",
+        preferred_profiles=("deephat-7b",),
+        required_capabilities=("llm_inference", "cybersecurity", "red-team"),
+        specialization="red-team",
+    ),
     "frontier": RoleRoutingSpec(
         role="frontier",
         preferred_profiles=("frontier-general",),
@@ -325,20 +329,21 @@ def routing_preferences_for_role(
     policy: str = "local-first",
     privacy_floor: str = PRIVACY_PUBLIC_REMOTE,
     max_cost_usd: float | None = None,
+    allow_manual_gate: bool = False,
 ):
     """Build RFC-0003 routing preferences for an allowed Jarvis model role.
 
-    Red-team is deliberately catalog-only here. Generic routing cannot activate
-    it; activation belongs to Taco manual configuration or the repository's
-    PolitieGPT/LE gate. Model choice never changes tool exposure or permissions.
+    A manual-gated role is never enabled merely because a model profile exists.
+    The caller must independently satisfy the relevant persistent operator gate
+    and authorization requirements before passing ``allow_manual_gate=True``.
     """
     from .runtime_router import AgentRoutingPreferences
 
     normalized = normalize_role(role)
-    if normalized == "red-team":
+    if normalized == "red-team" and not allow_manual_gate:
         raise PermissionError(
-            "red-team runtime activation is reserved for Taco manual configuration "
-            "or the repository's PolitieGPT/LE security gate"
+            "red-team runtime activation requires the persistent Red Team password gate "
+            "plus explicit manual/case authorization"
         )
 
     spec = ROLE_SPECS.get(normalized)

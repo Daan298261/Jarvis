@@ -1,0 +1,37 @@
+name: Backend tests
+
+on:
+  pull_request:
+    branches: [development]
+  push:
+    branches:
+      - 'cursor/**'
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JARVIS_SKIP_MODEL: '1'
+      PYTHONPATH: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Linux test dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          grep -Ev '^(pywinauto|pywin32|comtypes)' backend/requirements.txt > /tmp/requirements-linux.txt
+          python -m pip install -r /tmp/requirements-linux.txt
+
+      - name: Run pytest
+        run: python -m pytest -q
