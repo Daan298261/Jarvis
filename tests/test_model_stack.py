@@ -19,25 +19,35 @@ def test_specialist_catalog_contains_expected_models():
     assert MODEL_CATALOG["deephat-red"].model_id == "DeepHat/DeepHat-V1-7B"
 
 
-def test_red_team_recommendation_is_catalog_only_and_manual_gated():
+def test_red_team_recommendation_ships_disabled_and_manual_gated():
     red = get_specialist_model("deephat-red")
     assert red is not None
     assert red.role == "red-team"
     assert red.manual_gate is True
-    assert red.ship_runtime_template is False
-    assert red.runtime_profile() is None
+    assert red.ship_runtime_template is True
+    runtime = red.runtime_profile()
+    assert runtime is not None
+    assert runtime.name == "deephat-7b"
+    assert runtime.enabled is False
     assert list_specialist_models(role="red-team") == [red]
 
-    names = {profile.name for profile in default_runtime_profiles()}
-    assert "deephat-7b" not in names
+    profiles = {profile.name: profile for profile in default_runtime_profiles()}
+    assert profiles["deephat-7b"].enabled is False
 
 
 def test_generic_red_team_role_routing_fails_closed():
-    with pytest.raises(PermissionError, match="manual configuration"):
+    with pytest.raises(PermissionError, match="password gate"):
         routing_preferences_for_role("red-team")
 
-    with pytest.raises(PermissionError, match="manual configuration"):
+    with pytest.raises(PermissionError, match="password gate"):
         routing_preferences_for_role("pentest")
+
+
+def test_authorized_red_team_role_builds_preferences_only_after_external_gate():
+    prefs = routing_preferences_for_role("red-team", allow_manual_gate=True)
+    assert prefs.preferred_profiles == ("deephat-7b",)
+    assert "red-team" in prefs.required_capabilities
+    assert prefs.task_specialization == "red-team"
 
 
 def test_orchestrator_role_prefers_ornith():
@@ -72,10 +82,11 @@ def test_dfir_role_prefers_imperum():
 def test_specialist_runtime_templates_are_disabled_by_default():
     profiles = {profile.name: profile for profile in default_runtime_profiles()}
 
-    for name in ("qwen38-27b", "redsage-8b", "imperum-cyber"):
+    for name in ("qwen38-27b", "redsage-8b", "imperum-cyber", "deephat-7b"):
         assert name in profiles
         assert profiles[name].enabled is False
 
     assert "leader" in profiles["qwen38-27b"].specialization_tags
     assert "blue-team" in profiles["redsage-8b"].capability_tags
     assert "dfir" in profiles["imperum-cyber"].capability_tags
+    assert "red-team" in profiles["deephat-7b"].capability_tags
