@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -91,6 +91,19 @@ class SelfDevSettings(BaseModel):
     auto_merge: bool = False
 
 
+class PresentationSettings(BaseModel):
+    """Persisted presentation preference. Camera/biometric data is never stored here."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    shell: Literal["classic", "hud"] = "hud"
+    requested_presence: Literal["none", "neural", "humanoid"] = "neural"
+    performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] = "auto"
+    attention_mode: Literal["off", "pointer", "camera"] = "pointer"
+    reduced_motion: Literal["system", "reduce", "full"] = "system"
+    avatar_id: str = Field(default="jarvis_base", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
+
+
 class SocialPerceptionSettings(BaseModel):
     """Local semantic-perception policy. Disabled means no semantic frame processing."""
 
@@ -145,6 +158,7 @@ class AppSettings(BaseModel):
     backup_enabled: bool = True
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     self_dev: SelfDevSettings = Field(default_factory=SelfDevSettings)
+    presentation: PresentationSettings = Field(default_factory=PresentationSettings)
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     allowed_directories: list[str] = Field(default_factory=list)
