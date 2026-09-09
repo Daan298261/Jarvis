@@ -69,6 +69,8 @@ class SettingsUpdate(BaseModel):
     identity_recognition_confirmation_hits: int | None = Field(default=None, ge=1, le=20)
     identity_recognition_lost_timeout_seconds: float | None = Field(default=None, ge=0.0, le=60.0)
     identity_recognition_expose_identity_to_dialogue: bool | None = None
+    tts_speak_chat_replies: bool | None = None
+    tts_voice_profile_id: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 @router.get("")
@@ -196,6 +198,11 @@ async def update_settings(body: SettingsUpdate):
         if value is not None:
             recognition_values[key] = value
     settings.identity_recognition = type(settings.identity_recognition).model_validate(recognition_values)
+
+    if body.tts_speak_chat_replies is not None:
+        settings.tts.speak_chat_replies = body.tts_speak_chat_replies
+    if body.tts_voice_profile_id is not None:
+        settings.tts.voice_profile_id = body.tts_voice_profile_id
 
     save_settings(settings)
     REGISTRY.apply_settings(settings)
