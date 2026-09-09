@@ -1,0 +1,19 @@
+{
+  "id": "dry_butler_original_v1",
+  "archetype": "dry_household_butler",
+  "display_name": "Dry household butler (original)",
+  "license": "original",
+  "provenance": "Original dry butler archetype variant. Requires a licensed voice pack install.",
+  "tts": {
+    "engine_hint": "piper",
+    "speaker_ref": "dry_butler_v1",
+    "pack_path": "voice_packs/dry_butler_original_v1"
+  },
+  "persona_hooks": {
+    "register": "british_understated",
+    "humour": "dry"
+  },
+  "sample_utterance": "Very well.",
+  "vram_class": "balanced",
+  "builtin": false
+}

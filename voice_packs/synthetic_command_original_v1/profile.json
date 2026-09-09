@@ -1,0 +1,19 @@
+{
+  "id": "synthetic_command_original_v1",
+  "archetype": "synthetic_command",
+  "display_name": "Cold synthetic command (original)",
+  "license": "original",
+  "provenance": "Original synthetic command archetype. Requires a licensed voice pack install.",
+  "tts": {
+    "engine_hint": "qwen3-tts",
+    "speaker_ref": "synthetic_command_v1",
+    "pack_path": "voice_packs/synthetic_command_original_v1"
+  },
+  "persona_hooks": {
+    "register": "clinical",
+    "humour": "none"
+  },
+  "sample_utterance": "Acknowledged.",
+  "vram_class": "expressive",
+  "builtin": false
+}
