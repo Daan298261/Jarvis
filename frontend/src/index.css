@@ -292,6 +292,17 @@ h2 { font-size: 18px; margin: 0 0 12px; }
 }
 .composer-actions { margin-top: 10px; }
 .composer-check { margin: 0; font-size: 13px; color: var(--muted); }
+
+.chat-tts-mute {
+  font-size: 13px;
+  color: var(--muted);
+  border-color: rgba(212, 160, 23, 0.35);
+}
+
+.chat-tts-mute.muted {
+  color: var(--warn);
+  border-color: rgba(255, 138, 61, 0.45);
+}
 .auth-card { margin: 12px 24px 0; border-left: 4px solid var(--bad); }
 .bubble {
   background: var(--panel);
