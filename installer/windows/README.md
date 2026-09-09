@@ -9,6 +9,16 @@ Ships **sources** that produce `JarvisSetup.exe` on a Windows machine. The cloud
 3. Adds **Start Jarvis** / **Stop Jarvis** shortcuts (Desktop + Start Menu) that call `start-jarvis.ps1` and `stop-jarvis.ps1`.
 4. Uninstall removes shortcuts; **does not** delete `data/` by default.
 
+## Existing installations
+
+When Jarvis is already installed, Setup compares the installed version with the installer version:
+
+- A newer installer offers an in-place **Upgrade** and keeps settings, models, task data, logs, and connections.
+- The same version offers **Repair** with the same preservation behavior.
+- **Reinstall and keep custom files** removes the old application files before reinstalling while leaving generated files in place.
+- **Clean reinstall** removes the application and all custom files only after a separate permanent-deletion confirmation.
+- An older installer is blocked to prevent an accidental downgrade.
+
 ## Build `JarvisSetup.exe` (Windows)
 
 Prerequisites:

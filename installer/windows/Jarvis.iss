@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -11,6 +11,7 @@
 AppId={{A7B3C4D5-E6F7-4890-ABCD-EF1234567890}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}.0
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
@@ -73,6 +74,150 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopJarvis"
 
 [Code]
+const
+  JarvisUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{A7B3C4D5-E6F7-4890-ABCD-EF1234567890}_is1';
+
+var
+  ExistingInstallPage: TInputOptionWizardPage;
+  ExistingInstallDetected: Boolean;
+  ExistingInstallDir: String;
+  ExistingVersion: String;
+  ExistingVersionRelation: Integer;
+
+function NormalizeVersion(const Value: String): String;
+var
+  I: Integer;
+  DotCount: Integer;
+begin
+  Result := Trim(Value);
+  DotCount := 0;
+  for I := 1 to Length(Result) do
+    if Result[I] = '.' then
+      DotCount := DotCount + 1;
+  while DotCount < 3 do
+  begin
+    Result := Result + '.0';
+    DotCount := DotCount + 1;
+  end;
+end;
+
+function CompareVersionStrings(const InstallerVersion, InstalledVersion: String): Integer;
+var
+  InstallerPacked: Int64;
+  InstalledPacked: Int64;
+begin
+  Result := 0;
+  if not StrToVersion(NormalizeVersion(InstallerVersion), InstallerPacked) then
+    Exit;
+  if not StrToVersion(NormalizeVersion(InstalledVersion), InstalledPacked) then
+    Exit;
+  Result := ComparePackedVersion(InstallerPacked, InstalledPacked);
+end;
+
+function DetectExistingInstallation: Boolean;
+begin
+  ExistingInstallDir := '';
+  ExistingVersion := '';
+  Result := RegKeyExists(HKEY_CURRENT_USER, JarvisUninstallKey);
+  if Result then
+  begin
+    RegQueryStringValue(HKEY_CURRENT_USER, JarvisUninstallKey, 'InstallLocation', ExistingInstallDir);
+    RegQueryStringValue(HKEY_CURRENT_USER, JarvisUninstallKey, 'DisplayVersion', ExistingVersion);
+  end;
+
+  if ExistingInstallDir = '' then
+    ExistingInstallDir := ExpandConstant('{localappdata}\Jarvis');
+  if (not Result) and FileExists(AddBackslash(ExistingInstallDir) + 'unins000.exe') then
+    Result := True;
+  if ExistingVersion = '' then
+    ExistingVersion := 'unknown';
+
+  ExistingInstallDetected := Result;
+  if ExistingInstallDetected then
+    ExistingVersionRelation := CompareVersionStrings('{#MyAppVersion}', ExistingVersion)
+  else
+    ExistingVersionRelation := 0;
+end;
+
+function IsSafeJarvisInstallDir(const Path: String): Boolean;
+var
+  Candidate: String;
+  DefaultPath: String;
+begin
+  Candidate := AddBackslash(Path);
+  DefaultPath := AddBackslash(ExpandConstant('{localappdata}\Jarvis'));
+  Result := CompareText(Candidate, DefaultPath) = 0;
+  if not Result then
+    Result :=
+      FileExists(Candidate + 'start-jarvis.ps1') and
+      FileExists(Candidate + 'unins000.exe') and
+      FileExists(Candidate + 'installer\windows\Jarvis.iss');
+end;
+
+function InitializeSetup: Boolean;
+begin
+  DetectExistingInstallation;
+  Result := True;
+  if ExistingInstallDetected and (ExistingVersionRelation < 0) then
+  begin
+    MsgBox(
+      'Jarvis ' + ExistingVersion + ' is already installed, but this installer contains older version {#MyAppVersion}.' + #13#10 + #13#10 +
+      'Setup will stop to prevent an accidental downgrade. Use a newer installer or uninstall Jarvis from Windows Settings first.',
+      mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
+procedure InitializeWizard;
+var
+  PrimaryAction: String;
+begin
+  if not ExistingInstallDetected then
+    Exit;
+
+  if ExistingVersionRelation > 0 then
+    PrimaryAction := '&Upgrade to Jarvis {#MyAppVersion} (recommended)'
+  else
+    PrimaryAction := '&Repair Jarvis {#MyAppVersion}';
+
+  ExistingInstallPage := CreateInputOptionPage(
+    wpSelectDir,
+    'Existing Jarvis installation found',
+    'Installed: ' + ExistingVersion + '    Installer: {#MyAppVersion}',
+    'Choose how Setup should continue. Settings, downloaded models, task data, logs, and local connections are treated as custom files.',
+    True, False);
+  ExistingInstallPage.Add(PrimaryAction + ' - keep all custom files');
+  ExistingInstallPage.Add('&Reinstall Jarvis - remove the application, but keep custom files');
+  ExistingInstallPage.Add('&Clean reinstall - remove Jarvis and all custom files');
+  ExistingInstallPage.SelectedValueIndex := 0;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (ExistingInstallPage = nil) or (CurPageID <> ExistingInstallPage.ID) then
+    Exit;
+
+  if ExistingInstallPage.SelectedValueIndex = 2 then
+  begin
+    if not IsSafeJarvisInstallDir(ExistingInstallDir) then
+    begin
+      MsgBox(
+        'Jarvis cannot safely verify the existing installation folder, so custom files will not be removed.' + #13#10 + #13#10 +
+        'Choose an option that keeps custom files.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+
+    Result := MsgBox(
+      'Clean reinstall permanently removes all Jarvis settings, downloaded models, task data, logs, and other files in:' + #13#10 +
+      ExistingInstallDir + #13#10 + #13#10 +
+      'This cannot be undone. Continue?',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  end;
+end;
+
 procedure StopJarvisProcesses;
 var
   ResultCode: Integer;
@@ -91,12 +236,65 @@ begin
     Log('Failed to launch stop-jarvis.ps1 -IncludeTray');
 end;
 
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+function RemoveExistingApplication: Boolean;
+var
+  ResultCode: Integer;
+  Uninstaller: String;
 begin
-  Result := '';
-  { Settings -> Apps -> Modify re-runs setup; stop running Jarvis before files change. }
-  { Always stop Jarvis before file changes; IsUpgrade unavailable in Inno 6.7+. }
-  StopJarvisProcesses;
+  ResultCode := -1;
+  Uninstaller := AddBackslash(ExistingInstallDir) + 'unins000.exe';
+  if not FileExists(Uninstaller) then
+  begin
+    Log('Existing Jarvis uninstaller was not found: ' + Uninstaller);
+    Result := False;
+    Exit;
+  end;
+
+  Log('Removing existing Jarvis application before reinstall.');
+  Result := Exec(
+    Uninstaller,
+    '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART',
+    ExistingInstallDir,
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode) and (ResultCode = 0);
+  if not Result then
+    Log('Existing Jarvis uninstaller failed with code ' + IntToStr(ResultCode));
 end;
 
-{ User data (data/, models/, runtime/) created after install is not removed by default. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  SelectedAction: Integer;
+begin
+  Result := '';
+  { Windows Settings -> Apps -> Modify and direct setup launches use this same safe path. }
+  StopJarvisProcesses;
+
+  if not ExistingInstallDetected then
+    Exit;
+
+  SelectedAction := ExistingInstallPage.SelectedValueIndex;
+  if SelectedAction = 0 then
+  begin
+    if ExistingVersionRelation > 0 then
+      Log('Upgrading Jarvis ' + ExistingVersion + ' to {#MyAppVersion} while preserving custom files.')
+    else
+      Log('Repairing Jarvis {#MyAppVersion} while preserving custom files.');
+    Exit;
+  end;
+
+  if not RemoveExistingApplication then
+  begin
+    Result := 'Setup could not remove the existing Jarvis application. Close Jarvis and try again.';
+    Exit;
+  end;
+
+  if SelectedAction = 2 then
+  begin
+    if DirExists(ExistingInstallDir) and
+       (not DelTree(ExistingInstallDir, True, True, True)) then
+      Result := 'Setup removed Jarvis but could not remove all custom files. Check the installation folder and try again.';
+  end;
+end;
+
+{ Normal upgrade/uninstall preserves generated custom data unless clean reinstall is explicitly selected. }

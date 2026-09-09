@@ -27,6 +27,8 @@ Add a polished integrations step to the existing Jarvis first-run setup and make
 - [ ] Backend tests cover secret redaction, Gmail validation/config persistence, pairing state transitions, and process cleanup.
 - [ ] Unit tests pass (`python3 -m pytest`).
 - [ ] `npm --prefix frontend run build` and `npm --prefix frontend run lint` pass.
+- [ ] An existing installation gets a version-aware Upgrade or Repair choice, plus reinstall options that either preserve custom files or remove them after a separate destructive confirmation.
+- [ ] Older installers are blocked from silently downgrading a newer Jarvis installation.
 
 ## Likely files
 
