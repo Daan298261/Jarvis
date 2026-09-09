@@ -1,4 +1,5 @@
 import { fetchAudio } from "../api"
+import { getActiveVoiceProfileId } from "./voiceProfiles"
 
 const MAX_SPEAK_CHARS = 800
 
@@ -40,9 +41,15 @@ export async function speakChatReply(text: string, opts?: SpeakOpts): Promise<vo
   opts?.onStart?.()
 
   try {
+    const payload: { text: string; voice_profile_id?: string } = {
+      text: trimmed.slice(0, MAX_SPEAK_CHARS),
+    }
+    const voiceProfileId = getActiveVoiceProfileId()
+    if (voiceProfileId) payload.voice_profile_id = voiceProfileId
+
     const blob = await fetchAudio("/api/voice/speak", {
       method: "POST",
-      body: JSON.stringify({ text: trimmed.slice(0, MAX_SPEAK_CHARS) }),
+      body: JSON.stringify(payload),
     })
     const url = URL.createObjectURL(blob)
     activeUrl = url

@@ -8,6 +8,7 @@ import {
   updateTtsSettings,
   type TtsSettings,
 } from "../tts/chatTtsSettings"
+import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { AutonomySection } from "./Autonomy"
 import { LicenseSettings } from "./License"
 
@@ -123,7 +124,9 @@ export function SettingsPage() {
           Jarvis can speak typed chat replies aloud using local TTS (Windows SAPI, espeak-ng, or pyttsx3).
           Text always appears even when speech is off or TTS fails.
         </p>
-        <label className="row">
+        <VoiceProfilePicker />
+
+        <label className="row" style={{ marginTop: 12 }}>
           <input
             type="checkbox"
             checked={speakChatReplies}
@@ -136,7 +139,7 @@ export function SettingsPage() {
           <strong>Speak chat replies</strong>
         </label>
         <p className="lede" style={{ margin: 0, fontSize: 13 }}>
-          Spoken replies use the universal Jarvis persona pack (backend injection — RFC-0061 D1).
+          Spoken replies use the active voice profile and universal Jarvis persona pack (backend injection — RFC-0061/0062 D1/D2).
           You can also mute speech from the chat composer without opening Settings.
         </p>
       </div>

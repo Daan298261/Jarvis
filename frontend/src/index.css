@@ -303,6 +303,52 @@ h2 { font-size: 18px; margin: 0 0 12px; }
   color: var(--warn);
   border-color: rgba(255, 138, 61, 0.45);
 }
+
+.voice-profile-picker { margin-top: 4px; }
+
+.voice-profile-options {
+  grid-template-columns: 1fr;
+}
+
+.voice-profile-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.voice-profile-option.unavailable {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
+.voice-profile-select {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.voice-profile-select:disabled {
+  cursor: not-allowed;
+}
+
+.voice-profile-preview {
+  align-self: center;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.voice-profile-stub,
+.voice-profile-msg {
+  color: var(--muted);
+}
 .auth-card { margin: 12px 24px 0; border-left: 4px solid var(--bad); }
 .bubble {
   background: var(--panel);
