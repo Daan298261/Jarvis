@@ -1,6 +1,6 @@
 # RFC-0060: Internal docs-first grounding
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** P1 — Internal docs-first grounding  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-09
@@ -108,3 +108,5 @@ Full RAG product for user projects (RFC-0020); web search UX; Astra UI redesign;
 ## Notes
 
 Complements RFC-0020 (user project workspaces) and RFC-0011 (context repositories) without replacing them. The seeded pack is product content, not a placeholder tree — D1 fills it on the implement ticket. Desktop sign-off optional for live retrieval quality against the shipped pack.
+
+Implemented in #134 (merge 9b665ee) — DocsFirstGrounding gate + seeded project/jarvis/jarvis/internal/references/ pack.
