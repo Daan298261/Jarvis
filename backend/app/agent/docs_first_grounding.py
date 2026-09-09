@@ -195,6 +195,25 @@ def _score_text(text: str, terms: list[str]) -> int:
     return sum(lowered.count(term) for term in terms)
 
 
+def _score_document(path: Path, text: str, terms: list[str]) -> int:
+    """Prefer a specifically named reference over broad docs with repeated terms."""
+    score = _score_text(text, terms)
+    # Only score the document name. Absolute worktree names can contain query
+    # words (for example a feature branch called "humanoid-runtime").
+    path_text = path.name.lower()
+    heading = "\n".join(text.splitlines()[:3])
+    score += sum(60 for term in terms if term in path_text)
+    score += _score_text(heading, terms) * 12
+    for pack_root in (reference_pack_root(), packaged_reference_root()):
+        try:
+            path.resolve().relative_to(pack_root.resolve())
+            score += 100
+            break
+        except ValueError:
+            continue
+    return score
+
+
 def _extract_snippet(text: str, terms: list[str], max_chars: int = MAX_SNIPPET_CHARS) -> str:
     if not text:
         return ""
@@ -307,7 +326,7 @@ def search_internal_references(query: str, *, max_results: int = 5) -> list[Grou
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        score = _score_text(text, terms) if terms else 1
+        score = _score_document(path, text, terms) if terms else 1
         if terms and score <= 0:
             continue
         ranked.append((score, path, text))

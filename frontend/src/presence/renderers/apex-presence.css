@@ -1,7 +1,7 @@
 .jarvis-apex-presence {
   --jarvis-apex-size: 540px;
   position: relative;
-  width: min(calc(var(--jarvis-apex-size) * 1.15), 86vw);
+  width: min(calc(var(--jarvis-apex-size) * 1.15), 92vw);
   aspect-ratio: 680 / 480;
   display: block;
   isolation: isolate;
@@ -100,7 +100,7 @@
 
 @media (max-width: 760px) {
   .jarvis-apex-presence {
-    width: min(calc(var(--jarvis-apex-size) * 1.05), 94vw);
+    width: min(calc(var(--jarvis-apex-size) * 1.05), 98vw);
   }
 
   .jarvis-apex-vendored-orb {

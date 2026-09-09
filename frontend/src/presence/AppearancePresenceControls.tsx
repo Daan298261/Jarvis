@@ -41,9 +41,9 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
           <button type="button" disabled={busy} className={selected === "humanoid" ? "active" : ""}
             onClick={() => apply(
               { shell: "hud", requestedPresence: "humanoid" },
-              "Humanoid preference saved. Neural remains active until RFC-0051 installs the renderer.",
+              "Humanoid presence active. Jarvis will fall back to Neural if WebGL is unavailable.",
             )}>
-            Humanoid HUD
+            Humanoid HUD · built in
           </button>
         </div>
 
@@ -67,7 +67,7 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
             )}>
             <option value="off">Off</option>
             <option value="pointer">Follow pointer</option>
-            <option value="camera">Camera (runtime not active yet)</option>
+            <option value="camera">Camera preference (not activated here)</option>
           </select>
         </label>
 

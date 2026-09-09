@@ -53,7 +53,7 @@ export function HudChatHome() {
   return (
     <div className="hud-home">
       <section className="hud-orb-zone" aria-label="Jarvis state">
-        <PresenceHost snapshot={snapshot} settings={presentation} size={540} />
+        <PresenceHost snapshot={snapshot} settings={presentation} size={760} />
         <div className="hud-orb-caption" aria-live="polite">
           <span className={`hud-orb-state${mood === "alert" ? " alert" : ""}`}>{copy.label}</span>
           <span className="hud-orb-detail">{taskDetail(moodState.task, mood)}</span>
