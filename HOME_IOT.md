@@ -33,10 +33,11 @@ Autonomy profiles from `JARVIS_MASTER_PLAN.md` §45 apply. House control is not 
 
 ## 4. Relation to other specs
 
+- Household physical-world vision, multi-camera scene state, routine detection, and visually verified chore reminders: `HOUSEHOLD_VISION.md`.
 - Phone/voice: `ANDROID_CLIENT.md` — IoT commands are Leader API calls, not a cloud-only phone skill.
 - Security agents: `SECURITY_AGENTS.md` (Blue) — new unknown IoT MACs are security events; house control does not silently trust a new device.
 - P5 domain packs may later include a Home/Facilities pack; this file remains the house-control spec.
-- Not P3 swarm: bulbs are not Jarvis Nodes.
+- Not P3 swarm: bulbs are not Jarvis Nodes. A dedicated Household Vision computer, however, is a normal Jarvis Node under `SWARM_ARCHITECTURE.md`.
 
 ## 5. Acceptance (when implemented)
 
