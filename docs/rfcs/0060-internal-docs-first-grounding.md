@@ -29,11 +29,28 @@ Prefer these roots in order (all read-only from the agent's view; implementers m
 
 | Priority | Root | Notes |
 | --- | --- | --- |
-| 1 | `project/jarvis/jarvis/internal/references/**` | Preferred product/internal references tree; create empty scaffold with README only if needed for path contract |
+| 1 | `project/jarvis/jarvis/internal/references/**` | Preferred product/internal references tree — **seeded reference pack** (see below), not an empty path contract |
 | 2 | In-repo docs that ship with Jarvis | `docs/**`, root `*.md` product specs the runtime may index — **index allowlist**, not whole-repo dump (`AGENTS.md`, `docs/PROCESS.md`, `INSTALL*.md`, `WINDOWS_SHELL.md`, `ANDROID_CLIENT.md`, etc.) |
-| 3 | Packaged `internal/references` | Under install prefix when running from an installed build |
+| 3 | Packaged `internal/references` | Install-relative equivalent of the seeded pack when running from an installed build |
 
 Retrieval must be **local-first**. Do not call external web search for these triggers unless local hit confidence is low **and** the query is not "about Jarvis itself" (for self-about, never exfiltrate; stay local).
+
+### Seeded reference pack (layout)
+
+Canonical tree (install-relative equivalent when packaged):
+
+`project/jarvis/jarvis/internal/references/`
+
+Minimum initial pack layout (files or clearly named sections; markdown ok):
+
+| Path | Purpose |
+| --- | --- |
+| `README.md` | Index of the pack + how grounding uses it |
+| `capability-overview.md` | What Jarvis can/can't do at a product level |
+| `spec-summaries/` | Short summaries of key landed/active RFCs and root specs — not full RFC dump; pointers + 1–2 paragraph digests |
+| `setup-pitfalls.md` (or `setup-pitfalls/`) | At minimum: port-forward / off-LAN access; LAN bind / listen address; model download / LM Studio paths; GPU / VRAM limits and graded profiles; Start / Stop service lifecycle; private key / secrets handling (never echo secrets; point to correct local config) |
+
+**Authoring split:** this RFC (Architect) defines the layout + acceptance that an **initial reference pack ships with the implement ticket**. D1 authors the actual markdown content when implementing — do **not** write the long product essays in the specs-only RFC PR. Optionally add a tiny stub tree with README + empty/placeholder files only if needed to lock paths; prefer documenting the required layout here and an acceptance criterion that the implement PR must include the first real pack.
 
 ### Request-budget counter
 
@@ -70,6 +87,8 @@ Relate lightly to RFC-0020 (project knowledge) and RFC-0011 (context repos) but 
 - [ ] System-about / error triggers work with `budget=0`
 - [ ] Privacy: no external fetch for self-about; redaction of secrets in snippets
 - [ ] Chat pipeline hook returns citations; answers that used grounding can cite paths
+- [ ] Initial reference pack ships with the implement ticket under the path contract, covering capability overview, key RFC/spec summaries, and setup pitfalls listed above
+- [ ] Pack is indexed by DocsFirstGrounding; missing files fail closed with a clear "reference missing" note rather than hallucinating
 - [ ] Unit tests for triggers, budget, path confinement, redaction
 - [ ] Unit tests pass (`python3 -m pytest`); no portal required for MVP of this RFC
 
@@ -80,7 +99,7 @@ Relate lightly to RFC-0020 (project knowledge) and RFC-0011 (context repos) but 
 | Backend | agent loop / chat pipeline hook, `search_internal_references` tool, retrieval module |
 | Settings | thin `docs_first_budget` persistence |
 | Tests | `tests/test_docs_first_grounding.py` (triggers, budget, path confinement, redaction) |
-| Docs | `project/jarvis/jarvis/internal/references/` scaffold if missing |
+| Docs | `project/jarvis/jarvis/internal/references/` seeded pack (layout above; content authored in implement ticket) |
 
 ## Out of scope
 
@@ -88,4 +107,4 @@ Full RAG product for user projects (RFC-0020); web search UX; Astra UI redesign;
 
 ## Notes
 
-Complements RFC-0020 (user project workspaces) and RFC-0011 (context repositories) without replacing them. Desktop sign-off optional for live retrieval quality against a populated references tree.
+Complements RFC-0020 (user project workspaces) and RFC-0011 (context repositories) without replacing them. The seeded pack is product content, not a placeholder tree — D1 fills it on the implement ticket. Desktop sign-off optional for live retrieval quality against the shipped pack.
