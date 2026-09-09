@@ -9,6 +9,7 @@ from typing import Any
 import psutil
 
 from ..config import AppSettings, logs_dir
+from ..persona.pack import inject_persona_messages
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, normalize_chat_messages, probe_remote_server, resolve_backend
 from .profiles import ModelProfile, profile_gguf, resolve_mmproj, resolve_profile, declared_profiles
@@ -114,7 +115,8 @@ class InferenceManager:
             message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
             for message in messages
         ]
-        return normalize_chat_messages(typed)
+        with_persona = inject_persona_messages(typed)
+        return normalize_chat_messages(with_persona)
 
     async def chat(
         self,

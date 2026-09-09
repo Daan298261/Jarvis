@@ -121,6 +121,15 @@ class SocialPerceptionSettings(BaseModel):
     max_summary_retention_hours: int = Field(default=24, ge=1, le=168)
 
 
+class TtsSettings(BaseModel):
+    """Text-to-speech preferences for chat replies and voice output."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    speak_chat_replies: bool = True
+    voice_profile_id: str = ""
+
+
 class IdentityRecognitionSettings(BaseModel):
     """Explicit, local-only biometric identity matching. Disabled by default."""
 
@@ -161,6 +170,7 @@ class AppSettings(BaseModel):
     presentation: PresentationSettings = Field(default_factory=PresentationSettings)
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
+    tts: TtsSettings = Field(default_factory=TtsSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
