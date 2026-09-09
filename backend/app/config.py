@@ -74,6 +74,19 @@ class BrowserSettings(BaseModel):
     browser_use_model: str = "Qwen3.5-27B"
 
 
+class VoiceSettings(BaseModel):
+    """Persisted active voice profile selection (RFC-0062)."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    active_profile_id: str = Field(
+        default="butler_original_v1",
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z0-9_]+$",
+    )
+
+
 class CodingSettings(BaseModel):
     composer_model: str = "composer-2.5"
     grok_model: str = "grok-4.6"
@@ -159,6 +172,7 @@ class AppSettings(BaseModel):
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     self_dev: SelfDevSettings = Field(default_factory=SelfDevSettings)
     presentation: PresentationSettings = Field(default_factory=PresentationSettings)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     allowed_directories: list[str] = Field(default_factory=list)
