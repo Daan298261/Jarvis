@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
+import {
+  readTtsBootstrap,
+  refreshTtsFromBackend,
+  TTS_SETTINGS_CHANGED_EVENT,
+  updateTtsSettings,
+  type TtsSettings,
+} from "../tts/chatTtsSettings"
+import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { AutonomySection } from "./Autonomy"
 import { LicenseSettings } from "./License"
 
@@ -12,6 +20,7 @@ export function SettingsPage() {
   const [queueStatus, setQueueStatus] = useState<any>(null)
   const [inferenceKeyDraft, setInferenceKeyDraft] = useState("")
   const [msg, setMsg] = useState("")
+  const [speakChatReplies, setSpeakChatReplies] = useState(() => readTtsBootstrap().speak_chat_replies)
 
   async function loadData() {
     const [s, a, q] = await Promise.all([
@@ -25,12 +34,25 @@ export function SettingsPage() {
         delete inference.api_key
       }
       setSettings({ ...s, inference })
+      if (s.tts && typeof s.tts.speak_chat_replies === "boolean") {
+        setSpeakChatReplies(s.tts.speak_chat_replies)
+      }
     }
     if (a) setAuthStatus(a)
     if (q) setQueueStatus(q)
   }
 
   useEffect(() => { loadData() }, [])
+
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const custom = event as CustomEvent<TtsSettings>
+      setSpeakChatReplies(custom.detail.speak_chat_replies)
+    }
+    window.addEventListener(TTS_SETTINGS_CHANGED_EVENT, onChanged)
+    refreshTtsFromBackend().then((tts) => setSpeakChatReplies(tts.speak_chat_replies)).catch(() => undefined)
+    return () => window.removeEventListener(TTS_SETTINGS_CHANGED_EVENT, onChanged)
+  }, [])
 
   async function save(patch: any) {
     await api("/api/settings", { method: "PUT", body: JSON.stringify(patch) })
@@ -94,6 +116,32 @@ export function SettingsPage() {
             Open guest portals
           </Link>
         </div>
+      </div>
+
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Voice &amp; speech</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Jarvis can speak typed chat replies aloud using local TTS (Windows SAPI, espeak-ng, or pyttsx3).
+          Text always appears even when speech is off or TTS fails.
+        </p>
+        <VoiceProfilePicker />
+
+        <label className="row" style={{ marginTop: 12 }}>
+          <input
+            type="checkbox"
+            checked={speakChatReplies}
+            onChange={(e) => {
+              const enabled = e.target.checked
+              setSpeakChatReplies(enabled)
+              void updateTtsSettings({ speak_chat_replies: enabled })
+            }}
+          />
+          <strong>Speak chat replies</strong>
+        </label>
+        <p className="lede" style={{ margin: 0, fontSize: 13 }}>
+          Spoken replies use the active voice profile and universal Jarvis persona pack (backend injection — RFC-0061/0062 D1/D2).
+          You can also mute speech from the chat composer without opening Settings.
+        </p>
       </div>
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>

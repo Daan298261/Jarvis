@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
+import { speakChatReply, stopChatTts } from "../tts/chatTtsPlayer"
+import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null }) => void
@@ -15,7 +18,10 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [keyInput, setKeyInput] = useState<string>(getPrivateKey())
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [recording] = useState(false)
+  const [speaking, setSpeaking] = useState(false)
+  const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
+  const spokenRef = useRef<string>("")
 
   useEffect(() => {
     if (!id) {
@@ -40,8 +46,22 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   }, [id])
 
   useEffect(() => {
-    onMoodChange?.({ recording, speaking: false, task: id && task?.id === id ? task : null })
-  }, [recording, task, id, onMoodChange])
+    onMoodChange?.({ recording, speaking, task: id && task?.id === id ? task : null })
+  }, [recording, speaking, task, id, onMoodChange])
+
+  useEffect(() => {
+    const shown = id && task?.id === id ? task : null
+    if (!speakChatReplies || !shown || shown.status !== "completed") return
+    const text = (shown.result || shown.error || "").trim()
+    if (!text) return
+    const key = `${shown.id}:${text}`
+    if (spokenRef.current === key) return
+    spokenRef.current = key
+    void speakChatReply(text, {
+      onStart: () => setSpeaking(true),
+      onEnd: () => setSpeaking(false),
+    })
+  }, [speakChatReplies, task, id])
 
   const events = task?.events || []
   const visible = useMemo(
@@ -58,6 +78,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   async function submit() {
     const text = prompt.trim()
     if (!id && !text) return
+    stopChatTts()
+    setSpeaking(false)
     setBusy(true)
     try {
       if (id) {
@@ -162,6 +184,11 @@ export function HudChat({ onMoodChange }: HudChatProps) {
           aria-label="Message Jarvis"
         />
         <div className="hud-composer-actions">
+          <ChatTtsMuteButton
+            enabled={speakChatReplies}
+            variant="hud"
+            onToggle={(enabled) => { void setSpeakChatReplies(enabled) }}
+          />
           {shown && running && (
             <button
               className="btn secondary"

@@ -505,6 +505,22 @@
   background: rgba(116, 218, 247, 0.16);
 }
 
+.hud-tts-mute,
+.hud-app .btn.hud-tts-mute {
+  min-width: 0;
+  border-radius: 12px;
+  border-color: rgba(128, 223, 250, 0.18);
+  color: rgba(214, 240, 248, 0.88);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.hud-tts-mute.muted,
+.hud-app .btn.hud-tts-mute.muted {
+  border-color: rgba(255, 138, 61, 0.32);
+  color: rgba(255, 186, 140, 0.92);
+}
+
 .hud-auth-card {
   border-color: rgba(255, 138, 61, 0.28);
   border-radius: 13px;
