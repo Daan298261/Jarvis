@@ -1,12 +1,13 @@
-import { Component, type ErrorInfo, type ReactNode } from "react"
+import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react"
 import { NeuralPresence } from "./renderers/NeuralPresence"
+import { supportsHumanoidRuntime } from "./renderers/humanoidRuntime"
 import { PresenceFallback } from "./PresenceFallback"
 import type { EffectivePresence, PresenceSnapshot, PresentationSettings } from "./presenceTypes"
 
-const HUMANOID_RUNTIME_AVAILABLE = false
+const HumanoidPresence = lazy(() => import("./renderers/HumanoidPresence"))
 
 function resolvePresence(settings: PresentationSettings): EffectivePresence {
-  if (settings.requestedPresence === "humanoid" && !HUMANOID_RUNTIME_AVAILABLE) {
+  if (settings.requestedPresence === "humanoid" && !supportsHumanoidRuntime()) {
     return {
       requested: "humanoid",
       effective: "neural",
@@ -52,7 +53,12 @@ type PresenceHostProps = {
 
 export function PresenceHost({ snapshot, settings, size = 540 }: PresenceHostProps) {
   const resolved = resolvePresence(settings)
-  const fallback = <PresenceFallback snapshot={snapshot} />
+  const staticFallback = <PresenceFallback snapshot={snapshot} />
+  const neuralFallback = (
+    <PresenceErrorBoundary fallback={staticFallback}>
+      <NeuralPresence snapshot={snapshot} settings={settings} size={size} />
+    </PresenceErrorBoundary>
+  )
 
   return (
     <div
@@ -61,14 +67,18 @@ export function PresenceHost({ snapshot, settings, size = 540 }: PresenceHostPro
       data-effective-presence={resolved.effective}
       data-fallback-reason={resolved.fallbackReason || ""}
     >
-      <PresenceErrorBoundary fallback={fallback}>
-        {resolved.effective === "none" ? fallback : (
-          <NeuralPresence snapshot={snapshot} settings={settings} size={size} />
-        )}
-      </PresenceErrorBoundary>
-      {resolved.fallbackReason === "renderer_unavailable" && (
+      {resolved.effective === "none" && staticFallback}
+      {resolved.effective === "neural" && neuralFallback}
+      {resolved.effective === "humanoid" && (
+        <PresenceErrorBoundary key="humanoid" fallback={neuralFallback}>
+          <Suspense fallback={neuralFallback}>
+            <HumanoidPresence snapshot={snapshot} settings={settings} size={size} />
+          </Suspense>
+        </PresenceErrorBoundary>
+      )}
+      {resolved.fallbackReason && (
         <span className="jarvis-presence-fallback-note" role="status">
-          Humanoid selected · Neural active until the humanoid runtime is installed
+          Humanoid selected · Neural active because WebGL is unavailable
         </span>
       )}
     </div>

@@ -200,7 +200,7 @@
 }
 
 .hud-home {
-  width: min(900px, 100%);
+  width: min(1100px, 100%);
   min-height: 100%;
   display: flex;
   flex-direction: column;
@@ -212,7 +212,7 @@
 
 .hud-orb-zone {
   position: relative;
-  width: min(620px, 76vw);
+  width: min(900px, 88vw);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -697,7 +697,7 @@
 
   .hud-top-right { justify-self: end; }
   .hud-stage { padding-inline: 12px; }
-  .hud-orb-zone { width: min(560px, 92vw); }
+  .hud-orb-zone { width: min(700px, 96vw); }
   .hud-bottom-group:last-child { display: none; }
 }
 

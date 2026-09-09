@@ -46,8 +46,12 @@
 }
 
 .jarvis-presence-controls {
-  width: min(92vw, 560px);
-  margin-top: 12px;
+  position: absolute;
+  top: 12px;
+  right: 3%;
+  z-index: 12;
+  width: auto;
+  margin: 0;
   color: rgba(225, 244, 250, 0.82);
   font-size: 12px;
 }
@@ -63,6 +67,10 @@
 }
 
 .jarvis-presence-controls-body {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  width: min(560px, calc(100vw - 32px));
   margin-top: 10px;
   padding: 12px;
   display: grid;
