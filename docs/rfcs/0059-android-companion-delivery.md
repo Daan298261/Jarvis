@@ -25,13 +25,15 @@ to this project. Deployments require operator configuration, never embedded secr
 
 ## Acceptance criteria
 
-- [ ] Installable Android APK with Apex home, chat, task/model control and settings.
-- [ ] Owner-confirmed device enrollment, proof of key possession, revocation and TLS.
-- [ ] Persistent conversations, attachments and restart-safe schedules.
-- [ ] STT/TTS and native calls with authenticated signaling and push adapter.
-- [ ] Provisioning creates signed APKs without changing signing identity on update.
-- [ ] Direct/relay transport reports verified connectivity or actionable limitations.
+- [x] Installable Android APK with Apex home, chat, task/model control and settings.
+- [x] Owner-confirmed device enrollment, proof of key possession, revocation and TLS.
+- [x] Persistent conversations, attachments and restart-safe schedules.
+- [x] STT/TTS and native calls with authenticated signaling and push adapter.
+- [x] Provisioning creates signed APKs without changing signing identity on update.
+- [x] Direct/relay transport reports verified connectivity or actionable limitations.
 - [ ] Security, idempotency and schedule tests; backend suite; Android build and lint.
+  Focused tests and Android checks pass; the full Windows backend suite still has
+  five failures reproduced on the base revision.
 - [ ] Real-device incoming calls and live-model acceptance recorded separately.
 
 ## Boundaries
