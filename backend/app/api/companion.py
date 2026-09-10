@@ -131,6 +131,16 @@ async def events(after: int = Query(0, ge=0), device=Device):
     return await service.events(after)
 
 
+class Approval(BaseModel):
+    token: str = Field(min_length=20, max_length=100)
+    approved: bool
+
+
+@router.post("/tasks/{task_id}/approve")
+async def approve_task(task_id: uuid.UUID, body: Approval, device=Device):
+    return await service.approve(str(task_id), body.token, body.approved)
+
+
 @router.post("/attachments")
 async def upload(request: Request, device=Device):
     attachment_id = str(uuid.uuid4())

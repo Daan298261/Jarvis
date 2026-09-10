@@ -15,6 +15,11 @@ preview, not a production remote-access release.
 - Device-authenticated, allowlisted TLS gateway; owner/desktop APIs are not forwarded.
 - WebRTC voice bridge, call signaling, Android Telecom integration and optional FCM
   wake adapter. Calls require additional runtime dependencies and device validation.
+- Exact-action, expiring task approvals with protection against stale/replayed dialogs.
+- Encrypted pending-message recovery with stable request IDs, foreground-only polling,
+  incoming intent handling, call mute/audio-route controls and queued voice follow-ups.
+- Desktop owner pairing/build controls and a personalized release APK builder with a
+  persistent signing identity. Relay/push service source lives in `services/mobile-relay/`.
 
 ## Build
 
@@ -78,14 +83,16 @@ sends only destination registration token, opaque event ID and event kind. A rea
 FCM project and compatible push service are required. No public infrastructure is
 deployed by this branch yet.
 
-## Verification (2026-09-09)
+## Verification (2026-09-10)
 
 - Android debug APK: built successfully.
 - Android lint: passes; warnings include older pinned libraries and intentional
   Keystore/pinned-TLS/locally bundled WebView usage.
-- `tests/test_mobile_companion.py`: 9 passing tests (pairing, replay, copied invite,
-  revocation, localhost authentication, attachment ownership, TLS identity, gateway
-  isolation and schedule DST/missed-run handling).
+- 27 focused mobile/auth/voice tests pass, including stale/replayed approvals,
+  interrupted speech synthesis, stop commands during an answer and queued follow-ups.
+- Personalized signed release build and APK signature verification passed at the
+  previous checkpoint. That test APK used a loopback endpoint, not a live phone pairing.
+- GitHub Android build, frontend build and backend checks passed on `5b7740e`.
 - Broader pytest attempt: 109 passed before stopping at 5 failures. All 5 failures
   reproduced on untouched base `146adab`: shell benchmark missing `sh`, best-of-N
   fixture output missing, two Cursor installation assumptions, and a Linux-only
@@ -94,10 +101,11 @@ deployed by this branch yet.
 ## Remaining release acceptance
 
 - Full router automation and automatic hosted relay provisioning; public push deployment.
-- Installer-integrated personalized release APK build/signing and secure downloads.
+- End-to-end installer/gateway startup integration; personalized signing/build and
+  owner-authenticated downloads are implemented, but not verified on a paired phone.
 - Physical-phone incoming/background calls, audio routes, interruptions, reconnection,
   process recreation, foreground-service/permission behavior and device battery tests.
-- Durable mobile outbox/recovery, complete coding approvals, schedule editing and
-  generation artifact integration. Studio clearly reports BlackGrid as disconnected.
+- Device acceptance for encrypted outbox recovery and coding approvals; schedule
+  editing and generation artifacts. Studio reports BlackGrid as disconnected.
 - Live-model and multi-node execution verification. The phone is a controller;
   this branch does not implement new swarm consensus or phone-side inference.

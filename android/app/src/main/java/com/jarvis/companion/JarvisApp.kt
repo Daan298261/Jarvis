@@ -3,6 +3,7 @@ package com.jarvis.companion
 import android.app.Application
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
+import kotlinx.coroutines.launch
 
 class JarvisApp : Application() {
     lateinit var api: JarvisApi
@@ -16,6 +17,15 @@ class JarvisApp : Application() {
                     .setApiKey(config.getString("api_key"))
                     .setProjectId(config.getString("project_id"))
                     .setGcmSenderId(config.getString("sender_id")).build())
+            }
+        }
+        registerPush()
+    }
+    fun registerPush() {
+        if (api.deviceId.isEmpty() || FirebaseApp.getApps(this).isEmpty()) return
+        com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                runCatching { api.json("/preferences", "PUT", org.json.JSONObject().put("push_token", token)) }
             }
         }
     }

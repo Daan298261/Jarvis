@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 import uuid
+import secrets
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -54,7 +55,34 @@ async def task_snapshot(task_id: str):
                    "stale": task.status not in TERMINAL and time.time() - last_time > 90,
                    "worker": "Jarvis", "node": "leader", "elapsed_seconds": task.duration_seconds if task.status in TERMINAL else max(0, time.time() - (task.started_at or task.created_at).replace(tzinfo=timezone.utc).timestamp()),
                    "events": [{"id": e.id, "kind": e.kind, "title": e.title, "detail": e.detail, "created_at": iso(e.created_at)} for e in reversed(events)]})
+    if task.waiting_for_confirmation:
+        payload_hash = hashlib.sha256((task.confirmation_payload or "").encode()).hexdigest()
+        with database() as db:
+            approval = get(db, "approval", task_id)
+            if not approval or approval["payload_hash"] != payload_hash or approval["expires_at"] < time.time():
+                approval = {"token": secrets.token_urlsafe(32), "payload_hash": payload_hash, "expires_at": time.time() + 300}
+                put(db, "approval", task_id, approval)
+        result["approval"] = {"token": approval["token"], "expires_at": approval["expires_at"], "action": task.confirmation_payload}
     return result
+
+
+async def approve(task_id: str, token: str, approved: bool):
+    async with SUBMIT_LOCK:
+        with database() as db:
+            approval = get(db, "approval", task_id)
+        if not approval or approval["expires_at"] < time.time() or not secrets.compare_digest(approval["token"], token):
+            raise HTTPException(409, "Approval expired; inspect the current action again")
+        async with SessionLocal() as db:
+            task = await db.get(Task, task_id)
+        if not task or hashlib.sha256((task.confirmation_payload or "").encode()).hexdigest() != approval["payload_hash"]:
+            raise HTTPException(409, "The pending action has changed")
+        try:
+            await AGENT.confirm_task(task_id, approved, expected_payload=task.confirmation_payload or "")
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        with database() as db:
+            db.execute("DELETE FROM records WHERE kind='approval' AND id=?", (task_id,))
+    return await task_snapshot(task_id)
 
 
 async def conversations():

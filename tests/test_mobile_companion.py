@@ -68,6 +68,47 @@ def test_copied_invitation_cannot_enroll_second_phone(mobile_env):
     assert error.value.status_code == 409
 
 
+@pytest.mark.asyncio
+async def test_mobile_approval_is_single_use_and_bound_to_current_action(mobile_env, jarvis_env):
+    from app.mobile import service
+    from app.db.models import Task
+    from app.db.session import SessionLocal
+    async with SessionLocal() as db:
+        db.add(Task(id="approval-test", title="Test", prompt="Test", status="waiting", waiting_for_confirmation=True,
+                    confirmation_payload='{"tool":"file","path":"first"}'))
+        await db.commit()
+    first = (await service.task_snapshot("approval-test"))["approval"]
+    async with SessionLocal() as db:
+        task = await db.get(Task, "approval-test")
+        task.confirmation_payload = '{"tool":"file","path":"second"}'
+        await db.commit()
+    with pytest.raises(HTTPException) as error:
+        await service.approve("approval-test", first["token"], True)
+    assert error.value.status_code == 409
+    second = (await service.task_snapshot("approval-test"))["approval"]
+    assert second["token"] != first["token"]
+    assert (await service.approve("approval-test", second["token"], False))["status"] == "cancelled"
+    with pytest.raises(HTTPException) as error:
+        await service.approve("approval-test", second["token"], True)
+    assert error.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_agent_approval_compare_and_swap_rejects_racing_change(mobile_env, jarvis_env):
+    from app.agent.loop import AGENT
+    from app.db.models import Task
+    from app.db.session import SessionLocal
+    async with SessionLocal() as db:
+        db.add(Task(id="approval-race", title="Test", prompt="Test", waiting_for_confirmation=True, confirmation_payload='{"new":true}'))
+        await db.commit()
+    with pytest.raises(ValueError):
+        await AGENT.confirm_task("approval-race", True, expected_payload='{"old":true}')
+    async with SessionLocal() as db:
+        task = await db.get(Task, "approval-race")
+        assert task.waiting_for_confirmation
+        assert task.confirmation_payload == '{"new":true}'
+
+
 def test_expired_invitation(mobile_env):
     _, public = phone()
     invitation = identity.invite(-1)

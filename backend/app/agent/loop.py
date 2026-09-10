@@ -220,11 +220,21 @@ class AgentRuntime:
         self._tasks[task_id] = runner
         return task
 
-    async def confirm_task(self, task_id: str, approved: bool) -> Task:
+    async def confirm_task(self, task_id: str, approved: bool, expected_payload: str | None = None) -> Task:
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if not task:
                 raise KeyError(task_id)
+            if expected_payload is not None:
+                from sqlalchemy import update
+                # Bind mobile approval to exactly one still-pending action. A stale
+                # dialog or concurrent second device cannot approve its replacement.
+                changed = await session.execute(update(Task).where(
+                    Task.id == task_id, Task.waiting_for_confirmation.is_(True),
+                    Task.confirmation_payload == expected_payload,
+                ).values(waiting_for_confirmation=False))
+                if changed.rowcount != 1:
+                    raise ValueError("The pending action changed or was already resolved")
             if not approved:
                 task.status = "cancelled"
                 task.stage = "cancelled"

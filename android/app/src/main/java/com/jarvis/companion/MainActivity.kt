@@ -38,14 +38,31 @@ private val Panel = Color(0xFF111B28)
 private val Muted = Color(0xFF8C9CAF)
 
 class MainActivity : ComponentActivity() {
+    private var latestIntent by mutableStateOf<Intent?>(null)
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        latestIntent = intent
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        latestIntent = intent
         setContent {
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
+            val callState by CurrentCall.state.collectAsStateWithLifecycle()
             var tab by remember { mutableStateOf(if (model.api.endpoint.isEmpty()) "More" else "Home") }
-            var draft by remember { mutableStateOf(intent.getStringExtra(Intent.EXTRA_TEXT) ?: "") }
-            var incomingCall by remember { mutableStateOf(intent.getStringExtra("incoming_call")) }
+            var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+            var incomingCall by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+            DisposableEffect(model) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_START) model.setForeground(true)
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) model.setForeground(false)
+                }
+                lifecycle.addObserver(observer)
+                model.setForeground(lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+                onDispose { lifecycle.removeObserver(observer); model.setForeground(false) }
+            }
             val callPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
                 if (granted) {
                     val service = Intent(this@MainActivity, CallService::class.java).setAction("outgoing")
@@ -59,8 +76,17 @@ class MainActivity : ComponentActivity() {
             val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
             LaunchedEffect(Unit) {
                 if (android.os.Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            LaunchedEffect(latestIntent) {
+                val delivered = latestIntent ?: return@LaunchedEffect
+                delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
+                delivered.getStringExtra(Intent.EXTRA_TEXT)?.let { draft = it; tab = "Chat" }
                 @Suppress("DEPRECATION")
-                (intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))?.let(model::upload)
+                (delivered.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))?.let { model.upload(it); tab = "Chat" }
+                // Consume extras so rotating the activity cannot upload the same share again.
+                delivered.removeExtra(Intent.EXTRA_STREAM)
+                delivered.removeExtra(Intent.EXTRA_TEXT)
+                delivered.removeExtra("incoming_call")
             }
             MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel, onSurface = Color(0xFFE7EDF5), secondary = Color(0xFF74DCCD))) {
                 if (incomingCall != null) AlertDialog(onDismissRequest = { incomingCall = null }, title = { Text("Jarvis is calling") },
@@ -82,6 +108,39 @@ class MainActivity : ComponentActivity() {
                         }
                         if (state.error != null) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF34251D)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                             Text(state.error.orEmpty(), Modifier.padding(12.dp), fontSize = 12.sp)
+                        }
+                        if (state.pendingMessage) Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            var dismiss by remember { mutableStateOf(false) }
+                            Column(Modifier.padding(12.dp)) {
+                                Text("A message is waiting for confirmation", fontSize = 13.sp)
+                                Row {
+                                    TextButton(onClick = { model.retryPending() }, enabled = !state.busy) { Text("Retry safely") }
+                                    TextButton(onClick = { dismiss = true }, enabled = !state.busy) { Text("Dismiss") }
+                                }
+                            }
+                            if (dismiss) AlertDialog(onDismissRequest = { dismiss = false }, title = { Text("Dismiss pending message?") },
+                                text = { Text("Jarvis may already be working on it. Check Tasks before sending it again. Dismissing does not cancel a task.") },
+                                confirmButton = { TextButton(onClick = { dismiss = false; model.dismissPending() }) { Text("Dismiss") } },
+                                dismissButton = { TextButton(onClick = { dismiss = false }) { Text("Keep") } })
+                        }
+                        if (callState.active) Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            var routes by remember { mutableStateOf(false) }
+                            Column(Modifier.padding(12.dp)) {
+                                Text(callState.status, color = Gold)
+                                Row {
+                                    TextButton(onClick = { startService(Intent(this@MainActivity, CallService::class.java).setAction("mute")) }) { Text(if (callState.muted) "Unmute" else "Mute") }
+                                    Box {
+                                        TextButton(onClick = { routes = true }) { Text(callState.route.ifEmpty { "Audio" }) }
+                                        DropdownMenu(routes, { routes = false }) { callState.routes.forEach { (id, name) ->
+                                            DropdownMenuItem(text = { Text(name) }, onClick = {
+                                                routes = false
+                                                startService(Intent(this@MainActivity, CallService::class.java).setAction("route").putExtra("endpoint", id))
+                                            })
+                                        } }
+                                    }
+                                    TextButton(onClick = { startService(Intent(this@MainActivity, CallService::class.java).setAction("end")) }) { Text("Hang up") }
+                                }
+                            }
                         }
                         when (tab) {
                             "Home" -> {
@@ -209,6 +268,14 @@ class MainActivity : ComponentActivity() {
         Text(task.optString("title"), fontWeight = FontWeight.Medium, modifier = Modifier.padding(vertical = 8.dp))
         Text(task.optString("activity"), color = Muted, fontSize = 12.sp)
         Text("${task.optString("worker")} · ${task.optString("node")} · ${task.optDouble("elapsed_seconds").toInt()}s", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
+        task.optJSONObject("approval")?.let { approval ->
+            Text("Approval required", color = Gold, modifier = Modifier.padding(top = 12.dp))
+            Text(approval.optString("action"), fontSize = 12.sp)
+            Row {
+                TextButton(onClick = { model.approve(task.getString("id"), approval.getString("token"), true) }) { Text("Approve this action") }
+                TextButton(onClick = { model.approve(task.getString("id"), approval.getString("token"), false) }) { Text("Reject") }
+            }
+        }
         Row {
             TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Less" else "Activity") }
             if (task.optString("status") in listOf("queued", "running", "waiting")) TextButton(onClick = { model.cancel(task.getString("id")) }) { Text("Cancel") }

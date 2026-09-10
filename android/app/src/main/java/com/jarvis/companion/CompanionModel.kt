@@ -17,7 +17,7 @@ import java.util.UUID
 
 data class CompanionState(
     val connected: Boolean = false, val activity: String = "Offline", val error: String? = null,
-    val busy: Boolean = false, val recording: Boolean = false, val speaking: Boolean = false,
+    val busy: Boolean = false, val recording: Boolean = false, val speaking: Boolean = false, val pendingMessage: Boolean = false,
     val tasks: List<JSONObject> = emptyList(), val models: List<JSONObject> = emptyList(),
     val messages: List<JSONObject> = emptyList(), val conversations: List<JSONObject> = emptyList(),
     val schedules: List<JSONObject> = emptyList(), val calls: List<JSONObject> = emptyList(),
@@ -34,18 +34,24 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var recorder: MediaRecorder? = null
     private var recordingFile: File? = null
     private var player: MediaPlayer? = null
-    private var pendingRequest: Pair<String, String>? = null
+    private val outbox = Outbox(app)
+    private var foreground = false
+    private val sendLock = kotlinx.coroutines.sync.Mutex()
     init {
+        runCatching { outbox.read() }.onSuccess { mutable.value = mutable.value.copy(pendingMessage = it != null) }
+            .onFailure { mutable.value = mutable.value.copy(error = "Cannot recover pending message: ${it.message}") }
         viewModelScope.launch {
             while (true) {
-                if (api.deviceId.isNotEmpty()) runCatching { refresh() }.onFailure { mutable.value = mutable.value.copy(connected = false, activity = "Reconnecting", error = it.message) }
+                if (foreground && api.deviceId.isNotEmpty()) runCatching { refresh() }.onFailure { mutable.value = mutable.value.copy(connected = false, activity = "Reconnecting", error = it.message) }
                 delay(4000)
             }
         }
     }
+    fun setForeground(value: Boolean) { foreground = value }
     fun action(block: suspend () -> Unit) = viewModelScope.launch {
         mutable.value = mutable.value.copy(busy = true, error = null)
-        try { block() } catch (e: Exception) { mutable.value = mutable.value.copy(error = e.message) }
+        try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { mutable.value = mutable.value.copy(error = e.message) }
         finally { mutable.value = mutable.value.copy(busy = false) }
     }
     suspend fun refresh() {
@@ -59,32 +65,50 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val messages = if (cid != null) api.json("/conversations/$cid").getJSONArray("messages").objects() else emptyList()
         val active = tasks.firstOrNull { it.optString("status") in listOf("queued", "running", "waiting") }
         mutable.value = mutable.value.copy(connected = true, activity = active?.optString("activity") ?: "Ready when you are",
-            tasks = tasks, models = models, conversations = conversations, schedules = schedules, calls = calls, messages = messages, capabilities = capabilities)
+            tasks = tasks, models = models, conversations = conversations, schedules = schedules, calls = calls, messages = messages, capabilities = capabilities,
+            pendingMessage = outbox.read() != null)
     }
     fun pair(endpoint: String, pin: String, invitation: String) = action {
         api.configure(endpoint, pin)
         if (api.deviceId.isEmpty()) api.pair(invitation.trim())
         api.session()
+        (getApplication<Application>() as JarvisApp).registerPush()
         refresh()
     }
     fun selectModel(value: String) { mutable.value = mutable.value.copy(selectedModel = value) }
     fun openConversation(id: String?) = action {
         mutable.value = mutable.value.copy(conversationId = id, messages = emptyList())
-        pendingRequest = null
         refresh()
     }
     fun send(text: String) = action { sendNow(text) }
     private suspend fun sendNow(text: String) {
         if (text.isBlank()) return
+        sendLock.lock()
+        try {
+        check(outbox.read() == null) { "Resolve the pending message before sending another" }
         val state = mutable.value
         val content = JSONObject().put("text", text).put("profile", state.selectedModel)
             .put("attachments", JSONArray(state.attachmentIds))
         state.conversationId?.let { content.put("conversation_id", it) }
-        val signature = content.toString()
-        val request = pendingRequest?.takeIf { it.first == signature }?.second ?: UUID.randomUUID().toString()
-        pendingRequest = signature to request
-        val result = api.json("/messages", "POST", content.put("request_id", request))
-        pendingRequest = null
+        content.put("request_id", UUID.randomUUID().toString())
+        outbox.save(JSONObject().put("device", api.deviceId).put("pin", api.pin).put("body", content))
+        mutable.value = mutable.value.copy(pendingMessage = true)
+        deliverPending()
+        } finally { sendLock.unlock() }
+    }
+    fun retryPending() = action {
+        sendLock.lock()
+        try { deliverPending() } finally { sendLock.unlock() }
+    }
+    fun dismissPending() = action {
+        sendLock.lock()
+        try { outbox.clear(); mutable.value = mutable.value.copy(pendingMessage = false) } finally { sendLock.unlock() }
+    }
+    private suspend fun deliverPending() {
+        val pending = outbox.read() ?: return
+        check(pending.getString("device") == api.deviceId && pending.getString("pin") == api.pin) { "This pending message belongs to a different pairing" }
+        val result = api.json("/messages", "POST", pending.getJSONObject("body"))
+        outbox.clear()
         mutable.value = mutable.value.copy(conversationId = result.getString("conversation_id"), attachmentIds = emptyList())
         refresh()
     }
@@ -108,6 +132,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         mutable.value = mutable.value.copy(attachmentIds = mutable.value.attachmentIds + result.getString("id"))
     }
     fun cancel(taskId: String) = action { api.json("/tasks/$taskId/cancel", "POST"); refresh() }
+    fun approve(taskId: String, token: String, approved: Boolean) = action {
+        api.json("/tasks/$taskId/approve", "POST", JSONObject().put("token", token).put("approved", approved)); refresh()
+    }
     fun schedule(prompt: String, instant: java.time.ZonedDateTime, recurrence: String) = action {
         api.json("/schedules", "POST", JSONObject().put("prompt", prompt).put("next_run", instant.toEpochSecond()).put("timezone", instant.zone.id)
             .put("recurrence", recurrence).put("profile", mutable.value.selectedModel))

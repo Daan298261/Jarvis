@@ -7,6 +7,10 @@ import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.telecom.CallAttributesCompat
 import androidx.core.telecom.CallsManager
+import androidx.core.telecom.CallControlScope
+import androidx.core.telecom.CallEndpointCompat
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import android.telecom.DisconnectCause
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -17,6 +21,13 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 private const val CALL_CHANNEL = "jarvis-calls"
+
+data class CallUiState(val active: Boolean = false, val status: String = "", val muted: Boolean = false,
+                       val route: String = "", val routes: List<Pair<String, String>> = emptyList())
+object CurrentCall {
+    internal val mutable = MutableStateFlow(CallUiState())
+    val state = mutable.asStateFlow()
+}
 
 class JarvisPushService : FirebaseMessagingService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -59,14 +70,43 @@ class CallService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var media: RealtimeMediaClient? = null
     private var callId: String? = null
+    private var starting = false
+    private var control: CallControlScope? = null
+    private var endpoints: List<CallEndpointCompat> = emptyList()
+    private var userMuted = false
+    private var systemMuted = false
+    private var held = false
+    private fun applyMute() {
+        media?.setMuted(userMuted || systemMuted || held)
+        CurrentCall.mutable.value = CurrentCall.mutable.value.copy(muted = userMuted || systemMuted || held)
+    }
     private val api get() = (application as JarvisApp).api
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action in listOf("end", "decline")) {
-            scope.launch { val id = intent?.getStringExtra("call_id") ?: callId; if (id != null) runCatching { api.json("/calls/$id/end", "POST") }; stopSelf() }
+        if (intent?.action == "mute") {
+            userMuted = !userMuted; applyMute()
             return START_NOT_STICKY
         }
-        if (callId != null) return START_NOT_STICKY
+        if (intent?.action == "route") {
+            val endpoint = endpoints.firstOrNull { it.identifier.toString() == intent.getStringExtra("endpoint") }
+            if (endpoint != null) scope.launch { control?.requestEndpointChange(endpoint) }
+            return START_NOT_STICKY
+        }
+        if (intent?.action in listOf("end", "decline")) {
+            scope.launch {
+                runCatching { control?.disconnect(DisconnectCause(DisconnectCause.LOCAL)) }
+                val id = intent?.getStringExtra("call_id") ?: callId
+                if (id != null) {
+                    getSystemService(NotificationManager::class.java).cancel(id.hashCode())
+                    runCatching { api.json("/calls/$id/end", "POST") }
+                }
+                stopSelf()
+            }
+            return START_NOT_STICKY
+        }
+        if (callId != null || starting) return START_NOT_STICKY
+        starting = true
+        CurrentCall.mutable.value = CallUiState(active = true, status = "Connecting")
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Jarvis calls", NotificationManager.IMPORTANCE_HIGH))
         val hangup = PendingIntent.getService(this, 1, Intent(this, CallService::class.java).setAction("end"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -77,22 +117,36 @@ class CallService : Service() {
                 val incoming = intent?.getStringExtra("call_id")
                 val call = if (incoming != null) api.json("/calls/$incoming") else api.json("/calls", "POST", JSONObject())
                 callId = call.getString("id")
+                manager.cancel(callId!!.hashCode())
                 val callsManager = CallsManager(this@CallService)
                 callsManager.registerAppWithTelecom(CallsManager.CAPABILITY_BASELINE)
                 val attributes = CallAttributesCompat("Jarvis", Uri.parse("jarvis:swarm"), if (incoming != null) CallAttributesCompat.DIRECTION_INCOMING else CallAttributesCompat.DIRECTION_OUTGOING)
                 callsManager.addCall(attributes,
                     onAnswer = { },
                     onDisconnect = { stopSelf() },
-                    onSetActive = { },
-                    onSetInactive = { }) {
-                    val control = this
+                    onSetActive = { held = false; applyMute() },
+                    onSetInactive = { held = true; applyMute() }) {
+                    val currentControl = this
+                    control = currentControl
+                    launch { currentControl.isMuted.collect { systemMuted = it; applyMute() } }
+                    launch { currentControl.availableEndpoints.collect { values ->
+                        endpoints = values
+                        CurrentCall.mutable.value = CurrentCall.mutable.value.copy(routes = values.map { it.identifier.toString() to it.name.toString() })
+                    } }
+                    launch { currentControl.currentCallEndpoint.collect { CurrentCall.mutable.value = CurrentCall.mutable.value.copy(route = it.name.toString()) } }
                     scope.launch {
                         try {
-                            media = RealtimeMediaClient(this@CallService)
+                            media = RealtimeMediaClient(this@CallService) { connected ->
+                                scope.launch {
+                                    CurrentCall.mutable.value = CurrentCall.mutable.value.copy(status = if (connected) "Encrypted call" else "Connection lost")
+                                    if (!connected) stopSelf()
+                                }
+                            }
                             media!!.connect(api, call)
-                            if (incoming != null) control.answer(CallAttributesCompat.CALL_TYPE_AUDIO_CALL) else control.setActive()
+                            applyMute()
+                            if (incoming != null) currentControl.answer(CallAttributesCompat.CALL_TYPE_AUDIO_CALL) else currentControl.setActive()
                         } catch (e: Exception) {
-                            control.disconnect(DisconnectCause(DisconnectCause.ERROR))
+                            currentControl.disconnect(DisconnectCause(DisconnectCause.ERROR))
                             stopSelf()
                         }
                     }
@@ -104,10 +158,15 @@ class CallService : Service() {
         }
         return START_NOT_STICKY
     }
-    override fun onDestroy() { media?.close(); scope.cancel(); callId?.let { id -> CoroutineScope(Dispatchers.IO).launch { runCatching { api.json("/calls/$id/end", "POST") } } }; super.onDestroy() }
+    override fun onDestroy() {
+        CurrentCall.mutable.value = CallUiState()
+        media?.close(); scope.cancel()
+        callId?.let { id -> CoroutineScope(Dispatchers.IO).launch { runCatching { api.json("/calls/$id/end", "POST") } } }
+        super.onDestroy()
+    }
 }
 
-class RealtimeMediaClient(context: android.content.Context) {
+class RealtimeMediaClient(context: android.content.Context, private val connection: (Boolean) -> Unit) {
     private val factory: PeerConnectionFactory
     private var peer: PeerConnection? = null
     private var source: AudioSource? = null
@@ -124,7 +183,10 @@ class RealtimeMediaClient(context: android.content.Context) {
         val gathered = CompletableDeferred<Unit>()
         peer = factory.createPeerConnection(PeerConnection.RTCConfiguration(servers), object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState) {}
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {}
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
+                if (state == PeerConnection.IceConnectionState.CONNECTED || state == PeerConnection.IceConnectionState.COMPLETED) connection(true)
+                if (state == PeerConnection.IceConnectionState.FAILED) connection(false)
+            }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) { if (state == PeerConnection.IceGatheringState.COMPLETE) gathered.complete(Unit) }
             override fun onIceCandidate(candidate: IceCandidate) {}
@@ -158,5 +220,6 @@ class RealtimeMediaClient(context: android.content.Context) {
         }
         if (local) peer!!.setLocalDescription(observer, description) else peer!!.setRemoteDescription(observer, description)
     }
+    fun setMuted(muted: Boolean) { track?.setEnabled(!muted) }
     fun close() { peer?.close(); peer?.dispose(); track?.dispose(); source?.dispose(); factory.dispose() }
 }
