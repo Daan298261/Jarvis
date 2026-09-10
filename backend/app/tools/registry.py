@@ -25,6 +25,7 @@ from .verify_code import VerifyCodeTool
 from .external_ingest import ExternalIngestTool
 from .internal_references import InternalReferencesTool
 from .web_fetch import WebFetchTool
+from .mobile_call import MobileCallTool
 
 
 class ToolRegistry:
@@ -57,6 +58,7 @@ class ToolRegistry:
             MCPProxyTool(),
             UFOTool(),
             CuaTool(),
+            MobileCallTool(),
         ]
         self.tools = {tool.name: tool for tool in items}
 

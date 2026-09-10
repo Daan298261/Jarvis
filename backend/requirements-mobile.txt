@@ -1,0 +1,4 @@
+-r requirements.txt
+aiortc>=1.10.1,<2
+tzdata>=2024.2
+miniupnpc>=2.2.8

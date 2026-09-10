@@ -3864,13 +3864,19 @@ export async function getDiagnosticsText(): Promise<{ text: string; diagnostics:
 /** RFC-0063 — owner-side companion pairing codes (D1 backend). */
 export type CompanionPairingCode = {
   code: string
-  expires_at: string
+  expires_at: string | number
   ttl_seconds: number
 }
 
 export type CompanionPairingApiResult =
   | { available: true; pairing: CompanionPairingCode }
   | { available: false; reason: "not_found" | "error"; message?: string }
+
+let lastCompanionPairing: CompanionPairingCode | null = null
+
+function pairingExpiry(pairing: CompanionPairingCode): number {
+  return typeof pairing.expires_at === "number" ? pairing.expires_at * 1000 : Date.parse(pairing.expires_at)
+}
 
 async function companionPairingRequest(
   path: string,
@@ -3901,13 +3907,20 @@ async function companionPairingRequest(
 }
 
 export async function getActiveCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  return companionPairingRequest("/api/mobile/manage/pairing-codes/active")
+  if (lastCompanionPairing && pairingExpiry(lastCompanionPairing) > Date.now()) {
+    return { available: true, pairing: lastCompanionPairing }
+  }
+  return { available: false, reason: "not_found" }
 }
 
 export async function createCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  return companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: "{}" })
+  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: "{}" })
+  if (result.available) lastCompanionPairing = result.pairing
+  return result
 }
 
 export async function regenerateCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  return companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: "{}" })
+  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: "{}" })
+  if (result.available) lastCompanionPairing = result.pairing
+  return result
 }

@@ -1,1 +1,1 @@
-"""Native companion identity and pairing services."""
+"""Native companion services. Jarvis remains the execution authority."""

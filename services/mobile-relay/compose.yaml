@@ -1,0 +1,25 @@
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      RELAY_HOSTNAME: ${RELAY_HOSTNAME:?Set the public hostname}
+      RELAY_REGISTRATION_CODE: ${RELAY_REGISTRATION_CODE:?Set a random registration code}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase.json
+    ports:
+      - "15000-15099:15000-15099"
+    volumes:
+      - relay-data:/data
+      - ${FIREBASE_CREDENTIAL_FILE:?Set the Firebase service account file}:/run/secrets/firebase.json:ro
+  https:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      RELAY_HOSTNAME: ${RELAY_HOSTNAME}
+    ports: ["443:443", "80:80"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+volumes:
+  relay-data:
+  caddy-data:

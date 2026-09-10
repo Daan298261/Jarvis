@@ -53,7 +53,12 @@ def pairing_secret() -> str:
     key = get_effective_private_key(load_settings())
     if key:
         return key
-    return "jarvis-companion-pairing"
+    with database() as db:
+        record = get(db, "secret", "pairing")
+        if not record:
+            record = {"value": secrets.token_urlsafe(48)}
+            put(db, "secret", "pairing", record)
+    return record["value"]
 
 
 def hash_pairing_code(code: str) -> str:
@@ -151,8 +156,8 @@ def pairing_code_status() -> dict:
         }
 
 
-def check_enroll_rate_limit(client_ip: str) -> None:
-    key = f"enroll:{client_ip or 'unknown'}"
+def check_enroll_rate_limit(client_ip: str, device_fingerprint: str = "") -> None:
+    key = f"enroll:{client_ip or 'unknown'}:{device_fingerprint[:16]}"
     now = time.time()
     with database() as db:
         bucket = get(db, "rate_limit", key) or {"attempts": []}
@@ -174,6 +179,7 @@ def _create_pending_device(db, encoded_key: str, name: str) -> dict:
         "created_at": time.time(),
         "notifications": True,
         "critical_calls": False,
+        "voice_profile_id": "",
         "push_token": "",
     }
     put(db, "device", device["id"], device)
@@ -181,11 +187,11 @@ def _create_pending_device(db, encoded_key: str, name: str) -> dict:
 
 
 def enroll_pairing_code(code: str, encoded_key: str, name: str, *, client_ip: str = "") -> dict:
-    check_enroll_rate_limit(client_ip)
     if len(code) != 6 or not code.isdigit():
         raise HTTPException(400, "Pairing code must be exactly 6 digits")
     code_hash = hash_pairing_code(code)
     fp = fingerprint(encoded_key)
+    check_enroll_rate_limit(client_ip, fp)
     with database() as db:
         record = get(db, "pairing_code", code_hash)
         session = get(db, "pairing_session", PAIRING_OWNER)
@@ -213,8 +219,8 @@ def invite(ttl: int = 3600) -> dict:
 
 
 def enroll(token: str, encoded_key: str, name: str, *, client_ip: str = "") -> dict:
-    check_enroll_rate_limit(client_ip)
     fp = fingerprint(encoded_key)
+    check_enroll_rate_limit(client_ip, fp)
     with database() as db:
         invitation = get(db, "invitation", digest(token))
         if not invitation or invitation["expires_at"] < time.time():
