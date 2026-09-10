@@ -379,12 +379,10 @@ class Contact(BaseModel):
 @owner_router.post("/devices/{device_id}/call")
 async def contact(device_id: uuid.UUID, body: Contact):
     from ..mobile.calls import create_call
-    from ..mobile.runtime import push
+    from ..mobile.runtime import deliver_one, enqueue_push
     call = create_call(str(device_id), "incoming", task_id=str(body.task_id) if body.task_id else None, incident_id=str(body.incident_id))
     with database() as db:
         device = get(db, "device", str(device_id))
-    try:
-        delivered = await push(device, call["id"], "call")
-    except Exception:
-        delivered = False
+    queued = enqueue_push(device, call["id"], "call", call["expires_at"])
+    delivered = await deliver_one(queued)
     return {**call, "push_delivered": delivered}
