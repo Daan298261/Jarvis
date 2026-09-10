@@ -1,6 +1,6 @@
 # RFC-0067: Owner chat hides plan/approval chrome; conversational launch greeting
 
-**Status:** accepted  
+**Status:** implemented
 **Queue item:** P0 — Owner HUD usable for talk  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-10
@@ -34,13 +34,13 @@ On app/session start for the owner (cold start or new local session):
 
 ## Acceptance criteria
 
-- [ ] Owner chat default view has no END STATE / ACCEPTANCE / PLAN / persistent Approval-required board
-- [ ] Owner can send a normal chat turn and get a spoken/text reply without clearing plan chrome first
-- [ ] Settings toggle restores plan/approval chrome (default off)
-- [ ] On launch, owner gets one short conversational greeting; TTS speaks it when `speak_chat_replies` is on and not muted
-- [ ] Greet does not fire on mere Classic↔HUD toggle within the same session
-- [ ] Unit/UI tests or smoke for default-hidden chrome + greeting once
-- [ ] `python3 -m pytest`; `npm --prefix frontend run build` if portal touched
+- [x] Owner chat default view has no END STATE / ACCEPTANCE / PLAN / persistent Approval-required board
+- [x] Owner can send a normal chat turn and get a spoken/text reply without clearing plan chrome first
+- [x] Settings toggle restores plan/approval chrome (default off)
+- [x] On launch, owner gets one short conversational greeting; TTS speaks it when `speak_chat_replies` is on and not muted
+- [x] Greet does not fire on mere Classic↔HUD toggle within the same session
+- [x] Unit/UI tests or smoke for default-hidden chrome + greeting once
+- [x] `python3 -m pytest`; `npm --prefix frontend run build` if portal touched
 
 ## Likely files
 
@@ -57,3 +57,10 @@ New agent capabilities, new approval policy engine, Humanoid mesh redesign, inst
 ## Notes
 
 Taco 2026-09-10 via CoS: HUD unusable with plan/approval chrome; want hide-by-default + conversational launch greeting with TTS. Retroactive acceptance documents intent already agreed for implementation.
+
+## Implementation note
+
+Landed on `development` (no new design):
+- Specs: #154 (`92847b0`)
+- D1 greeting + owner chat streaming: #153 (`1e9a638`)
+- UX hide Result/plan chrome: #156 (`2deaf9d`)
