@@ -17,7 +17,8 @@ preview, not a production remote-access release.
   once/daily/weekly schedules.
 - Mobile TTS uses the PC voice-profile catalog with an in-app selector and preview.
   Recorded STT and generated speech use device-authenticated pinned TLS; no speech
-  model or permanent Jarvis credential is stored on the phone.
+  model or permanent Jarvis credential is stored on the phone. The selected voice is
+  bound to the paired device and also applies to live WebRTC call replies.
 - Device-authenticated, allowlisted TLS gateway; owner/desktop APIs are not forwarded.
 - WebRTC voice bridge, call signaling, Android Telecom integration and optional FCM
   wake adapter. Failed media reconnects use ordered, replay-safe offer generations.

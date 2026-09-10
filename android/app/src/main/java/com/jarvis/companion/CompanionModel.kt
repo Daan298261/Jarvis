@@ -126,6 +126,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         if (mutable.value.voiceProfiles.none { it.optString("id") == value && it.optBoolean("available") }) return
         companionPrefs.edit().putString("voice_profile", value).apply()
         mutable.value = mutable.value.copy(selectedVoice = value)
+        action {
+            api.json("/preferences", "PUT", JSONObject().put("voice_profile_id", value))
+            refresh()
+        }
     }
     fun selectPresence(value: String) {
         if (value !in setOf("orb", "humanoid")) return

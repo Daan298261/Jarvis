@@ -30,9 +30,9 @@ class Speaker(AudioStreamTrack):
         while not self.queue.empty():
             self.queue.get_nowait()
 
-    async def speak(self, text):
+    async def speak(self, text, voice_profile_id=None):
         generation = self.generation
-        wav = await synthesize_speech(text[:6000])
+        wav = await synthesize_speech(text[:6000], voice_profile_id=voice_profile_id or None)
         if generation != self.generation:
             return
         resampler = av.AudioResampler(format="s16", layout="mono", rate=48000)
@@ -77,6 +77,11 @@ class VoiceBridge:
         self.reader = asyncio.create_task(self.listen(track))
         self.transcriber = asyncio.create_task(self.transcribe())
         self.turn = asyncio.create_task(self.respond())
+
+    def voice_profile_id(self):
+        with database() as db:
+            device = get(db, "device", self.call["device_id"])
+        return str((device or {}).get("voice_profile_id") or "")
 
     def stop(self):
         for task in (self.reader, self.transcriber, self.turn):
@@ -170,7 +175,7 @@ class VoiceBridge:
                     remainder = response[len(spoken):]
                     if snapshot["status"] in service.TERMINAL or remainder.endswith((".", "!", "?", "\n")):
                         if self.output.generation == generation:
-                            await self.output.speak(remainder)
+                            await self.output.speak(remainder, self.voice_profile_id())
                         spoken = response
                 if snapshot["status"] in service.TERMINAL:
                     break
