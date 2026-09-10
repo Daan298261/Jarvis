@@ -131,18 +131,19 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       composer?.setSize(Math.max(1, width), Math.max(1, height))
       const aspect = Math.max(1, width) / Math.max(1, height)
       const ultrawide = aspect >= 2.05
+      const stageUltrawide = ultrawide || window.innerWidth / Math.max(1, window.innerHeight) >= 2.05
       camera.aspect = aspect
-      camera.fov = ultrawide ? 36 : 32
-      camera.position.z = ultrawide
-        ? Math.max(6.35, 5.2 / Math.min(aspect, 2.6))
+      camera.fov = stageUltrawide ? 39 : 32
+      camera.position.z = stageUltrawide
+        ? Math.max(7.4, 5.8 / Math.min(aspect, 2.8))
         : Math.max(5.4, 4.6 / Math.min(aspect, 2.1))
-      camera.position.x = ultrawide ? 0.62 : camera.aspect > 1.6 ? 0.75 : 0.45
-      camera.position.y = ultrawide ? 0.22 : 0.28
-      camera.lookAt(0.05, ultrawide ? 0.04 : 0.08, 0)
-      system.group.scale.setScalar(ultrawide ? 0.9 : 1)
+      camera.position.x = stageUltrawide ? 0.55 : camera.aspect > 1.6 ? 0.75 : 0.45
+      camera.position.y = stageUltrawide ? 0.16 : 0.28
+      camera.lookAt(0.05, stageUltrawide ? 0.02 : 0.08, 0)
+      system.group.scale.setScalar(stageUltrawide ? 0.76 : aspect > 1.35 ? 0.92 : 1)
       camera.updateProjectionMatrix()
-      const scaleCap = ultrawide ? 520 : 580
-      uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.75, height / scaleCap)
+      const scaleCap = stageUltrawide ? 460 : 580
+      uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.72, height / scaleCap)
     }
     const observer = new ResizeObserver(resize)
     observer.observe(stage)
@@ -198,10 +199,10 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       const mode = current.settings.attentionMode
       const follow = !reduced && mode !== "off"
       const att = attentionRef.current
-      const yawGain = 0.38
-      const pitchGain = 0.15
-      const yawLerp = 0.15
-      const pitchLerp = 0.13
+      const yawGain = 0.52
+      const pitchGain = 0.22
+      const yawLerp = 0.2
+      const pitchLerp = 0.17
       if (reduced) {
         bust.rotation.set(0, baseYaw, 0)
         bust.position.set(basePos[0], basePos[1], basePos[2])

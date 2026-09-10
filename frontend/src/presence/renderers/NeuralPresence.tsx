@@ -83,7 +83,7 @@ export function NeuralPresence({ snapshot, settings, size = 540 }: NeuralPresenc
   const efficient = settings.performancePreset === "efficient"
   const showReasoningWeb = !reduced && !efficient
 
-  usePresenceAttentionLoop({ settings, cssTargetRef: orbRef, cssScale: 1.15 })
+  usePresenceAttentionLoop({ settings, cssTargetRef: orbRef, cssScale: 1.35 })
 
   const onSelect = useCallback((selection: ApexSelection) => {
     const route = ROUTES.get(selection.key)

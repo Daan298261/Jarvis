@@ -1,4 +1,5 @@
 import type { AttentionMode } from "./presenceTypes"
+import { createPresenceCameraTracker, type PresenceCameraTracker } from "./presenceCameraTrack"
 
 export type AttentionVector = {
   x: number
@@ -10,18 +11,6 @@ export type AttentionVector = {
 export type PresenceAttentionController = {
   sample(): AttentionVector
   dispose(): void
-}
-
-type FaceDetectorLike = {
-  detect: (source: CanvasImageSource) => Promise<Array<{ boundingBox: DOMRectReadOnly }>>
-}
-
-type FaceDetectorCtor = new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => FaceDetectorLike
-
-declare global {
-  interface Window {
-    FaceDetector?: FaceDetectorCtor
-  }
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -49,8 +38,8 @@ export function createPresenceAttentionController(
 
   let stream: MediaStream | null = null
   let video: HTMLVideoElement | null = null
-  let detector: FaceDetectorLike | null = null
-  let detectTimer = 0
+  let tracker: PresenceCameraTracker | null = null
+  let trackFrame = 0
   let cameraModeActive = false
   let cameraUsable = false
   let disposed = false
@@ -71,9 +60,10 @@ export function createPresenceAttentionController(
   window.addEventListener("pointermove", onPointerMove, { passive: true })
 
   const stopCamera = () => {
-    window.clearInterval(detectTimer)
-    detectTimer = 0
-    detector = null
+    if (trackFrame) window.cancelAnimationFrame(trackFrame)
+    trackFrame = 0
+    tracker?.dispose()
+    tracker = null
     cameraUsable = false
     cameraModeActive = false
     cameraTarget.x = 0
@@ -89,24 +79,18 @@ export function createPresenceAttentionController(
     stream = null
   }
 
-  const detectFace = async () => {
-    if (!video || !detector || video.readyState < 2) return
-    try {
-      const faces = await detector.detect(video)
-      const face = faces[0]
-      if (!face) {
-        cameraTarget.confidence = 0
-        return
-      }
-      const box = face.boundingBox
-      const cx = (box.x + box.width * 0.5) / Math.max(1, video.videoWidth)
-      const cy = (box.y + box.height * 0.5) / Math.max(1, video.videoHeight)
-      cameraTarget.x = clamp((cx - 0.5) * 2, -1, 1)
-      cameraTarget.y = clamp((cy - 0.5) * 2, -1, 1)
-      cameraTarget.confidence = 1
-    } catch {
-      cameraTarget.confidence = 0
+  const runTrackingLoop = () => {
+    if (!tracker || !video || disposed) return
+    const tick = (time: number) => {
+      if (disposed || !tracker || !video) return
+      trackFrame = window.requestAnimationFrame(tick)
+      tracker.tick(time)
+      const sample = tracker.read()
+      cameraTarget.x = sample.x
+      cameraTarget.y = sample.y
+      cameraTarget.confidence = sample.confidence
     }
+    trackFrame = window.requestAnimationFrame(tick)
   }
 
   const startCamera = async () => {
@@ -118,7 +102,7 @@ export function createPresenceAttentionController(
     }
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 320 }, height: { ideal: 240 } },
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       })
       video = document.createElement("video")
@@ -134,14 +118,13 @@ export function createPresenceAttentionController(
       document.body.appendChild(video)
       video.srcObject = stream
       await video.play()
-      if (window.FaceDetector) {
-        detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 })
+      tracker = await createPresenceCameraTracker(video)
+      if (tracker) {
         cameraUsable = true
-        detectTimer = window.setInterval(() => {
-          void detectFace()
-        }, 120)
+        runTrackingLoop()
       } else {
         cameraUsable = false
+        stopCamera()
       }
     } catch {
       cameraUsable = false
@@ -179,13 +162,13 @@ export function createPresenceAttentionController(
         return { x: 0, y: 0, confidence: 0, source: "pointer" }
       }
 
-      pointerSmooth.x = lerp(pointerSmooth.x, pointerTarget.x, 0.22)
-      pointerSmooth.y = lerp(pointerSmooth.y, pointerTarget.y, 0.22)
-      cameraSmooth.x = lerp(cameraSmooth.x, cameraTarget.x, 0.18)
-      cameraSmooth.y = lerp(cameraSmooth.y, cameraTarget.y, 0.18)
-      cameraSmooth.confidence = lerp(cameraSmooth.confidence, cameraTarget.confidence, 0.2)
+      pointerSmooth.x = lerp(pointerSmooth.x, pointerTarget.x, 0.26)
+      pointerSmooth.y = lerp(pointerSmooth.y, pointerTarget.y, 0.26)
+      cameraSmooth.x = lerp(cameraSmooth.x, cameraTarget.x, 0.22)
+      cameraSmooth.y = lerp(cameraSmooth.y, cameraTarget.y, 0.22)
+      cameraSmooth.confidence = lerp(cameraSmooth.confidence, cameraTarget.confidence, 0.24)
 
-      if (mode === "camera" && cameraUsable && cameraSmooth.confidence > 0.35) {
+      if (mode === "camera" && cameraUsable && cameraSmooth.confidence > 0.3) {
         return {
           x: cameraSmooth.x,
           y: cameraSmooth.y,
@@ -212,9 +195,9 @@ export function createPresenceAttentionController(
 
 /** Shared yaw/pitch offsets for CSS-based presence surfaces. */
 export function attentionCssTransform(x: number, y: number, scale = 1): string {
-  const tx = x * 14 * scale
-  const ty = y * 9 * scale
-  const ry = x * 10 * scale
-  const rx = -y * 6 * scale
+  const tx = x * 18 * scale
+  const ty = y * 12 * scale
+  const ry = x * 14 * scale
+  const rx = -y * 8 * scale
   return `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px)) rotateY(${ry}deg) rotateX(${rx}deg)`
 }

@@ -259,8 +259,8 @@ export function NeuralOrb({ mood = "idle", size = 520 }: NeuralOrbProps) {
       const pulse = 1 + Math.sin(elapsed * (0.8 + speed * 1.3)) * (0.006 + energy * 0.014)
       sphere.scale.setScalar(pulse)
       sphere.rotation.y += 0.0015 + speed * 0.0025
-      sphere.rotation.x += (pointerY * 0.16 - sphere.rotation.x) * 0.08
-      root.rotation.y += (pointerX * 0.24 - root.rotation.y) * 0.07
+      sphere.rotation.x += (pointerY * 0.22 - sphere.rotation.x) * 0.1
+      root.rotation.y += (pointerX * 0.32 - root.rotation.y) * 0.085
 
       outer.material.opacity = 0.58 + energy * 0.24
       middle.material.opacity = 0.23 + energy * 0.28

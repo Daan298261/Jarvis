@@ -866,6 +866,12 @@
     max-height: min(54dvh, 40vw);
   }
 
+  .hud-orb-zone:has(.jarvis-presence-humanoid) {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: min(38dvh, 28vw);
+  }
+
   .hud-chat {
     width: min(920px, calc(100% - clamp(48px, 6vw, 96px)));
     gap: clamp(10px, 1.2vh, 14px);

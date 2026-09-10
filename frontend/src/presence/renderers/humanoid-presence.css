@@ -1,13 +1,14 @@
 .jarvis-presence-humanoid {
   position: relative;
-  width: 100%;
+  width: min(100%, 960px);
   height: clamp(
     320px,
-    min(58dvh, calc(100dvh - 300px), min(72vw, 920px)),
-    min(920px, 58dvh)
+    min(54dvh, calc(100dvh - 320px)),
+    min(720px, 54dvh)
   );
-  max-height: min(58dvh, 46vw);
+  max-height: min(54dvh, 72vh);
   min-width: 0;
+  margin-inline: auto;
   isolation: isolate;
   overflow: hidden;
   background:
@@ -18,18 +19,24 @@
 }
 .jarvis-presence-host:has(.jarvis-presence-humanoid) {
   width: 100%;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-height: 0;
   display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
-  flex: 1 1 auto;
-  height: auto;
-  min-height: clamp(320px, min(52dvh, calc(100dvh - 300px)), 720px);
-  max-height: min(56dvh, 44vw);
+  flex: 0 1 auto;
+  height: clamp(300px, min(50dvh, calc(100dvh - 340px)), 680px);
+  max-height: min(50dvh, 68vh);
 }
 
-.hud-orb-zone:has(.jarvis-presence-humanoid) { min-height: 0; }
+.hud-orb-zone:has(.jarvis-presence-humanoid) {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(52dvh, 70vh);
+  justify-content: center;
+}
 .hud-orb-zone:has(.jarvis-presence-humanoid) .hud-orb-caption { margin-top: -8px; }
 
 .jarvis-presence-humanoid canvas {
@@ -120,16 +127,23 @@
   box-shadow: 0 0 12px #ffac36;
 }
 
+/* Ultrawide: ~⅓ viewport height — bust + mountains breathe, chat keeps room. */
 @media (min-aspect-ratio: 21/9) {
   .jarvis-presence-humanoid,
   .jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
-    max-height: min(52dvh, 40vw);
-    min-height: clamp(280px, 46dvh, 640px);
+    width: min(100%, min(920px, 46vw));
+    max-height: min(38dvh, 28vw);
+    height: min(38dvh, max(280px, calc(100dvh - 420px)));
+    min-height: clamp(260px, 34dvh, 420px);
+  }
+
+  .hud-orb-zone:has(.jarvis-presence-humanoid) {
+    max-height: min(40dvh, 30vw);
   }
 }
 
 @media (max-width: 760px) {
-  .jarvis-presence-humanoid { height: clamp(340px, 56dvh, 600px); }
+  .jarvis-presence-humanoid { height: clamp(340px, 56dvh, 600px); max-height: 62dvh; }
   .jarvis-humanoid-label { font-size: 8px; gap: 8px; }
   .jarvis-humanoid-hud-tr { font-size: 7px; }
   .jarvis-humanoid-hud-tl,
