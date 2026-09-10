@@ -94,7 +94,8 @@ Relevant owner APIs:
 
 Pairing creates a pending record. New apps use the six-digit desktop code; legacy
 long invitations remain accepted until their expiry. Confirm the fingerprint on the
-desktop and press Connect on the phone. A revoked device must pair again.
+same desktop pairing screen and press Connect on the phone. A revoked device must
+pair again.
 
 ## Voice and push
 

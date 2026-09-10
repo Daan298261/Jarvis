@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react"
 import {
+  api,
   createCompanionPairingCode,
   getActiveCompanionPairingCode,
   regenerateCompanionPairingCode,
   type CompanionPairingCode,
 } from "../api"
+
+type CompanionDevice = { id: string; name: string; status: string; fingerprint: string }
 
 function formatDigits(code: string): string {
   const digits = code.replace(/\D/g, "").slice(0, 6)
@@ -41,6 +44,12 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
   const [state, setState] = useState<PanelState>({ mode: "loading" })
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState("")
+  const [devices, setDevices] = useState<CompanionDevice[]>([])
+
+  const refreshDevices = useCallback(() => {
+    if (compact) return Promise.resolve()
+    return api<CompanionDevice[]>("/api/mobile/manage/devices").then(setDevices)
+  }, [compact])
 
   const applyResult = useCallback((result: Awaited<ReturnType<typeof getActiveCompanionPairingCode>>) => {
     if (!result.available) {
@@ -79,6 +88,13 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
   useEffect(() => {
     ensureCode(true).catch(() => setState({ mode: "waiting_api" }))
   }, [ensureCode]) // Generate once when this owner-only screen opens; plaintext is never stored server-side.
+
+  useEffect(() => {
+    if (compact) return
+    refreshDevices().catch(() => undefined)
+    const timer = window.setInterval(() => refreshDevices().catch(() => undefined), 3000)
+    return () => window.clearInterval(timer)
+  }, [compact, refreshDevices])
 
   const readyExpiresAt = state.mode === "ready" ? state.pairing.expires_at : null
 
@@ -187,11 +203,36 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
       </div>
 
       {!compact && (
-        <ol className="companion-pairing-steps">
-          <li>Open the Jarvis companion app on your phone.</li>
-          <li>Enter this 6-digit code when prompted.</li>
-          <li>Confirm the device fingerprint on this PC if asked.</li>
-        </ol>
+        <>
+          <ol className="companion-pairing-steps">
+            <li>Open the Jarvis companion app on your phone.</li>
+            <li>Enter this 6-digit code.</li>
+            <li>Compare and approve the fingerprint below.</li>
+          </ol>
+          {devices.filter((device) => device.status === "pending").map((device) => (
+            <div key={device.id} className="card" style={{ marginTop: 12 }}>
+              <strong>{device.name} · awaiting approval</strong>
+              <p style={{ overflowWrap: "anywhere", fontFamily: "monospace" }}>
+                {device.fingerprint.match(/.{1,8}/g)?.join(" ")}
+              </p>
+              <button className="btn" type="button" onClick={async () => {
+                setBusy(true); setMsg("")
+                try {
+                  await api(`/api/mobile/manage/devices/${device.id}/confirm`, {
+                    method: "POST", body: JSON.stringify({ fingerprint: device.fingerprint }),
+                  })
+                  setMsg(`${device.name} approved. Return to the phone and connect.`)
+                  await refreshDevices()
+                } catch (error) {
+                  setMsg(error instanceof Error ? error.message : String(error))
+                } finally { setBusy(false) }
+              }} disabled={busy}>Fingerprint matches — approve phone</button>
+            </div>
+          ))}
+          {devices.some((device) => device.status === "active") && (
+            <p className="companion-pairing-msg">Paired: {devices.filter((device) => device.status === "active").map((device) => device.name).join(", ")}</p>
+          )}
+        </>
       )}
     </div>
   )
