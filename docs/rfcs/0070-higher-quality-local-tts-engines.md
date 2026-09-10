@@ -157,9 +157,10 @@ Implementation follow-up (not this PR): unit tests (`python3 -m pytest`); portal
 
 | Area | Paths |
 | --- | --- |
-| Backend | `backend/app/workers/voice.py` (adapters), `backend/app/voice_profiles/` (catalog / schema), download / pack install |
-| Frontend | `frontend/src/tts/VoiceProfilePicker.tsx`, quality-tier labels |
-| Tests | engine routing, forbidden ids, offline fallback, speak-filter (no thought-process / URL / code) |
+| Backend | `backend/app/workers/voice.py` (adapters), `backend/app/voice_profiles/` (catalog / schema), download / pack install, speak filter |
+| Frontend | `frontend/src/tts/VoiceProfilePicker.tsx`, quality-tier labels, “Get more voices” |
+| Installer | Windows Setup bundle for default butler / Kokoro (see `INSTALLER.md` — Architect spec only; this RFC does not overwrite `installer/windows/`) |
+| Tests | engine routing, forbidden ids, offline fallback, speak-filter (no thought-process / URL / code), OOB butler availability |
 | Docs | this RFC; optional §59 Decision Log line |
 
 ## Out of scope
