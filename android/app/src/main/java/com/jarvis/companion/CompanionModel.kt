@@ -55,6 +55,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         finally { mutable.value = mutable.value.copy(busy = false) }
     }
     suspend fun refresh() {
+        api.refreshEndpoints()
         val capabilities = api.json("/capabilities")
         val tasks = api.array("/tasks").objects()
         val models = api.json("/models").getJSONArray("models").objects()

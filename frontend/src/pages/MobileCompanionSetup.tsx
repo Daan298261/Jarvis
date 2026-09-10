@@ -3,10 +3,13 @@ import { api, getPrivateKey } from "../api"
 
 type Device = { id: string; name: string; status: string; fingerprint: string }
 type Build = { id: string; state: string; activity: string; started_at: number; updated_at: number; result?: { sha256: string; invitation_expires_at: number } }
+type Connection = { state: string; activity: string; endpoints: string[]; server_pin?: string; router?: string; limitation?: string; local_verified?: boolean; remote_verified?: boolean; updated_at?: number }
 
 export function MobileCompanionSetup() {
   const [devices, setDevices] = useState<Device[]>([])
-  const [endpoint, setEndpoint] = useState(`https://${window.location.hostname}:4781`)
+  const [endpoint, setEndpoint] = useState("")
+  const [connection, setConnection] = useState<Connection | null>(null)
+  const [remote, setRemote] = useState(true)
   const [build, setBuild] = useState<Build | null>(null)
   const [error, setError] = useState("")
   const [invitation, setInvitation] = useState("")
@@ -15,7 +18,10 @@ export function MobileCompanionSetup() {
   const buildState = build?.state
   const refresh = () => api<Device[]>("/api/mobile/manage/devices").then(setDevices)
   useEffect(() => {
-    const tick = () => refresh().catch(() => undefined)
+    const tick = () => {
+      refresh().catch(() => undefined)
+      api<Connection>("/api/mobile/manage/connection").then(setConnection).catch(() => undefined)
+    }
     tick()
     const interval = window.setInterval(tick, 5000)
     return () => window.clearInterval(interval)
@@ -43,9 +49,24 @@ export function MobileCompanionSetup() {
   return <section className="card" style={{ marginBottom: 20 }}>
     <h2>Android companion</h2>
     <p className="lede">Build your personalized app, then confirm the phone’s fingerprint here. Each phone gets its own revocable identity.</p>
-    <label>Encrypted Jarvis endpoint<input className="command" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
+    <label><input type="checkbox" checked={remote} onChange={(event) => setRemote(event.target.checked)} /> Enable encrypted internet access when supported</label>
+    <div className="row" style={{ gap: 10, marginTop: 12 }}>
+      <button className="btn" disabled={busy} onClick={() => run(async () => setConnection(await api<Connection>("/api/mobile/manage/connection", { method: "POST", body: JSON.stringify({ enabled: true, remote }) })))}>Prepare connection</button>
+      {connection?.state === "ready" && <button className="btn secondary" disabled={busy} onClick={() => run(async () => setConnection(await api<Connection>("/api/mobile/manage/connection", { method: "POST", body: JSON.stringify({ enabled: false, remote: false }) })))}>Stop mobile access</button>}
+    </div>
+    {connection && <div role="status" style={{ marginTop: 12 }}>
+      <strong>{connection.state}</strong> · {connection.activity}
+      {connection.local_verified && <p>Desktop encryption and device authentication verified. Test the phone on Wi-Fi next.</p>}
+      {connection.remote_verified && <p>Hosted fallback reached this Jarvis gateway.</p>}
+      {connection.limitation && <p>{connection.limitation}</p>}
+      {connection.endpoints.map((address) => <div key={address}><code>{address}</code></div>)}
+      {connection.server_pin && <details><summary>Server fingerprint</summary><code style={{ overflowWrap: "anywhere" }}>{connection.server_pin}</code></details>}
+    </div>}
+    <details style={{ marginTop: 12 }}><summary>Custom connection address</summary>
+      <label>Encrypted Jarvis endpoint<input className="command" value={endpoint} placeholder={connection?.endpoints[0] || "https://your-jarvis-host:4781"} onChange={(event) => setEndpoint(event.target.value)} /></label>
+    </details>
     <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-      <button className="btn" disabled={busy || (!!build && ["queued", "running"].includes(build.state))} onClick={() => run(async () => setBuild(await api<Build>("/api/mobile/manage/builds", { method: "POST", body: JSON.stringify({ endpoint }) })))}>Build Android APK</button>
+      <button className="btn" disabled={busy || (!endpoint && !connection?.endpoints.length) || (!!build && ["queued", "running"].includes(build.state))} onClick={() => run(async () => setBuild(await api<Build>("/api/mobile/manage/builds", { method: "POST", body: JSON.stringify({ endpoint }) })))}>Build Android APK</button>
       <button className="btn secondary" disabled={busy} onClick={() => run(async () => { const value = await api<{ invitation: string }>("/api/mobile/manage/invitations", { method: "POST" }); setInvitation(value.invitation) })}>Pair existing APK</button>
     </div>
     {invitation && <p>One-hour pairing invitation: <code style={{ overflowWrap: "anywhere" }}>{invitation}</code></p>}

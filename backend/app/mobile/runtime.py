@@ -36,7 +36,9 @@ class MobileRuntime:
 
     def start(self):
         if not self.tasks:
+            from .connectivity import CONNECTIVITY
             self.tasks = [asyncio.create_task(scheduler.run()), asyncio.create_task(self.notifications()), asyncio.create_task(self.reap_calls())]
+            self.tasks.append(asyncio.create_task(CONNECTIVITY.run()))
             if os.environ.get("JARVIS_RELAY_URL") and os.environ.get("JARVIS_RELAY_CREDENTIAL"):
                 from .relay import run
                 self.tasks.append(asyncio.create_task(run(os.environ["JARVIS_RELAY_URL"], os.environ["JARVIS_RELAY_CREDENTIAL"])))

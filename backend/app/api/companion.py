@@ -273,17 +273,45 @@ def revoke(device_id: uuid.UUID):
 
 
 class Build(BaseModel):
-    endpoint: str = Field(max_length=1024)
+    endpoint: str = Field(default="", max_length=1024)
+
+
+class ConnectionSetup(BaseModel):
+    enabled: bool = True
+    remote: bool = True
+
+
+@owner_router.get("/connection")
+def connection_status():
+    from ..mobile.connectivity import CONNECTIVITY
+    return CONNECTIVITY.snapshot()
+
+
+@owner_router.post("/connection")
+async def connection_setup(body: ConnectionSetup):
+    from ..mobile.connectivity import CONNECTIVITY
+    return await CONNECTIVITY.configure(body.enabled, body.remote)
+
+
+@router.get("/connection")
+def device_connection_status(device=Device):
+    from ..mobile.connectivity import CONNECTIVITY
+    # Only already-paired devices may discover additional endpoints with this same pin.
+    snapshot = CONNECTIVITY.snapshot()
+    return {key: snapshot[key] for key in ("endpoints", "server_pin") if key in snapshot}
 
 
 @owner_router.post("/builds")
 async def build_apk(body: Build):
     from ..mobile.provision import start
-    from urllib.parse import urlsplit
-    parsed = urlsplit(body.endpoint)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.query or parsed.fragment or parsed.path.strip("/"):
-        raise HTTPException(400, "Supply an HTTPS gateway origin")
-    return await start(body.endpoint)
+    from ..mobile.connectivity import CONNECTIVITY, origin
+    prepared = CONNECTIVITY.snapshot().get("endpoints", [])
+    endpoint = body.endpoint or (prepared[0] if prepared else "")
+    try:
+        endpoint = origin(endpoint)
+    except ValueError as exc:
+        raise HTTPException(400, "Prepare a connection first, or supply an HTTPS gateway origin") from exc
+    return await start(endpoint, prepared if endpoint in prepared else [])
 
 
 @owner_router.get("/builds/{job_id}")

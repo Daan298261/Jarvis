@@ -39,10 +39,13 @@ def secret_file(path: Path) -> str:
     return value
 
 
-def build(endpoint: str, progress=lambda message: print(message, flush=True), firebase: dict | None = None) -> dict:
+def build(endpoint: str, progress=lambda message: print(message, flush=True), firebase: dict | None = None, endpoints: list[str] | None = None) -> dict:
     from app.mobile.gateway import server_identity
     from app.mobile.identity import invite
     from app.mobile.store import root
+    from app.mobile.connectivity import origin
+    endpoint = origin(endpoint)
+    endpoints = list(dict.fromkeys([endpoint] + [origin(value) for value in endpoints or []]))[:8]
     parsed = urlsplit(endpoint)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.query or parsed.fragment or parsed.path.strip("/"):
         raise ValueError("Endpoint must be an HTTPS origin without credentials, query or path")
@@ -63,9 +66,9 @@ def build(endpoint: str, progress=lambda message: print(message, flush=True), fi
         subprocess.run([str(java / "bin" / ("keytool" + binary)), "-genkeypair", "-keystore", str(keystore), "-alias", "jarvis",
                         "-storepass:env", "JARVIS_APK_PASSWORD", "-keypass:env", "JARVIS_APK_PASSWORD",
                         "-keyalg", "RSA", "-keysize", "3072", "-validity", "10000", "-dname", "CN=Jarvis Companion"], env=env, check=True, capture_output=True)
-    identity = server_identity([parsed.hostname])
+    identity = server_identity([urlsplit(value).hostname for value in endpoints])
     invitation = invite(3600)
-    settings = {"endpoint": endpoint.rstrip("/"), "server_pin": identity["server_pin"], "invitation": invitation["invitation"]}
+    settings = {"endpoint": endpoint.rstrip("/"), "endpoints": endpoints, "server_pin": identity["server_pin"], "invitation": invitation["invitation"]}
     if firebase is None and os.environ.get("JARVIS_FIREBASE_CLIENT_CONFIG"):
         firebase = json.loads(Path(os.environ["JARVIS_FIREBASE_CLIENT_CONFIG"]).read_text())
     if firebase:

@@ -37,6 +37,13 @@ class JarvisApi(context: Context) {
         private set
     val invitation: String get() = bootstrap.optString("invitation")
     val firebase: JSONObject? get() = bootstrap.optJSONObject("firebase")
+    private var endpoints = runCatching {
+        val supplied = JSONArray(prefs.getString("endpoints", null) ?: bootstrap.optJSONArray("endpoints")?.toString() ?: "[]")
+        (0 until supplied.length()).map { TransportPolicy.origin(supplied.getString(it)) }.distinct().take(8)
+    }.getOrDefault(emptyList())
+    @Volatile private var preferred = ""
+    @Volatile private var preferredAt = 0L
+    @Volatile private var cachedClient: Pair<String, OkHttpClient>? = null
     private var token = ""
     private var expiresAt = 0L
     private val sessionLock = Mutex()
@@ -54,14 +61,26 @@ class JarvisApi(context: Context) {
     }
 
     fun configure(url: String, publicPin: String) {
-        val parsed = java.net.URI(url.trim())
-        require(parsed.scheme == "https" && parsed.host != null && parsed.userInfo == null && parsed.query == null && parsed.fragment == null && parsed.path.orEmpty().trim('/').isEmpty()) { "Enter an HTTPS server origin, without a path or credentials" }
+        val address = TransportPolicy.origin(url)
         require(publicPin.matches(Regex("[a-fA-F0-9]{64}"))) { "Server fingerprint must contain 64 hexadecimal characters" }
-        val changed = endpoint != url.trim().trimEnd('/') || pin != publicPin.lowercase()
-        endpoint = url.trim().trimEnd('/')
+        val changed = pin != publicPin.lowercase()
+        endpoint = address
         pin = publicPin.lowercase()
-        if (changed) { deviceId = ""; token = ""; expiresAt = 0 }
-        prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).apply()
+        if (changed) { deviceId = ""; token = ""; expiresAt = 0; endpoints = emptyList(); cachedClient = null }
+        preferred = ""; preferredAt = 0
+        endpoints = (listOf(endpoint) + endpoints).distinct().take(8)
+        prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).putString("endpoints", JSONArray(endpoints).toString()).apply()
+    }
+
+    suspend fun refreshEndpoints() {
+        val settings = json("/connection")
+        if (settings.optString("server_pin") != pin) return
+        val values = settings.optJSONArray("endpoints") ?: return
+        val addresses = (0 until values.length()).map { TransportPolicy.origin(values.getString(it)) }.distinct().take(8)
+        if (addresses.isNotEmpty()) {
+            endpoints = addresses
+            prefs.edit().putString("endpoints", JSONArray(addresses).toString()).apply()
+        }
     }
 
     private fun publicKey() = Base64.encodeToString(keys.getCertificate(keyAlias).publicKey.encoded, Base64.NO_WRAP)
@@ -97,31 +116,45 @@ class JarvisApi(context: Context) {
                     authenticated: Boolean = true, contentType: String = "application/json", filename: String? = null): ByteArray = withContext(Dispatchers.IO) {
         if (authenticated) session()
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
+        val expectedPin = pin
+        val client = cachedClient?.takeIf { it.first == expectedPin }?.second ?: run {
         val trust = object : X509TrustManager {
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
             override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) { throw java.security.cert.CertificateException("Client trust is not supported") }
             override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
                 if (chain.isEmpty()) throw java.security.cert.CertificateException("Missing certificate")
                 chain[0].checkValidity()
-                if (sha256(chain[0].publicKey.encoded) != pin) throw java.security.cert.CertificateException("Jarvis server fingerprint changed; verify it on the desktop")
+                if (sha256(chain[0].publicKey.encoded) != expectedPin) throw java.security.cert.CertificateException("Jarvis server fingerprint changed; verify it on the desktop")
             }
         }
         val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
-        val client = OkHttpClient.Builder().sslSocketFactory(tls.socketFactory, trust)
-            .followRedirects(false).followSslRedirects(false).connectTimeout(15, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
-        val request = Request.Builder().url("$endpoint/api/companion$path")
+        OkHttpClient.Builder().sslSocketFactory(tls.socketFactory, trust).retryOnConnectionFailure(false)
+            .followRedirects(false).followSslRedirects(false).connectTimeout(4, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
+            .also { cachedClient = expectedPin to it }
+        }
+        val requestId = if (path == "/messages" && body != null) runCatching { JSONObject(body.toString(Charsets.UTF_8)).optString("request_id") }.getOrNull() else null
+        val retry = TransportPolicy.replayable(method, path, requestId)
+        val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }
+        val addresses = (listOfNotNull(recent) + endpoints + endpoint).filter { it.isNotBlank() }.distinct().let { if (retry) it else it.take(1) }
+        var failure: java.io.IOException? = null
+        for (address in addresses) {
+        val request = Request.Builder().url("${TransportPolicy.origin(address)}/api/companion$path")
         if (authenticated) request.header("Authorization", "Bearer $token").header("X-Jarvis-Device", deviceId)
         if (filename != null) request.header("X-Filename", filename.filter { it.code in 32..126 }.take(200))
         request.method(method, if (method == "GET") null else (body ?: ByteArray(0)).toRequestBody(contentType.toMediaType()))
-        client.newCall(request.build()).execute().use { response ->
+        try { client.newCall(request.build()).execute().use { response ->
             val result = response.body?.bytes() ?: ByteArray(0)
             if (!response.isSuccessful) {
                 if (response.code == 401) { token = ""; expiresAt = 0 }
                 val reason = runCatching { JSONObject(result.toString(Charsets.UTF_8)).optString("detail") }.getOrDefault("")
                 throw ApiException(response.code, reason.ifEmpty { "Jarvis returned ${response.code}" })
             }
-            result
+            preferred = address; preferredAt = System.currentTimeMillis()
+            return@withContext result
+        } } catch (error: javax.net.ssl.SSLException) { throw error }
+        catch (error: java.io.IOException) { failure = error }
         }
+        throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
     }
 
     companion object {
