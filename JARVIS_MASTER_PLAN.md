@@ -2370,6 +2370,14 @@ Reason:
 
 Graceful degradation should be visible. Missing workers must not look like crashes or silent omissions.
 
+Decision: RFC-0067 and RFC-0068 landed on development
+
+Owner chat hides plan/approval chrome by default and greets once per session start (RFC-0067: specs #154, greeting+streaming #153, UX #156). Long jobs may speak one rate-limited persona think-aloud (RFC-0068: specs #157, backend #159). Live TTS/HUD remain desktop sign-off. Not added to the RFC backlog (already implemented).
+
+Reason:
+
+Taco: HUD felt like a ticket runner; conversational talk plus brief spoken commentary during long work.
+
 ---
 
 ## 60. Expected Example Behavior

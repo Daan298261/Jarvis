@@ -1,6 +1,6 @@
 # RFC-0068: Spoken think-aloud during long work
 
-**Status:** accepted  
+**Status:** implemented
 **Author:** Jarvis Architect  
 **Date:** 2026-09-10
 
@@ -26,10 +26,10 @@ When a turn or tool run exceeds a short threshold (~2–3s before first useful o
 
 ## Acceptance criteria
 
-- [ ] Long jobs can emit one rate-limited spoken think-aloud without plan chrome
-- [ ] Suppressed when TTS muted/DND or `speak_chat_replies` off
-- [ ] Unit/smoke for threshold + rate-limit
-- [ ] `python3 -m pytest`
+- [x] Long jobs can emit one rate-limited spoken think-aloud without plan chrome
+- [x] Suppressed when TTS muted/DND or `speak_chat_replies` off
+- [x] Unit/smoke for threshold + rate-limit
+- [x] `python3 -m pytest`
 
 ## Likely files
 
@@ -46,3 +46,9 @@ Rewriting RFC-0067; approval engine changes; companion/Android realtime voice.
 ## Notes
 
 Taco 2026-09-10; pairs with #154 / RFC-0067. Implementation ticket follows accepted RFC.
+
+## Implementation note
+
+Landed on `development` (no new design):
+- Specs: #157 (`e41c300`)
+- Backend: #159 (`9eb56c2`) — `backend/app/persona/think_aloud.py`, loop hook, `tests/test_think_aloud_rfc0068.py`
