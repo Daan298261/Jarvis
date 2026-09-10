@@ -43,6 +43,12 @@ def test_wizard_preset_to_budget_maps_dynamic():
         wizard_preset_to_budget("nope")
 
 
+def test_integrations_step_follows_runtime():
+    from app.setup_state import WIZARD_STEPS
+
+    assert WIZARD_STEPS.index("integrations") == WIZARD_STEPS.index("runtime") + 1
+
+
 def test_complete_setup(tmp_path, monkeypatch):
     from app import setup_state as mod
 

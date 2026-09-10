@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { api } from "../api"
+import { IntegrationSetup } from "../components/IntegrationSetup"
 import "./setup-conversation.css"
 
 type SetupQuestion = {
@@ -75,11 +76,14 @@ function shortHardware(hw: Record<string, unknown>): string {
 
 export function SetupPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const isConnections = new URLSearchParams(location.search).get("step") === "integrations"
   const [questions, setQuestions] = useState<SetupQuestion[]>([])
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [index, setIndex] = useState(0)
   const [input, setInput] = useState("")
   const [plan, setPlan] = useState<InterviewPlan | null>(null)
+  const [interviewComplete, setInterviewComplete] = useState(false)
   const [busy, setBusy] = useState(false)
   const [listening, setListening] = useState(false)
   const [error, setError] = useState("")
@@ -89,7 +93,8 @@ export function SetupPage() {
   useEffect(() => {
     api<InterviewPayload>("/api/setup/interview")
       .then((payload) => {
-        if (payload.completed) {
+        setInterviewComplete(payload.completed)
+        if (payload.completed && !isConnections) {
           navigate("/", { replace: true })
           return
         }
@@ -101,8 +106,10 @@ export function SetupPage() {
         setAnswers(restored)
         if (payload.plan && Object.keys(payload.plan).length) setPlan(payload.plan)
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-  }, [navigate])
+      .catch((err) => {
+        if (!isConnections) setError(err instanceof Error ? err.message : String(err))
+      })
+  }, [isConnections, navigate])
 
   useEffect(() => () => recognitionRef.current?.stop(), [])
 
@@ -186,7 +193,7 @@ export function SetupPage() {
         body: JSON.stringify({ answers }),
       })
       if (!result.ok) throw new Error("Jarvis could not apply the setup plan.")
-      navigate("/", { replace: true, state: { setupComplete: true, downloadScript: result.download_script_path } })
+      navigate("/setup?step=integrations", { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -198,6 +205,26 @@ export function SetupPage() {
     setPlan(null)
     setIndex(0)
     setInput("")
+  }
+
+  if (isConnections) {
+    return (
+      <div className="setup-conversation setup-connections">
+        <header className="setup-conversation-head">
+          <span className="setup-kicker">JARVIS · CONNECTIONS</span>
+          <h1>Connect Gmail and WhatsApp</h1>
+          <p className="lede">No terminal commands. Jarvis checks Gmail for you and shows the WhatsApp QR code here.</p>
+        </header>
+        {error && <div className="setup-inline-error">{error}</div>}
+        <IntegrationSetup />
+        <div className="setup-plan-actions setup-connections-actions">
+          <button type="button" className="btn" onClick={() => navigate(interviewComplete ? "/" : "/setup", { replace: true })}>
+            {interviewComplete ? "Finish and open Jarvis" : "Continue setup"}
+          </button>
+        </div>
+        <p className="setup-advanced-note">Both connections are optional and can be changed later under Connections.</p>
+      </div>
+    )
   }
 
   if (!questions.length && !error) {

@@ -25,6 +25,7 @@ async def test_setup_status_and_state_roundtrip(setup_env):
     body = status.json()
     assert body["needs_setup"] is True
     assert "welcome" in body["steps"]
+    assert "integrations" in body["steps"]
 
     put = client.put("/api/setup/state", json={"current_step": "resources", "resource_preset": "dynamic", "global_percent": 40})
     assert put.status_code == 200

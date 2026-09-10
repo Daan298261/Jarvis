@@ -3682,6 +3682,7 @@ export type SetupWizardStep =
   | "resources"
   | "inference"
   | "runtime"
+  | "integrations"
   | "desktop"
   | "verification"
   | "done"
@@ -3803,6 +3804,53 @@ export async function listSetupComponents(): Promise<{
   ids: string[]
 }> {
   return api("/api/setup/components")
+}
+
+export type EmailIntegrationStatus = {
+  configured: boolean
+  email: string
+  full_name: string
+  error?: string
+}
+
+export type WhatsAppIntegrationStatus = {
+  state: "idle" | "starting" | "pairing" | "connected" | "failed"
+  qr: string
+  error: string
+  paired: boolean
+}
+
+export type IntegrationStatus = {
+  email: EmailIntegrationStatus
+  whatsapp: WhatsAppIntegrationStatus
+}
+
+export async function getIntegrationStatus(): Promise<IntegrationStatus> {
+  return api<IntegrationStatus>("/api/integrations/status")
+}
+
+export async function configureGmail(body: {
+  account_name: string
+  email: string
+  full_name: string
+  app_password: string
+}): Promise<{ ok: boolean; email: EmailIntegrationStatus }> {
+  return api("/api/integrations/email/configure", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function startWhatsAppPairing(): Promise<{ ok: boolean; whatsapp: WhatsAppIntegrationStatus }> {
+  return api("/api/integrations/whatsapp/pair", { method: "POST", body: "{}" })
+}
+
+export async function getWhatsAppPairing(): Promise<{ whatsapp: WhatsAppIntegrationStatus }> {
+  return api("/api/integrations/whatsapp/pair")
+}
+
+export async function cancelWhatsAppPairing(): Promise<{ ok: boolean; whatsapp: WhatsAppIntegrationStatus }> {
+  return api("/api/integrations/whatsapp/pair", { method: "DELETE" })
 }
 
 export async function getDiagnostics(): Promise<Record<string, unknown>> {

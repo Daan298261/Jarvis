@@ -100,11 +100,40 @@ function Ensure-Python {
 function Ensure-Node {
     if (Test-Command node) {
         $ver = node --version
-        Write-Ok "Node.js found ($ver)."
+        $major = [int]($ver.TrimStart("v").Split(".")[0])
+        if ($major -ge 24) {
+            Write-Ok "Node.js found ($ver)."
+            return
+        }
+        Write-Host "    Node.js $ver is too old for the Gmail and WhatsApp connectors. Updating..."
+        if (-not (Test-Command winget)) {
+            throw "Node.js 24 or newer is required. Install the current Node.js LTS release, then re-run setup."
+        }
+        & winget upgrade --id "OpenJS.NodeJS.LTS" -e --accept-package-agreements --accept-source-agreements | Out-Host
+        $ver = node --version
+        $major = [int]($ver.TrimStart("v").Split(".")[0])
+        if ($major -lt 24) {
+            throw "Node.js 24 or newer is required. Restart Windows, then re-run setup."
+        }
+        Write-Ok "Node.js updated ($ver)."
         return
     }
     Ensure-WingetPackage -WingetId "OpenJS.NodeJS.LTS" -FriendlyName "Node"
     if (-not (Test-Command node)) { throw "Node.js installation did not succeed." }
+}
+
+function Ensure-McpConnectors {
+    $packageFile = Join-Path $Root "mcp\package.json"
+    $lockFile = Join-Path $Root "mcp\package-lock.json"
+    if (-not (Test-Path $packageFile) -or -not (Test-Path $lockFile)) {
+        throw "Jarvis connector package files are missing. Re-download the installer."
+    }
+    Write-Host "    Installing Gmail and WhatsApp connectors..."
+    $env:PUPPETEER_SKIP_DOWNLOAD = "true"
+    npm ci --prefix (Join-Path $Root "mcp")
+    Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
+    if ($LASTEXITCODE -ne 0) { throw "Connector installation failed." }
+    Write-Ok "Gmail and WhatsApp connectors installed."
 }
 
 function Ensure-Venv([string]$PythonExe) {
@@ -143,17 +172,13 @@ function Ensure-Playwright([string]$VenvPython) {
 
 function Ensure-FrontendBuild {
     $dist = Join-Path $Root "frontend\dist\index.html"
-    if (Test-Path $dist) {
-        Write-Skip "Portal build (frontend/dist)"
-        return
-    }
     Push-Location (Join-Path $Root "frontend")
-    if (-not (Test-Path "node_modules")) {
-        Write-Host "    Installing frontend packages (npm install)..."
-        npm install
-    }
+    Write-Host "    Installing frontend packages..."
+    npm ci
+    if ($LASTEXITCODE -ne 0) { throw "Frontend package installation failed." }
     Write-Host "    Building portal (npm run build)..."
     npm run build
+    if ($LASTEXITCODE -ne 0) { throw "Frontend build failed." }
     Pop-Location
     if (-not (Test-Path $dist)) { throw "frontend build failed; dist/index.html missing" }
     Write-Ok "Portal built."
@@ -294,6 +319,9 @@ $pythonExe = Ensure-Python
 
 Write-Step "Checking Node.js"
 Ensure-Node
+
+Write-Step "Gmail and WhatsApp connectors"
+Ensure-McpConnectors
 
 Write-Step "Python environment and packages"
 $venvPython = Ensure-Venv -PythonExe $pythonExe

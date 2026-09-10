@@ -67,7 +67,7 @@ const ADMIN_LINKS = [
   { to: "/delegation", label: "Helpers" },
   { to: "/model", label: "Model" },
   { to: "/tools", label: "Tools" },
-  { to: "/mcp", label: "MCP" },
+  { to: "/mcp", label: "Connections" },
   { to: "/system", label: "System" },
   { to: "/swarm", label: "Swarm" },
 ] as const
