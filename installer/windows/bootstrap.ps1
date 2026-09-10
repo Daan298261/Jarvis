@@ -158,6 +158,32 @@ function Ensure-PipPackages([string]$VenvPython) {
     Write-Ok "Python packages from requirements.txt installed."
 }
 
+function Ensure-TtsPythonPackages([string]$VenvPython) {
+    # RFC-0070: default butler speech needs Kokoro + soundfile in the post-install venv.
+    $marker = Join-Path $Root ".venv\.jarvis-tts-python-ready"
+    $check = @"
+import importlib.util
+missing = [name for name in ('kokoro', 'soundfile') if importlib.util.find_spec(name) is None]
+if missing:
+    raise SystemExit('missing:' + ','.join(missing))
+"@
+    & $VenvPython -c $check 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        if (-not (Test-Path $marker)) {
+            New-Item -ItemType File -Force -Path $marker | Out-Null
+        }
+        Write-Skip "Kokoro TTS Python packages (kokoro, soundfile)"
+        return
+    }
+    Write-Host "    Ensuring Kokoro TTS packages (kokoro, soundfile)..."
+    & $VenvPython -m pip install "kokoro>=0.9.2" "soundfile>=0.13.0"
+    if ($LASTEXITCODE -ne 0) { throw "Kokoro TTS package install failed." }
+    & $VenvPython -c $check
+    if ($LASTEXITCODE -ne 0) { throw "Kokoro TTS packages are still missing after pip install." }
+    New-Item -ItemType File -Force -Path $marker | Out-Null
+    Write-Ok "Kokoro TTS Python packages ready."
+}
+
 function Ensure-Playwright([string]$VenvPython) {
     $marker = Join-Path $Root ".venv\.playwright-chromium-ready"
     if (Test-Path $marker) {
@@ -326,6 +352,7 @@ Ensure-McpConnectors
 Write-Step "Python environment and packages"
 $venvPython = Ensure-Venv -PythonExe $pythonExe
 Ensure-PipPackages -VenvPython $venvPython
+Ensure-TtsPythonPackages -VenvPython $venvPython
 Ensure-Playwright -VenvPython $venvPython
 
 Write-Step "Web portal"
