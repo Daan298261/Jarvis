@@ -136,12 +136,14 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     fun approve(taskId: String, token: String, approved: Boolean) = action {
         api.json("/tasks/$taskId/approve", "POST", JSONObject().put("token", token).put("approved", approved)); refresh()
     }
-    fun schedule(prompt: String, instant: java.time.ZonedDateTime, recurrence: String) = action {
-        api.json("/schedules", "POST", JSONObject().put("prompt", prompt).put("next_run", instant.toEpochSecond()).put("timezone", instant.zone.id)
+    fun schedule(id: String?, prompt: String, instant: java.time.ZonedDateTime, recurrence: String) = action {
+        api.json(if (id == null) "/schedules" else "/schedules/$id", if (id == null) "POST" else "PUT",
+            JSONObject().put("prompt", prompt).put("next_run", instant.toEpochSecond()).put("timezone", instant.zone.id)
             .put("recurrence", recurrence).put("profile", mutable.value.selectedModel))
         refresh()
     }
     fun pauseSchedule(id: String) = action { api.json("/schedules/$id/pause", "POST"); refresh() }
+    fun resumeSchedule(id: String) = action { api.json("/schedules/$id/resume", "POST"); refresh() }
     fun preferences(notifications: Boolean, calls: Boolean) = action {
         api.json("/preferences", "PUT", JSONObject().put("notifications", notifications).put("critical_calls", calls))
         refresh()

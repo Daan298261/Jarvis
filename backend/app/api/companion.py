@@ -230,6 +230,11 @@ def add_schedule(body: Schedule, device=Device):
     return scheduler.create(device["id"], body.model_dump())
 
 
+@router.put("/schedules/{schedule_id}")
+def update_schedule(schedule_id: uuid.UUID, body: Schedule, device=Device):
+    return scheduler.update(device["id"], str(schedule_id), body.model_dump())
+
+
 @router.post("/schedules/{schedule_id}/pause")
 def pause_schedule(schedule_id: uuid.UUID, device=Device):
     with database() as db:
@@ -239,6 +244,11 @@ def pause_schedule(schedule_id: uuid.UUID, device=Device):
         value["enabled"] = False
         put(db, "schedule", value["id"], value)
     return value
+
+
+@router.post("/schedules/{schedule_id}/resume")
+def resume_schedule(schedule_id: uuid.UUID, device=Device):
+    return scheduler.resume(device["id"], str(schedule_id))
 
 
 @router.put("/preferences")

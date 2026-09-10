@@ -291,6 +291,7 @@ class MainActivity : ComponentActivity() {
     var schedulePrompt by remember { mutableStateOf("") }
     var whenText by remember { mutableStateOf(LocalDateTime.now().plusHours(1).withSecond(0).withNano(0).toString()) }
     var recurrence by remember { mutableStateOf("once") }
+    var editingSchedule by remember { mutableStateOf<String?>(null) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Connection", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
@@ -323,9 +324,27 @@ class MainActivity : ComponentActivity() {
             OutlinedTextField(schedulePrompt, { schedulePrompt = it }, label = { Text("What should Jarvis do?") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(whenText, { whenText = it }, label = { Text("Local date/time · YYYY-MM-DDTHH:MM") }, modifier = Modifier.fillMaxWidth())
             Row { listOf("once", "daily", "weekly").forEach { value -> FilterChip(recurrence == value, { recurrence = value }, { Text(value) }, modifier = Modifier.padding(end = 6.dp)) } }
-            Button(onClick = { runCatching { LocalDateTime.parse(whenText).atZone(ZoneId.systemDefault()) }.onSuccess { model.schedule(schedulePrompt, it, recurrence) } }, enabled = state.connected && schedulePrompt.isNotBlank()) { Text("Schedule on Jarvis") }
+            Button(onClick = { runCatching { LocalDateTime.parse(whenText).atZone(ZoneId.systemDefault()) }.onSuccess {
+                model.schedule(editingSchedule, schedulePrompt, it, recurrence)
+                editingSchedule = null
+            } }, enabled = state.connected && schedulePrompt.isNotBlank()) { Text(if (editingSchedule == null) "Schedule on Jarvis" else "Save schedule") }
+            if (editingSchedule != null) TextButton(onClick = { editingSchedule = null; schedulePrompt = "" }) { Text("Cancel editing") }
         }
-        items(state.schedules) { schedule -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) { Text(schedule.optString("prompt")); Text("${schedule.optString("recurrence")} · ${if (schedule.optBoolean("enabled")) "scheduled" else "paused / complete"}", color = Muted); if (schedule.optBoolean("enabled")) TextButton(onClick = { model.pauseSchedule(schedule.getString("id")) }) { Text("Pause") } } } }
+        items(state.schedules) { schedule -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) {
+            Text(schedule.optString("prompt"))
+            val next = runCatching { java.time.Instant.ofEpochSecond(schedule.getLong("next_run")).atZone(ZoneId.systemDefault()).toLocalDateTime() }.getOrNull()
+            Text("${schedule.optString("recurrence")} · ${if (schedule.optBoolean("enabled")) "scheduled" else "paused / complete"}${next?.let { " · $it" } ?: ""}", color = Muted)
+            Row {
+                TextButton(onClick = {
+                    editingSchedule = schedule.getString("id")
+                    schedulePrompt = schedule.optString("prompt")
+                    recurrence = schedule.optString("recurrence", "once")
+                    next?.let { whenText = it.withSecond(0).withNano(0).toString() }
+                }) { Text("Edit") }
+                if (schedule.optBoolean("enabled")) TextButton(onClick = { model.pauseSchedule(schedule.getString("id")) }) { Text("Pause") }
+                else TextButton(onClick = { model.resumeSchedule(schedule.getString("id")) }) { Text("Resume") }
+            }
+        } } }
         item { Text("Call history", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp)) }
         items(state.calls) { call -> InfoCard("Jarvis · ${call.optString("state")}", call.optString("direction")) }
         item { Spacer(Modifier.height(20.dp)) }

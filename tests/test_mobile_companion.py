@@ -149,6 +149,32 @@ def test_missed_recurring_runs_coalesce():
     assert scheduler.next_due({**value, "recurrence": "once"}, 4 * 86400) is None
 
 
+def test_schedule_edit_and_resume_are_device_scoped(mobile_env):
+    original = scheduler.create("phone-one", {"prompt": "first", "profile": "auto", "next_run": 100.0,
+                                               "timezone": "UTC", "recurrence": "daily"})
+    changed = scheduler.update("phone-one", original["id"], {"prompt": "second", "profile": "auto",
+                                "next_run": 200.0, "timezone": "UTC", "recurrence": "weekly"})
+    assert changed["prompt"] == "second" and changed["enabled"]
+    with pytest.raises(HTTPException) as error:
+        scheduler.update("phone-two", original["id"], {"prompt": "stolen", "profile": "auto",
+                         "next_run": 300.0, "timezone": "UTC", "recurrence": "once"})
+    assert error.value.status_code == 404
+    with store.database() as db:
+        saved = store.get(db, "schedule", original["id"])
+        saved["enabled"] = False
+        store.put(db, "schedule", original["id"], saved)
+    resumed = scheduler.resume("phone-one", original["id"], now=500.0)
+    assert resumed["enabled"] and resumed["next_run"] > 500.0
+
+
+def test_past_one_time_schedule_requires_edit_before_resume(mobile_env):
+    value = scheduler.create("phone", {"prompt": "once", "profile": "auto", "next_run": 100.0,
+                                        "timezone": "UTC", "recurrence": "once"})
+    with pytest.raises(HTTPException) as error:
+        scheduler.resume("phone", value["id"], now=101.0)
+    assert error.value.status_code == 409
+
+
 @pytest.mark.asyncio
 async def test_gateway_does_not_expose_owner_or_desktop_api(mobile_env):
     from app.mobile.gateway import gateway_app

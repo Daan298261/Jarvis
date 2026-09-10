@@ -27,17 +27,49 @@ def next_due(schedule: dict, now: float) -> float | None:
     return local.timestamp()
 
 
-def create(device_id: str, values: dict):
+def validate(values: dict):
     try:
         ZoneInfo(values["timezone"])
     except (KeyError, ValueError):
         raise HTTPException(400, "Unknown timezone")
     profile_choice(values.get("profile"))
+
+
+def create(device_id: str, values: dict):
+    validate(values)
     value = {**values, "id": str(uuid.uuid4()), "device_id": device_id, "enabled": True,
              "last_task_id": None, "last_error": None, "created_at": time.time()}
     with database() as db:
         put(db, "schedule", value["id"], value)
     return value
+
+
+def update(device_id: str, schedule_id: str, values: dict):
+    validate(values)
+    with database() as db:
+        current = get(db, "schedule", schedule_id)
+        if not current or current["device_id"] != device_id:
+            raise HTTPException(404, "Schedule not found")
+        current.update(values)
+        current.update(enabled=True, last_error=None, updated_at=time.time())
+        put(db, "schedule", schedule_id, current)
+    return current
+
+
+def resume(device_id: str, schedule_id: str, now: float | None = None):
+    now = time.time() if now is None else now
+    with database() as db:
+        current = get(db, "schedule", schedule_id)
+        if not current or current["device_id"] != device_id:
+            raise HTTPException(404, "Schedule not found")
+        if current["next_run"] <= now:
+            following = next_due(current, now)
+            if following is None:
+                raise HTTPException(409, "Choose a new time before resuming this one-time schedule")
+            current["next_run"] = following
+        current.update(enabled=True, last_error=None, updated_at=time.time())
+        put(db, "schedule", schedule_id, current)
+    return current
 
 
 async def tick(now: float | None = None):

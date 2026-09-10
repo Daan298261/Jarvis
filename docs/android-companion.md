@@ -11,7 +11,7 @@ preview, not a production remote-access release.
 - P-256 Android Keystore device identity, owner-confirmed pairing, short sessions,
   per-device revocation, and pinned TLS server identity.
 - Native API integration for task/model control, conversation history, file sharing,
-  attachments, STT/TTS, and persistent once/daily/weekly schedules.
+  attachments, STT/TTS, and editable persistent once/daily/weekly schedules.
 - Device-authenticated, allowlisted TLS gateway; owner/desktop APIs are not forwarded.
 - WebRTC voice bridge, call signaling, Android Telecom integration and optional FCM
   wake adapter. Calls require additional runtime dependencies and device validation.
@@ -106,9 +106,9 @@ deployed by this branch yet.
 - Android debug APK: built successfully.
 - Android lint: passes; warnings include older pinned libraries and intentional
   Keystore/pinned-TLS/locally bundled WebView usage.
-- 51 focused pairing/connectivity/mobile/auth/voice tests pass, including stale/replayed
+- 53 focused pairing/connectivity/mobile/auth/voice tests pass, including stale/replayed
   approvals, interrupted speech, real local TLS lifecycle, safe router mapping and
-  six-digit code expiry/regeneration/rate limiting.
+  six-digit code expiry/regeneration/rate limiting, plus scoped schedule edit/resume.
 - Personalized signed release build and APK signature verification passed at the
   previous checkpoint. That test APK used a loopback endpoint, not a live phone pairing.
 - GitHub Android build, frontend build and backend checks passed on the connectivity
@@ -126,7 +126,7 @@ deployed by this branch yet.
   owner-authenticated downloads are implemented, but not verified on a paired phone.
 - Physical-phone incoming/background calls, audio routes, interruptions, reconnection,
   process recreation, foreground-service/permission behavior and device battery tests.
-- Device acceptance for encrypted outbox recovery and coding approvals; schedule
-  editing and generation artifacts. Studio reports BlackGrid as disconnected.
+- Device acceptance for encrypted outbox recovery, coding approvals and schedule
+  editing; generation artifacts await BlackGrid. Studio reports it as disconnected.
 - Live-model and multi-node execution verification. The phone is a controller;
   this branch does not implement new swarm consensus or phone-side inference.
