@@ -30,7 +30,7 @@ class EventBus:
         if queue in self._global:
             self._global.remove(queue)
 
-    async def publish(self, task_id: str, kind: str, title: str, detail: str = "", stage: str = "") -> None:
+    async def publish(self, task_id: str, kind: str, title: str, detail: str = "", stage: str = "", *, persist: bool = True) -> None:
         event = {
             "task_id": task_id,
             "kind": kind,
@@ -39,19 +39,24 @@ class EventBus:
             "stage": stage,
             "created_at": utcnow().isoformat(),
         }
-        async with SessionLocal() as session:
-            session.add(
-                TaskEvent(
-                    task_id=task_id,
-                    kind=kind,
-                    title=title[:400],
-                    detail=detail,
-                    stage=stage,
+        if persist:
+            async with SessionLocal() as session:
+                session.add(
+                    TaskEvent(
+                        task_id=task_id,
+                        kind=kind,
+                        title=title[:400],
+                        detail=detail,
+                        stage=stage,
+                    )
                 )
-            )
-            await session.commit()
+                await session.commit()
         for queue in list(self._subscribers.get(task_id, [])) + list(self._global):
             await queue.put(event)
+
+    async def publish_ephemeral(self, channel: str, kind: str, title: str, detail: str = "", stage: str = "") -> None:
+        """Notify subscribers without persisting a TaskEvent (no task FK)."""
+        await self.publish(channel, kind, title, detail, stage, persist=False)
 
     async def stream(self, task_id: str | None = None) -> AsyncIterator[str]:
         queue = self.subscribe(task_id)
