@@ -118,9 +118,14 @@ This aligns RFC-0067 hide-chrome-by-default with RFC-0061: the speak path filter
 
 Taco’s “Codsworth-like voice” means **feel** (dry household butler), not a character clone. Original or licensed packs only. MUST NOT clone Codsworth / Fallout / Stephen Russell, Cortana, Ultron, or any trademarked id. UX uses archetype language only (`Household butler (original)`), never a protected character name as the product voice.
 
-### 7. Installer / download
+### 7. Installer / download / out-of-box butler
 
-Kokoro (and Piper) must remain usable offline without a large extra download on the default ship path. Chatterbox and Orpheus are **optional packs** — opt-in downloads with a clear license shown before fetch. Large GPU models must not be required for first speech.
+Taco hard rule: listing voices that show `install_required` without a trivial install path is a **fail**.
+
+- The **default household butler pack** (original, RFC-0056 / 0062) must **work out of the box after Windows Setup** — no extra download, no Settings hunt, no silent `install_required`.
+- Kokoro (and Piper) stay on the default ship path so first speech is usable offline. Prefer **bundling** the default English Kokoro butler pack (and Dutch Piper if shipped) in Windows Setup.
+- Any catalog profile that is not bundled must be reachable via **one-click or an extremely short “Get more voices”** flow in Settings (bundle in Setup **or** that one-click path — not a listing-only stub).
+- Chatterbox and Orpheus remain **optional packs** — opt-in downloads with a clear license shown before fetch. Large GPU models must not be required for first speech.
 
 ### Will not
 
@@ -131,12 +136,15 @@ Kokoro (and Piper) must remain usable offline without a large extra download on 
 - Ship XTTS v2 or F5-TTS (CC-BY-NC) as product defaults
 - Require the 27B model for speaking
 - Narrate thought-process / Show work / plan chrome, URLs, or code
+- Ship catalog voices as listing-only `install_required` stubs with no Setup bundle or one-click install
 
 ## Acceptance criteria
 
 - [ ] Documented engine+voice catalog schema extending RFC-0062 profile `tts` block
 - [ ] Ranking: Kokoro-82M (Apache-2.0) default low-latency English; Chatterbox/Turbo (MIT) optional quality; Orpheus 3B (Apache-2.0) catalog not default; Piper remains edge/Dutch/baseline; XTTS v2 and F5-TTS (CC-BY-NC) are not product defaults
-- [ ] Quality bar: must subjectively/objectively beat current robotic default on owner desktop before flipping default profile
+- [ ] Quality bar: must subjectively/objectively beat current robotic SAPI/espeak/pyttsx3 stack on owner desktop before flipping default profile
+- [ ] Default household butler pack works out of the box after Windows Setup (no extra download)
+- [ ] Profiles that would show `install_required` are either bundled in Setup or installed via one-click / extremely short “Get more voices” in Settings — listing-only stubs fail
 - [ ] Same active profile drives desktop chat→TTS and Android host TTS (0064)
 - [ ] Latency: first-chunk speech respects RFC-0036 budgets or documented ack-path fallback to Kokoro/Piper
 - [ ] IP guardrails restated (no clone packs; “Codsworth-like” is feel only)
