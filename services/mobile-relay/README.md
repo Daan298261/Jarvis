@@ -5,8 +5,8 @@ reach its Jarvis gateway. TLS terminates at the owner's gateway, not at this rel
 It has no access to conversation/audio/file plaintext. The HTTPS control service
 handles swarm registration and opaque push identifiers.
 
-Deploy with Docker Compose on a public Linux host. Set `RELAY_HOSTNAME`, a random
-`RELAY_REGISTRATION_CODE`, and `FIREBASE_CREDENTIAL_FILE` in the operator's environment.
+Deploy with Docker Compose on a public Linux host. Copy `.env.example` to `.env` and set
+`RELAY_HOSTNAME`, a random `RELAY_REGISTRATION_CODE`, and `FIREBASE_CREDENTIAL_FILE`.
 The Firebase service account stays only on the service host. Allow TCP 80/443 and
 15000–15099. The relay is not a TURN server; configure coturn separately for WebRTC.
 

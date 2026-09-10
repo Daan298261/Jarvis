@@ -398,6 +398,12 @@ def connection_status():
     return CONNECTIVITY.snapshot()
 
 
+@owner_router.get("/infrastructure")
+def infrastructure_status():
+    from ..mobile.infrastructure import infrastructure_readiness
+    return infrastructure_readiness()
+
+
 @owner_router.post("/connection")
 async def connection_setup(body: ConnectionSetup):
     from ..mobile.connectivity import CONNECTIVITY

@@ -27,10 +27,15 @@ ACTIVE_STATES = {"ringing", "connecting", "active", "reconnecting"}
 
 
 def capabilities():
+    from .infrastructure import infrastructure_readiness
     available = importlib.util.find_spec("aiortc") is not None
-    return {"available": available, "push_configured": bool(os.environ.get("JARVIS_PUSH_URL")),
-            "turn_configured": bool(os.environ.get("JARVIS_TURN_URL")),
-            "detail": "WebRTC available" if available else "Install backend/requirements-mobile.txt to enable calls"}
+    ready = infrastructure_readiness()
+    return {
+        "available": available,
+        "push_configured": ready["push_configured"],
+        "turn_configured": ready["turn_configured"],
+        "detail": "WebRTC available" if available else "Install backend/requirements-mobile.txt to enable calls",
+    }
 
 
 def ice_servers():
