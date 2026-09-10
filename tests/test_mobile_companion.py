@@ -155,7 +155,7 @@ async def test_mobile_can_resolve_coding_decision_with_explicit_instructions(mob
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
         url = "/api/companion/coding/decisions/decision-1/resolve"
         assert (await client.post(url, json={"resolution": "keep the verified branch"})).status_code == 401
-        empty = await client.post(url, json={"resolution": ""}, headers=headers)
+        empty = await client.post(url, json={"resolution": "   "}, headers=headers)
         assert empty.status_code == 422
         response = await client.post(url, json={"resolution": "keep the verified branch"}, headers=headers)
     assert response.status_code == 200

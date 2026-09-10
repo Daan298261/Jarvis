@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 
 from ..auth import require_owner_private_key
@@ -52,6 +52,14 @@ class PairingCodeRequest(BaseModel):
 
 class CodingDecisionResolution(BaseModel):
     resolution: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("resolution")
+    @classmethod
+    def require_instructions(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Resolution instructions are required")
+        return value
 
 
 class Message(BaseModel):

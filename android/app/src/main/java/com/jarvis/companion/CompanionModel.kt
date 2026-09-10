@@ -72,6 +72,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     suspend fun refresh() {
         api.refreshEndpoints()
         val previous = mutable.value
+        val previousCoding = JSONObject().put("overview", previous.coding)
+            .put("decisions", JSONObject().put("items", JSONArray(previous.codingDecisions)))
         val payload = kotlinx.coroutines.coroutineScope {
             val capabilities = async { api.json("/capabilities") }
             val tasks = async { api.array("/tasks").objects() }
@@ -83,7 +85,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 previous.conversationId?.let { api.json("/conversations/$it").getJSONArray("messages").objects() } ?: emptyList()
             }
             val swarm = async { runCatching { api.json("/swarm") }.getOrDefault(previous.swarm) }
-            val coding = async { runCatching { api.json("/coding") }.getOrDefault(previous.coding) }
+            val coding = async { runCatching { api.json("/coding") }.getOrDefault(previousCoding) }
             RefreshPayload(capabilities.await(), tasks.await(), models.await(), conversations.await(), schedules.await(), calls.await(),
                 messages.await(), swarm.await(), coding.await())
         }
