@@ -1,96 +1,157 @@
 import * as THREE from "three"
 
-// Original point-sampled portrait. All surfaces and light fields are luminous dots.
+// Original contour portrait, reconstructed from the owner's APEX humanoid reel.
+// Skin contours, shoulder arcs, nerve filaments and loose particles are separate structures.
 export function createParticleBust(density: number, material: THREE.ShaderMaterial) {
-  let seed = 51
+  let seed = 5103
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296 }
-  const gaussian = (value: number, width: number) => Math.exp(-(value * value) / (width * width))
-  function cloud(build: (point: (x: number, y: number, z: number, gold: number, brightness: number, flow?: number) => void) => void) {
-    const positions: number[] = [], sizes: number[] = [], golds: number[] = [], lights: number[] = [], flows: number[] = []
-    build((x, y, z, gold, brightness, flow = 0) => {
-      positions.push(x, y, z)
-      sizes.push((random() > 0.985 ? 8 : 3.2 + random() * 2.0) / Math.sqrt(density))
-      golds.push(gold); lights.push(brightness); flows.push(flow)
+  const gauss = (v: number, s: number) => Math.exp(-v * v / (s * s))
+  type Emit = (x: number, y: number, z: number, gold: number, light: number, flow?: number, size?: number) => void
+  function cloud(build: (emit: Emit) => void) {
+    const position: number[] = [], sizes: number[] = [], golds: number[] = [], lights: number[] = [], flows: number[] = [], seeds: number[] = []
+    build((x, y, z, gold, light, flow = 0, size = 1.6 + random() * 0.8) => {
+      position.push(x, y, z); sizes.push(size / Math.sqrt(density)); golds.push(gold)
+      lights.push(light); flows.push(flow); seeds.push(random())
     })
     const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3))
-    geometry.setAttribute("aSize", new THREE.Float32BufferAttribute(sizes, 1))
-    geometry.setAttribute("aGold", new THREE.Float32BufferAttribute(golds, 1))
-    geometry.setAttribute("aLight", new THREE.Float32BufferAttribute(lights, 1))
-    geometry.setAttribute("aFlow", new THREE.Float32BufferAttribute(flows, 1))
+    for (const [name, array, stride] of [
+      ["position", position, 3], ["aSize", sizes, 1], ["aGold", golds, 1],
+      ["aLight", lights, 1], ["aFlow", flows, 1], ["aSeed", seeds, 1],
+    ] as const) geometry.setAttribute(name, new THREE.Float32BufferAttribute(array, stride))
     return new THREE.Points(geometry, material)
   }
-  const head = cloud((point) => {
-    const rows = Math.round(88 * density), columns = Math.round(100 * density)
-    for (let row = 1; row < rows; row++) {
-      const v = row / rows * 2 - 1
-      const y = 1 + v * 0.98
-      const radius = Math.sqrt(1 - v * v)
-      const jaw = 0.8 + 0.2 * THREE.MathUtils.smoothstep(v, -0.75, 0.1)
-      for (let col = 0; col < columns; col++) {
-        const angle = (col + (row % 2) * 0.5) / columns * Math.PI * 2
-        const x = Math.sin(angle) * 0.64 * radius * jaw
-        const z = Math.cos(angle) * 0.53 * radius
-        const front = THREE.MathUtils.smoothstep(Math.cos(angle), 0.25, 0.85)
-        const mask = gaussian(x, 0.4) * gaussian(y - 0.76, 0.43) * front
-        const edge = Math.pow(Math.abs(Math.sin(angle)), 10)
-        point(x + (random() - 0.5) * 0.007, y, z, mask,
-          (0.25 + edge * 1.45 + front * 0.5 + mask * 2.0) * (0.8 + random() * 0.4))
-      }
-    }
-    // Warm inner face core glows through the cyan surface contours.
-    for (let i = 0; i < 2400 * density; i++) {
-      const angle = random() * Math.PI * 2, r = Math.sqrt(random())
-      point(Math.cos(angle) * r * 0.38, 0.76 + Math.sin(angle) * r * 0.43,
-        0.49 + random() * 0.06, 1, Math.pow(1 - r * r, 1.5) * 1.3)
-    }
-    for (let i = 0; i < 1100 * density; i++) {
-      const angle = random() * Math.PI * 2, v = random() * 2 - 1
-      const r = Math.sqrt(1 - v * v) * (1.04 + random() * 0.13)
-      point(Math.sin(angle) * 0.66 * r, 1 + v * 1.05, Math.cos(angle) * 0.55 * r,
-        0, 0.12 + random() * 0.32, 0.15)
-    }
-  })
-  const body = cloud((point) => {
-    // Sloping shoulder contours flow continuously into a narrow neck.
-    const rows = Math.round(66 * density), columns = Math.round(160 * density)
+  const profile = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0.08, 0.07, 0.19), new THREE.Vector3(0.27, 0.16, 0.27),
+    new THREE.Vector3(0.44, 0.4, 0.35), new THREE.Vector3(0.51, 0.72, 0.40),
+    new THREE.Vector3(0.52, 1.10, 0.40), new THREE.Vector3(0.44, 1.39, 0.35),
+    new THREE.Vector3(0.27, 1.58, 0.24), new THREE.Vector3(0, 1.66, 0),
+  ], false, "catmullrom", 0.3)
+  const head = cloud((emit) => {
+    const rows = Math.round(64 * density), columns = Math.round(180 * density)
     for (let row = 0; row < rows; row++) {
-      const t = row / (rows - 1)
+      const ring = profile.getPoint(row / rows)
       for (let col = 0; col < columns; col++) {
-        const angle = col / columns * Math.PI * 2
-        const s = Math.sin(angle), c = Math.cos(angle)
-        const width = 0.2 + 1.52 * THREE.MathUtils.smoothstep(t, 0.2, 0.62)
-          - 0.13 * THREE.MathUtils.smoothstep(t, 0.7, 1)
-        const x = s * width
-        const shoulder = THREE.MathUtils.smoothstep(t, 0.3, 0.7) * Math.pow(Math.abs(s), 0.65)
-        const y = 0.03 - t * 1.62 - shoulder * 0.15
-        const z = c * (0.23 + t * 0.4)
-        const gold = gaussian(x - Math.sin(t * 12) * 0.08, 0.024) * Math.max(0, c) * 0.9
-        const fade = 1 - THREE.MathUtils.smoothstep(t, 0.78, 1) * 0.88
-        const neckLight = 0.45 + THREE.MathUtils.smoothstep(t, 0.16, 0.4) * 0.55
-        point(x, y, z, gold, (0.25 + Math.max(0, c) * 0.85 + gold * 0.6) * fade * neckLight)
+        const angle = (col + random() * 0.65) / columns * Math.PI * 2
+        const front = Math.cos(angle), x = Math.sin(angle) * ring.x
+        // Slightly flattened face with cheek, brow and nose relief, not an ellipsoid.
+        const nose = gauss(x, 0.12) * gauss(ring.y - 0.65, 0.26) * 0.075
+        const brow = gauss(ring.y - 1.0, 0.06) * gauss(x, 0.42) * 0.025
+        const z = front * ring.z + Math.max(0, front) * (nose + brow)
+        const mask = gauss(x, 0.38) * gauss(ring.y - 0.61, 0.39) * THREE.MathUtils.smoothstep(front, 0.3, 0.85)
+        const rim = Math.pow(Math.abs(Math.sin(angle)), 14)
+        const light = front < 0 ? 0.06 : 0.25 + rim * 4.5 + mask * 3.6
+        // Fine broken contour strokes avoid a mechanical latitude/longitude grid.
+        if (random() < 0.05 && rim < 0.7) continue
+        emit(x, ring.y + Math.sin(angle * 3 + ring.y * 5) * 0.004, z,
+          mask, light * (0.65 + random() * 0.55), 0, 1.4 + random() * 0.65)
       }
     }
-    for (let i = 0; i < 350 * density; i++) {
-      const a = random() * Math.PI * 2, r = Math.pow(random(), 2) * 0.11
-      point(Math.cos(a) * r, -1.2 + Math.sin(a) * r, 0.68, 0.05, 1.3)
+    // Warm face bands are laid onto the facial surface, with feathered edges.
+    for (let row = 0; row < 27 * density; row++) {
+      const v = row / (27 * density) * 2 - 1
+      const width = Math.sqrt(1 - v * v) * 0.34
+      for (let i = 0; i < 150 * density; i++) {
+        const u = i / (150 * density) * 2 - 1
+        emit(u * width, 0.62 + v * 0.39 + Math.cos(u * Math.PI) * 0.013,
+          0.47 - Math.abs(u) * 0.035, 1, (1 - Math.pow(Math.abs(u), 4)) * (1 - v * v) * 1.8,
+          0, 1.4 + random() * 0.35)
+      }
+    }
+    emit(0, 0.62, 0.43, 1, 0.24, 0, 115)
+    // Sparse halo with a trailing, asymmetric edge. The face stays legible through it.
+    for (let i = 0; i < 3200 * density; i++) {
+      const ring = profile.getPoint(random()), angle = random() * Math.PI * 2
+      const spread = Math.pow(random(), 2) * 0.30
+      emit(Math.sin(angle) * (ring.x + spread), ring.y + spread * 0.9,
+        Math.cos(angle) * (ring.z + spread), 0, 0.15 + random() * 0.48, 0.4, 1.0 + random())
     }
   })
-  const field = cloud((point) => {
-    const strands = Math.round(28 * density), samples = Math.round(140 * density)
+  const body = cloud((emit) => {
+    const outline = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0.28, 0.16, -0.02), new THREE.Vector3(0.24, -0.10, 0.04),
+      new THREE.Vector3(0.31, -0.37, 0.09), new THREE.Vector3(0.62, -0.54, 0.05),
+      new THREE.Vector3(1.10, -0.65, -0.02), new THREE.Vector3(1.43, -0.89, -0.08),
+      new THREE.Vector3(1.55, -1.27, -0.15),
+    ])
     for (const side of [-1, 1]) {
-      for (let strand = 0; strand < strands; strand++) {
-        const band = strand / strands
-        for (let i = 0; i < samples; i++) {
-          const t = i / (samples - 1)
-          const x = side * (1.1 + t * 6.3)
-          const wave = Math.sin(t * 10.5 - band * 3.5) * Math.sin(t * Math.PI) * 0.38
-          const y = -1.12 + t * 1.5 + wave - band * (0.2 + Math.sin(t * Math.PI) * 1.4)
-          const fade = Math.sin(t * Math.PI) * (0.75 + 0.6 * random())
-          point(x, y, -0.7 - band * 0.8, strand % 9 === 0 ? 0.95 : 0, fade, 1)
-          if (i % 3 === 0) point(x + (random() - 0.5) * 0.1, y + (random() - 0.5) * 0.28,
-            -1.1, 0, fade * 0.45, 1)
+      // Nested outlines connect jaw, neck and shoulders as one organic surface.
+      for (let contour = 0; contour < 7 * density; contour++) {
+        for (let i = 0; i < 250 * density; i++) {
+          const t = i / (250 * density), p = outline.getPoint(t)
+          const inset = contour / density * 0.014
+          emit(side * (p.x - inset), p.y - inset * t * 0.9, p.z + inset,
+            0, (1 - contour / (9 * density)) * 2.0, 0, 1.4)
         }
+      }
+      // Rounded deltoid/chest contour arches, clipped into the outer shoulder silhouette.
+      for (let row = 0; row < 20 * density; row++) {
+        const r = 0.17 + row / density * 0.047
+        for (let col = 0; col < 180 * density; col++) {
+          const angle = (col + random() * 0.8) / (180 * density) * Math.PI
+          const x = side * (0.83 + Math.cos(angle) * r)
+          const y = -1.54 + Math.sin(angle) * r * 0.96
+          const ax = Math.abs(x)
+          const top = -0.29 - 0.32 * (1 - Math.exp(-Math.pow(Math.max(0, ax - 0.25) / 0.25, 2))) - 0.32 * Math.pow(ax / 1.6, 6)
+          if (ax < 0.10 || ax > 1.53 || y > top) continue
+          const fade = THREE.MathUtils.smoothstep(y, -1.54, -1.24)
+          emit(x, y, 0.18 + Math.sin(angle) * 0.2, 0,
+            fade * (0.3 + random() * 0.35), 0, 1.35)
+        }
+      }
+      // Slender branching amber filaments connect the face to the sternum.
+      for (let branch = 0; branch < 7; branch++) {
+        for (let i = 0; i < 180 * density; i++) {
+          const t = i / (180 * density)
+          const y = -1.27 + t * 1.36
+          const x = side * (0.015 + t * (0.035 + branch * 0.026) + Math.sin(t * 14 + branch) * 0.032 * Math.sin(t * Math.PI))
+          emit(x, y, 0.29, 0.92, 0.65 + Math.sin(t * Math.PI) * 0.8, 0, 1.5)
+        }
+      }
+    }
+    // Transverse neck contours bow gently, rather than forming a bright cylinder.
+    for (let row = 0; row < 27 * density; row++) {
+      const t = row / (27 * density)
+      for (let i = 0; i < 80 * density; i++) {
+        const x = (i / (80 * density) * 2 - 1) * (0.23 + t * 0.09)
+        const y = 0.10 - t * 0.59 - (1 - Math.pow(x / (0.23 + t * 0.09), 2)) * 0.07
+        emit(x, y, 0.19, 0, 0.17 + random() * 0.18, 0, 1.25)
+      }
+    }
+    for (let i = 0; i < 220 * density; i++) {
+      const a = random() * Math.PI * 2, r = Math.pow(random(), 2) * 0.055
+      emit(Math.cos(a) * r, -1.28 + Math.sin(a) * r, 0.40, 0, 2.0, 2, 2.0 + random() * 2)
+    }
+    // The emitter's soft halo is a single large point, not a solid sphere.
+    emit(0, -1.28, 0.4, 0, 0.55, 2, 65)
+  })
+  const field = cloud((emit) => {
+    for (const side of [-1, 1]) {
+      for (let strand = 0; strand < 55 * density; strand++) {
+        const band = strand / (55 * density)
+        for (let i = 0; i < 240 * density; i++) {
+          const t = i / (240 * density)
+          const x = side * (0.95 + t * 6.4)
+          const crest = Math.sin(t * 12 + side * 0.4) * 0.28
+            + Math.sin(t * 27 - band * 2) * 0.11 + Math.sin(t * 51 + band * 3) * 0.04
+          const y = -0.89 + t * 0.96 + crest - band * (0.28 + Math.sin(t * Math.PI) * 1.3)
+          const gold = strand % 17 < 2
+          const bright = gold || strand % 11 === 0
+          const fade = Math.sin(t * Math.PI) * (0.28 + random() * 0.65) * (bright ? 5.5 : 0.85)
+          if (bright || random() > 0.25) emit(x, y, -0.75 - band * 0.7, gold ? 0.94 : 0, fade, 1, (bright ? 1.65 : 1.1) + random() * 0.8)
+          if (random() < 0.22) emit(x, y + (random() - 0.5) * 0.22, -0.7,
+            0, fade * 0.55, 1, 0.9 + random())
+        }
+      }
+    }
+    // Quiet interrupted concentric arcs behind the portrait, as in the reel.
+    for (let ring = 0; ring < 5; ring++) {
+      const radius = 0.98 + ring * 0.16
+      for (let i = 0; i < 430 * density; i++) {
+        const a = i / (430 * density) * Math.PI * 2
+        if (Math.sin(a * 3 + ring * 0.7) > 0.91) continue
+        const y = 0.64 + Math.cos(a) * radius
+        if (y < -0.5) continue
+        emit(Math.sin(a) * radius, y, -1.5, 0, 0.12 - ring * 0.014, 2, 1.15)
       }
     }
   })
@@ -102,44 +163,57 @@ export const particleVertexShader = `
   attribute float aGold;
   attribute float aLight;
   attribute float aFlow;
+  attribute float aSeed;
   uniform float uTime;
   uniform float uMotion;
   uniform float uActivity;
   uniform float uSpeech;
   uniform float uPixelScale;
-  uniform float uSize;
+  uniform float uAssemble;
   varying float vGold;
   varying float vLight;
   void main() {
     vec3 p = position;
-    float wave = sin(p.x * 2.1 + uTime * (0.55 + uActivity * 0.6) + p.y * 2.0);
-    p.y += wave * aFlow * 0.07 * uMotion;
-    p.z += sin(p.y * 6.0 - uTime * 1.6) * 0.009 * uMotion * (1.0 - aFlow);
-    p.xy *= 1.0 + uSpeech * 0.012 * sin(p.y * 8.0 + uTime * 9.0);
+    float t = uTime;
+    if (aFlow > 0.8 && aFlow < 1.5) {
+      p.y += (sin(p.x * 2.8 - t * 0.6) * 0.14 + sin(p.x * 6.5 + t * 0.45) * 0.06) * uMotion;
+      p.z += sin(p.x * 1.8 + t * 0.25) * 0.1 * uMotion;
+    } else if (aFlow < 0.8) {
+      float loose = step(0.2, aFlow);
+      p.x += sin(t * 0.55 + aSeed * 42.0) * 0.055 * loose * uMotion;
+      p.y += cos(t * 0.45 + aSeed * 31.0) * 0.06 * loose * uMotion;
+      float sweep = pow(max(0.0, sin(t * 0.4 + p.y * 0.8)), 5.0);
+      float drift = loose * (0.08 + uActivity * 0.2) * sweep * uMotion;
+      p.x += drift * (0.5 + aSeed) * smoothstep(-0.3, 0.5, p.x);
+      float dissolve = smoothstep(0.65, 1.0, uActivity) * smoothstep(0.65, 0.95, aSeed) * uMotion;
+      p.x += dissolve * (0.35 + sin(t * 0.7 + aSeed * 8.0) * 0.2);
+      p.y += dissolve * sin(t * 0.55 + aSeed * 13.0) * 0.35;
+      p.z += sin(p.y * 7.0 - t * 1.3) * (0.004 + uSpeech * 0.025) * uMotion;
+      vec3 scattered = vec3(sin(aSeed * 75.0) * (0.4 + aSeed * 1.2),
+        -1.28 + aSeed * 1.4, cos(aSeed * 43.0) * 0.6);
+      float assemble = smoothstep(0.0, 1.0, clamp(uAssemble * 1.5 - aSeed * 0.5, 0.0, 1.0));
+      p = mix(scattered, p, assemble);
+    }
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = clamp(aSize * uSize * uPixelScale * 7.1 / -mv.z, 1.0, 64.0);
+    gl_PointSize = clamp(aSize * uPixelScale * 7.1 / -mv.z, 0.8, 120.0);
     vGold = aGold;
-    float shimmer = 0.88 + 0.12 * sin(uTime * 1.8 + p.y * 5.0 + p.x * 3.0);
-    float scan = pow(max(0.0, sin(p.y * 3.0 - uTime * 1.5)), 12.0) * uActivity;
-    vLight = aLight * (mix(1.0, shimmer, uMotion) + scan * uMotion * 0.28);
+    float shimmer = 0.87 + 0.13 * sin(t * 1.2 + aSeed * 60.0);
+    float wave = pow(max(0.0, sin(p.y * 3.5 - t * 1.1)), 8.0) * uActivity;
+    vLight = aLight * (mix(1.0, shimmer, uMotion) + wave * uMotion * 0.24);
   }
 `
-
 export const particleFragmentShader = `
   uniform vec3 uColor;
   uniform vec3 uGold;
   uniform float uOpacity;
-  uniform float uGain;
   varying float vGold;
   varying float vLight;
   void main() {
-    float radius = length(gl_PointCoord - 0.5) * 2.0;
-    if (radius > 1.0) discard;
-    float core = exp(-radius * radius * 22.0);
-    float halo = exp(-radius * radius * 4.0) * 0.38;
-    float alpha = (core + halo) * (1.0 - smoothstep(0.65, 1.0, radius)) * vLight * uOpacity * uGain;
-    vec3 color = mix(uColor, uGold, smoothstep(0.15, 0.8, vGold));
-    gl_FragColor = vec4(color + vec3(core * 0.14), alpha);
+    float r = length(gl_PointCoord - 0.5) * 2.0;
+    if (r > 1.0) discard;
+    float alpha = exp(-r * r * 4.0) * (1.0 - smoothstep(0.65, 1.0, r));
+    vec3 color = mix(uColor, uGold, smoothstep(0.13, 0.75, vGold));
+    gl_FragColor = vec4(color * vLight, alpha * uOpacity);
   }
 `
