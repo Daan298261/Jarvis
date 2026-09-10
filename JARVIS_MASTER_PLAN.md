@@ -2378,6 +2378,14 @@ Reason:
 
 Taco: HUD felt like a ticket runner; conversational talk plus brief spoken commentary during long work.
 
+Decision: RFC-0069 accepts the #166 presence shape-catalog / morph surface
+
+Presence remains a humanoid of thousands of glowing orbs (parity baseline #165). RFC-0069 locks the accepted contract to implement PR #166: expandable `registerPresenceShape` catalog (default `humanoid_bust`, stub `energy_core`), `avatarId` → shape id (`jarvis_base` / empty / `shape:<id>`), and fixed-budget A/B orb morph (`uMorph`) without remounting `HumanoidPresence`. Field layers may swap rather than lerp. No new §58 backlog checkboxes.
+
+Reason:
+
+CoS assigned this ledger so specs can land then #166 without renaming the shipped surface. Morph/catalog shipped ahead of the RFC; this entry accepts that API.
+
 ---
 
 ## 60. Expected Example Behavior
