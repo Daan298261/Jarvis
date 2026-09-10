@@ -2386,6 +2386,14 @@ Reason:
 
 CoS assigned this ledger so specs can land then #166 without renaming the shipped surface. Morph/catalog shipped ahead of the RFC; this entry accepts that API.
 
+Decision: RFC-0070 higher-quality local TTS engines (accepted)
+
+Taco (2026-09-10) wants a less robotic Jarvis voice — a massive quality jump via better local-friendly engines, not cloud lock-in or IP-clone packs. RFC-0070 extends the RFC-0062 profile `tts` block with an engine adapter. Canonical desktop ranking (RTX 5070 Ti): Kokoro-82M (Apache-2.0) default low-latency English; Chatterbox/Turbo (MIT) optional quality when ~4–6 GB VRAM free, original butler packs only; Orpheus 3B (Apache-2.0) catalog, not default. Piper remains edge/Dutch/baseline. Do not ship XTTS v2 or F5-TTS (CC-BY-NC) as product defaults. Default household butler pack must work out of the box after Setup; other voices bundle or one-click “Get more voices” (listing-only `install_required` fails). TTS speaks final conversational text and allowed persona lines only — never thought-process / plan chrome, URLs, or code. “Codsworth-like” is feel, not a clone. Chat→TTS, think-aloud, and Android host TTS keep the same active `voice_profile_id`. Specs-only; implementation is a follow-up ticket.
+
+Reason:
+
+Current host TTS still falls through to robotic OS/espeak-class backends despite the voice-profile catalog. Owner asked for quality, not another picker.
+
 ---
 
 ## 60. Expected Example Behavior
