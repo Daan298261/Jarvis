@@ -66,6 +66,7 @@ class TaskEvent(Base):
     stage: Mapped[str] = mapped_column(String(64), default="")
     title: Mapped[str] = mapped_column(String(400), default="")
     detail: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(120), default="jarvis-agent")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     task: Mapped[Task] = relationship(back_populates="events")

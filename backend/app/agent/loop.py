@@ -23,7 +23,7 @@ from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool
 from ..policy.authorize import AuthorizationResult, authorize
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
-from ..tools.safety import RiskLevel, classify_command, needs_confirmation
+from ..tools.safety import RiskLevel, classify_command, is_destructive_operation, needs_confirmation
 from .compaction import (
     compact_history,
     deserialize_messages,
@@ -153,13 +153,53 @@ def _tool_authorization(
     if command:
         risk = max(risk, classify_command(command), key=lambda item: list(RiskLevel).index(item))
     action = arguments.get("action") if isinstance(arguments, dict) else None
+    if is_destructive_operation(name, arguments, command):
+        risk = RiskLevel.IRREVERSIBLE
     return authorize(name, action=action, risk=risk, profile_id=profile_id, approved=approved)
 
 
 class AgentRuntime:
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task] = {}
+        self._heartbeat_tasks: dict[str, asyncio.Task] = {}
+        self._last_heartbeat: dict[str, datetime] = {}
         self._cancel = set()
+
+    async def _heartbeat_loop(self, task_id: str) -> None:
+        try:
+            while True:
+                self._last_heartbeat[task_id] = utcnow()
+                await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            raise
+
+    def _start_runner(self, task_id: str, coroutine: Any) -> asyncio.Task:
+        previous = self._heartbeat_tasks.pop(task_id, None)
+        if previous:
+            previous.cancel()
+        runner = asyncio.create_task(coroutine)
+        heartbeat = asyncio.create_task(self._heartbeat_loop(task_id))
+        self._tasks[task_id] = runner
+        self._heartbeat_tasks[task_id] = heartbeat
+
+        def finish(_finished: asyncio.Task) -> None:
+            current = self._heartbeat_tasks.pop(task_id, None)
+            if current:
+                current.cancel()
+            self._last_heartbeat[task_id] = utcnow()
+
+        runner.add_done_callback(finish)
+        return runner
+
+    def runtime_status(self, task_id: str) -> dict[str, Any]:
+        runner = self._tasks.get(task_id)
+        alive = bool(runner and not runner.done())
+        heartbeat = self._last_heartbeat.get(task_id)
+        return {
+            "alive": alive,
+            "last_heartbeat_at": heartbeat.isoformat() if heartbeat else None,
+            "heartbeat_status": "alive" if alive else "stopped",
+        }
 
     async def create_task(
         self,
@@ -203,8 +243,7 @@ class AgentRuntime:
         async with SessionLocal() as session:
             session.add(task)
             await session.commit()
-        runner = asyncio.create_task(self._run(task.id, continue_existing=False))
-        self._tasks[task.id] = runner
+        self._start_runner(task.id, self._run(task.id, continue_existing=False))
         return task
 
     async def continue_task(self, task_id: str, prompt: str | None = None) -> Task:
@@ -223,8 +262,7 @@ class AgentRuntime:
             task.waiting_for_confirmation = False
             task.updated_at = utcnow()
             await session.commit()
-        runner = asyncio.create_task(self._run(task_id, continue_existing=True, extra_prompt=prompt))
-        self._tasks[task_id] = runner
+        self._start_runner(task_id, self._run(task_id, continue_existing=True, extra_prompt=prompt))
         return task
 
     async def confirm_task(self, task_id: str, approved: bool, expected_payload: str | None = None) -> Task:
@@ -253,8 +291,7 @@ class AgentRuntime:
             task.waiting_for_confirmation = False
             task.status = "running"
             await session.commit()
-        runner = asyncio.create_task(self._run(task_id, continue_existing=True, pending_tool=payload))
-        self._tasks[task_id] = runner
+        self._start_runner(task_id, self._run(task_id, continue_existing=True, pending_tool=payload))
         return task
 
     def cancel(self, task_id: str) -> None:
@@ -554,7 +591,7 @@ class AgentRuntime:
                     tool_meta = REGISTRY.tools.get(step.get("tool") or "")
                     risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
                     command = (step.get("arguments") or {}).get("command") if isinstance(step.get("arguments"), dict) else None
-                    if needs_confirmation(autonomy, risk, command):
+                    if needs_confirmation(autonomy, risk, command, tool_name=step.get("tool"), arguments=step.get("arguments") or {}):
                         blocked = True
                         break
                 if blocked:
@@ -853,7 +890,7 @@ class AgentRuntime:
                         tool_meta = REGISTRY.tools.get(name)
                         risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
                         command = arguments.get("command") if isinstance(arguments, dict) else None
-                        if needs_confirmation(autonomy, risk, command):
+                        if needs_confirmation(autonomy, risk, command, tool_name=name, arguments=arguments):
                             metrics.note_confirmation()
                             await self._update(
                                 task_id,

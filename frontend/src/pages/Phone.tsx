@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } from "../api"
 import { MobileCompanionSetup } from "./MobileCompanionSetup"
+import { TaskHeartbeat } from "../components/TaskActivity"
+import { phaseLabel } from "../taskStatus"
 
 type VoiceStatus = { stt_ready?: boolean; tts_ready?: boolean; detail?: string }
 
@@ -208,10 +210,13 @@ export function PhonePage() {
           <>
             <div className="kv">
               <b>Task</b><span>{active.title}</span>
-              <b>Status</b><span className={`badge ${active.status}`}>{active.status}</span>
-              <b>Stage</b><span>{active.stage || "—"}</span>
+              <b>State</b><span><span className={`badge ${active.state || active.status}`}>{phaseLabel(active)}</span> <TaskHeartbeat task={active} /></span>
+              <b>Started</b><span>{(active.started_at || active.created_at)?.replace("T", " ").slice(0, 19)}</span>
+              <b>Elapsed</b><span>{Math.round(active.elapsed_seconds ?? active.duration_seconds ?? 0)}s</span>
               <b>Action</b><span>{active.current_action || "—"}</span>
               <b>Tool</b><span>{active.current_tool || "—"}</span>
+              <b>Worker</b><span>{active.active_worker || "Jarvis agent"}</span>
+              <b>Last progress</b><span>{active.last_progress_at?.replace("T", " ").slice(0, 19) || "—"}</span>
               <b>Verified</b><span>{active.verification ? "yes" : "pending"}</span>
             </div>
             {active.result && <div className="report" style={{ marginTop: 12 }}>{active.result.slice(0, 600)}</div>}
@@ -231,7 +236,7 @@ export function PhonePage() {
             </div>
             {active.waiting_for_confirmation && (
               <div className="row" style={{ marginTop: 12 }}>
-                <button className="btn" type="button" onClick={() => api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ approve: true }) })}>Approve</button>
+                <button className="btn danger" type="button" onClick={() => api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ approve: true }) })}>Approve delete</button>
                 <button className="btn secondary" type="button" onClick={() => api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ approve: false }) })}>Reject</button>
               </div>
             )}

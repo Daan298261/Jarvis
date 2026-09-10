@@ -19,7 +19,11 @@ export function SystemPage() {
     if (d) setDiag(d)
   }
 
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 4000)
+    return () => window.clearInterval(timer)
+  }, [])
   const hw = info?.hardware || {}
   const report = selfDev?.report
   const gate = selfDev?.latest_gate
@@ -102,6 +106,10 @@ export function SystemPage() {
           </p>
           <div className="kv" style={{ marginBottom: 12 }}>
             <b>Status</b><span className={`badge ${selfDev.status || "queued"}`}>{selfDev.status || "idle"}</span>
+            <b>Activity</b><span>{selfDev.current_activity || "Waiting for activity"}</span>
+            <b>Supervisor</b><span>{selfDev.worker || "Self-Development Supervisor"}</span>
+            <b>Heartbeat</b><span className={`task-heartbeat ${selfDev.heartbeat_status || "stopped"}`}><span className="task-heartbeat-dot" />{selfDev.heartbeat_status || "stopped"}</span>
+            <b>Last update</b><span>{selfDev.last_progress_at ? new Date(selfDev.last_progress_at).toLocaleTimeString() : "—"}</span>
             <b>Kill switch</b><span>{selfDev.kill_switch ? (selfDev.kill_reason || "active") : "off"}</span>
             <b>Branch</b><span>{selfDev.branch || "—"}</span>
             <b>Start commit</b><span className="stat">{selfDev.source_commit ? String(selfDev.source_commit).slice(0, 12) : "—"}</span>
@@ -109,6 +117,20 @@ export function SystemPage() {
             <b>Budget stop</b><span>{selfDev.budget_stop_reason || "none"}</span>
             <b>Experimental</b><span>{selfDev.experimental_launch?.experimental || "127.0.0.1:4781"}</span>
           </div>
+          {(selfDev.activity_log || []).length > 0 && (
+            <details className="task-activity" style={{ marginBottom: 12 }}>
+              <summary><span>Recent self-development activity</span><span className="task-activity-summary">{selfDev.current_activity}</span></summary>
+              <div className="task-recent-actions" style={{ paddingTop: 8 }}>
+                {(selfDev.activity_log || []).slice(-10).reverse().map((entry: any, index: number) => (
+                  <div key={`${entry.at}-${index}`}>
+                    <span>{new Date(entry.at).toLocaleTimeString()}</span>
+                    <strong>{entry.activity}</strong>
+                    <em>{entry.state}</em>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
           <div className="row">
             <button
               className="btn"
