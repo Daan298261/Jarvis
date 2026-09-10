@@ -359,6 +359,43 @@ h2 { font-size: 18px; margin: 0 0 12px; }
 }
 .bubble p { margin: 6px 0 0; white-space: pre-wrap; }
 .bubble-user { background: var(--panel-2); }
+.bubble-assistant { background: var(--panel); }
+.chat-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.chat-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gold-dim);
+  animation: chat-typing-pulse 1.2s ease-in-out infinite;
+}
+@keyframes chat-typing-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.chat-work-details { margin-top: 4px; }
+.chat-details-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.chat-details-toggle:hover { color: var(--text); }
+.chat-work-details-panel {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
 .btn.recording { background: var(--warn); color: #16120a; }
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

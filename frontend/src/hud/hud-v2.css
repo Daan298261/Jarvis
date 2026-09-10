@@ -443,6 +443,54 @@
   border-color: rgba(130, 219, 246, 0.13);
 }
 
+.hud-bubble-assistant {
+  max-width: 92%;
+  border-color: rgba(130, 219, 246, 0.18);
+}
+
+.hud-chat-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  color: rgba(132, 210, 234, 0.62);
+  font-size: 11px;
+}
+
+.hud-typing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(130, 219, 246, 0.75);
+  animation: hud-typing-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes hud-typing-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.hud-chat-details { margin-top: 6px; }
+
+.hud-details-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(132, 210, 234, 0.55);
+  font-size: 10px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hud-details-toggle:hover { color: rgba(180, 235, 255, 0.85); }
+
+.hud-chat-details-panel {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(142, 219, 241, 0.08);
+}
+
 .hud-bubble-label {
   color: rgba(132, 210, 234, 0.58);
   font-size: 9px;
