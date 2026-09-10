@@ -3860,3 +3860,54 @@ export async function getDiagnostics(): Promise<Record<string, unknown>> {
 export async function getDiagnosticsText(): Promise<{ text: string; diagnostics: Record<string, unknown> }> {
   return api("/api/diagnostics/text")
 }
+
+/** RFC-0063 — owner-side companion pairing codes (D1 backend). */
+export type CompanionPairingCode = {
+  code: string
+  expires_at: string
+  ttl_seconds: number
+}
+
+export type CompanionPairingApiResult =
+  | { available: true; pairing: CompanionPairingCode }
+  | { available: false; reason: "not_found" | "error"; message?: string }
+
+async function companionPairingRequest(
+  path: string,
+  init?: RequestInit,
+): Promise<CompanionPairingApiResult> {
+  try {
+    const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
+    const response = await fetch(path, { ...init, headers })
+    if (response.status === 404) {
+      return { available: false, reason: "not_found" }
+    }
+    if (!response.ok) {
+      const text = await response.text()
+      let message = text || response.statusText
+      try {
+        const parsed = JSON.parse(text)
+        message = formatApiDetail(parsed.detail, message)
+      } catch {
+        // not JSON
+      }
+      return { available: false, reason: "error", message }
+    }
+    const pairing = await response.json() as CompanionPairingCode
+    return { available: true, pairing }
+  } catch (err) {
+    return { available: false, reason: "error", message: String(err) }
+  }
+}
+
+export async function getActiveCompanionPairingCode(): Promise<CompanionPairingApiResult> {
+  return companionPairingRequest("/api/mobile/manage/pairing-codes/active")
+}
+
+export async function createCompanionPairingCode(): Promise<CompanionPairingApiResult> {
+  return companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: "{}" })
+}
+
+export async function regenerateCompanionPairingCode(): Promise<CompanionPairingApiResult> {
+  return companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: "{}" })
+}
