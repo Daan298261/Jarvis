@@ -1,6 +1,8 @@
 package com.jarvis.companion
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaPlayer
@@ -8,6 +10,7 @@ import android.media.MediaRecorder
 import android.media.MediaRecorder.AudioSource
 import android.net.Uri
 import android.util.Base64
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -261,16 +264,47 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun hasRecordAudioPermission(): Boolean =
+        ContextCompat.checkSelfPermission(getApplication(), Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
     private fun startRealtimeTalk() = action {
+        if (!hasRecordAudioPermission()) {
+            mutable.value = mutable.value.copy(error = "Microphone permission is required for realtime voice")
+            return@action
+        }
         stopSpeaking()
         val session = RealtimeVoiceSession(api, mutable.value.conversationId, mutable.value.selectedVoice)
         realtime = session
         session.connect()
         session.startTurn()
         val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val record = AudioRecord(AudioSource.VOICE_COMMUNICATION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
+        val record = try {
+            AudioRecord(AudioSource.VOICE_COMMUNICATION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
+        } catch (_: SecurityException) {
+            session.close()
+            realtime = null
+            mutable.value = mutable.value.copy(error = "Microphone permission is required for realtime voice")
+            return@action
+        }
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            session.close()
+            realtime = null
+            mutable.value = mutable.value.copy(error = "Microphone is unavailable")
+            return@action
+        }
         audioRecord = record
-        record.startRecording()
+        try {
+            record.startRecording()
+        } catch (_: SecurityException) {
+            record.release()
+            audioRecord = null
+            session.close()
+            realtime = null
+            mutable.value = mutable.value.copy(error = "Microphone permission is required for realtime voice")
+            return@action
+        }
         mutable.value = mutable.value.copy(recording = true, voiceMode = "realtime", liveTranscript = "", activity = "Listening…")
         ensureTtsWorker()
         captureJob = viewModelScope.launch(Dispatchers.IO) {

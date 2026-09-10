@@ -179,6 +179,7 @@ def _create_pending_device(db, encoded_key: str, name: str) -> dict:
         "created_at": time.time(),
         "notifications": True,
         "critical_calls": False,
+        "voice_profile_id": "",
         "push_token": "",
     }
     put(db, "device", device["id"], device)

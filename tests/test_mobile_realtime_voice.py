@@ -144,6 +144,36 @@ def test_websocket_requires_device_auth_and_accepts_hello(mobile_env):
 
 
 @pytest.mark.asyncio
+async def test_synthesize_speech_uses_profile_engine_and_speaker(monkeypatch):
+    from app.workers import voice
+
+    class _Tts:
+        engine_hint = "espeak"
+        speaker_ref = "en-gb"
+
+    class _Profile:
+        tts = _Tts()
+
+    class _Catalog:
+        def get_available(self, profile_id: str):
+            return _Profile() if profile_id == "butler_original_v1" else None
+
+    routed: list[tuple[str, str, str]] = []
+
+    async def fake_espeak(text: str, binary_name: str, *, speaker_ref: str = "") -> bytes:
+        routed.append((text, binary_name, speaker_ref))
+        return b"RIFFwav"
+
+    monkeypatch.setattr(voice, "tts_backend", lambda: "espeak-ng")
+    monkeypatch.setattr("app.voice_profiles.catalog.get_catalog", lambda: _Catalog())
+    monkeypatch.setattr(voice, "_speak_espeak", fake_espeak)
+
+    audio = await voice.synthesize_speech("Hello", voice_profile_id="butler_original_v1")
+    assert audio == b"RIFFwav"
+    assert routed == [("Hello", "espeak-ng", "en-gb")]
+
+
+@pytest.mark.asyncio
 async def test_clip_endpoints_remain_as_fallback(mobile_env, monkeypatch):
     from app.api.companion import router
     from app.workers import voice

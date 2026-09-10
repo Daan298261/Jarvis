@@ -82,6 +82,7 @@ class Preferences(BaseModel):
     notifications: bool | None = None
     critical_calls: bool | None = None
     push_token: str | None = Field(default=None, max_length=4096)
+    voice_profile_id: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[a-z0-9_]+$")
 
 
 @router.post("/enroll")
@@ -325,9 +326,15 @@ def resume_schedule(schedule_id: uuid.UUID, device=Device):
 
 @router.put("/preferences")
 def preferences(body: Preferences, device=Device):
+    updates = body.model_dump(exclude_none=True)
+    voice_profile_id = updates.get("voice_profile_id")
+    if voice_profile_id:
+        from ..voice_profiles.catalog import get_catalog
+        if get_catalog().get_available(voice_profile_id) is None:
+            raise HTTPException(409, "Voice profile is not available")
     with database() as db:
         value = get(db, "device", device["id"])
-        value.update(body.model_dump(exclude_none=True))
+        value.update(updates)
         put(db, "device", value["id"], value)
     return identity.safe_device(value)
 
