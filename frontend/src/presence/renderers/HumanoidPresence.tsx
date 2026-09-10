@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import * as THREE from "three"
+import { createPresenceAttentionController, type AttentionVector } from "../presenceAttention"
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js"
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
@@ -29,6 +30,7 @@ const PHASE_COLOR: Record<PresenceSnapshot["phase"], number> = {
 export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresenceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
+  const attentionRef = useRef<AttentionVector>({ x: 0, y: 0, confidence: 0, source: "pointer" })
   const stateRef = useRef({ snapshot, settings, shapeId })
   const [failure, setFailure] = useState<Error | null>(null)
   const [activeShapeId, setActiveShapeId] = useState(
@@ -38,6 +40,29 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
   useEffect(() => {
     stateRef.current = { snapshot, settings, shapeId }
   }, [snapshot, settings, shapeId])
+
+  useEffect(() => {
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const controller = createPresenceAttentionController({
+      getMode: () => stateRef.current.settings.attentionMode,
+      getReducedMotion: () => {
+        const rm = stateRef.current.settings.reducedMotion
+        if (rm === "reduce") return true
+        if (rm === "full") return false
+        return motionQuery.matches
+      },
+    })
+    let frame = 0
+    const tick = () => {
+      frame = window.requestAnimationFrame(tick)
+      attentionRef.current = controller.sample()
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      controller.dispose()
+    }
+  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -89,7 +114,6 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       composer.addPass(output)
     }
 
-    const pointer = new THREE.Vector2()
     const color = new THREE.Color()
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
     let frame = 0
@@ -105,26 +129,26 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       renderer.setSize(Math.max(1, width), Math.max(1, height), false)
       composer?.setPixelRatio(renderer.getPixelRatio())
       composer?.setSize(Math.max(1, width), Math.max(1, height))
-      camera.aspect = Math.max(1, width) / Math.max(1, height)
-      camera.position.z = Math.max(5.4, 4.6 / Math.min(camera.aspect, 2.1))
-      camera.position.x = camera.aspect > 1.6 ? 0.75 : 0.45
-      camera.position.y = 0.28
-      camera.lookAt(0.05, 0.08, 0)
+      const aspect = Math.max(1, width) / Math.max(1, height)
+      const ultrawide = aspect >= 2.05
+      const stageUltrawide = ultrawide || window.innerWidth / Math.max(1, window.innerHeight) >= 2.05
+      camera.aspect = aspect
+      camera.fov = stageUltrawide ? 39 : 32
+      camera.position.z = stageUltrawide
+        ? Math.max(7.4, 5.8 / Math.min(aspect, 2.8))
+        : Math.max(5.4, 4.6 / Math.min(aspect, 2.1))
+      camera.position.x = stageUltrawide ? 0.55 : camera.aspect > 1.6 ? 0.75 : 0.45
+      camera.position.y = stageUltrawide ? 0.16 : 0.28
+      camera.lookAt(0.05, stageUltrawide ? 0.02 : 0.08, 0)
+      system.group.scale.setScalar(stageUltrawide ? 0.76 : aspect > 1.35 ? 0.92 : 1)
       camera.updateProjectionMatrix()
-      uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.8, height / 580)
+      const scaleCap = stageUltrawide ? 460 : 580
+      uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.72, height / scaleCap)
     }
     const observer = new ResizeObserver(resize)
     observer.observe(stage)
     resize()
 
-    const onPointerMove = (event: PointerEvent) => {
-      const rect = stage.getBoundingClientRect()
-      pointer.set(
-        THREE.MathUtils.clamp((event.clientX - rect.left) / rect.width * 2 - 1, -1, 1),
-        THREE.MathUtils.clamp((event.clientY - rect.top) / rect.height * 2 - 1, -1, 1),
-      )
-    }
-    const resetPointer = () => pointer.set(0, 0)
     const onContextLost = (event: Event) => {
       event.preventDefault()
       window.cancelAnimationFrame(frame)
@@ -172,13 +196,21 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       const framing = resolvePresenceShape(system.currentShapeId).framing
       const baseYaw = framing?.yaw ?? 0.95
       const basePos = framing?.position ?? [0.15, 0.08, 0]
-      const follow = !reduced && current.settings.attentionMode === "pointer"
+      const mode = current.settings.attentionMode
+      const follow = !reduced && mode !== "off"
+      const att = attentionRef.current
+      const yawGain = 0.52
+      const pitchGain = 0.22
+      const yawLerp = 0.2
+      const pitchLerp = 0.17
       if (reduced) {
         bust.rotation.set(0, baseYaw, 0)
         bust.position.set(basePos[0], basePos[1], basePos[2])
       } else {
-        bust.rotation.y += ((baseYaw + (follow ? pointer.x * 0.12 : 0)) - bust.rotation.y) * 0.05
-        bust.rotation.x += ((follow ? pointer.y * 0.04 : 0) - bust.rotation.x) * 0.06
+        const ax = follow ? att.x : 0
+        const ay = follow ? att.y : 0
+        bust.rotation.y += ((baseYaw + ax * yawGain) - bust.rotation.y) * yawLerp
+        bust.rotation.x += ((ay * pitchGain) - bust.rotation.x) * pitchLerp
         bust.position.x = basePos[0]
         bust.position.z = basePos[2]
         bust.position.y = basePos[1] + Math.sin(animationTime * 1.05) * 0.016
@@ -199,8 +231,6 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
         frame = window.requestAnimationFrame(render)
       }
     }
-    stage.addEventListener("pointermove", onPointerMove, { passive: true })
-    stage.addEventListener("pointerleave", resetPointer)
     canvas.addEventListener("webglcontextlost", onContextLost)
     document.addEventListener("visibilitychange", onVisibilityChange)
     if (!document.hidden) frame = window.requestAnimationFrame(render)
@@ -209,8 +239,6 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       disposed = true
       window.cancelAnimationFrame(frame)
       observer.disconnect()
-      stage.removeEventListener("pointermove", onPointerMove)
-      stage.removeEventListener("pointerleave", resetPointer)
       canvas.removeEventListener("webglcontextlost", onContextLost)
       document.removeEventListener("visibilitychange", onVisibilityChange)
       system.dispose()
@@ -231,6 +259,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       className="jarvis-presence jarvis-presence-humanoid"
       data-phase={snapshot.phase}
       data-performance-preset={settings.performancePreset}
+      data-attention-mode={settings.attentionMode}
       data-presence-shape={activeShapeId}
       role="img"
       aria-label={`Jarvis particle presence is ${snapshot.phase}`}
