@@ -33,6 +33,8 @@ import { HudShell } from "./hud/HudShell"
 import { HudChatHome } from "./hud/HudChatHome"
 import { getUiMode, setUiMode as persistUiMode, type UiMode } from "./hud/uiMode"
 import "./hud/hud.css"
+import { TaskHeartbeat } from "./components/TaskActivity"
+import { phaseLabel } from "./taskStatus"
 import {
   assignTask,
   createProject,
@@ -457,7 +459,10 @@ function OwnerPortal() {
                             className={({ isActive }) => `rail-item${isActive ? " active" : ""}`}
                             onClick={closeNav}
                           >
-                            {task ? taskLabel(task) : "Open task"}
+                            <span className="rail-item-title">{task ? taskLabel(task) : "Open task"}</span>
+                            {task && ["queued", "running", "waiting"].includes(task.state || task.status) && (
+                              <span className="rail-item-meta"><TaskHeartbeat task={task} label={false} />{phaseLabel(task)}</span>
+                            )}
                           </NavLink>
                           <button
                             type="button"
@@ -492,7 +497,10 @@ function OwnerPortal() {
                   onClick={closeNav}
                 >
                   <span className="rail-item-title">{taskLabel(task)}</span>
-                  {grouped && <span className="rail-item-meta">{grouped.name}</span>}
+                  <span className="rail-item-meta">
+                    {["queued", "running", "waiting"].includes(task.state || task.status) && <TaskHeartbeat task={task} label={false} />}
+                    {phaseLabel(task)}{grouped ? ` · ${grouped.name}` : ""}
+                  </span>
                 </NavLink>
                 {projects.length > 0 && (
                   <select

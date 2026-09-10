@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sse_starlette.sse import EventSourceResponse
 
+from ..agent.execution_status import (
+    active_worker,
+    elapsed_seconds,
+    normalized_state,
+    phase_for_event,
+    project_phase,
+    verification_summary,
+)
 from ..agent.loop import AGENT
 from ..agent.self_dev import KillSwitchActive
 from ..db.models import Task, TaskEvent
@@ -32,7 +41,15 @@ class ContinueBody(BaseModel):
     approve: bool | None = None
 
 
-def _task_dict(task: Task) -> dict[str, Any]:
+def _iso_utc(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any]:
     extra: list[str] = []
     raw = getattr(task, "compact_memory", None) or ""
     if raw:
@@ -48,12 +65,26 @@ def _task_dict(task: Task) -> dict[str, Any]:
     else:
         allowed_tools = sorted(tool_names_for(task_class, extra))
     db_exposed = [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item]
+    runtime = AGENT.runtime_status(task.id)
+    state = normalized_state(task)
+    heartbeat_status = runtime["heartbeat_status"]
+    if state == "waiting":
+        heartbeat_status = "waiting"
+    elif state in {"queued", "running"} and not runtime["alive"]:
+        heartbeat_status = "stale"
+    last_progress_at = (
+        _iso_utc(last_event.created_at)
+        if last_event is not None and last_event.created_at
+        else _iso_utc(task.updated_at)
+    )
     return {
         "id": task.id,
         "title": task.title,
         "prompt": task.prompt,
         "status": task.status,
+        "state": state,
         "stage": task.stage,
+        "execution_phase": project_phase(task, last_event).value,
         "autonomy": task.autonomy,
         "profile": task.profile,
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
@@ -62,15 +93,24 @@ def _task_dict(task: Task) -> dict[str, Any]:
         "allowed_tools": allowed_tools,
         "result": task.result,
         "error": task.error,
+        "current_action": task.current_action,
+        "current_tool": task.current_tool,
+        "active_worker": active_worker(task),
         "retries": task.retries,
         "duration_seconds": task.duration_seconds,
+        "elapsed_seconds": elapsed_seconds(task),
+        "last_progress_at": last_progress_at,
+        "alive": runtime["alive"],
+        "last_heartbeat_at": runtime["last_heartbeat_at"],
+        "heartbeat_status": heartbeat_status,
         "waiting_for_confirmation": task.waiting_for_confirmation,
         "confirmation_payload": task.confirmation_payload,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
-        "started_at": task.started_at.isoformat() if task.started_at else None,
-        "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+        "created_at": _iso_utc(task.created_at),
+        "updated_at": _iso_utc(task.updated_at),
+        "started_at": _iso_utc(task.started_at),
+        "finished_at": _iso_utc(task.finished_at),
         "verification": task.verification,
+        "verification_summary": verification_summary(task),
         "model_calls": getattr(task, "model_calls", 0) or 0,
         "tool_calls": getattr(task, "tool_call_count", 0) or 0,
         "schema_errors": getattr(task, "schema_errors", 0) or 0,
@@ -93,7 +133,14 @@ async def create_task(body: TaskCreate):
 async def list_tasks():
     async with SessionLocal() as session:
         rows = (await session.execute(select(Task).order_by(Task.created_at.desc()))).scalars().all()
-        return [_task_dict(row) for row in rows]
+        latest_ids = select(func.max(TaskEvent.id)).group_by(TaskEvent.task_id)
+        events = (
+            await session.execute(select(TaskEvent).where(TaskEvent.id.in_(latest_ids)))
+        ).scalars().all()
+        latest: dict[str, TaskEvent] = {}
+        for event in events:
+            latest.setdefault(event.task_id, event)
+        return [_task_dict(row, latest.get(row.id)) for row in rows]
 
 
 @router.get("/{task_id}")
@@ -105,14 +152,17 @@ async def get_task(task_id: str):
         events = (
             await session.execute(select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.id))
         ).scalars().all()
-        payload = _task_dict(task)
+        last_event = events[-1] if events else None
+        payload = _task_dict(task, last_event)
         payload["events"] = [
             {
                 "kind": e.kind,
                 "title": e.title,
                 "detail": e.detail,
                 "stage": e.stage,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "phase": phase_for_event(e).value,
+                "source": e.source,
+                "created_at": _iso_utc(e.created_at),
             }
             for e in events
         ]

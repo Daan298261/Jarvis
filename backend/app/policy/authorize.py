@@ -58,88 +58,27 @@ def authorize(
             capability=capability,
         )
 
-    if risk == RiskLevel.LOW:
-        allowed = rank >= LEVEL_RANK[AutonomyLevel.L2_EXECUTE_SAFE]
-        return AuthorizationResult(
-            allowed=allowed,
-            requires_approval=False,
-            reason="low-risk execution permitted" if allowed else "insufficient autonomy for low-risk execution",
-            effective_level=effective,
-            capability=capability,
-        )
-
-    if risk == RiskLevel.MEDIUM:
-        allowed = rank >= LEVEL_RANK[AutonomyLevel.L3_EXECUTE_WITH_GATES]
-        return AuthorizationResult(
-            allowed=allowed,
-            requires_approval=False,
-            reason="medium-risk execution permitted" if allowed else "insufficient autonomy for medium-risk execution",
-            effective_level=effective,
-            capability=capability,
-        )
-
-    if risk == RiskLevel.HIGH:
-        if rank >= LEVEL_RANK[AutonomyLevel.L4_AUTONOMOUS]:
-            return AuthorizationResult(
-                allowed=True,
-                requires_approval=False,
-                reason="high-risk execution permitted",
-                effective_level=effective,
-                capability=capability,
-            )
-        if rank == LEVEL_RANK[AutonomyLevel.L3_EXECUTE_WITH_GATES]:
-            if approved:
-                return AuthorizationResult(
-                    allowed=True,
-                    requires_approval=False,
-                    reason="approved high-risk execution",
-                    effective_level=effective,
-                    capability=capability,
-                )
-            return AuthorizationResult(
-                allowed=False,
-                requires_approval=True,
-                reason="high-risk action requires approval at L3_EXECUTE_WITH_GATES",
-                effective_level=effective,
-                capability=capability,
-            )
-        return AuthorizationResult(
-            allowed=False,
-            requires_approval=False,
-            reason="insufficient autonomy for high-risk execution",
-            effective_level=effective,
-            capability=capability,
-        )
-
-    # IRREVERSIBLE
-    if rank >= LEVEL_RANK[AutonomyLevel.L5_OPERATOR]:
+    if risk != RiskLevel.IRREVERSIBLE:
         return AuthorizationResult(
             allowed=True,
             requires_approval=False,
-            reason="irreversible execution permitted for operator",
+            reason="routine execution auto-approved by platform policy",
             effective_level=effective,
             capability=capability,
         )
-    if rank == LEVEL_RANK[AutonomyLevel.L4_AUTONOMOUS]:
-        if approved:
-            return AuthorizationResult(
-                allowed=True,
-                requires_approval=False,
-                reason="approved irreversible execution",
-                effective_level=effective,
-                capability=capability,
-            )
+
+    if approved:
         return AuthorizationResult(
-            allowed=False,
-            requires_approval=True,
-            reason="irreversible action requires approval at L4_AUTONOMOUS",
+            allowed=True,
+            requires_approval=False,
+            reason="destructive deletion explicitly approved",
             effective_level=effective,
             capability=capability,
         )
     return AuthorizationResult(
         allowed=False,
-        requires_approval=False,
-        reason="insufficient autonomy for irreversible execution",
+        requires_approval=True,
+        reason="destructive deletion requires explicit approval",
         effective_level=effective,
         capability=capability,
     )

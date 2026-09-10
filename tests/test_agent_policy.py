@@ -96,7 +96,7 @@ def test_authorize_denies_observe_and_suggest(policy_store):
     assert denied.requires_approval is False
 
 
-def test_authorize_requires_approval_for_gated_high_risk(policy_store):
+def test_authorize_auto_approves_routine_and_gates_destructive(policy_store):
     profile = create_profile(
         name="Gated",
         interview_answers={
@@ -105,9 +105,17 @@ def test_authorize_requires_approval_for_gated_high_risk(policy_store):
         },
         actor="tester",
     )
-    pending = authorize(
+    routine = authorize(
         "terminal",
         risk=RiskLevel.HIGH,
+        profile_id=profile["id"],
+    )
+    assert routine.allowed is True
+    assert routine.requires_approval is False
+
+    pending = authorize(
+        "terminal",
+        risk=RiskLevel.IRREVERSIBLE,
         profile_id=profile["id"],
     )
     assert pending.allowed is False
@@ -115,7 +123,7 @@ def test_authorize_requires_approval_for_gated_high_risk(policy_store):
 
     approved = authorize(
         "terminal",
-        risk=RiskLevel.HIGH,
+        risk=RiskLevel.IRREVERSIBLE,
         profile_id=profile["id"],
         approved=True,
     )
@@ -191,4 +199,4 @@ def test_agent_policy_api_roundtrip(policy_store):
         json={"tool_name": "web_fetch", "risk": "medium", "profile_id": profile_id},
     )
     assert denied.status_code == 200
-    assert denied.json()["allowed"] is False
+    assert denied.json()["allowed"] is True

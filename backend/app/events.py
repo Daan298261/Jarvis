@@ -3,12 +3,21 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict
+from datetime import timezone
 from typing import Any, AsyncIterator
 
 from sqlalchemy import select
 
 from .db.models import TaskEvent, utcnow
 from .db.session import SessionLocal
+
+
+def _iso_utc(value) -> str:
+    if value is None:
+        return ""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 
 
 class EventBus:
@@ -30,13 +39,24 @@ class EventBus:
         if queue in self._global:
             self._global.remove(queue)
 
-    async def publish(self, task_id: str, kind: str, title: str, detail: str = "", stage: str = "", *, persist: bool = True) -> None:
+    async def publish(
+        self,
+        task_id: str,
+        kind: str,
+        title: str,
+        detail: str = "",
+        stage: str = "",
+        *,
+        source: str = "jarvis-agent",
+        persist: bool = True,
+    ) -> None:
         event = {
             "task_id": task_id,
             "kind": kind,
             "title": title,
             "detail": detail,
             "stage": stage,
+            "source": source,
             "created_at": utcnow().isoformat(),
         }
         if persist:
@@ -48,6 +68,7 @@ class EventBus:
                         title=title[:400],
                         detail=detail,
                         stage=stage,
+                        source=source,
                     )
                 )
                 await session.commit()
@@ -75,7 +96,8 @@ class EventBus:
                             "title": row.title,
                             "detail": row.detail,
                             "stage": row.stage,
-                            "created_at": row.created_at.isoformat() if row.created_at else "",
+                            "source": row.source,
+                            "created_at": _iso_utc(row.created_at),
                         }
                         yield f"data: {json.dumps(payload)}\n\n"
             while True:

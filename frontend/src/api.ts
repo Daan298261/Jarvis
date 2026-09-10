@@ -102,7 +102,9 @@ export type Task = {
   title: string
   prompt: string
   status: string
+  state?: "queued" | "running" | "waiting" | "failed" | "completed" | string
   stage: string
+  execution_phase?: string
   autonomy?: string
   execution_mode?: string
   task_class?: string
@@ -111,11 +113,13 @@ export type Task = {
   acceptance_criteria?: string
   current_action: string
   current_tool: string
+  active_worker?: string
   result: string
   error: string
   verification?: string
   retries: number
   duration_seconds: number
+  elapsed_seconds?: number
   model_calls?: number
   tool_calls?: number
   schema_errors?: number
@@ -123,9 +127,23 @@ export type Task = {
   tool_ms?: number
   human_interventions?: number
   started_at?: string | null
+  finished_at?: string | null
   created_at: string
+  updated_at?: string | null
+  last_progress_at?: string | null
+  alive?: boolean
+  last_heartbeat_at?: string | null
+  heartbeat_status?: "alive" | "waiting" | "stale" | "stopped" | string
   waiting_for_confirmation: boolean
-  events?: { kind: string; title: string; detail: string; stage: string; created_at: string }[]
+  verification_summary?: {
+    result: "VERIFIED" | "VERIFICATION_FAILED" | "PARTIALLY_VERIFIED" | "NOT_VERIFIED" | string
+    verifier: string
+    checks: string[]
+    evidence_refs: string[]
+    warnings: string[]
+    timestamp?: string | null
+  }
+  events?: { kind: string; title: string; detail: string; stage: string; phase?: string; source?: string; created_at: string }[]
 }
 
 export type SwarmNodeHardware = {

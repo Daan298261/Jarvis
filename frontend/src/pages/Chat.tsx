@@ -5,6 +5,7 @@ import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { speakChatReply, stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
+import { TaskActivityPanel } from "../components/TaskActivity"
 import { DelegationPanel } from "./Delegation"
 
 type VoiceStatus = {
@@ -184,7 +185,7 @@ export function ChatPage() {
           <>
             <div className="chat-head-title">
               <h1>{shown.title || "Task"}</h1>
-              <span className={`badge ${shown.status}`}>{shown.status}</span>
+              <span className={`badge ${shown.state || shown.status}`}>{shown.state || shown.status}</span>
             </div>
             <p className="chat-head-meta">
               {shown.current_action || shown.stage || "Working"}
@@ -210,6 +211,21 @@ export function ChatPage() {
           <h1>Opening task…</h1>
         )}
       </header>
+
+      {shown && (
+        <div className="chat-activity-wrap">
+          <TaskActivityPanel task={shown} elapsed={elapsed || Math.round(shown.elapsed_seconds || shown.duration_seconds || 0)} />
+          {shown.waiting_for_confirmation && (
+            <div className="task-approval-bar">
+              <span>Destructive deletion is paused until you approve it.</span>
+              <div className="row">
+                <button className="btn danger" onClick={() => api(`/api/tasks/${shown.id}/continue`, { method: "POST", body: JSON.stringify({ approve: true }) })}>Approve delete</button>
+                <button className="btn secondary" onClick={() => api(`/api/tasks/${shown.id}/continue`, { method: "POST", body: JSON.stringify({ approve: false }) })}>Reject</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {shown && helpersOpen && (
         <div className="chat-helpers">
