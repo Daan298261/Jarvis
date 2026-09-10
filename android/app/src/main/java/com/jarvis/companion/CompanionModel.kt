@@ -1,20 +1,29 @@
 package com.jarvis.companion
 
 import android.app.Application
+import android.media.AudioFormat
+import android.media.AudioRecord
 import android.media.MediaPlayer
 import android.media.MediaRecorder
+import android.media.MediaRecorder.AudioSource
 import android.net.Uri
+import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.LinkedBlockingQueue
 
 data class CompanionState(
     val connected: Boolean = false, val activity: String = "Offline", val error: String? = null,
@@ -26,7 +35,8 @@ data class CompanionState(
     val attachmentIds: List<String> = emptyList(), val capabilities: JSONObject = JSONObject(),
     val swarm: JSONObject = JSONObject(), val coding: JSONObject = JSONObject(),
     val codingDecisions: List<JSONObject> = emptyList(), val voiceProfiles: List<JSONObject> = emptyList(),
-    val selectedVoice: String = "", val presenceMode: String = "orb"
+    val selectedVoice: String = "", val presenceMode: String = "orb",
+    val liveTranscript: String = "", val voiceMode: String = "clip",
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
@@ -59,6 +69,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val outbox = Outbox(app)
     private var foreground = false
     private val sendLock = kotlinx.coroutines.sync.Mutex()
+    private var audioRecord: AudioRecord? = null
+    private var realtime: RealtimeVoiceSession? = null
+    private var captureJob: Job? = null
+    private var listenJob: Job? = null
+    private val ttsQueue = LinkedBlockingQueue<ByteArray>()
+    private var ttsJob: Job? = null
     init {
         runCatching { outbox.read() }.onSuccess { mutable.value = mutable.value.copy(pendingMessage = it != null) }
             .onFailure { mutable.value = mutable.value.copy(error = "Cannot recover pending message: ${it.message}") }
@@ -211,6 +227,16 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
     fun toggleRecord() {
+        val realtimeReady = mutable.value.connected &&
+            mutable.value.capabilities.optJSONObject("voice")?.optBoolean("realtime") == true
+        if (realtimeReady && audioRecord == null && recorder == null) {
+            startRealtimeTalk()
+            return
+        }
+        if (audioRecord != null || realtime != null) {
+            stopRealtimeTalk()
+            return
+        }
         if (recorder == null) {
             runCatching {
                 recordingFile = File.createTempFile("jarvis-voice", ".m4a", getApplication<Application>().cacheDir)
@@ -221,7 +247,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 next.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 next.setOutputFile(recordingFile!!.absolutePath)
                 next.prepare(); next.start(); recorder = next
-                mutable.value = mutable.value.copy(recording = true)
+                mutable.value = mutable.value.copy(recording = true, voiceMode = "clip", liveTranscript = "")
             }.onFailure { mutable.value = mutable.value.copy(error = it.message) }
         } else action {
             try {
@@ -234,8 +260,102 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    private fun startRealtimeTalk() = action {
+        stopSpeaking()
+        val session = RealtimeVoiceSession(api, mutable.value.conversationId, mutable.value.selectedVoice)
+        realtime = session
+        session.connect()
+        session.startTurn()
+        val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val record = AudioRecord(AudioSource.VOICE_COMMUNICATION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
+        audioRecord = record
+        record.startRecording()
+        mutable.value = mutable.value.copy(recording = true, voiceMode = "realtime", liveTranscript = "", activity = "Listening…")
+        ensureTtsWorker()
+        captureJob = viewModelScope.launch(Dispatchers.IO) {
+            val buffer = ByteArray(minBuf.coerceAtLeast(3200))
+            while (isActive && audioRecord != null) {
+                val read = record.read(buffer, 0, buffer.size)
+                if (read > 0) {
+                    try { session.sendPcm(buffer.copyOf(read)) } catch (_: Exception) { break }
+                }
+            }
+        }
+        listenJob = viewModelScope.launch {
+            try {
+                while (isActive) {
+                    val event = session.nextEvent()
+                    when (event.optString("type")) {
+                        "partial", "final" -> mutable.value = mutable.value.copy(
+                            liveTranscript = event.optString("text"),
+                            activity = if (event.optString("type") == "final") "Thinking…" else "Listening…",
+                        )
+                        "tts" -> {
+                            if (event.optBoolean("final")) continue
+                            val data = event.optString("data")
+                            if (data.isNotEmpty()) {
+                                ttsQueue.offer(Base64.decode(data, Base64.DEFAULT))
+                                mutable.value = mutable.value.copy(speaking = true, activity = event.optString("text").ifEmpty { "Speaking" })
+                            }
+                        }
+                        "done" -> {
+                            event.optString("conversation_id").takeIf { it.isNotEmpty() }?.let {
+                                mutable.value = mutable.value.copy(conversationId = it)
+                            }
+                            mutable.value = mutable.value.copy(activity = "Ready when you are")
+                            refresh()
+                            break
+                        }
+                        "interrupted" -> {
+                            ttsQueue.clear(); stopSpeaking()
+                            mutable.value = mutable.value.copy(activity = "Interrupted", speaking = false)
+                            break
+                        }
+                        "error" -> throw IllegalStateException(event.optString("detail"))
+                    }
+                }
+            } catch (exc: Exception) {
+                mutable.value = mutable.value.copy(error = exc.message)
+            }
+        }
+    }
+
+    private fun stopRealtimeTalk() = action {
+        captureJob?.cancel(); captureJob = null
+        runCatching { audioRecord?.stop() }
+        audioRecord?.release(); audioRecord = null
+        mutable.value = mutable.value.copy(recording = false)
+        val session = realtime
+        if (session != null) {
+            runCatching { session.endTurn() }
+            // Keep listenJob alive until done/tts finishes; close after a grace period if needed.
+            viewModelScope.launch {
+                delay(120_000)
+                if (listenJob?.isActive == true) {
+                    session.interrupt()
+                    session.close()
+                    listenJob?.cancel()
+                    listenJob = null
+                    realtime = null
+                }
+            }
+        }
+    }
+
+    private fun ensureTtsWorker() {
+        if (ttsJob?.isActive == true) return
+        ttsJob = viewModelScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                val audio = ttsQueue.take()
+                withContext(Dispatchers.Main) { playAudio(audio) }
+                while (mutable.value.speaking && isActive) delay(40)
+            }
+        }
+    }
+
     fun speak(text: String) = action {
-        if (player != null) { stopSpeaking(); return@action }
+        if (player != null || mutable.value.speaking) { stopSpeaking(); realtime?.interrupt(); return@action }
         val body = JSONObject().put("text", text.take(6000))
         mutable.value.selectedVoice.takeIf { it.isNotEmpty() }?.let { body.put("voice_profile_id", it) }
         val audio = api.raw("/voice/speak", "POST", body.toString().toByteArray())
@@ -268,5 +388,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         playerFile?.delete(); playerFile = null
         mutable.value = mutable.value.copy(speaking = false)
     }
-    override fun onCleared() { recorder?.release(); recordingFile?.delete(); stopSpeaking(); super.onCleared() }
+    override fun onCleared() {
+        captureJob?.cancel(); listenJob?.cancel(); ttsJob?.cancel()
+        runCatching { audioRecord?.stop() }; audioRecord?.release()
+        realtime?.close()
+        recorder?.release(); recordingFile?.delete(); stopSpeaking(); super.onCleared()
+    }
 }

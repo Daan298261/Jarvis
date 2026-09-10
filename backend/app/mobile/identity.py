@@ -287,18 +287,23 @@ def exchange(device_id: str, signature: str):
     return {"access_token": token, "expires_in": SESSION_SECONDS, "device": safe_device(device)}
 
 
-def authenticate(request: Request) -> dict | None:
-    auth = request.headers.get("authorization", "")
-    device_id = request.headers.get("x-jarvis-device", "")
-    if not device_id or not auth.startswith("Bearer "):
+def authenticate_values(authorization: str, device_id: str) -> dict | None:
+    if not device_id or not authorization.startswith("Bearer "):
         return None
     with database() as db:
         device = get(db, "device", device_id)
         session = get(db, "session", device_id)
     if device and device["status"] == "active" and session and session["expires_at"] > time.time():
-        if secrets.compare_digest(session["hash"], digest(auth[7:])):
+        if secrets.compare_digest(session["hash"], digest(authorization[7:])):
             return device
     return None
+
+
+def authenticate(request: Request) -> dict | None:
+    return authenticate_values(
+        request.headers.get("authorization", ""),
+        request.headers.get("x-jarvis-device", ""),
+    )
 
 
 def require_device(request: Request) -> dict:

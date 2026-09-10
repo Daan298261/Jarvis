@@ -117,6 +117,29 @@ class JarvisApi(context: Context) {
         expiresAt = System.currentTimeMillis() + (result.getLong("expires_in") - 30) * 1000
     }
 
+    suspend fun ensureSession() = session()
+    fun accessToken(): String = token
+    fun preferredOrigin(): String = TransportPolicy.origin(preferred.ifBlank { endpoint })
+    fun pinnedClient(): OkHttpClient {
+        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
+        val expectedPin = pin
+        return cachedClient?.takeIf { it.first == expectedPin }?.second ?: run {
+            val trust = object : X509TrustManager {
+                override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) { throw java.security.cert.CertificateException("Client trust is not supported") }
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                    if (chain.isEmpty()) throw java.security.cert.CertificateException("Missing certificate")
+                    chain[0].checkValidity()
+                    if (sha256(chain[0].publicKey.encoded) != expectedPin) throw java.security.cert.CertificateException("Jarvis server fingerprint changed; verify it on the desktop")
+                }
+            }
+            val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
+            OkHttpClient.Builder().sslSocketFactory(tls.socketFactory, trust).retryOnConnectionFailure(false)
+                .followRedirects(false).followSslRedirects(false).connectTimeout(4, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
+                .also { cachedClient = expectedPin to it }
+        }
+    }
+
     suspend fun json(path: String, method: String = "GET", body: JSONObject? = null): JSONObject =
         JSONObject(raw(path, method, body?.toString()?.toByteArray()).toString(Charsets.UTF_8))
     suspend fun array(path: String): JSONArray = JSONArray(raw(path).toString(Charsets.UTF_8))
@@ -125,22 +148,7 @@ class JarvisApi(context: Context) {
                     authenticated: Boolean = true, contentType: String = "application/json", filename: String? = null): ByteArray = withContext(Dispatchers.IO) {
         if (authenticated) session()
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
-        val expectedPin = pin
-        val client = cachedClient?.takeIf { it.first == expectedPin }?.second ?: run {
-        val trust = object : X509TrustManager {
-            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) { throw java.security.cert.CertificateException("Client trust is not supported") }
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
-                if (chain.isEmpty()) throw java.security.cert.CertificateException("Missing certificate")
-                chain[0].checkValidity()
-                if (sha256(chain[0].publicKey.encoded) != expectedPin) throw java.security.cert.CertificateException("Jarvis server fingerprint changed; verify it on the desktop")
-            }
-        }
-        val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
-        OkHttpClient.Builder().sslSocketFactory(tls.socketFactory, trust).retryOnConnectionFailure(false)
-            .followRedirects(false).followSslRedirects(false).connectTimeout(4, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
-            .also { cachedClient = expectedPin to it }
-        }
+        val client = pinnedClient()
         val requestId = if (path == "/messages" && body != null) runCatching { JSONObject(body.toString(Charsets.UTF_8)).optString("request_id") }.getOrNull() else null
         val retry = TransportPolicy.replayable(method, path, requestId)
         val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }

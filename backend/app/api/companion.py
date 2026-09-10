@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
@@ -14,7 +14,7 @@ from sqlalchemy import select
 from ..auth import require_owner_private_key
 from ..db.models import Task
 from ..db.session import SessionLocal
-from ..mobile import identity, scheduler, service
+from ..mobile import identity, realtime_voice, scheduler, service
 from ..mobile.store import database, get, put, root, rows
 
 router = APIRouter(prefix="/api/companion", tags=["companion"])
@@ -106,7 +106,10 @@ def session(body: Proof):
 def capabilities(device=Device):
     from ..workers.voice import voice_status
     from ..mobile.calls import capabilities as call_capabilities
-    return {"api_version": 1, "device": identity.safe_device(device), "voice": voice_status(),
+    voice = voice_status()
+    voice["realtime"] = True
+    voice["realtime_path"] = "/api/companion/voice/realtime"
+    return {"api_version": 1, "device": identity.safe_device(device), "voice": voice,
             "calls": call_capabilities(), "studio": service.studio_capabilities(),
             "attachments_max_bytes": 64 * 1024 * 1024, "schedules": True}
 
@@ -270,6 +273,22 @@ async def speak(body: Speak, device=Device):
         return Response(await synthesize_speech(body.text, voice_profile_id=body.voice_profile_id), media_type="audio/wav")
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
+
+
+@router.websocket("/voice/realtime")
+async def voice_realtime(websocket: WebSocket):
+    """Duplex conversational voice (RFC-0064). Auth via headers only — never query tokens."""
+    device = identity.authenticate_values(
+        websocket.headers.get("authorization", ""),
+        websocket.headers.get("x-jarvis-device", ""),
+    )
+    if not device:
+        await websocket.close(code=1008, reason="Paired-device authentication required")
+        return
+    try:
+        await realtime_voice.handle_realtime(websocket, device)
+    except WebSocketDisconnect:
+        return
 
 
 @router.get("/schedules")

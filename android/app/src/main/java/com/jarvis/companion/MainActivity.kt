@@ -169,6 +169,7 @@ class MainActivity : ComponentActivity() {
                                     PresenceHud(state.presenceMode, if (state.recording) "listening" else if (state.speaking) "speaking" else if (state.tasks.any { it.optString("status") in listOf("queued", "running") }) "thinking" else "idle")
                                 }
                                 Text(if (state.recording) "I’m listening." else if (state.speaking) "Speaking" else "What’s on your mind?", fontSize = 28.sp, fontWeight = FontWeight.Light)
+                                if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
@@ -440,8 +441,11 @@ class MainActivity : ComponentActivity() {
             val voice = state.capabilities.optJSONObject("voice")
             Text("Speech recognition · ${if (voice?.optBoolean("stt_ready") == true) "ready" else "unavailable"}  ·  Speech output · ${if (voice?.optBoolean("tts_ready") == true) "ready" else "unavailable"}",
                 color = Muted, fontSize = 12.sp)
-            Text("Audio is processed by your paired Jarvis host and transported through pinned TLS.", color = Muted, fontSize = 11.sp,
-                modifier = Modifier.padding(top = 6.dp))
+            Text(
+                if (voice?.optBoolean("realtime") == true) "Realtime duplex voice is available over pinned TLS. Clip STT/TTS remains the fallback."
+                else "Audio is processed by your paired Jarvis host and transported through pinned TLS.",
+                color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp),
+            )
         }
         item {
             Text("Schedules", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
