@@ -108,12 +108,53 @@ pair again.
 ## Voice and push
 
 Install `backend/requirements-mobile.txt`. STT/TTS reuse installed Jarvis voice
-providers; this does not download model weights. Configure TURN using
-`JARVIS_TURN_URL` and `JARVIS_TURN_SECRET` (coturn REST shared-secret authentication).
-Push configuration uses `JARVIS_PUSH_URL` and `JARVIS_PUSH_CREDENTIAL`; the adapter
-sends only destination registration token, opaque event ID and event kind. A real
-FCM project and compatible push service are required. No public infrastructure is
-deployed by this branch yet.
+providers; this does not download model weights.
+
+### Operator environment templates
+
+- Relay host: copy `services/mobile-relay/.env.example` to `.env` on the public
+  Linux machine (never commit secrets). See `services/mobile-relay/README.md`.
+- Jarvis desktop: copy `docs/examples/mobile-companion.env.example` and set values
+  in your OS or service environment.
+
+| Variable | Role |
+| --- | --- |
+| `JARVIS_RELAY_URL` / `JARVIS_RELAY_CREDENTIAL` | Outbound relay agent (Jarvis → relay) |
+| `JARVIS_RELAY_ENDPOINT` | Phone HTTPS fallback origin after relay registration |
+| `JARVIS_PUSH_URL` / `JARVIS_PUSH_CREDENTIAL` | Opaque FCM broker on the relay |
+| `JARVIS_TURN_URL` / `JARVIS_TURN_SECRET` | coturn REST shared-secret ICE |
+| `JARVIS_FIREBASE_CLIENT_CONFIG` | Path to **public** Android client JSON for APK builds |
+
+Owner API `GET /api/mobile/manage/infrastructure` returns booleans only for whether
+each piece is configured (no credentials echoed). Device call capabilities mirror
+push/TURN readiness for the companion UI.
+
+Configure TURN using `JARVIS_TURN_URL` and `JARVIS_TURN_SECRET` (coturn REST
+shared-secret authentication). Push configuration uses `JARVIS_PUSH_URL` and
+`JARVIS_PUSH_CREDENTIAL`; the adapter sends only destination registration token,
+opaque event ID and event kind. A real FCM project and compatible push service are
+required.
+
+### Operator checklist (remote voice and background calls)
+
+1. **Firebase** — Create a Firebase project. Download the **service account JSON**
+   for the relay host only (`FIREBASE_CREDENTIAL_FILE`). Download the **Android
+   client** public config for `JARVIS_FIREBASE_CLIENT_CONFIG` on the Jarvis PC
+   (never the admin service account on Jarvis).
+2. **Mobile relay** — Deploy `services/mobile-relay/` on a public Linux host with
+   Compose, register this Jarvis installation via `POST /v1/register`, then set
+   `JARVIS_RELAY_*`, `JARVIS_PUSH_*` on the Jarvis desktop. Restart Jarvis so the
+   outbound relay agent connects.
+3. **TURN** — Deploy and configure coturn (REST shared-secret) on a reachable host;
+   set `JARVIS_TURN_URL` and `JARVIS_TURN_SECRET` on Jarvis.
+4. **APK** — In the desktop companion panel, **Prepare connection**, then build a
+   personalized release APK so endpoints and pins match (includes Firebase client
+   fields when configured).
+5. **Acceptance** — On a physical phone: incoming and background critical calls,
+   audio routes, interruptions, and reconnection (not verified in CI).
+
+**No public relay, Firebase, or TURN infrastructure is deployed or claimed by the
+repository;** live acceptance remains blocked until Taco provisions hosts and secrets.
 
 ## Verification (2026-09-10)
 
@@ -135,8 +176,10 @@ deployed by this branch yet.
 
 ## Remaining release acceptance
 
-- Public relay and Firebase deployment. Local gateway/router lifecycle and relay client
-  configuration are implemented; no public infrastructure is deployed by this branch.
+Operator env templates, `GET /api/mobile/manage/infrastructure`, and the checklist
+above make the deploy path concrete; **no public infrastructure is deployed by this
+PR.** Remaining items:
+
 - End-to-end installer/gateway startup integration; personalized signing/build and
   owner-authenticated downloads are implemented, but not verified on a paired phone.
 - Physical-phone incoming/background calls, audio routes, interruptions, reconnection,
