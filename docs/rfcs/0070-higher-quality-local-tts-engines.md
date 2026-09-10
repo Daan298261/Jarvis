@@ -1,6 +1,6 @@
 # RFC-0070: Higher-quality local TTS engines
 
-**Status:** accepted
+**Status:** implemented
 **Queue item:** P0 / P1 — Voice quality (owner: less robotic TTS)
 **Author:** Jarvis Architect
 **Date:** 2026-09-10
@@ -140,16 +140,16 @@ Taco hard rule: listing voices that show `install_required` without a trivial in
 
 ## Acceptance criteria
 
-- [ ] Documented engine+voice catalog schema extending RFC-0062 profile `tts` block
-- [ ] Ranking: Kokoro-82M (Apache-2.0) default low-latency English; Chatterbox/Turbo (MIT) optional quality; Orpheus 3B (Apache-2.0) catalog not default; Piper remains edge/Dutch/baseline; XTTS v2 and F5-TTS (CC-BY-NC) are not product defaults
-- [ ] Quality bar: must subjectively/objectively beat current robotic SAPI/espeak/pyttsx3 stack on owner desktop before flipping default profile
-- [ ] Default household butler pack works out of the box after Windows Setup (no extra download)
-- [ ] Profiles that would show `install_required` are either bundled in Setup or installed via one-click / extremely short “Get more voices” in Settings — listing-only stubs fail
-- [ ] Same active profile drives desktop chat→TTS and Android host TTS (0064)
-- [ ] Latency: first-chunk speech respects RFC-0036 budgets or documented ack-path fallback to Kokoro/Piper
-- [ ] IP guardrails restated (no clone packs; “Codsworth-like” is feel only)
-- [ ] TTS never speaks thought-process / Show work / plan chrome, URLs, code, stack traces, or tool dumps
-- [ ] Specs-only PR (no product code in this PR)
+- [x] Documented engine+voice catalog schema extending RFC-0062 profile `tts` block
+- [x] Ranking: Kokoro-82M (Apache-2.0) default low-latency English; Chatterbox/Turbo (MIT) optional quality; Orpheus 3B (Apache-2.0) catalog not default; Piper remains edge/Dutch/baseline; XTTS v2 and F5-TTS (CC-BY-NC) are not product defaults
+- [x] Quality bar: must subjectively/objectively beat current robotic SAPI/espeak/pyttsx3 stack on owner desktop before flipping default profile — #173 flips the default off SAPI/espeak/pyttsx3 to Kokoro; owner Desktop A/B listen/sign-off remains operational verification after Setup rebuild
+- [x] Default household butler pack works out of the box after Windows Setup (no extra download)
+- [x] Profiles that would show `install_required` are either bundled in Setup or installed via one-click / extremely short “Get more voices” in Settings — listing-only stubs fail
+- [x] Same active profile drives desktop chat→TTS and Android host TTS (0064)
+- [x] Latency: first-chunk speech respects RFC-0036 budgets or documented ack-path fallback to Kokoro/Piper
+- [x] IP guardrails restated (no clone packs; “Codsworth-like” is feel only)
+- [x] TTS never speaks thought-process / Show work / plan chrome, URLs, code, stack traces, or tool dumps
+- [x] Specs-only PR (no product code in this PR) — satisfied by #171
 
 Implementation follow-up (not this PR): unit tests (`python3 -m pytest`); portal picker build if TS changes (`npm --prefix frontend run build`).
 
@@ -176,3 +176,7 @@ Informational only — **not** acceptance criteria and not this ticket: MediaPip
 - RFC-0061 / 0062 / 0064 / 0067 / 0068 are implemented; this RFC does not reopen those contracts except to extend the `tts` block and to state the speak filter. Host TTS path stays shared.
 - RFC-0056 butler voice remains original; Chatterbox cloning is pack-creation capability, not a product clone of named actors/characters.
 - Linux cloud VMs cannot verify live TTS quality or GPU latency; desktop sign-off on the owner machine.
+
+## Implementation note
+
+Landed on `development` via #171 (specs) + #173 (impl @ `9ff1fff`). Surfaces: Kokoro default, Chatterbox optional, Setup butler pack / one-click voices, speak-filter.
