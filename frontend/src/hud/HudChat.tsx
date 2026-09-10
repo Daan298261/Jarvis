@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { speakChatReply, stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
@@ -63,17 +64,11 @@ export function HudChat({ onMoodChange }: HudChatProps) {
     })
   }, [speakChatReplies, task, id])
 
-  const events = task?.events || []
-  const visible = useMemo(
-    () => events.filter((e) => !["model"].includes(e.kind) || e.title !== "Model is thinking"),
-    [events],
-  )
-
   useEffect(() => {
     const node = threadRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [visible.length, task?.result, task?.status, task?.id])
+  }, [task?.events?.length, task?.result, task?.status, task?.id])
 
   async function submit() {
     const text = prompt.trim()
@@ -148,27 +143,20 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         <div className="hud-thread" ref={threadRef} aria-live="polite">
           {!shown && <p className="hud-thread-empty">Loading task…</p>}
           {shown && (
-            <>
-              {shown.prompt && (
-                <div className="hud-bubble hud-bubble-user">
-                  <span className="hud-bubble-label">You</span>
-                  <p>{shown.prompt}</p>
-                </div>
-              )}
-              {visible.slice(-6).map((event, index) => (
-                <div className="hud-bubble hud-bubble-event" key={`${event.created_at}-${index}`}>
-                  <span className="hud-bubble-label">{event.title}</span>
-                  {event.detail && <p>{event.detail.slice(0, 400)}</p>}
-                </div>
-              ))}
-              {!visible.length && running && <p className="hud-thread-empty">Working…</p>}
-              {(shown.result || shown.error) && (
-                <div className="hud-bubble hud-bubble-result">
-                  <span className="hud-bubble-label">Result</span>
-                  <div className="report">{shown.result || shown.error}</div>
-                </div>
-              )}
-            </>
+            <OwnerChatTranscript
+              key={shown.id}
+              variant="hud"
+              taskId={shown.id}
+              prompt={shown.prompt}
+              status={shown.status}
+              stage={shown.stage}
+              current_action={shown.current_action}
+              current_tool={shown.current_tool}
+              waiting_for_confirmation={shown.waiting_for_confirmation}
+              result={shown.result}
+              error={shown.error}
+              events={shown.events}
+            />
           )}
         </div>
       )}

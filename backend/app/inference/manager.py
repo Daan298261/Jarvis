@@ -4,6 +4,7 @@ import asyncio
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
+from collections.abc import AsyncIterator
 from typing import Any
 
 import psutil
@@ -143,6 +144,31 @@ class InferenceManager:
             thinking=thinking,
             extra=extra,
         )
+
+    async def chat_stream(
+        self,
+        messages: list[Any],
+        *,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        max_tokens: int | None = None,
+        thinking: bool | None = False,
+        extra: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]:
+        if not self.provider:
+            raise RuntimeError("Inference model is not loaded")
+        prepared = self.prepare_chat_messages(messages)
+        async for delta in self.provider.chat_stream(
+            prepared,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            max_tokens=max_tokens,
+            thinking=thinking,
+            extra=extra,
+        ):
+            yield delta
 
     def _vision_requested(self, settings: AppSettings, vision: bool | None) -> bool:
         return resolve_vision(settings, vision)

@@ -8,6 +8,7 @@ from ..tools.registry import REGISTRY
 # Task class → native tools Jarvis should send to the model.
 # Mixed / long-horizon tasks keep the full enabled set.
 CLASS_TOOLS: dict[str, tuple[str, ...]] = {
+    "conversation": (),
     "filesystem": ("filesystem", "python"),
     "shell": ("filesystem", "terminal", "python"),
     "system administration": ("filesystem", "terminal", "python", "docker"),
