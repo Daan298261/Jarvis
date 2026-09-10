@@ -1,6 +1,6 @@
 # RFC-0069: Presence shape catalog and morph API
 
-**Status:** accepted
+**Status:** implemented
 **Author:** Jarvis Architect
 **Date:** 2026-09-10
 
@@ -54,11 +54,11 @@ Owner reference reel / photos. `humanoid_bust` is the visual default (thousands 
 
 ## Acceptance criteria
 
-- [ ] RFC documents catalog + morph contract matching #166 names above
-- [ ] `humanoid_bust` first; catalog expandable (`energy_core` as proof stub ok)
-- [ ] `avatarId` → shape id mapping documented
-- [ ] Reduced-motion / no-camera / decorative-canvas constraints referenced from RFC-0051
-- [ ] Specs-only PR (no product code)
+- [x] RFC documents catalog + morph contract matching #166 names above
+- [x] `humanoid_bust` first; catalog expandable (`energy_core` as proof stub ok)
+- [x] `avatarId` → shape id mapping documented
+- [x] Reduced-motion / no-camera / decorative-canvas constraints referenced from RFC-0051
+- [x] Specs-only PR (no product code)
 
 ## Likely files
 
@@ -80,3 +80,7 @@ For implementers — already largely in #166:
 ## Notes
 
 Cite #165 as the visual-parity baseline and #166 as the morph-catalog implement PR. Implementation may land after or with this RFC; this RFC is the ledger for Watch % and CoS land order (specs first, then #166, without renaming the shipped surface).
+
+## Implementation note
+
+Landed on `development` via #168 (specs) + #166 (impl @ `4e7b97d`). Surface: `shapes/catalog.ts`, `humanoidBust` + `energyCore`, `morphableOrbCloud`/`uMorph`.
