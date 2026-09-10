@@ -1,6 +1,6 @@
 # RFC-0061: Always-on chat→TTS and universal personality
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** P1 — Always-on TTS and portable personality  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-09
@@ -79,3 +79,5 @@ Full RFC-0056 expressive butler; RFC-0033 device reliability rewrite; Astra Comm
 ## Notes
 
 RFC-0036 defines when streaming TTS may begin; RFC-0056 selects the voice runtime. This RFC wires typed chat through that stack and unifies persona injection across backends.
+
+Implemented in #138 (backend, 2bdca7c) + #135 (UI, d91c647); on main via stable cut #141 (e496a4b).
