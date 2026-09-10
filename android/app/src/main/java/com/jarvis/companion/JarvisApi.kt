@@ -89,8 +89,13 @@ class JarvisApi(context: Context) {
     suspend fun pair(credential: String): JSONObject {
         val value = credential.trim()
         val body = JSONObject().put("public_key", publicKey()).put("name", android.os.Build.MODEL)
-        if (CompanionCodeValidator.validate(value) is CompanionCodeValidation.Valid) body.put("code", value)
-        else body.put("invitation", value)
+        when (val validation = CompanionCodeValidator.validate(value)) {
+            is CompanionCodeValidation.Valid -> body.put("code", validation.code)
+            else -> {
+                require(value.length >= 20) { "Enter the 6-digit code shown on your Jarvis desktop" }
+                body.put("invitation", value)
+            }
+        }
         val result = raw("/enroll", "POST", body.toString().toByteArray(), false)
         val device = JSONObject(result.toString(Charsets.UTF_8))
         deviceId = device.getString("id")

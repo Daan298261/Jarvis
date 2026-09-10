@@ -26,6 +26,12 @@ class CompanionCodeValidatorTest {
     }
 
     @Test
+    fun validate_rejects_mixed_or_long_credentials() {
+        assertTrue(CompanionCodeValidator.validate("abc123456") is CompanionCodeValidation.Invalid)
+        assertTrue(CompanionCodeValidator.validate("1234567") is CompanionCodeValidation.Incomplete)
+    }
+
+    @Test
     fun isComplete_requires_six_digits() {
         assertEquals(false, CompanionCodeValidator.isComplete("12345"))
         assertEquals(true, CompanionCodeValidator.isComplete("123456"))

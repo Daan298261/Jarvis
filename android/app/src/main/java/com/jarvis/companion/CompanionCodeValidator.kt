@@ -11,9 +11,12 @@ object CompanionCodeValidator {
     fun isComplete(input: String): Boolean = normalize(input).length == 6
 
     fun validate(input: String): CompanionCodeValidation {
-        val digits = normalize(input)
+        val digits = input.trim()
+        if (digits.any { !it.isDigit() }) {
+            return CompanionCodeValidation.Invalid("Enter exactly 6 digits.")
+        }
         if (digits.length != 6) {
-            return CompanionCodeValidation.Incomplete(remaining = 6 - digits.length)
+            return CompanionCodeValidation.Incomplete(remaining = (6 - digits.length).coerceAtLeast(0))
         }
         if (!CODE_PATTERN.matches(digits)) {
             return CompanionCodeValidation.Invalid("Enter exactly 6 digits.")
