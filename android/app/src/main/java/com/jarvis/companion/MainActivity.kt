@@ -166,7 +166,7 @@ class MainActivity : ComponentActivity() {
                                 Spacer(Modifier.height(12.dp))
                                 Text("YOUR INTELLIGENCE, EVERYWHERE", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
                                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                                    PresenceOrb(if (state.recording) "listening" else if (state.speaking) "speaking" else if (state.tasks.any { it.optString("status") in listOf("queued", "running") }) "thinking" else "idle")
+                                    PresenceHud(state.presenceMode, if (state.recording) "listening" else if (state.speaking) "speaking" else if (state.tasks.any { it.optString("status") in listOf("queued", "running") }) "thinking" else "idle")
                                 }
                                 Text(if (state.recording) "I’m listening." else if (state.speaking) "Speaking" else "What’s on your mind?", fontSize = 28.sp, fontWeight = FontWeight.Light)
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
@@ -238,7 +238,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun PresenceOrb(phase: String) {
+@Composable private fun PresenceHud(mode: String, phase: String) {
     var web by remember { mutableStateOf<WebView?>(null) }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(owner) {
@@ -251,6 +251,7 @@ class MainActivity : ComponentActivity() {
     }
     AndroidView(modifier = Modifier.fillMaxWidth().height(310.dp), factory = { context ->
         WebView(context).apply {
+            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
             val loader = androidx.webkit.WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", androidx.webkit.WebViewAssetLoader.AssetsPathHandler(context)).build()
             web = this
@@ -268,7 +269,10 @@ class MainActivity : ComponentActivity() {
             }
             loadUrl("https://appassets.androidplatform.net/assets/orb/index.html")
         }
-    }, update = { it.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null) })
+    }, update = {
+        it.evaluateJavascript("window.setJarvisAppearance && window.setJarvisAppearance(${JSONObject.quote(mode)})", null)
+        it.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null)
+    })
 }
 
 @Composable private fun ModelPicker(state: CompanionState, select: (String) -> Unit) {
@@ -278,6 +282,26 @@ class MainActivity : ComponentActivity() {
         DropdownMenu(expanded, { expanded = false }) {
             DropdownMenuItem(text = { Text("Auto · Jarvis selects") }, onClick = { select("auto"); expanded = false })
             state.models.forEach { model -> DropdownMenuItem(text = { Text(model.optString("label") + if (!model.optBoolean("installed")) " · unavailable" else "") }, enabled = model.optBoolean("installed"), onClick = { select(model.getString("name")); expanded = false }) }
+        }
+    }
+}
+
+@Composable private fun VoicePicker(state: CompanionState, select: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = state.voiceProfiles.firstOrNull { it.optString("id") == state.selectedVoice }
+    Box {
+        TextButton(onClick = { expanded = true }, enabled = state.voiceProfiles.isNotEmpty()) {
+            Icon(Icons.Outlined.GraphicEq, null, Modifier.size(16.dp))
+            Text("  ${selected?.optString("display_name") ?: "Voice"}  ▾", maxLines = 1)
+        }
+        DropdownMenu(expanded, { expanded = false }) {
+            state.voiceProfiles.forEach { voice ->
+                DropdownMenuItem(
+                    text = { Text(voice.optString("display_name") + if (!voice.optBoolean("available")) " · unavailable" else "") },
+                    enabled = voice.optBoolean("available"),
+                    onClick = { select(voice.getString("id")); expanded = false },
+                )
+            }
         }
     }
 }
@@ -399,6 +423,25 @@ class MainActivity : ComponentActivity() {
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Task notifications", Modifier.weight(1f)); Switch(device?.optBoolean("notifications") == true, { model.preferences(it, device?.optBoolean("critical_calls") == true) }, enabled = state.connected) }
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Calls for critical events", Modifier.weight(1f)); Switch(device?.optBoolean("critical_calls") == true, { model.preferences(device?.optBoolean("notifications") == true, it) }, enabled = state.connected) }
             if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text("Background push needs the Jarvis push service configured.", color = Muted, fontSize = 12.sp)
+        }
+        item {
+            Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+            Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(state.presenceMode == "orb", { model.selectPresence("orb") }, { Text("Glowing orb") })
+                FilterChip(state.presenceMode == "humanoid", { model.selectPresence("humanoid") }, { Text("Humanoid HUD") })
+            }
+            Text("Server voice", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { VoicePicker(state, model::selectVoice) }
+                OutlinedButton(onClick = { model.previewVoice(state.selectedVoice) },
+                    enabled = state.connected && state.selectedVoice.isNotEmpty() && !state.busy) { Text("Preview") }
+            }
+            val voice = state.capabilities.optJSONObject("voice")
+            Text("Speech recognition · ${if (voice?.optBoolean("stt_ready") == true) "ready" else "unavailable"}  ·  Speech output · ${if (voice?.optBoolean("tts_ready") == true) "ready" else "unavailable"}",
+                color = Muted, fontSize = 12.sp)
+            Text("Audio is processed by your paired Jarvis host and transported through pinned TLS.", color = Muted, fontSize = 11.sp,
+                modifier = Modifier.padding(top = 6.dp))
         }
         item {
             Text("Schedules", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))

@@ -8,11 +8,16 @@ preview, not a production remote-access release.
 
 - Kotlin/Compose Home, Chat, Tasks, Studio capability notice, and More screens.
 - The same vendored Apex orb as desktop, bundled locally with no credential bridge.
+- Selectable glowing-orb and efficient WebGL humanoid HUD modes, both driven by
+  listening/thinking/speaking state and bundled entirely inside the APK.
 - P-256 Android Keystore device identity, owner-confirmed pairing, short sessions,
   per-device revocation, and pinned TLS server identity.
 - Native API integration for task/model control, conversation history, file sharing,
   attachments and direct camera capture, STT/TTS, and editable persistent
   once/daily/weekly schedules.
+- Mobile TTS uses the PC voice-profile catalog with an in-app selector and preview.
+  Recorded STT and generated speech use device-authenticated pinned TLS; no speech
+  model or permanent Jarvis credential is stored on the phone.
 - Device-authenticated, allowlisted TLS gateway; owner/desktop APIs are not forwarded.
 - WebRTC voice bridge, call signaling, Android Telecom integration and optional FCM
   wake adapter. Failed media reconnects use ordered, replay-safe offer generations.
@@ -114,7 +119,7 @@ deployed by this branch yet.
 - Android debug APK: built successfully.
 - Android lint: passes; warnings include older pinned libraries and intentional
   Keystore/pinned-TLS/locally bundled WebView usage.
-- 65 focused pairing/connectivity/mobile/auth/voice tests pass, including stale/replayed
+- 66 focused pairing/connectivity/mobile/auth/voice tests pass, including stale/replayed
   approvals, interrupted speech, real local TLS lifecycle, safe router mapping and
   six-digit code expiry/regeneration/rate limiting, scoped schedule edit/resume and
   ordered call reconnect offers.

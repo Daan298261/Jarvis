@@ -220,13 +220,54 @@ async def transcribe(request: Request, device=Device):
 
 class Speak(BaseModel):
     text: str = Field(min_length=1, max_length=6000)
+    voice_profile_id: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[a-z0-9_]+$")
+
+
+def _companion_voice_profiles() -> dict:
+    from ..voice_profiles.catalog import get_active_voice_profile_id, get_catalog
+    active_id = get_active_voice_profile_id()
+    profiles = get_catalog().list_profiles(active_id)
+    return {
+        "active_voice_profile_id": active_id,
+        "profiles": [
+            {
+                "id": profile.id,
+                "display_name": profile.display_name,
+                "archetype": profile.archetype,
+                "available": profile.available,
+                "active": profile.active,
+                "vram_class": profile.vram_class,
+                "unavailable_reason": profile.unavailable_reason,
+            }
+            for profile in profiles
+        ],
+    }
+
+
+@router.get("/voice/profiles")
+def voice_profiles(device=Device):
+    return _companion_voice_profiles()
+
+
+@router.post("/voice/profiles/{profile_id}/preview")
+async def preview_voice_profile(profile_id: str, device=Device):
+    from ..voice_profiles.catalog import get_catalog
+    from ..workers.voice import synthesize_speech
+    profile = get_catalog().get_available(profile_id)
+    if profile is None:
+        raise HTTPException(404, "Voice profile is not available")
+    try:
+        audio = await synthesize_speech(profile.sample_utterance, voice_profile_id=profile.id)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return Response(audio, media_type="audio/wav")
 
 
 @router.post("/voice/speak")
 async def speak(body: Speak, device=Device):
     from ..workers.voice import synthesize_speech
     try:
-        return Response(await synthesize_speech(body.text), media_type="audio/wav")
+        return Response(await synthesize_speech(body.text, voice_profile_id=body.voice_profile_id), media_type="audio/wav")
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
 

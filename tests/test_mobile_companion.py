@@ -163,6 +163,34 @@ async def test_mobile_can_resolve_coding_decision_with_explicit_instructions(mob
     assert received == {"item_id": "decision-1", "resolution": "keep the verified branch"}
 
 
+@pytest.mark.asyncio
+async def test_mobile_voice_profiles_are_minimized_and_tts_selection_is_forwarded(mobile_env, monkeypatch):
+    from app.api.companion import router
+    from app.workers import voice
+    app = FastAPI()
+    app.include_router(router)
+    key, device = paired()
+    session = identity.exchange(device["id"], signature(key, device))
+    headers = {"Authorization": "Bearer " + session["access_token"], "X-Jarvis-Device": device["id"]}
+    received = {}
+
+    async def synthesize(text, *, voice_profile_id=None):
+        received.update(text=text, voice_profile_id=voice_profile_id)
+        return b"RIFFtest"
+
+    monkeypatch.setattr(voice, "synthesize_speech", synthesize)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
+        assert (await client.get("/api/companion/voice/profiles")).status_code == 401
+        profiles = (await client.get("/api/companion/voice/profiles", headers=headers)).json()["profiles"]
+        assert profiles and set(profiles[0]) <= {
+            "id", "display_name", "archetype", "available", "active", "vram_class", "unavailable_reason"
+        }
+        response = await client.post("/api/companion/voice/speak", headers=headers,
+                                     json={"text": "Status report", "voice_profile_id": "butler_original_v1"})
+    assert response.status_code == 200 and response.content == b"RIFFtest"
+    assert received == {"text": "Status report", "voice_profile_id": "butler_original_v1"}
+
+
 def test_daily_schedule_preserves_local_time_across_dst():
     from datetime import datetime
     from zoneinfo import ZoneInfo
