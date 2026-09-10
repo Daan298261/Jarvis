@@ -10,15 +10,15 @@ Full build/API reference: [`docs/android-companion.md`](android-companion.md). A
 
 ## 0. APK to install
 
-**Use for this MVP pass:** `Jarvis-companion-debug-5c75f3e.apk`, then pair to `https://192.168.1.212:4781` with the gateway **server pin** and the desktop **6-digit code** (steps below). Newer APKs on disk are fine if you rebuild the gateway pin flow; do not commit APKs or pins to git.
+**Use for this MVP pass:** `JarvisCompanion-a1be0f1.apk` (Jarvis **1.2.0** build [`a1be0f1`](https://github.com/Daan298261/Jarvis/commit/a1be0f1)), then pair to `https://192.168.1.212:4781` with the gateway **server pin** and the desktop **6-digit code** (steps below). Do not commit APKs or pins to git.
 
 ### Where Taco keeps installable APKs
 
 | Location | Files / notes |
 | --- | --- |
-| **Desktop (same folder)** | `Jarvis-companion-debug-5c75f3e.apk` — **preferred for this checklist** ([`5c75f3e`](https://github.com/Daan298261/Jarvis/commit/5c75f3e), RFC-0059 companion merge). Also present: `Jarvis-companion-lan-192.168.1.212.apk` (LAN-oriented bootstrap naming), `Jarvis-companion-debug-9d380f6.apk` (later debug snapshot). Copy to the phone via USB, Nearby Share, or email-to-self. |
-| **Google Drive** | User-facing shared folder (link Taco distributes outside the repo). Same APK filenames as on the desktop when synced there. |
-| **Jarvis install / repo tree** | Under the 1.2 release layout, e.g. `jarvis\jarvis\releases\1.2\jarvis companion\` (adjust drive letter and nesting to match your clone or installer root). Use when the desktop copies are missing. |
+| **Primary — Releases folder** | `%USERPROFILE%\Documents\Projects\Jarvis\Releases\Jarvis-1.2.0-a1be0f1-2026-09-10\JarvisCompanion-a1be0f1.apk` — **preferred for this checklist**. Copy to the phone via USB, Nearby Share, or email-to-self. |
+| **Primary — Google Drive** | `My Drive\JarvisCompanion-a1be0f1.apk` — same **1.2.0 / a1be0f1** build as the Releases path (link Taco distributes outside the repo). |
+| **Secondary / older (do not prefer)** | `%USERPROFILE%\Documents\Projects\Jarvis\Releases\Jarvis-e008ae1-2026-09-10\JarvisCompanion-e008ae1.apk` — same-day release, **older** than `a1be0f1`. Desktop debug snapshots: `Jarvis-companion-debug-5c75f3e.apk` ([`5c75f3e`](https://github.com/Daan298261/Jarvis/commit/5c75f3e), RFC-0059 era) and `Jarvis-companion-debug-9d380f6.apk` — **older debug builds**; use only if the 1.2.0 APK is unavailable. |
 
 ### Other sources (developers)
 
@@ -28,7 +28,7 @@ Full build/API reference: [`docs/android-companion.md`](android-companion.md). A
 | **CI artifact** | GitHub Actions **Android companion** → `jarvis-android-debug` (`app-debug.apk`) |
 | **Personalized release** | Desktop **Android companion** build → `data\mobile\builds\jarvis-<version>.apk` ([`docs/android-companion.md`](android-companion.md)) |
 
-**Rebuild from tip** when companion fixes landed after `5c75f3e`:
+**Rebuild from tip** when companion fixes landed after `a1be0f1`:
 
 ```powershell
 cd <Jarvis-repo>
@@ -110,7 +110,7 @@ Related owner routes: `POST /api/mobile/manage/pairing-codes/regenerate`, `GET /
 
 ## 4. Phone — install and pair
 
-1. **Install** `Jarvis-companion-debug-5c75f3e.apk` (from desktop, Drive, or `releases\1.2\jarvis companion\`). Enable “Install unknown apps” for your file manager if needed.
+1. **Install** `JarvisCompanion-a1be0f1.apk` (Releases `Jarvis-1.2.0-a1be0f1-2026-09-10\` or Drive `JarvisCompanion-a1be0f1.apk`). Enable “Install unknown apps” for your file manager if needed.
 2. **Same Wi‑Fi** as the PC (no VPN isolating the phone).
 3. In the app **More** (connection settings):
    - Endpoint: `https://192.168.1.212:4781`
