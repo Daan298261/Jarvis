@@ -13,6 +13,7 @@ from ..voice_profiles.catalog import (
 )
 from ..voice_profiles.ip_guard import contains_forbidden_ip_term
 from ..voice_profiles.schema import ActiveVoiceProfileIn, ActiveVoiceProfileOut
+from ..tts.pack_install import install_voice_pack
 from ..workers.voice import synthesize_speech
 
 router = APIRouter(prefix="/api/voice-profiles", tags=["voice-profiles"])
@@ -60,6 +61,35 @@ async def set_active_voice_profile(body: ActiveVoiceProfileIn):
     return {
         "voice_profile_id": body.voice_profile_id,
         "profile": profile.model_dump(),
+    }
+
+
+@router.post("/{profile_id}/install")
+async def install_voice_profile_pack(profile_id: str):
+    if contains_forbidden_ip_term(profile_id):
+        raise HTTPException(
+            status_code=400,
+            detail="profile_id contains a forbidden copyrighted-character or trademark term",
+        )
+    catalog = get_catalog()
+    profile = catalog.get(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"Unknown voice profile: {profile_id}")
+    try:
+        result = install_voice_pack(profile)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not result.ok:
+        raise HTTPException(status_code=409, detail=result.detail)
+    active_id = get_active_voice_profile_id()
+    items = catalog.list_profiles(active_id)
+    listed = next((item for item in items if item.id == profile_id), None)
+    return {
+        "profile_id": profile_id,
+        "installed": True,
+        "detail": result.detail,
+        "pack_path": result.pack_path,
+        "profile": listed.model_dump() if listed else None,
     }
 
 

@@ -1,0 +1,11 @@
+{
+  "pack_id": "butler_original_v1",
+  "engine_id": "kokoro",
+  "model_id": "kokoro-82m",
+  "model_rel_path": "models/tts/kokoro-82m",
+  "speaker_ref": "bm_george",
+  "license": "Apache-2.0",
+  "offline": true,
+  "quality_tier": "natural",
+  "bundled": true
+}

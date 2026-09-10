@@ -51,6 +51,10 @@ Source: "bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversio
 ; by build-installer.ps1 and is not committed to the repository.
 Source: "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"; DestDir: "{app}\models\bootstrap"; Flags: ignoreversion
 #endif
+#ifndef SkipVoicePack
+; Default household butler Kokoro-82M weights (RFC-0070). Staged by stage-voice-default.ps1.
+Source: "payload\models\tts\kokoro-82m\*"; DestDir: "{app}\models\tts\kokoro-82m"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 
 [Icons]
 Name: "{group}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start the Jarvis local agent portal"

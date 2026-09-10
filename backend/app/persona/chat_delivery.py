@@ -8,6 +8,7 @@ from typing import Any
 from ..config import load_settings
 from ..events import BUS
 from .quiet import should_speak_chat_reply
+from ..tts.speak_filter import filter_text_for_speech
 
 OWNER_CHAT_CHANNEL = "__owner_chat__"
 
@@ -51,19 +52,23 @@ async def publish_owner_text(
     tts_id = None
     if want_speech:
         tts_id = enqueue_chat_tts(cleaned, source=source)
-        await BUS.publish_ephemeral(
-            OWNER_CHAT_CHANNEL,
-            "chat_tts",
-            "Speak reply",
-            cleaned,
-            stage=source,
-        )
+        if tts_id:
+            await BUS.publish_ephemeral(
+                OWNER_CHAT_CHANNEL,
+                "chat_tts",
+                "Speak reply",
+                cleaned,
+                stage=source,
+            )
 
-    return {"text": cleaned, "spoken": want_speech, "tts_id": tts_id}
+    return {"text": cleaned, "spoken": bool(tts_id), "tts_id": tts_id or None}
 
 
 def enqueue_chat_tts(text: str, *, source: str = "chat") -> str:
-    item = ChatTtsItem(id=str(uuid.uuid4()), text=text.strip(), source=source)
+    speakable = filter_text_for_speech(text, source=source)
+    if not speakable:
+        return ""
+    item = ChatTtsItem(id=str(uuid.uuid4()), text=speakable, source=source)
     _pending_tts.append(item)
     return item.id
 
