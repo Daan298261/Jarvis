@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react"
 import { api, getPrivateKey } from "../api"
+import { CompanionPairingPanel } from "../components/CompanionPairingPanel"
 
 type Device = { id: string; name: string; status: string; fingerprint: string }
-type Build = { id: string; state: string; activity: string; started_at: number; updated_at: number; result?: { sha256: string; invitation_expires_at: number } }
+type Build = { id: string; state: string; activity: string; started_at: number; updated_at: number; result?: { sha256: string } }
 type Connection = { state: string; activity: string; endpoints: string[]; server_pin?: string; router?: string; limitation?: string; local_verified?: boolean; remote_verified?: boolean; updated_at?: number }
 
 export function MobileCompanionSetup() {
@@ -12,7 +13,6 @@ export function MobileCompanionSetup() {
   const [remote, setRemote] = useState(true)
   const [build, setBuild] = useState<Build | null>(null)
   const [error, setError] = useState("")
-  const [invitation, setInvitation] = useState("")
   const [busy, setBusy] = useState(false)
   const buildId = build?.id
   const buildState = build?.state
@@ -67,9 +67,8 @@ export function MobileCompanionSetup() {
     </details>
     <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 12 }}>
       <button className="btn" disabled={busy || (!endpoint && !connection?.endpoints.length) || (!!build && ["queued", "running"].includes(build.state))} onClick={() => run(async () => setBuild(await api<Build>("/api/mobile/manage/builds", { method: "POST", body: JSON.stringify({ endpoint }) })))}>Build Android APK</button>
-      <button className="btn secondary" disabled={busy} onClick={() => run(async () => { const value = await api<{ invitation: string }>("/api/mobile/manage/invitations", { method: "POST" }); setInvitation(value.invitation) })}>Pair existing APK</button>
     </div>
-    {invitation && <p>One-hour pairing invitation: <code style={{ overflowWrap: "anywhere" }}>{invitation}</code></p>}
+    <div style={{ marginTop: 16 }}><CompanionPairingPanel compact /></div>
     {build && <div role="status" style={{ marginTop: 12 }}>
       <strong>{build.state}</strong> · {build.activity}<br />
       <small>Started {new Date(build.started_at * 1000).toLocaleTimeString()} · Last progress {new Date(build.updated_at * 1000).toLocaleTimeString()}</small>

@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from ..auth import require_owner_private_key
@@ -23,9 +23,16 @@ Device = Depends(identity.require_device)
 
 
 class Enroll(BaseModel):
-    invitation: str = Field(min_length=20, max_length=100)
+    code: str | None = Field(default=None, min_length=6, max_length=6, pattern=r"^\d{6}$")
+    invitation: str | None = Field(default=None, min_length=20, max_length=100)
     public_key: str = Field(max_length=2000)
     name: str = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def exactly_one_credential(self):
+        if bool(self.code) == bool(self.invitation):
+            raise ValueError("Provide exactly one of code or invitation")
+        return self
 
 
 class Proof(BaseModel):
@@ -35,6 +42,12 @@ class Proof(BaseModel):
 
 class Confirm(BaseModel):
     fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class PairingCodeRequest(BaseModel):
+    ttl_minutes: int = Field(default=identity.DEFAULT_PAIRING_TTL_MINUTES,
+                             ge=identity.MIN_PAIRING_TTL_MINUTES,
+                             le=identity.MAX_PAIRING_TTL_MINUTES)
 
 
 class Message(BaseModel):
@@ -60,8 +73,11 @@ class Preferences(BaseModel):
 
 
 @router.post("/enroll")
-def enroll(body: Enroll):
-    return identity.enroll(body.invitation, body.public_key, body.name)
+def enroll(body: Enroll, request: Request):
+    client_ip = request.client.host if request.client else ""
+    if body.code:
+        return identity.enroll_pairing_code(body.code, body.public_key, body.name, client_ip=client_ip)
+    return identity.enroll(body.invitation, body.public_key, body.name, client_ip=client_ip)
 
 
 @router.get("/challenge/{device_id}")
@@ -254,6 +270,21 @@ def studio(device=Device):
 @owner_router.post("/invitations")
 def invitation():
     return identity.invite()
+
+
+@owner_router.post("/pairing-codes")
+def create_pairing_code(body: PairingCodeRequest):
+    return identity.generate_pairing_code(body.ttl_minutes)
+
+
+@owner_router.post("/pairing-codes/regenerate")
+def regenerate_pairing_code(body: PairingCodeRequest):
+    return identity.regenerate_pairing_code(body.ttl_minutes)
+
+
+@owner_router.get("/pairing-codes/status")
+def pairing_code_status():
+    return identity.pairing_code_status()
 
 
 @owner_router.get("/devices")

@@ -11,6 +11,7 @@ import { SystemPage } from "./pages/System"
 import { SwarmPage } from "./pages/Swarm"
 import { WorkflowsPage } from "./pages/Workflows"
 import { PhonePage } from "./pages/Phone"
+import { CompanionPairingPage } from "./pages/CompanionPairing"
 import { SetupPage } from "./pages/Setup"
 import { AgentsPage } from "./pages/Agents"
 import { AgentInterviewPage } from "./pages/AgentInterview"
@@ -262,6 +263,7 @@ function OwnerPortal() {
     <Routes>
       <Route path="/" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
       <Route path="/phone" element={<PhonePage />} />
+      <Route path="/companion-pairing" element={<CompanionPairingPage />} />
       <Route path="/tasks/:id" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
       <Route path="/history" element={<HistoryPage />} />
       <Route path="/workflows" element={<WorkflowsPage />} />

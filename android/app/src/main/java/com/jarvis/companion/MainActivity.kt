@@ -287,7 +287,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun MoreScreen(model: CompanionModel, state: CompanionState) {
     var endpoint by remember { mutableStateOf(model.api.endpoint) }
     var pin by remember { mutableStateOf(model.api.pin) }
-    var invitation by remember { mutableStateOf(model.api.invitation) }
+    var pairingCode by remember { mutableStateOf(model.api.invitation) }
     var schedulePrompt by remember { mutableStateOf("") }
     var whenText by remember { mutableStateOf(LocalDateTime.now().plusHours(1).withSecond(0).withNano(0).toString()) }
     var recurrence by remember { mutableStateOf("once") }
@@ -296,8 +296,18 @@ class MainActivity : ComponentActivity() {
             Text("Connection", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
             OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Jarvis HTTPS endpoint") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(pin, { pin = it }, label = { Text("Server fingerprint") }, modifier = Modifier.fillMaxWidth())
-            if (model.api.deviceId.isEmpty()) OutlinedTextField(invitation, { invitation = it }, label = { Text("Pairing invitation") }, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { model.pair(endpoint, pin, invitation) }, enabled = !state.busy) { Text(if (model.api.deviceId.isEmpty()) "Pair with Jarvis" else "Connect / check approval") }
+            if (model.api.deviceId.isEmpty()) OutlinedTextField(
+                pairingCode,
+                { pairingCode = CompanionCodeValidator.normalize(it) },
+                label = { Text("6-digit pairing code") },
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(onClick = { model.pair(endpoint, pin, pairingCode) },
+                enabled = !state.busy && (model.api.deviceId.isNotEmpty() || CompanionCodeValidator.isComplete(pairingCode))) {
+                Text(if (model.api.deviceId.isEmpty()) "Pair with Jarvis" else "Connect / check approval")
+            }
             Text("Phone fingerprint: ${model.api.fingerprint().chunked(8).joinToString(" ")}", color = Muted, fontSize = 11.sp)
             Text("Confirm this fingerprint on your Jarvis desktop to finish pairing.", color = Muted, fontSize = 12.sp)
         }

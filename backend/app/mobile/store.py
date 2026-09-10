@@ -20,7 +20,8 @@ def database():
     conn = sqlite3.connect(root() / "companion.db", timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript('''
+    conn.executescript(
+        """
         CREATE TABLE IF NOT EXISTS records (
             kind TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL,
             PRIMARY KEY(kind, id)
@@ -30,7 +31,8 @@ def database():
             kind TEXT NOT NULL, payload TEXT NOT NULL, created REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS events_device ON events(device, id);
-    ''')
+        """
+    )
     try:
         conn.execute("BEGIN IMMEDIATE")
         yield conn
@@ -48,8 +50,14 @@ def get(conn, kind: str, key: str):
 
 
 def put(conn, kind: str, key: str, value: dict):
-    conn.execute("INSERT INTO records VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload",
-                 (kind, key, json.dumps(value, ensure_ascii=False)))
+    conn.execute(
+        "INSERT INTO records VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload",
+        (kind, key, json.dumps(value, ensure_ascii=False)),
+    )
+
+
+def delete(conn, kind: str, key: str):
+    conn.execute("DELETE FROM records WHERE kind=? AND id=?", (kind, key))
 
 
 def rows(conn, kind: str) -> list[dict]:

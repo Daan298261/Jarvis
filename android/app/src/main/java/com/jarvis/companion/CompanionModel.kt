@@ -69,9 +69,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             tasks = tasks, models = models, conversations = conversations, schedules = schedules, calls = calls, messages = messages, capabilities = capabilities,
             pendingMessage = outbox.read() != null)
     }
-    fun pair(endpoint: String, pin: String, invitation: String) = action {
+    fun pair(endpoint: String, pin: String, credential: String) = action {
         api.configure(endpoint, pin)
-        if (api.deviceId.isEmpty()) api.pair(invitation.trim())
+        if (api.deviceId.isEmpty()) api.pair(credential.trim())
         api.session()
         (getApplication<Application>() as JarvisApp).registerPush()
         refresh()

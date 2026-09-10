@@ -258,6 +258,10 @@ export function PhonePage() {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h2>Pair this phone</h2>
+        <p className="lede" style={{ marginBottom: 8 }}>
+          For the native Android companion app, open <strong>Settings → Pair phone</strong> on the PC and enter
+          the 6-digit code in the app.
+        </p>
         {!standalone && (
           <p className="lede">{info?.pairing?.install || "Add this page to the home screen from Chrome."}</p>
         )}

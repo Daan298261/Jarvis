@@ -112,6 +112,7 @@ def is_auth_required_for_request(request: Request, settings: AppSettings) -> boo
         "/api/auth/status",
         "/api/auth/verify",
         "/api/mobile",
+        "/api/companion/enroll",
         "/api/setup/status",
     }:
         return False

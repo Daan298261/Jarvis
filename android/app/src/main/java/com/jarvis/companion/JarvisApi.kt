@@ -86,8 +86,12 @@ class JarvisApi(context: Context) {
     private fun publicKey() = Base64.encodeToString(keys.getCertificate(keyAlias).publicKey.encoded, Base64.NO_WRAP)
     fun fingerprint() = sha256(keys.getCertificate(keyAlias).publicKey.encoded)
 
-    suspend fun pair(invite: String): JSONObject {
-        val result = raw("/enroll", "POST", JSONObject().put("invitation", invite).put("public_key", publicKey()).put("name", android.os.Build.MODEL).toString().toByteArray(), false)
+    suspend fun pair(credential: String): JSONObject {
+        val value = credential.trim()
+        val body = JSONObject().put("public_key", publicKey()).put("name", android.os.Build.MODEL)
+        if (CompanionCodeValidator.validate(value) is CompanionCodeValidation.Valid) body.put("code", value)
+        else body.put("invitation", value)
+        val result = raw("/enroll", "POST", body.toString().toByteArray(), false)
         val device = JSONObject(result.toString(Charsets.UTF_8))
         deviceId = device.getString("id")
         prefs.edit().putString("device", deviceId).apply()

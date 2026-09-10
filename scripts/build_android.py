@@ -41,7 +41,6 @@ def secret_file(path: Path) -> str:
 
 def build(endpoint: str, progress=lambda message: print(message, flush=True), firebase: dict | None = None, endpoints: list[str] | None = None) -> dict:
     from app.mobile.gateway import server_identity
-    from app.mobile.identity import invite
     from app.mobile.store import root
     from app.mobile.connectivity import origin
     endpoint = origin(endpoint)
@@ -67,8 +66,7 @@ def build(endpoint: str, progress=lambda message: print(message, flush=True), fi
                         "-storepass:env", "JARVIS_APK_PASSWORD", "-keypass:env", "JARVIS_APK_PASSWORD",
                         "-keyalg", "RSA", "-keysize", "3072", "-validity", "10000", "-dname", "CN=Jarvis Companion"], env=env, check=True, capture_output=True)
     identity = server_identity([urlsplit(value).hostname for value in endpoints])
-    invitation = invite(3600)
-    settings = {"endpoint": endpoint.rstrip("/"), "endpoints": endpoints, "server_pin": identity["server_pin"], "invitation": invitation["invitation"]}
+    settings = {"endpoint": endpoint.rstrip("/"), "endpoints": endpoints, "server_pin": identity["server_pin"]}
     if firebase is None and os.environ.get("JARVIS_FIREBASE_CLIENT_CONFIG"):
         firebase = json.loads(Path(os.environ["JARVIS_FIREBASE_CLIENT_CONFIG"]).read_text())
     if firebase:
@@ -92,7 +90,7 @@ def build(endpoint: str, progress=lambda message: print(message, flush=True), fi
     target = folder / f"jarvis-{release_code}.apk"
     shutil.copyfile(source, target)
     result = {"filename": target.name, "path": str(target), "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
-              "endpoint": settings["endpoint"], "server_pin": settings["server_pin"], "invitation_expires_at": invitation["expires_at"]}
+              "endpoint": settings["endpoint"], "server_pin": settings["server_pin"]}
     progress("APK signature verified; ready to install")
     return result
 
