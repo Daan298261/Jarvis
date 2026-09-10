@@ -11,6 +11,7 @@ import {
 import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { AutonomySection } from "./Autonomy"
 import { LicenseSettings } from "./License"
+import { CompanionPairingPanel } from "../components/CompanionPairingPanel"
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -103,6 +104,16 @@ export function SettingsPage() {
             Open agent interview
           </Link>
         </div>
+      </div>
+
+      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
+        <h2>Pair phone</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Show a 6-digit code for the Android companion app. Regenerate anytime; the previous unclaimed code
+          stops working.{" "}
+          <Link to="/companion-pairing">Open full pairing page</Link>.
+        </p>
+        <CompanionPairingPanel compact />
       </div>
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>

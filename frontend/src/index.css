@@ -1501,6 +1501,63 @@ label { display: block; color: var(--muted); font-size: 13px; }
 .whatsapp-pairing { display: grid; justify-items: center; gap: 14px; margin-top: 16px; }
 .whatsapp-qr { padding: 10px; border-radius: 12px; background: white; line-height: 0; }
 .whatsapp-pairing ol { width: 100%; margin: 0; padding-left: 24px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+
+/* RFC-0063 — companion 6-digit pairing */
+.companion-pairing { display: grid; gap: 16px; margin-top: 8px; }
+.companion-pairing--compact { margin-top: 0; }
+.companion-pairing-code {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.companion-pairing-digit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 68px;
+  padding: 0 8px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 36px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+}
+.companion-pairing-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.companion-pairing-ttl {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 15px;
+  color: var(--muted);
+}
+.companion-pairing-hint,
+.companion-pairing-msg {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+.companion-pairing-actions {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.companion-pairing-steps {
+  width: 100%;
+  margin: 0;
+  padding-left: 24px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
 .integration-actions { margin-top: auto; padding-top: 14px; }
 .advanced-connections { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
 .advanced-connections > summary { cursor: pointer; color: var(--muted); font-weight: 600; margin-bottom: 16px; }
