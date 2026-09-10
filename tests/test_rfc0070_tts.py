@@ -51,6 +51,30 @@ def test_speak_filter_allows_think_aloud_source():
     assert filter_text_for_speech(line, source="think_aloud") == line
 
 
+def test_speak_filter_strips_final_reply_reasoning_and_markdown_residue():
+    raw = (
+        "Final reply: Very well, sir.\n"
+        "Reasoning: I considered three options.\n"
+        "See [the docs](https://example.com/x) for detail.\n"
+        "WORKING STATE: scratch notes\n"
+        "Shall I proceed?"
+    )
+    filtered = filter_text_for_speech(raw, source="chat")
+    assert "Final reply:" not in filtered
+    assert "Reasoning:" not in filtered
+    assert "https://" not in filtered
+    assert "WORKING STATE" not in filtered
+    assert "the docs" in filtered
+    assert "Shall I proceed?" in filtered
+
+
+def test_tts_modules_import_without_circular_import():
+    import importlib
+
+    importlib.import_module("app.tts.synthesize")
+    importlib.import_module("app.workers.voice")
+
+
 def test_enqueue_chat_tts_skips_non_speakable_content():
     item_id = enqueue_chat_tts("PLAN: hidden\nhttps://x.test", source="task_chat")
     assert item_id == ""

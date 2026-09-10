@@ -18,6 +18,8 @@ from .engines import (
     legacy_system_tts_available,
     resolve_pack_model_dir,
 )
+from .system_sapi import legacy_tts_backend, speak_espeak, speak_pyttsx3, speak_sapi
+from .warm_start import get_kokoro_pipeline
 
 
 def _pcm_to_wav(pcm: bytes, *, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> bytes:
@@ -75,10 +77,8 @@ async def _synthesize_kokoro(
         resolved_dir = resolve_pack_model_dir(profile)
 
     def _run() -> bytes:
-        from kokoro import KPipeline
-
         lang = "b" if voice.startswith("b") else "a"
-        pipeline = KPipeline(lang_code=lang, model=str(resolved_dir) if resolved_dir else None)
+        pipeline = get_kokoro_pipeline(lang, resolved_dir)
         chosen = voice or "bm_george"
         chunks: list[bytes] = []
         sample_rate = 24000
@@ -176,14 +176,12 @@ def _resolve_piper_onnx(voice: str, profile: VoiceProfile | None) -> Path | None
 async def _synthesize_system(text: str, *, engine: str, speaker_ref: str) -> bytes:
     if not legacy_system_tts_available():
         raise RuntimeError("No legacy system TTS backend is available.")
-    from ..workers import voice as voice_worker
-
-    backend = voice_worker.legacy_tts_backend()
+    backend = legacy_tts_backend()
     if backend == "sapi":
-        return await voice_worker._speak_sapi(text, speaker_ref=speaker_ref)
+        return await speak_sapi(text, speaker_ref=speaker_ref)
     if backend in {"espeak", "espeak-ng"}:
-        return await voice_worker._speak_espeak(text, backend, speaker_ref=speaker_ref)
-    return voice_worker._speak_pyttsx3(text, speaker_ref=speaker_ref)
+        return await speak_espeak(text, backend, speaker_ref=speaker_ref)
+    return speak_pyttsx3(text, speaker_ref=speaker_ref)
 
 
 def load_pack_manifest(pack_dir: Path) -> dict[str, Any]:

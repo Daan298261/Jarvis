@@ -165,6 +165,12 @@ async def startup() -> None:
     QUEUE_WATCHER.start()
     mobile_runtime.start()
     await QUEUE_WATCHER.process_pending()
+    try:
+        from .tts.warm_start import schedule_tts_warm_start
+
+        schedule_tts_warm_start()
+    except Exception:
+        logging.debug("TTS warm-start scheduling skipped", exc_info=True)
     asyncio.create_task(_maybe_launch_greeting(app.state.startup_id))
 
 
