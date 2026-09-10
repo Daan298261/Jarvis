@@ -67,6 +67,7 @@ from .planning import (
 )
 from ..persona.chat_delivery import publish_owner_text
 from ..persona.owner_chat import OWNER_CHAT_SYSTEM
+from ..persona.think_aloud import run_with_think_aloud
 from .recovery import recovery_hint
 from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
@@ -691,17 +692,29 @@ class AgentRuntime:
                     await MANAGER.ensure_vision(settings)
                     provider = MANAGER.provider or provider
                 try:
-                    result: ChatResult = await asyncio.wait_for(
-                        MANAGER.chat(
-                            messages,
-                            tools=None if force_final else exposure_schemas_for(working.task_class, working.requested_tools),
-                            temperature=profile.temperature,
-                            top_p=profile.top_p,
-                            top_k=profile.top_k,
-                            thinking=think,
-                            max_tokens=400 if force_final else 1024,
-                        ),
-                        timeout=90 if force_final else 180,
+                    async def _model_turn() -> ChatResult:
+                        return await asyncio.wait_for(
+                            MANAGER.chat(
+                                messages,
+                                tools=None if force_final else exposure_schemas_for(working.task_class, working.requested_tools),
+                                temperature=profile.temperature,
+                                top_p=profile.top_p,
+                                top_k=profile.top_k,
+                                thinking=think,
+                                max_tokens=400 if force_final else 1024,
+                            ),
+                            timeout=90 if force_final else 180,
+                        )
+
+                    think_context = (
+                        "Writing the final report"
+                        if force_final
+                        else ("Verifying the result" if verifying else "Thinking through the next step")
+                    )
+                    result: ChatResult = await run_with_think_aloud(
+                        task_id,
+                        context=think_context,
+                        operation=_model_turn,
                     )
                 except (APIStatusError, APIConnectionError) as exc:
                     await self._release_lazy_vision()
@@ -1070,7 +1083,15 @@ class AgentRuntime:
         if not authz.allowed:
             return _authorization_observation(authz), None
         started = datetime.now(timezone.utc)
-        result = await REGISTRY.execute(name, arguments)
+
+        async def _run_tool():
+            return await REGISTRY.execute(name, arguments)
+
+        result = await run_with_think_aloud(
+            task_id,
+            context=f"Running {name}",
+            operation=_run_tool,
+        )
         duration = (datetime.now(timezone.utc) - started).total_seconds() * 1000
         if metrics is not None:
             metrics.note_tool(duration, schema_error=schema_error)
