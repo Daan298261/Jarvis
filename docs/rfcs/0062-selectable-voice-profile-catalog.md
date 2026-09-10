@@ -1,6 +1,6 @@
 # RFC-0062: Selectable working TTS / voice profiles
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** P1 — Selectable voice profile catalog  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-09
@@ -86,3 +86,5 @@ Full RFC-0056 engine bake-off; training a new voice from scratch in this ticket;
 ## Notes
 
 Taco’s Codsworth request is satisfied only via original butler-archetype feel (already RFC-0055/0056 policy), never a Fallout pack.
+
+Implemented in #139 (API/packs, f09132e) + #135 (picker UI, d91c647); on main via stable cut #141 (e496a4b).
