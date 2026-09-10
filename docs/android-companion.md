@@ -20,6 +20,8 @@ preview, not a production remote-access release.
 - Push events use a durable local retry queue with bounded backoff, preference and
   revocation checks, call expiry, and per-state task deduplication.
 - Exact-action, expiring task approvals with protection against stale/replayed dialogs.
+- The Tasks screen projects current swarm node/worker liveness and coding-worker
+  availability, and lets an authenticated companion resolve coding decision-inbox items.
 - Encrypted pending-message recovery with stable request IDs, foreground-only polling,
   incoming intent handling, call mute/audio-route controls and queued voice follow-ups.
 - Desktop owner pairing/build controls and a personalized release APK builder with a
@@ -112,7 +114,7 @@ deployed by this branch yet.
 - Android debug APK: built successfully.
 - Android lint: passes; warnings include older pinned libraries and intentional
   Keystore/pinned-TLS/locally bundled WebView usage.
-- 61 focused pairing/connectivity/mobile/auth/voice tests pass, including stale/replayed
+- 65 focused pairing/connectivity/mobile/auth/voice tests pass, including stale/replayed
   approvals, interrupted speech, real local TLS lifecycle, safe router mapping and
   six-digit code expiry/regeneration/rate limiting, scoped schedule edit/resume and
   ordered call reconnect offers.

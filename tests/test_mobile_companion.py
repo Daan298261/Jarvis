@@ -132,6 +132,37 @@ async def test_mobile_auth_required_even_on_localhost_and_revoke(mobile_env):
         assert (await client.get("/api/companion/models", headers=headers)).status_code == 401
 
 
+@pytest.mark.asyncio
+async def test_mobile_can_resolve_coding_decision_with_explicit_instructions(mobile_env, monkeypatch):
+    from app.agent import coding_workers
+    from app.api.companion import router
+    app = FastAPI()
+    app.include_router(router)
+    key, device = paired()
+    session = identity.exchange(device["id"], signature(key, device))
+    headers = {"Authorization": "Bearer " + session["access_token"], "X-Jarvis-Device": device["id"]}
+    received = {}
+
+    class Resolved:
+        def as_dict(self):
+            return {"id": "decision-1", "status": "resolved", "resolution": received["resolution"]}
+
+    def resolve(item_id, resolution):
+        received.update(item_id=item_id, resolution=resolution)
+        return Resolved()
+
+    monkeypatch.setattr(coding_workers, "resolve_decision_inbox_item", resolve)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
+        url = "/api/companion/coding/decisions/decision-1/resolve"
+        assert (await client.post(url, json={"resolution": "keep the verified branch"})).status_code == 401
+        empty = await client.post(url, json={"resolution": ""}, headers=headers)
+        assert empty.status_code == 422
+        response = await client.post(url, json={"resolution": "keep the verified branch"}, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["status"] == "resolved"
+    assert received == {"item_id": "decision-1", "resolution": "keep the verified branch"}
+
+
 def test_daily_schedule_preserves_local_time_across_dst():
     from datetime import datetime
     from zoneinfo import ZoneInfo

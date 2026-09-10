@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -22,10 +23,24 @@ data class CompanionState(
     val messages: List<JSONObject> = emptyList(), val conversations: List<JSONObject> = emptyList(),
     val schedules: List<JSONObject> = emptyList(), val calls: List<JSONObject> = emptyList(),
     val conversationId: String? = null, val selectedModel: String = "auto",
-    val attachmentIds: List<String> = emptyList(), val capabilities: JSONObject = JSONObject()
+    val attachmentIds: List<String> = emptyList(), val capabilities: JSONObject = JSONObject(),
+    val swarm: JSONObject = JSONObject(), val coding: JSONObject = JSONObject(),
+    val codingDecisions: List<JSONObject> = emptyList()
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
+
+private data class RefreshPayload(
+    val capabilities: JSONObject,
+    val tasks: List<JSONObject>,
+    val models: List<JSONObject>,
+    val conversations: List<JSONObject>,
+    val schedules: List<JSONObject>,
+    val calls: List<JSONObject>,
+    val messages: List<JSONObject>,
+    val swarm: JSONObject,
+    val coding: JSONObject,
+)
 
 class CompanionModel(app: Application) : AndroidViewModel(app) {
     val api = (app as JarvisApp).api
@@ -56,17 +71,28 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
     suspend fun refresh() {
         api.refreshEndpoints()
-        val capabilities = api.json("/capabilities")
-        val tasks = api.array("/tasks").objects()
-        val models = api.json("/models").getJSONArray("models").objects()
-        val conversations = api.array("/conversations").objects()
-        val schedules = api.array("/schedules").objects()
-        val calls = api.array("/calls").objects()
-        val cid = mutable.value.conversationId
-        val messages = if (cid != null) api.json("/conversations/$cid").getJSONArray("messages").objects() else emptyList()
-        val active = tasks.firstOrNull { it.optString("status") in listOf("queued", "running", "waiting") }
+        val previous = mutable.value
+        val payload = kotlinx.coroutines.coroutineScope {
+            val capabilities = async { api.json("/capabilities") }
+            val tasks = async { api.array("/tasks").objects() }
+            val models = async { api.json("/models").getJSONArray("models").objects() }
+            val conversations = async { api.array("/conversations").objects() }
+            val schedules = async { api.array("/schedules").objects() }
+            val calls = async { api.array("/calls").objects() }
+            val messages = async {
+                previous.conversationId?.let { api.json("/conversations/$it").getJSONArray("messages").objects() } ?: emptyList()
+            }
+            val swarm = async { runCatching { api.json("/swarm") }.getOrDefault(previous.swarm) }
+            val coding = async { runCatching { api.json("/coding") }.getOrDefault(previous.coding) }
+            RefreshPayload(capabilities.await(), tasks.await(), models.await(), conversations.await(), schedules.await(), calls.await(),
+                messages.await(), swarm.await(), coding.await())
+        }
+        val active = payload.tasks.firstOrNull { it.optString("status") in listOf("queued", "running", "waiting") }
         mutable.value = mutable.value.copy(connected = true, activity = active?.optString("activity") ?: "Ready when you are",
-            tasks = tasks, models = models, conversations = conversations, schedules = schedules, calls = calls, messages = messages, capabilities = capabilities,
+            tasks = payload.tasks, models = payload.models, conversations = payload.conversations, schedules = payload.schedules,
+            calls = payload.calls, messages = payload.messages, capabilities = payload.capabilities, swarm = payload.swarm,
+            coding = payload.coding.optJSONObject("overview") ?: JSONObject(),
+            codingDecisions = payload.coding.optJSONObject("decisions")?.optJSONArray("items")?.objects() ?: emptyList(),
             pendingMessage = outbox.read() != null)
     }
     fun pair(endpoint: String, pin: String, credential: String) = action {
@@ -139,6 +165,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     fun cancel(taskId: String) = action { api.json("/tasks/$taskId/cancel", "POST"); refresh() }
     fun approve(taskId: String, token: String, approved: Boolean) = action {
         api.json("/tasks/$taskId/approve", "POST", JSONObject().put("token", token).put("approved", approved)); refresh()
+    }
+    fun resolveCodingDecision(itemId: String, resolution: String) = action {
+        api.json("/coding/decisions/$itemId/resolve", "POST", JSONObject().put("resolution", resolution)); refresh()
     }
     fun schedule(id: String?, prompt: String, instant: java.time.ZonedDateTime, recurrence: String) = action {
         api.json(if (id == null) "/schedules" else "/schedules/$id", if (id == null) "POST" else "PUT",

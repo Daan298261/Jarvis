@@ -50,6 +50,10 @@ class PairingCodeRequest(BaseModel):
                              le=identity.MAX_PAIRING_TTL_MINUTES)
 
 
+class CodingDecisionResolution(BaseModel):
+    resolution: str = Field(min_length=1, max_length=2000)
+
+
 class Message(BaseModel):
     request_id: uuid.UUID
     text: str = Field(min_length=1, max_length=32000)
@@ -270,6 +274,16 @@ async def swarm(device=Device):
 async def coding(device=Device):
     from .coding import coding_overview, decision_inbox
     return {"overview": await coding_overview(), "decisions": await decision_inbox()}
+
+
+@router.post("/coding/decisions/{item_id}/resolve")
+def resolve_coding_decision(item_id: str, body: CodingDecisionResolution, device=Device):
+    from ..agent.coding_workers import resolve_decision_inbox_item
+    from ..agent.worktrees import WorktreeError
+    try:
+        return resolve_decision_inbox_item(item_id, resolution=body.resolution).as_dict()
+    except WorktreeError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/studio")

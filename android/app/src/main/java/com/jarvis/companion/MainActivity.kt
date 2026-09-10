@@ -214,8 +214,13 @@ class MainActivity : ComponentActivity() {
                             "Tasks" -> {
                                 Text("Your swarm at work", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
                                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    if (state.swarm.length() > 0) item { SwarmOverviewCard(state.swarm) }
+                                    if (state.coding.length() > 0) item { CodingOverviewCard(state.coding) }
+                                    items(state.codingDecisions, key = { "decision-${it.optString("id")}" }) { decision ->
+                                        CodingDecisionCard(decision, model)
+                                    }
                                     if (state.tasks.isEmpty()) item { Text("Tasks appear here as soon as Jarvis starts working.", color = Muted) }
-                                    items(state.tasks) { task -> TaskCard(task, model) }
+                                    items(state.tasks, key = { "task-${it.optString("id")}" }) { task -> TaskCard(task, model) }
                                 }
                             }
                             "Studio" -> {
@@ -279,6 +284,62 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun InfoCard(title: String, text: String) {
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) { Column(Modifier.padding(18.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(text, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) } }
+}
+
+@Composable private fun SwarmOverviewCard(swarm: JSONObject) {
+    val nodes = swarm.optJSONArray("nodes")?.objects() ?: emptyList()
+    val workers = swarm.optJSONArray("workers")?.objects() ?: emptyList()
+    val available = workers.count { it.optBoolean("available") }
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
+        Text("SWARM · ${swarm.optString("mode", "unknown").uppercase()}", color = Gold, fontSize = 10.sp)
+        Text("${nodes.size} node${if (nodes.size == 1) "" else "s"} · $available/${workers.size} workers available",
+            fontWeight = FontWeight.Medium, modifier = Modifier.padding(vertical = 8.dp))
+        nodes.take(4).forEach { node ->
+            val seen = node.optString("last_seen_at").take(19).replace('T', ' ')
+            Text("${node.optString("hostname", node.optString("id"))} · ${node.optString("status", "unknown")}${if (seen.isNotEmpty()) " · seen $seen" else ""}",
+                color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 2.dp))
+        }
+        workers.take(6).forEach { worker ->
+            Text("${worker.optString("name", worker.optString("kind", worker.optString("id", "Worker")))} · ${worker.optString("status", "unknown")}",
+                color = if (worker.optBoolean("available")) MaterialTheme.colorScheme.onSurface else Muted, fontSize = 12.sp,
+                modifier = Modifier.padding(vertical = 2.dp))
+        }
+    } }
+}
+
+@Composable private fun CodingOverviewCard(coding: JSONObject) {
+    val workers = coding.optJSONArray("workers")?.objects() ?: emptyList()
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
+        Text("CODING WORKERS", color = Gold, fontSize = 10.sp)
+        workers.forEach { worker ->
+            Text(worker.optString("name", worker.optString("id")), fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 8.dp))
+            Text(worker.optString("status", "unknown"), color = Muted, fontSize = 12.sp)
+        }
+    } }
+}
+
+@Composable private fun CodingDecisionCard(decision: JSONObject, model: CompanionModel) {
+    var responding by remember { mutableStateOf(false) }
+    var resolution by remember(decision.optString("id")) { mutableStateOf("") }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF242018))) {
+        Column(Modifier.padding(16.dp)) {
+            Text("CODING DECISION", color = Gold, fontSize = 10.sp)
+            Text(decision.optString("title"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            Text(decision.optString("detail"), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            TextButton(onClick = { responding = true }) { Text("Respond") }
+        }
+    }
+    if (responding) AlertDialog(
+        onDismissRequest = { responding = false },
+        title = { Text("Resolve coding decision") },
+        text = { OutlinedTextField(resolution, { resolution = it.take(2000) }, label = { Text("Instructions for Jarvis") }, minLines = 3) },
+        confirmButton = { TextButton(onClick = {
+            responding = false
+            model.resolveCodingDecision(decision.getString("id"), resolution.trim())
+        }, enabled = resolution.isNotBlank()) { Text("Resolve") } },
+        dismissButton = { TextButton(onClick = { responding = false }) { Text("Cancel") } },
+    )
 }
 
 @Composable private fun TaskCard(task: JSONObject, model: CompanionModel) {
