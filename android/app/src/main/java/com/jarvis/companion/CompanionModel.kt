@@ -121,6 +121,18 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         (getApplication<Application>() as JarvisApp).registerPush()
         refresh()
     }
+
+    suspend fun fetchStudioStatus(): JSONObject {
+        if (api.deviceId.isNotEmpty()) {
+            return runCatching { api.json("/studio") }.getOrElse { error ->
+                val fallback = mutable.value.capabilities.optJSONObject("studio")
+                if (fallback != null && fallback.length() > 0) fallback else throw error
+            }
+        }
+        val fallback = mutable.value.capabilities.optJSONObject("studio")
+        if (fallback != null && fallback.length() > 0) return fallback
+        throw IllegalStateException("Connect to Jarvis to check BlackGrid Studio status.")
+    }
     fun selectModel(value: String) { mutable.value = mutable.value.copy(selectedModel = value) }
     fun selectVoice(value: String) {
         if (mutable.value.voiceProfiles.none { it.optString("id") == value && it.optBoolean("available") }) return

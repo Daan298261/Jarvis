@@ -3865,7 +3865,17 @@ export async function getDiagnosticsText(): Promise<{ text: string; diagnostics:
 export type CompanionPairingCode = {
   code: string
   expires_at: string | number
-  ttl_seconds: number
+  ttl_seconds?: number
+  id?: string
+}
+
+/** BlackGrid studio capabilities (companion device auth: GET /api/companion/studio). */
+export type CompanionStudioCapabilities = {
+  provider: string
+  available: boolean
+  detail?: string
+  contract_version?: number
+  operations?: string[]
 }
 
 export type CompanionPairingApiResult =
@@ -3899,7 +3909,16 @@ async function companionPairingRequest(
       }
       return { available: false, reason: "error", message }
     }
-    const pairing = await response.json() as CompanionPairingCode
+    const raw = await response.json() as CompanionPairingCode
+    const pairing: CompanionPairingCode = {
+      ...raw,
+      ttl_seconds:
+        typeof raw.ttl_seconds === "number"
+          ? raw.ttl_seconds
+          : typeof raw.expires_at === "number"
+            ? Math.max(0, Math.floor(raw.expires_at - Date.now() / 1000))
+            : undefined,
+    }
     return { available: true, pairing }
   } catch (err) {
     return { available: false, reason: "error", message: String(err) }

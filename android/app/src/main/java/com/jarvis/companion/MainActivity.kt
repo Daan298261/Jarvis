@@ -223,12 +223,7 @@ class MainActivity : ComponentActivity() {
                                     items(state.tasks, key = { "task-${it.optString("id")}" }) { task -> TaskCard(task, model) }
                                 }
                             }
-                            "Studio" -> {
-                                Spacer(Modifier.height(32.dp)); Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(48.dp), tint = Gold)
-                                Text("Creative studio", fontSize = 30.sp, modifier = Modifier.padding(top = 20.dp))
-                                Text("Images. Motion. Voice.", color = Muted, modifier = Modifier.padding(vertical = 12.dp))
-                                InfoCard("BlackGrid integration", "Multistep generation, takes, timelines, and stitching will be connected through BlackGrid Multimedia Studio. The media engine is not connected in this build.")
-                            }
+                            "Studio" -> StudioScreen(model, state)
                             "More" -> MoreScreen(model, state)
                         }
                     }
@@ -308,6 +303,80 @@ class MainActivity : ComponentActivity() {
 
 @Composable private fun InfoCard(title: String, text: String) {
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) { Column(Modifier.padding(18.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(text, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) } }
+}
+
+@Composable private fun StudioScreen(model: CompanionModel, state: CompanionState) {
+    var studio by remember { mutableStateOf<JSONObject?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
+    suspend fun loadStudio() {
+        refreshing = true
+        loadError = null
+        try {
+            studio = model.fetchStudioStatus()
+        } catch (error: Exception) {
+            loadError = error.message ?: "Could not reach Jarvis."
+            if (studio == null) {
+                val fallback = state.capabilities.optJSONObject("studio")
+                if (fallback != null && fallback.length() > 0) studio = fallback
+            }
+        } finally {
+            refreshing = false
+        }
+    }
+    LaunchedEffect(state.connected, state.capabilities) { loadStudio() }
+    val available = studio?.optBoolean("available") == true
+    val detail = studio?.optString("detail").orEmpty().ifEmpty {
+        if (available) "BlackGrid Multimedia Studio is connected." else "Generation is not available yet."
+    }
+    val provider = studio?.optString("provider", "blackgrid") ?: "blackgrid"
+    val operations = studio?.optJSONArray("operations")?.let { array ->
+        (0 until array.length()).mapNotNull { index -> array.optString(index).takeIf { it.isNotEmpty() } }
+    } ?: emptyList()
+    Column(Modifier.fillMaxWidth()) {
+        Spacer(Modifier.height(32.dp))
+        Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(48.dp), tint = Gold)
+        Text("Creative studio", fontSize = 30.sp, modifier = Modifier.padding(top = 20.dp))
+        Text("Images · motion · voice via $provider", color = Muted, modifier = Modifier.padding(vertical = 12.dp))
+        Card(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            colors = CardDefaults.cardColors(containerColor = if (available) Color(0xFF15261F) else Color(0xFF1A1520)),
+        ) {
+            Column(Modifier.padding(18.dp)) {
+                Text(
+                    if (available) "● CONNECTED" else "○ NOT CONNECTED",
+                    color = if (available) Color(0xFF74DCCD) else Gold,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.sp,
+                )
+                Text("BlackGrid Studio", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp))
+                Text(detail, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                if (loadError != null && studio == null) {
+                    Text(loadError.orEmpty(), color = Color(0xFFE8A87C), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        }
+        if (available && operations.isNotEmpty()) {
+            InfoCard(
+                "Available when connected",
+                operations.joinToString(" · "),
+            )
+        }
+        if (!available) {
+            InfoCard(
+                "Generation",
+                "Creative tools stay read-only until Jarvis reports studio.available=true. No local preview engine runs on the phone.",
+            )
+        }
+        Button(
+            onClick = { model.action { loadStudio() } },
+            enabled = !refreshing && !state.busy,
+            modifier = Modifier.padding(top = 8.dp),
+        ) { Text(if (refreshing) "Refreshing…" else "Refresh status") }
+        if (!state.connected) {
+            Text("Connect on the More tab to load live studio status from Jarvis.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        }
+    }
 }
 
 @Composable private fun SwarmOverviewCard(swarm: JSONObject) {
