@@ -18,8 +18,8 @@ function Check() {
   })
 
   return (
-    <>
-      <div style={{ padding: 16, display: "flex", gap: 20, flexWrap: "wrap" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#03070b" }}>
+      <div style={{ padding: 12, display: "flex", gap: 20, flexWrap: "wrap", flex: "0 0 auto" }}>
         <label>
           Phase{" "}
           <select
@@ -56,19 +56,21 @@ function Check() {
           />
         </label>
       </div>
-      <PresenceHost
-        settings={settings}
-        snapshot={{
-          phase,
-          intensity: 0.7,
-          connected: phase !== "offline",
-          runningTaskCount: 0,
-          decisionCount: 0,
-          systemDegraded: phase === "alert",
-          audioLevel: phase === "speaking" ? 0.6 : 0,
-        }}
-      />
-    </>
+      <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex" }}>
+        <PresenceHost
+          settings={settings}
+          snapshot={{
+            phase,
+            intensity: 0.7,
+            connected: phase !== "offline",
+            runningTaskCount: 0,
+            decisionCount: 0,
+            systemDegraded: phase === "alert",
+            audioLevel: phase === "speaking" ? 0.6 : 0,
+          }}
+        />
+      </div>
+    </div>
   )
 }
 

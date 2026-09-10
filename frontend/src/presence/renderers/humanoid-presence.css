@@ -1,7 +1,7 @@
 .jarvis-presence-humanoid {
   position: relative;
   width: 100%;
-  height: clamp(280px, min(65dvh, calc(100dvh - 310px)), 1100px);
+  height: clamp(360px, min(72dvh, calc(100dvh - 260px)), 1200px);
   min-width: 0;
   isolation: isolate;
   overflow: hidden;
@@ -9,7 +9,18 @@
     radial-gradient(ellipse 28% 52% at 46% 46%, rgba(0, 140, 210, 0.07), transparent 72%),
     radial-gradient(ellipse 60% 40% at 70% 70%, rgba(255, 140, 40, 0.03), transparent 70%),
     #03070b;
-  mask-image: linear-gradient(180deg, transparent, black 5%, black 93%, transparent);
+  mask-image: linear-gradient(180deg, transparent, black 4%, black 94%, transparent);
+}
+.jarvis-presence-host:has(.jarvis-presence-humanoid) {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: clamp(360px, 70dvh, 1200px);
 }
 
 .hud-orb-zone:has(.jarvis-presence-humanoid) { min-height: 0; }

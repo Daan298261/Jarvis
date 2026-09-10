@@ -41,13 +41,13 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
     renderer.toneMapping = THREE.ReinhardToneMapping
     renderer.toneMappingExposure = 1.08
     const scene = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 40)
-    // Slightly off-center so the left-facing profile reads on ultrawide stages.
-    camera.position.set(0.15, 0.12, 6.4)
+    const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40)
+    camera.position.set(0.55, 0.28, 5.6)
+    camera.lookAt(0.05, 0.1, 0)
     const uniforms = {
       uTime: { value: 0 }, uMotion: { value: 1 }, uActivity: { value: 0 },
       uSpeech: { value: 0 }, uPixelScale: { value: 1 }, uOpacity: { value: 1 },
-      uAssemble: { value: 0 },
+      uAssemble: { value: 1 },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
       uGold: { value: new THREE.Color(0xff941f) },
     }
@@ -64,13 +64,15 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
     const { head, body, field } = createParticleBust(density, material)
     const bust = new THREE.Group()
     bust.add(head, body)
-    bust.position.set(0.05, 0.05, 0)
+    // ¾ view so the cyan contour silhouette reads like the reference profile shots.
+    bust.rotation.y = 0.95
+    bust.position.set(0.15, 0.08, 0)
     scene.add(field, bust)
 
     const composer = efficient ? null : new EffectComposer(renderer)
     const bloom = efficient
       ? null
-      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.55, 0.72)
+      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.62, 0.4, 0.78)
     const output = efficient ? null : new OutputPass()
     if (composer && bloom && output) {
       composer.addPass(new RenderPass(scene, camera))
@@ -95,11 +97,12 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
       composer?.setPixelRatio(renderer.getPixelRatio())
       composer?.setSize(Math.max(1, width), Math.max(1, height))
       camera.aspect = Math.max(1, width) / Math.max(1, height)
-      // Keep bust readable on phones; pull back on ultrawide so mountains stay in frame.
-      camera.position.z = Math.max(6.2, 5.1 / Math.min(camera.aspect, 2.2))
-      camera.position.x = camera.aspect > 1.6 ? 0.35 : 0.12
+      camera.position.z = Math.max(5.4, 4.6 / Math.min(camera.aspect, 2.1))
+      camera.position.x = camera.aspect > 1.6 ? 0.75 : 0.45
+      camera.position.y = 0.28
+      camera.lookAt(0.05, 0.08, 0)
       camera.updateProjectionMatrix()
-      uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.75, height / 620)
+      uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.8, height / 580)
     }
     const observer = new ResizeObserver(resize)
     observer.observe(stage)
@@ -136,7 +139,8 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
         executing: 1, speaking: 0.68, waiting: 0.12, alert: 0.85,
       }[phase]
       uniforms.uTime.value = animationTime
-      uniforms.uAssemble.value = reduced ? 1 : Math.min(1, animationTime / 1.7)
+      // Keep assembled for first paint; mild re-assemble only on cold starts is skipped.
+      uniforms.uAssemble.value = 1
       uniforms.uMotion.value = reduced ? 0 : 1
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)
         * (reduced ? 1 : Math.min(1, delta * 3))
@@ -149,13 +153,14 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
         phase === "alert" ? 0xff543b : phase === "offline" ? 0x607580 : 0xff941f,
       )
       const follow = !reduced && current.settings.attentionMode === "pointer"
+      const baseYaw = 0.95
       if (reduced) {
-        bust.rotation.set(0, 0, 0)
+        bust.rotation.set(0, baseYaw, 0)
       } else {
-        bust.rotation.y += ((follow ? pointer.x * 0.12 : 0) - bust.rotation.y) * 0.05
+        bust.rotation.y += ((baseYaw + (follow ? pointer.x * 0.12 : 0)) - bust.rotation.y) * 0.05
         bust.rotation.x += ((follow ? pointer.y * 0.04 : 0) - bust.rotation.x) * 0.06
       }
-      bust.position.y = reduced ? 0.05 : 0.05 + Math.sin(animationTime * 1.05) * 0.016
+      bust.position.y = reduced ? 0.08 : 0.08 + Math.sin(animationTime * 1.05) * 0.016
       try {
         if (composer) composer.render()
         else renderer.render(scene, camera)
