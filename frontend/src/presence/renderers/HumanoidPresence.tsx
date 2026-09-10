@@ -81,7 +81,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
     const composer = efficient ? null : new EffectComposer(renderer)
     const bloom = efficient
       ? null
-      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.62, 0.4, 0.78)
+      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.68, 0.38, 0.74)
     const output = efficient ? null : new OutputPass()
     if (composer && bloom && output) {
       composer.addPass(new RenderPass(scene, camera))

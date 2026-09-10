@@ -75,7 +75,8 @@ export const particleFragmentShader = `
     float halo = exp(-r * r * 3.6) * 0.45;
     float alpha = (core + halo) * (1.0 - smoothstep(0.6, 1.0, r)) * vLight * uOpacity;
     vec3 color = mix(uColor, uGold, smoothstep(0.13, 0.75, vGold));
-    gl_FragColor = vec4(color + vec3(core * 0.18), alpha);
+    float hot = smoothstep(2.4, 4.5, vLight);
+    gl_FragColor = vec4(color + vec3(core * (0.18 + hot * 0.42)), alpha);
   }
 `
 
