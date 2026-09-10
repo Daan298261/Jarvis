@@ -2388,7 +2388,7 @@ CoS assigned this ledger so specs can land then #166 without renaming the shippe
 
 Decision: RFC-0070 higher-quality local TTS engines (accepted)
 
-Taco (2026-09-10) wants a less robotic Jarvis voice — a massive quality jump via better local-friendly engines, not cloud lock-in or IP-clone packs. RFC-0070 extends the RFC-0062 profile `tts` block with an engine adapter (`engine_id`, model/speaker/pack, quality tier). Piper stays baseline/Dutch/low-resource; Kokoro 82M (Apache-2.0) is the primary English naturalness candidate to evaluate before flipping the default. Catalog is expandable when CoS/Architect accept a license+quality engine. Chat→TTS, think-aloud, and Android host TTS keep the same active `voice_profile_id`. Specs-only; implementation is a follow-up ticket.
+Taco (2026-09-10) wants a less robotic Jarvis voice — a massive quality jump via better local-friendly engines, not cloud lock-in or IP-clone packs. RFC-0070 extends the RFC-0062 profile `tts` block with an engine adapter. Canonical desktop ranking (RTX 5070 Ti): Kokoro-82M (Apache-2.0) default low-latency English; Chatterbox/Turbo (MIT) optional quality when ~4–6 GB VRAM free, original butler packs only; Orpheus 3B (Apache-2.0) catalog, not default. Piper remains edge/Dutch/baseline. Do not ship XTTS v2 or F5-TTS (CC-BY-NC) as product defaults. TTS speaks final conversational text and allowed persona lines only — never thought-process / plan chrome, URLs, or code. “Codsworth-like” is feel, not a clone. Chat→TTS, think-aloud, and Android host TTS keep the same active `voice_profile_id`. Specs-only; implementation is a follow-up ticket.
 
 Reason:
 
