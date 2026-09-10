@@ -24,21 +24,36 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
     new THREE.Vector3(0.27, 1.58, 0.24), new THREE.Vector3(0, 1.66, 0),
   ], false, "catmullrom", 0.3)
 
-  const rows = Math.round(64 * density), columns = Math.round(180 * density)
+  const rows = Math.round(72 * density), columns = Math.round(200 * density)
   for (let row = 0; row < rows; row++) {
     const ring = profile.getPoint(row / rows)
     for (let col = 0; col < columns; col++) {
-      const angle = (col + random() * 0.65) / columns * Math.PI * 2
+      const angle = (col + random() * 0.42) / columns * Math.PI * 2
       const front = Math.cos(angle), x = Math.sin(angle) * ring.x
       const nose = gauss(x, 0.12) * gauss(ring.y - 0.65, 0.26) * 0.075
       const brow = gauss(ring.y - 1.0, 0.06) * gauss(x, 0.42) * 0.025
       const z = front * ring.z + Math.max(0, front) * (nose + brow)
       const mask = gauss(x, 0.38) * gauss(ring.y - 0.61, 0.39) * THREE.MathUtils.smoothstep(front, 0.3, 0.85)
-      const rim = Math.pow(Math.abs(Math.sin(angle)), 14)
-      const light = front < 0 ? 0.06 : 0.25 + rim * 4.5 + mask * 3.6
-      if (random() < 0.05 && rim < 0.7) continue
-      emit(x, ring.y + Math.sin(angle * 3 + ring.y * 5) * 0.004, z,
-        mask, light * (0.65 + random() * 0.55), 0, 1.4 + random() * 0.65)
+      const rim = Math.pow(Math.abs(Math.sin(angle)), 8.5)
+      const shell = THREE.MathUtils.smoothstep(rim, 0.55, 0.98)
+      const light = front < 0 ? 0.08 + rim * 0.35 : 0.32 + rim * 5.2 + mask * 3.4 + shell * 1.6
+      if (random() < 0.018 && rim < 0.55) continue
+      const jitter = (random() - 0.5) * 0.012 * (1 + shell * 0.8)
+      emit(x + jitter, ring.y + Math.sin(angle * 3 + ring.y * 5) * 0.005 + jitter, z,
+        mask * 0.85, light * (0.72 + random() * 0.48), 0, 1.55 + random() * 0.75 + shell * 0.35)
+    }
+  }
+  for (let row = 0; row < Math.round(52 * density); row++) {
+    const ring = profile.getPoint(row / (52 * density))
+    for (let i = 0; i < Math.round(95 * density); i++) {
+      const angle = (i / (95 * density) + random() * 0.08) * Math.PI * 2
+      const front = Math.cos(angle)
+      if (front < 0.12) continue
+      const rim = Math.pow(Math.abs(Math.sin(angle)), 6.5)
+      const x = Math.sin(angle) * (ring.x + 0.01)
+      const z = front * ring.z
+      emit(x, ring.y + (random() - 0.5) * 0.01, z, 0,
+        0.55 + rim * 4.8, 0, 1.35 + random() * 0.55)
     }
   }
   for (let row = 0; row < 27 * density; row++) {
@@ -62,16 +77,31 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
       1, 1.2 + (1 - r / 0.24) * 1.8, 0, 1.4 + random() * 0.7,
     )
   }
-  emit(0, 0.62, 0.43, 1, 0.24, 0, 115)
+  const coreY = 0.61, coreZ = 0.445
+  for (let i = 0; i < Math.round(720 * density); i++) {
+    const a = random() * Math.PI * 2
+    const r = Math.pow(random(), 1.8) * 0.11
+    const ly = coreY + Math.sin(a) * r * 0.75 + (random() - 0.5) * 0.018
+    const lx = Math.cos(a) * r * 0.55
+    const lz = coreZ + Math.sin(a * 0.5) * r * 0.35
+    const hot = Math.exp(-(r / 0.11) * (r / 0.11) * 2.2)
+    emit(lx, ly, lz, 0, 2.8 + hot * 3.4 + random() * 0.6, 2, 2.2 + hot * 4.5 + random() * 2.2)
+  }
+  emit(0, coreY, coreZ, 0, 6.2, 2, 48)
   emit(0, 1.05, 0.12, 1, 0.35, 0, 90)
-  for (let i = 0; i < 4200 * density; i++) {
-    const ring = profile.getPoint(random()), angle = random() * Math.PI * 2
-    const spread = Math.pow(random(), 2) * 0.30
-    const trail = Math.pow(random(), 1.4) * 1.8
-    const x = Math.sin(angle) * (ring.x + spread) + (angle > 0 ? trail * 0.55 : 0)
-    emit(x, ring.y + spread * 0.9 + (random() - 0.5) * trail * 0.15,
-      Math.cos(angle) * (ring.z + spread) - trail * 0.1,
-      0, (0.15 + random() * 0.48) * Math.exp(-trail * 0.35), 0.4, 1.0 + random())
+  for (let i = 0; i < Math.round(9200 * density); i++) {
+    const headBias = Math.pow(random(), 0.55)
+    const ring = profile.getPoint(0.35 + headBias * 0.62)
+    const angle = random() * Math.PI * 2
+    const spread = Math.pow(random(), 2.2) * 0.34
+    const trail = Math.pow(random(), 0.85) * 3.6
+    const back = THREE.MathUtils.smoothstep(-Math.cos(angle), 0.05, 0.55)
+    const x = Math.sin(angle) * (ring.x + spread) + trail * (0.75 + random() * 0.55) * (0.35 + back * 0.65)
+    const y = ring.y + spread * 0.85 + (random() - 0.5) * trail * 0.22
+      + Math.sin(trail * 0.9 + ring.y) * 0.08
+    const z = Math.cos(angle) * (ring.z + spread * 0.5) - trail * 0.14 - back * 0.08
+    const fade = Math.exp(-trail * 0.22) * (0.28 + back * 0.55)
+    emit(x, y, z, 0, (0.35 + random() * 0.72) * fade + back * 0.25, 0.38, 1.05 + random() * 1.35)
   }
 
   const outline = new THREE.CatmullRomCurve3([
@@ -103,12 +133,34 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
           fade * (0.3 + random() * 0.35), 0, 1.35)
       }
     }
+    for (let branch = 0; branch < 9; branch++) {
+      for (let i = 0; i < Math.round(200 * density); i++) {
+        const t = i / (200 * density)
+        const y = coreY - 0.04 + t * 0.52
+        const x = side * (0.02 + t * (0.11 + branch * 0.034)
+          + Math.sin(t * 11 + branch * 1.3) * 0.028 * Math.sin(t * Math.PI))
+        const z = coreZ - 0.06 + t * 0.12 + Math.sin(t * 8 + branch) * 0.018
+        emit(x, y, z, 0.9 + random() * 0.08, 0.72 + Math.sin(t * Math.PI) * 1.05, 0, 1.45 + random() * 0.35)
+      }
+    }
+    for (let branch = 0; branch < 5; branch++) {
+      for (let i = 0; i < Math.round(165 * density); i++) {
+        const t = i / (165 * density)
+        const along = t * t * (3 - 2 * t)
+        const x = side * (0.04 + along * (0.38 + branch * 0.05) + Math.sin(t * 9 + branch) * 0.04)
+        const y = coreY - 0.02 - along * 0.14 + Math.sin(t * 6) * 0.02
+        const z = coreZ - 0.04 - along * 0.06
+        emit(x, y, z, 0.88, 0.58 + (1 - t) * 0.55, 0, 1.35 + random() * 0.3)
+      }
+    }
     for (let branch = 0; branch < 7; branch++) {
-      for (let i = 0; i < 180 * density; i++) {
-        const t = i / (180 * density)
-        const y = -1.27 + t * 1.36
-        const x = side * (0.015 + t * (0.035 + branch * 0.026) + Math.sin(t * 14 + branch) * 0.032 * Math.sin(t * Math.PI))
-        emit(x, y, 0.29, 0.92, 0.65 + Math.sin(t * Math.PI) * 0.8, 0, 1.5)
+      for (let i = 0; i < Math.round(175 * density); i++) {
+        const t = i / (175 * density)
+        const y = coreY + 0.02 + t * 0.48
+        const x = side * (0.06 + (1 - t) * 0.08 + branch * 0.012
+          + Math.sin(t * 14 + branch) * 0.022 * Math.sin(t * Math.PI))
+        const z = coreZ + 0.02 + t * 0.08
+        emit(x, y, z, 0.93, 0.68 + Math.sin(t * Math.PI) * 0.85, 0, 1.5)
       }
     }
   }
