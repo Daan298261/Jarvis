@@ -1,5 +1,7 @@
 # Android companion — RFC-0059
 
+**MVP LAN pairing (step-by-step):** [`ANDROID_MVP_LAN_CHECKLIST.md`](ANDROID_MVP_LAN_CHECKLIST.md) — debug APK, `192.168.x.x:4781`, six-digit code, smoke tests, emulator vs phone gaps.
+
 The native app lives in `android/`. Keep work on `cursor/android-companion-99ea`
 until the remaining release checks below are complete. This is an implementation
 preview, not a production remote-access release.
