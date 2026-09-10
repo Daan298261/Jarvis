@@ -1,0 +1,3 @@
+{$RELAY_HOSTNAME} {
+    reverse_proxy relay:8080
+}

@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, context_repo, delegation, diagnostics, guest_portals, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, packs, perception, perception_identity, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, context_repo, delegation, diagnostics, guest_portals, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, packs, perception, perception_identity, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -26,6 +26,8 @@ from .swarm.nodes import register_localhost_node
 from .swarm.workers import bind_workers_to_node
 from .tools.mcp_runtime import MCP
 from .tools.registry import REGISTRY
+from .mobile.calls import router as companion_calls_router
+from .mobile.runtime import MobileRuntime
 
 logging.basicConfig(level=logging.INFO, filename=str(logs_dir() / "jarvis.log"), filemode="a")
 console = logging.StreamHandler()
@@ -66,6 +68,8 @@ app.include_router(workflows.router)
 app.include_router(self_dev.router)
 app.include_router(coding.router)
 app.include_router(mobile.router)
+app.include_router(companion.router)
+app.include_router(companion.owner_router)
 app.include_router(swarm.router)
 app.include_router(worker_environments.router)
 app.include_router(runtime_profiles.router)
@@ -86,12 +90,18 @@ app.include_router(diagnostics.router)
 app.include_router(ingest.router)
 app.include_router(perception.router)
 app.include_router(perception_identity.router)
+app.include_router(companion_calls_router)
+mobile_runtime = MobileRuntime()
 
 frontend_dist = repo_root() / "frontend" / "dist"
 
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
+    # Companion routes enforce device proof/session auth even on localhost.
+    # They never inherit the owner's key or the desktop convenience exemption.
+    if request.url.path.startswith("/api/companion/"):
+        return await call_next(request)
     if authenticate_request(request):
         return await call_next(request)
 
@@ -150,6 +160,7 @@ async def startup() -> None:
             logging.exception("Failed to read JARVIS_LAUNCH_PROMPT_FILE %s", launch_prompt_file)
 
     QUEUE_WATCHER.start()
+    mobile_runtime.start()
     await QUEUE_WATCHER.process_pending()
 
 
@@ -157,6 +168,7 @@ async def startup() -> None:
 async def shutdown() -> None:
     QUEUE_WATCHER.stop()
     await WHATSAPP_PAIRING.close()
+    await mobile_runtime.stop()
 
 
 async def _autoload_model(current) -> None:

@@ -162,18 +162,27 @@ class AgentRuntime:
         autonomy: str | None = None,
         profile: str | None = None,
         execution_mode: str | None = None,
+        request_id: str | None = None,
     ) -> Task:
         if kill_switch_active():
             raise KillSwitchActive(
                 "Emergency stop is active (data/STOP_JARVIS). "
                 "New tasks are blocked until POST /api/self-dev/resume."
             )
+        # Mobile and scheduled submissions use a stable ID across retries/restarts.
+        if request_id:
+            async with SessionLocal() as session:
+                existing = await session.get(Task, request_id)
+                if existing:
+                    if existing.status == "queued" and request_id not in self._tasks:
+                        self._tasks[request_id] = asyncio.create_task(self._run(request_id, continue_existing=False))
+                    return existing
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
         task_class = classify_task(prompt)
         REGISTRY.apply_settings(settings)
         task = Task(
-            id=str(uuid.uuid4()),
+            id=request_id or str(uuid.uuid4()),
             title=prompt.strip().splitlines()[0][:120],
             prompt=prompt,
             status="queued",
@@ -211,11 +220,21 @@ class AgentRuntime:
         self._tasks[task_id] = runner
         return task
 
-    async def confirm_task(self, task_id: str, approved: bool) -> Task:
+    async def confirm_task(self, task_id: str, approved: bool, expected_payload: str | None = None) -> Task:
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if not task:
                 raise KeyError(task_id)
+            if expected_payload is not None:
+                from sqlalchemy import update
+                # Bind mobile approval to exactly one still-pending action. A stale
+                # dialog or concurrent second device cannot approve its replacement.
+                changed = await session.execute(update(Task).where(
+                    Task.id == task_id, Task.waiting_for_confirmation.is_(True),
+                    Task.confirmation_payload == expected_payload,
+                ).values(waiting_for_confirmation=False))
+                if changed.rowcount != 1:
+                    raise ValueError("The pending action changed or was already resolved")
             if not approved:
                 task.status = "cancelled"
                 task.stage = "cancelled"

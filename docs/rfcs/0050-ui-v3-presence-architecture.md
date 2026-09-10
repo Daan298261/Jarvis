@@ -1,6 +1,6 @@
 # RFC-0050 — UI v3 Presence Architecture and Selectable Presentation Modes
 
-Status: Accepted  
+Status: Implemented
 Priority: P1 / High  
 Target: Jarvis desktop frontend (React + Vite + Tauri)  
 Depends on: existing HUD v2, NeuralOrb, settings API  

@@ -1,6 +1,6 @@
 # RFC-0053: Social perception and ambient awareness pipeline
 
-**Status:** accepted  
+**Status:** implemented
 **Queue item:** P1 — Social Perception / ambient awareness  
 **Author:** ChatGPT design session  
 **Date:** 2026-09-08

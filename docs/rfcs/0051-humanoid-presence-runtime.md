@@ -1,6 +1,6 @@
 # RFC-0051 — Humanoid Presence Runtime
 
-Status: Accepted
+Status: Implemented
 
 Priority: P0 / Owner priority
 

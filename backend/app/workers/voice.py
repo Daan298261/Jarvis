@@ -418,6 +418,8 @@ async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -
     if not cleaned:
         raise RuntimeError("text is required")
     selected_profile_id = (voice_profile_id or active_voice_profile_id()).strip()
+    engine_hint = "system"
+    speaker_ref = ""
     if selected_profile_id:
         try:
             from ..voice_profiles.catalog import get_catalog
@@ -426,6 +428,9 @@ async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -
             profile = catalog.get_available(selected_profile_id)
             if profile is None and voice_profile_id:
                 raise RuntimeError(f"Voice profile is not available: {selected_profile_id}")
+            if profile is not None:
+                engine_hint = (profile.tts.engine_hint or "system").strip() or "system"
+                speaker_ref = (profile.tts.speaker_ref or "").strip()
         except RuntimeError:
             raise
         except Exception:
@@ -436,19 +441,44 @@ async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -
             "No local TTS backend is available. On Windows, SAPI is used automatically. "
             "Otherwise install espeak-ng or pyttsx3."
         )
+    # Route through the profile's declared engine when it matches an installed backend;
+    # otherwise fall through to the host default so desktop and phone stay consistent.
+    preferred = {
+        "sapi": "sapi",
+        "windows": "sapi",
+        "system": backend,
+        "espeak": "espeak" if backend in {"espeak", "espeak-ng"} else backend,
+        "espeak-ng": "espeak-ng" if backend == "espeak-ng" else backend,
+        "pyttsx3": "pyttsx3" if backend == "pyttsx3" else backend,
+    }.get(engine_hint.lower(), backend)
+    if preferred == "sapi" and backend == "sapi":
+        return await _speak_sapi(cleaned, speaker_ref=speaker_ref)
+    if preferred in {"espeak", "espeak-ng"} and backend in {"espeak", "espeak-ng"}:
+        return await _speak_espeak(cleaned, preferred if preferred == backend else backend, speaker_ref=speaker_ref)
+    if preferred == "pyttsx3" and backend == "pyttsx3":
+        return _speak_pyttsx3(cleaned, speaker_ref=speaker_ref)
     if backend == "sapi":
-        return await _speak_sapi(cleaned)
+        return await _speak_sapi(cleaned, speaker_ref=speaker_ref)
     if backend in {"espeak", "espeak-ng"}:
-        return await _speak_espeak(cleaned, backend)
-    return _speak_pyttsx3(cleaned)
+        return await _speak_espeak(cleaned, backend, speaker_ref=speaker_ref)
+    return _speak_pyttsx3(cleaned, speaker_ref=speaker_ref)
 
 
-async def _speak_sapi(text: str) -> bytes:
+async def _speak_sapi(text: str, *, speaker_ref: str = "") -> bytes:
     out = _temp_path(".wav")
     escaped = text.replace("'", "''")
+    voice_line = ""
+    if speaker_ref:
+        safe_voice = speaker_ref.replace("'", "''")
+        voice_line = (
+            f"try {{ $s.SelectVoice('{safe_voice}') }} catch {{ "
+            f"$match = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{safe_voice}*' }} | Select-Object -First 1; "
+            "if ($null -ne $match) { $s.SelectVoice($match.VoiceInfo.Name) } }"
+        )
     script = (
         "Add-Type -AssemblyName System.Speech; "
         "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        f"{voice_line}; "
         f"$s.SetOutputToWaveFile('{out}'); "
         f"$s.Speak('{escaped}'); "
         "$s.Dispose()"
@@ -472,14 +502,15 @@ async def _speak_sapi(text: str) -> bytes:
     return data
 
 
-async def _speak_espeak(text: str, binary_name: str) -> bytes:
+async def _speak_espeak(text: str, binary_name: str, *, speaker_ref: str = "") -> bytes:
     binary = shutil.which(binary_name) or binary_name
     out = _temp_path(".wav")
+    command = [binary, "-w", str(out)]
+    if speaker_ref:
+        command.extend(["-v", speaker_ref])
+    command.append(text)
     proc = await asyncio.create_subprocess_exec(
-        binary,
-        "-w",
-        str(out),
-        text,
+        *command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -494,11 +525,18 @@ async def _speak_espeak(text: str, binary_name: str) -> bytes:
     return data
 
 
-def _speak_pyttsx3(text: str) -> bytes:
+def _speak_pyttsx3(text: str, *, speaker_ref: str = "") -> bytes:
     import pyttsx3
 
     out = _temp_path(".wav")
     engine = pyttsx3.init()
+    if speaker_ref:
+        for voice in engine.getProperty("voices") or []:
+            name = getattr(voice, "name", "") or ""
+            vid = getattr(voice, "id", "") or ""
+            if speaker_ref.lower() in name.lower() or speaker_ref.lower() in vid.lower():
+                engine.setProperty("voice", vid)
+                break
     engine.save_to_file(text, str(out))
     engine.runAndWait()
     if not out.is_file() or out.stat().st_size == 0:
