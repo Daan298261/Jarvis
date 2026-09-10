@@ -51,7 +51,22 @@ function Check() {
           </select>
         </label>
         <label>
-          Reduce motion{" "}
+          Attention{" "}
+          <select
+            value={settings.attentionMode}
+            onChange={(e) =>
+              setSettings((s) => ({
+                ...s,
+                attentionMode: e.target.value as typeof s.attentionMode,
+              }))
+            }
+          >
+            <option value="pointer">pointer</option>
+            <option value="camera">camera</option>
+            <option value="off">off</option>
+          </select>
+        </label>
+        <label>
           <input
             type="checkbox"
             onChange={(e) =>

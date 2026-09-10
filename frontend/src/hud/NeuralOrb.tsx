@@ -225,17 +225,10 @@ export function NeuralOrb({ mood = "idle", size = 520 }: NeuralOrbProps) {
     let pointerX = 0
     let pointerY = 0
     const onPointerMove = (event: PointerEvent) => {
-      const rect = mount.getBoundingClientRect()
-      if (!rect.width || !rect.height) return
-      pointerX = ((event.clientX - rect.left) / rect.width - 0.5) * 2
-      pointerY = ((event.clientY - rect.top) / rect.height - 0.5) * 2
+      pointerX = (event.clientX / Math.max(1, window.innerWidth) - 0.5) * 2
+      pointerY = (event.clientY / Math.max(1, window.innerHeight) - 0.5) * 2
     }
-    const onPointerLeave = () => {
-      pointerX = 0
-      pointerY = 0
-    }
-    mount.addEventListener("pointermove", onPointerMove)
-    mount.addEventListener("pointerleave", onPointerLeave)
+    window.addEventListener("pointermove", onPointerMove, { passive: true })
 
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
     const clock = new THREE.Clock()
@@ -266,8 +259,8 @@ export function NeuralOrb({ mood = "idle", size = 520 }: NeuralOrbProps) {
       const pulse = 1 + Math.sin(elapsed * (0.8 + speed * 1.3)) * (0.006 + energy * 0.014)
       sphere.scale.setScalar(pulse)
       sphere.rotation.y += 0.0015 + speed * 0.0025
-      sphere.rotation.x += (pointerY * 0.09 - sphere.rotation.x) * 0.025
-      root.rotation.y += (pointerX * 0.13 - root.rotation.y) * 0.022
+      sphere.rotation.x += (pointerY * 0.16 - sphere.rotation.x) * 0.08
+      root.rotation.y += (pointerX * 0.24 - root.rotation.y) * 0.07
 
       outer.material.opacity = 0.58 + energy * 0.24
       middle.material.opacity = 0.23 + energy * 0.28
@@ -290,8 +283,7 @@ export function NeuralOrb({ mood = "idle", size = 520 }: NeuralOrbProps) {
     return () => {
       if (raf) window.cancelAnimationFrame(raf)
       observer?.disconnect()
-      mount.removeEventListener("pointermove", onPointerMove)
-      mount.removeEventListener("pointerleave", onPointerLeave)
+      window.removeEventListener("pointermove", onPointerMove)
       outer.geometry.dispose()
       middle.geometry.dispose()
       volume.geometry.dispose()

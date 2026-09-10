@@ -1,7 +1,12 @@
 .jarvis-presence-humanoid {
   position: relative;
   width: 100%;
-  height: clamp(360px, min(72dvh, calc(100dvh - 260px)), 1200px);
+  height: clamp(
+    320px,
+    min(58dvh, calc(100dvh - 300px), min(72vw, 920px)),
+    min(920px, 58dvh)
+  );
+  max-height: min(58dvh, 46vw);
   min-width: 0;
   isolation: isolate;
   overflow: hidden;
@@ -20,7 +25,8 @@
 .jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
   flex: 1 1 auto;
   height: auto;
-  min-height: clamp(360px, 70dvh, 1200px);
+  min-height: clamp(320px, min(52dvh, calc(100dvh - 300px)), 720px);
+  max-height: min(56dvh, 44vw);
 }
 
 .hud-orb-zone:has(.jarvis-presence-humanoid) { min-height: 0; }
@@ -112,6 +118,14 @@
   border-radius: 50%;
   background: #ffbc56;
   box-shadow: 0 0 12px #ffac36;
+}
+
+@media (min-aspect-ratio: 21/9) {
+  .jarvis-presence-humanoid,
+  .jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
+    max-height: min(52dvh, 40vw);
+    min-height: clamp(280px, 46dvh, 640px);
+  }
 }
 
 @media (max-width: 760px) {
