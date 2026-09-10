@@ -59,6 +59,22 @@ def test_byte_limit_and_interrupt_clear_memory(mobile_env):
     assert turn.cancelled and len(turn.audio) == 0
 
 
+def test_interrupt_cancels_active_agent_task(mobile_env, monkeypatch):
+    session = realtime_voice.create_session({"id": "phone"})
+    turn = realtime_voice.begin_turn(session)
+    turn.active_task_id = "task-abc"
+    cancelled: list[str] = []
+
+    class _Agent:
+        def cancel(self, task_id: str) -> None:
+            cancelled.append(task_id)
+
+    monkeypatch.setattr("app.agent.loop.AGENT", _Agent())
+    realtime_voice.interrupt_turn(turn)
+    assert cancelled == ["task-abc"]
+    assert turn.active_task_id is None
+
+
 def test_reconnect_resumes_same_device_session_only(mobile_env):
     first = realtime_voice.create_session({"id": "phone-a"})
     turn = realtime_voice.begin_turn(first)

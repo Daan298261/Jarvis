@@ -47,6 +47,7 @@ class VoiceTurn:
     finalized: bool = False
     transcript: str = ""
     tts_seq: int = 0
+    active_task_id: str | None = None
 
 
 @dataclass
@@ -160,6 +161,15 @@ def accept_audio(turn: VoiceTurn, seq: int, payload: bytes) -> None:
 def interrupt_turn(turn: VoiceTurn) -> None:
     turn.cancelled = True
     turn.audio.clear()
+    task_id = turn.active_task_id
+    if task_id:
+        try:
+            from ..agent.loop import AGENT
+
+            AGENT.cancel(task_id)
+        except Exception:
+            pass
+        turn.active_task_id = None
 
 
 def _pcm_to_wav(pcm: bytes, sample_rate: int = CHUNK_PCM_RATE) -> bytes:
@@ -223,6 +233,7 @@ async def stream_reply(turn: VoiceTurn, text: str) -> AsyncIterator[dict[str, An
     except Exception as exc:
         raise HTTPException(503, str(getattr(exc, "detail", exc))[:200]) from exc
     turn.conversation_id = result.get("conversation_id") or turn.conversation_id
+    turn.active_task_id = result.get("task_id")
     spoken = ""
     while not turn.cancelled:
         snapshot = await service.task_snapshot(result["task_id"])
