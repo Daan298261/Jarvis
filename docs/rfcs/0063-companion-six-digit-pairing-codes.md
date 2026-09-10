@@ -1,6 +1,6 @@
 # RFC-0063: Regenerable 6-digit Android companion pairing codes
 
-**Status:** accepted
+**Status:** implemented
 
 **Queue item:** P1 — Companion pairing UX (blocks comfortable #132 land)
 

@@ -1,6 +1,6 @@
 # RFC-0049 — Conversational onboarding, self-configuration, and bootstrap model
 
-Status: Accepted for implementation
+Status: Implemented
 
 ## Problem
 

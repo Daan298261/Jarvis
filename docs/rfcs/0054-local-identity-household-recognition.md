@@ -1,6 +1,6 @@
 # RFC-0054: Local identity resolver and household recognition
 
-**Status:** accepted  
+**Status:** implemented
 **Queue item:** P1 — Optional local household recognition  
 **Author:** ChatGPT design session  
 **Date:** 2026-09-08
