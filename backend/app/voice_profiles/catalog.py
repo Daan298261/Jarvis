@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import load_settings, repo_root, save_settings
-from ..workers.voice import tts_backend
+from ..tts.engines import pick_engine_for_profile
 from .ip_guard import contains_forbidden_ip_term, validate_profile_ip_fields
 from .schema import VoiceProfile, VoiceProfileListItem
 
@@ -37,30 +37,22 @@ def _profile_is_available(profile: VoiceProfile) -> tuple[bool, str | None, str 
             return (
                 False,
                 "install_required",
-                f"Install the voice pack at {profile.tts.pack_path} to unlock this profile.",
+                f"Install this voice from Settings (Get more voices) or run Setup with bundled packs.",
             )
         manifest = pack / "pack.json"
         if not manifest.is_file():
             return (
                 False,
                 "install_required",
-                f"Voice pack at {profile.tts.pack_path} is incomplete (missing pack.json).",
+                "One-click install is available in Settings for this voice profile.",
             )
 
-    if profile.builtin or not profile.tts.pack_path:
-        if tts_backend() is None:
-            return (
-                False,
-                "tts_unavailable",
-                "No local TTS backend is available. Install espeak-ng, pyttsx3, or use Windows SAPI.",
-            )
-        return True, None, None
-
-    if tts_backend() is None:
+    engine = pick_engine_for_profile(profile)
+    if engine is None:
         return (
             False,
             "tts_unavailable",
-            "Voice pack is installed but no TTS backend is available.",
+            "No local TTS engine is available for this profile. Re-run Jarvis Setup or install Kokoro weights.",
         )
     return True, None, None
 

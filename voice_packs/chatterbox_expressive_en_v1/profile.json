@@ -1,0 +1,26 @@
+{
+  "id": "chatterbox_expressive_en_v1",
+  "archetype": "british_butler",
+  "display_name": "Household butler (expressive)",
+  "license": "original",
+  "provenance": "Optional Chatterbox-Turbo expressive path (MIT). Opt-in via JARVIS_TTS_CHATTERBOX=1; falls back to Kokoro under VRAM pressure.",
+  "tts": {
+    "engine_id": "chatterbox",
+    "engine_hint": "chatterbox",
+    "model_id": "chatterbox-turbo",
+    "speaker_ref": "jarvis_butler_expressive_v1",
+    "pack_path": "voice_packs/chatterbox_expressive_en_v1",
+    "vram_class": "expressive",
+    "latency_class": "interactive",
+    "license": "MIT",
+    "offline": true,
+    "quality_tier": "expressive"
+  },
+  "persona_hooks": {
+    "register": "british_understated",
+    "humour": "dry"
+  },
+  "sample_utterance": "At your service, sir.",
+  "vram_class": "expressive",
+  "builtin": false
+}

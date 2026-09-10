@@ -164,8 +164,10 @@ async def test_synthesize_speech_uses_profile_engine_and_speaker(monkeypatch):
     from app.workers import voice
 
     class _Tts:
-        engine_hint = "espeak"
-        speaker_ref = "en-gb"
+        engine_id = "kokoro"
+        engine_hint = "kokoro"
+        speaker_ref = "bm_george"
+        pack_path = ""
 
     class _Profile:
         tts = _Tts()
@@ -176,17 +178,17 @@ async def test_synthesize_speech_uses_profile_engine_and_speaker(monkeypatch):
 
     routed: list[tuple[str, str, str]] = []
 
-    async def fake_espeak(text: str, binary_name: str, *, speaker_ref: str = "") -> bytes:
-        routed.append((text, binary_name, speaker_ref))
+    async def fake_synth(text, *, engine_id, profile=None, speaker_ref="", model_dir=None):
+        routed.append((text, engine_id, speaker_ref))
         return b"RIFFwav"
 
-    monkeypatch.setattr(voice, "tts_backend", lambda: "espeak-ng")
     monkeypatch.setattr("app.voice_profiles.catalog.get_catalog", lambda: _Catalog())
-    monkeypatch.setattr(voice, "_speak_espeak", fake_espeak)
+    monkeypatch.setattr(voice, "pick_engine_for_profile", lambda _p: "kokoro")
+    monkeypatch.setattr(voice, "synthesize_with_engine", fake_synth)
 
     audio = await voice.synthesize_speech("Hello", voice_profile_id="butler_original_v1")
     assert audio == b"RIFFwav"
-    assert routed == [("Hello", "espeak-ng", "en-gb")]
+    assert routed == [("Hello", "kokoro", "bm_george")]
 
 
 @pytest.mark.asyncio

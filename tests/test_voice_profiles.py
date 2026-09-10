@@ -61,7 +61,7 @@ def test_catalog_loads_default_butler_profile():
 
 
 def test_catalog_lists_stub_profiles_as_unavailable(monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.tts_backend", lambda: "espeak-ng")
+    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
     reload_catalog()
     catalog = reload_catalog()
     items = catalog.list_profiles(DEFAULT_VOICE_PROFILE_ID)
@@ -71,14 +71,14 @@ def test_catalog_lists_stub_profiles_as_unavailable(monkeypatch):
     assert stub.available is False
     assert stub.unavailable_reason == "install_required"
     assert stub.install_hint is not None
-    assert "pack" in stub.install_hint.lower()
+    assert "install" in stub.install_hint.lower()
 
 
 def test_active_selection_persists(voice_profiles_env, monkeypatch):
     settings = voice_profiles_env["settings"]
     settings.voice.active_profile_id = DEFAULT_VOICE_PROFILE_ID
     save_settings(settings)
-    monkeypatch.setattr("app.voice_profiles.catalog.tts_backend", lambda: "espeak-ng")
+    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
     reload_catalog()
 
     activated = set_active_voice_profile_id(DEFAULT_VOICE_PROFILE_ID)
@@ -99,21 +99,21 @@ def test_forbidden_id_rejection():
 
 
 def test_set_active_rejects_forbidden_id(voice_profiles_env, monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.tts_backend", lambda: "espeak-ng")
+    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
     reload_catalog()
     with pytest.raises(ValueError, match="forbidden"):
         set_active_voice_profile_id("codsworth_voice_v1")
 
 
 def test_set_active_rejects_unavailable_stub(voice_profiles_env, monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.tts_backend", lambda: "espeak-ng")
+    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
     reload_catalog()
     with pytest.raises(PermissionError):
         set_active_voice_profile_id("tactical_aide_original_v1")
 
 
 def test_api_list_and_set_active(voice_profiles_env, monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.tts_backend", lambda: "espeak-ng")
+    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
     reload_catalog()
     client = TestClient(app)
 
@@ -145,7 +145,7 @@ def test_api_list_and_set_active(voice_profiles_env, monkeypatch):
 
 
 def test_api_preview_unavailable_stub_returns_409(voice_profiles_env, monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.tts_backend", lambda: "espeak-ng")
+    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
     reload_catalog()
     client = TestClient(app)
     response = client.post("/api/voice-profiles/tactical_aide_original_v1/preview")
@@ -161,7 +161,7 @@ async def test_preview_available_profile(voice_profiles_env, monkeypatch):
         return b"RIFF"
 
     monkeypatch.setattr("app.api.voice_profiles.synthesize_speech", fake_synthesize)
-    monkeypatch.setattr("app.voice_profiles.catalog.tts_backend", lambda: "espeak-ng")
+    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
     reload_catalog()
     response = await preview_voice_profile(DEFAULT_VOICE_PROFILE_ID)
     assert response.body == b"RIFF"
