@@ -3,7 +3,7 @@ import { api, getPrivateKey } from "../api"
 import { CompanionPairingPanel } from "../components/CompanionPairingPanel"
 
 type Device = { id: string; name: string; status: string; fingerprint: string }
-type Build = { id: string; state: string; activity: string; started_at: number; updated_at: number; result?: { sha256: string } }
+type Build = { id: string; state: string; activity: string; worker?: string; stale?: boolean; heartbeat_at?: number; started_at: number; updated_at: number; result?: { sha256: string } }
 type Connection = { state: string; activity: string; endpoints: string[]; server_pin?: string; router?: string; limitation?: string; local_verified?: boolean; remote_verified?: boolean; updated_at?: number }
 
 export function MobileCompanionSetup() {
@@ -71,7 +71,8 @@ export function MobileCompanionSetup() {
     <div style={{ marginTop: 16 }}><CompanionPairingPanel compact /></div>
     {build && <div role="status" style={{ marginTop: 12 }}>
       <strong>{build.state}</strong> · {build.activity}<br />
-      <small>Started {new Date(build.started_at * 1000).toLocaleTimeString()} · Last progress {new Date(build.updated_at * 1000).toLocaleTimeString()}</small>
+      <small>{build.worker || "Android builder"} · Started {new Date(build.started_at * 1000).toLocaleTimeString()} · Last progress {new Date((build.heartbeat_at || build.updated_at) * 1000).toLocaleTimeString()}</small>
+      {build.stale && <p>No recent build heartbeat. Jarvis will mark an interrupted build failed after restart.</p>}
       {build.state === "completed" && <button className="btn" onClick={() => run(download)}>Download signed APK</button>}
     </div>}
     {error && <p role="alert">{error}</p>}

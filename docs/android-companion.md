@@ -23,7 +23,8 @@ preview, not a production remote-access release.
 - Encrypted pending-message recovery with stable request IDs, foreground-only polling,
   incoming intent handling, call mute/audio-route controls and queued voice follow-ups.
 - Desktop owner pairing/build controls and a personalized release APK builder with a
-  persistent signing identity. Relay/push service source lives in `services/mobile-relay/`.
+  persistent signing identity, live heartbeats and interrupted-build recovery.
+  Relay/push service source lives in `services/mobile-relay/`.
 - Owner-started TLS gateway lifecycle with verified local authentication, one-hour
   UPnP leases that preserve foreign mappings, and multi-endpoint Android fallback.
 - Regenerable six-digit pairing codes are HMAC-protected at rest, expire after ten
@@ -110,7 +111,7 @@ deployed by this branch yet.
 - Android debug APK: built successfully.
 - Android lint: passes; warnings include older pinned libraries and intentional
   Keystore/pinned-TLS/locally bundled WebView usage.
-- 59 focused pairing/connectivity/mobile/auth/voice tests pass, including stale/replayed
+- 61 focused pairing/connectivity/mobile/auth/voice tests pass, including stale/replayed
   approvals, interrupted speech, real local TLS lifecycle, safe router mapping and
   six-digit code expiry/regeneration/rate limiting, scoped schedule edit/resume and
   ordered call reconnect offers.
