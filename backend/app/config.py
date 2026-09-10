@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def repo_root() -> Path:
@@ -74,6 +74,19 @@ class BrowserSettings(BaseModel):
     browser_use_model: str = "Qwen3.5-27B"
 
 
+class VoiceSettings(BaseModel):
+    """Persisted active voice profile selection (RFC-0062)."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    active_profile_id: str = Field(
+        default="butler_original_v1",
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z0-9_]+$",
+    )
+
+
 class CodingSettings(BaseModel):
     composer_model: str = "composer-2.5"
     grok_model: str = "grok-4.6"
@@ -91,6 +104,67 @@ class SelfDevSettings(BaseModel):
     auto_merge: bool = False
 
 
+class PresentationSettings(BaseModel):
+    """Persisted presentation preference. Camera/biometric data is never stored here."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    shell: Literal["classic", "hud"] = "hud"
+    requested_presence: Literal["none", "neural", "humanoid"] = "neural"
+    performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] = "auto"
+    attention_mode: Literal["off", "pointer", "camera"] = "pointer"
+    reduced_motion: Literal["system", "reduce", "full"] = "system"
+    avatar_id: str = Field(default="jarvis_base", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
+
+
+class SocialPerceptionSettings(BaseModel):
+    """Local semantic-perception policy. Disabled means no semantic frame processing."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = False
+    semantic_observer: str = Field(default="none", min_length=1, max_length=64)
+    sample_interval_seconds: float = Field(default=5.0, ge=1.0, le=3600.0)
+    min_confidence: float = Field(default=0.75, ge=0.0, le=1.0)
+    novelty_threshold: float = Field(default=0.35, ge=0.0, le=1.0)
+    comment_cooldown_seconds: int = Field(default=900, ge=0, le=86400)
+    duplicate_ttl_seconds: int = Field(default=3600, ge=0, le=604800)
+    baseline_enabled: bool = True
+    retain_observation_summaries: bool = False
+    max_summary_retention_hours: int = Field(default=24, ge=1, le=168)
+
+
+class TtsSettings(BaseModel):
+    """Text-to-speech preferences for chat replies and voice output."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    speak_chat_replies: bool = True
+    voice_profile_id: str = ""
+
+
+class IdentityRecognitionSettings(BaseModel):
+    """Explicit, local-only biometric identity matching. Disabled by default."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = False
+    backend: str = Field(default="none", min_length=1, max_length=64)
+    match_threshold: float = Field(default=0.45, ge=-1.0, le=1.0)
+    margin_threshold: float = Field(default=0.08, ge=0.0, le=1.0)
+    min_face_quality: float = Field(default=0.60, ge=0.0, le=1.0)
+    confirmation_window: int = Field(default=5, ge=1, le=20)
+    confirmation_hits: int = Field(default=3, ge=1, le=20)
+    lost_timeout_seconds: float = Field(default=3.0, ge=0.0, le=60.0)
+    expose_identity_to_dialogue: bool = True
+
+    @model_validator(mode="after")
+    def validate_confirmation_window(self):
+        if self.confirmation_hits > self.confirmation_window:
+            raise ValueError("confirmation_hits must not exceed confirmation_window")
+        return self
+
+
 class AppSettings(BaseModel):
     bind_host: str = "127.0.0.1"
     bind_port: int = 4780
@@ -106,6 +180,11 @@ class AppSettings(BaseModel):
     backup_enabled: bool = True
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     self_dev: SelfDevSettings = Field(default_factory=SelfDevSettings)
+    presentation: PresentationSettings = Field(default_factory=PresentationSettings)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
+    identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
+    tts: TtsSettings = Field(default_factory=TtsSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)

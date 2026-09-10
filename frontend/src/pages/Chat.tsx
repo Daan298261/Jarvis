@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { api, apiForm, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
+import { speakChatReply, stopChatTts } from "../tts/chatTtsPlayer"
+import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 import { DelegationPanel } from "./Delegation"
 
 type VoiceStatus = {
@@ -20,7 +23,7 @@ export function ChatPage() {
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false)
   const [voice, setVoice] = useState<VoiceStatus | null>(null)
   const [recording, setRecording] = useState(false)
-  const [speakResults, setSpeakResults] = useState(false)
+  const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const [helpersOpen, setHelpersOpen] = useState(true)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -66,19 +69,14 @@ export function ChatPage() {
   }, [task?.status, task?.id, task?.started_at, task?.duration_seconds])
 
   useEffect(() => {
-    if (!speakResults || !task || task.status !== "completed" || !task.result) return
-    const key = `${task.id}:${task.result}`
+    if (!speakChatReplies || !task || task.status !== "completed") return
+    const text = (task.result || task.error || "").trim()
+    if (!text) return
+    const key = `${task.id}:${text}`
     if (spokenRef.current === key) return
     spokenRef.current = key
-    fetchAudio("/api/voice/speak", { method: "POST", body: JSON.stringify({ text: task.result.slice(0, 800) }) })
-      .then((blob) => {
-        const url = URL.createObjectURL(blob)
-        const audio = new Audio(url)
-        audio.onended = () => URL.revokeObjectURL(url)
-        return audio.play()
-      })
-      .catch(() => undefined)
-  }, [speakResults, task?.id, task?.status, task?.result])
+    void speakChatReply(text)
+  }, [speakChatReplies, task?.id, task?.status, task?.result, task?.error])
 
   const events = task?.events || []
   const visible = useMemo(
@@ -95,6 +93,7 @@ export function ChatPage() {
   async function submit() {
     const text = prompt.trim()
     if (!id && !text) return
+    stopChatTts()
     setBusy(true)
     try {
       if (id) {
@@ -297,10 +296,10 @@ export function ChatPage() {
           >
             {recording ? "Stop recording" : "Speak"}
           </button>
-          <label className="row composer-check">
-            <input type="checkbox" checked={speakResults} onChange={(e) => setSpeakResults(e.target.checked)} />
-            Speak results
-          </label>
+          <ChatTtsMuteButton
+            enabled={speakChatReplies}
+            onToggle={(enabled) => { void setSpeakChatReplies(enabled) }}
+          />
           {shown && running && (
             <button className="btn secondary" onClick={() => api(`/api/tasks/${shown.id}/cancel`, { method: "POST" })}>
               Cancel

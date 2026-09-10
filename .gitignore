@@ -29,6 +29,10 @@ backend/.venv/
 # Node
 frontend/node_modules/
 frontend/dist/
+mcp/node_modules/
+
+# Installer build output
+installer/windows/dist/
 
 # Tauri / Rust
 frontend/src-tauri/target/

@@ -23,6 +23,7 @@ from .screenshot import ScreenshotTool
 from .terminal import TerminalTool
 from .verify_code import VerifyCodeTool
 from .external_ingest import ExternalIngestTool
+from .internal_references import InternalReferencesTool
 from .web_fetch import WebFetchTool
 
 
@@ -48,6 +49,7 @@ class ToolRegistry:
             DockerTool(),
             WebFetchTool(getter),
             ExternalIngestTool(getter),
+            InternalReferencesTool(),
             ScreenshotTool(),
             VerifyCodeTool(getter),
             RequestToolsTool(),

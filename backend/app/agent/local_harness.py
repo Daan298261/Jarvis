@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
+from ..persona.pack import inject_persona_messages
 from ..providers.base import ChatMessage
 from ..tools.exposure import REQUEST_CAPABILITY, normalize_capability, tools_for_task
 from ..tools.registry import REGISTRY
@@ -208,7 +209,12 @@ def build_harness_surface(policy: LocalHarnessPolicy, goal: str = "") -> Harness
     system_prompt = CORE_SYSTEM_PROMPT
     if skill_text:
         system_prompt = f"{CORE_SYSTEM_PROMPT}\n\nOn-demand skills:\n{skill_text}"
-    messages = [ChatMessage(role="system", content=system_prompt)]
+    messages = inject_persona_messages([ChatMessage(role="system", content=system_prompt)])
+    system_prompt = "\n\n".join(
+        message.content
+        for message in messages
+        if message.role == "system" and isinstance(message.content, str)
+    )
     metrics = HarnessMetrics(
         core_prompt_version=CORE_PROMPT_VERSION,
         tool_surface_version=CORE_TOOL_SURFACE_VERSION,

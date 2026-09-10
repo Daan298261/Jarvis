@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import load_settings, save_settings
 from ..inference.backends import suggested_port
@@ -37,6 +39,38 @@ class SettingsUpdate(BaseModel):
     self_dev_max_paid_invocations: int | None = None
     self_dev_max_consecutive_failures: int | None = None
     self_dev_experimental_port: int | None = None
+    presentation_shell: Literal["classic", "hud"] | None = None
+    presentation_requested_presence: Literal["none", "neural", "humanoid"] | None = None
+    presentation_performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] | None = None
+    presentation_attention_mode: Literal["off", "pointer", "camera"] | None = None
+    presentation_reduced_motion: Literal["system", "reduce", "full"] | None = None
+    presentation_avatar_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9_.-]+$",
+    )
+    social_perception_enabled: bool | None = None
+    social_perception_semantic_observer: str | None = Field(default=None, min_length=1, max_length=64)
+    social_perception_sample_interval_seconds: float | None = Field(default=None, ge=1.0, le=3600.0)
+    social_perception_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    social_perception_novelty_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    social_perception_comment_cooldown_seconds: int | None = Field(default=None, ge=0, le=86400)
+    social_perception_duplicate_ttl_seconds: int | None = Field(default=None, ge=0, le=604800)
+    social_perception_baseline_enabled: bool | None = None
+    social_perception_retain_observation_summaries: bool | None = None
+    social_perception_max_summary_retention_hours: int | None = Field(default=None, ge=1, le=168)
+    identity_recognition_enabled: bool | None = None
+    identity_recognition_backend: str | None = Field(default=None, min_length=1, max_length=64)
+    identity_recognition_match_threshold: float | None = Field(default=None, ge=-1.0, le=1.0)
+    identity_recognition_margin_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    identity_recognition_min_face_quality: float | None = Field(default=None, ge=0.0, le=1.0)
+    identity_recognition_confirmation_window: int | None = Field(default=None, ge=1, le=20)
+    identity_recognition_confirmation_hits: int | None = Field(default=None, ge=1, le=20)
+    identity_recognition_lost_timeout_seconds: float | None = Field(default=None, ge=0.0, le=60.0)
+    identity_recognition_expose_identity_to_dialogue: bool | None = None
+    tts_speak_chat_replies: bool | None = None
+    tts_voice_profile_id: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 @router.get("")
@@ -111,6 +145,65 @@ async def update_settings(body: SettingsUpdate):
         settings.self_dev.max_consecutive_failures = body.self_dev_max_consecutive_failures
     if body.self_dev_experimental_port is not None:
         settings.self_dev.experimental_port = body.self_dev_experimental_port
+
+    presentation_values = settings.presentation.model_dump()
+    presentation_updates = {
+        "shell": body.presentation_shell,
+        "requested_presence": body.presentation_requested_presence,
+        "performance_preset": body.presentation_performance_preset,
+        "attention_mode": body.presentation_attention_mode,
+        "reduced_motion": body.presentation_reduced_motion,
+        "avatar_id": body.presentation_avatar_id,
+    }
+    for key, value in presentation_updates.items():
+        if value is not None:
+            presentation_values[key] = value
+    settings.presentation = type(settings.presentation).model_validate(presentation_values)
+
+    perception = settings.social_perception
+    if body.social_perception_enabled is not None:
+        perception.enabled = body.social_perception_enabled
+    if body.social_perception_semantic_observer is not None:
+        perception.semantic_observer = body.social_perception_semantic_observer
+    if body.social_perception_sample_interval_seconds is not None:
+        perception.sample_interval_seconds = body.social_perception_sample_interval_seconds
+    if body.social_perception_min_confidence is not None:
+        perception.min_confidence = body.social_perception_min_confidence
+    if body.social_perception_novelty_threshold is not None:
+        perception.novelty_threshold = body.social_perception_novelty_threshold
+    if body.social_perception_comment_cooldown_seconds is not None:
+        perception.comment_cooldown_seconds = body.social_perception_comment_cooldown_seconds
+    if body.social_perception_duplicate_ttl_seconds is not None:
+        perception.duplicate_ttl_seconds = body.social_perception_duplicate_ttl_seconds
+    if body.social_perception_baseline_enabled is not None:
+        perception.baseline_enabled = body.social_perception_baseline_enabled
+    if body.social_perception_retain_observation_summaries is not None:
+        perception.retain_observation_summaries = body.social_perception_retain_observation_summaries
+    if body.social_perception_max_summary_retention_hours is not None:
+        perception.max_summary_retention_hours = body.social_perception_max_summary_retention_hours
+
+    recognition_values = settings.identity_recognition.model_dump()
+    recognition_updates = {
+        "enabled": body.identity_recognition_enabled,
+        "backend": body.identity_recognition_backend,
+        "match_threshold": body.identity_recognition_match_threshold,
+        "margin_threshold": body.identity_recognition_margin_threshold,
+        "min_face_quality": body.identity_recognition_min_face_quality,
+        "confirmation_window": body.identity_recognition_confirmation_window,
+        "confirmation_hits": body.identity_recognition_confirmation_hits,
+        "lost_timeout_seconds": body.identity_recognition_lost_timeout_seconds,
+        "expose_identity_to_dialogue": body.identity_recognition_expose_identity_to_dialogue,
+    }
+    for key, value in recognition_updates.items():
+        if value is not None:
+            recognition_values[key] = value
+    settings.identity_recognition = type(settings.identity_recognition).model_validate(recognition_values)
+
+    if body.tts_speak_chat_replies is not None:
+        settings.tts.speak_chat_replies = body.tts_speak_chat_replies
+    if body.tts_voice_profile_id is not None:
+        settings.tts.voice_profile_id = body.tts_voice_profile_id
+
     save_settings(settings)
     REGISTRY.apply_settings(settings)
     return settings.model_dump()

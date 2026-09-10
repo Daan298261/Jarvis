@@ -403,10 +403,33 @@ async def _transcribe_windows_sapi(path: Path) -> str:
     return text
 
 
-async def synthesize_speech(text: str) -> bytes:
+def active_voice_profile_id() -> str:
+    """Return the persisted active voice profile id for TTS routing."""
+    try:
+        from ..voice_profiles.catalog import get_active_voice_profile_id
+
+        return get_active_voice_profile_id()
+    except Exception:
+        return "butler_original_v1"
+
+
+async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -> bytes:
     cleaned = (text or "").strip()
     if not cleaned:
         raise RuntimeError("text is required")
+    selected_profile_id = (voice_profile_id or active_voice_profile_id()).strip()
+    if selected_profile_id:
+        try:
+            from ..voice_profiles.catalog import get_catalog
+
+            catalog = get_catalog()
+            profile = catalog.get_available(selected_profile_id)
+            if profile is None and voice_profile_id:
+                raise RuntimeError(f"Voice profile is not available: {selected_profile_id}")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
     backend = tts_backend()
     if not backend:
         raise RuntimeError(

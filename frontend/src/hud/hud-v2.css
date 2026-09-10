@@ -200,7 +200,7 @@
 }
 
 .hud-home {
-  width: min(900px, 100%);
+  width: min(1100px, 100%);
   min-height: 100%;
   display: flex;
   flex-direction: column;
@@ -212,7 +212,7 @@
 
 .hud-orb-zone {
   position: relative;
-  width: min(620px, 76vw);
+  width: min(900px, 88vw);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -505,6 +505,22 @@
   background: rgba(116, 218, 247, 0.16);
 }
 
+.hud-tts-mute,
+.hud-app .btn.hud-tts-mute {
+  min-width: 0;
+  border-radius: 12px;
+  border-color: rgba(128, 223, 250, 0.18);
+  color: rgba(214, 240, 248, 0.88);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.hud-tts-mute.muted,
+.hud-app .btn.hud-tts-mute.muted {
+  border-color: rgba(255, 138, 61, 0.32);
+  color: rgba(255, 186, 140, 0.92);
+}
+
 .hud-auth-card {
   border-color: rgba(255, 138, 61, 0.28);
   border-radius: 13px;
@@ -681,7 +697,7 @@
 
   .hud-top-right { justify-self: end; }
   .hud-stage { padding-inline: 12px; }
-  .hud-orb-zone { width: min(560px, 92vw); }
+  .hud-orb-zone { width: min(700px, 96vw); }
   .hud-bottom-group:last-child { display: none; }
 }
 

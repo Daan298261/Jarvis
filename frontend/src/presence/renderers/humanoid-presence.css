@@ -1,0 +1,78 @@
+.jarvis-presence-humanoid {
+  --jarvis-humanoid-size: 720px;
+  position: relative;
+  width: min(var(--jarvis-humanoid-size), 92vw);
+  height: min(calc(var(--jarvis-humanoid-size) * 0.72), 62vh);
+  min-height: 420px;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 46% 46% 18% 18% / 24% 24% 10% 10%;
+  background:
+    radial-gradient(ellipse at 50% 54%, rgba(37, 175, 207, 0.1), transparent 45%),
+    linear-gradient(180deg, transparent 50%, rgba(1, 8, 12, 0.42));
+}
+
+.jarvis-presence-humanoid canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 34px rgba(75, 222, 246, 0.1));
+}
+
+.jarvis-humanoid-scanline {
+  position: absolute;
+  inset: 5% 13% 8%;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(106, 229, 250, 0.024) 0,
+    rgba(106, 229, 250, 0.024) 1px,
+    transparent 1px,
+    transparent 5px
+  );
+  mask-image: radial-gradient(ellipse at center, black, transparent 72%);
+  mix-blend-mode: screen;
+}
+
+.jarvis-humanoid-label {
+  position: absolute;
+  left: 50%;
+  bottom: 7%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  transform: translateX(-50%);
+  color: rgba(191, 227, 237, 0.44);
+  font: 8px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.15em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.jarvis-humanoid-label i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #54dff7;
+  box-shadow: 0 0 8px rgba(84, 223, 247, 0.8);
+}
+
+.jarvis-presence-humanoid[data-phase="alert"] .jarvis-humanoid-label i,
+.jarvis-presence-humanoid[data-phase="offline"] .jarvis-humanoid-label i {
+  background: #ff704d;
+  box-shadow: 0 0 8px rgba(255, 112, 77, 0.7);
+}
+
+@media (max-width: 760px) {
+  .jarvis-presence-humanoid {
+    width: min(var(--jarvis-humanoid-size), 100vw);
+    height: min(calc(var(--jarvis-humanoid-size) * 0.68), 54vh);
+    min-height: 300px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jarvis-humanoid-scanline {
+    display: none;
+  }
+}

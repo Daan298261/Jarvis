@@ -6,6 +6,7 @@ param(
     [string]$PromptFile,
     [string]$PrivateKey,
     [string]$ExecutionMode = "balanced",
+    [string]$OpenPath = "/",
     [switch]$LanAccess,
     [switch]$Wait
 )
@@ -162,7 +163,8 @@ if ($Wait -and ($Prompt -or $PromptFile)) {
     }
 }
 elseif (-not $NoBrowser) {
-    Start-Process "http://127.0.0.1:4780"
+    if (-not $OpenPath.StartsWith("/")) { $OpenPath = "/" }
+    Start-Process "http://127.0.0.1:4780$OpenPath"
 }
 
 Write-Host "Stop with .\stop-jarvis.ps1 or use the system tray icon (Stop / Quit)."

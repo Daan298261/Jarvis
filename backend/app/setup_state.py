@@ -18,6 +18,7 @@ WIZARD_STEPS = (
     "resources",
     "inference",
     "runtime",
+    "integrations",
     "desktop",
     "verification",
     "done",

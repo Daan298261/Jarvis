@@ -1,0 +1,19 @@
+{
+  "id": "tactical_aide_original_v1",
+  "archetype": "tactical_aide",
+  "display_name": "Tactical soft-spoken aide (original)",
+  "license": "original",
+  "provenance": "Original tactical aide archetype. Requires a licensed voice pack install.",
+  "tts": {
+    "engine_hint": "kokoro",
+    "speaker_ref": "tactical_aide_v1",
+    "pack_path": "voice_packs/tactical_aide_original_v1"
+  },
+  "persona_hooks": {
+    "register": "calm_precise",
+    "humour": "minimal"
+  },
+  "sample_utterance": "Standing by.",
+  "vram_class": "balanced",
+  "builtin": false
+}

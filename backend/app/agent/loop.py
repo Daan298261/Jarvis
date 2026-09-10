@@ -86,6 +86,7 @@ from .prompts import (
     VERIFY_PROMPT,
     VERIFY_REQUIRED_PROMPT,
 )
+from .docs_first_grounding import DocsFirstContext, maybe_docs_first
 from .self_dev import KillSwitchActive, kill_switch_active
 
 
@@ -412,11 +413,23 @@ class AgentRuntime:
         if existing and continue_existing:
             messages = existing
             if extra_prompt:
+                follow_up_grounding = maybe_docs_first(DocsFirstContext(user_message=extra_prompt))
+                if follow_up_grounding and follow_up_grounding.prompt_block():
+                    for idx, message in enumerate(messages):
+                        if message.role == "system":
+                            messages[idx] = ChatMessage(
+                                role="system",
+                                content=message.content + "\n\n" + follow_up_grounding.prompt_block(),
+                            )
+                            break
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT + "\n\n" + extra_prompt))
             else:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
             system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(prompt) + _environment_block(settings)
+            grounding = maybe_docs_first(DocsFirstContext(user_message=prompt))
+            if grounding and grounding.prompt_block():
+                system_prompt += "\n\n" + grounding.prompt_block()
             audit = professional_prompt_block(prompt)
             if audit:
                 system_prompt += "\n\n" + audit

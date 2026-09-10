@@ -1,0 +1,135 @@
+.jarvis-presence-host {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.jarvis-presence-host > * {
+  grid-area: 1 / 1;
+}
+
+.jarvis-presence-fallback {
+  width: min(54vw, 420px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(103, 220, 255, 0.16), transparent 66%);
+}
+
+.jarvis-presence-fallback-core {
+  width: 42%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1px solid rgba(103, 220, 255, 0.6);
+  box-shadow: 0 0 50px rgba(103, 220, 255, 0.2), inset 0 0 34px rgba(103, 220, 255, 0.12);
+}
+
+.jarvis-presence-fallback.phase-alert .jarvis-presence-fallback-core,
+.jarvis-presence-fallback.phase-offline .jarvis-presence-fallback-core {
+  border-color: rgba(255, 138, 61, 0.72);
+  box-shadow: 0 0 50px rgba(255, 138, 61, 0.18), inset 0 0 34px rgba(255, 138, 61, 0.12);
+}
+
+.jarvis-presence-fallback-note {
+  align-self: end;
+  margin-bottom: 6px;
+  max-width: 420px;
+  padding: 6px 10px;
+  border: 1px solid rgba(103, 220, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(4, 12, 18, 0.76);
+  color: rgba(218, 241, 249, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.jarvis-presence-controls {
+  position: absolute;
+  top: 12px;
+  right: 3%;
+  z-index: 12;
+  width: auto;
+  margin: 0;
+  color: rgba(225, 244, 250, 0.82);
+  font-size: 12px;
+}
+
+.jarvis-presence-controls > summary {
+  width: fit-content;
+  margin: 0 auto;
+  cursor: pointer;
+  user-select: none;
+  color: rgba(177, 218, 231, 0.74);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.jarvis-presence-controls-body {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  width: min(560px, calc(100vw - 32px));
+  margin-top: 10px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  border: 1px solid rgba(103, 220, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(3, 10, 15, 0.86);
+  backdrop-filter: blur(14px);
+}
+
+.jarvis-presence-mode-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.jarvis-presence-mode-row button,
+.jarvis-presence-controls select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(103, 220, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(8, 20, 28, 0.88);
+  color: rgba(226, 245, 250, 0.88);
+}
+
+.jarvis-presence-mode-row button {
+  cursor: pointer;
+}
+
+.jarvis-presence-mode-row button.active {
+  border-color: rgba(103, 220, 255, 0.62);
+  box-shadow: inset 0 0 0 1px rgba(103, 220, 255, 0.18), 0 0 20px rgba(103, 220, 255, 0.08);
+}
+
+.jarvis-presence-controls label {
+  display: grid;
+  gap: 5px;
+  color: rgba(162, 199, 211, 0.78);
+}
+
+.jarvis-presence-controls-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: rgba(196, 228, 237, 0.72);
+}
+
+@media (max-width: 720px) {
+  .jarvis-presence-controls-body,
+  .jarvis-presence-mode-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jarvis-presence-host *,
+  .jarvis-presence-controls * {
+    transition: none !important;
+  }
+}

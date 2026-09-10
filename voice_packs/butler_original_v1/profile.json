@@ -1,0 +1,19 @@
+{
+  "id": "butler_original_v1",
+  "archetype": "british_butler",
+  "display_name": "Household butler (original)",
+  "license": "original",
+  "provenance": "Jarvis original British-butler voice profile (RFC-0056/0062). Uses the local system TTS backend.",
+  "tts": {
+    "engine_hint": "system",
+    "speaker_ref": "jarvis_butler_v1",
+    "pack_path": ""
+  },
+  "persona_hooks": {
+    "register": "british_understated",
+    "humour": "dry"
+  },
+  "sample_utterance": "At your service.",
+  "vram_class": "balanced",
+  "builtin": true
+}

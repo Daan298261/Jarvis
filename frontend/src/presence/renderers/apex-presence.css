@@ -1,0 +1,113 @@
+.jarvis-apex-presence {
+  --jarvis-apex-size: 540px;
+  position: relative;
+  width: min(calc(var(--jarvis-apex-size) * 1.15), 92vw);
+  aspect-ratio: 680 / 480;
+  display: block;
+  isolation: isolate;
+}
+
+.jarvis-apex-reasoning-web {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  filter: drop-shadow(0 0 18px rgba(53, 216, 242, 0.035));
+}
+
+.jarvis-apex-vendored-orb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  width: 74%;
+  aspect-ratio: 900 / 520;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  filter: drop-shadow(0 0 30px rgba(245, 166, 35, 0.08));
+}
+
+.jarvis-apex-vendored-orb .apex-orb-wrap {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.jarvis-apex-vendored-orb .apex-orb-wrap svg {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.jarvis-apex-presence-legend {
+  position: absolute;
+  right: 3%;
+  top: 3%;
+  z-index: 3;
+  display: flex;
+  gap: 10px;
+  color: rgba(193, 221, 231, 0.46);
+  font: 8px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.jarvis-apex-presence-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.jarvis-apex-presence-legend i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #35d8f2;
+  box-shadow: 0 0 8px rgba(53, 216, 242, 0.8);
+}
+
+.jarvis-apex-presence-legend i.target {
+  background: transparent;
+  border: 1px dashed #7f9bb3;
+  box-shadow: none;
+}
+
+.jarvis-apex-sr-nav {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.jarvis-apex-presence[data-performance-preset="efficient"] .jarvis-apex-presence-legend,
+.jarvis-apex-presence.reduced-motion .jarvis-apex-presence-legend {
+  display: none;
+}
+
+.jarvis-apex-presence[data-phase="alert"] {
+  filter: saturate(0.82) contrast(1.05);
+}
+
+.jarvis-apex-presence.reduced-motion .apex-orb-wrap,
+.jarvis-apex-presence.reduced-motion .apex-orb-wrap * {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (max-width: 760px) {
+  .jarvis-apex-presence {
+    width: min(calc(var(--jarvis-apex-size) * 1.05), 98vw);
+  }
+
+  .jarvis-apex-vendored-orb {
+    width: 82%;
+  }
+
+  .jarvis-apex-presence-legend {
+    display: none;
+  }
+}

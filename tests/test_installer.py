@@ -1,6 +1,9 @@
 """Cross-platform checks for the Windows installer sources (no Windows required)."""
 
 from pathlib import Path
+import json
+import re
+import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER_DIR = REPO_ROOT / "installer" / "windows"
@@ -28,6 +31,8 @@ def test_bootstrap_covers_required_steps():
         "requirements.txt",
         "playwright",
         "npm",
+        "mcp\\package-lock.json",
+        "ensure-mcpconnectors",
         "llama-server",
         "qwen3.5-9b",
         "start-jarvis",
@@ -57,6 +62,34 @@ def test_jarvis_iss_wiring():
     assert "runtime" in lower
     assert "start-jarvis.ps1" in lower
     assert "diskspanning=yes" in lower
+    assert "step=integrations" in lower
+    assert "runhidden" in lower
+
+
+def test_existing_install_upgrade_and_removal_choices_are_wired():
+    text = _read(ISS)
+    lower = text.lower()
+    assert "detectexistinginstallation" in lower
+    assert "comparepackedversion" in lower
+    assert "existing jarvis installation found" in lower
+    assert "upgrade to jarvis" in lower
+    assert "reinstall jarvis" in lower
+    assert "clean reinstall" in lower
+    assert "removeexistingapplication" in lower
+    assert "/verysilent /suppressmsgboxes /norestart" in lower
+    assert "deltree(existinginstalldir, true, true, true)" in lower
+    assert "this cannot be undone" in lower
+    assert "issafejarvisinstalldir" in lower
+
+
+def test_installer_and_desktop_versions_match():
+    iss_text = _read(ISS)
+    installer_version = re.search(r'#define MyAppVersion "([^"]+)"', iss_text).group(1)
+    cargo = tomllib.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "Cargo.toml"))
+    tauri = json.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "tauri.conf.json"))
+    assert installer_version == "1.1.0"
+    assert cargo["package"]["version"] == installer_version
+    assert tauri["version"] == installer_version
 
 
 def test_build_script_invokes_iscc():
