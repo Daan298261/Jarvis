@@ -6,15 +6,19 @@ import {
   DEFAULT_PRESENTATION_SETTINGS,
   type PresencePhase,
 } from "./src/presence/presenceTypes"
+import { listPresenceShapes } from "./src/presence/renderers/shapes/catalog"
 import "./src/presence/presence.css"
 
 function Check() {
+  const shapes = listPresenceShapes()
   const [phase, setPhase] = useState<PresencePhase>("idle")
+  const [shapeId, setShapeId] = useState("humanoid_bust")
   const [settings, setSettings] = useState({
     ...DEFAULT_PRESENTATION_SETTINGS,
     requestedPresence: "humanoid" as const,
     performancePreset: "cinematic" as const,
     reducedMotion: "full" as const,
+    avatarId: "humanoid_bust",
   })
 
   return (
@@ -28,6 +32,21 @@ function Check() {
           >
             {["idle", "listening", "thinking", "executing", "speaking", "waiting", "alert", "offline"].map((p) => (
               <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Shape{" "}
+          <select
+            value={shapeId}
+            onChange={(e) => {
+              const id = e.target.value
+              setShapeId(id)
+              setSettings((s) => ({ ...s, avatarId: id }))
+            }}
+          >
+            {shapes.map((shape) => (
+              <option key={shape.id} value={shape.id}>{shape.label}</option>
             ))}
           </select>
         </label>

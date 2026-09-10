@@ -5,13 +5,20 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
 import type { PresenceSnapshot, PresentationSettings } from "../presenceTypes"
-import { createParticleBust, particleFragmentShader, particleVertexShader } from "./particleBust"
+import {
+  createMorphablePresenceSystem,
+  particleFragmentShader,
+  particleVertexShader,
+} from "./morphableOrbCloud"
+import { presenceShapeIdForAvatar, resolvePresenceShape } from "./shapes/catalog"
 import "./humanoid-presence.css"
 
 type HumanoidPresenceProps = {
   snapshot: PresenceSnapshot
   settings: PresentationSettings
   size?: number
+  /** Optional override for harness / morph demos; defaults from settings.avatarId. */
+  shapeId?: string
 }
 
 const PHASE_COLOR: Record<PresenceSnapshot["phase"], number> = {
@@ -19,13 +26,18 @@ const PHASE_COLOR: Record<PresenceSnapshot["phase"], number> = {
   executing: 0x00bdff, speaking: 0x3ad4ff, waiting: 0x7996b3, alert: 0xff7957,
 }
 
-export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) {
+export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresenceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
-  const stateRef = useRef({ snapshot, settings })
+  const stateRef = useRef({ snapshot, settings, shapeId })
   const [failure, setFailure] = useState<Error | null>(null)
+  const [activeShapeId, setActiveShapeId] = useState(
+    () => shapeId || presenceShapeIdForAvatar(settings.avatarId),
+  )
 
-  useEffect(() => { stateRef.current = { snapshot, settings } }, [snapshot, settings])
+  useEffect(() => {
+    stateRef.current = { snapshot, settings, shapeId }
+  }, [snapshot, settings, shapeId])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -36,7 +48,6 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
       canvas, alpha: true, antialias: false,
       powerPreference: efficient ? "low-power" : "high-performance",
     })
-    // Opaque void matches the reference dark HUD plate.
     renderer.setClearColor(0x03070b, 1)
     renderer.toneMapping = THREE.ReinhardToneMapping
     renderer.toneMappingExposure = 1.08
@@ -47,7 +58,7 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
     const uniforms = {
       uTime: { value: 0 }, uMotion: { value: 1 }, uActivity: { value: 0 },
       uSpeech: { value: 0 }, uPixelScale: { value: 1 }, uOpacity: { value: 1 },
-      uAssemble: { value: 1 },
+      uMorph: { value: 1 },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
       uGold: { value: new THREE.Color(0xff941f) },
     }
@@ -61,13 +72,11 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
       blending: THREE.AdditiveBlending,
     })
     const density = efficient ? 0.6 : settings.performancePreset === "cinematic" ? 1.15 : 0.95
-    const { head, body, field } = createParticleBust(density, material)
-    const bust = new THREE.Group()
-    bust.add(head, body)
-    // ¾ view so the cyan contour silhouette reads like the reference profile shots.
-    bust.rotation.y = 0.95
-    bust.position.set(0.15, 0.08, 0)
-    scene.add(field, bust)
+    const initialId = shapeId || presenceShapeIdForAvatar(settings.avatarId)
+    const system = createMorphablePresenceSystem(density, material, initialId)
+    const bust = system.bust
+    scene.add(system.group)
+    setActiveShapeId(system.currentShapeId)
 
     const composer = efficient ? null : new EffectComposer(renderer)
     const bloom = efficient
@@ -133,14 +142,21 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
       const delta = Math.min((time - lastRender) / 1000, 0.05)
       lastRender = time
       if (!reduced) animationTime += delta
+
+      const desiredShape = current.shapeId
+        || presenceShapeIdForAvatar(current.settings.avatarId)
+      if (desiredShape !== system.currentShapeId) {
+        system.morphTo(desiredShape, { duration: reduced ? 0 : 1.2, immediate: reduced })
+        setActiveShapeId(system.currentShapeId)
+      }
+      system.tick(delta)
+
       const phase = current.snapshot.phase
       const activity = {
         offline: 0, idle: 0.18, listening: 0.45, thinking: 0.72,
         executing: 1, speaking: 0.68, waiting: 0.12, alert: 0.85,
       }[phase]
       uniforms.uTime.value = animationTime
-      // Keep assembled for first paint; mild re-assemble only on cold starts is skipped.
-      uniforms.uAssemble.value = 1
       uniforms.uMotion.value = reduced ? 0 : 1
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)
         * (reduced ? 1 : Math.min(1, delta * 3))
@@ -152,15 +168,21 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
       uniforms.uGold.value.setHex(
         phase === "alert" ? 0xff543b : phase === "offline" ? 0x607580 : 0xff941f,
       )
+
+      const framing = resolvePresenceShape(system.currentShapeId).framing
+      const baseYaw = framing?.yaw ?? 0.95
+      const basePos = framing?.position ?? [0.15, 0.08, 0]
       const follow = !reduced && current.settings.attentionMode === "pointer"
-      const baseYaw = 0.95
       if (reduced) {
         bust.rotation.set(0, baseYaw, 0)
+        bust.position.set(basePos[0], basePos[1], basePos[2])
       } else {
         bust.rotation.y += ((baseYaw + (follow ? pointer.x * 0.12 : 0)) - bust.rotation.y) * 0.05
         bust.rotation.x += ((follow ? pointer.y * 0.04 : 0) - bust.rotation.x) * 0.06
+        bust.position.x = basePos[0]
+        bust.position.z = basePos[2]
+        bust.position.y = basePos[1] + Math.sin(animationTime * 1.05) * 0.016
       }
-      bust.position.y = reduced ? 0.08 : 0.08 + Math.sin(animationTime * 1.05) * 0.016
       try {
         if (composer) composer.render()
         else renderer.render(scene, camera)
@@ -191,15 +213,15 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
       stage.removeEventListener("pointerleave", resetPointer)
       canvas.removeEventListener("webglcontextlost", onContextLost)
       document.removeEventListener("visibilitychange", onVisibilityChange)
-      head.geometry.dispose()
-      body.geometry.dispose()
-      field.geometry.dispose()
+      system.dispose()
       material.dispose()
       bloom?.dispose()
       output?.dispose()
       composer?.dispose()
       renderer.dispose()
     }
+  // avatarId/shapeId morph inside the frame loop — remounting would drop the cloud.
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.performancePreset])
 
   if (failure) throw failure
@@ -209,6 +231,7 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
       className="jarvis-presence jarvis-presence-humanoid"
       data-phase={snapshot.phase}
       data-performance-preset={settings.performancePreset}
+      data-presence-shape={activeShapeId}
       role="img"
       aria-label={`Jarvis particle presence is ${snapshot.phase}`}
     >
