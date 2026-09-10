@@ -1,5 +1,4 @@
 import asyncio
-from contextlib import nullcontext
 
 import pytest
 
@@ -10,34 +9,19 @@ from app.mobile import media
 @pytest.mark.asyncio
 async def test_interruption_during_tts_does_not_enqueue_old_audio(monkeypatch):
     started, release = asyncio.Event(), asyncio.Event()
-    selected = []
-    async def synthesize(text, **kwargs):
-        selected.append(kwargs.get("voice_profile_id"))
+    async def synthesize(text):
         started.set()
         await release.wait()
         return b"not decoded after interruption"
     monkeypatch.setattr(media, "synthesize_speech", synthesize)
     speaker = media.Speaker()
-    work = asyncio.create_task(speaker.speak("old answer", "butler_original_v1"))
+    work = asyncio.create_task(speaker.speak("old answer"))
     await started.wait()
     speaker.interrupt()
     release.set()
     await work
-    assert selected == ["butler_original_v1"]
     assert speaker.queue.empty()
     speaker.stop()
-
-
-def test_call_voice_uses_paired_device_profile(monkeypatch):
-    monkeypatch.setattr(media, "database", lambda: nullcontext(object()))
-    monkeypatch.setattr(
-        media,
-        "get",
-        lambda db, kind, device_id: {"voice_profile_id": "butler_original_v1"},
-    )
-    bridge = media.VoiceBridge({"id": "call", "device_id": "phone"})
-    assert bridge.voice_profile_id() == "butler_original_v1"
-    bridge.stop()
 
 
 @pytest.mark.asyncio

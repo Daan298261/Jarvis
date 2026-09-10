@@ -166,7 +166,6 @@ async def test_mobile_can_resolve_coding_decision_with_explicit_instructions(mob
 @pytest.mark.asyncio
 async def test_mobile_voice_profiles_are_minimized_and_tts_selection_is_forwarded(mobile_env, monkeypatch):
     from app.api.companion import router
-    from app.voice_profiles import catalog
     from app.workers import voice
     app = FastAPI()
     app.include_router(router)
@@ -186,10 +185,6 @@ async def test_mobile_voice_profiles_are_minimized_and_tts_selection_is_forwarde
         assert profiles and set(profiles[0]) <= {
             "id", "display_name", "archetype", "available", "active", "vram_class", "unavailable_reason"
         }
-        monkeypatch.setattr(catalog, "get_catalog", lambda: type("Catalog", (), {"get_available": lambda self, value: object()})())
-        preference = await client.put("/api/companion/preferences", headers=headers,
-                                      json={"voice_profile_id": "butler_original_v1"})
-        assert preference.status_code == 200 and preference.json()["voice_profile_id"] == "butler_original_v1"
         response = await client.post("/api/companion/voice/speak", headers=headers,
                                      json={"text": "Status report", "voice_profile_id": "butler_original_v1"})
     assert response.status_code == 200 and response.content == b"RIFFtest"

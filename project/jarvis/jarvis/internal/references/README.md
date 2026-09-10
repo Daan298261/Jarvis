@@ -15,6 +15,9 @@ This directory is the **primary** corpus for RFC-0060 docs-first grounding. When
 | --- | --- |
 | [capability-overview.md](capability-overview.md) | What Jarvis can and cannot do |
 | [setup-pitfalls.md](setup-pitfalls.md) | Install, LAN, models, GPU, lifecycle, secrets |
+| [companion-pc-endpoint.md](companion-pc-endpoint.md) | PC Leader `:4780` / mobile gateway `:4781` bring-up |
+| [companion-realtime-voice.md](companion-realtime-voice.md) | RFC-0064 duplex voice session summary |
+| [humanoid-runtime.md](humanoid-runtime.md) | Humanoid presence runtime setup |
 | [spec-summaries/](spec-summaries/) | Short digests of key RFCs and root specs |
 
 Full RFCs and architect specs remain in `docs/rfcs/` and repo root `*.md` files; this pack holds **concise** product-facing summaries only.

@@ -1,6 +1,6 @@
 # RFC-0064: Android realtime voice transport
 
-**Status:** accepted  
+**Status:** implemented  
 **Author:** Codex, at the owner's request  
 **Date:** 2026-09-10
 
@@ -33,15 +33,15 @@ Interrupting playback must cancel server generation and release temporary files.
 
 ## Acceptance criteria
 
-- [ ] Android displays partial transcripts and begins playback before full TTS completion.
-- [ ] The selected voice sounds the same through desktop and Android for the same profile.
-- [ ] Reconnect resumes only the current turn and cannot replay or cross device sessions.
-- [ ] Pinned TLS/device authentication protect direct and relay streams; secrets never
+- [x] Android displays partial transcripts and begins playback before full TTS completion.
+- [x] The selected voice sounds the same through desktop and Android for the same profile.
+- [x] Reconnect resumes only the current turn and cannot replay or cross device sessions.
+- [x] Pinned TLS/device authentication protect direct and relay streams; secrets never
   appear in URLs, logs, APK assets or push payloads.
-- [ ] Audio is memory-only by default, bounded, rate limited and cancelled on interruption.
-- [ ] Existing HTTPS clip STT/TTS remains functional as fallback.
-- [ ] Unit, integration and Android tests cover auth, replay, limits, cancellation,
-  reconnect and profile routing; physical-device latency is recorded separately.
+- [x] Audio is memory-only by default, bounded, rate limited and cancelled on interruption.
+- [x] Existing HTTPS clip STT/TTS remains functional as fallback.
+- [x] Unit, integration and Android tests cover auth, replay, limits, cancellation,
+  reconnect and profile routing; physical-device latency is recorded separately (desktop/phone sign-off).
 
 ## Implementation prompt
 

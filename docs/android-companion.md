@@ -15,10 +15,12 @@ preview, not a production remote-access release.
 - Native API integration for task/model control, conversation history, file sharing,
   attachments and direct camera capture, STT/TTS, and editable persistent
   once/daily/weekly schedules.
+- Duplex realtime voice over authenticated WSS (`/api/companion/voice/realtime`): partial
+  transcripts, sentence-level TTS playback before full completion, replay-safe sequences,
+  per-device rate limits, and profile-routed host TTS. Clip HTTPS STT/TTS remains fallback.
 - Mobile TTS uses the PC voice-profile catalog with an in-app selector and preview.
   Recorded STT and generated speech use device-authenticated pinned TLS; no speech
-  model or permanent Jarvis credential is stored on the phone. The selected voice is
-  bound to the paired device and also applies to live WebRTC call replies.
+  model or permanent Jarvis credential is stored on the phone.
 - Device-authenticated, allowlisted TLS gateway; owner/desktop APIs are not forwarded.
 - WebRTC voice bridge, call signaling, Android Telecom integration and optional FCM
   wake adapter. Failed media reconnects use ordered, replay-safe offer generations.
