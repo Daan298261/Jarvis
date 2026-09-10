@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import io
 import json
@@ -19,7 +20,10 @@ from .store import database, get, put, rows
 
 router = APIRouter(prefix="/api/companion/calls", tags=["mobile calls"])
 PEERS: dict[str, object] = {}
-ACTIVE_STATES = {"ringing", "connecting", "active"}
+OFFERS: dict[str, dict] = {}
+OFFER_LOCKS: dict[str, asyncio.Lock] = {}
+SUPERSEDED: set[object] = set()
+ACTIVE_STATES = {"ringing", "connecting", "active", "reconnecting"}
 
 
 def capabilities():
@@ -84,7 +88,7 @@ def create_call(device_id: str, direction: str, conversation_id: str | None = No
         call = {"id": str(uuid.uuid4()), "device_id": device_id, "direction": direction,
                 "state": "ringing", "conversation_id": conversation_id, "task_id": task_id,
                 "incident_id": incident_id, "created_at": time.time(), "updated_at": time.time(),
-                "expires_at": time.time() + 45}
+                "expires_at": time.time() + 45, "generation": -1}
         put(db, "call", call["id"], call)
     return call
 
@@ -96,6 +100,18 @@ class Start(BaseModel):
 class Offer(BaseModel):
     sdp: str = Field(min_length=10, max_length=64000)
     type: str = "offer"
+    generation: int = Field(default=0, ge=0, le=100)
+
+
+def offer_decision(call: dict, generation: int, sdp: str):
+    previous = OFFERS.get(call["id"])
+    offer_hash = hashlib.sha256(sdp.encode()).hexdigest()
+    current = int(call.get("generation", -1))
+    if generation == current and previous and previous["hash"] == offer_hash:
+        return "replay", previous
+    if generation != current + 1:
+        return "stale", None
+    return "replace", {"generation": generation, "hash": offer_hash}
 
 
 @router.get("")
@@ -121,7 +137,11 @@ async def end(call_id: uuid.UUID, device=Depends(require_device)):
     call = owned(str(call_id), device["id"])
     peer = PEERS.pop(call["id"], None)
     if peer:
+        SUPERSEDED.add(peer)
         await peer.close()
+        SUPERSEDED.discard(peer)
+    OFFERS.pop(call["id"], None)
+    OFFER_LOCKS.pop(call["id"], None)
     return update(call["id"], state="ended", ended_at=time.time())
 
 
@@ -130,8 +150,22 @@ async def offer(call_id: uuid.UUID, body: Offer, device=Depends(require_device))
     call = owned(str(call_id), device["id"])
     if call["state"] not in ACTIVE_STATES or body.type != "offer":
         raise HTTPException(409, "Call offer is no longer valid")
-    if call["id"] in PEERS:
-        raise HTTPException(409, "Call already connected; reconnect using a new call")
+    lock = OFFER_LOCKS.setdefault(call["id"], asyncio.Lock())
+    async with lock:
+        return await accept_offer(call, body)
+
+
+async def accept_offer(call: dict, body: Offer):
+    decision, record = offer_decision(call, body.generation, body.sdp)
+    if decision == "replay":
+        return {"sdp": record["answer"], "type": "answer", "generation": body.generation}
+    if decision == "stale":
+        raise HTTPException(409, "Call media generation is stale; refresh call state")
+    old_peer = PEERS.pop(call["id"], None)
+    if old_peer:
+        SUPERSEDED.add(old_peer)
+        await old_peer.close()
+        SUPERSEDED.discard(old_peer)
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
     from .media import VoiceBridge
     config = RTCConfiguration(iceServers=[RTCIceServer(**entry) for entry in ice_servers()])
@@ -139,7 +173,7 @@ async def offer(call_id: uuid.UUID, body: Offer, device=Depends(require_device))
     PEERS[call["id"]] = peer
     bridge = VoiceBridge(call)
     peer.addTrack(bridge.output)
-    update(call["id"], state="connecting", expires_at=time.time() + 3600)
+    update(call["id"], state="connecting", generation=body.generation, expires_at=time.time() + 3600)
 
     @peer.on("track")
     def on_track(track):
@@ -148,19 +182,27 @@ async def offer(call_id: uuid.UUID, body: Offer, device=Depends(require_device))
 
     @peer.on("connectionstatechange")
     async def state_changed():
+        if peer in SUPERSEDED:
+            return
         if peer.connectionState == "connected":
             update(call["id"], state="active")
         elif peer.connectionState in {"failed", "closed"}:
             bridge.stop()
-            PEERS.pop(call["id"], None)
-            update(call["id"], state="ended" if peer.connectionState == "closed" else "failed")
+            if PEERS.get(call["id"]) is peer:
+                PEERS.pop(call["id"], None)
+            update(call["id"], state="ended" if peer.connectionState == "closed" else "reconnecting",
+                   expires_at=time.time() + 60)
 
     try:
         await peer.setRemoteDescription(RTCSessionDescription(sdp=body.sdp, type="offer"))
         await peer.setLocalDescription(await peer.createAnswer())
-        return {"sdp": peer.localDescription.sdp, "type": peer.localDescription.type}
+        record["answer"] = peer.localDescription.sdp
+        OFFERS[call["id"]] = record
+        return {"sdp": peer.localDescription.sdp, "type": peer.localDescription.type, "generation": body.generation}
     except Exception:
+        SUPERSEDED.add(peer)
         await peer.close()
+        SUPERSEDED.discard(peer)
         PEERS.pop(call["id"], None)
-        update(call["id"], state="failed")
+        update(call["id"], state="reconnecting", generation=body.generation, expires_at=time.time() + 60)
         raise HTTPException(400, "Unable to establish WebRTC media")

@@ -76,6 +76,8 @@ class CallService : Service() {
     private var userMuted = false
     private var systemMuted = false
     private var held = false
+    private var generation = 0
+    private var reconnectJob: Job? = null
     private fun applyMute() {
         media?.setMuted(userMuted || systemMuted || held)
         CurrentCall.mutable.value = CurrentCall.mutable.value.copy(muted = userMuted || systemMuted || held)
@@ -136,13 +138,9 @@ class CallService : Service() {
                     launch { currentControl.currentCallEndpoint.collect { CurrentCall.mutable.value = CurrentCall.mutable.value.copy(route = it.name.toString()) } }
                     scope.launch {
                         try {
-                            media = RealtimeMediaClient(this@CallService) { connected ->
-                                scope.launch {
-                                    CurrentCall.mutable.value = CurrentCall.mutable.value.copy(status = if (connected) "Encrypted call" else "Connection lost")
-                                    if (!connected) stopSelf()
-                                }
-                            }
-                            media!!.connect(api, call)
+                            val first = newMedia(call, currentControl)
+                            media = first
+                            first.connect(api, call, generation)
                             applyMute()
                             if (incoming != null) currentControl.answer(CallAttributesCompat.CALL_TYPE_AUDIO_CALL) else currentControl.setActive()
                         } catch (e: Exception) {
@@ -157,6 +155,42 @@ class CallService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+    private fun newMedia(call: JSONObject, callControl: CallControlScope): RealtimeMediaClient {
+        lateinit var candidate: RealtimeMediaClient
+        candidate = RealtimeMediaClient(this) { connected ->
+            scope.launch {
+                if (candidate !== media) return@launch
+                if (connected) CurrentCall.mutable.value = CurrentCall.mutable.value.copy(status = "Encrypted call")
+                else reconnect(call, callControl, candidate)
+            }
+        }
+        return candidate
+    }
+    private fun reconnect(call: JSONObject, callControl: CallControlScope, failed: RealtimeMediaClient) {
+        if (reconnectJob?.isActive == true || failed !== media) return
+        CurrentCall.mutable.value = CurrentCall.mutable.value.copy(status = "Reconnecting encrypted audio")
+        reconnectJob = scope.launch {
+            media = null
+            failed.close()
+            repeat(3) { attempt ->
+                delay((1L shl attempt) * 1000)
+                generation += 1
+                val candidate = newMedia(call, callControl)
+                media = candidate
+                try {
+                    candidate.connect(api, call, generation)
+                    applyMute()
+                    return@launch
+                } catch (_: Exception) {
+                    if (media === candidate) media = null
+                    candidate.close()
+                }
+            }
+            CurrentCall.mutable.value = CurrentCall.mutable.value.copy(status = "Call connection lost")
+            runCatching { callControl.disconnect(DisconnectCause(DisconnectCause.ERROR)) }
+            stopSelf()
+        }
     }
     override fun onDestroy() {
         CurrentCall.mutable.value = CallUiState()
@@ -175,7 +209,7 @@ class RealtimeMediaClient(context: android.content.Context, private val connecti
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
         factory = PeerConnectionFactory.builder().createPeerConnectionFactory()
     }
-    suspend fun connect(api: JarvisApi, call: JSONObject) {
+    suspend fun connect(api: JarvisApi, call: JSONObject, generation: Int) {
         val servers = call.optJSONArray("ice_servers")?.objects()?.map { server ->
             val urls = server.getJSONArray("urls")
             PeerConnection.IceServer.builder((0 until urls.length()).map(urls::getString)).setUsername(server.optString("username")).setPassword(server.optString("credential")).createIceServer()
@@ -208,7 +242,8 @@ class RealtimeMediaClient(context: android.content.Context, private val connecti
         }, MediaConstraints()) }
         setDescription(offer, true)
         withTimeout(20000) { gathered.await() }
-        val response = api.json("/calls/${call.getString("id")}/offer", "POST", JSONObject().put("type", "offer").put("sdp", peer!!.localDescription.description))
+        val response = api.json("/calls/${call.getString("id")}/offer", "POST", JSONObject().put("type", "offer")
+            .put("generation", generation).put("sdp", peer!!.localDescription.description))
         setDescription(SessionDescription(SessionDescription.Type.ANSWER, response.getString("sdp")), false)
     }
     private suspend fun setDescription(description: SessionDescription, local: Boolean) = suspendCancellableCoroutine<Unit> { continuation ->
