@@ -11,7 +11,8 @@ preview, not a production remote-access release.
 - P-256 Android Keystore device identity, owner-confirmed pairing, short sessions,
   per-device revocation, and pinned TLS server identity.
 - Native API integration for task/model control, conversation history, file sharing,
-  attachments, STT/TTS, and editable persistent once/daily/weekly schedules.
+  attachments and direct camera capture, STT/TTS, and editable persistent
+  once/daily/weekly schedules.
 - Device-authenticated, allowlisted TLS gateway; owner/desktop APIs are not forwarded.
 - WebRTC voice bridge, call signaling, Android Telecom integration and optional FCM
   wake adapter. Calls require additional runtime dependencies and device validation.

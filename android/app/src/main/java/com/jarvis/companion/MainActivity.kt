@@ -73,6 +73,25 @@ class MainActivity : ComponentActivity() {
             }
             val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) model.toggleRecord() }
             val attachment = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(model::upload) }
+            var photoPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+            val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+                photoPath?.let { path ->
+                    val file = java.io.File(path)
+                    if (saved) {
+                        val uri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file)
+                        model.uploadCaptured(uri, file)
+                    } else file.delete()
+                }
+                photoPath = null
+            }
+            val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                if (granted) {
+                    val folder = java.io.File(cacheDir, "camera").apply { mkdirs() }
+                    val file = java.io.File.createTempFile("jarvis-photo-", ".jpg", folder)
+                    photoPath = file.absolutePath
+                    camera.launch(androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file))
+                }
+            }
             val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
             LaunchedEffect(Unit) {
                 if (android.os.Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -186,6 +205,7 @@ class MainActivity : ComponentActivity() {
                                 OutlinedTextField(value = draft, onValueChange = { draft = it }, placeholder = { Text("Ask anything…") }, modifier = Modifier.fillMaxWidth(), maxLines = 5, shape = RoundedCornerShape(20.dp))
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(onClick = { attachment.launch("*/*") }) { Icon(Icons.Outlined.AttachFile, "Attach file") }
+                                    IconButton(onClick = { cameraPermission.launch(Manifest.permission.CAMERA) }) { Icon(Icons.Outlined.PhotoCamera, "Take photo") }
                                     IconButton(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }) { Icon(if (state.recording) Icons.Outlined.Stop else Icons.Outlined.Mic, "Voice message") }
                                     Spacer(Modifier.weight(1f))
                                     Button(onClick = { model.send(draft) }, enabled = draft.isNotBlank() && !state.busy) { Text("Send"); Icon(Icons.Outlined.ArrowUpward, null) }

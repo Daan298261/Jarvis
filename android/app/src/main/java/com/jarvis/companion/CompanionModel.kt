@@ -113,7 +113,11 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         mutable.value = mutable.value.copy(conversationId = result.getString("conversation_id"), attachmentIds = emptyList())
         refresh()
     }
-    fun upload(uri: Uri) = action {
+    fun upload(uri: Uri) = action { uploadNow(uri) }
+    fun uploadCaptured(uri: Uri, file: File) = action {
+        try { uploadNow(uri) } finally { file.delete() }
+    }
+    private suspend fun uploadNow(uri: Uri) {
         val context = getApplication<Application>()
         val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             context.contentResolver.openInputStream(uri)?.use { stream ->
