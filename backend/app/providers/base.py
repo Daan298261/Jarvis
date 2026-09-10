@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -145,6 +146,47 @@ class ModelProvider:
             timings=timings,
             raw=raw,
         )
+
+    async def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        *,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        max_tokens: int | None = None,
+        thinking: bool | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> AsyncIterator[str]:
+        extra_body: dict[str, Any] = dict(extra or {})
+        extra_body.setdefault("chat_template_kwargs", {})
+        if thinking is not None:
+            extra_body["chat_template_kwargs"]["enable_thinking"] = bool(thinking)
+            if not thinking:
+                extra_body["reasoning_budget"] = 0
+        if top_k is not None:
+            extra_body["top_k"] = top_k
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": to_openai_messages(messages),
+            "stream": True,
+        }
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+        stream = await self.client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            choice = chunk.choices[0] if chunk.choices else None
+            if not choice:
+                continue
+            delta = choice.delta.content or ""
+            if delta:
+                yield delta
 
 
 def parse_tool_arguments(payload: str) -> dict[str, Any]:

@@ -69,7 +69,54 @@ def resolve_execution_policy(name: str | None) -> ExecutionPolicy:
     return POLICIES.get(key, POLICIES["balanced"])
 
 
+CONVERSATION_CLASS = "conversation"
+
+_CONVERSATION_BLOCKERS = (
+    "fix ",
+    "install ",
+    "delete ",
+    "organize ",
+    "run ",
+    "deploy ",
+    "migrate ",
+    "refactor ",
+    "pytest",
+    "repository",
+    "spreadsheet",
+    "powershell",
+    "write ",
+    "read ",
+    "create ",
+    "verify",
+    "make sure",
+    "folder",
+    "file ",
+    "desktop",
+)
+
+
+def is_plain_conversation(prompt: str) -> bool:
+    """Heuristic: casual owner talk that should not enter the tool/approval agent loop."""
+    text = (prompt or "").strip()
+    if not text or len(text) > 800:
+        return False
+    lowered = text.lower()
+    if any(marker in lowered for marker in _CONVERSATION_BLOCKERS):
+        return False
+    action_hits = sum(1 for _, keywords in TASK_CATEGORIES for keyword in keywords if keyword in lowered)
+    if action_hits > 0:
+        return False
+    chatty = (
+        "?" in text
+        or lowered.startswith(("hi", "hello", "hey", "good morning", "good afternoon", "good evening"))
+        or lowered in {"thanks", "thank you", "how are you", "how are you?"}
+    )
+    return chatty
+
+
 def classify_task(prompt: str) -> str:
+    if is_plain_conversation(prompt):
+        return CONVERSATION_CLASS
     text = (prompt or "").lower()
     scored: list[tuple[int, str]] = []
     for name, keywords in TASK_CATEGORIES:

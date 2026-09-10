@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -12,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, context_repo, delegation, diagnostics, guest_portals, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, packs, perception, perception_identity, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, context_repo, delegation, diagnostics, guest_portals, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, owner_chat, packs, perception, perception_identity, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -63,6 +64,7 @@ app.include_router(settings.router)
 app.include_router(mcp.router)
 app.include_router(memory.router)
 app.include_router(voice.router)
+app.include_router(owner_chat.router)
 app.include_router(voice_profiles.router)
 app.include_router(workflows.router)
 app.include_router(self_dev.router)
@@ -128,6 +130,7 @@ async def auth_middleware(request: Request, call_next):
 
 @app.on_event("startup")
 async def startup() -> None:
+    app.state.startup_id = str(uuid.uuid4())
     await init_db()
     node = await register_localhost_node()
     await bind_workers_to_node(node.id)
@@ -162,6 +165,16 @@ async def startup() -> None:
     QUEUE_WATCHER.start()
     mobile_runtime.start()
     await QUEUE_WATCHER.process_pending()
+    asyncio.create_task(_maybe_launch_greeting(app.state.startup_id))
+
+
+async def _maybe_launch_greeting(startup_id: str) -> None:
+    try:
+        from .persona.greeting import maybe_send_launch_greeting
+
+        await maybe_send_launch_greeting(startup_id)
+    except Exception:
+        logging.exception("Launch greeting failed")
 
 
 @app.on_event("shutdown")

@@ -53,16 +53,20 @@ from .escalation import (
     user_requested_expert,
 )
 from .planning import (
+    CONVERSATION_CLASS,
     WorkingState,
     best_of_n_plan_prompt,
     best_of_n_select_prompt,
     classify_task,
     format_selected_plan,
+    is_plain_conversation,
     parse_plan_block,
     parse_plan_candidates,
     resolve_execution_policy,
     select_best_plan,
 )
+from ..persona.chat_delivery import publish_owner_text
+from ..persona.owner_chat import OWNER_CHAT_SYSTEM
 from .recovery import recovery_hint
 from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
@@ -180,6 +184,8 @@ class AgentRuntime:
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
         task_class = classify_task(prompt)
+        if is_plain_conversation(prompt):
+            task_class = CONVERSATION_CLASS
         REGISTRY.apply_settings(settings)
         task = Task(
             id=request_id or str(uuid.uuid4()),
@@ -328,6 +334,55 @@ class AgentRuntime:
         except Exception:
             pass
 
+    async def _run_conversation(
+        self,
+        task_id: str,
+        prompt: str,
+        profile_name: str | None,
+        settings: AppSettings,
+        working: WorkingState,
+        metrics: LiveTaskMetrics,
+    ) -> None:
+        """Plain owner dialogue: stream text, no tools, no confirmation gates."""
+        profile = resolve_profile(profile_name)
+        if not MANAGER.provider or not MANAGER.state.loaded:
+            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
+            await MANAGER.load(settings, profile_name)
+        await self._update(task_id, stage="act", current_action="Replying", task_class=CONVERSATION_CLASS)
+        messages = [
+            ChatMessage(role="system", content=OWNER_CHAT_SYSTEM),
+            ChatMessage(role="user", content=prompt),
+        ]
+        parts: list[str] = []
+        try:
+            async for delta in MANAGER.chat_stream(
+                messages,
+                temperature=profile.temperature,
+                top_p=profile.top_p,
+                top_k=profile.top_k,
+                max_tokens=512,
+                thinking=False,
+            ):
+                parts.append(delta)
+                await BUS.publish(task_id, "assistant_delta", "Reply", delta, stage="chat")
+        except Exception as exc:
+            err = str(exc)
+            await self._update(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=err,
+                result=err,
+                **metrics.as_fields(),
+            )
+            await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
+            return
+        content = "".join(parts).strip() or "I'm afraid I couldn't form a reply just then."
+        await publish_owner_text(content, source="task_chat", speak=True)
+        messages.append(ChatMessage(role="assistant", content=content))
+        working.verified = True
+        await self._complete(task_id, messages, content, content, working, metrics)
+
     async def _run(
         self,
         task_id: str,
@@ -362,6 +417,15 @@ class AgentRuntime:
                 working.goal = prompt.strip().splitlines()[0][:240]
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
+        metrics = LiveTaskMetrics()
+        if (
+            working.task_class == CONVERSATION_CLASS
+            and not continue_existing
+            and not pending_tool
+            and not extra_prompt
+        ):
+            await self._run_conversation(task_id, prompt, profile_name, settings, working, metrics)
+            return
         await self._update(task_id, exposed_tools=_exposed_csv(working))
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
