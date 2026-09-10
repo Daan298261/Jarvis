@@ -1,6 +1,6 @@
 # RFC-0059: Installer integration onboarding
 
-**Status:** accepted
+**Status:** implemented
 
 **Queue item:** P1 — Installer integration onboarding for Gmail and WhatsApp
 

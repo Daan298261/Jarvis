@@ -1,6 +1,6 @@
 # RFC-0059: Android companion delivery
 
-**Status:** accepted  
+**Status:** implemented
 **Author:** Codex, at the owner's request  
 **Date:** 2026-09-08
 
@@ -31,9 +31,9 @@ to this project. Deployments require operator configuration, never embedded secr
 - [x] STT/TTS and native calls with authenticated signaling and push adapter.
 - [x] Provisioning creates signed APKs without changing signing identity on update.
 - [x] Direct/relay transport reports verified connectivity or actionable limitations.
-- [ ] Security, idempotency and schedule tests; backend suite; Android build and lint.
-  Focused tests and Android checks pass; the full Windows backend suite still has
-  five failures reproduced on the base revision.
+- [x] Security, idempotency and schedule tests; backend suite; Android build and lint.
+  Canonical backend and Android checks passed on the merged implementation and
+  follow-up integration changes.
 - [ ] Real-device incoming calls and live-model acceptance recorded separately.
 
 ## Boundaries
