@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api, apiForm, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { speakChatReply, stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
@@ -78,17 +79,11 @@ export function ChatPage() {
     void speakChatReply(text)
   }, [speakChatReplies, task?.id, task?.status, task?.result, task?.error])
 
-  const events = task?.events || []
-  const visible = useMemo(
-    () => events.filter((e) => !["model"].includes(e.kind) || e.title !== "Model is thinking"),
-    [events],
-  )
-
   useEffect(() => {
     const node = threadRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [visible.length, task?.result, task?.status, task?.id])
+  }, [task?.events?.length, task?.result, task?.status, task?.id])
 
   async function submit() {
     const text = prompt.trim()
@@ -241,38 +236,20 @@ export function ChatPage() {
 
       <div className="chat-thread" ref={threadRef}>
         {shown && (
-          <>
-            {shown.prompt && (
-              <div className="bubble bubble-user">
-                <strong>You</strong>
-                <p>{shown.prompt}</p>
-              </div>
-            )}
-            <div className="timeline">
-              {visible.map((event, index) => (
-                <div className="t-item" key={index}>
-                  <div className="rail" />
-                  <div>
-                    <strong>{event.title}</strong>
-                    {event.detail && <p>{event.detail.slice(0, 800)}</p>}
-                  </div>
-                </div>
-              ))}
-              {!visible.length && running && <p className="lede">Waiting for the first action.</p>}
-            </div>
-            {(shown.result || shown.error || shown.status === "completed") && (
-              <div className="bubble bubble-result">
-                <strong>Result</strong>
-                <div className="report">{shown.result || shown.error || "The final report appears after verification."}</div>
-                {shown.waiting_for_confirmation && (
-                  <div className="row" style={{ marginTop: 12 }}>
-                    <button className="btn" onClick={() => api(`/api/tasks/${shown.id}/continue`, { method: "POST", body: JSON.stringify({ approve: true }) })}>Approve</button>
-                    <button className="btn secondary" onClick={() => api(`/api/tasks/${shown.id}/continue`, { method: "POST", body: JSON.stringify({ approve: false }) })}>Reject</button>
-                  </div>
-                )}
-              </div>
-            )}
-          </>
+          <OwnerChatTranscript
+            key={shown.id}
+            variant="classic"
+            taskId={shown.id}
+            prompt={shown.prompt}
+            status={shown.status}
+            stage={shown.stage}
+            current_action={shown.current_action}
+            current_tool={shown.current_tool}
+            waiting_for_confirmation={shown.waiting_for_confirmation}
+            result={shown.result}
+            error={shown.error}
+            events={shown.events}
+          />
         )}
       </div>
 
