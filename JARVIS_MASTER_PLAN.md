@@ -2394,6 +2394,14 @@ Reason:
 
 Current host TTS still falls through to robotic OS/espeak-class backends despite the voice-profile catalog. Owner asked for quality, not another picker.
 
+Decision: RFC-0073 HUD model hotswap selector (implemented)
+
+RFC-0073 is implemented on development via #180+#181 (`0b9cfa1`). HUD ModelSelector top-right, pinnable slots, More → `/model`. No new §58 backlog checkboxes.
+
+Reason:
+
+CoS assigned this ledger tick after #181 landed on tip; specs #180 accepted the contract.
+
 ---
 
 ## 60. Expected Example Behavior
