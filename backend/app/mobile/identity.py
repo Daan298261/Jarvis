@@ -121,7 +121,12 @@ def generate_pairing_code(ttl_minutes: int = DEFAULT_PAIRING_TTL_MINUTES) -> dic
             db,
             "pairing_session",
             PAIRING_OWNER,
-            {"active_hash": code_hash, "expires_at": expires_at, "updated_at": now},
+            {
+                "active_hash": code_hash,
+                "expires_at": expires_at,
+                "updated_at": now,
+                "display_code": code,
+            },
         )
     return {
         "code": code,
@@ -147,13 +152,16 @@ def pairing_code_status() -> dict:
         remaining = max(0, int(record["expires_at"] - now))
         claimed = bool(record.get("claimed_by"))
         active = remaining > 0 and not claimed
-        return {
+        result = {
             "active": active,
             "claimed": claimed,
             "expires_at": record["expires_at"],
             "ttl_remaining_seconds": remaining,
             "id": record["id"],
         }
+        if active and session.get("display_code"):
+            result["code"] = session["display_code"]
+        return result
 
 
 def check_enroll_rate_limit(client_ip: str, device_fingerprint: str = "") -> None:

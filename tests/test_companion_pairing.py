@@ -161,6 +161,73 @@ def test_companion_enroll_accepts_code_without_owner_key(companion_env):
     assert response.json()["status"] == "pending"
 
 
+@pytest.fixture
+def companion_env_no_owner_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    settings = AppSettings(
+        allowed_directories=[str(tmp_path)],
+        auth_required=True,
+        auth_token="",
+    )
+    monkeypatch.setattr("app.main.load_settings", lambda: settings)
+    monkeypatch.setattr("app.auth.load_settings", lambda: settings)
+    monkeypatch.setattr("app.mobile.identity.load_settings", lambda: settings)
+    return {
+        "tmp": tmp_path,
+        "client": TestClient(app, client=("127.0.0.1", 47880)),
+    }
+
+
+def test_pairing_codes_auto_mint_owner_key_without_prior_key(companion_env_no_owner_key, caplog):
+    client = companion_env_no_owner_key["client"]
+    with caplog.at_level("INFO"):
+        create = client.post("/api/mobile/manage/pairing-codes", json={"ttl_minutes": 10})
+    assert create.status_code == 200
+    body = create.json()
+    assert len(body["code"]) == 6
+    from app.auth import get_effective_private_key, private_key_file_path
+
+    assert get_effective_private_key()
+    assert private_key_file_path().exists()
+    assert not any("jarvis_pk_" in record.message for record in caplog.records)
+    status = client.get("/api/mobile/manage/pairing-codes/status")
+    assert status.status_code == 200
+    assert status.json()["active"] is True
+    assert status.json()["code"] == body["code"]
+
+
+def test_pairing_status_includes_qr_fields_when_connection_ready(companion_env, monkeypatch):
+    from app.mobile import connectivity
+
+    monkeypatch.setattr(
+        connectivity.CONNECTIVITY,
+        "snapshot",
+        lambda: {
+            "state": "ready",
+            "endpoints": ["https://192.168.1.5:4781"],
+            "server_pin": "a" * 64,
+        },
+    )
+    client = companion_env["client"]
+    owner = owner_headers(companion_env["owner_key"])
+    created = client.post("/api/mobile/manage/pairing-codes", headers=owner, json={}).json()
+    assert created["endpoint"] == "https://192.168.1.5:4781"
+    assert created["qr"]["code"] == created["code"]
+    assert created["qr"]["server_pin"] == "a" * 64
+
+
+def test_companion_onboarding_snapshot_offers_pair_and_explore(companion_env):
+    client = companion_env["client"]
+    response = client.get("/api/mobile/onboarding/companion")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == 1
+    offer_ids = {item["id"] for item in body["offers"]}
+    assert offer_ids == {"pair_phone", "explore_features"}
+    assert all("spoken_prompt" in item for item in body["offers"])
+
+
 def test_companion_enroll_legacy_invitation_without_owner_key(companion_env):
     client = companion_env["client"]
     owner = owner_headers(companion_env["owner_key"])

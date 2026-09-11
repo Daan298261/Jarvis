@@ -11,14 +11,16 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 
-from ..auth import require_owner_private_key
+from ..auth import require_owner_private_key, require_owner_private_key_for_pairing
+from ..mobile.companion_onboarding import companion_onboarding_snapshot
+from ..mobile.pairing_payload import enrich_pairing_session
 from ..db.models import Task
 from ..db.session import SessionLocal
 from ..mobile import identity, realtime_voice, scheduler, service
 from ..mobile.store import database, get, put, root, rows
 
 router = APIRouter(prefix="/api/companion", tags=["companion"])
-owner_router = APIRouter(prefix="/api/mobile/manage", dependencies=[Depends(require_owner_private_key)], tags=["mobile management"])
+owner_router = APIRouter(prefix="/api/mobile/manage", tags=["mobile management"])
 Device = Depends(identity.require_device)
 
 
@@ -366,38 +368,38 @@ def studio(device=Device):
     return service.studio_capabilities()
 
 
-@owner_router.post("/invitations")
+@owner_router.post("/invitations", dependencies=[Depends(require_owner_private_key)])
 def invitation():
     return identity.invite()
 
 
-@owner_router.post("/pairing-codes")
+@owner_router.post("/pairing-codes", dependencies=[Depends(require_owner_private_key_for_pairing)])
 def create_pairing_code(body: PairingCodeRequest):
-    return identity.generate_pairing_code(body.ttl_minutes)
+    return enrich_pairing_session(identity.generate_pairing_code(body.ttl_minutes))
 
 
-@owner_router.post("/pairing-codes/regenerate")
+@owner_router.post("/pairing-codes/regenerate", dependencies=[Depends(require_owner_private_key_for_pairing)])
 def regenerate_pairing_code(body: PairingCodeRequest):
-    return identity.regenerate_pairing_code(body.ttl_minutes)
+    return enrich_pairing_session(identity.regenerate_pairing_code(body.ttl_minutes))
 
 
-@owner_router.get("/pairing-codes/status")
+@owner_router.get("/pairing-codes/status", dependencies=[Depends(require_owner_private_key_for_pairing)])
 def pairing_code_status():
-    return identity.pairing_code_status()
+    return enrich_pairing_session(identity.pairing_code_status())
 
 
-@owner_router.get("/devices")
+@owner_router.get("/devices", dependencies=[Depends(require_owner_private_key)])
 def devices():
     with database() as db:
         return [identity.safe_device(d) for d in rows(db, "device")]
 
 
-@owner_router.post("/devices/{device_id}/confirm")
+@owner_router.post("/devices/{device_id}/confirm", dependencies=[Depends(require_owner_private_key_for_pairing)])
 def confirm(device_id: uuid.UUID, body: Confirm):
     return identity.set_status(str(device_id), "active", body.fingerprint)
 
 
-@owner_router.post("/devices/{device_id}/revoke")
+@owner_router.post("/devices/{device_id}/revoke", dependencies=[Depends(require_owner_private_key)])
 def revoke(device_id: uuid.UUID):
     return identity.set_status(str(device_id), "revoked")
 
@@ -411,19 +413,19 @@ class ConnectionSetup(BaseModel):
     remote: bool = True
 
 
-@owner_router.get("/connection")
+@owner_router.get("/connection", dependencies=[Depends(require_owner_private_key)])
 def connection_status():
     from ..mobile.connectivity import CONNECTIVITY
     return CONNECTIVITY.snapshot()
 
 
-@owner_router.get("/infrastructure")
+@owner_router.get("/infrastructure", dependencies=[Depends(require_owner_private_key)])
 def infrastructure_status():
     from ..mobile.infrastructure import infrastructure_readiness
     return infrastructure_readiness()
 
 
-@owner_router.post("/connection")
+@owner_router.post("/connection", dependencies=[Depends(require_owner_private_key)])
 async def connection_setup(body: ConnectionSetup):
     from ..mobile.connectivity import CONNECTIVITY
     return await CONNECTIVITY.configure(body.enabled, body.remote)
@@ -437,7 +439,7 @@ def device_connection_status(device=Device):
     return {key: snapshot[key] for key in ("endpoints", "server_pin") if key in snapshot}
 
 
-@owner_router.post("/builds")
+@owner_router.post("/builds", dependencies=[Depends(require_owner_private_key)])
 async def build_apk(body: Build):
     from ..mobile.provision import start
     from ..mobile.connectivity import CONNECTIVITY, origin
@@ -450,13 +452,13 @@ async def build_apk(body: Build):
     return await start(endpoint, prepared if endpoint in prepared else [])
 
 
-@owner_router.get("/builds/{job_id}")
+@owner_router.get("/builds/{job_id}", dependencies=[Depends(require_owner_private_key)])
 def build_status(job_id: uuid.UUID):
     from ..mobile.provision import job
     return job(str(job_id))
 
 
-@owner_router.get("/builds/{job_id}/apk")
+@owner_router.get("/builds/{job_id}/apk", dependencies=[Depends(require_owner_private_key)])
 def apk_download(job_id: uuid.UUID):
     from ..mobile.provision import job
     value = job(str(job_id))
@@ -471,7 +473,7 @@ class Contact(BaseModel):
     task_id: uuid.UUID | None = None
 
 
-@owner_router.post("/devices/{device_id}/call")
+@owner_router.post("/devices/{device_id}/call", dependencies=[Depends(require_owner_private_key)])
 async def contact(device_id: uuid.UUID, body: Contact):
     from ..mobile.calls import create_call
     from ..mobile.runtime import deliver_one, enqueue_push
