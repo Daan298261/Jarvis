@@ -3879,12 +3879,48 @@ export async function getDiagnosticsText(): Promise<{ text: string; diagnostics:
   return api("/api/diagnostics/text")
 }
 
-/** RFC-0063 — owner-side companion pairing codes (D1 backend). */
+/** RFC-0063 / RFC-0074 — owner-side companion pairing codes (D1 backend). */
+export type CompanionPairingQr = {
+  endpoint: string
+  server_pin: string
+  code: string
+}
+
 export type CompanionPairingCode = {
   code: string
   expires_at: string | number
   ttl_seconds?: number
   id?: string
+  active?: boolean
+  claimed?: boolean
+  endpoint?: string
+  endpoints?: string[]
+  server_pin?: string
+  qr?: CompanionPairingQr | null
+}
+
+export type CompanionOnboardingOffer = {
+  id: string
+  label: string
+  spoken_prompt: string
+  hint?: string
+}
+
+export type CompanionOnboardingSnapshot = {
+  version: number
+  owner_key_configured: boolean
+  paired_device_count: number
+  pending_device_count: number
+  speak_chat_replies: boolean
+  connection: {
+    state: string
+    activity: string
+    endpoints: string[]
+    server_pin: string
+    ready: boolean
+  }
+  pairing: Record<string, unknown>
+  offers: CompanionOnboardingOffer[]
 }
 
 /** BlackGrid studio capabilities (companion device auth: GET /api/companion/studio). */
@@ -3899,12 +3935,6 @@ export type CompanionStudioCapabilities = {
 export type CompanionPairingApiResult =
   | { available: true; pairing: CompanionPairingCode }
   | { available: false; reason: "not_found" | "error"; message?: string }
-
-let lastCompanionPairing: CompanionPairingCode | null = null
-
-function pairingExpiry(pairing: CompanionPairingCode): number {
-  return typeof pairing.expires_at === "number" ? pairing.expires_at * 1000 : Date.parse(pairing.expires_at)
-}
 
 async function companionPairingRequest(
   path: string,
@@ -3944,22 +3974,29 @@ async function companionPairingRequest(
 }
 
 export async function getActiveCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  if (lastCompanionPairing && pairingExpiry(lastCompanionPairing) > Date.now()) {
-    return { available: true, pairing: lastCompanionPairing }
+  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/status")
+  if (!result.available) {
+    return result
   }
-  return { available: false, reason: "not_found" }
+  const code = String(result.pairing.code || "").replace(/\D/g, "")
+  if (code.length !== 6 || result.pairing.active === false) {
+    return { available: false, reason: "not_found" }
+  }
+  return { available: true, pairing: result.pairing }
 }
 
 export async function createCompanionPairingCode(): Promise<CompanionPairingApiResult> {
   const result = await companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: "{}" })
-  if (result.available) lastCompanionPairing = result.pairing
   return result
 }
 
 export async function regenerateCompanionPairingCode(): Promise<CompanionPairingApiResult> {
   const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: "{}" })
-  if (result.available) lastCompanionPairing = result.pairing
   return result
+}
+
+export async function fetchCompanionOnboarding(): Promise<CompanionOnboardingSnapshot> {
+  return api<CompanionOnboardingSnapshot>("/api/mobile/onboarding/companion")
 }
 
 /** RFC-0076 — companion APK build + delivery (owner manage API). */

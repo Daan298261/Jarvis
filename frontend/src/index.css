@@ -1652,6 +1652,30 @@ label { display: block; color: var(--muted); font-size: 13px; }
   justify-content: center;
   flex-wrap: wrap;
 }
+
+.companion-pairing-offers {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.companion-pairing-offers-lede {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.companion-pairing-offer-actions { flex-wrap: wrap; gap: 10px; }
+.companion-pairing-qr-block {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.companion-pairing-qr {
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  width: fit-content;
+}
 .companion-pairing-steps {
   width: 100%;
   margin: 0;
