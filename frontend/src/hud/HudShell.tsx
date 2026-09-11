@@ -89,7 +89,6 @@ export function HudTopChrome({
       </div>
 
       <div className="hud-top-right">
-        <HudModelSelector model={model} />
         <button type="button" className="hud-icon-btn" onClick={onAdminToggle} aria-expanded={adminOpen}>
           Admin
         </button>
@@ -100,6 +99,7 @@ export function HudTopChrome({
         >
           Legacy UI
         </button>
+        <HudModelSelector model={model} />
       </div>
 
       {adminOpen && (
