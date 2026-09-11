@@ -108,6 +108,39 @@
   max-width: min(52vw, 640px);
 }
 
+/* When the hotswap menu is open, reflow chrome so the 360px panel does not sit on Admin / Legacy. */
+.hud-top:has(.hud-model-trigger.open) {
+  z-index: 110;
+  overflow: visible;
+  align-items: flex-start;
+}
+
+.hud-top-right:has(.hud-model-trigger.open) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: flex-end;
+  align-content: flex-end;
+  row-gap: 8px;
+  max-width: min(360px, calc(100vw - 36px));
+}
+
+.hud-top-right:has(.hud-model-trigger.open) > .hud-icon-btn {
+  order: 1;
+  flex: 0 0 auto;
+}
+
+.hud-top-right:has(.hud-model-trigger.open) > .hud-model-selector {
+  order: 2;
+  flex: 1 1 100%;
+  display: flex;
+  justify-content: flex-end;
+  z-index: 1;
+}
+
+.hud-top-right:has(.hud-model-trigger.open) .hud-model-menu {
+  z-index: 130;
+}
+
 /* HUD_MODEL_HOTSWAP — top-right model selector (RFC id TBD) */
 .hud-model-selector {
   position: relative;
