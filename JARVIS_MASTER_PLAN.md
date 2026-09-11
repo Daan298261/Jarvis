@@ -2402,6 +2402,22 @@ Reason:
 
 CoS assigned this ledger tick after #181 landed on tip; specs #180 accepted the contract.
 
+Decision: RFC-0074 / 0075 / 0076 accepted (Taco 1.2.5 desktop test)
+
+CoS → Jarvis Architect. Three accepted specs from the 1.2.5 owner test: RFC-0074 companion pairing streamline + QR + spoken pair-vs-explore onboarding; RFC-0075 social vs technical speak path, first-sentence TTS, thought-process chevron; RFC-0076 APK build progress + Download to Desktop + WhatsApp/email send when configured. No new §58 backlog checkboxes. Implement is UX/D1/D2 after this specs-only land.
+
+Reason:
+
+Taco 1.2.5: pairing failed without a private key and without QR; default TTS still robotic / late / markup-aloud; APK generation had no visible progress or Desktop/send path.
+
+Decision: RFC-0077 local LM Studio discovery + play/hotswap context (accepted)
+
+CoS → Jarvis Architect. Accepted spec: auto-discover GGUFs under the **current user’s** `%USERPROFILE%\.lmstudio\models` / `~/.lmstudio/models` (never a hardcoded username); grade via RFC-0043; show in HUD ModelSelector marked **local** with a **play** one-click load; preserve conversation id + recent turns + persona pack across hotswap; reflow HudTopChrome so Admin/Legacy do not overlap the open selector. No new §58 backlog checkboxes. Implement is D1 + UX after this specs-only land. RFC-0074 / 0075 / 0076 stay intact.
+
+Reason:
+
+Taco wants all local LM Studio models discovered for whoever is logged in, play-to-load without resetting chat, and no overlapping HUD chrome when the selector opens.
+
 ---
 
 ## 60. Expected Example Behavior
