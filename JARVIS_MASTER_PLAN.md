@@ -2410,13 +2410,21 @@ Reason:
 
 Taco 1.2.5: pairing failed without a private key and without QR; default TTS still robotic / late / markup-aloud; APK generation had no visible progress or Desktop/send path.
 
-Decision: RFC-0077 local LM Studio discovery + play/hotswap context (accepted)
+Decision: RFC-0075 natural speak path + reply latency (implemented)
 
-CoS → Jarvis Architect. Accepted spec: auto-discover GGUFs under the **current user’s** `%USERPROFILE%\.lmstudio\models` / `~/.lmstudio/models` (never a hardcoded username); grade via RFC-0043; show in HUD ModelSelector marked **local** with a **play** one-click load; preserve conversation id + recent turns + persona pack across hotswap; reflow HudTopChrome so Admin/Legacy do not overlap the open selector. No new §58 backlog checkboxes. Implement is D1 + UX after this specs-only land. RFC-0074 / 0075 / 0076 stay intact.
+RFC-0075 is implemented on development via #188 (`99e1028`): social vs technical speak path, speak filter, natural prose, early TTS. RFC-0067 Show work / hide-chrome remains the owner-chat thought-process contract. No new §58 backlog checkboxes. RFC-0074 / 0076 stay accepted.
 
 Reason:
 
-Taco wants all local LM Studio models discovered for whoever is logged in, play-to-load without resetting chat, and no overlapping HUD chrome when the selector opens.
+CoS assigned this ledger tick after #188 landed on tip.
+
+Decision: RFC-0077 local LM Studio discovery + play/hotswap context (implemented)
+
+RFC-0077 is implemented on development via #187 (`b806080`) + #186 (`3f8f6a4`) + #185 (`1aed4a8` chrome overlap). Home-relative LM Studio discovery, local + play in ModelSelector, conversation rebind, HudTopChrome reflow. No new §58 backlog checkboxes.
+
+Reason:
+
+CoS assigned this ledger tick after #187+#186 landed on tip. Taco wants all local LM Studio models discovered for whoever is logged in, play-to-load without resetting chat, and no overlapping HUD chrome when the selector opens.
 
 ---
 

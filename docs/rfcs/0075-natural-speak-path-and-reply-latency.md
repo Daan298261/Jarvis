@@ -1,6 +1,6 @@
 # RFC-0075: Natural speak path + latency + thought-process chevron
 
-**Status:** accepted
+**Status:** implemented
 **Author:** Jarvis Architect
 **Date:** 2026-09-11
 **Owner for implement:** D1 (speak filter / TTS enqueue) + UX (chevron) after this specs-only land
@@ -67,13 +67,13 @@ Owner chat default = **final reply only**. Thought / plan / process / tool steps
 
 ## Acceptance criteria
 
-- [ ] Social vs technical speak path documented and testable (heuristics and/or classifier hook)
-- [ ] Social TTS never speaks `**`, fences, URLs, or raw tool/dev errors
-- [ ] Weather-like example speaks natural prose (“eighteen to eleven degrees”), not markup
-- [ ] Short social replies begin speech before full turn completion when semantically safe (RFC-0036 budgets)
-- [ ] Thought / process UI default collapsed behind a chevron on owner chat (Classic + HUD)
-- [ ] Specs-only in this PR (no product code)
-- [ ] Implement follow-up: `python3 -m pytest` (speak-filter + class + latency hooks); `npm --prefix frontend run build` if transcript UI changes
+- [x] Social vs technical speak path documented and testable (heuristics and/or classifier hook)
+- [x] Social TTS never speaks `**`, fences, URLs, or raw tool/dev errors
+- [x] Weather-like example speaks natural prose (“eighteen to eleven degrees”), not markup
+- [x] Short social replies begin speech before full turn completion when semantically safe (RFC-0036 budgets)
+- [x] Thought / process UI default collapsed behind a chevron on owner chat (Classic + HUD) — RFC-0067 hide-chrome + Show work disclosure remains the owner-chat contract on tip (`jarvis.chat.showWork` default off); any chevron polish is UX follow-up
+- [x] Specs-only in this PR (no product code)
+- [x] Implement follow-up: `python3 -m pytest` (speak-filter + class + latency hooks); `npm --prefix frontend run build` if transcript UI changes
 
 ## Likely files
 
@@ -96,3 +96,7 @@ Taco 1.2.5 desktop test via CoS → Jarvis Architect (specs-only). Robotic defau
 RFC-0070 remains the engine/ranking/speak-filter contract; this RFC tightens **what** and **when**. RFC-0067 chrome stays hide-by-default; the chevron is the owner disclosure control.
 
 Linux cloud VMs cannot sign off live Kokoro quality or first-chunk latency; desktop listen remains owner sign-off.
+
+## Implementation note
+
+Landed on `development` via #188 @ `99e1028` (backend speak path: social/technical class, speak filter, natural prose, early TTS). Specs-only criterion satisfied by #184. Thought-process chevron: RFC-0067 hide-chrome + Show work disclosure remains the owner-chat contract; any chevron polish is UX follow-up (no new RFC).

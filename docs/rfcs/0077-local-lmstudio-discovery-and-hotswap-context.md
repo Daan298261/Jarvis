@@ -1,6 +1,6 @@
 # RFC-0077: Local LM Studio discovery + play/hotswap context
 
-**Status:** accepted
+**Status:** implemented
 **Author:** Jarvis Architect
 **Date:** 2026-09-11
 **Owner for implement:** D1 (scan/grade/load) + UX (ModelSelector chrome)
@@ -70,13 +70,13 @@ When ModelSelector opens, **Admin**, **Legacy UI**, and the admin drawer must no
 
 ## Acceptance criteria
 
-- [ ] Discovers under current-user `~/.lmstudio/models` / `%USERPROFILE%\.lmstudio\models` without hardcoded usernames
-- [ ] Graded + shown in ModelSelector marked **local**
-- [ ] Play = one-click immediate load
-- [ ] Hotswap/play preserves conversation context (same conversation id + recent turns + persona pack)
-- [ ] No Admin/Legacy overlap when selector open
-- [ ] Specs-only in this PR (no product code)
-- [ ] Implement follow-up: `python3 -m pytest` (discovery root + no-username + context rebind); `npm --prefix frontend run build` when ModelSelector chrome lands
+- [x] Discovers under current-user `~/.lmstudio/models` / `%USERPROFILE%\.lmstudio\models` without hardcoded usernames
+- [x] Graded + shown in ModelSelector marked **local**
+- [x] Play = one-click immediate load
+- [x] Hotswap/play preserves conversation context (same conversation id + recent turns + persona pack)
+- [x] No Admin/Legacy overlap when selector open
+- [x] Specs-only in this PR (no product code)
+- [x] Implement follow-up: `python3 -m pytest` (discovery root + no-username + context rebind); `npm --prefix frontend run build` when ModelSelector chrome lands
 
 ## Likely files
 
@@ -98,3 +98,7 @@ Taco via CoS → Jarvis Architect (specs-only). Wants all local LM Studio models
 RFC-0043 remains the grading/catalog contract; this RFC owns **home-relative discovery**, **local + play in the HUD selector**, **conversation rebind**, and **chrome stacking**. RFC-0073 remains the slot/hotswap chrome contract.
 
 Linux cloud VMs cannot sign off live LM Studio load or HUD overlap on Windows; those are owner-desktop verification after implement.
+
+## Implementation note
+
+Landed on `development` via #187 @ `b806080` (backend discovery / play / hotswap rebind) + #186 @ `3f8f6a4` (frontend local mark, play, context UX) + #185 @ `1aed4a8` (HudTopChrome Admin/Legacy overlap reflow). Specs-only criterion satisfied by #184; implement pytest/build satisfied by those lands.
