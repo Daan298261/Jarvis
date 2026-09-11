@@ -171,6 +171,17 @@
   background: rgba(122, 212, 239, 0.06);
 }
 
+.hud-model-trigger.transferring {
+  border-color: rgba(103, 220, 255, 0.45);
+}
+
+.hud-model-transferring {
+  margin: 0 0 8px;
+  font-size: 10px;
+  color: rgba(160, 220, 245, 0.85);
+  letter-spacing: 0.02em;
+}
+
 .hud-model-trigger-label {
   font-size: 11px;
   font-weight: 600;
@@ -371,6 +382,119 @@
 
 .hud-model-more:hover {
   text-decoration: underline;
+}
+
+.hud-model-local {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hud-line);
+}
+
+.hud-model-local-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.hud-model-local-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(190, 220, 235, 0.65);
+}
+
+.hud-model-local-vram {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  color: rgba(170, 195, 210, 0.5);
+}
+
+.hud-model-local-hint {
+  margin: 0;
+  font-size: 10px;
+  color: rgba(170, 195, 210, 0.55);
+}
+
+.hud-model-local-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.hud-model-local-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 8px;
+}
+
+.hud-model-local-row.active {
+  background: rgba(103, 220, 255, 0.07);
+}
+
+.hud-model-local-row.ungraded {
+  opacity: 0.85;
+}
+
+.hud-model-local-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.hud-model-local-name {
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hud-model-local-meta {
+  font-size: 9px;
+  color: rgba(170, 195, 210, 0.55);
+}
+
+.hud-model-local-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(120, 210, 180, 0.95);
+  background: rgba(80, 180, 140, 0.12);
+  border: 1px solid rgba(100, 200, 160, 0.25);
+  vertical-align: middle;
+}
+
+.hud-model-local-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+  align-items: center;
+}
+
+.hud-model-play-btn {
+  min-width: 32px;
+  font-size: 11px;
+  color: var(--hud-cyan);
+}
+
+.hud-model-slot.disabled,
+.hud-model-slot:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .hud-icon-btn,

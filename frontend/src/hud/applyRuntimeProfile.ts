@@ -3,6 +3,7 @@ import {
   getRuntimeProfile,
   getSelectedRuntimePolicy,
   routeRuntime,
+  selectLmStudioProfile,
   setSelectedRuntimeMode,
   setSelectedRuntimeProfileId,
   type RuntimeProfile,
@@ -46,4 +47,11 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
   }
 
   return profile
+}
+
+/** RFC-0077 — bind LM Studio catalog row then force route/load (conversation stays client-side). */
+export async function playLmStudioCatalogProfile(catalogProfileId: string): Promise<RuntimeProfile> {
+  const runtime = await selectLmStudioProfile(catalogProfileId)
+  const id = runtime.id || runtime.name
+  return applyRuntimeProfile(id)
 }
