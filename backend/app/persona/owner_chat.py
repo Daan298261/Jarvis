@@ -8,7 +8,14 @@ from ..config import load_settings
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
 from ..providers.base import ChatMessage
-from .chat_delivery import publish_owner_text
+from .chat_delivery import (
+    OWNER_CHAT_CHANNEL,
+    clear_stream_speak_state,
+    maybe_enqueue_streaming_social_tts,
+    publish_owner_text,
+    stream_speak_offset,
+)
+from ..events import BUS
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
 Reply naturally, warmly, and briefly in a British-inspired butler register.
@@ -116,6 +123,9 @@ async def stream_owner_chat(
     profile = resolve_profile(settings.inference.profile)
     messages = _owner_messages(cid, cleaned)
     parts: list[str] = []
+    stream_key = f"owner:{cid}"
+    clear_stream_speak_state(stream_key)
+    early_tts_ids: list[str] = []
 
     try:
         async for delta in MANAGER.chat_stream(
@@ -127,8 +137,25 @@ async def stream_owner_chat(
             thinking=False,
         ):
             parts.append(delta)
+            accumulated = "".join(parts)
+            early_id = maybe_enqueue_streaming_social_tts(
+                accumulated,
+                source="owner_chat",
+                stream_key=stream_key,
+                user_prompt=cleaned,
+            )
+            if early_id:
+                early_tts_ids.append(early_id)
+                await BUS.publish_ephemeral(
+                    OWNER_CHAT_CHANNEL,
+                    "chat_tts",
+                    "Speak reply",
+                    accumulated[: stream_speak_offset(stream_key)],
+                    stage="owner_chat",
+                )
             yield {"type": "delta", "conversation_id": cid, "text": delta}
     except Exception as exc:
+        clear_stream_speak_state(stream_key)
         yield {"type": "error", "detail": str(exc)[:500]}
         return
 
@@ -136,14 +163,24 @@ async def stream_owner_chat(
     if reply:
         _conversations[cid].append(ChatMessage(role="user", content=cleaned))
         _conversations[cid].append(ChatMessage(role="assistant", content=reply))
-        delivery = await publish_owner_text(reply, source="owner_chat", speak=True)
+        delivery = await publish_owner_text(
+            reply,
+            source="owner_chat",
+            speak=True,
+            user_prompt=cleaned,
+            tts_char_offset=stream_speak_offset(stream_key),
+        )
+        clear_stream_speak_state(stream_key)
+        tts_id = early_tts_ids[0] if early_tts_ids and not delivery.get("tts_id") else delivery.get("tts_id")
         yield {
             "type": "done",
             "conversation_id": cid,
             "text": reply,
-            "tts_id": delivery.get("tts_id"),
+            "tts_id": tts_id,
+            "early_tts_ids": early_tts_ids,
         }
     else:
+        clear_stream_speak_state(stream_key)
         yield {"type": "done", "conversation_id": cid, "text": ""}
 
 

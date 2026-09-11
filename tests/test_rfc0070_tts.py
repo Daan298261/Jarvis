@@ -75,6 +75,14 @@ def test_tts_modules_import_without_circular_import():
     importlib.import_module("app.workers.voice")
 
 
+def test_speak_filter_strips_bold_weather_for_owner_chat():
+    raw = "Today: **18** to **11** degrees, partly cloudy."
+    filtered = filter_text_for_speech(raw, source="owner_chat", user_prompt="weather?")
+    assert "**" not in filtered
+    assert "eighteen" in filtered
+    assert "eleven" in filtered
+
+
 def test_enqueue_chat_tts_skips_non_speakable_content():
     item_id = enqueue_chat_tts("PLAN: hidden\nhttps://x.test", source="task_chat")
     assert item_id == ""
