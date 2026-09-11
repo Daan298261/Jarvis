@@ -5,9 +5,14 @@
   "license": "original",
   "provenance": "Original synthetic command archetype. Requires a licensed voice pack install.",
   "tts": {
-    "engine_hint": "qwen3-tts",
-    "speaker_ref": "synthetic_command_v1",
-    "pack_path": "voice_packs/synthetic_command_original_v1"
+    "engine_id": "kokoro",
+    "engine_hint": "kokoro",
+    "model_id": "kokoro-82m",
+    "speaker_ref": "am_michael",
+    "pack_path": "voice_packs/synthetic_command_original_v1",
+    "quality_tier": "baseline",
+    "offline": true,
+    "license": "Apache-2.0"
   },
   "persona_hooks": {
     "register": "clinical",

@@ -16,6 +16,13 @@ IRREVERSIBLE_PATTERNS = [
     r"net\s+user\s+\S+\s+\S+",
     r"shutdown\s+/s",
     r"Remove-WindowsFeature",
+    r"\bremove-item\b",
+    r"(^|[;&|]\s*)rm\s+",
+    r"(^|[;&|]\s*)(del|erase|rmdir|rd)\s+",
+    r"\b(unlink|shred)\s+",
+    r"\b(drop|truncate)\s+(database|schema|table)\b",
+    r"\bdelete\s+from\b",
+    r"git\s+(reset\s+--hard|clean\s+-[^\r\n]*f)",
 ]
 
 HIGH_IMPACT_PATTERNS = [
@@ -49,15 +56,34 @@ def classify_command(command: str) -> RiskLevel:
     return RiskLevel.MEDIUM
 
 
-def needs_confirmation(autonomy: str, risk: RiskLevel, command: str | None = None) -> bool:
-    if command:
-        risk = max(risk, classify_command(command), key=lambda item: list(RiskLevel).index(item))
-    autonomy = (autonomy or "trusted").lower()
-    if autonomy == "interactive":
-        return risk in {RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.IRREVERSIBLE}
-    if autonomy == "trusted":
-        return risk in {RiskLevel.HIGH, RiskLevel.IRREVERSIBLE}
-    return risk == RiskLevel.IRREVERSIBLE
+def is_destructive_operation(
+    tool_name: str | None = None,
+    arguments: dict | None = None,
+    command: str | None = None,
+) -> bool:
+    """Return true only for actions that erase data or discard recoverable state."""
+    args = arguments or {}
+    action = str(args.get("action") or "").strip().lower()
+    name = str(tool_name or "").strip().lower()
+    if action in {"delete", "remove", "destroy", "purge", "truncate", "drop", "uninstall"}:
+        return True
+    if name == "git" and action in {"worktree_remove", "clean", "reset_hard"}:
+        return True
+    raw = command or (str(args.get("command") or "") if args else "")
+    return bool(raw and classify_command(raw) == RiskLevel.IRREVERSIBLE)
+
+
+def needs_confirmation(
+    autonomy: str,
+    risk: RiskLevel,
+    command: str | None = None,
+    *,
+    tool_name: str | None = None,
+    arguments: dict | None = None,
+) -> bool:
+    """Routine task operations are automatic; destructive deletion always pauses."""
+    del autonomy
+    return risk == RiskLevel.IRREVERSIBLE or is_destructive_operation(tool_name, arguments, command)
 
 
 def resolve_allowed_path(path: str, allowed: list[str]) -> Path:

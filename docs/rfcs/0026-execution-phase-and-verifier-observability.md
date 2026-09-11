@@ -43,6 +43,8 @@ For software work, evidence may include tests/build/lint results and changed-fil
 
 The UI should default to compactness: one phase indicator, one concrete activity line, optional elapsed/progress, and a verification badge. Rich event history, child workers, evidence, retries, and warnings belong in expandable task detail. This follows Jarvis's clean command-center direction rather than turning the home screen into an operations HUD.
 
+For task tool execution, approval is effect-based: routine operations are auto-approved once the effective Agent Profile permits execution. An operation that deletes data or destructively discards state always enters `WAITING_APPROVAL`, including at the highest autonomy level. Capability denials, filesystem boundaries, authentication, and hard policy prohibitions remain enforced and are not approval prompts.
+
 ## Acceptance criteria
 
 - [ ] Define the canonical execution phase enum and legal transition rules.
@@ -65,6 +67,7 @@ The UI should default to compactness: one phase indicator, one concrete activity
 - [ ] Home/task-row presentation remains compact: phase, concrete activity, optional deterministic progress/elapsed time, and verification status; detailed telemetry is expandable rather than always visible.
 - [ ] Phase history and verifier evidence are included in audit/export APIs.
 - [ ] The same phase/verification projection can be consumed by desktop UI, Away Mode/automations, and RFC-0025 channel notifications without transport-specific lifecycle logic.
+- [ ] Routine task operations do not create approval prompts; destructive deletion always requires explicit approval.
 - [ ] Unit tests pass (`python3 -m pytest`).
 - [ ] If portal is touched, `npm --prefix frontend run build` passes.
 

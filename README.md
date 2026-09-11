@@ -16,7 +16,9 @@ Detailed P2+ swarm role, node placement, resource-control, and universal-UI requ
 | **[docs/rfcs/](docs/rfcs/)** | Design RFCs (template + index) |
 | **[docs/INSTALL.md](docs/INSTALL.md)** | Full Windows install: Python, Node, llama.cpp, GGUFs, start options, LAN auth, updates |
 | **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** | Repo map, dev servers, API, agent loop, adding tools, tests |
+| **[docs/ANDROID_MVP_LAN_CHECKLIST.md](docs/ANDROID_MVP_LAN_CHECKLIST.md)** | LAN-first Android companion MVP: APK, gateway `:4781`, pairing, smoke tests |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Control plane, compaction, memory, autonomy |
+| [docs/TASK_STATUS_AND_APPROVALS.md](docs/TASK_STATUS_AND_APPROVALS.md) | Routine auto-approval, destructive-delete gates, task phases and heartbeat UI |
 | [SWARM_ARCHITECTURE.md](SWARM_ARCHITECTURE.md) | P2–P4 node roles, placement, resources, swarm UI, multi-node and resilience requirements |
 | [ADAPTIVE_DOMAIN_ARCHITECTURE.md](ADAPTIVE_DOMAIN_ARCHITECTURE.md) | P4/P5 adaptive intelligence and domain packs |
 | [ANDROID_CLIENT.md](ANDROID_CLIENT.md) | Android client to the Leader; AI-guided WAN reachability |

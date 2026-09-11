@@ -1,65 +1,119 @@
 import { useEffect, useRef, useState } from "react"
 import * as THREE from "three"
+import { createPresenceAttentionController, type AttentionVector } from "../presenceAttention"
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js"
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
 import type { PresenceSnapshot, PresentationSettings } from "../presenceTypes"
-import { createParticleBust, particleFragmentShader, particleVertexShader } from "./particleBust"
+import {
+  createMorphablePresenceSystem,
+  particleFragmentShader,
+  particleVertexShader,
+} from "./morphableOrbCloud"
+import { presenceShapeIdForAvatar, resolvePresenceShape } from "./shapes/catalog"
 import "./humanoid-presence.css"
 
 type HumanoidPresenceProps = {
   snapshot: PresenceSnapshot
   settings: PresentationSettings
   size?: number
+  /** Optional override for harness / morph demos; defaults from settings.avatarId. */
+  shapeId?: string
 }
 
 const PHASE_COLOR: Record<PresenceSnapshot["phase"], number> = {
-  offline: 0x547084, idle: 0x00cfff, listening: 0x42edff, thinking: 0x24aeff,
-  executing: 0x20ddff, speaking: 0x57e6ff, waiting: 0x8bb4d2, alert: 0xff7957,
+  offline: 0x547084, idle: 0x00c8ff, listening: 0x2ad8ff, thinking: 0x1aa0ff,
+  executing: 0x00bdff, speaking: 0x3ad4ff, waiting: 0x7996b3, alert: 0xff7957,
 }
 
-export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) {
+export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresenceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
-  const stateRef = useRef({ snapshot, settings })
+  const attentionRef = useRef<AttentionVector>({ x: 0, y: 0, confidence: 0, source: "pointer" })
+  const stateRef = useRef({ snapshot, settings, shapeId })
   const [failure, setFailure] = useState<Error | null>(null)
+  const [activeShapeId, setActiveShapeId] = useState(
+    () => shapeId || presenceShapeIdForAvatar(settings.avatarId),
+  )
 
-  useEffect(() => { stateRef.current = { snapshot, settings } }, [snapshot, settings])
+  useEffect(() => {
+    stateRef.current = { snapshot, settings, shapeId }
+  }, [snapshot, settings, shapeId])
+
+  useEffect(() => {
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const controller = createPresenceAttentionController({
+      getMode: () => stateRef.current.settings.attentionMode,
+      getReducedMotion: () => {
+        const rm = stateRef.current.settings.reducedMotion
+        if (rm === "reduce") return true
+        if (rm === "full") return false
+        return motionQuery.matches
+      },
+    })
+    let frame = 0
+    const tick = () => {
+      frame = window.requestAnimationFrame(tick)
+      attentionRef.current = controller.sample()
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      controller.dispose()
+    }
+  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
     const stage = stageRef.current
     if (!canvas || !stage) return
     const efficient = settings.performancePreset === "efficient"
-    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: false,
-      powerPreference: efficient ? "low-power" : "high-performance" })
-    renderer.setClearColor(0x000000, 0)
+    const renderer = new THREE.WebGLRenderer({
+      canvas, alpha: true, antialias: false,
+      powerPreference: efficient ? "low-power" : "high-performance",
+    })
+    renderer.setClearColor(0x03070b, 1)
+    renderer.toneMapping = THREE.ReinhardToneMapping
+    renderer.toneMappingExposure = 1.08
     const scene = new THREE.Scene()
-    const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 40)
-    camera.position.set(0, 0.08, 7.1)
+    const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40)
+    camera.position.set(0.55, 0.28, 5.6)
+    camera.lookAt(0.05, 0.1, 0)
     const uniforms = {
       uTime: { value: 0 }, uMotion: { value: 1 }, uActivity: { value: 0 },
       uSpeech: { value: 0 }, uPixelScale: { value: 1 }, uOpacity: { value: 1 },
-      uSize: { value: 1 }, uGain: { value: 1 },
+      uMorph: { value: 1 },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
-      uGold: { value: new THREE.Color(0xffb33f) },
+      uGold: { value: new THREE.Color(0xff941f) },
     }
     const material = new THREE.ShaderMaterial({
-      uniforms, vertexShader: particleVertexShader, fragmentShader: particleFragmentShader,
-      transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
+      uniforms,
+      vertexShader: particleVertexShader,
+      fragmentShader: particleFragmentShader,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
     })
-    const density = efficient ? 0.65 : settings.performancePreset === "cinematic" ? 1.2 : 1
-    const { head, body, field } = createParticleBust(density, material)
-    // A soft sprite pass gives the point cloud bloom without full-screen render targets.
-    const glowMaterial = new THREE.ShaderMaterial({
-      uniforms: { ...uniforms, uSize: { value: 3.5 }, uGain: { value: 0.055 } },
-      vertexShader: particleVertexShader, fragmentShader: particleFragmentShader,
-      transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
-    })
-    if (!efficient) {
-      for (const points of [head, body, field]) points.add(new THREE.Points(points.geometry, glowMaterial))
+    const density = efficient ? 0.6 : settings.performancePreset === "cinematic" ? 1.15 : 0.95
+    const initialId = shapeId || presenceShapeIdForAvatar(settings.avatarId)
+    const system = createMorphablePresenceSystem(density, material, initialId)
+    const bust = system.bust
+    scene.add(system.group)
+    setActiveShapeId(system.currentShapeId)
+
+    const composer = efficient ? null : new EffectComposer(renderer)
+    const bloom = efficient
+      ? null
+      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.68, 0.38, 0.74)
+    const output = efficient ? null : new OutputPass()
+    if (composer && bloom && output) {
+      composer.addPass(new RenderPass(scene, camera))
+      composer.addPass(bloom)
+      composer.addPass(output)
     }
-    const bust = new THREE.Group()
-    bust.add(head, body)
-    scene.add(field, bust)
-    const pointer = new THREE.Vector2()
+
     const color = new THREE.Color()
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
     let frame = 0
@@ -70,31 +124,37 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
     const resize = () => {
       const { width, height } = stage.getBoundingClientRect()
       const preset = stateRef.current.settings.performancePreset
-      const cap = preset === "efficient" ? 1 : preset === "cinematic" ? 2 : 1.5
+      const cap = preset === "efficient" ? 1 : preset === "cinematic" ? 1.5 : 1.25
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap))
       renderer.setSize(Math.max(1, width), Math.max(1, height), false)
-      camera.aspect = Math.max(1, width) / Math.max(1, height)
-      // Fit shoulders on phones; preserve portrait scale as a desktop gets wider.
-      camera.position.z = Math.max(7.1, 5.6 / camera.aspect)
+      composer?.setPixelRatio(renderer.getPixelRatio())
+      composer?.setSize(Math.max(1, width), Math.max(1, height))
+      const aspect = Math.max(1, width) / Math.max(1, height)
+      const ultrawide = aspect >= 2.05
+      const stageUltrawide = ultrawide || window.innerWidth / Math.max(1, window.innerHeight) >= 2.05
+      camera.aspect = aspect
+      camera.fov = stageUltrawide ? 39 : 32
+      camera.position.z = stageUltrawide
+        ? Math.max(7.4, 5.8 / Math.min(aspect, 2.8))
+        : Math.max(5.4, 4.6 / Math.min(aspect, 2.1))
+      camera.position.x = stageUltrawide ? 0.55 : camera.aspect > 1.6 ? 0.75 : 0.45
+      camera.position.y = stageUltrawide ? 0.16 : 0.28
+      camera.lookAt(0.05, stageUltrawide ? 0.02 : 0.08, 0)
+      system.group.scale.setScalar(stageUltrawide ? 0.76 : aspect > 1.35 ? 0.92 : 1)
       camera.updateProjectionMatrix()
-      uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.75, height / 620)
+      const scaleCap = stageUltrawide ? 460 : 580
+      uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.72, height / scaleCap)
     }
     const observer = new ResizeObserver(resize)
     observer.observe(stage)
     resize()
-    const onPointerMove = (event: PointerEvent) => {
-      const rect = stage.getBoundingClientRect()
-      pointer.set(
-        THREE.MathUtils.clamp((event.clientX - rect.left) / rect.width * 2 - 1, -1, 1),
-        THREE.MathUtils.clamp((event.clientY - rect.top) / rect.height * 2 - 1, -1, 1),
-      )
-    }
-    const resetPointer = () => pointer.set(0, 0)
+
     const onContextLost = (event: Event) => {
       event.preventDefault()
       window.cancelAnimationFrame(frame)
       setFailure(new Error("Particle presence WebGL context lost"))
     }
+
     const render = (time: number) => {
       if (disposed || document.hidden) return
       frame = window.requestAnimationFrame(render)
@@ -106,60 +166,114 @@ export function HumanoidPresence({ snapshot, settings }: HumanoidPresenceProps) 
       const delta = Math.min((time - lastRender) / 1000, 0.05)
       lastRender = time
       if (!reduced) animationTime += delta
+
+      const desiredShape = current.shapeId
+        || presenceShapeIdForAvatar(current.settings.avatarId)
+      if (desiredShape !== system.currentShapeId) {
+        system.morphTo(desiredShape, { duration: reduced ? 0 : 1.2, immediate: reduced })
+        setActiveShapeId(system.currentShapeId)
+      }
+      system.tick(delta)
+
       const phase = current.snapshot.phase
-      const activity = { offline: 0, idle: 0.15, listening: 0.45, thinking: 0.7,
-        executing: 1, speaking: 0.65, waiting: 0.1, alert: 0.8 }[phase]
+      const activity = {
+        offline: 0, idle: 0.18, listening: 0.45, thinking: 0.72,
+        executing: 1, speaking: 0.68, waiting: 0.12, alert: 0.85,
+      }[phase]
       uniforms.uTime.value = animationTime
       uniforms.uMotion.value = reduced ? 0 : 1
-      uniforms.uActivity.value = activity
+      uniforms.uActivity.value += (activity - uniforms.uActivity.value)
+        * (reduced ? 1 : Math.min(1, delta * 3))
       uniforms.uSpeech.value = !reduced && phase === "speaking"
         ? THREE.MathUtils.clamp(current.snapshot.audioLevel, 0, 1) : 0
-      uniforms.uOpacity.value = phase === "offline" ? 0.35 : phase === "waiting" ? 0.7 : 1
+      uniforms.uOpacity.value = phase === "offline" ? 0.35 : phase === "waiting" ? 0.72 : 1
       color.setHex(PHASE_COLOR[phase])
       uniforms.uColor.value.lerp(color, reduced ? 1 : 0.12)
-      uniforms.uGold.value.setHex(phase === "alert" ? 0xff543b : phase === "offline" ? 0x607580 : 0xffb33f)
-      const follow = !reduced && current.settings.attentionMode === "pointer"
-      if (reduced) head.rotation.set(0, 0, 0)
-      else {
-        head.rotation.y += ((follow ? pointer.x * 0.16 : 0) - head.rotation.y) * 0.08
-        head.rotation.x += ((follow ? pointer.y * 0.045 : 0) - head.rotation.x) * 0.08
+      uniforms.uGold.value.setHex(
+        phase === "alert" ? 0xff543b : phase === "offline" ? 0x607580 : 0xff941f,
+      )
+
+      const framing = resolvePresenceShape(system.currentShapeId).framing
+      const baseYaw = framing?.yaw ?? 0.95
+      const basePos = framing?.position ?? [0.15, 0.08, 0]
+      const mode = current.settings.attentionMode
+      const follow = !reduced && mode !== "off"
+      const att = attentionRef.current
+      const yawGain = 0.52
+      const pitchGain = 0.22
+      const yawLerp = 0.2
+      const pitchLerp = 0.17
+      if (reduced) {
+        bust.rotation.set(0, baseYaw, 0)
+        bust.position.set(basePos[0], basePos[1], basePos[2])
+      } else {
+        const ax = follow ? att.x : 0
+        const ay = follow ? att.y : 0
+        bust.rotation.y += ((baseYaw + ax * yawGain) - bust.rotation.y) * yawLerp
+        bust.rotation.x += ((ay * pitchGain) - bust.rotation.x) * pitchLerp
+        bust.position.x = basePos[0]
+        bust.position.z = basePos[2]
+        bust.position.y = basePos[1] + Math.sin(animationTime * 1.05) * 0.016
       }
-      bust.position.y = reduced ? 0 : Math.sin(animationTime * 1.1) * 0.018
-      try { renderer.render(scene, camera) } catch (error) {
+      try {
+        if (composer) composer.render()
+        else renderer.render(scene, camera)
+      } catch (error) {
         window.cancelAnimationFrame(frame)
         setFailure(error instanceof Error ? error : new Error("Particle presence render failed"))
       }
     }
+
     const onVisibilityChange = () => {
       window.cancelAnimationFrame(frame)
-      if (!document.hidden) { lastRender = performance.now(); frame = window.requestAnimationFrame(render) }
+      if (!document.hidden) {
+        lastRender = performance.now()
+        frame = window.requestAnimationFrame(render)
+      }
     }
-    stage.addEventListener("pointermove", onPointerMove, { passive: true })
-    stage.addEventListener("pointerleave", resetPointer)
     canvas.addEventListener("webglcontextlost", onContextLost)
     document.addEventListener("visibilitychange", onVisibilityChange)
     if (!document.hidden) frame = window.requestAnimationFrame(render)
+
     return () => {
       disposed = true
       window.cancelAnimationFrame(frame)
       observer.disconnect()
-      stage.removeEventListener("pointermove", onPointerMove)
-      stage.removeEventListener("pointerleave", resetPointer)
       canvas.removeEventListener("webglcontextlost", onContextLost)
       document.removeEventListener("visibilitychange", onVisibilityChange)
-      head.geometry.dispose(); body.geometry.dispose(); field.geometry.dispose()
+      system.dispose()
       material.dispose()
-      glowMaterial.dispose()
+      bloom?.dispose()
+      output?.dispose()
+      composer?.dispose()
       renderer.dispose()
     }
+  // avatarId/shapeId morph inside the frame loop — remounting would drop the cloud.
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.performancePreset])
 
   if (failure) throw failure
   return (
-    <div ref={stageRef} className="jarvis-presence jarvis-presence-humanoid"
-      data-phase={snapshot.phase} data-performance-preset={settings.performancePreset}
-      role="img" aria-label={`Jarvis particle presence is ${snapshot.phase}`}>
+    <div
+      ref={stageRef}
+      className="jarvis-presence jarvis-presence-humanoid"
+      data-phase={snapshot.phase}
+      data-performance-preset={settings.performancePreset}
+      data-attention-mode={settings.attentionMode}
+      data-presence-shape={activeShapeId}
+      role="img"
+      aria-label={`Jarvis particle presence is ${snapshot.phase}`}
+    >
       <canvas ref={canvasRef} aria-hidden="true" />
+      <div className="jarvis-humanoid-hud" aria-hidden="true">
+        <span className="jarvis-humanoid-hud-tl" />
+        <span className="jarvis-humanoid-hud-tr">
+          TEM // PRESENCE
+          <br />
+          {snapshot.phase.toUpperCase()}
+        </span>
+        <span className="jarvis-humanoid-hud-bl" />
+      </div>
       <div className="jarvis-humanoid-label" aria-hidden="true">
         <span>JARVIS</span><i /><span>NEURAL PRESENCE</span>
       </div>

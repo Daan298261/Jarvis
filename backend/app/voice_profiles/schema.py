@@ -5,10 +5,25 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+QualityTier = Literal["baseline", "natural", "expressive"]
+LatencyClass = Literal["interactive", "streaming", "batch"]
+
+
 class VoiceProfileTTS(BaseModel):
+    engine_id: str = ""
     engine_hint: str = "system"
+    model_id: str = ""
     speaker_ref: str = ""
     pack_path: str = ""
+    vram_class: Literal["edge", "balanced", "expressive"] = "balanced"
+    latency_class: LatencyClass = "interactive"
+    license: str = ""
+    offline: bool = True
+    quality_tier: QualityTier = "natural"
+
+    def resolved_engine_id(self) -> str:
+        raw = (self.engine_id or self.engine_hint or "system").strip().lower()
+        return raw or "system"
 
 
 class VoiceProfilePersonaHooks(BaseModel):

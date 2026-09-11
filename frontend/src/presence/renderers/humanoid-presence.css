@@ -1,20 +1,108 @@
 .jarvis-presence-humanoid {
   position: relative;
-  width: 100%;
-  height: clamp(280px, min(65dvh, calc(100dvh - 310px)), 1100px);
+  width: min(100%, 960px);
+  height: clamp(
+    320px,
+    min(54dvh, calc(100dvh - 320px)),
+    min(720px, 54dvh)
+  );
+  max-height: min(54dvh, 72vh);
   min-width: 0;
+  margin-inline: auto;
   isolation: isolate;
   overflow: hidden;
-  background: radial-gradient(ellipse 22% 48% at 50% 48%, rgba(0, 151, 218, 0.065), transparent 80%);
-  mask-image: linear-gradient(180deg, transparent, black 6%, black 92%, transparent);
+  background:
+    radial-gradient(ellipse 28% 52% at 46% 46%, rgba(0, 140, 210, 0.07), transparent 72%),
+    radial-gradient(ellipse 60% 40% at 70% 70%, rgba(255, 140, 40, 0.03), transparent 70%),
+    #03070b;
+  mask-image: linear-gradient(180deg, transparent, black 4%, black 94%, transparent);
 }
-.hud-orb-zone:has(.jarvis-presence-humanoid) { min-height: 0; }
+.jarvis-presence-host:has(.jarvis-presence-humanoid) {
+  width: 100%;
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
+  flex: 0 1 auto;
+  height: clamp(300px, min(50dvh, calc(100dvh - 340px)), 680px);
+  max-height: min(50dvh, 68vh);
+}
+
+.hud-orb-zone:has(.jarvis-presence-humanoid) {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(52dvh, 70vh);
+  justify-content: center;
+}
 .hud-orb-zone:has(.jarvis-presence-humanoid) .hud-orb-caption { margin-top: -8px; }
-.jarvis-presence-humanoid canvas { display: block; width: 100%; height: 100%; }
+
+.jarvis-presence-humanoid canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Faint TEM-style chrome — decorative only, does not compete with chat. */
+.jarvis-humanoid-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.jarvis-humanoid-hud-tl,
+.jarvis-humanoid-hud-bl {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(100, 210, 240, 0.18);
+  opacity: 0.7;
+}
+
+.jarvis-humanoid-hud-tl {
+  top: 8%;
+  left: 4%;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.jarvis-humanoid-hud-tl::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 18px;
+  height: 2px;
+  background: rgba(90, 210, 240, 0.35);
+  box-shadow: 0 6px 0 rgba(90, 210, 240, 0.18), 0 12px 0 rgba(90, 210, 240, 0.12);
+}
+
+.jarvis-humanoid-hud-bl {
+  bottom: 14%;
+  left: 4%;
+  border-right: 0;
+  border-top: 0;
+}
+
+.jarvis-humanoid-hud-tr {
+  position: absolute;
+  top: 8%;
+  right: 4%;
+  color: rgba(140, 210, 235, 0.42);
+  font: 9px/1.55 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.16em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
 .jarvis-humanoid-label {
   position: absolute;
   left: 50%;
   bottom: 3%;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -25,7 +113,12 @@
   white-space: nowrap;
   pointer-events: none;
 }
-.jarvis-humanoid-label > span:first-child { color: #d0eeff; letter-spacing: 0.32em; }
+
+.jarvis-humanoid-label > span:first-child {
+  color: #d0eeff;
+  letter-spacing: 0.32em;
+}
+
 .jarvis-humanoid-label i {
   width: 3px;
   height: 3px;
@@ -33,10 +126,34 @@
   background: #ffbc56;
   box-shadow: 0 0 12px #ffac36;
 }
-@media (max-width: 760px) {
-  .jarvis-presence-humanoid { height: clamp(340px, 56dvh, 600px); }
-  .jarvis-humanoid-label { font-size: 8px; gap: 8px; }
+
+/* Ultrawide: ~⅓ viewport height — bust + mountains breathe, chat keeps room. */
+@media (min-aspect-ratio: 21/9) {
+  .jarvis-presence-humanoid,
+  .jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
+    width: min(100%, min(920px, 46vw));
+    max-height: min(38dvh, 28vw);
+    height: min(38dvh, max(280px, calc(100dvh - 420px)));
+    min-height: clamp(260px, 34dvh, 420px);
+  }
+
+  .hud-orb-zone:has(.jarvis-presence-humanoid) {
+    max-height: min(40dvh, 30vw);
+  }
 }
+
+@media (max-width: 760px) {
+  .jarvis-presence-humanoid { height: clamp(340px, 56dvh, 600px); max-height: 62dvh; }
+  .jarvis-humanoid-label { font-size: 8px; gap: 8px; }
+  .jarvis-humanoid-hud-tr { font-size: 7px; }
+  .jarvis-humanoid-hud-tl,
+  .jarvis-humanoid-hud-bl { width: 28px; height: 28px; }
+}
+
 @media (max-height: 650px) and (min-width: 761px) {
   .jarvis-presence-humanoid { height: max(260px, calc(100dvh - 295px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jarvis-humanoid-hud { opacity: 0.55; }
 }

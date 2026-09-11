@@ -34,6 +34,12 @@ From the repository root:
 
 Output: `installer\windows\dist\JarvisSetup.exe`
 
+Release builds run `stage-voice-default.ps1` to bundle **Kokoro-82M** under `models/tts/kokoro-82m` so the default household butler speaks out of the box (RFC-0070). Developer escape hatch:
+
+```powershell
+.\installer\windows\build-installer.ps1 -SkipVoicePack
+```
+
 One-liner after Inno Setup is installed:
 
 ```powershell

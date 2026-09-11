@@ -5,9 +5,14 @@
   "license": "original",
   "provenance": "Original dry butler archetype variant. Requires a licensed voice pack install.",
   "tts": {
-    "engine_hint": "piper",
-    "speaker_ref": "dry_butler_v1",
-    "pack_path": "voice_packs/dry_butler_original_v1"
+    "engine_id": "kokoro",
+    "engine_hint": "kokoro",
+    "model_id": "kokoro-82m",
+    "speaker_ref": "bm_george",
+    "pack_path": "voice_packs/dry_butler_original_v1",
+    "quality_tier": "natural",
+    "offline": true,
+    "license": "Apache-2.0"
   },
   "persona_hooks": {
     "register": "british_understated",

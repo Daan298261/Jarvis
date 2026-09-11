@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from ..config import models_dir
+from ..tts.engines import engine_availability, pick_engine_for_profile, primary_tts_backend
+from ..tts.synthesize import synthesize_with_engine
 
 
 @dataclass
@@ -94,15 +96,8 @@ def stt_backend() -> str | None:
 
 
 def tts_backend() -> str | None:
-    if sys.platform == "win32":
-        return "sapi"
-    if shutil.which("espeak-ng"):
-        return "espeak-ng"
-    if shutil.which("espeak"):
-        return "espeak"
-    if _module_available("pyttsx3"):
-        return "pyttsx3"
-    return None
+    """Primary host TTS backend (RFC-0070: Kokoro first)."""
+    return primary_tts_backend()
 
 
 def stt_install_hint(backend: str | None = None) -> str:
@@ -159,8 +154,24 @@ def voice_status() -> dict[str, Any]:
         )
     if tts:
         detail_parts.append(f"TTS={tts}")
+        engines = engine_availability()
+        detail_parts.append(
+            "engines="
+            + ",".join(
+                key
+                for key, ready in (
+                    ("kokoro", engines.get("kokoro")),
+                    ("piper", engines.get("piper")),
+                    ("chatterbox", engines.get("chatterbox")),
+                )
+                if ready
+            )
+            or "fallback"
+        )
     else:
-        detail_parts.append("TTS missing. Windows SAPI, espeak-ng, or pyttsx3 provide local speech.")
+        detail_parts.append(
+            "TTS missing. Install Kokoro (default), Piper, or legacy Windows SAPI / espeak-ng / pyttsx3."
+        )
     return {
         "id": "voice",
         "name": "Voice STT/TTS",
@@ -418,8 +429,7 @@ async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -
     if not cleaned:
         raise RuntimeError("text is required")
     selected_profile_id = (voice_profile_id or active_voice_profile_id()).strip()
-    engine_hint = "system"
-    speaker_ref = ""
+    profile = None
     if selected_profile_id:
         try:
             from ..voice_profiles.catalog import get_catalog
@@ -428,122 +438,24 @@ async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -
             profile = catalog.get_available(selected_profile_id)
             if profile is None and voice_profile_id:
                 raise RuntimeError(f"Voice profile is not available: {selected_profile_id}")
-            if profile is not None:
-                engine_hint = (profile.tts.engine_hint or "system").strip() or "system"
-                speaker_ref = (profile.tts.speaker_ref or "").strip()
+            if profile is None:
+                profile = catalog.get(selected_profile_id)
         except RuntimeError:
             raise
         except Exception:
-            pass
-    backend = tts_backend()
-    if not backend:
+            profile = None
+
+    engine_id = pick_engine_for_profile(profile) if profile else tts_backend()
+    if not engine_id:
         raise RuntimeError(
-            "No local TTS backend is available. On Windows, SAPI is used automatically. "
-            "Otherwise install espeak-ng or pyttsx3."
+            "No local TTS backend is available. Run Jarvis Setup to bundle Kokoro, "
+            "or install espeak-ng / pyttsx3 as fallback."
         )
-    # Route through the profile's declared engine when it matches an installed backend;
-    # otherwise fall through to the host default so desktop and phone stay consistent.
-    preferred = {
-        "sapi": "sapi",
-        "windows": "sapi",
-        "system": backend,
-        "espeak": "espeak" if backend in {"espeak", "espeak-ng"} else backend,
-        "espeak-ng": "espeak-ng" if backend == "espeak-ng" else backend,
-        "pyttsx3": "pyttsx3" if backend == "pyttsx3" else backend,
-    }.get(engine_hint.lower(), backend)
-    if preferred == "sapi" and backend == "sapi":
-        return await _speak_sapi(cleaned, speaker_ref=speaker_ref)
-    if preferred in {"espeak", "espeak-ng"} and backend in {"espeak", "espeak-ng"}:
-        return await _speak_espeak(cleaned, preferred if preferred == backend else backend, speaker_ref=speaker_ref)
-    if preferred == "pyttsx3" and backend == "pyttsx3":
-        return _speak_pyttsx3(cleaned, speaker_ref=speaker_ref)
-    if backend == "sapi":
-        return await _speak_sapi(cleaned, speaker_ref=speaker_ref)
-    if backend in {"espeak", "espeak-ng"}:
-        return await _speak_espeak(cleaned, backend, speaker_ref=speaker_ref)
-    return _speak_pyttsx3(cleaned, speaker_ref=speaker_ref)
-
-
-async def _speak_sapi(text: str, *, speaker_ref: str = "") -> bytes:
-    out = _temp_path(".wav")
-    escaped = text.replace("'", "''")
-    voice_line = ""
-    if speaker_ref:
-        safe_voice = speaker_ref.replace("'", "''")
-        voice_line = (
-            f"try {{ $s.SelectVoice('{safe_voice}') }} catch {{ "
-            f"$match = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{safe_voice}*' }} | Select-Object -First 1; "
-            "if ($null -ne $match) { $s.SelectVoice($match.VoiceInfo.Name) } }"
-        )
-    script = (
-        "Add-Type -AssemblyName System.Speech; "
-        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-        f"{voice_line}; "
-        f"$s.SetOutputToWaveFile('{out}'); "
-        f"$s.Speak('{escaped}'); "
-        "$s.Dispose()"
+    speaker_ref = (profile.tts.speaker_ref if profile else "").strip()
+    return await synthesize_with_engine(
+        cleaned,
+        engine_id=engine_id,
+        profile=profile,
+        speaker_ref=speaker_ref,
     )
-    proc = await asyncio.create_subprocess_exec(
-        "powershell",
-        "-NoProfile",
-        "-Command",
-        script,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _stdout, stderr = await proc.communicate()
-    if proc.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
-        raise RuntimeError(stderr.decode("utf-8", errors="replace") or "Windows SAPI TTS failed")
-    data = out.read_bytes()
-    try:
-        out.unlink(missing_ok=True)
-    except Exception:
-        pass
-    return data
 
-
-async def _speak_espeak(text: str, binary_name: str, *, speaker_ref: str = "") -> bytes:
-    binary = shutil.which(binary_name) or binary_name
-    out = _temp_path(".wav")
-    command = [binary, "-w", str(out)]
-    if speaker_ref:
-        command.extend(["-v", speaker_ref])
-    command.append(text)
-    proc = await asyncio.create_subprocess_exec(
-        *command,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _stdout, stderr = await proc.communicate()
-    if proc.returncode != 0 or not out.is_file() or out.stat().st_size == 0:
-        raise RuntimeError(stderr.decode("utf-8", errors="replace") or "espeak TTS failed")
-    data = out.read_bytes()
-    try:
-        out.unlink(missing_ok=True)
-    except Exception:
-        pass
-    return data
-
-
-def _speak_pyttsx3(text: str, *, speaker_ref: str = "") -> bytes:
-    import pyttsx3
-
-    out = _temp_path(".wav")
-    engine = pyttsx3.init()
-    if speaker_ref:
-        for voice in engine.getProperty("voices") or []:
-            name = getattr(voice, "name", "") or ""
-            vid = getattr(voice, "id", "") or ""
-            if speaker_ref.lower() in name.lower() or speaker_ref.lower() in vid.lower():
-                engine.setProperty("voice", vid)
-                break
-    engine.save_to_file(text, str(out))
-    engine.runAndWait()
-    if not out.is_file() or out.stat().st_size == 0:
-        raise RuntimeError("pyttsx3 did not write audio")
-    data = out.read_bytes()
-    try:
-        out.unlink(missing_ok=True)
-    except Exception:
-        pass
-    return data

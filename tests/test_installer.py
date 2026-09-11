@@ -29,6 +29,9 @@ def test_bootstrap_covers_required_steps():
     for needle in (
         ".venv",
         "requirements.txt",
+        "ensure-ttspythonpackages",
+        "kokoro",
+        "soundfile",
         "playwright",
         "npm",
         "mcp\\package-lock.json",

@@ -5,9 +5,14 @@
   "license": "original",
   "provenance": "Original tactical aide archetype. Requires a licensed voice pack install.",
   "tts": {
+    "engine_id": "kokoro",
     "engine_hint": "kokoro",
-    "speaker_ref": "tactical_aide_v1",
-    "pack_path": "voice_packs/tactical_aide_original_v1"
+    "model_id": "kokoro-82m",
+    "speaker_ref": "af_bella",
+    "pack_path": "voice_packs/tactical_aide_original_v1",
+    "quality_tier": "natural",
+    "offline": true,
+    "license": "Apache-2.0"
   },
   "persona_hooks": {
     "register": "calm_precise",

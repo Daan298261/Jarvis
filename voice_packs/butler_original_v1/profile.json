@@ -3,11 +3,18 @@
   "archetype": "british_butler",
   "display_name": "Household butler (original)",
   "license": "original",
-  "provenance": "Jarvis original British-butler voice profile (RFC-0056/0062). Uses the local system TTS backend.",
+  "provenance": "Jarvis original British-butler voice (RFC-0056/0062/0070). Default Kokoro-82M household butler.",
   "tts": {
-    "engine_hint": "system",
-    "speaker_ref": "jarvis_butler_v1",
-    "pack_path": ""
+    "engine_id": "kokoro",
+    "engine_hint": "kokoro",
+    "model_id": "kokoro-82m",
+    "speaker_ref": "bm_george",
+    "pack_path": "voice_packs/butler_original_v1",
+    "vram_class": "balanced",
+    "latency_class": "interactive",
+    "license": "Apache-2.0",
+    "offline": true,
+    "quality_tier": "natural"
   },
   "persona_hooks": {
     "register": "british_understated",

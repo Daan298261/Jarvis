@@ -10,6 +10,7 @@ from ..agent.self_dev import (
     checkpoint_commit,
     clear_kill_switch,
     experimental_launch_plan,
+    note_activity,
     refuse_trusted_merge,
     run_verification_gate,
     snapshot,
@@ -96,6 +97,7 @@ async def checkpoint(worktree_id: str, body: CheckpointBody | None = None):
             commits = list(usage.get("commits") or [])
             commits.append(result["commit"])
             usage["commits"] = commits
+            note_activity(session, f"Created checkpoint {result['commit'][:12]}", state="waiting")
             save_session(session)
         return result
     except (WorktreeError, PermissionError) as exc:

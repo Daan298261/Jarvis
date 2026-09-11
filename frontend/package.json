@@ -17,7 +17,8 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "@mediapipe/tasks-vision": "^0.10.32"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

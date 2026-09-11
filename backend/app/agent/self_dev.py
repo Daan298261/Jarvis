@@ -83,6 +83,7 @@ def activate_kill_switch(reason: str = "Emergency stop") -> dict[str, Any]:
         session["kill_switch"] = True
         session["kill_reason"] = reason
         session["ended_at"] = stamp
+        note_activity(session, reason or "Emergency stop", state="stopped")
         save_session(session)
     try:
         from .loop import AGENT
@@ -102,6 +103,7 @@ def clear_kill_switch() -> dict[str, Any]:
     if session and session.get("status") == "stopped":
         session["kill_switch"] = False
         session["status"] = "idle" if not session.get("worktree_id") else "running"
+        note_activity(session, "Emergency stop cleared; waiting for autonomous tasks", state="waiting")
         save_session(session)
     return snapshot()
 
@@ -119,6 +121,20 @@ def load_session() -> dict[str, Any]:
 
 def save_session(payload: dict[str, Any]) -> None:
     session_path().write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def note_activity(payload: dict[str, Any], activity: str, *, state: str | None = None) -> dict[str, Any]:
+    stamp = datetime.now(timezone.utc).isoformat()
+    payload["current_activity"] = activity
+    payload["last_progress_at"] = stamp
+    payload["last_heartbeat_at"] = stamp
+    payload["worker"] = "Self-Development Supervisor"
+    if state:
+        payload["activity_state"] = state
+    entries = list(payload.get("activity_log") or [])
+    entries.append({"at": stamp, "activity": activity, "state": state or payload.get("activity_state") or "running"})
+    payload["activity_log"] = entries[-20:]
+    return payload
 
 
 def budget_from_settings() -> dict[str, Any]:
@@ -304,6 +320,7 @@ def record_usage(kind: str, amount_eur: float = 0.0) -> dict[str, Any]:
     elif kind == "task_failure":
         usage["tasks_failed"] = int(usage.get("tasks_failed") or 0) + 1
         usage["consecutive_failures"] = int(usage.get("consecutive_failures") or 0) + 1
+    note_activity(session, f"Usage updated: {kind}", state="running")
     save_session(session)
     return session
 
@@ -326,6 +343,12 @@ def empty_session() -> dict[str, Any]:
         "usage": default_usage(),
         "kill_switch": False,
         "report": None,
+        "activity_state": "waiting",
+        "current_activity": "No self-development trial is active",
+        "last_progress_at": None,
+        "last_heartbeat_at": None,
+        "worker": "Self-Development Supervisor",
+        "activity_log": [],
     }
 
 
@@ -352,6 +375,7 @@ def start_trial(repo: str | Path | None = None, run_baseline: bool = True, pytes
             "experimental_launch": experimental_launch_plan(spec.path),
         }
     )
+    note_activity(session, "Isolated worktree ready; waiting for autonomous tasks", state="waiting")
     save_session(session)
     return session
 
@@ -362,6 +386,9 @@ def run_verification_gate(worktree_id: str | None = None, pytest_timeout: int = 
     if not spec_id:
         raise WorktreeError("No isolated worktree is active")
     spec = get_worktree(spec_id)
+    if session:
+        note_activity(session, "Running the independent verification gate", state="running")
+        save_session(session)
     before = counts_from((session or {}).get("baseline_tests"))
     after = run_pytest(spec.path, timeout=pytest_timeout)
     gate = evaluate_gate(before, after)
@@ -373,6 +400,11 @@ def run_verification_gate(worktree_id: str | None = None, pytest_timeout: int = 
     gate["end_commit"] = current_commit(Path(spec.path))
     if session:
         session["latest_gate"] = gate
+        note_activity(
+            session,
+            "Verification gate passed" if gate["passed"] else "Verification gate failed",
+            state="waiting" if gate["passed"] else "failed",
+        )
         save_session(session)
     return gate
 
@@ -429,6 +461,7 @@ def build_report(session: dict[str, Any] | None = None) -> dict[str, Any]:
     state["ended_at"] = ended
     if state.get("status") == "running":
         state["status"] = "completed"
+    note_activity(state, "End-of-run report created", state="completed")
     save_session(state)
     return report
 
@@ -442,6 +475,11 @@ def snapshot() -> dict[str, Any]:
     session["worktrees"] = list_worktrees()
     session["experimental_launch"] = session.get("experimental_launch") or experimental_launch_plan(
         session.get("worktree_path")
+    )
+    activity_state = session.get("activity_state") or "waiting"
+    session["alive"] = activity_state == "running" and session.get("status") == "running"
+    session["heartbeat_status"] = (
+        "alive" if session["alive"] else ("waiting" if session.get("status") == "running" else "stopped")
     )
     return session
 

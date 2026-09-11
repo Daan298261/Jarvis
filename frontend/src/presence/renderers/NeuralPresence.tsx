@@ -1,6 +1,7 @@
-import { useCallback, type CSSProperties } from "react"
+import { useCallback, useRef, type CSSProperties } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
 import type { PresenceSnapshot, PresentationSettings } from "../presenceTypes"
+import { usePresenceAttentionLoop } from "../usePresenceAttentionLoop"
 import ApexOrb, { type ApexOrbState } from "../../vendor/apex-ui/ApexOrb"
 import ReasoningWeb, {
   type ApexRosterEntry,
@@ -77,9 +78,12 @@ type NeuralPresenceProps = {
 
 export function NeuralPresence({ snapshot, settings, size = 540 }: NeuralPresenceProps) {
   const navigate = useNavigate()
+  const orbRef = useRef<HTMLDivElement>(null)
   const reduced = settings.reducedMotion === "reduce"
   const efficient = settings.performancePreset === "efficient"
   const showReasoningWeb = !reduced && !efficient
+
+  usePresenceAttentionLoop({ settings, cssTargetRef: orbRef, cssScale: 1.35 })
 
   const onSelect = useCallback((selection: ApexSelection) => {
     const route = ROUTES.get(selection.key)
@@ -108,7 +112,7 @@ export function NeuralPresence({ snapshot, settings, size = 540 }: NeuralPresenc
         </div>
       )}
 
-      <div className="jarvis-apex-vendored-orb" aria-hidden="true">
+      <div ref={orbRef} className="jarvis-apex-vendored-orb" aria-hidden="true">
         <ApexOrb state={orbState(snapshot.phase)} />
       </div>
 
