@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react"
 import { Link, NavLink } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode, Task } from "../api"
 import { HudHealthRail } from "./HudHealthRail"
+import { HudModelSelector } from "./HudModelSelector"
 import { HudOpsRail } from "./HudOpsRail"
 import type { UiMode } from "./uiMode"
 import "./hud.css"
@@ -32,6 +33,7 @@ type HudTopChromeProps = {
   showPanels: boolean
   runningCount: number
   attentionCount: number
+  model: { loaded?: boolean; loading?: boolean; active_model?: string; last_error?: string } | null
 }
 
 export function HudTopChrome({
@@ -46,6 +48,7 @@ export function HudTopChrome({
   showPanels,
   runningCount,
   attentionCount,
+  model,
 }: HudTopChromeProps) {
   return (
     <header className="hud-top">
@@ -86,6 +89,7 @@ export function HudTopChrome({
       </div>
 
       <div className="hud-top-right">
+        <HudModelSelector model={model} />
         <button type="button" className="hud-icon-btn" onClick={onAdminToggle} aria-expanded={adminOpen}>
           Admin
         </button>
@@ -217,6 +221,7 @@ export function HudShell({
         showPanels={isChat}
         runningCount={runningCount}
         attentionCount={attentionCount}
+        model={model}
       />
 
       {isChat ? (
