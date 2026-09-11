@@ -2402,6 +2402,14 @@ Reason:
 
 CoS assigned this ledger tick after #181 landed on tip; specs #180 accepted the contract.
 
+Decision: RFC-0074 / 0075 / 0076 accepted (Taco 1.2.5 desktop test)
+
+CoS → Jarvis Architect. Three accepted specs from the 1.2.5 owner test: RFC-0074 companion pairing streamline + QR + spoken pair-vs-explore onboarding; RFC-0075 social vs technical speak path, first-sentence TTS, thought-process chevron; RFC-0076 APK build progress + Download to Desktop + WhatsApp/email send when configured. No new §58 backlog checkboxes. Implement is UX/D1/D2 after this specs-only land.
+
+Reason:
+
+Taco 1.2.5: pairing failed without a private key and without QR; default TTS still robotic / late / markup-aloud; APK generation had no visible progress or Desktop/send path.
+
 ---
 
 ## 60. Expected Example Behavior
