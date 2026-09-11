@@ -3961,3 +3961,93 @@ export async function regenerateCompanionPairingCode(): Promise<CompanionPairing
   if (result.available) lastCompanionPairing = result.pairing
   return result
 }
+
+/** RFC-0076 — companion APK build + delivery (owner manage API). */
+export type CompanionBuildJob = {
+  id: string
+  state: string
+  activity: string
+  worker?: string
+  stale?: boolean
+  heartbeat_at?: number
+  started_at: number
+  updated_at: number
+  result?: { sha256: string; filename?: string }
+}
+
+export function companionBuildPhase(state: string): "queued" | "building" | "ready" | "failed" {
+  if (state === "queued") return "queued"
+  if (state === "running") return "building"
+  if (state === "completed") return "ready"
+  return "failed"
+}
+
+export function companionApkDownloadName(build: Pick<CompanionBuildJob, "id">): string {
+  const rev = build.id.replace(/-/g, "").slice(0, 8)
+  return `JarvisCompanion-${rev}.apk`
+}
+
+export async function fetchCompanionBuild(buildId: string): Promise<CompanionBuildJob> {
+  return api<CompanionBuildJob>(`/api/mobile/manage/builds/${buildId}`)
+}
+
+export async function startCompanionBuild(endpoint: string): Promise<CompanionBuildJob> {
+  return api<CompanionBuildJob>("/api/mobile/manage/builds", {
+    method: "POST",
+    body: JSON.stringify({ endpoint }),
+  })
+}
+
+export async function downloadCompanionApkBlob(buildId: string): Promise<Blob> {
+  const response = await fetch(`/api/mobile/manage/builds/${buildId}/apk`, { headers: authHeaders() })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(text || "Unable to download APK")
+  }
+  return response.blob()
+}
+
+export type CompanionApkSendResult =
+  | { ok: true; detail?: string }
+  | { ok: false; reason: "not_available" | "error"; message: string }
+
+async function sendCompanionApk(buildId: string, channel: "email" | "whatsapp"): Promise<CompanionApkSendResult> {
+  const label = channel === "email" ? "email" : "WhatsApp"
+  try {
+    const response = await fetch(`/api/mobile/manage/builds/${buildId}/send/${channel}`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    })
+    if (response.status === 404 || response.status === 501) {
+      return {
+        ok: false,
+        reason: "not_available",
+        message: `Send via ${label} is not available on this Jarvis version yet. Use Download to Desktop.`,
+      }
+    }
+    if (!response.ok) {
+      const text = await response.text()
+      let message = text || response.statusText
+      try {
+        const parsed = JSON.parse(text)
+        message = formatApiDetail(parsed.detail, message)
+      } catch {
+        // not JSON
+      }
+      return { ok: false, reason: "error", message }
+    }
+    const body = (await response.json().catch(() => ({}))) as { detail?: string; message?: string }
+    return { ok: true, detail: body.detail || body.message }
+  } catch (err) {
+    return { ok: false, reason: "error", message: String(err) }
+  }
+}
+
+export async function sendCompanionApkEmail(buildId: string): Promise<CompanionApkSendResult> {
+  return sendCompanionApk(buildId, "email")
+}
+
+export async function sendCompanionApkWhatsApp(buildId: string): Promise<CompanionApkSendResult> {
+  return sendCompanionApk(buildId, "whatsapp")
+}
