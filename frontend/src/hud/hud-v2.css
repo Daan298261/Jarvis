@@ -265,6 +265,50 @@
 
 .hud-orb-state.alert { color: var(--hud-orange); }
 
+/* Humanoid mode is a full-stage scene. HUD copy and chat float above it. */
+@media (min-width: 761px) {
+  .hud-center:has(.jarvis-presence-humanoid) {
+    align-items: stretch;
+    overflow: hidden;
+  }
+
+  .hud-home:has(.jarvis-presence-humanoid) {
+    position: relative;
+    display: block;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .hud-home:has(.jarvis-presence-humanoid) > .hud-orb-zone {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+  }
+
+  .hud-home:has(.jarvis-presence-humanoid) .hud-orb-caption {
+    position: absolute;
+    left: 50%;
+    bottom: clamp(146px, 17dvh, 210px);
+    width: min(720px, calc(100% - 48px));
+    margin: 0;
+    transform: translateX(-50%);
+  }
+
+  .hud-home:has(.jarvis-presence-humanoid) > .hud-chat {
+    position: absolute;
+    z-index: 8;
+    left: 50%;
+    bottom: clamp(16px, 2.2vh, 30px);
+    width: min(1000px, calc(100% - 64px));
+    transform: translateX(-50%);
+  }
+}
+
 /* High-resolution neural core. WebGL sits over a CSS fallback. */
 .jarvis-neural-orb {
   --jarvis-orb-size: 520px;
@@ -867,9 +911,9 @@
   }
 
   .hud-orb-zone:has(.jarvis-presence-humanoid) {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-height: 0;
-    max-height: min(38dvh, 28vw);
+    max-height: none;
   }
 
   .hud-chat {

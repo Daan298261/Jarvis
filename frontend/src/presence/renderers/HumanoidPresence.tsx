@@ -45,6 +45,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
     const controller = createPresenceAttentionController({
       getMode: () => stateRef.current.settings.attentionMode,
+      anchor: () => stageRef.current,
       getReducedMotion: () => {
         const rm = stateRef.current.settings.reducedMotion
         if (rm === "reduce") return true
@@ -75,7 +76,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
     })
     renderer.setClearColor(0x03070b, 1)
     renderer.toneMapping = THREE.ReinhardToneMapping
-    renderer.toneMappingExposure = 1.08
+    renderer.toneMappingExposure = 0.96
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40)
     camera.position.set(0.55, 0.28, 5.6)
@@ -84,6 +85,8 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       uTime: { value: 0 }, uMotion: { value: 1 }, uActivity: { value: 0 },
       uSpeech: { value: 0 }, uPixelScale: { value: 1 }, uOpacity: { value: 1 },
       uMorph: { value: 1 },
+      uPointer: { value: new THREE.Vector2(0, 0) },
+      uPointerStrength: { value: 0 },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
       uGold: { value: new THREE.Color(0xff941f) },
     }
@@ -106,7 +109,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
     const composer = efficient ? null : new EffectComposer(renderer)
     const bloom = efficient
       ? null
-      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.68, 0.38, 0.74)
+      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.32, 0.82)
     const output = efficient ? null : new OutputPass()
     if (composer && bloom && output) {
       composer.addPass(new RenderPass(scene, camera))
@@ -130,19 +133,15 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       composer?.setPixelRatio(renderer.getPixelRatio())
       composer?.setSize(Math.max(1, width), Math.max(1, height))
       const aspect = Math.max(1, width) / Math.max(1, height)
-      const ultrawide = aspect >= 2.05
-      const stageUltrawide = ultrawide || window.innerWidth / Math.max(1, window.innerHeight) >= 2.05
       camera.aspect = aspect
-      camera.fov = stageUltrawide ? 39 : 32
-      camera.position.z = stageUltrawide
-        ? Math.max(7.4, 5.8 / Math.min(aspect, 2.8))
-        : Math.max(5.4, 4.6 / Math.min(aspect, 2.1))
-      camera.position.x = stageUltrawide ? 0.55 : camera.aspect > 1.6 ? 0.75 : 0.45
-      camera.position.y = stageUltrawide ? 0.16 : 0.28
-      camera.lookAt(0.05, stageUltrawide ? 0.02 : 0.08, 0)
-      system.group.scale.setScalar(stageUltrawide ? 0.76 : aspect > 1.35 ? 0.92 : 1)
+      camera.fov = aspect < 0.85 ? 37 : 32
+      camera.position.set(0, 0.12, aspect < 0.85 ? 6.15 : 5.6)
+      camera.lookAt(0, 0.06, 0)
+      // Keep the environment full-bleed. Only the bust is framed to occupy roughly
+      // three quarters of the stage height on desktop.
+      bust.scale.setScalar(aspect < 0.85 ? 0.9 : aspect > 2.05 ? 0.8 : 0.84)
       camera.updateProjectionMatrix()
-      const scaleCap = stageUltrawide ? 460 : 580
+      const scaleCap = aspect > 2.05 ? 720 : 580
       uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.72, height / scaleCap)
     }
     const observer = new ResizeObserver(resize)
@@ -194,26 +193,29 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       )
 
       const framing = resolvePresenceShape(system.currentShapeId).framing
-      const baseYaw = framing?.yaw ?? 0.95
-      const basePos = framing?.position ?? [0.15, 0.08, 0]
+      const baseYaw = framing?.yaw ?? 0.06
+      const basePos = framing?.position ?? [0, 0.08, 0]
       const mode = current.settings.attentionMode
       const follow = !reduced && mode !== "off"
       const att = attentionRef.current
-      const yawGain = 0.52
-      const pitchGain = 0.22
-      const yawLerp = 0.2
-      const pitchLerp = 0.17
+      const yawGain = THREE.MathUtils.degToRad(6)
+      const pitchGain = THREE.MathUtils.degToRad(3.5)
+      const rotationLerp = 1 - Math.exp(-delta * 5.5)
       if (reduced) {
         bust.rotation.set(0, baseYaw, 0)
         bust.position.set(basePos[0], basePos[1], basePos[2])
+        uniforms.uPointerStrength.value = 0
       } else {
         const ax = follow ? att.x : 0
         const ay = follow ? att.y : 0
-        bust.rotation.y += ((baseYaw + ax * yawGain) - bust.rotation.y) * yawLerp
-        bust.rotation.x += ((ay * pitchGain) - bust.rotation.x) * pitchLerp
+        bust.rotation.y += ((baseYaw + ax * yawGain) - bust.rotation.y) * rotationLerp
+        bust.rotation.x += ((-ay * pitchGain) - bust.rotation.x) * rotationLerp
         bust.position.x = basePos[0]
         bust.position.z = basePos[2]
         bust.position.y = basePos[1] + Math.sin(animationTime * 1.05) * 0.016
+        uniforms.uPointer.value.set(ax * 1.75, 0.08 - ay * 1.6)
+        uniforms.uPointerStrength.value += ((follow ? 1 : 0) - uniforms.uPointerStrength.value)
+          * Math.min(1, delta * 5)
       }
       try {
         if (composer) composer.render()
