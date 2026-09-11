@@ -468,6 +468,20 @@ def apk_download(job_id: uuid.UUID):
     return FileResponse(path, filename="Jarvis.apk", media_type="application/vnd.android.package-archive")
 
 
+
+class ApkSendRequest(BaseModel):
+    to: str | None = Field(default=None, max_length=254)
+
+
+@owner_router.post("/builds/{job_id}/send/{channel}", dependencies=[Depends(require_owner_private_key)])
+def send_apk(job_id: uuid.UUID, channel: Literal["email", "whatsapp"], body: ApkSendRequest | None = None):
+    from ..mobile.apk_delivery import send_apk_email, send_apk_whatsapp
+
+    payload = body or ApkSendRequest()
+    if channel == "email":
+        return send_apk_email(str(job_id), payload.to)
+    return send_apk_whatsapp(str(job_id))
+
 class Contact(BaseModel):
     incident_id: uuid.UUID
     task_id: uuid.UUID | None = None
