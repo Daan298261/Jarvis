@@ -65,6 +65,7 @@ class InferenceSettings(BaseModel):
     vision_mode: str = "lazy"
     remote_model: str = ""
     api_key: str = ""
+    lmstudio_models_root: str = ""
 
 
 class BrowserSettings(BaseModel):

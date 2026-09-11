@@ -7,14 +7,17 @@ from fastapi.testclient import TestClient
 
 from app.inference.lmstudio_catalog import (
     build_catalog,
+    default_models_root,
     discover_ggufs,
     discovery_payload,
+    resolve_models_root,
     select_catalog_profile,
     set_profile_override,
     set_profile_pin,
     sort_profiles,
     vram_state_for_weight,
 )
+from app.inference.runtime_profiles import PRIVACY_LOCAL_ONLY
 from app.inference.runtime_profiles import get_runtime_profile, reset_runtime_profiles
 from app.main import app
 
@@ -159,6 +162,13 @@ def test_api_endpoints(catalog_env, monkeypatch):
     _write_gguf(root, "Qwen3.6-40B-Deck-Opus-NEO-CODE-Q4_K_S.gguf")
     _patch_weights(monkeypatch, {"Defiant": 6.1, "NEO-CODE": 21.2})
 
+    async def fake_activate(_profile, *, force=True):
+        from app.inference.manager import MANAGER
+
+        MANAGER.state.loaded = True
+        return MANAGER.state
+
+    monkeypatch.setattr("app.api.lmstudio.activate_runtime_profile", fake_activate)
     monkeypatch.setattr(
         "app.inference.lmstudio_catalog.resolve_models_root",
         lambda: root,
@@ -190,6 +200,7 @@ def test_api_endpoints(catalog_env, monkeypatch):
     runtime = select.json()
     assert runtime["provider"] == "lmstudio"
     assert runtime["privacy_class"] == "local-only"
+    assert runtime.get("load", {}).get("loaded") is True
 
     discovery = client.get("/api/lmstudio/discovery")
     assert discovery.status_code == 200
@@ -202,3 +213,64 @@ def test_discovery_payload_lists_models(catalog_env):
     payload = discovery_payload(models_root=root)
     assert payload["count"] == 1
     assert payload["models"][0]["filename"] == "Qwen3.5-9B-Defiant-Q4.gguf"
+    assert payload["models"][0]["is_local"] is True
+    assert payload["models"][0]["privacy_class"] == PRIVACY_LOCAL_ONLY
+
+
+def test_default_models_root_is_home_relative(tmp_path, monkeypatch):
+    fake_home = tmp_path / "owner-home"
+    fake_home.mkdir()
+    monkeypatch.delenv("JARVIS_LMSTUDIO_MODELS_ROOT", raising=False)
+    monkeypatch.setattr("app.inference.lmstudio_catalog._user_home", lambda: fake_home)
+    expected = fake_home / ".lmstudio" / "models"
+    assert default_models_root() == expected
+
+
+def test_resolve_models_root_honors_env_and_settings(tmp_path, monkeypatch, jarvis_env):
+    del jarvis_env
+    override = tmp_path / "custom-models"
+    override.mkdir()
+    monkeypatch.setenv("JARVIS_LMSTUDIO_MODELS_ROOT", str(override))
+    assert default_models_root() == override
+
+    monkeypatch.delenv("JARVIS_LMSTUDIO_MODELS_ROOT", raising=False)
+    settings_root = tmp_path / "settings-root"
+    settings_root.mkdir()
+
+    from app.config import InferenceSettings, load_settings
+
+    settings = load_settings()
+    settings.inference = InferenceSettings(
+        **{**settings.inference.model_dump(), "lmstudio_models_root": str(settings_root)}
+    )
+    monkeypatch.setattr("app.inference.lmstudio_catalog.load_settings", lambda: settings)
+    assert resolve_models_root() == settings_root
+
+
+def test_lmstudio_catalog_sources_exclude_hardcoded_usernames():
+    repo = Path(__file__).resolve().parents[1]
+    targets = [
+        repo / "backend" / "app" / "inference" / "lmstudio_catalog.py",
+        repo / "backend" / "app" / "api" / "lmstudio.py",
+        repo / "backend" / "app" / "api" / "model.py",
+        repo / "backend" / "app" / "inference" / "hotswap.py",
+        repo / "backend" / "app" / "persona" / "owner_chat.py",
+    ]
+    banned_username = "daanv"
+    for path in targets:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8").lower()
+        assert banned_username not in text, f"{path} must not hardcode username paths"
+
+
+def test_catalog_profiles_marked_local(catalog_env):
+    root = catalog_env["models_root"]
+    _write_gguf(root, "Qwen3.5-9B-Defiant-Q4.gguf", 0.006)
+    catalog = build_catalog(show_hidden=True, models_root=root)
+    profile = next(p for p in catalog["profiles"] if p["id"] == "lm-cheap-coding-9b")
+    assert profile["is_local"] is True
+    assert profile["privacy_class"] == PRIVACY_LOCAL_ONLY
+    assert profile["catalog_kind"] == "graded"
+    if catalog["ungraded"]:
+        assert catalog["ungraded"][0]["is_local"] is True

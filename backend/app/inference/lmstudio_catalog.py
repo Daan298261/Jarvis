@@ -37,6 +37,21 @@ QUANT_RE = re.compile(
     re.IGNORECASE,
 )
 
+def _user_home() -> Path:
+    if os.name == "nt":
+        profile = (os.environ.get("USERPROFILE") or "").strip()
+        if profile:
+            return Path(profile)
+    return Path.home()
+
+
+def _local_catalog_fields(*, kind: str) -> dict[str, Any]:
+    return {
+        "is_local": True,
+        "privacy_class": PRIVACY_LOCAL_ONLY,
+        "catalog_kind": kind,
+    }
+
 
 @dataclass
 class DiscoveredGguf:
@@ -66,17 +81,14 @@ def default_models_root() -> Path:
     override = (os.environ.get("JARVIS_LMSTUDIO_MODELS_ROOT") or "").strip()
     if override:
         return Path(override)
-    home = Path.home()
-    if os.name == "nt":
-        return home / ".lmstudio" / "models"
-    return home / ".lmstudio" / "models"
+    return _user_home() / ".lmstudio" / "models"
 
 
 def resolve_models_root() -> Path:
     settings = load_settings()
-    custom = getattr(settings.inference, "lmstudio_models_root", "") or ""
-    if str(custom).strip():
-        return Path(str(custom).strip())
+    custom = (settings.inference.lmstudio_models_root or "").strip()
+    if custom:
+        return Path(custom)
     return default_models_root()
 
 
@@ -249,6 +261,7 @@ def _build_graded_profile(
     source_notes = merged.get("source_notes")
     if source_notes:
         result["source_notes"] = str(source_notes)
+    result.update(_local_catalog_fields(kind="graded"))
     return result
 
 
@@ -284,6 +297,7 @@ def build_catalog(*, show_hidden: bool = False, models_root: Path | None = None)
                 "path": item.path,
                 "weight_gb": item.weight_gb,
                 "quantization": item.quantization,
+                **_local_catalog_fields(kind="ungraded"),
             }
             for item in discovered
             if item.path not in matched_paths
@@ -460,6 +474,7 @@ def discovery_payload(*, models_root: Path | None = None) -> dict[str, Any]:
                 "path": item.path,
                 "weight_gb": item.weight_gb,
                 "quantization": item.quantization,
+                **_local_catalog_fields(kind="discovered"),
             }
             for item in items
         ],
