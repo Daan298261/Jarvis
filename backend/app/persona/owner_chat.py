@@ -26,6 +26,58 @@ def get_conversation(conversation_id: str) -> list[ChatMessage]:
     return list(_conversations.get(conversation_id, []))
 
 
+def conversation_ids() -> list[str]:
+    return list(_conversations.keys())
+
+
+def _estimate_history_char_budget(context_limit: int) -> int:
+    """Reserve headroom for persona, owner system prompt, and model output."""
+    tokens_for_history = max(256, int(context_limit) - 4096)
+    return max(512, tokens_for_history * 4)
+
+
+def _truncate_turns_for_budget(messages: list[ChatMessage], char_budget: int) -> list[ChatMessage]:
+    if char_budget <= 0 or not messages:
+        return list(messages)
+    kept: list[ChatMessage] = []
+    used = 0
+    for message in reversed(messages):
+        text = (message.content or "").strip()
+        size = len(text) + 32
+        if kept and used + size > char_budget:
+            break
+        kept.append(message)
+        used += size
+    if not kept and messages:
+        last = messages[-1]
+        snippet = (last.content or "")[: max(64, char_budget)]
+        kept = [ChatMessage(role=last.role, content=snippet)]
+    return list(reversed(kept))
+
+
+def rebind_owner_conversations_after_hotswap(
+    context_limit: int,
+    *,
+    previous_context_limit: int | None = None,
+) -> None:
+    """Keep owner-chat threads across model hotswap; drop oldest turns if context shrinks."""
+    limit = int(context_limit or 0)
+    if limit <= 0:
+        return
+    budget = _estimate_history_char_budget(limit)
+    if previous_context_limit and int(previous_context_limit) > limit:
+        for cid in list(_conversations.keys()):
+            _conversations[cid] = _truncate_turns_for_budget(_conversations[cid], budget)
+        return
+    for cid, history in list(_conversations.items()):
+        if _history_char_size(history) > budget:
+            _conversations[cid] = _truncate_turns_for_budget(history, budget)
+
+
+def _history_char_size(messages: list[ChatMessage]) -> int:
+    return sum(len((message.content or "")) + 32 for message in messages)
+
+
 def _ensure_conversation(conversation_id: str | None) -> str:
     cid = (conversation_id or "").strip() or str(uuid.uuid4())
     _conversations.setdefault(cid, [])

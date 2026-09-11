@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..config import load_settings
+from ..inference.hotswap import activate_runtime_profile
 from ..inference.lmstudio_catalog import (
     AXIS_KEYS,
     build_catalog,
@@ -11,6 +13,7 @@ from ..inference.lmstudio_catalog import (
     set_profile_override,
     set_profile_pin,
 )
+from ..inference.manager import MANAGER
 
 router = APIRouter(prefix="/api/lmstudio", tags=["lmstudio"])
 
@@ -60,7 +63,14 @@ async def select_profile(profile_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return profile.as_dict()
+    try:
+        await activate_runtime_profile(profile)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:500]) from exc
+    settings = load_settings()
+    payload = profile.as_dict()
+    payload["load"] = await MANAGER.snapshot(settings)
+    return payload
 
 
 @router.get("/discovery")
