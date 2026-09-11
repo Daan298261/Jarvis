@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import secrets
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,8 @@ from fastapi import HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
 
 from .config import AppSettings, data_dir, load_settings, save_settings
+
+logger = logging.getLogger(__name__)
 
 
 def private_key_file_path() -> Path:
@@ -25,6 +28,19 @@ def get_effective_private_key(settings: AppSettings | None = None) -> str:
         except Exception:
             pass
     return ""
+
+
+def is_local_owner_host(host: str) -> bool:
+    return host in {"127.0.0.1", "::1", "localhost"}
+
+
+def ensure_owner_private_key() -> bool:
+    """Mint and persist the owner key when unset. Returns True if a new key was created."""
+    if get_effective_private_key(load_settings()):
+        return False
+    generate_private_key()
+    logger.info("Owner private key auto-generated for companion pairing")
+    return True
 
 
 def generate_private_key() -> str:
@@ -101,17 +117,51 @@ def require_owner_private_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Valid owner private key required")
 
 
+def require_owner_private_key_for_pairing(request: Request) -> None:
+    """Owner auth for companion pairing: auto-mint key on first pair intent.
+
+    Localhost portal sessions may omit the client key until Settings syncs it;
+    remote callers must still present the owner key.
+    """
+    ensure_owner_private_key()
+    current = load_settings()
+    expected = get_effective_private_key(current)
+    if not expected:
+        raise HTTPException(status_code=503, detail="Could not prepare owner identity for pairing")
+    provided = extract_key_from_request(request)
+    if verify_key(provided, expected):
+        return
+    host = request.client.host if request.client else ""
+    if is_local_owner_host(host) and not provided:
+        return
+    raise HTTPException(status_code=401, detail="Valid owner private key required")
+
+
+def is_owner_pairing_manage_path(path: str) -> bool:
+    if path in {
+        "/api/mobile/manage/pairing-codes",
+        "/api/mobile/manage/pairing-codes/regenerate",
+        "/api/mobile/manage/pairing-codes/status",
+    }:
+        return True
+    return path.startswith("/api/mobile/manage/devices/") and path.endswith("/confirm")
+
+
 def is_auth_required_for_request(request: Request, settings: AppSettings) -> bool:
     if not (settings.auth_required or settings.lan_access):
         return False
 
     # Skip health check & auth status check
     path = request.url.path
+    host = request.client.host if request.client else ""
+    if is_owner_pairing_manage_path(path) and is_local_owner_host(host):
+        return False
     if path in {
         "/api/health",
         "/api/auth/status",
         "/api/auth/verify",
         "/api/mobile",
+        "/api/mobile/onboarding/companion",
         "/api/companion/enroll",
         "/api/setup/status",
     }:

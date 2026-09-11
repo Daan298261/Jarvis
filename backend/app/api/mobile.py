@@ -64,3 +64,10 @@ def mobile_snapshot() -> dict[str, Any]:
 @router.get("")
 async def mobile_info():
     return mobile_snapshot()
+
+
+@router.get("/onboarding/companion")
+async def mobile_companion_onboarding():
+    from ..mobile.companion_onboarding import companion_onboarding_snapshot
+
+    return companion_onboarding_snapshot()
