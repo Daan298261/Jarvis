@@ -25,8 +25,12 @@ export const particleVertexShader = `
   uniform float uSpeech;
   uniform float uPixelScale;
   uniform float uMorph;
+  uniform vec2 uPointer;
+  uniform float uPointerStrength;
   varying float vGold;
   varying float vLight;
+  varying float vFlow;
+  varying float vDepth;
   void main() {
     float m = smoothstep(0.0, 1.0, uMorph);
     vec3 p = mix(aPos, bPos, m);
@@ -47,6 +51,13 @@ export const particleVertexShader = `
       p.x += dissolve * (0.35 + sin(t * 0.7 + aSeed * 8.0) * 0.2);
       p.y += dissolve * sin(t * 0.55 + aSeed * 13.0) * 0.35;
       p.z += sin(p.y * 7.0 - t * 1.3) * (0.004 + uSpeech * 0.025) * uMotion;
+      // Pointer energy belongs to the loose halo, never the anatomical core.
+      vec2 pointerDelta = p.xy - uPointer;
+      float pointerDistance = length(pointerDelta);
+      float pointerFalloff = 1.0 - smoothstep(0.12, 0.82, pointerDistance);
+      vec2 pointerDirection = pointerDelta / max(pointerDistance, 0.045);
+      p.xy += pointerDirection * pointerFalloff * loose * uPointerStrength * 0.2 * uMotion;
+      p.z += pointerFalloff * loose * uPointerStrength * (0.04 + aSeed * 0.06) * uMotion;
     } else {
       p *= 1.0 + uSpeech * 0.03 * sin(t * 9.5);
     }
@@ -54,6 +65,8 @@ export const particleVertexShader = `
     gl_Position = projectionMatrix * mv;
     gl_PointSize = clamp(size * uPixelScale * 7.1 / -mv.z, 0.8, 120.0);
     vGold = mix(aGold, bGold, m);
+    vFlow = flow;
+    vDepth = p.z;
     float shimmer = 0.87 + 0.13 * sin(t * 1.2 + aSeed * 60.0);
     float wave = pow(max(0.0, sin(p.y * 3.5 - t * 1.1)), 8.0) * uActivity;
     float light = mix(aLight, bLight, m);
@@ -67,13 +80,19 @@ export const particleFragmentShader = `
   uniform float uOpacity;
   varying float vGold;
   varying float vLight;
+  varying float vFlow;
+  varying float vDepth;
   void main() {
     float r = length(gl_PointCoord - 0.5) * 2.0;
     if (r > 1.0) discard;
     // Soft glowing orb (not a hard mesh texel).
-    float core = exp(-r * r * 18.0);
-    float halo = exp(-r * r * 3.6) * 0.45;
-    float alpha = (core + halo) * (1.0 - smoothstep(0.6, 1.0, r)) * vLight * uOpacity;
+    float loose = step(0.2, vFlow) * (1.0 - step(0.8, vFlow));
+    float environment = step(0.8, vFlow);
+    float core = exp(-r * r * 18.0) * mix(1.0, 0.42, loose);
+    float halo = exp(-r * r * 3.6) * mix(0.45, 0.62, loose);
+    float depthWeight = mix(clamp(0.72 + vDepth * 0.52, 0.52, 1.12), 1.0, environment);
+    float alpha = (core + halo) * (1.0 - smoothstep(0.6, 1.0, r))
+      * vLight * uOpacity * depthWeight * mix(1.0, 0.72, loose);
     vec3 color = mix(uColor, uGold, smoothstep(0.13, 0.75, vGold));
     float hot = smoothstep(2.4, 4.5, vLight);
     gl_FragColor = vec4(color + vec3(core * (0.18 + hot * 0.42)), alpha);
@@ -150,7 +169,7 @@ export function createMorphablePresenceSystem(
   material: THREE.ShaderMaterial,
   initialShapeId?: PresenceShapeId,
 ): MorphablePresenceSystem {
-  const figureBudget = Math.round(28000 * density)
+  const figureBudget = Math.round(52000 * density)
   const fieldBudget = Math.round(18000 * density)
   let shape = resolvePresenceShape(initialShapeId)
   const figureOrbs = resampleOrbs(shape.buildFigure(density), figureBudget)
