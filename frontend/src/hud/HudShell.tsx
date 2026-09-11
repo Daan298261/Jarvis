@@ -34,6 +34,7 @@ type HudTopChromeProps = {
   runningCount: number
   attentionCount: number
   model: { loaded?: boolean; loading?: boolean; active_model?: string; last_error?: string } | null
+  onModelMenuOpenChange?: (open: boolean) => void
 }
 
 export function HudTopChrome({
@@ -49,6 +50,7 @@ export function HudTopChrome({
   runningCount,
   attentionCount,
   model,
+  onModelMenuOpenChange,
 }: HudTopChromeProps) {
   return (
     <header className="hud-top">
@@ -99,7 +101,7 @@ export function HudTopChrome({
         >
           Legacy UI
         </button>
-        <HudModelSelector model={model} />
+        <HudModelSelector model={model} onOpenChange={onModelMenuOpenChange} />
       </div>
 
       {adminOpen && (
@@ -222,6 +224,9 @@ export function HudShell({
         runningCount={runningCount}
         attentionCount={attentionCount}
         model={model}
+        onModelMenuOpenChange={(open) => {
+          if (open) setAdminOpen(false)
+        }}
       />
 
       {isChat ? (
