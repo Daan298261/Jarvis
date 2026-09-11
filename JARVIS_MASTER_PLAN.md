@@ -2410,6 +2410,14 @@ Reason:
 
 Taco 1.2.5: pairing failed without a private key and without QR; default TTS still robotic / late / markup-aloud; APK generation had no visible progress or Desktop/send path.
 
+Decision: RFC-0077 local LM Studio discovery + play/hotswap context (accepted)
+
+CoS → Jarvis Architect. Accepted spec: auto-discover GGUFs under the **current user’s** `%USERPROFILE%\.lmstudio\models` / `~/.lmstudio/models` (never a hardcoded username); grade via RFC-0043; show in HUD ModelSelector marked **local** with a **play** one-click load; preserve conversation id + recent turns + persona pack across hotswap; reflow HudTopChrome so Admin/Legacy do not overlap the open selector. No new §58 backlog checkboxes. Implement is D1 + UX after this specs-only land. RFC-0074 / 0075 / 0076 stay intact.
+
+Reason:
+
+Taco wants all local LM Studio models discovered for whoever is logged in, play-to-load without resetting chat, and no overlapping HUD chrome when the selector opens.
+
 ---
 
 ## 60. Expected Example Behavior

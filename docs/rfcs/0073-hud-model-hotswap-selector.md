@@ -6,7 +6,7 @@
 **Date:** 2026-09-11
 **Owner for implement:** Jarvis UX (`frontend/src`)
 
-**Related (do not rewrite):** RFC-0003 runtime/model profiles; RFC-0043 LM Studio graded profiles; `frontend/src/pages/Model.tsx`, `RuntimeProfilesSection`, `LmStudioCatalogPicker` / `frontend/src/lmstudio/*`; `backend/app/api/model.py` (`GET /api/model`, `POST /api/model/load` with `{ profile }`); LM Studio catalog APIs.
+**Related (do not rewrite):** RFC-0003 runtime/model profiles; RFC-0043 LM Studio graded profiles; RFC-0077 local LM Studio discovery + play/hotswap context; `frontend/src/pages/Model.tsx`, `RuntimeProfilesSection`, `LmStudioCatalogPicker` / `frontend/src/lmstudio/*`; `backend/app/api/model.py` (`GET /api/model`, `POST /api/model/load` with `{ profile }`); LM Studio catalog APIs.
 
 ## Problem
 
