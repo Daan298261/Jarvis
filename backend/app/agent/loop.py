@@ -65,7 +65,12 @@ from .planning import (
     resolve_execution_policy,
     select_best_plan,
 )
-from ..persona.chat_delivery import publish_owner_text
+from ..persona.chat_delivery import (
+    clear_stream_speak_state,
+    maybe_enqueue_streaming_social_tts,
+    publish_owner_text,
+    stream_speak_offset,
+)
 from ..persona.owner_chat import OWNER_CHAT_SYSTEM
 from ..persona.think_aloud import run_with_think_aloud
 from .recovery import recovery_hint
@@ -392,6 +397,8 @@ class AgentRuntime:
             ChatMessage(role="user", content=prompt),
         ]
         parts: list[str] = []
+        stream_key = f"task:{task_id}"
+        clear_stream_speak_state(stream_key)
         try:
             async for delta in MANAGER.chat_stream(
                 messages,
@@ -402,8 +409,18 @@ class AgentRuntime:
                 thinking=False,
             ):
                 parts.append(delta)
+                accumulated = "".join(parts)
+                early_id = maybe_enqueue_streaming_social_tts(
+                    accumulated,
+                    source="task_chat",
+                    stream_key=stream_key,
+                    user_prompt=prompt,
+                )
+                if early_id:
+                    await BUS.publish(task_id, "chat_tts", "Speak reply", accumulated[: stream_speak_offset(stream_key)], stage="chat")
                 await BUS.publish(task_id, "assistant_delta", "Reply", delta, stage="chat")
         except Exception as exc:
+            clear_stream_speak_state(stream_key)
             err = str(exc)
             await self._update(
                 task_id,
@@ -416,7 +433,14 @@ class AgentRuntime:
             await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
             return
         content = "".join(parts).strip() or "I'm afraid I couldn't form a reply just then."
-        await publish_owner_text(content, source="task_chat", speak=True)
+        await publish_owner_text(
+            content,
+            source="task_chat",
+            speak=True,
+            user_prompt=prompt,
+            tts_char_offset=stream_speak_offset(stream_key),
+        )
+        clear_stream_speak_state(stream_key)
         messages.append(ChatMessage(role="assistant", content=content))
         working.verified = True
         await self._complete(task_id, messages, content, content, working, metrics)
