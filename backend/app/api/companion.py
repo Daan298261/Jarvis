@@ -469,18 +469,38 @@ def apk_download(job_id: uuid.UUID):
 
 
 
+@router.get("/whatsapp/contact")
+async def whatsapp_contact(device=Device):
+    """Return a Jarvis WhatsApp contact card for the companion to save."""
+    from ..integrations.setup import WHATSAPP_PAIRING
+    from ..integrations.whatsapp_bridge import jarvis_whatsapp_contact
+
+    status = WHATSAPP_PAIRING.status()
+    if not bool(status.get("paired") or status.get("state") == "connected"):
+        return {
+            "available": False,
+            "reason": "WhatsApp is not connected on the Jarvis desktop. Connect it in Setup first.",
+        }
+    try:
+        return await jarvis_whatsapp_contact()
+    except HTTPException as exc:
+        if exc.status_code in {400, 502, 504}:
+            return {"available": False, "reason": str(exc.detail)}
+        raise
+
+
 class ApkSendRequest(BaseModel):
     to: str | None = Field(default=None, max_length=254)
 
 
 @owner_router.post("/builds/{job_id}/send/{channel}", dependencies=[Depends(require_owner_private_key)])
-def send_apk(job_id: uuid.UUID, channel: Literal["email", "whatsapp"], body: ApkSendRequest | None = None):
+async def send_apk(job_id: uuid.UUID, channel: Literal["email", "whatsapp"], body: ApkSendRequest | None = None):
     from ..mobile.apk_delivery import send_apk_email, send_apk_whatsapp
 
     payload = body or ApkSendRequest()
     if channel == "email":
         return send_apk_email(str(job_id), payload.to)
-    return send_apk_whatsapp(str(job_id))
+    return await send_apk_whatsapp(str(job_id), payload.to)
 
 class Contact(BaseModel):
     incident_id: uuid.UUID

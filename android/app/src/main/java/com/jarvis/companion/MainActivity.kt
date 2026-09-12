@@ -1,5 +1,6 @@
 package com.jarvis.companion
 
+import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.Intent
 import android.os.Bundle
@@ -100,12 +101,28 @@ class MainActivity : ComponentActivity() {
                 val delivered = latestIntent ?: return@LaunchedEffect
                 delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
                 delivered.getStringExtra(Intent.EXTRA_TEXT)?.let { draft = it; tab = "Chat" }
+                val shared = mutableListOf<android.net.Uri>()
                 @Suppress("DEPRECATION")
-                (delivered.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))?.let { model.upload(it); tab = "Chat" }
+                when (delivered.action) {
+                    Intent.ACTION_SEND -> delivered.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.let(shared::add)
+                    Intent.ACTION_SEND_MULTIPLE -> {
+                        @Suppress("DEPRECATION")
+                        delivered.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.let(shared::addAll)
+                    }
+                }
+                // WhatsApp and other apps may also put media on ClipData.
+                delivered.clipData?.let { clip ->
+                    for (index in 0 until clip.itemCount) {
+                        clip.getItemAt(index).uri?.let(shared::add)
+                    }
+                }
+                shared.distinct().forEach(model::upload)
+                if (shared.isNotEmpty()) tab = "Chat"
                 // Consume extras so rotating the activity cannot upload the same share again.
                 delivered.removeExtra(Intent.EXTRA_STREAM)
                 delivered.removeExtra(Intent.EXTRA_TEXT)
                 delivered.removeExtra("incoming_call")
+                delivered.clipData = null
             }
             MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel, onSurface = Color(0xFFE7EDF5), secondary = Color(0xFF74DCCD))) {
                 if (incomingCall != null) AlertDialog(onDismissRequest = { incomingCall = null }, title = { Text("Jarvis is calling") },
@@ -487,6 +504,30 @@ class MainActivity : ComponentActivity() {
             Text("Phone fingerprint: ${model.api.fingerprint().chunked(8).joinToString(" ")}", color = Muted, fontSize = 11.sp)
             Text("Confirm this fingerprint on your Jarvis desktop to finish pairing.", color = Muted, fontSize = 12.sp)
         }
+
+        item {
+            Text("WhatsApp", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+            Text(
+                "Save Jarvis as a WhatsApp contact on this phone so you can message the linked desktop session.",
+                color = Muted,
+                fontSize = 12.sp,
+            )
+            val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                if (granted) model.addJarvisWhatsAppContact()
+            }
+            Button(
+                onClick = {
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(
+                            model.getApplication(),
+                            Manifest.permission.WRITE_CONTACTS,
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) model.addJarvisWhatsAppContact()
+                    else contactsPermission.launch(Manifest.permission.WRITE_CONTACTS)
+                },
+                enabled = state.connected && !state.busy,
+            ) { Text("Add Jarvis on WhatsApp") }
+        }
+
         item {
             Text("Notifications & calls", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             val device = state.capabilities.optJSONObject("device")
