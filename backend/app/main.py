@@ -22,6 +22,7 @@ from .config import default_allowed_directories, load_settings, logs_dir, repo_r
 from .db import init_db
 from .events import BUS
 from .hardware import hardware_dict
+from .inference.hotswap import local_lmstudio_fallback_settings
 from .inference.manager import MANAGER
 from .inference.profiles import preferred_startup_profile
 from .integrations.setup import WHATSAPP_PAIRING
@@ -207,7 +208,22 @@ async def _autoload_model(current) -> None:
     try:
         await MANAGER.load(current, preferred_startup_profile(current.inference.profile))
     except Exception:
-        logging.exception("Model auto-load failed; it can be loaded from the Model page")
+        fallback = local_lmstudio_fallback_settings(current)
+        if fallback is None:
+            logging.exception("Model auto-load failed; it can be loaded from the Model page")
+            return
+        try:
+            profile = preferred_startup_profile(fallback.inference.profile)
+            await MANAGER.load(fallback, profile)
+        except Exception:
+            logging.exception("LM Studio was unavailable and local fallback failed")
+            return
+        fallback.inference.profile = profile
+        save_settings(fallback)
+        logging.warning(
+            "LM Studio was unavailable at startup; switched to Jarvis-managed local profile %s",
+            profile,
+        )
 
 
 @app.get("/api/health")

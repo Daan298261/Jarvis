@@ -59,8 +59,33 @@ def _resolve_builtin_profile_name(runtime: RuntimeProfile, fallback: str) -> str
     return fallback
 
 
+def local_lmstudio_fallback_settings(settings):
+    """Return a Jarvis-managed fallback for an unavailable local LM Studio server.
+
+    A local catalog selection can legitimately point at LM Studio while it is
+    running. It must not, however, leave a desktop unable to start after that
+    optional server has been closed. Never apply this fallback to a LAN/remote
+    endpoint: those are explicit operator-managed runtime choices.
+    """
+    provider = _normalize_provider(settings.inference.backend)
+    host = (settings.inference.host or "").strip().lower()
+    if provider != "lmstudio" or host not in {"127.0.0.1", "localhost", "::1"}:
+        return None
+
+    fallback = settings.model_copy(deep=True)
+    fallback.inference.backend = "llama.cpp"
+    fallback.inference.host = "127.0.0.1"
+    fallback.inference.port = int(DEFAULT_PORTS["llama.cpp"])
+    fallback.inference.remote_model = ""
+    if fallback.inference.profile not in PROFILES:
+        fallback.inference.profile = "bootstrap"
+    return fallback
+
+
 async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
-    settings = load_settings()
+    # Only save after the external runtime has answered its probe. A failed
+    # click must never leave a stale LM Studio server as the next boot target.
+    settings = load_settings().model_copy(deep=True)
     provider = _normalize_provider(runtime.provider or "")
     if provider == "lmstudio":
         settings.inference.backend = "lmstudio"
