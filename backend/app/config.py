@@ -111,7 +111,7 @@ class PresentationSettings(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     shell: Literal["classic", "hud"] = "hud"
-    requested_presence: Literal["none", "neural", "humanoid"] = "neural"
+    requested_presence: Literal["none", "neural", "humanoid", "particle_bust"] = "neural"
     performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] = "auto"
     attention_mode: Literal["off", "pointer", "camera"] = "pointer"
     reduced_motion: Literal["system", "reduce", "full"] = "system"
