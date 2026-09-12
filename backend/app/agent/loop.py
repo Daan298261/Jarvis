@@ -71,6 +71,7 @@ from ..persona.chat_delivery import (
     publish_owner_text,
     stream_speak_offset,
 )
+from ..persona.acknowledgements import task_acknowledgement
 from ..persona.owner_chat import OWNER_CHAT_SYSTEM
 from ..persona.think_aloud import run_with_think_aloud
 from .recovery import recovery_hint
@@ -405,7 +406,7 @@ class AgentRuntime:
                 temperature=profile.temperature,
                 top_p=profile.top_p,
                 top_k=profile.top_k,
-                max_tokens=512,
+                max_tokens=256,
                 thinking=False,
             ):
                 parts.append(delta)
@@ -488,6 +489,14 @@ class AgentRuntime:
         ):
             await self._run_conversation(task_id, prompt, profile_name, settings, working, metrics)
             return
+        if not continue_existing and not pending_tool and not extra_prompt:
+            await BUS.publish(
+                task_id,
+                "chat_tts",
+                "Acknowledged",
+                task_acknowledgement(prompt),
+                stage="understand",
+            )
         await self._update(task_id, exposed_tools=_exposed_csv(working))
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
