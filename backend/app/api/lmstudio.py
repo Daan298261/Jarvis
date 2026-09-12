@@ -4,6 +4,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..config import load_settings
+from ..inference.default_candidates import (
+    PERSONALITY_PRESETS,
+    RECOMMENDED_16GB_STACK,
+    TTS_CANDIDATES,
+    list_model_candidates,
+)
 from ..inference.hotswap import activate_runtime_profile
 from ..inference.lmstudio_catalog import (
     AXIS_KEYS,
@@ -30,6 +36,32 @@ class OverrideBody(BaseModel):
 @router.get("/catalog")
 async def get_catalog(show_hidden: bool = False):
     return build_catalog(show_hidden=show_hidden)
+
+
+@router.get("/candidates")
+async def get_inference_candidates(role: str | None = None):
+    """Return RFC-0063 candidates without promoting them to active runtimes.
+
+    The catalog is advisory: actual promotion remains gated by the local Jarvis
+    benchmark so an externally well-regarded model cannot silently replace the
+    working primary on reputation alone.
+    """
+
+    allowed_roles = {"micro", "small", "primary", "presentation", "expert", "lab"}
+    normalized_role = None
+    if role:
+        normalized_role = role.strip().lower().replace("_", "-")
+        if normalized_role not in allowed_roles:
+            raise HTTPException(status_code=400, detail=f"unknown candidate role: {role}")
+
+    candidates = list_model_candidates(normalized_role) if normalized_role else list_model_candidates()
+    return {
+        "candidates": [candidate.as_dict() for candidate in candidates],
+        "recommended_16gb_stack": RECOMMENDED_16GB_STACK,
+        "tts_candidates": [candidate.as_dict() for candidate in TTS_CANDIDATES.values()],
+        "personality_presets": [preset.as_dict() for preset in PERSONALITY_PRESETS.values()],
+        "promotion_policy": "benchmark-required",
+    }
 
 
 @router.post("/catalog/{profile_id}/pin")
