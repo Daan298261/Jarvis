@@ -42,6 +42,33 @@
     "experimental_port": 4781,
     "auto_merge": false
   },
+  "dialogue": {
+    "enabled": true,
+    "worker_profile": "qwen35-08b-presentation",
+    "output_language": "auto",
+    "translate_only_when_needed": true,
+    "verbosity": "auto",
+    "auto_preference": "concise",
+    "personality_preset": "jarvis_dry",
+    "humor_frequency": 0.12,
+    "warmth": 0.35,
+    "formality": 0.65,
+    "dryness": 0.35,
+    "directness": 0.9,
+    "preserve_structured_content": true
+  },
+  "tts": {
+    "speak_chat_replies": true,
+    "voice_profile_id": "",
+    "engine": "auto",
+    "quality_engine": "chatterbox_multilingual_v3",
+    "fallback_engine": "kokoro",
+    "loading_policy": "lazy",
+    "language": "auto",
+    "speed": 1.0,
+    "expressiveness": 0.5,
+    "prefer_cpu_fallback": true
+  },
   "allowed_directories": [],
   "mcp_servers": []
 }

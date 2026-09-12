@@ -17,23 +17,36 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
     orbs.push({ x, y, z, gold, light, flow, size: size / Math.sqrt(density) })
   }
 
-  const profile = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.08, 0.07, 0.19), new THREE.Vector3(0.27, 0.16, 0.27),
-    new THREE.Vector3(0.44, 0.4, 0.35), new THREE.Vector3(0.51, 0.72, 0.40),
-    new THREE.Vector3(0.52, 1.10, 0.40), new THREE.Vector3(0.44, 1.39, 0.35),
-    new THREE.Vector3(0.27, 1.58, 0.24), new THREE.Vector3(0, 1.66, 0),
-  ], false, "catmullrom", 0.3)
+  // Explicit front-view landmarks make a human cranium with cheekbones, jaw
+  // and chin. Sampling the old spline by curve length bunched rings into a
+  // rounded capsule and lost the reference silhouette.
+  const profile = [
+    { t: 0, x: 0.05, y: 0.18, z: 0.16 },
+    { t: 0.12, x: 0.34, y: 0.35, z: 0.29 },
+    { t: 0.3, x: 0.51, y: 0.63, z: 0.38 },
+    { t: 0.56, x: 0.59, y: 1.02, z: 0.42 },
+    { t: 0.78, x: 0.55, y: 1.34, z: 0.39 },
+    { t: 0.93, x: 0.37, y: 1.56, z: 0.29 },
+    { t: 1, x: 0.08, y: 1.65, z: 0.1 },
+  ]
+  const profileCurve = new THREE.CatmullRomCurve3(
+    profile.map((point) => new THREE.Vector3(point.x, point.y, point.z)),
+    false,
+    "catmullrom",
+    0.56,
+  )
+  const headRing = (t: number) => profileCurve.getPoint(THREE.MathUtils.clamp(t, 0, 1))
 
-  const rows = Math.round(72 * density), columns = Math.round(200 * density)
+  const rows = Math.round(88 * density), columns = Math.round(236 * density)
   for (let row = 0; row < rows; row++) {
-    const ring = profile.getPoint(row / rows)
+    const ring = headRing(row / rows)
     for (let col = 0; col < columns; col++) {
       const angle = (col + random() * 0.42) / columns * Math.PI * 2
       const front = Math.cos(angle), x = Math.sin(angle) * ring.x
-      const nose = gauss(x, 0.12) * gauss(ring.y - 0.65, 0.26) * 0.075
-      const brow = gauss(ring.y - 1.0, 0.06) * gauss(x, 0.42) * 0.025
+      const nose = gauss(x, 0.14) * gauss(ring.y - 0.82, 0.29) * 0.07
+      const brow = gauss(ring.y - 1.12, 0.07) * gauss(x, 0.46) * 0.022
       const z = front * ring.z + Math.max(0, front) * (nose + brow)
-      const mask = gauss(x, 0.38) * gauss(ring.y - 0.61, 0.39) * THREE.MathUtils.smoothstep(front, 0.3, 0.85)
+      const mask = gauss(x, 0.43) * gauss(ring.y - 0.88, 0.46) * THREE.MathUtils.smoothstep(front, 0.28, 0.86)
       const rim = Math.pow(Math.abs(Math.sin(angle)), 8.5)
       const shell = THREE.MathUtils.smoothstep(rim, 0.55, 0.98)
       const light = front < 0 ? 0.08 + rim * 0.35 : 0.28 + rim * 3.8 + mask * 1.65 + shell * 1.25
@@ -44,7 +57,7 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
     }
   }
   for (let row = 0; row < Math.round(52 * density); row++) {
-    const ring = profile.getPoint(row / (52 * density))
+    const ring = headRing(row / (52 * density))
     for (let i = 0; i < Math.round(95 * density); i++) {
       const angle = (i / (95 * density) + random() * 0.08) * Math.PI * 2
       const front = Math.cos(angle)
@@ -56,63 +69,65 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
         0.55 + rim * 4.8, 0, 1.35 + random() * 0.55)
     }
   }
-  for (let row = 0; row < 27 * density; row++) {
-    const v = row / (27 * density) * 2 - 1
-    const width = Math.sqrt(1 - v * v) * 0.34
-    for (let i = 0; i < 150 * density; i++) {
-      const u = i / (150 * density) * 2 - 1
-      emit(u * width, 0.62 + v * 0.39 + Math.cos(u * Math.PI) * 0.013,
-        0.47 - Math.abs(u) * 0.035, 1, (1 - Math.pow(Math.abs(u), 4)) * (1 - v * v) * 1.8,
-        0, 1.4 + random() * 0.35)
+  for (let row = 0; row < 34 * density; row++) {
+    const v = row / (34 * density) * 2 - 1
+    const width = Math.sqrt(1 - v * v) * 0.48
+    for (let i = 0; i < 190 * density; i++) {
+      const u = i / (190 * density) * 2 - 1
+      const heat = (1 - Math.pow(Math.abs(u), 3)) * (1 - v * v)
+      emit(u * width, 0.88 + v * 0.5 + Math.cos(u * Math.PI) * 0.012,
+        0.48 - Math.abs(u) * 0.028, heat * 0.92, 0.42 + heat * 1.02,
+        0, 1.15 + random() * 0.3)
     }
   }
-  for (let i = 0; i < 2600 * density; i++) {
+  // A diffuse amber volume behind the scan bands. It reads as neural heat, not
+  // as the single white flashlight that previously erased the face.
+  for (let i = 0; i < 5600 * density; i++) {
     const a = random() * Math.PI * 2
     const b = Math.acos(random() * 2 - 1)
-    const r = Math.pow(random(), 0.5) * 0.24
+    const r = Math.pow(random(), 0.62)
     emit(
-      Math.sin(b) * Math.cos(a) * r * 0.9,
-      1.05 + Math.sin(b) * Math.sin(a) * r * 0.85,
-      0.12 + Math.cos(b) * r * 0.7,
-      1, 1.2 + (1 - r / 0.24) * 1.8, 0, 1.4 + random() * 0.7,
+      Math.sin(b) * Math.cos(a) * r * 0.42,
+      0.9 + Math.sin(b) * Math.sin(a) * r * 0.51,
+      0.19 + Math.cos(b) * r * 0.15,
+      0.78 + random() * 0.16, 0.34 + (1 - r) * 1.02, 0, 0.95 + random() * 0.5,
     )
   }
-  const coreY = 0.61, coreZ = 0.445
-  for (let i = 0; i < Math.round(720 * density); i++) {
+  const coreY = 0.9, coreZ = 0.45
+  for (let i = 0; i < Math.round(980 * density); i++) {
     const a = random() * Math.PI * 2
-    const r = Math.pow(random(), 1.8) * 0.11
-    const ly = coreY + Math.sin(a) * r * 0.75 + (random() - 0.5) * 0.018
-    const lx = Math.cos(a) * r * 0.55
-    const lz = coreZ + Math.sin(a * 0.5) * r * 0.35
-    const hot = Math.exp(-(r / 0.11) * (r / 0.11) * 2.2)
-    emit(lx, ly, lz, 0, 2.8 + hot * 3.4 + random() * 0.6, 2, 2.2 + hot * 4.5 + random() * 2.2)
+    const r = Math.pow(random(), 1.45) * 0.2
+    const ly = coreY + Math.sin(a) * r * 1.35 + (random() - 0.5) * 0.024
+    const lx = Math.cos(a) * r
+    const lz = coreZ + Math.sin(a * 0.5) * r * 0.22
+    const hot = Math.exp(-(r / 0.2) * (r / 0.2) * 1.8)
+    emit(lx, ly, lz, 0.92, 0.72 + hot * 1.35 + random() * 0.35, 2, 1.25 + hot * 0.95 + random() * 0.65)
   }
-  emit(0, coreY, coreZ, 0, 5.4, 2, 12)
 
   // Dense interior population: these dim particles make the face read as mass
   // rather than a wire shell while the brighter rings retain its anatomy.
-  for (let i = 0; i < Math.round(9000 * density); i++) {
+  for (let i = 0; i < Math.round(18000 * density); i++) {
     const azimuth = random() * Math.PI * 2
     const elevation = Math.acos(random() * 2 - 1)
     const r = Math.cbrt(random())
     const vertical = Math.cos(elevation)
     const jaw = THREE.MathUtils.lerp(0.72, 1, THREE.MathUtils.smoothstep(vertical, -0.45, 0.2))
     emit(
-      Math.sin(elevation) * Math.cos(azimuth) * r * 0.47 * jaw,
+      Math.sin(elevation) * Math.cos(azimuth) * r * 0.54 * jaw,
       0.88 + vertical * r * 0.76,
       0.02 + Math.sin(elevation) * Math.sin(azimuth) * r * 0.34,
       random() < 0.06 ? 0.75 : 0,
-      0.16 + (1 - r) * 0.54 + random() * 0.2,
+      0.18 + (1 - r) * 0.5 + random() * 0.18,
       0,
       1.05 + random() * 0.75,
     )
   }
 
   // A second interior population joins the neck, chest, and broad shoulders.
-  for (let i = 0; i < Math.round(10500 * density); i++) {
-    const y = -1.45 + random() * 1.58
-    const shoulderBand = Math.exp(-Math.pow((y + 0.82) / 0.5, 2))
-    const width = 0.3 + shoulderBand * 1.18 + THREE.MathUtils.smoothstep(-y, 0.25, 1.4) * 0.22
+  for (let i = 0; i < Math.round(18000 * density); i++) {
+    const y = -1.32 + random() * 1.57
+    const shoulderBand = Math.exp(-Math.pow((y + 0.52) / 0.48, 2))
+    const width = 0.29 + shoulderBand * 1.24 + THREE.MathUtils.smoothstep(-y, 0.08, 1.3) * 0.22
     const normalizedX = (random() * 2 - 1) * Math.pow(random(), 0.34)
     const x = normalizedX * width
     const edge = Math.abs(normalizedX)
@@ -122,16 +137,15 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
       y,
       0.03 + (random() * 2 - 1) * depth,
       random() < 0.035 ? 0.72 : 0,
-      0.12 + (1 - edge) * 0.32 + random() * 0.18,
+      0.18 + (1 - edge) * 0.42 + random() * 0.2,
       0,
       1 + random() * 0.7,
     )
   }
 
-  emit(0, 1.05, 0.12, 1, 0.3, 0, 11)
-  for (let i = 0; i < Math.round(12500 * density); i++) {
+  for (let i = 0; i < Math.round(6500 * density); i++) {
     const headBias = Math.pow(random(), 0.55)
-    const ring = profile.getPoint(0.35 + headBias * 0.62)
+    const ring = headRing(0.3 + headBias * 0.67)
     const angle = random() * Math.PI * 2
     const spread = Math.pow(random(), 1.9) * 0.5
     const trail = (random() - 0.5) * 1.2
@@ -145,62 +159,32 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
   }
 
   const outline = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.28, 0.16, -0.02), new THREE.Vector3(0.24, -0.10, 0.04),
-    new THREE.Vector3(0.31, -0.37, 0.09), new THREE.Vector3(0.62, -0.54, 0.05),
-    new THREE.Vector3(1.10, -0.65, -0.02), new THREE.Vector3(1.43, -0.89, -0.08),
-    new THREE.Vector3(1.55, -1.27, -0.15),
+    new THREE.Vector3(0.27, 0.20, -0.02), new THREE.Vector3(0.25, 0.02, 0.04),
+    new THREE.Vector3(0.36, -0.20, 0.09), new THREE.Vector3(0.70, -0.34, 0.05),
+    new THREE.Vector3(1.14, -0.48, -0.02), new THREE.Vector3(1.48, -0.70, -0.08),
+    new THREE.Vector3(1.61, -1.08, -0.15),
   ])
   for (const side of [-1, 1]) {
-    for (let contour = 0; contour < 7 * density; contour++) {
+    for (let contour = 0; contour < 11 * density; contour++) {
       for (let i = 0; i < 250 * density; i++) {
         const t = i / (250 * density), p = outline.getPoint(t)
         const inset = contour / density * 0.014
         emit(side * (p.x - inset), p.y - inset * t * 0.9, p.z + inset,
-          0, (1 - contour / (9 * density)) * 2.0, 0, 1.4)
+          0, (1 - contour / (14 * density)) * 2.25, 0, 1.4)
       }
     }
-    for (let row = 0; row < 20 * density; row++) {
+    for (let row = 0; row < 28 * density; row++) {
       const r = 0.17 + row / density * 0.047
       for (let col = 0; col < 180 * density; col++) {
         const angle = (col + random() * 0.8) / (180 * density) * Math.PI
         const x = side * (0.83 + Math.cos(angle) * r)
-        const y = -1.54 + Math.sin(angle) * r * 0.96
+        const y = -1.42 + Math.sin(angle) * r * 0.96
         const ax = Math.abs(x)
-        const top = -0.29 - 0.32 * (1 - Math.exp(-Math.pow(Math.max(0, ax - 0.25) / 0.25, 2))) - 0.32 * Math.pow(ax / 1.6, 6)
+        const top = -0.05 - 0.3 * (1 - Math.exp(-Math.pow(Math.max(0, ax - 0.25) / 0.25, 2))) - 0.3 * Math.pow(ax / 1.65, 6)
         if (ax < 0.10 || ax > 1.53 || y > top) continue
-        const fade = THREE.MathUtils.smoothstep(y, -1.54, -1.24)
+        const fade = THREE.MathUtils.smoothstep(y, -1.42, -1.1)
         emit(x, y, 0.18 + Math.sin(angle) * 0.2, 0,
-          fade * (0.3 + random() * 0.35), 0, 1.35)
-      }
-    }
-    for (let branch = 0; branch < 9; branch++) {
-      for (let i = 0; i < Math.round(200 * density); i++) {
-        const t = i / (200 * density)
-        const y = coreY - 0.04 + t * 0.52
-        const x = side * (0.02 + t * (0.11 + branch * 0.034)
-          + Math.sin(t * 11 + branch * 1.3) * 0.028 * Math.sin(t * Math.PI))
-        const z = coreZ - 0.06 + t * 0.12 + Math.sin(t * 8 + branch) * 0.018
-        emit(x, y, z, 0.9 + random() * 0.08, 0.72 + Math.sin(t * Math.PI) * 1.05, 0, 1.45 + random() * 0.35)
-      }
-    }
-    for (let branch = 0; branch < 5; branch++) {
-      for (let i = 0; i < Math.round(165 * density); i++) {
-        const t = i / (165 * density)
-        const along = t * t * (3 - 2 * t)
-        const x = side * (0.04 + along * (0.38 + branch * 0.05) + Math.sin(t * 9 + branch) * 0.04)
-        const y = coreY - 0.02 - along * 0.14 + Math.sin(t * 6) * 0.02
-        const z = coreZ - 0.04 - along * 0.06
-        emit(x, y, z, 0.88, 0.58 + (1 - t) * 0.55, 0, 1.35 + random() * 0.3)
-      }
-    }
-    for (let branch = 0; branch < 7; branch++) {
-      for (let i = 0; i < Math.round(175 * density); i++) {
-        const t = i / (175 * density)
-        const y = coreY + 0.02 + t * 0.48
-        const x = side * (0.06 + (1 - t) * 0.08 + branch * 0.012
-          + Math.sin(t * 14 + branch) * 0.022 * Math.sin(t * Math.PI))
-        const z = coreZ + 0.02 + t * 0.08
-        emit(x, y, z, 0.93, 0.68 + Math.sin(t * Math.PI) * 0.85, 0, 1.5)
+          fade * (0.44 + random() * 0.42), 0, 1.35)
       }
     }
   }
@@ -208,15 +192,24 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
     const t = row / (27 * density)
     for (let i = 0; i < 80 * density; i++) {
       const x = (i / (80 * density) * 2 - 1) * (0.23 + t * 0.09)
-      const y = 0.10 - t * 0.59 - (1 - Math.pow(x / (0.23 + t * 0.09), 2)) * 0.07
+      const y = 0.18 - t * 0.46 - (1 - Math.pow(x / (0.23 + t * 0.09), 2)) * 0.05
       emit(x, y, 0.19, 0, 0.17 + random() * 0.18, 0, 1.25)
     }
   }
-  for (let i = 0; i < 320 * density; i++) {
-    const a = random() * Math.PI * 2, r = Math.pow(random(), 2) * 0.07
-    emit(Math.cos(a) * r, -1.28 + Math.sin(a) * r, 0.40, 0.05, 2.3, 2, 2.4 + random() * 2.2)
+  // Gold circuitry descends from the face through the neck and sternum, as in
+  // the reference, without adding a separate glowing chest orb.
+  for (const side of [-1, 1]) {
+    for (let branch = 0; branch < 12; branch++) {
+      for (let i = 0; i < Math.round(185 * density); i++) {
+        const t = i / (185 * density)
+        const spread = 0.018 + t * (0.025 + branch * 0.012)
+        const x = side * (spread + Math.sin(t * 16 + branch * 0.9) * 0.012 * Math.sin(t * Math.PI))
+        const y = 0.2 - t * 1.44
+        const z = 0.37 - t * 0.08 + Math.sin(t * 9 + branch) * 0.012
+        emit(x, y, z, 0.9, 0.58 + (1 - t) * 0.72 + Math.sin(t * Math.PI) * 0.45, 0, 1.15 + random() * 0.35)
+      }
+    }
   }
-  emit(0, -1.28, 0.4, 0, 0.65, 2, 11)
   return orbs
 }
 
@@ -294,5 +287,5 @@ export const humanoidBustShape: PresenceShapeDefinition = {
   label: "Humanoid bust",
   buildFigure: buildHumanoidBustFigure,
   buildField: buildHumanoidBustField,
-  framing: { yaw: 0.06, position: [0, 0.08, 0] },
+  framing: { yaw: 0.025, position: [0, -0.1, 0] },
 }

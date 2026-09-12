@@ -1,6 +1,90 @@
 {
-  "catalog_version": "2026-09-08",
+  "catalog_version": "2026-09-12",
   "profiles": [
+    {
+      "id": "lm-qwen38-9b-uncensored",
+      "display_name": "Primary candidate — Qwen3.8 9B Uncensored",
+      "overall": 9.0,
+      "axes": {
+        "coding": 9,
+        "writing": 8,
+        "reasoning": 9,
+        "speed_cost": 8,
+        "vram_fit": 9,
+        "instruction": 9,
+        "uncensored": 10
+      },
+      "strength": "First default-brain benchmark candidate: strong reasoning/tool-use in a 16 GB-friendly footprint",
+      "weakness": "Community distill/uncensor; must pass Jarvis local benchmark before promotion",
+      "weight_gb": 7.7,
+      "quantization": "Q6_K",
+      "match_substrings": ["Qwen3.8-9B-Distill", "uncensored-heretic", "Heretic-Uncensored"],
+      "specialization_tags": ["general", "agentic", "low-vram", "uncensored"],
+      "source_notes": "RFC-0063 provisional ranking; Q6 weight estimate from current GGUF family; replace ranking with local Jarvis benchmark"
+    },
+    {
+      "id": "lm-lfm25-fast-primary",
+      "display_name": "Fast primary candidate — LFM2.5 8B-A1B",
+      "overall": 8.8,
+      "axes": {
+        "coding": 8,
+        "writing": 8,
+        "reasoning": 8,
+        "speed_cost": 10,
+        "vram_fit": 9,
+        "instruction": 9,
+        "uncensored": 10
+      },
+      "strength": "MoE with ~1.5B active parameters/token; designed for fast reliable tool calling",
+      "weakness": "LFM license needs redistribution review; runtime support must be current",
+      "weight_gb": 6.96,
+      "quantization": "Q6_K",
+      "match_substrings": ["LFM2.5-8B-A1B-Uncensored", "LFM2.5-8B-A1B"],
+      "specialization_tags": ["general", "agentic", "moe", "low-latency"],
+      "source_notes": "RFC-0063 provisional ranking; promote only after local tool-loop and license gates"
+    },
+    {
+      "id": "lm-minicpm5-2b-small",
+      "display_name": "Small worker candidate — MiniCPM5 2B",
+      "overall": 8.2,
+      "axes": {
+        "coding": 8,
+        "writing": 7,
+        "reasoning": 7,
+        "speed_cost": 10,
+        "vram_fit": 10,
+        "instruction": 9,
+        "uncensored": 9
+      },
+      "strength": "Very small footprint with unusually strong published agent/tool benchmarks",
+      "weakness": "Not intended to replace the main brain for difficult general reasoning",
+      "weight_gb": 2.7,
+      "quantization": "Q8-class",
+      "match_substrings": ["MiniCPM5-2B", "MiniCPM5-2B-abliterated"],
+      "specialization_tags": ["agentic", "micro", "low-latency"],
+      "source_notes": "RFC-0063 provisional ranking; benchmark against MiniCPM5-1B for always-on role"
+    },
+    {
+      "id": "lm-nemotron3-nano-4b",
+      "display_name": "Compact general candidate — Nemotron3 Nano 4B",
+      "overall": 7.9,
+      "axes": {
+        "coding": 7,
+        "writing": 7,
+        "reasoning": 8,
+        "speed_cost": 9,
+        "vram_fit": 10,
+        "instruction": 8,
+        "uncensored": 10
+      },
+      "strength": "Compact uncensored general worker with comfortable VRAM headroom",
+      "weakness": "Must prove tool-loop reliability against MiniCPM/Qwen candidates",
+      "weight_gb": 4.4,
+      "quantization": "Q8_K_P",
+      "match_substrings": ["Nemotron3-Nano-4B-Uncensored", "HauhauCS-Aggressive"],
+      "specialization_tags": ["general", "small", "uncensored"],
+      "source_notes": "RFC-0063 provisional ranking; local benchmark required"
+    },
     {
       "id": "lm-best-overall",
       "display_name": "Best overall",

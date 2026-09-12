@@ -106,7 +106,7 @@ class SelfDevSettings(BaseModel):
 
 
 class PresentationSettings(BaseModel):
-    """Persisted presentation preference. Camera/biometric data is never stored here."""
+    """Persisted visual-presentation preference. Camera/biometric data is never stored here."""
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -116,6 +116,30 @@ class PresentationSettings(BaseModel):
     attention_mode: Literal["off", "pointer", "camera"] = "pointer"
     reduced_motion: Literal["system", "reduce", "full"] = "system"
     avatar_id: str = Field(default="jarvis_base", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_.-]+$")
+
+
+class DialogueSettings(BaseModel):
+    """Language, verbosity and personality policy from RFC-0063.
+
+    This is presentation policy only. Tool calls, code, commands, paths, JSON,
+    hashes and quoted evidence must bypass stylistic rewriting.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = True
+    worker_profile: str = "qwen35-08b-presentation"
+    output_language: str = "auto"
+    translate_only_when_needed: bool = True
+    verbosity: Literal["very-short", "concise", "balanced", "detailed", "exhaustive", "auto"] = "auto"
+    auto_preference: Literal["concise", "balanced", "detailed"] = "concise"
+    personality_preset: Literal["minimal", "professional", "jarvis_dry", "friendly", "custom"] = "jarvis_dry"
+    humor_frequency: float = Field(default=0.12, ge=0.0, le=1.0)
+    warmth: float = Field(default=0.35, ge=0.0, le=1.0)
+    formality: float = Field(default=0.65, ge=0.0, le=1.0)
+    dryness: float = Field(default=0.35, ge=0.0, le=1.0)
+    directness: float = Field(default=0.90, ge=0.0, le=1.0)
+    preserve_structured_content: bool = True
 
 
 class SocialPerceptionSettings(BaseModel):
@@ -142,6 +166,14 @@ class TtsSettings(BaseModel):
 
     speak_chat_replies: bool = True
     voice_profile_id: str = ""
+    engine: Literal["auto", "chatterbox_multilingual_v3", "kokoro", "chatterbox_turbo", "external"] = "auto"
+    quality_engine: str = "chatterbox_multilingual_v3"
+    fallback_engine: str = "kokoro"
+    loading_policy: Literal["resident", "lazy", "cpu-preferred"] = "lazy"
+    language: str = "auto"
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    expressiveness: float = Field(default=0.5, ge=0.0, le=1.0)
+    prefer_cpu_fallback: bool = True
 
 
 class IdentityRecognitionSettings(BaseModel):
@@ -182,6 +214,7 @@ class AppSettings(BaseModel):
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     self_dev: SelfDevSettings = Field(default_factory=SelfDevSettings)
     presentation: PresentationSettings = Field(default_factory=PresentationSettings)
+    dialogue: DialogueSettings = Field(default_factory=DialogueSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
