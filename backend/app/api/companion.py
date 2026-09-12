@@ -406,6 +406,9 @@ def revoke(device_id: uuid.UUID):
 
 class Build(BaseModel):
     endpoint: str = Field(default="", max_length=1024)
+    mode: Literal["personalized", "generic"] = "personalized"
+    prepare_connection: bool = True
+    remote: bool = True
 
 
 class ConnectionSetup(BaseModel):
@@ -443,13 +446,25 @@ def device_connection_status(device=Device):
 async def build_apk(body: Build):
     from ..mobile.provision import start
     from ..mobile.connectivity import CONNECTIVITY, origin
+
+    if body.mode == "generic":
+        # Full-featured companion APK for releases / sideload; pair in the app after install.
+        return await start("", [], generic=True)
+
     prepared = CONNECTIVITY.snapshot().get("endpoints", [])
     endpoint = body.endpoint or (prepared[0] if prepared else "")
+    if not endpoint and body.prepare_connection:
+        snapshot = await CONNECTIVITY.configure(True, body.remote)
+        prepared = snapshot.get("endpoints", [])
+        endpoint = prepared[0] if prepared else ""
     try:
         endpoint = origin(endpoint)
     except ValueError as exc:
-        raise HTTPException(400, "Prepare a connection first, or supply an HTTPS gateway origin") from exc
-    return await start(endpoint, prepared if endpoint in prepared else [])
+        raise HTTPException(
+            400,
+            "Prepare a connection first, supply an HTTPS gateway origin, or build a generic companion APK.",
+        ) from exc
+    return await start(endpoint, prepared if endpoint in prepared else [], generic=False)
 
 
 @owner_router.get("/builds/{job_id}", dependencies=[Depends(require_owner_private_key)])
@@ -464,8 +479,11 @@ def apk_download(job_id: uuid.UUID):
     value = job(str(job_id))
     if value["state"] != "completed":
         raise HTTPException(409, "APK is not ready")
-    path = root() / "builds" / value["result"]["filename"]
-    return FileResponse(path, filename="Jarvis.apk", media_type="application/vnd.android.package-archive")
+    result = value.get("result") or {}
+    filename = result.get("filename") or "JarvisCompanion.apk"
+    path = root() / "builds" / filename
+    download_name = filename if filename.endswith(".apk") else "JarvisCompanion.apk"
+    return FileResponse(path, filename=download_name, media_type="application/vnd.android.package-archive")
 
 
 

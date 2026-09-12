@@ -135,12 +135,23 @@ export function CompanionApkBuildPanel({ build, onBuildChange, onRetry, busy, on
         <p className="companion-apk-build-hint">
           {phase === "queued"
             ? "Waiting for the Android builder to start…"
-            : "Building your personalized companion APK — this can take several minutes."}
+            : build.mode === "generic"
+              ? "Building the full-featured generic companion APK — this can take several minutes."
+              : "Building your personalized companion APK — this can take several minutes."}
         </p>
       )}
 
       {phase === "ready" && (
         <div className="companion-apk-build-ready">
+          {build.mode === "generic" && (
+            <p className="companion-apk-build-hint">
+              Generic release APK includes chat, attachments, realtime voice, calls, schedules, WhatsApp contact,
+              and the Apex orb. Pair with the 6-digit code or QR after install.
+            </p>
+          )}
+          {Array.isArray(build.result?.features) && build.result.features.length > 0 && (
+            <p className="companion-apk-build-meta">Features: {build.result.features.join(", ")}</p>
+          )}
           <button className="btn" type="button" disabled={busy || sendBusy !== ""} onClick={downloadToDesktop}>
             Download to Desktop
           </button>

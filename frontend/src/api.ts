@@ -4005,11 +4005,12 @@ export type CompanionBuildJob = {
   state: string
   activity: string
   worker?: string
+  mode?: "personalized" | "generic"
   stale?: boolean
   heartbeat_at?: number
   started_at: number
   updated_at: number
-  result?: { sha256: string; filename?: string }
+  result?: { sha256?: string; filename?: string; mode?: string; features?: string[] }
 }
 
 export function companionBuildPhase(state: string): "queued" | "building" | "ready" | "failed" {
@@ -4019,19 +4020,31 @@ export function companionBuildPhase(state: string): "queued" | "building" | "rea
   return "failed"
 }
 
-export function companionApkDownloadName(build: Pick<CompanionBuildJob, "id">): string {
+export function companionApkDownloadName(build: Pick<CompanionBuildJob, "id" | "mode" | "result">): string {
+  const mode = build.mode || build.result?.mode
   const rev = build.id.replace(/-/g, "").slice(0, 8)
-  return `JarvisCompanion-${rev}.apk`
+  return mode === "generic" ? `JarvisCompanion-generic-${rev}.apk` : `JarvisCompanion-${rev}.apk`
 }
 
 export async function fetchCompanionBuild(buildId: string): Promise<CompanionBuildJob> {
   return api<CompanionBuildJob>(`/api/mobile/manage/builds/${buildId}`)
 }
 
-export async function startCompanionBuild(endpoint: string): Promise<CompanionBuildJob> {
+export async function startCompanionBuild(options?: {
+  endpoint?: string
+  mode?: "personalized" | "generic"
+  prepareConnection?: boolean
+  remote?: boolean
+}): Promise<CompanionBuildJob> {
+  const mode = options?.mode ?? "personalized"
   return api<CompanionBuildJob>("/api/mobile/manage/builds", {
     method: "POST",
-    body: JSON.stringify({ endpoint }),
+    body: JSON.stringify({
+      endpoint: options?.endpoint ?? "",
+      mode,
+      prepare_connection: options?.prepareConnection ?? mode === "personalized",
+      remote: options?.remote ?? true,
+    }),
   })
 }
 
