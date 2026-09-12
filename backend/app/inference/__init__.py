@@ -1,3 +1,10 @@
+from .candidate_routing import (
+    CANDIDATE_ROUTES,
+    candidate_keys_for_role,
+    candidate_route,
+    candidates_for_role,
+    normalize_candidate_role,
+)
 from .default_candidates import (
     MODEL_CANDIDATES,
     PERSONALITY_PRESETS,
@@ -23,8 +30,13 @@ __all__ = [
     "TTS_CANDIDATES",
     "PERSONALITY_PRESETS",
     "RECOMMENDED_16GB_STACK",
+    "CANDIDATE_ROUTES",
     "list_model_candidates",
     "get_model_candidate",
     "candidates_fitting_weights",
     "get_personality_preset",
+    "candidate_route",
+    "candidate_keys_for_role",
+    "candidates_for_role",
+    "normalize_candidate_role",
 ]
