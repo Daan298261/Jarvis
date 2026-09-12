@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..agent.loop import AGENT
 from ..config import load_settings
@@ -19,6 +21,12 @@ class VoiceIn(BaseModel):
 
 class SpeakIn(BaseModel):
     text: str
+    voice_profile_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z0-9_]+$",
+    )
 
 
 def _stt_error_response(exc: VoiceSTTError) -> JSONResponse:
@@ -98,8 +106,14 @@ async def voice_transcribe(audio: UploadFile = File(...)):
 
 @router.post("/speak")
 async def voice_speak(body: SpeakIn):
+    started = time.perf_counter()
     try:
-        wav = await synthesize_speech(body.text)
+        wav = await synthesize_speech(body.text, voice_profile_id=body.voice_profile_id)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
-    return Response(content=wav, media_type="audio/wav")
+    duration_ms = (time.perf_counter() - started) * 1000
+    return Response(
+        content=wav,
+        media_type="audio/wav",
+        headers={"Server-Timing": f"tts;dur={duration_ms:.1f}"},
+    )

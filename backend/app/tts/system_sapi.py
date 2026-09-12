@@ -32,7 +32,12 @@ def legacy_tts_backend() -> str | None:
     return None
 
 
-async def speak_sapi(text: str, *, speaker_ref: str = "") -> bytes:
+async def speak_sapi(
+    text: str,
+    *,
+    speaker_ref: str = "",
+    speaking_rate: float = 1.0,
+) -> bytes:
     out = _temp_path(".wav")
     escaped = text.replace("'", "''")
     voice_line = ""
@@ -43,10 +48,12 @@ async def speak_sapi(text: str, *, speaker_ref: str = "") -> bytes:
             f"$match = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{safe_voice}*' }} | Select-Object -First 1; "
             "if ($null -ne $match) { $s.SelectVoice($match.VoiceInfo.Name) } }"
         )
+    sapi_rate = max(-10, min(10, round((speaking_rate - 1.0) * 10)))
     script = (
         "Add-Type -AssemblyName System.Speech; "
         "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
         f"{voice_line}; "
+        f"$s.Rate = {sapi_rate}; "
         f"$s.SetOutputToWaveFile('{out}'); "
         f"$s.Speak('{escaped}'); "
         "$s.Dispose()"
@@ -70,10 +77,17 @@ async def speak_sapi(text: str, *, speaker_ref: str = "") -> bytes:
     return data
 
 
-async def speak_espeak(text: str, binary_name: str, *, speaker_ref: str = "") -> bytes:
+async def speak_espeak(
+    text: str,
+    binary_name: str,
+    *,
+    speaker_ref: str = "",
+    speaking_rate: float = 1.0,
+) -> bytes:
     binary = shutil.which(binary_name) or binary_name
     out = _temp_path(".wav")
-    command = [binary, "-w", str(out)]
+    words_per_minute = max(80, min(450, round(175 * speaking_rate)))
+    command = [binary, "-w", str(out), "-s", str(words_per_minute)]
     if speaker_ref:
         command.extend(["-v", speaker_ref])
     command.append(text)
@@ -93,11 +107,18 @@ async def speak_espeak(text: str, binary_name: str, *, speaker_ref: str = "") ->
     return data
 
 
-def speak_pyttsx3(text: str, *, speaker_ref: str = "") -> bytes:
+def speak_pyttsx3(
+    text: str,
+    *,
+    speaker_ref: str = "",
+    speaking_rate: float = 1.0,
+) -> bytes:
     import pyttsx3
 
     out = _temp_path(".wav")
     engine = pyttsx3.init()
+    base_rate = int(engine.getProperty("rate") or 200)
+    engine.setProperty("rate", max(80, min(450, round(base_rate * speaking_rate))))
     if speaker_ref:
         for voice in engine.getProperty("voices") or []:
             name = getattr(voice, "name", "") or ""

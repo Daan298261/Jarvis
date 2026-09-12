@@ -75,8 +75,9 @@ async def test_owner_chat_streams_without_confirmation(jarvis_env, monkeypatch):
 
     class StreamProvider:
         async def chat_stream(self, messages, **kwargs):
-            del kwargs
+            assert kwargs["max_tokens"] == 256
             assert messages[0].role == "system"
+            assert "useful answer in the first sentence" in messages[0].content
             yield "Certainly."
             yield " One moment."
 

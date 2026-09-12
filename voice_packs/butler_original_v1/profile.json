@@ -14,7 +14,8 @@
     "latency_class": "interactive",
     "license": "Apache-2.0",
     "offline": true,
-    "quality_tier": "natural"
+    "quality_tier": "natural",
+    "speaking_rate": 1.08
   },
   "persona_hooks": {
     "register": "british_understated",

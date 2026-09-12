@@ -7,5 +7,6 @@
   "license": "Apache-2.0",
   "offline": true,
   "quality_tier": "natural",
+  "speaking_rate": 1.08,
   "bundled": true
 }
