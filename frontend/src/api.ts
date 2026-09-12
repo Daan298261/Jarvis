@@ -799,8 +799,23 @@ export async function overrideLmStudioProfile(
   })
 }
 
-export async function selectLmStudioProfile(profileId: string): Promise<RuntimeProfile> {
-  return api<RuntimeProfile>(`/api/lmstudio/catalog/${encodeURIComponent(profileId)}/select`, {
+export async function selectLmStudioProfile(profileId: string): Promise<RuntimeProfile & { load?: Record<string, unknown> }> {
+  return api<RuntimeProfile & { load?: Record<string, unknown> }>(
+    `/api/lmstudio/catalog/${encodeURIComponent(profileId)}/select`,
+    {
+      method: "POST",
+    },
+  )
+}
+
+export type RuntimeActivateResponse = {
+  ok: boolean
+  profile: RuntimeProfile
+  load: Record<string, unknown>
+}
+
+export async function activateRuntimeProfile(profileId: string): Promise<RuntimeActivateResponse> {
+  return api<RuntimeActivateResponse>(`/api/runtime-profiles/${encodeURIComponent(profileId)}/activate`, {
     method: "POST",
   })
 }

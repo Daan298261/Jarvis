@@ -21,7 +21,7 @@ def worker_catalog() -> list[dict[str, Any]]:
     from ..tools.capabilities import native_capabilities
     from ..workers.browser import BrowserUseBackend
     from ..workers.code import OpenHandsBackend
-    from ..workers.computer import CuaBackend, UFOBackend
+    from ..workers.computer import CuaBackend, NativeWindowsBackend, UFOBackend
     from ..workers.interpreter import OpenInterpreterBackend
     from ..workers.voice import voice_status
 
@@ -44,6 +44,7 @@ def worker_catalog() -> list[dict[str, Any]]:
 
     for backend in (
         BrowserUseBackend(),
+        NativeWindowsBackend(),
         UFOBackend(),
         CuaBackend(),
         OpenHandsBackend(),

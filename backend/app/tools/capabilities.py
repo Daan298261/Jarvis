@@ -6,7 +6,7 @@ import shutil
 from typing import Any
 
 from ..agent.coding_workers import coding_worker_catalog
-from ..workers.computer import CuaBackend, UFOBackend
+from ..workers.computer import CuaBackend, NativeWindowsBackend, UFOBackend
 from ..workers.browser import BrowserUseBackend
 from ..workers.code import OpenHandsBackend
 from ..workers.interpreter import OpenInterpreterBackend
@@ -69,14 +69,7 @@ def native_capabilities() -> list[dict[str, Any]]:
             "status": "ready" if _module_available("playwright") else "missing",
             "detail": "Deterministic browser backend (default). Browser Use is optional for unfamiliar sites.",
         },
-        {
-            "id": "windows_ui",
-            "name": "Windows UI Automation",
-            "kind": "native",
-            "available": windows and _module_available("pywinauto"),
-            "status": "ready" if windows and _module_available("pywinauto") else "unavailable",
-            "detail": "Named-control UI Automation first (inspect / name / automation_id). Coordinate click is last resort.",
-        },
+        NativeWindowsBackend().probe(),
         {
             "id": "office",
             "name": "Microsoft Office",

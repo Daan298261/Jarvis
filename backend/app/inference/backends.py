@@ -106,6 +106,30 @@ def parse_models_payload(path: str, payload: Any) -> list[str]:
     return out
 
 
+def resolve_advertised_model(hint: str, advertised: list[str]) -> str:
+    """Resolve a runtime catalog hint to the model identifier an endpoint exposes."""
+    cleaned_hint = (hint or "").strip()
+    names = [str(item).strip() for item in advertised if str(item).strip()]
+    if not names:
+        return cleaned_hint
+    if len(names) == 1:
+        return names[0]
+    if not cleaned_hint:
+        return names[0]
+    lower_hint = cleaned_hint.lower()
+    for name in names:
+        if name.lower() == lower_hint:
+            return name
+    stem_hint = Path(cleaned_hint).stem.lower()
+    for name in names:
+        lower_name = name.lower()
+        if lower_hint in lower_name or lower_name in lower_hint:
+            return name
+        if stem_hint and (stem_hint in lower_name or Path(name).stem.lower() in stem_hint):
+            return name
+    return cleaned_hint
+
+
 async def probe_remote_server(
     host: str,
     port: int,

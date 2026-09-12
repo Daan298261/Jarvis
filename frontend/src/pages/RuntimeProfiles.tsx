@@ -8,6 +8,7 @@ import {
   listRuntimeProfiles,
   previewRuntimeRoute,
   resetRuntimeProfiles,
+  activateRuntimeProfile,
   RUNTIME_PRIVACY_CLASSES,
   RUNTIME_PROFILE_PROVIDERS,
   setSelectedRuntimeMode,
@@ -262,8 +263,22 @@ export function RuntimeProfilesSection() {
   function selectProfile(profile: RuntimeProfile, mode: RuntimeSelectMode = selectMode) {
     persistSelection(profile.id, mode)
     const label = profile.label || profile.name
-    setMsg(mode === "force" ? `Locked on ${label}.` : `${label} is preferred.`)
+    setMsg(mode === "force" ? `Switching to ${label}…` : `${label} is preferred.`)
     setError("")
+    if (mode === "force") {
+      void (async () => {
+        try {
+          await activateRuntimeProfile(profile.id)
+          setMsg(`Locked on ${label}.`)
+          window.dispatchEvent(
+            new CustomEvent("jarvis:runtime-profile-changed", { detail: { id: profile.id } }),
+          )
+        } catch (err: unknown) {
+          setError(err instanceof Error ? err.message : "Could not activate this runtime.")
+          setMsg("")
+        }
+      })()
+    }
   }
 
   function clearSelection() {
