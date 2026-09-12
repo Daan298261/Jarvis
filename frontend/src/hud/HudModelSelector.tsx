@@ -20,6 +20,8 @@ import {
   setSlotProfile,
   type HudModelSlotsV1,
 } from "./modelSlots"
+import { isHexStrikeSuiteProfile } from "./hexstrikeSuite"
+import "./hexstrike.css"
 
 export type HudModelSelectorProps = {
   model: { loaded?: boolean; loading?: boolean; active_model?: string; last_error?: string } | null
@@ -151,6 +153,11 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     () => profiles.find((p) => profileMatches(p, selectedId)) || null,
     [profiles, selectedId],
   )
+  const hexstrikeProfile = useMemo(
+    () => profiles.find((profile) => isHexStrikeSuiteProfile(profile)) || null,
+    [profiles],
+  )
+  const hexstrikeActive = !!(selectedProfile && isHexStrikeSuiteProfile(selectedProfile))
 
   const headline = useMemo(() => {
     if (transferring) return "Transferring conversation…"
@@ -163,10 +170,11 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const subline = useMemo(() => {
     if (transferring) return "Loading model"
     if (model?.loading) return "Switching runtime"
+    if (hexstrikeActive) return "Cybersecurity suite"
     if (model?.loaded && model.active_model) return model.active_model
     if (selectedProfile) return selectedProfile.model
     return profilesError ? "Offline" : "Pick a slot"
-  }, [model, profilesError, selectedProfile, transferring])
+  }, [hexstrikeActive, model, profilesError, selectedProfile, transferring])
 
   function setOpenState(next: boolean) {
     setOpen(next)
@@ -191,6 +199,22 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
       setMsg(`Loaded ${applied.label || applied.name}.`)
     } catch {
       setMsg("Could not load this slot.")
+    } finally {
+      setBusySlot(null)
+    }
+  }
+
+  async function onSwapSuite() {
+    if (!hexstrikeProfile) return
+    setBusySlot(-1)
+    setMsg("")
+    try {
+      const applied = await applyRuntimeProfile(hexstrikeProfile.id || hexstrikeProfile.name)
+      setSelectedId(applied.id || applied.name)
+      setMsg("HexStrike AI suite ready.")
+      setOpenState(false)
+    } catch {
+      setMsg("Could not open HexStrike.")
     } finally {
       setBusySlot(null)
     }
@@ -371,6 +395,21 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
           {msg && <p className="hud-model-msg">{msg}</p>}
           {model?.last_error && !transferring && (
             <p className="hud-model-error">{model.last_error}</p>
+          )}
+
+          {hexstrikeProfile && (
+            <button
+              type="button"
+              className={`hud-model-suite-row${hexstrikeActive ? " active" : ""}`}
+              disabled={transferring}
+              onClick={() => void onSwapSuite()}
+            >
+              <span className="mark" aria-hidden>
+                ⬡
+              </span>
+              <span>{hexstrikeProfile.label || "HexStrike AI"}</span>
+              <span className="meta">Cyber suite</span>
+            </button>
           )}
 
           <div

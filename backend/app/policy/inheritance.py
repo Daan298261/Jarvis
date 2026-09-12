@@ -38,6 +38,8 @@ TOOL_CAPABILITY_MAP: dict[str, str] = {
     "python": "python",
     "docker": "docker",
     "desktop": "desktop",
+    "ufo": "desktop",
+    "cua": "desktop",
     "office": "office",
     "screenshot": "screenshot",
     "web_fetch": "web_fetch",

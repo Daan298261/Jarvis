@@ -21,6 +21,12 @@ from ..inference.profiles import resolve_profile
 from ..inference.vision import messages_need_vision, should_load_vision
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..policy.authorize import AuthorizationResult, authorize
+from ..policy.computer_permissions import (
+    confirmation_payload_for_tool,
+    consume_once_grants,
+    evaluate_tool_permissions,
+    permission_ids_for_tool,
+)
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, classify_command, is_destructive_operation, needs_confirmation
@@ -161,7 +167,33 @@ def _tool_authorization(
     action = arguments.get("action") if isinstance(arguments, dict) else None
     if is_destructive_operation(name, arguments, command):
         risk = RiskLevel.IRREVERSIBLE
-    return authorize(name, action=action, risk=risk, profile_id=profile_id, approved=approved)
+    return authorize(
+        name,
+        action=action,
+        arguments=arguments if isinstance(arguments, dict) else None,
+        risk=risk,
+        profile_id=profile_id,
+        approved=approved,
+    )
+
+
+def _tool_needs_operator_pause(
+    autonomy: str,
+    risk: RiskLevel,
+    command: str | None,
+    tool_name: str | None,
+    arguments: dict[str, Any] | None,
+) -> bool:
+    if needs_confirmation(autonomy, risk, command, tool_name=tool_name, arguments=arguments):
+        return True
+    return evaluate_tool_permissions(tool_name or "", arguments or {}).status == "ask"
+
+
+def _permission_denied_observation(tool_name: str | None, arguments: dict[str, Any] | None) -> str | None:
+    decision = evaluate_tool_permissions(tool_name or "", arguments or {})
+    if decision.status == "deny":
+        return f"ERROR: Permission denied: {decision.reason}"
+    return None
 
 
 class AgentRuntime:
@@ -271,7 +303,14 @@ class AgentRuntime:
         self._start_runner(task_id, self._run(task_id, continue_existing=True, extra_prompt=prompt))
         return task
 
-    async def confirm_task(self, task_id: str, approved: bool, expected_payload: str | None = None) -> Task:
+    async def confirm_task(
+        self,
+        task_id: str,
+        approved: bool,
+        expected_payload: str | None = None,
+        grant_mode: str | None = None,
+        permission_id: str | None = None,
+    ) -> Task:
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if not task:
@@ -286,6 +325,26 @@ class AgentRuntime:
                 ).values(waiting_for_confirmation=False))
                 if changed.rowcount != 1:
                     raise ValueError("The pending action changed or was already resolved")
+            payload = json.loads(task.confirmation_payload or "{}")
+            if approved:
+                from ..policy.computer_permissions import apply_grant
+
+                mode = (grant_mode or "").strip().lower()
+                if mode in {"allow_once", "allow_session", "always"}:
+                    ids: list[str] = []
+                    primary = permission_id or payload.get("permission_id")
+                    if primary:
+                        ids.append(str(primary))
+                    for extra in payload.get("pending") or []:
+                        text = str(extra)
+                        if text not in ids:
+                            ids.append(text)
+                    try:
+                        for item in ids:
+                            apply_grant(item, mode)
+                    except PermissionError as exc:
+                        approved = False
+                        await BUS.publish(task_id, "confirm", "Permission grant refused", str(exc)[:1500], stage="act")
             if not approved:
                 task.status = "cancelled"
                 task.stage = "cancelled"
@@ -293,7 +352,6 @@ class AgentRuntime:
                 await session.commit()
                 await BUS.publish(task_id, "cancelled", "User rejected the pending action")
                 return task
-            payload = json.loads(task.confirmation_payload or "{}")
             task.waiting_for_confirmation = False
             task.status = "running"
             await session.commit()
@@ -624,7 +682,13 @@ class AgentRuntime:
                     tool_meta = REGISTRY.tools.get(step.get("tool") or "")
                     risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
                     command = (step.get("arguments") or {}).get("command") if isinstance(step.get("arguments"), dict) else None
-                    if needs_confirmation(autonomy, risk, command, tool_name=step.get("tool"), arguments=step.get("arguments") or {}):
+                    if _tool_needs_operator_pause(
+                        autonomy,
+                        risk,
+                        command,
+                        step.get("tool"),
+                        step.get("arguments") or {},
+                    ) or _permission_denied_observation(step.get("tool"), step.get("arguments") or {}):
                         blocked = True
                         break
                 if blocked:
@@ -923,19 +987,39 @@ class AgentRuntime:
                         tool_meta = REGISTRY.tools.get(name)
                         risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
                         command = arguments.get("command") if isinstance(arguments, dict) else None
-                        if needs_confirmation(autonomy, risk, command, tool_name=name, arguments=arguments):
+                        denied = _permission_denied_observation(name, arguments)
+                        if denied:
+                            messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=denied))
+                            working.note_tool(name, denied, False)
+                            continue
+                        if _tool_needs_operator_pause(autonomy, risk, command, name, arguments):
                             metrics.note_confirmation()
+                            irreversible = needs_confirmation(
+                                autonomy, risk, command, tool_name=name, arguments=arguments
+                            )
+                            payload = confirmation_payload_for_tool(
+                                call_id=call["id"],
+                                name=name,
+                                arguments=arguments,
+                                irreversible=irreversible,
+                            )
                             await self._update(
                                 task_id,
                                 status="waiting",
                                 waiting_for_confirmation=True,
-                                confirmation_payload=json.dumps({"id": call["id"], "name": name, "arguments": arguments}),
+                                confirmation_payload=json.dumps(payload),
                                 current_action=f"Waiting for confirmation: {name}",
                                 conversation_json=serialize_messages(messages),
                                 compact_memory=working.dumps(),
                                 **metrics.as_fields(),
                             )
-                            await BUS.publish(task_id, "confirm", f"Confirmation required for {name}", json.dumps(arguments)[:1500], stage="act")
+                            await BUS.publish(
+                                task_id,
+                                "confirm",
+                                f"Confirmation required for {name}",
+                                json.dumps(arguments)[:1500],
+                                stage="act",
+                            )
                             return
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
@@ -1152,6 +1236,7 @@ class AgentRuntime:
         authz = _tool_authorization(name, arguments, approved=approved, profile_id=profile_id)
         if not authz.allowed:
             return _authorization_observation(authz), None
+        consume_once_grants(permission_ids_for_tool(name, arguments))
         started = datetime.now(timezone.utc)
 
         async def _run_tool():

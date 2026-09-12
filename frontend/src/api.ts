@@ -135,6 +135,7 @@ export type Task = {
   last_heartbeat_at?: string | null
   heartbeat_status?: "alive" | "waiting" | "stale" | "stopped" | string
   waiting_for_confirmation: boolean
+  confirmation_payload?: unknown
   verification_summary?: {
     result: "VERIFIED" | "VERIFICATION_FAILED" | "PARTIALLY_VERIFIED" | "NOT_VERIFIED" | string
     verifier: string
@@ -801,6 +802,51 @@ export async function overrideLmStudioProfile(
 export async function selectLmStudioProfile(profileId: string): Promise<RuntimeProfile> {
   return api<RuntimeProfile>(`/api/lmstudio/catalog/${encodeURIComponent(profileId)}/select`, {
     method: "POST",
+  })
+}
+
+export type HexStrikeStatus = {
+  suite: string
+  shape_id: string
+  installed: boolean
+  running: boolean
+  starting: boolean
+  install_path: string
+  python_executable: string
+  host: string
+  port: number
+  health_url: string
+  embed_path: string
+  native_ui: boolean
+  pid: number | null
+  last_error: string
+  tools: Record<string, unknown>
+  telemetry: Record<string, unknown>
+  processes: Record<string, unknown>
+  dashboard: Record<string, unknown> | null
+  health: Record<string, unknown>
+}
+
+export async function getHexStrikeStatus(): Promise<HexStrikeStatus> {
+  return api<HexStrikeStatus>("/api/hexstrike")
+}
+
+export async function startHexStrike(): Promise<HexStrikeStatus> {
+  return api<HexStrikeStatus>("/api/hexstrike/start", { method: "POST" })
+}
+
+export async function stopHexStrike(): Promise<HexStrikeStatus> {
+  return api<HexStrikeStatus>("/api/hexstrike/stop", { method: "POST" })
+}
+
+export async function configureHexStrike(body: {
+  install_path?: string
+  python_executable?: string
+  port?: number
+}): Promise<HexStrikeStatus> {
+  return api<HexStrikeStatus>("/api/hexstrike/config", {
+    method: "PUT",
+    body: JSON.stringify(body),
   })
 }
 

@@ -49,9 +49,10 @@ type PresenceHostProps = {
   snapshot: PresenceSnapshot
   settings: PresentationSettings
   size?: number
+  shapeId?: string
 }
 
-export function PresenceHost({ snapshot, settings, size = 540 }: PresenceHostProps) {
+export function PresenceHost({ snapshot, settings, size = 540, shapeId }: PresenceHostProps) {
   const resolved = resolvePresence(settings)
   const staticFallback = <PresenceFallback snapshot={snapshot} />
   const neuralFallback = (
@@ -72,7 +73,7 @@ export function PresenceHost({ snapshot, settings, size = 540 }: PresenceHostPro
       {resolved.effective === "humanoid" && (
         <PresenceErrorBoundary key="humanoid" fallback={neuralFallback}>
           <Suspense fallback={neuralFallback}>
-            <HumanoidPresence snapshot={snapshot} settings={settings} size={size} />
+            <HumanoidPresence snapshot={snapshot} settings={settings} size={size} shapeId={shapeId} />
           </Suspense>
         </PresenceErrorBoundary>
       )}

@@ -53,6 +53,15 @@ def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
 
 
 async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = True):
+    from ..security.hexstrike import HEXSTRIKE, is_hexstrike_suite, is_suite_runtime
+
+    if is_hexstrike_suite(runtime) or is_suite_runtime(runtime):
+        await HEXSTRIKE.ensure_started()
+        return MANAGER.state
+
+    if HEXSTRIKE.is_running:
+        await HEXSTRIKE.stop()
+
     settings = load_settings()
     previous_context = int(MANAGER.state.context_size or settings.inference.context_size or 0)
     apply_runtime_profile_to_settings(runtime)

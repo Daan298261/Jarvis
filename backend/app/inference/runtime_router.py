@@ -12,6 +12,7 @@ from .runtime_profiles import (
     get_runtime_profile,
     list_runtime_profiles,
 )
+from ..security.hexstrike import is_suite_runtime
 
 ROUTING_POLICIES = ("local-only", "local-first", "best-result", "cost-optimized")
 
@@ -257,6 +258,8 @@ def _filter_candidates(
             return [], "Forced runtime profile is forbidden", "forced_forbidden"
         if not forced.enabled:
             return [], "Forced runtime profile is disabled", "forced_disabled"
+        if is_suite_runtime(forced):
+            return [], "Forced runtime profile is a UI suite, not an inference runtime", "suite_not_inference"
         if not _privacy_allows(forced, prefs.privacy_floor):
             return [], "Forced runtime profile violates privacy floor", "privacy_violation"
         if not _has_capabilities(forced, prefs.required_capabilities):
@@ -273,6 +276,8 @@ def _filter_candidates(
         if profile.name in prefs.forbidden_profiles or profile.id in prefs.forbidden_profiles:
             continue
         if not profile.enabled:
+            continue
+        if is_suite_runtime(profile):
             continue
         if not _has_capabilities(profile, prefs.required_capabilities):
             continue

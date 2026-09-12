@@ -6,8 +6,11 @@ import {
   selectLmStudioProfile,
   setSelectedRuntimeMode,
   setSelectedRuntimeProfileId,
+  startHexStrike,
+  stopHexStrike,
   type RuntimeProfile,
 } from "../api"
+import { isHexStrikeSuiteProfile } from "./hexstrikeSuite"
 
 const BUILTIN_LOAD_PROFILES = new Set(["fast", "balanced", "quality", "expert"])
 
@@ -30,6 +33,17 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
   setSelectedRuntimeProfileId(id)
   setSelectedRuntimeMode("force")
   window.dispatchEvent(new CustomEvent("jarvis:runtime-profile-changed", { detail: { id } }))
+
+  if (isHexStrikeSuiteProfile(profile)) {
+    await startHexStrike()
+    return profile
+  }
+
+  try {
+    await stopHexStrike()
+  } catch {
+    // Suite may already be idle.
+  }
 
   try {
     await routeRuntime({ force_profile: id, policy })

@@ -176,6 +176,17 @@ class TtsSettings(BaseModel):
     prefer_cpu_fallback: bool = True
 
 
+class HexStrikeSettings(BaseModel):
+    """Local HexStrike AI suite (RFC-0078). Loopback only; never a WAN listener."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    install_path: str = ""
+    python_executable: str = ""
+    host: str = "127.0.0.1"
+    port: int = Field(default=8888, ge=1, le=65535)
+
+
 class IdentityRecognitionSettings(BaseModel):
     """Explicit, local-only biometric identity matching. Disabled by default."""
 
@@ -219,6 +230,7 @@ class AppSettings(BaseModel):
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
+    hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)

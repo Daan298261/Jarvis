@@ -140,8 +140,9 @@ export function HudChat({ onMoodChange }: HudChatProps) {
               stage={shown.stage}
               current_action={shown.current_action}
               current_tool={shown.current_tool}
-              waiting_for_confirmation={shown.waiting_for_confirmation}
-              result={shown.result}
+            waiting_for_confirmation={shown.waiting_for_confirmation}
+            confirmation_payload={shown.confirmation_payload}
+            result={shown.result}
               error={shown.error}
               events={shown.events}
             />

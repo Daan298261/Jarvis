@@ -207,15 +207,6 @@ export function ChatPage() {
       {shown && (
         <div className="chat-activity-wrap">
           <TaskActivityPanel task={shown} elapsed={elapsed || Math.round(shown.elapsed_seconds || shown.duration_seconds || 0)} />
-          {shown.waiting_for_confirmation && (
-            <div className="task-approval-bar">
-              <span>Destructive deletion is paused until you approve it.</span>
-              <div className="row">
-                <button className="btn danger" onClick={() => api(`/api/tasks/${shown.id}/continue`, { method: "POST", body: JSON.stringify({ approve: true }) })}>Approve delete</button>
-                <button className="btn secondary" onClick={() => api(`/api/tasks/${shown.id}/continue`, { method: "POST", body: JSON.stringify({ approve: false }) })}>Reject</button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -254,6 +245,7 @@ export function ChatPage() {
             current_action={shown.current_action}
             current_tool={shown.current_tool}
             waiting_for_confirmation={shown.waiting_for_confirmation}
+            confirmation_payload={shown.confirmation_payload}
             result={shown.result}
             error={shown.error}
             events={shown.events}

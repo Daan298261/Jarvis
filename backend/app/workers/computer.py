@@ -25,21 +25,100 @@ def _module_available(name: str) -> bool:
 
 
 class ComputerUseBackend:
-    id: str
-    name: str
+    """Computer-use worker contract. Subclasses override detection and command shape."""
+
+    id: str = "computer"
+    name: str = "Computer use"
     license_id: str = ""
+    timeout_seconds: int = 180
 
     def available(self) -> bool:
         return False
 
     def probe(self) -> dict[str, Any]:
-        raise NotImplementedError
+        ready = self.available()
+        return {
+            "id": self.id,
+            "name": self.name,
+            "kind": "optional",
+            "available": ready,
+            "status": "ready" if ready else "unavailable",
+            "detail": (
+                f"{self.name} is ready."
+                if ready
+                else f"{self.name} is not available on this machine."
+            ),
+        }
 
     def build_command(self, goal: str, app: str | None = None, kind: str | None = None) -> list[str]:
-        raise NotImplementedError
+        del goal, app, kind
+        return []
 
     async def run(self, goal: str, app: str | None = None, timeout_seconds: int | None = None) -> ToolResult:
-        raise NotImplementedError
+        if not str(goal or "").strip():
+            return ToolResult(False, "", error="goal is required")
+        if not self.available():
+            return ToolResult(
+                False,
+                "",
+                error=(
+                    f"{self.name} is not available on this machine. "
+                    "Use the native desktop tool on Windows with pywinauto installed."
+                ),
+            )
+        command = self.build_command(str(goal).strip(), app)
+        if not command:
+            hint = f" for app {app}" if app else ""
+            return ToolResult(
+                True,
+                (
+                    f"Use the native desktop tool{hint} for: {goal.strip()}. "
+                    "Prefer named UI Automation controls over coordinates."
+                ),
+                data={"backend": self.id, "goal": goal, "app": app},
+            )
+        timeout = timeout_seconds or self.timeout_seconds
+        try:
+            stdout, stderr, code = await self._invoke(command, timeout)
+        except Exception as exc:
+            return ToolResult(
+                False,
+                "",
+                error=f"{self.name} failed: {exc}. Fall back to the native desktop tool.",
+            )
+        output = (stdout or stderr or "").strip()
+        data = {"backend": self.id, "command": command, "exit_code": code, "app": app}
+        if code != 0:
+            return ToolResult(
+                False,
+                output,
+                data=data,
+                error=(
+                    f"{self.name} exited {code}. Continue with the native desktop tool "
+                    "and verify the UI state."
+                ),
+            )
+        reminder = (
+            f"\n\nJarvis must independently inspect the UI after {self.name} returns. "
+            "A worker report of success is not verification."
+        )
+        return ToolResult(True, (output or f"{self.name} finished.") + reminder, data=data)
+
+    async def _invoke(self, command: list[str], timeout: int) -> tuple[str, str, int]:
+        proc = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise TimeoutError(f"{self.name} timed out after {timeout}s")
+        stdout = stdout_b.decode("utf-8", errors="replace")
+        stderr = stderr_b.decode("utf-8", errors="replace")
+        return stdout, stderr, proc.returncode or 0
 
 
 class NativeWindowsBackend(ComputerUseBackend):
