@@ -50,3 +50,23 @@ async def whatsapp_pairing_status():
 @router.delete("/whatsapp/pair")
 async def cancel_whatsapp_pairing():
     return {"ok": True, "whatsapp": await WHATSAPP_PAIRING.cancel()}
+
+
+@router.get("/whatsapp/contact")
+async def whatsapp_contact_card():
+    """Desktop/portal contact card for messaging the linked WhatsApp session."""
+    from ..integrations.whatsapp_bridge import jarvis_whatsapp_contact
+
+    status = WHATSAPP_PAIRING.status()
+    if not bool(status.get("paired") or status.get("state") == "connected"):
+        return {
+            "available": False,
+            "reason": "WhatsApp is not connected. Connect WhatsApp in Setup, then try again.",
+        }
+    try:
+        return await jarvis_whatsapp_contact()
+    except HTTPException as exc:
+        if exc.status_code in {400, 502, 504}:
+            return {"available": False, "reason": str(exc.detail)}
+        raise
+

@@ -20,7 +20,8 @@ from ..inference.backends import probe_remote_server
 from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
-from ..inference.profiles import available_profiles, declared_profiles
+from ..inference.profiles import available_profiles, declared_profiles, resolve_profile
+from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 
 router = APIRouter(prefix="/api/model", tags=["model"])
 
@@ -177,13 +178,20 @@ async def run_model_harness():
 async def load_model(body: LoadBody | None = None):
     settings = load_settings()
     profile = (body.profile if body else None) or settings.inference.profile
+    previous_context = int(MANAGER.state.context_size or settings.inference.context_size or 0)
+    target = resolve_profile(profile)
+    target_context = int(target.context_size or settings.inference.context_size or 0)
     try:
         await MANAGER.load(settings, profile)
     except Exception as exc:
-        raise HTTPException(500, str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)[:500])
     if body and body.profile:
         settings.inference.profile = body.profile
         save_settings(settings)
+    rebind_owner_conversations_after_hotswap(
+        int(MANAGER.state.context_size or target_context),
+        previous_context_limit=previous_context if previous_context > 0 else None,
+    )
     return await MANAGER.snapshot(settings)
 
 

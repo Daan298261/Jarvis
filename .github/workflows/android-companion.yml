@@ -1,7 +1,7 @@
 name: Android companion
 on:
   pull_request:
-    paths: ['android/**', 'frontend/mobile-orb/**', 'frontend/src/vendor/apex-ui/**', 'frontend/vite.orb.config.ts', '.github/workflows/android-companion.yml']
+    paths: ['android/**', 'frontend/mobile-orb/**', 'frontend/src/vendor/apex-ui/**', 'frontend/vite.orb.config.ts', 'scripts/build_android.py', '.github/workflows/android-companion.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,15 +21,52 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - uses: android-actions/setup-android@v3
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Verify companion feature sources
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          source = Path("scripts/build_android.py").resolve()
+          spec = importlib.util.spec_from_file_location("jarvis_build_android", source)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          module.ensure_feature_sources()
+          print("features:", ", ".join(module.REQUIRED_COMPANION_FEATURES))
+          PY
       - run: npm --prefix frontend ci
       - run: npx vite build --config vite.orb.config.ts
         working-directory: frontend
-      - run: bash gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest --console=plain
+      - name: Write generic release bootstrap
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          features = [
+              "chat", "tasks", "attachments", "realtime_voice", "calls",
+              "schedules", "whatsapp_contact", "apex_orb",
+          ]
+          path = Path("android/bootstrap-generic.json")
+          path.write_text(json.dumps({"mode": "generic", "features": features}), encoding="utf-8")
+          print(path, "written")
+          PY
+      - name: Assemble debug + release (generic companion)
+        run: |
+          bash gradlew \
+            :app:assembleDebug \
+            :app:assembleRelease \
+            :app:lintDebug \
+            :app:testDebugUnitTest \
+            -PbootstrapFile="$(pwd)/bootstrap-generic.json" \
+            --console=plain
         working-directory: android
       - uses: actions/upload-artifact@v4
         with:
           name: jarvis-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-android-generic-release
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -33,7 +33,7 @@ def update(job_id, **changes):
         put(db, "build", job_id, value)
 
 
-def execute(job_id, endpoint, endpoints):
+def execute(job_id, endpoint, endpoints, *, generic: bool = False):
     stopped = threading.Event()
     activity = ["Preparing Android build"]
 
@@ -52,8 +52,18 @@ def execute(job_id, endpoint, endpoints):
         spec = importlib.util.spec_from_file_location("jarvis_build_android", source)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        result = module.build(endpoint, endpoints=endpoints, progress=progress)
-        update(job_id, state="completed", result=result, activity="Signed APK ready", finished_at=time.time())
+        if generic:
+            result = module.build(progress=progress, generic=True)
+        else:
+            result = module.build(endpoint, endpoints=endpoints, progress=progress, generic=False)
+        update(
+            job_id,
+            state="completed",
+            result=result,
+            activity="Signed APK ready",
+            mode=result.get("mode") or ("generic" if generic else "personalized"),
+            finished_at=time.time(),
+        )
     except Exception as exc:
         update(job_id, state="failed", activity=str(exc)[:300], finished_at=time.time())
     finally:
@@ -75,15 +85,27 @@ def recover_interrupted():
     return recovered
 
 
-async def start(endpoint, endpoints=None):
+async def start(endpoint, endpoints=None, *, generic: bool = False):
     if not BUILD_LOCK.acquire(blocking=False):
         raise HTTPException(409, "An Android build is already running")
     job_id = str(uuid.uuid4())
-    value = {"id": job_id, "state": "queued", "activity": "Preparing Android build", "worker": "Android builder",
-             "started_at": time.time(), "updated_at": time.time(), "heartbeat_at": time.time(), "stale": False}
+    mode = "generic" if generic else "personalized"
+    value = {
+        "id": job_id,
+        "state": "queued",
+        "activity": "Preparing generic companion APK" if generic else "Preparing Android build",
+        "worker": "Android builder",
+        "mode": mode,
+        "started_at": time.time(),
+        "updated_at": time.time(),
+        "heartbeat_at": time.time(),
+        "stale": False,
+    }
     with database() as db:
         put(db, "build", job_id, value)
-    task = asyncio.create_task(asyncio.to_thread(execute, job_id, endpoint, endpoints or []))
+    task = asyncio.create_task(
+        asyncio.to_thread(execute, job_id, endpoint or "", endpoints or [], generic=generic)
+    )
     JOBS.add(task)
     task.add_done_callback(JOBS.discard)
     return value

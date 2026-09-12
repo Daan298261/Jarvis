@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from "react"
+import { QRCodeSVG } from "qrcode.react"
 import {
   api,
   createCompanionPairingCode,
+  fetchCompanionOnboarding,
   getActiveCompanionPairingCode,
   regenerateCompanionPairingCode,
+  type CompanionOnboardingOffer,
+  type CompanionOnboardingSnapshot,
   type CompanionPairingCode,
 } from "../api"
+import { speakChatReply } from "../tts/chatTtsPlayer"
+import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 
 type CompanionDevice = { id: string; name: string; status: string; fingerprint: string }
 
@@ -16,7 +22,8 @@ function formatDigits(code: string): string {
 
 function remainingSeconds(pairing: CompanionPairingCode): number {
   if (pairing.expires_at) {
-    const expiresMs = typeof pairing.expires_at === "number" ? pairing.expires_at * 1000 : Date.parse(pairing.expires_at)
+    const expiresMs =
+      typeof pairing.expires_at === "number" ? pairing.expires_at * 1000 : Date.parse(String(pairing.expires_at))
     if (!Number.isNaN(expiresMs)) {
       return Math.max(0, Math.ceil((expiresMs - Date.now()) / 1000))
     }
@@ -33,6 +40,20 @@ function formatCountdown(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`
 }
 
+function qrPayload(pairing: CompanionPairingCode): string | null {
+  if (pairing.qr?.endpoint && pairing.qr.server_pin && pairing.qr.code) {
+    return JSON.stringify(pairing.qr)
+  }
+  if (pairing.endpoint && pairing.server_pin && pairing.code) {
+    return JSON.stringify({
+      endpoint: pairing.endpoint,
+      server_pin: pairing.server_pin,
+      code: formatDigits(pairing.code),
+    })
+  }
+  return null
+}
+
 type PanelState =
   | { mode: "loading" }
   | { mode: "waiting_api" }
@@ -45,6 +66,9 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState("")
   const [devices, setDevices] = useState<CompanionDevice[]>([])
+  const [onboarding, setOnboarding] = useState<CompanionOnboardingSnapshot | null>(null)
+  const [spokenOfferId, setSpokenOfferId] = useState<string | null>(null)
+  const [speakChatReplies] = useSpeakChatReplies()
 
   const refreshDevices = useCallback(() => {
     if (compact) return Promise.resolve()
@@ -68,26 +92,35 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
     setState({ mode: "ready", pairing: result.pairing, remaining })
   }, [])
 
-  const ensureCode = useCallback(async (createIfMissing: boolean) => {
-    setBusy(true)
-    setMsg("")
-    try {
-      let result = await getActiveCompanionPairingCode()
-      if (!result.available && result.reason === "not_found" && createIfMissing) {
-        result = await createCompanionPairingCode()
+  const ensureCode = useCallback(
+    async (createIfMissing: boolean) => {
+      setBusy(true)
+      setMsg("")
+      try {
+        let result = await getActiveCompanionPairingCode()
+        if (!result.available && result.reason === "not_found" && createIfMissing) {
+          result = await createCompanionPairingCode()
+        }
+        applyResult(result)
+        if (!result.available && result.reason === "not_found") {
+          setMsg("Pairing service is unavailable. Check that Jarvis is running and try again.")
+        }
+      } finally {
+        setBusy(false)
       }
-      applyResult(result)
-      if (!result.available && result.reason === "not_found") {
-        setMsg("Pairing service is unavailable. Check that Jarvis is running and try again.")
-      }
-    } finally {
-      setBusy(false)
-    }
-  }, [applyResult])
+    },
+    [applyResult],
+  )
 
   useEffect(() => {
     ensureCode(true).catch(() => setState({ mode: "waiting_api" }))
   }, [ensureCode]) // Generate once when this owner-only screen opens; plaintext is never stored server-side.
+
+  useEffect(() => {
+    fetchCompanionOnboarding()
+      .then(setOnboarding)
+      .catch(() => setOnboarding(null))
+  }, [])
 
   useEffect(() => {
     if (compact) return
@@ -148,6 +181,15 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
     }
   }
 
+  async function speakOffer(offer: CompanionOnboardingOffer) {
+    setSpokenOfferId(offer.id)
+    setMsg(offer.spoken_prompt)
+    const shouldSpeak = speakChatReplies || onboarding?.speak_chat_replies === true
+    if (shouldSpeak) {
+      await speakChatReply(offer.spoken_prompt)
+    }
+  }
+
   const displayCode =
     state.mode === "ready" || state.mode === "expired"
       ? state.pairing
@@ -168,35 +210,81 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
             ? "Loading…"
             : "—"
 
+  const readyPairing = state.mode === "ready" ? state.pairing : null
+  const qrValue = readyPairing ? qrPayload(readyPairing) : null
+
   return (
     <div className={compact ? "companion-pairing companion-pairing--compact" : "companion-pairing"}>
+      {!compact && onboarding && onboarding.offers.length > 0 && (
+        <div className="companion-pairing-offers" aria-label="Companion onboarding choices">
+          <p className="companion-pairing-offers-lede">What would you like to do?</p>
+          <div className="row companion-pairing-offer-actions">
+            {onboarding.offers.map((offer) => (
+              <button
+                key={offer.id}
+                className={`btn ${spokenOfferId === offer.id ? "" : "secondary"}`}
+                type="button"
+                disabled={busy}
+                onClick={() => void speakOffer(offer)}
+              >
+                {offer.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="companion-pairing-code" aria-live="polite">
         {displayCode.split("").map((digit, index) => (
-          <span key={index} className="companion-pairing-digit">{digit}</span>
+          <span key={index} className="companion-pairing-digit">
+            {digit}
+          </span>
         ))}
       </div>
+
+      {!compact && state.mode === "ready" && (
+        <div className="companion-pairing-qr-block">
+          {qrValue ? (
+            <>
+              <div className="companion-pairing-qr" aria-label="Companion pairing QR code">
+                <QRCodeSVG value={qrValue} size={232} level="M" marginSize={2} />
+              </div>
+              <p className="companion-pairing-hint">
+                Scan with the Jarvis companion app, or type the 6-digit code. Same session as the digits above.
+              </p>
+            </>
+          ) : (
+            <p className="companion-pairing-hint">
+              QR appears after Prepare connection is ready (HTTPS endpoint + server pin). The 6-digit code still works.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="companion-pairing-meta">
         <span className="companion-pairing-ttl">{countdown}</span>
         {state.mode === "waiting_api" && (
           <span className="companion-pairing-hint">Pairing service unavailable.</span>
         )}
-        {state.mode === "error" && (
-          <span className="companion-pairing-hint">{state.message}</span>
-        )}
+        {state.mode === "error" && <span className="companion-pairing-hint">{state.message}</span>}
       </div>
 
       {msg && <p className="companion-pairing-msg">{msg}</p>}
 
       <div className="row companion-pairing-actions">
-        <button className="btn" type="button" disabled={busy} onClick={regenerate}>
+        <button className="btn" type="button" disabled={busy} onClick={() => void regenerate()}>
           Regenerate code
         </button>
-        <button className="btn secondary" type="button" disabled={busy || displayCode === "------"} onClick={copyCode}>
+        <button
+          className="btn secondary"
+          type="button"
+          disabled={busy || displayCode === "------"}
+          onClick={() => void copyCode()}
+        >
           Copy
         </button>
         {state.mode === "waiting_api" && (
-          <button className="btn secondary" type="button" disabled={busy} onClick={() => ensureCode(true)}>
+          <button className="btn secondary" type="button" disabled={busy} onClick={() => void ensureCode(true)}>
             Try create
           </button>
         )}
@@ -206,31 +294,50 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
         <>
           <ol className="companion-pairing-steps">
             <li>Open the Jarvis companion app on your phone.</li>
-            <li>Enter this 6-digit code.</li>
+            <li>Scan the QR code or enter this 6-digit code.</li>
             <li>Compare and approve the fingerprint below.</li>
           </ol>
-          {devices.filter((device) => device.status === "pending").map((device) => (
-            <div key={device.id} className="card" style={{ marginTop: 12 }}>
-              <strong>{device.name} · awaiting approval</strong>
-              <p style={{ overflowWrap: "anywhere", fontFamily: "monospace" }}>
-                {device.fingerprint.match(/.{1,8}/g)?.join(" ")}
-              </p>
-              <button className="btn" type="button" onClick={async () => {
-                setBusy(true); setMsg("")
-                try {
-                  await api(`/api/mobile/manage/devices/${device.id}/confirm`, {
-                    method: "POST", body: JSON.stringify({ fingerprint: device.fingerprint }),
-                  })
-                  setMsg(`${device.name} approved. Return to the phone and connect.`)
-                  await refreshDevices()
-                } catch (error) {
-                  setMsg(error instanceof Error ? error.message : String(error))
-                } finally { setBusy(false) }
-              }} disabled={busy}>Fingerprint matches — approve phone</button>
-            </div>
-          ))}
+          {devices
+            .filter((device) => device.status === "pending")
+            .map((device) => (
+              <div key={device.id} className="card" style={{ marginTop: 12 }}>
+                <strong>{device.name} · awaiting approval</strong>
+                <p style={{ overflowWrap: "anywhere", fontFamily: "monospace" }}>
+                  {device.fingerprint.match(/.{1,8}/g)?.join(" ")}
+                </p>
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true)
+                    setMsg("")
+                    try {
+                      await api(`/api/mobile/manage/devices/${device.id}/confirm`, {
+                        method: "POST",
+                        body: JSON.stringify({ fingerprint: device.fingerprint }),
+                      })
+                      setMsg(`${device.name} approved. Return to the phone and connect.`)
+                      await refreshDevices()
+                    } catch (error) {
+                      setMsg(error instanceof Error ? error.message : String(error))
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}
+                >
+                  Fingerprint matches — approve phone
+                </button>
+              </div>
+            ))}
           {devices.some((device) => device.status === "active") && (
-            <p className="companion-pairing-msg">Paired: {devices.filter((device) => device.status === "active").map((device) => device.name).join(", ")}</p>
+            <p className="companion-pairing-msg">
+              Paired:{" "}
+              {devices
+                .filter((device) => device.status === "active")
+                .map((device) => device.name)
+                .join(", ")}
+            </p>
           )}
         </>
       )}

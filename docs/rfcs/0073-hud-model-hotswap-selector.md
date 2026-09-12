@@ -1,12 +1,12 @@
 # RFC-0073: HUD model hotswap selector
 
-**Status:** accepted
+**Status:** implemented
 **Queue item:** P0 — HUD model hotswap
 **Author:** Jarvis Architect
 **Date:** 2026-09-11
 **Owner for implement:** Jarvis UX (`frontend/src`)
 
-**Related (do not rewrite):** RFC-0003 runtime/model profiles; RFC-0043 LM Studio graded profiles; `frontend/src/pages/Model.tsx`, `RuntimeProfilesSection`, `LmStudioCatalogPicker` / `frontend/src/lmstudio/*`; `backend/app/api/model.py` (`GET /api/model`, `POST /api/model/load` with `{ profile }`); LM Studio catalog APIs.
+**Related (do not rewrite):** RFC-0003 runtime/model profiles; RFC-0043 LM Studio graded profiles; RFC-0077 local LM Studio discovery + play/hotswap context; `frontend/src/pages/Model.tsx`, `RuntimeProfilesSection`, `LmStudioCatalogPicker` / `frontend/src/lmstudio/*`; `backend/app/api/model.py` (`GET /api/model`, `POST /api/model/load` with `{ profile }`); LM Studio catalog APIs.
 
 ## Problem
 
@@ -30,13 +30,13 @@ Add a toolbar **ModelSelector** on the **main HUD chrome, top-right** (`HudTopCh
 
 ## Acceptance criteria
 
-- [ ] HUD top-right ModelSelector with ~6 pin-configurable slots
-- [ ] One-click hotswap loads that profile via existing `/api/model` (or documented RuntimeProfile / LM Studio select) without opening Settings
-- [ ] Slots are user-configurable favorites (persist in `jarvis_hud_model_slots` or equivalent); not a hardcoded model list
-- [ ] More → existing advanced Model / Settings page (`/model`)
-- [ ] Active profile indicated; load errors visible on HUD without leaving chat
-- [ ] Specs-only PR (no product code here)
-- [ ] Implement follow-up: `npm --prefix frontend run build`; `python3 -m pytest` if backend prefs touched
+- [x] HUD top-right ModelSelector with ~6 pin-configurable slots
+- [x] One-click hotswap loads that profile via existing `/api/model` (or documented RuntimeProfile / LM Studio select) without opening Settings
+- [x] Slots are user-configurable favorites (persist in `jarvis_hud_model_slots` or equivalent); not a hardcoded model list
+- [x] More → existing advanced Model / Settings page (`/model`)
+- [x] Active profile indicated; load errors visible on HUD without leaving chat
+- [x] Specs-only PR (no product code here)
+- [x] Implement follow-up: `npm --prefix frontend run build`; `python3 -m pytest` if backend prefs touched
 
 ## Likely files
 
@@ -55,3 +55,7 @@ Presence/orb redesign; TTS; swarm routing rewrite; new inference backends; Andro
 ## Notes
 
 Taco urgent 2026-09-11 via CoS. Keep this RFC short. Implement is a follow-up Jarvis UX ticket after this specs-only land — do not ship product code in the RFC PR.
+
+## Implementation note
+
+Landed via #180 (specs) + #181 (impl @ `0b9cfa1`); HUD ModelSelector top-right, pinnable slots, More → `/model`. Specs-only criterion satisfied by #180; implement build criterion satisfied by #181 land.

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+import errno
 import ipaddress
 import os
 import socket
@@ -127,9 +128,12 @@ class Connectivity:
 
     async def start_gateway(self, identity):
         from ..config import load_settings
+        if self.server and self.server_task and not self.server_task.done() and self.server.started:
+            return
         await self.stop_gateway()
         # Bind ourselves so port conflicts raise OSError instead of Uvicorn's SystemExit.
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        addr_in_use = getattr(errno, "WSAEADDRINUSE", 10048)
         try:
             listener.bind(("0.0.0.0", PORT))
             listener.listen(128)
@@ -148,6 +152,15 @@ class Connectivity:
                     return
                 await asyncio.sleep(.05)
             raise TimeoutError("Mobile listener did not start")
+        except OSError as exc:
+            listener.close()
+            if exc.errno in (errno.EADDRINUSE, addr_in_use):
+                try:
+                    await self.probe(f"https://127.0.0.1:{PORT}", identity)
+                    return
+                except Exception:
+                    pass
+            raise
         except BaseException:
             listener.close()
             raise

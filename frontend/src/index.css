@@ -1652,6 +1652,30 @@ label { display: block; color: var(--muted); font-size: 13px; }
   justify-content: center;
   flex-wrap: wrap;
 }
+
+.companion-pairing-offers {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.companion-pairing-offers-lede {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.companion-pairing-offer-actions { flex-wrap: wrap; gap: 10px; }
+.companion-pairing-qr-block {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.companion-pairing-qr {
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  width: fit-content;
+}
 .companion-pairing-steps {
   width: 100%;
   margin: 0;
@@ -1660,6 +1684,39 @@ label { display: block; color: var(--muted); font-size: 13px; }
   font-size: 13px;
   line-height: 1.7;
 }
+/* RFC-0076 — companion APK build / delivery */
+.companion-apk-build {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+.companion-apk-build-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.companion-apk-build-title { display: block; font-size: 15px; }
+.companion-apk-build-activity { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.companion-apk-build-meta { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+.companion-apk-build-hint { margin: 12px 0 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.companion-apk-build-warn { margin: 10px 0 0; font-size: 13px; color: var(--gold); }
+.companion-apk-build-error { margin: 10px 0 0; font-size: 13px; color: var(--bad); }
+.companion-apk-build-note { margin: 10px 0 0; font-size: 13px; color: var(--ok); }
+.companion-apk-build-failed { margin-top: 12px; display: grid; gap: 10px; justify-items: start; }
+.companion-apk-build-ready { margin-top: 14px; display: grid; gap: 8px; justify-items: start; }
+.companion-apk-send {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  width: 100%;
+}
+.companion-apk-send-lede { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.companion-apk-send-actions { flex-wrap: wrap; gap: 10px; }
+.companion-apk-send-setup { margin: 10px 0 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .integration-actions { margin-top: auto; padding-top: 14px; }
 .advanced-connections { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
 .advanced-connections > summary { cursor: pointer; color: var(--muted); font-weight: 600; margin-bottom: 16px; }

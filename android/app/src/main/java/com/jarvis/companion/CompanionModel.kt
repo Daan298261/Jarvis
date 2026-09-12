@@ -9,6 +9,9 @@ import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.media.MediaRecorder.AudioSource
 import android.net.Uri
+import android.content.ContentProviderOperation
+import android.content.Intent
+import android.provider.ContactsContract
 import android.util.Base64
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -237,6 +240,46 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
     fun pauseSchedule(id: String) = action { api.json("/schedules/$id/pause", "POST"); refresh() }
     fun resumeSchedule(id: String) = action { api.json("/schedules/$id/resume", "POST"); refresh() }
+
+    fun addJarvisWhatsAppContact() = action {
+        val contact = api.json("/whatsapp/contact")
+        if (!contact.optBoolean("available", false)) {
+            error(contact.optString("reason", "WhatsApp contact is unavailable"))
+        }
+        val display = contact.optString("display_name", "Jarvis")
+        val phone = contact.optString("phone_e164").ifBlank { "+${contact.optString("phone_digits")}" }
+        val note = contact.optString("note")
+        val ops = ArrayList<ContentProviderOperation>()
+        ops += ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
+            .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
+            .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, null)
+            .build()
+        ops += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
+            .withValue(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, display)
+            .build()
+        ops += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+            .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+            .withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, phone)
+            .withValue(ContactsContract.CommonDataKinds.Phone.TYPE, ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
+            .build()
+        if (note.isNotBlank()) {
+            ops += ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
+                .withValue(ContactsContract.CommonDataKinds.Note.NOTE, note)
+                .build()
+        }
+        getApplication<Application>().contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
+        val waMe = contact.optString("wa_me_url")
+        if (waMe.isNotBlank()) {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(waMe)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            getApplication<Application>().startActivity(intent)
+        }
+    }
+
     fun preferences(notifications: Boolean, calls: Boolean) = action {
         api.json("/preferences", "PUT", JSONObject().put("notifications", notifications).put("critical_calls", calls))
         refresh()

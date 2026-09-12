@@ -3879,12 +3879,48 @@ export async function getDiagnosticsText(): Promise<{ text: string; diagnostics:
   return api("/api/diagnostics/text")
 }
 
-/** RFC-0063 — owner-side companion pairing codes (D1 backend). */
+/** RFC-0063 / RFC-0074 — owner-side companion pairing codes (D1 backend). */
+export type CompanionPairingQr = {
+  endpoint: string
+  server_pin: string
+  code: string
+}
+
 export type CompanionPairingCode = {
   code: string
   expires_at: string | number
   ttl_seconds?: number
   id?: string
+  active?: boolean
+  claimed?: boolean
+  endpoint?: string
+  endpoints?: string[]
+  server_pin?: string
+  qr?: CompanionPairingQr | null
+}
+
+export type CompanionOnboardingOffer = {
+  id: string
+  label: string
+  spoken_prompt: string
+  hint?: string
+}
+
+export type CompanionOnboardingSnapshot = {
+  version: number
+  owner_key_configured: boolean
+  paired_device_count: number
+  pending_device_count: number
+  speak_chat_replies: boolean
+  connection: {
+    state: string
+    activity: string
+    endpoints: string[]
+    server_pin: string
+    ready: boolean
+  }
+  pairing: Record<string, unknown>
+  offers: CompanionOnboardingOffer[]
 }
 
 /** BlackGrid studio capabilities (companion device auth: GET /api/companion/studio). */
@@ -3899,12 +3935,6 @@ export type CompanionStudioCapabilities = {
 export type CompanionPairingApiResult =
   | { available: true; pairing: CompanionPairingCode }
   | { available: false; reason: "not_found" | "error"; message?: string }
-
-let lastCompanionPairing: CompanionPairingCode | null = null
-
-function pairingExpiry(pairing: CompanionPairingCode): number {
-  return typeof pairing.expires_at === "number" ? pairing.expires_at * 1000 : Date.parse(pairing.expires_at)
-}
 
 async function companionPairingRequest(
   path: string,
@@ -3944,20 +3974,130 @@ async function companionPairingRequest(
 }
 
 export async function getActiveCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  if (lastCompanionPairing && pairingExpiry(lastCompanionPairing) > Date.now()) {
-    return { available: true, pairing: lastCompanionPairing }
+  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/status")
+  if (!result.available) {
+    return result
   }
-  return { available: false, reason: "not_found" }
+  const code = String(result.pairing.code || "").replace(/\D/g, "")
+  if (code.length !== 6 || result.pairing.active === false) {
+    return { available: false, reason: "not_found" }
+  }
+  return { available: true, pairing: result.pairing }
 }
 
 export async function createCompanionPairingCode(): Promise<CompanionPairingApiResult> {
   const result = await companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: "{}" })
-  if (result.available) lastCompanionPairing = result.pairing
   return result
 }
 
 export async function regenerateCompanionPairingCode(): Promise<CompanionPairingApiResult> {
   const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: "{}" })
-  if (result.available) lastCompanionPairing = result.pairing
   return result
+}
+
+export async function fetchCompanionOnboarding(): Promise<CompanionOnboardingSnapshot> {
+  return api<CompanionOnboardingSnapshot>("/api/mobile/onboarding/companion")
+}
+
+/** RFC-0076 — companion APK build + delivery (owner manage API). */
+export type CompanionBuildJob = {
+  id: string
+  state: string
+  activity: string
+  worker?: string
+  mode?: "personalized" | "generic"
+  stale?: boolean
+  heartbeat_at?: number
+  started_at: number
+  updated_at: number
+  result?: { sha256?: string; filename?: string; mode?: string; features?: string[] }
+}
+
+export function companionBuildPhase(state: string): "queued" | "building" | "ready" | "failed" {
+  if (state === "queued") return "queued"
+  if (state === "running") return "building"
+  if (state === "completed") return "ready"
+  return "failed"
+}
+
+export function companionApkDownloadName(build: Pick<CompanionBuildJob, "id" | "mode" | "result">): string {
+  const mode = build.mode || build.result?.mode
+  const rev = build.id.replace(/-/g, "").slice(0, 8)
+  return mode === "generic" ? `JarvisCompanion-generic-${rev}.apk` : `JarvisCompanion-${rev}.apk`
+}
+
+export async function fetchCompanionBuild(buildId: string): Promise<CompanionBuildJob> {
+  return api<CompanionBuildJob>(`/api/mobile/manage/builds/${buildId}`)
+}
+
+export async function startCompanionBuild(options?: {
+  endpoint?: string
+  mode?: "personalized" | "generic"
+  prepareConnection?: boolean
+  remote?: boolean
+}): Promise<CompanionBuildJob> {
+  const mode = options?.mode ?? "personalized"
+  return api<CompanionBuildJob>("/api/mobile/manage/builds", {
+    method: "POST",
+    body: JSON.stringify({
+      endpoint: options?.endpoint ?? "",
+      mode,
+      prepare_connection: options?.prepareConnection ?? mode === "personalized",
+      remote: options?.remote ?? true,
+    }),
+  })
+}
+
+export async function downloadCompanionApkBlob(buildId: string): Promise<Blob> {
+  const response = await fetch(`/api/mobile/manage/builds/${buildId}/apk`, { headers: authHeaders() })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(text || "Unable to download APK")
+  }
+  return response.blob()
+}
+
+export type CompanionApkSendResult =
+  | { ok: true; detail?: string }
+  | { ok: false; reason: "not_available" | "error"; message: string }
+
+async function sendCompanionApk(buildId: string, channel: "email" | "whatsapp"): Promise<CompanionApkSendResult> {
+  const label = channel === "email" ? "email" : "WhatsApp"
+  try {
+    const response = await fetch(`/api/mobile/manage/builds/${buildId}/send/${channel}`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: "{}",
+    })
+    if (response.status === 404 || response.status === 501) {
+      return {
+        ok: false,
+        reason: "not_available",
+        message: `Send via ${label} is not available on this Jarvis version yet. Use Download to Desktop.`,
+      }
+    }
+    if (!response.ok) {
+      const text = await response.text()
+      let message = text || response.statusText
+      try {
+        const parsed = JSON.parse(text)
+        message = formatApiDetail(parsed.detail, message)
+      } catch {
+        // not JSON
+      }
+      return { ok: false, reason: "error", message }
+    }
+    const body = (await response.json().catch(() => ({}))) as { detail?: string; message?: string }
+    return { ok: true, detail: body.detail || body.message }
+  } catch (err) {
+    return { ok: false, reason: "error", message: String(err) }
+  }
+}
+
+export async function sendCompanionApkEmail(buildId: string): Promise<CompanionApkSendResult> {
+  return sendCompanionApk(buildId, "email")
+}
+
+export async function sendCompanionApkWhatsApp(buildId: string): Promise<CompanionApkSendResult> {
+  return sendCompanionApk(buildId, "whatsapp")
 }
