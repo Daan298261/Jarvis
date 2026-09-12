@@ -120,7 +120,7 @@ def test_send_whatsapp_requires_pairing(apk_env, monkeypatch):
         def status(self):
             return {"paired": False, "state": "idle"}
 
-    monkeypatch.setattr(apk_delivery, "WHATSAPP_PAIRING", FakeWA())
+    monkeypatch.setattr("app.integrations.whatsapp_bridge.WHATSAPP_PAIRING", FakeWA())
     response = apk_env["client"].post(
         f"/api/mobile/manage/builds/{apk_env['job_id']}/send/whatsapp",
         headers=apk_env["headers"],
@@ -130,16 +130,52 @@ def test_send_whatsapp_requires_pairing(apk_env, monkeypatch):
     assert "WhatsApp" in response.json()["detail"]
 
 
-def test_send_whatsapp_not_implemented_when_paired(apk_env, monkeypatch):
-    class FakeWA:
-        def status(self):
-            return {"paired": True, "state": "connected"}
+def test_send_whatsapp_media_when_paired(apk_env, monkeypatch):
+    async def fake_send(path, *, to=None, caption=None):
+        assert path.name == "JarvisCompanion.apk"
+        assert path.read_bytes() == b"apk-bytes"
+        assert to is None
+        assert caption and "Jarvis companion APK" in caption
+        return {
+            "ok": "true",
+            "channel": "whatsapp",
+            "chat_id": "15551234567@c.us",
+            "message_id": "wamid.TEST",
+            "detail": "File sent on WhatsApp.",
+        }
 
-    monkeypatch.setattr(apk_delivery, "WHATSAPP_PAIRING", FakeWA())
+    monkeypatch.setattr("app.integrations.whatsapp_bridge.send_whatsapp_media", fake_send)
     response = apk_env["client"].post(
         f"/api/mobile/manage/builds/{apk_env['job_id']}/send/whatsapp",
         headers=apk_env["headers"],
         json={},
     )
-    assert response.status_code == 501
-    assert "Download to Desktop" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["channel"] == "whatsapp"
+    assert body["chat_id"] == "15551234567@c.us"
+    assert body["message_id"] == "wamid.TEST"
+
+
+def test_send_whatsapp_media_with_destination(apk_env, monkeypatch):
+    seen: dict = {}
+
+    async def fake_send(path, *, to=None, caption=None):
+        seen["to"] = to
+        return {
+            "ok": "true",
+            "channel": "whatsapp",
+            "chat_id": "15559876543@c.us",
+            "message_id": "wamid.DEST",
+            "detail": "File sent on WhatsApp.",
+        }
+
+    monkeypatch.setattr("app.integrations.whatsapp_bridge.send_whatsapp_media", fake_send)
+    response = apk_env["client"].post(
+        f"/api/mobile/manage/builds/{apk_env['job_id']}/send/whatsapp",
+        headers=apk_env["headers"],
+        json={"to": "+15559876543"},
+    )
+    assert response.status_code == 200, response.text
+    assert seen["to"] == "+15559876543"
+    assert response.json()["message_id"] == "wamid.DEST"

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from ..integrations.setup import WHATSAPP_PAIRING, email_config_path, email_status
+from ..integrations.setup import email_config_path, email_status
 from . import provision
 from .store import root
 
@@ -88,14 +88,16 @@ def send_apk_email(job_id: str, to: str | None = None) -> dict[str, str]:
     return {"ok": "true", "channel": "email", "to": recipient, "detail": f"APK emailed to {recipient}."}
 
 
-def send_apk_whatsapp(job_id: str) -> dict[str, str]:
-    # Ensure the APK exists even when WhatsApp send is not implemented yet.
-    _completed_apk_path(job_id)
-    status = WHATSAPP_PAIRING.status()
-    paired = bool(status.get("paired") or status.get("state") == "connected")
-    if not paired:
-        raise HTTPException(400, "WhatsApp is not connected. Connect WhatsApp in Setup, then try again.")
-    raise HTTPException(
-        501,
-        "WhatsApp APK send is not available in this Jarvis build yet. Use Download to Desktop.",
+async def send_apk_whatsapp(job_id: str, to: str | None = None) -> dict[str, str]:
+    """Send the completed companion APK as a WhatsApp media message."""
+    apk_path = _completed_apk_path(job_id)
+    from ..integrations.whatsapp_bridge import send_whatsapp_media
+
+    return await send_whatsapp_media(
+        apk_path,
+        to=to,
+        caption=(
+            "Your Jarvis companion APK. Install it on this phone, then pair with the "
+            "6-digit code or QR shown on your Jarvis desktop."
+        ),
     )
