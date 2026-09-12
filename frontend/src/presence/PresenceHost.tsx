@@ -5,11 +5,12 @@ import { PresenceFallback } from "./PresenceFallback"
 import type { EffectivePresence, PresenceSnapshot, PresentationSettings } from "./presenceTypes"
 
 const HumanoidPresence = lazy(() => import("./renderers/HumanoidPresence"))
+const ParticleBustPresence = lazy(() => import("./renderers/ParticleBustPresence"))
 
 function resolvePresence(settings: PresentationSettings): EffectivePresence {
-  if (settings.requestedPresence === "humanoid" && !supportsHumanoidRuntime()) {
+  if ((settings.requestedPresence === "humanoid" || settings.requestedPresence === "particle_bust") && !supportsHumanoidRuntime()) {
     return {
-      requested: "humanoid",
+      requested: settings.requestedPresence,
       effective: "neural",
       fallbackReason: "renderer_unavailable",
     }
@@ -77,9 +78,16 @@ export function PresenceHost({ snapshot, settings, size = 540, shapeId }: Presen
           </Suspense>
         </PresenceErrorBoundary>
       )}
+      {resolved.effective === "particle_bust" && (
+        <PresenceErrorBoundary key="particle-bust" fallback={neuralFallback}>
+          <Suspense fallback={neuralFallback}>
+            <ParticleBustPresence snapshot={snapshot} settings={settings} size={size} />
+          </Suspense>
+        </PresenceErrorBoundary>
+      )}
       {resolved.fallbackReason && (
         <span className="jarvis-presence-fallback-note" role="status">
-          Humanoid selected · Neural active because WebGL is unavailable
+          {resolved.requested === "particle_bust" ? "Particle bust" : "Humanoid"} selected · Neural active because WebGL is unavailable
         </span>
       )}
     </div>

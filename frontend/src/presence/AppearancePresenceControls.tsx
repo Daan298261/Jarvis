@@ -45,6 +45,13 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
             )}>
             Humanoid HUD · built in
           </button>
+          <button type="button" disabled={busy} className={selected === "particle_bust" ? "active" : ""}
+            onClick={() => apply(
+              { shell: "hud", requestedPresence: "particle_bust" },
+              "Particle bust active. Jarvis will fall back to Neural if WebGL is unavailable.",
+            )}>
+            Particle bust · experimental
+          </button>
         </div>
 
         <label>

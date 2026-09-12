@@ -15,7 +15,7 @@ const STORAGE_KEY = "jarvis.presentation.v3"
 export const PRESENTATION_CHANGED_EVENT = "jarvis:presentation-changed"
 
 const SHELLS = new Set<ShellMode>(["classic", "hud"])
-const PRESENCES = new Set<PresenceMode>(["none", "neural", "humanoid"])
+const PRESENCES = new Set<PresenceMode>(["none", "neural", "humanoid", "particle_bust"])
 const PRESETS = new Set<PresencePerformancePreset>(["auto", "efficient", "balanced", "cinematic"])
 const ATTENTION = new Set<AttentionMode>(["off", "pointer", "camera"])
 const MOTION = new Set<ReducedMotionMode>(["system", "reduce", "full"])

@@ -1,5 +1,5 @@
 export type ShellMode = "classic" | "hud"
-export type PresenceMode = "none" | "neural" | "humanoid"
+export type PresenceMode = "none" | "neural" | "humanoid" | "particle_bust"
 export type PresencePerformancePreset = "auto" | "efficient" | "balanced" | "cinematic"
 export type AttentionMode = "off" | "pointer" | "camera"
 export type ReducedMotionMode = "system" | "reduce" | "full"
