@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import subprocess
@@ -35,6 +36,119 @@ REQUIRED_COMPANION_FEATURES = (
     "whatsapp_contact",
     "apex_orb",
 )
+
+_JAVA_MISSING = (
+    "JDK 17 was not found. Install Eclipse Temurin 17 "
+    "(winget install EclipseAdoptium.Temurin.17.JDK) or set JAVA_HOME to that JDK."
+)
+_ANDROID_MISSING = (
+    "Android SDK platform 35 was not found. Run scripts/setup_android.ps1 "
+    "or set ANDROID_HOME to an SDK that includes platforms/android-35."
+)
+
+
+def _exe(name: str) -> str:
+    return name + (".exe" if os.name == "nt" else "")
+
+
+def _is_jdk_home(path: Path) -> bool:
+    return (path / "bin" / _exe("java")).is_file() and (path / "bin" / _exe("keytool")).is_file()
+
+
+def _java_major(java_home: Path) -> int | None:
+    java = java_home / "bin" / _exe("java")
+    try:
+        proc = subprocess.run(
+            [str(java), "-version"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    blob = f"{proc.stderr or ''}\n{proc.stdout or ''}"
+    match = re.search(r'version "(?:1\.)?(\d+)', blob)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _windows_jdk_candidates() -> list[Path]:
+    program_files = Path(os.environ.get("ProgramFiles") or r"C:\Program Files")
+    local_app = Path(os.environ.get("LOCALAPPDATA") or "")
+    roots = [
+        program_files / "Eclipse Adoptium",
+        program_files / "Microsoft",
+        program_files / "Java",
+        program_files / "AdoptOpenJDK",
+        program_files / "Amazon Corretto",
+        program_files / "Zulu",
+        local_app / "Programs" / "Eclipse Adoptium",
+        Path.home() / ".jdks",
+    ]
+    found: list[Path] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        try:
+            children = sorted(root.iterdir(), key=lambda item: item.name, reverse=True)
+        except OSError:
+            continue
+        for child in children:
+            if child.is_dir() and _is_jdk_home(child):
+                found.append(child)
+    studio_jbr = program_files / "Android" / "Android Studio" / "jbr"
+    if _is_jdk_home(studio_jbr):
+        found.append(studio_jbr)
+    return found
+
+
+def _jdk_candidates() -> list[Path]:
+    if os.name == "nt":
+        return _windows_jdk_candidates()
+    return []
+
+
+def resolve_java_home() -> Path:
+    """Prefer JAVA_HOME, then a locally installed JDK 17 (common Windows paths)."""
+    explicit = Path(os.environ.get("JAVA_HOME") or "")
+    if str(explicit) and _is_jdk_home(explicit):
+        return explicit
+    named_17: list[Path] = []
+    others: list[Path] = []
+    for candidate in _jdk_candidates():
+        name = candidate.name.lower()
+        if "jdk-17" in name or "jdk17" in name or "-17." in name:
+            named_17.append(candidate)
+        else:
+            others.append(candidate)
+    for candidate in named_17 + others:
+        major = _java_major(candidate)
+        if major == 17:
+            return candidate
+        if "jdk-17" in candidate.name.lower() or "jdk17" in candidate.name.lower():
+            return candidate
+    raise RuntimeError(_JAVA_MISSING)
+
+
+def resolve_android_sdk() -> Path:
+    """Prefer ANDROID_HOME, then the Jarvis/Android Studio SDK folders on this PC."""
+    local_app = Path(os.environ.get("LOCALAPPDATA") or "")
+    candidates = [
+        os.environ.get("ANDROID_HOME") or "",
+        os.environ.get("ANDROID_SDK_ROOT") or "",
+        str(local_app / "Jarvis" / "android-sdk") if local_app else "",
+        str(local_app / "Android" / "Sdk") if local_app else "",
+        str(Path.home() / "Android" / "Sdk"),
+    ]
+    for raw in candidates:
+        if not raw:
+            continue
+        path = Path(raw)
+        if (path / "platforms" / "android-35" / "android.jar").is_file():
+            return path
+    raise RuntimeError(_ANDROID_MISSING)
 
 
 def secret_file(path: Path) -> str:
@@ -122,24 +236,28 @@ def build(
 
     ensure_feature_sources()
 
-    java = Path(os.environ.get("JAVA_HOME", ""))
-    sdk = Path(os.environ.get("ANDROID_HOME", os.environ.get("ANDROID_SDK_ROOT", "")))
-    binary = ".exe" if os.name == "nt" else ""
-    if not (java / "bin" / ("keytool" + binary)).is_file():
-        raise RuntimeError("Set JAVA_HOME to JDK 17 before building")
-    if not (sdk / "platforms" / "android-35" / "android.jar").is_file():
-        raise RuntimeError("Set ANDROID_HOME and install SDK platform 35 (scripts/setup_android.ps1 on Windows)")
+    java = resolve_java_home()
+    sdk = resolve_android_sdk()
+    progress(f"Using JDK at {java}")
+    progress(f"Using Android SDK at {sdk}")
 
     folder = root() / "builds"
     folder.mkdir(exist_ok=True)
     keystore = folder / "jarvis-release.jks"
     password = secret_file(folder / "signing-password.sec")
-    env = {**os.environ, "JARVIS_APK_KEYSTORE": str(keystore), "JARVIS_APK_PASSWORD": password}
+    env = {
+        **os.environ,
+        "JAVA_HOME": str(java),
+        "ANDROID_HOME": str(sdk),
+        "ANDROID_SDK_ROOT": str(sdk),
+        "JARVIS_APK_KEYSTORE": str(keystore),
+        "JARVIS_APK_PASSWORD": password,
+    }
     if not keystore.exists():
         progress("Creating the persistent release signing identity")
         subprocess.run(
             [
-                str(java / "bin" / ("keytool" + binary)),
+                str(java / "bin" / _exe("keytool")),
                 "-genkeypair",
                 "-keystore",
                 str(keystore),
