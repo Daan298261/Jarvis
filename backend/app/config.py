@@ -96,6 +96,14 @@ class CodingSettings(BaseModel):
     local_max_attempts: int = 2
 
 
+class AcpAdapterSettings(BaseModel):
+    """Local ACP server is opt-in; it never opens a network listener."""
+
+    enabled: bool = False
+    allowed_profiles: list[str] = Field(default_factory=lambda: ["balanced"])
+    max_replay_events: int = Field(default=40, ge=1, le=200)
+
+
 class SelfDevSettings(BaseModel):
     max_duration_hours: float = 12.0
     max_paid_spend_eur: float = 0.0
@@ -111,7 +119,7 @@ class PresentationSettings(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     shell: Literal["classic", "hud"] = "hud"
-    requested_presence: Literal["none", "neural", "humanoid"] = "neural"
+    requested_presence: Literal["none", "neural", "humanoid", "particle_bust"] = "neural"
     performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] = "auto"
     attention_mode: Literal["off", "pointer", "camera"] = "pointer"
     reduced_motion: Literal["system", "reduce", "full"] = "system"
@@ -176,6 +184,17 @@ class TtsSettings(BaseModel):
     prefer_cpu_fallback: bool = True
 
 
+class HexStrikeSettings(BaseModel):
+    """Local HexStrike AI suite (RFC-0078). Loopback only; never a WAN listener."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    install_path: str = ""
+    python_executable: str = ""
+    host: str = "127.0.0.1"
+    port: int = Field(default=8888, ge=1, le=65535)
+
+
 class IdentityRecognitionSettings(BaseModel):
     """Explicit, local-only biometric identity matching. Disabled by default."""
 
@@ -219,10 +238,12 @@ class AppSettings(BaseModel):
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
+    hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
     coding: CodingSettings = Field(default_factory=CodingSettings)
+    acp_adapter: AcpAdapterSettings = Field(default_factory=AcpAdapterSettings)
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:

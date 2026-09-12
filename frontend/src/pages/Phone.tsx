@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { PermissionPrompt } from "../chat/PermissionPrompt"
 import { MobileCompanionSetup } from "./MobileCompanionSetup"
 import { TaskHeartbeat } from "../components/TaskActivity"
 import { phaseLabel } from "../taskStatus"
@@ -235,10 +236,7 @@ export function PhonePage() {
               <button className="btn secondary" type="button" onClick={() => navigate(`/tasks/${active.id}`)}>Open on PC layout</button>
             </div>
             {active.waiting_for_confirmation && (
-              <div className="row" style={{ marginTop: 12 }}>
-                <button className="btn danger" type="button" onClick={() => api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ approve: true }) })}>Approve delete</button>
-                <button className="btn secondary" type="button" onClick={() => api(`/api/tasks/${active.id}/continue`, { method: "POST", body: JSON.stringify({ approve: false }) })}>Reject</button>
-              </div>
+              <PermissionPrompt taskId={active.id} payload={active.confirmation_payload} variant="phone" />
             )}
           </>
         ) : (

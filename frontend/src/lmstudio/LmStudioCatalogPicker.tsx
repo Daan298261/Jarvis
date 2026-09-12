@@ -74,7 +74,12 @@ export function LmStudioCatalogPicker({
       setSelectedRuntimeProfileId(id)
       window.dispatchEvent(new CustomEvent("jarvis:runtime-profile-changed", { detail: { id } }))
       onSelected?.(id)
-      setMsg(`Selected ${profile.display_name}.`)
+      const active = runtime.load?.active_model
+      setMsg(
+        active
+          ? `Selected ${profile.display_name} (${String(active)}).`
+          : `Selected ${profile.display_name}.`,
+      )
       await load()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not select this profile.")

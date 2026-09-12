@@ -13,7 +13,7 @@ from ..config import AppSettings, logs_dir
 from ..persona.pack import inject_persona_messages
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, normalize_chat_messages, probe_remote_server, resolve_backend
-from .profiles import ModelProfile, profile_gguf, resolve_mmproj, resolve_profile, declared_profiles
+from .profiles import ModelProfile, declared_profiles, profile_gguf, qwen38_9b_profile, resolve_mmproj, resolve_profile
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
@@ -304,7 +304,9 @@ class InferenceManager:
             or profile.context_size
         )
 
-        missing = backend.missing_requirements(profile)
+        missing: list[str] = []
+        if backend.requires_local_files:
+            missing = backend.missing_requirements(profile)
         if missing:
             self.state.last_error = "; ".join(missing)
             raise FileNotFoundError(self.state.last_error)
@@ -323,11 +325,12 @@ class InferenceManager:
 
         self._apply_profile_state(settings, profile, backend, model, want_context, want_vision)
 
+        probe_timeout = 8.0 if not backend.manages_process else 6.0
         probe = await probe_remote_server(
             settings.inference.host,
             settings.inference.port,
             settings.inference.api_key,
-            timeout=6,
+            timeout=probe_timeout,
         )
         already_running = (self.backend is None or self.backend.pid is None) and bool(probe.get("ok"))
         if already_running and not backend.manages_process:
@@ -349,11 +352,16 @@ class InferenceManager:
         self.state.last_error = ""
         started = time.time()
 
-        start_kwargs: dict[str, Any] = {"timeout": 300, "context_size": want_context, "vision": want_vision}
+        start_timeout = 8.0 if not backend.manages_process else 300.0
+        start_kwargs: dict[str, Any] = {
+            "timeout": start_timeout,
+            "context_size": want_context,
+            "vision": want_vision,
+        }
         try:
             ready = await backend.start(profile, **start_kwargs)
         except TypeError:
-            ready = await backend.start(profile, timeout=300)
+            ready = await backend.start(profile, timeout=start_timeout)
         if not ready and backend.manages_process and want_context > 16384:
             fallback_ctx = 16384
             try:
@@ -535,7 +543,7 @@ class InferenceManager:
                     "thinking_mode": p.thinking_mode,
                     "context_size": p.context_size,
                 }
-                for p in declared_profiles()
+                for p in _snapshot_profiles()
             ],
             "context_policy": {
                 "live": self.state.context_size or profile.context_size,
@@ -569,6 +577,14 @@ class InferenceManager:
             )
         except Exception:
             pass
+
+
+def _snapshot_profiles() -> list[ModelProfile]:
+    profiles = list(declared_profiles())
+    extra = qwen38_9b_profile()
+    if extra is not None and extra.name not in {item.name for item in profiles}:
+        profiles.insert(0, extra)
+    return profiles
 
 
 MANAGER = InferenceManager()

@@ -1,6 +1,6 @@
 # Jarvis
 
-Self-hosted local desktop agent. The default model is **Qwen3.5-9B Abliterated** running on this computer through llama.cpp (Qwen3.5-27B remains the Expert escalation model, or you can point at any OpenAI-compatible server). The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
+Self-hosted local desktop agent. The default model is **Qwen3.5-9B Abliterated** running on this computer through llama.cpp. If a **Qwen3.8-9B uncensored** GGUF is already installed under `models/` or the current user’s LM Studio folder, Jarvis prefers that as the everyday autoload default. Qwen3.5-27B remains the Expert escalation model, or you can point at any OpenAI-compatible server. The HUD **Help** icon answers product questions from local docs first (then the public web) and lists guides for phone pairing, custom models, swarms, and autonomy. The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
 
 **Development process:** [`docs/PROCESS.md`](docs/PROCESS.md) — one RFC or one queue item per worker; branch from `development` and open PRs against `development`. `main` is the stable release branch (GitHub default); promote only on an explicit cut. Design specs go in [`docs/rfcs/`](docs/rfcs/), not wholesale edits to the master plan.
 
@@ -57,7 +57,7 @@ cd ..
 
 New machine, missing GGUFs, or llama.cpp not extracted: follow **[docs/INSTALL.md](docs/INSTALL.md)** instead of this block.
 
-llama.cpp CUDA binaries live in `runtime/llama.cpp`. Primary weights live in `models/Qwen3.5-9B-abliterated-GGUF`. Expert 27B weights live in `models/Qwen3.5-27B-GGUF`.
+llama.cpp CUDA binaries live in `runtime/llama.cpp`. Primary weights live in `models/Qwen3.5-9B-abliterated-GGUF`. Expert 27B weights live in `models/Qwen3.5-27B-GGUF`. A locally installed Qwen3.8-9B uncensored GGUF (Jarvis `models/` or `~/.lmstudio/models`) wins as the everyday default when present.
 
 ## Daily use
 

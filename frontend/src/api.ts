@@ -135,6 +135,7 @@ export type Task = {
   last_heartbeat_at?: string | null
   heartbeat_status?: "alive" | "waiting" | "stale" | "stopped" | string
   waiting_for_confirmation: boolean
+  confirmation_payload?: unknown
   verification_summary?: {
     result: "VERIFIED" | "VERIFICATION_FAILED" | "PARTIALLY_VERIFIED" | "NOT_VERIFIED" | string
     verifier: string
@@ -798,9 +799,69 @@ export async function overrideLmStudioProfile(
   })
 }
 
-export async function selectLmStudioProfile(profileId: string): Promise<RuntimeProfile> {
-  return api<RuntimeProfile>(`/api/lmstudio/catalog/${encodeURIComponent(profileId)}/select`, {
+export async function selectLmStudioProfile(profileId: string): Promise<RuntimeProfile & { load?: Record<string, unknown> }> {
+  return api<RuntimeProfile & { load?: Record<string, unknown> }>(
+    `/api/lmstudio/catalog/${encodeURIComponent(profileId)}/select`,
+    {
+      method: "POST",
+    },
+  )
+}
+
+export type RuntimeActivateResponse = {
+  ok: boolean
+  profile: RuntimeProfile
+  load: Record<string, unknown>
+}
+
+export async function activateRuntimeProfile(profileId: string): Promise<RuntimeActivateResponse> {
+  return api<RuntimeActivateResponse>(`/api/runtime-profiles/${encodeURIComponent(profileId)}/activate`, {
     method: "POST",
+  })
+}
+
+export type HexStrikeStatus = {
+  suite: string
+  shape_id: string
+  installed: boolean
+  running: boolean
+  starting: boolean
+  install_path: string
+  python_executable: string
+  host: string
+  port: number
+  health_url: string
+  embed_path: string
+  native_ui: boolean
+  pid: number | null
+  last_error: string
+  tools: Record<string, unknown>
+  telemetry: Record<string, unknown>
+  processes: Record<string, unknown>
+  dashboard: Record<string, unknown> | null
+  health: Record<string, unknown>
+}
+
+export async function getHexStrikeStatus(): Promise<HexStrikeStatus> {
+  return api<HexStrikeStatus>("/api/hexstrike")
+}
+
+export async function startHexStrike(): Promise<HexStrikeStatus> {
+  return api<HexStrikeStatus>("/api/hexstrike/start", { method: "POST" })
+}
+
+export async function stopHexStrike(): Promise<HexStrikeStatus> {
+  return api<HexStrikeStatus>("/api/hexstrike/stop", { method: "POST" })
+}
+
+export async function configureHexStrike(body: {
+  install_path?: string
+  python_executable?: string
+  port?: number
+}): Promise<HexStrikeStatus> {
+  return api<HexStrikeStatus>("/api/hexstrike/config", {
+    method: "PUT",
+    body: JSON.stringify(body),
   })
 }
 
@@ -4100,4 +4161,49 @@ export async function sendCompanionApkEmail(buildId: string): Promise<CompanionA
 
 export async function sendCompanionApkWhatsApp(buildId: string): Promise<CompanionApkSendResult> {
   return sendCompanionApk(buildId, "whatsapp")
+}
+
+export type HelpTopic = {
+  id: string
+  title: string
+  summary: string
+  href: string
+  keywords: string[]
+  body: string
+}
+
+export type HelpStatus = {
+  docs_first: boolean
+  web_fallback: boolean
+  help_profile: string
+  startup_profile: string
+  qwen38_9b_installed: boolean
+  qwen38_9b_path: string
+  topics: HelpTopic[]
+}
+
+export type HelpChatReply = {
+  ok: boolean
+  conversation_id: string
+  text: string
+  used_model: boolean
+  help_profile: string
+  used_web: boolean
+  citations: { id: string; path: string }[]
+  web: { title: string; url: string }[]
+}
+
+export async function getHelpStatus(): Promise<HelpStatus> {
+  return api("/api/help/status")
+}
+
+export async function listHelpTopics(): Promise<{ topics: HelpTopic[] }> {
+  return api("/api/help/topics")
+}
+
+export async function postHelpChat(message: string, conversationId?: string): Promise<HelpChatReply> {
+  return api("/api/help/chat", {
+    method: "POST",
+    body: JSON.stringify({ message, conversation_id: conversationId || null }),
+  })
 }

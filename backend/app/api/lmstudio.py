@@ -97,6 +97,10 @@ async def select_profile(profile_id: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     try:
         await activate_runtime_profile(profile)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:500]) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)[:500]) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:500]) from exc
     settings = load_settings()

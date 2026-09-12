@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import __version__
+
 """Read-oriented Jarvis MCP server for Cursor (plan §11).
 
 Cursor attaches here as a client. Jarvis remains the single supervisor.
@@ -392,7 +394,7 @@ class JarvisMcpServer:
                 "result": {
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "jarvis", "version": "1.0.0"},
+                    "serverInfo": {"name": "jarvis", "version": __version__},
                     "instructions": (
                         "Read-only Jarvis context plus verification/result reporting. "
                         "Do not use this server to start Cursor or a new Jarvis task."

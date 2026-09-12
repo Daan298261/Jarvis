@@ -56,6 +56,11 @@ def test_requested_humanoid_round_trips_without_effective_renderer_state():
     assert "embedding" not in presentation
 
 
+def test_requested_particle_bust_round_trips_without_effective_renderer_state():
+    presentation = PresentationSettings(requested_presence="particle_bust").model_dump()
+    assert presentation["requested_presence"] == "particle_bust"
+
+
 def test_settings_update_validates_presentation_enum_values():
     with pytest.raises(ValidationError):
         settings_api.SettingsUpdate(presentation_requested_presence="unsupported")

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { Link, NavLink } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode, Task } from "../api"
+import { HelpPanel, HelpTrigger } from "../help/HelpPanel"
 import { HudHealthRail } from "./HudHealthRail"
 import { HudModelSelector } from "./HudModelSelector"
 import { HudOpsRail } from "./HudOpsRail"
@@ -28,6 +29,8 @@ type HudTopChromeProps = {
   onUiModeChange: (mode: UiMode) => void
   adminOpen: boolean
   onAdminToggle: () => void
+  helpOpen: boolean
+  onHelpToggle: () => void
   panel: HudPanel
   onPanelToggle: (panel: Exclude<HudPanel, null>) => void
   showPanels: boolean
@@ -44,6 +47,8 @@ export function HudTopChrome({
   onUiModeChange,
   adminOpen,
   onAdminToggle,
+  helpOpen,
+  onHelpToggle,
   panel,
   onPanelToggle,
   showPanels,
@@ -91,6 +96,7 @@ export function HudTopChrome({
       </div>
 
       <div className="hud-top-right">
+        <HelpTrigger variant="hud" onClick={onHelpToggle} expanded={helpOpen} />
         <button type="button" className="hud-icon-btn" onClick={onAdminToggle} aria-expanded={adminOpen}>
           Admin
         </button>
@@ -189,6 +195,7 @@ export function HudShell({
   model,
 }: HudShellProps) {
   const [adminOpen, setAdminOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [panel, setPanel] = useState<HudPanel>(null)
 
   const runningCount = tasks.filter((task) => ["running", "queued", "waiting"].includes(task.status)).length
@@ -196,17 +203,26 @@ export function HudShell({
 
   function togglePanel(next: Exclude<HudPanel, null>) {
     setAdminOpen(false)
+    setHelpOpen(false)
     setPanel((current) => current === next ? null : next)
   }
 
   function toggleAdmin() {
     setPanel(null)
+    setHelpOpen(false)
     setAdminOpen((open) => !open)
+  }
+
+  function toggleHelp() {
+    setPanel(null)
+    setAdminOpen(false)
+    setHelpOpen((open) => !open)
   }
 
   function closePanels() {
     setPanel(null)
     setAdminOpen(false)
+    setHelpOpen(false)
   }
 
   return (
@@ -218,6 +234,8 @@ export function HudShell({
         onUiModeChange={onUiModeChange}
         adminOpen={adminOpen}
         onAdminToggle={toggleAdmin}
+        helpOpen={helpOpen}
+        onHelpToggle={toggleHelp}
         panel={panel}
         onPanelToggle={togglePanel}
         showPanels={isChat}
@@ -225,9 +243,13 @@ export function HudShell({
         attentionCount={attentionCount}
         model={model}
         onModelMenuOpenChange={(open) => {
-          if (open) setAdminOpen(false)
+          if (open) {
+            setAdminOpen(false)
+            setHelpOpen(false)
+          }
         }}
       />
+      <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} variant="hud" />
 
       {isChat ? (
         <div className="hud-stage">

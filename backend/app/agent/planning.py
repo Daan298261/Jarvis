@@ -56,7 +56,7 @@ TASK_CATEGORIES: list[tuple[str, tuple[str, ...]]] = [
     ("software engineering", ("repository", "refactor", "debug", "pytest", "unit test", "compile", "fix this", "source code")),
     ("research", ("research", "compare products", "summarize", "look up")),
     ("browser automation", ("website", "browser", "web page", "login", "cms", "playwright")),
-    ("windows gui", ("click", "window", "desktop app", "ui automation", "notepad")),
+    ("windows gui", ("click", "window", "desktop app", "ui automation", "notepad", "computer use", "remote desktop", "rdp", "pywinauto")),
     ("office", ("word", "excel", "powerpoint", "docx", "xlsx", "manuscript", "spreadsheet")),
     ("document processing", ("pdf", "document", "formatting", "chapter")),
     ("data processing", ("csv", "json", "dataset", "logs", "parse")),

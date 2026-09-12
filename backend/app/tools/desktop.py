@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import time
 from typing import Any
 
 from .base import RiskLevel, Tool, ToolResult
@@ -161,6 +162,8 @@ class DesktopTool(Tool):
             if action == "windows":
                 titles = [w.window_text() for w in desktop.windows() if w.window_text()]
                 return ToolResult(True, "\n".join(titles[:200]) or "No windows")
+            if action in {"inspect", "wait"}:
+                return self._uia_action(action, kwargs)
             spec = desktop.window(title_re=f".*{kwargs.get('title') or ''}.*")
             if action == "focus":
                 spec.set_focus()

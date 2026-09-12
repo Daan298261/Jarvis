@@ -39,6 +39,8 @@ class TaskCreate(BaseModel):
 class ContinueBody(BaseModel):
     prompt: str | None = None
     approve: bool | None = None
+    grant_mode: str | None = None
+    permission_id: str | None = None
 
 
 def _iso_utc(value: datetime | None) -> str | None:
@@ -173,8 +175,20 @@ async def get_task(task_id: str):
 async def continue_task(task_id: str, body: ContinueBody | None = None):
     body = body or ContinueBody()
     try:
-        if body.approve is not None:
-            task = await AGENT.confirm_task(task_id, body.approve)
+        if body.grant_mode or body.approve is not None:
+            grant_mode = (body.grant_mode or "").strip().lower() or None
+            if grant_mode == "deny":
+                approved = False
+            elif grant_mode:
+                approved = True
+            else:
+                approved = bool(body.approve)
+            task = await AGENT.confirm_task(
+                task_id,
+                approved,
+                grant_mode=grant_mode,
+                permission_id=body.permission_id,
+            )
         else:
             task = await AGENT.continue_task(task_id, body.prompt)
         return _task_dict(task)

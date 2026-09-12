@@ -12,8 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import __version__
+
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, context_repo, delegation, diagnostics, guest_portals, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, owner_chat, packs, perception, perception_identity, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, computer_use, context_repo, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, owner_chat, packs, perception, perception_identity, permissions, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -21,6 +23,7 @@ from .db import init_db
 from .events import BUS
 from .hardware import hardware_dict
 from .inference.manager import MANAGER
+from .inference.profiles import preferred_startup_profile
 from .integrations.setup import WHATSAPP_PAIRING
 from .swarm.capabilities import register_localhost_capabilities
 from .swarm.nodes import register_localhost_node
@@ -35,7 +38,7 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 logging.getLogger().addHandler(console)
 
-app = FastAPI(title="Jarvis", version="1.0.0")
+app = FastAPI(title="Jarvis", version=__version__)
 settings_obj = load_settings()
 origins = [
     f"http://127.0.0.1:{settings_obj.bind_port}",
@@ -65,6 +68,7 @@ app.include_router(mcp.router)
 app.include_router(memory.router)
 app.include_router(voice.router)
 app.include_router(owner_chat.router)
+app.include_router(help_api.router)
 app.include_router(voice_profiles.router)
 app.include_router(workflows.router)
 app.include_router(self_dev.router)
@@ -75,6 +79,9 @@ app.include_router(companion.owner_router)
 app.include_router(swarm.router)
 app.include_router(worker_environments.router)
 app.include_router(runtime_profiles.router)
+app.include_router(hexstrike.router)
+app.include_router(permissions.router)
+app.include_router(computer_use.router)
 app.include_router(lmstudio.router)
 app.include_router(packs.router)
 app.include_router(trajectories.router)
@@ -188,11 +195,17 @@ async def shutdown() -> None:
     QUEUE_WATCHER.stop()
     await WHATSAPP_PAIRING.close()
     await mobile_runtime.stop()
+    try:
+        from .security.hexstrike import HEXSTRIKE
+
+        await HEXSTRIKE.stop()
+    except Exception:
+        logging.debug("HexStrike shutdown skipped", exc_info=True)
 
 
 async def _autoload_model(current) -> None:
     try:
-        await MANAGER.load(current, current.inference.profile)
+        await MANAGER.load(current, preferred_startup_profile(current.inference.profile))
     except Exception:
         logging.exception("Model auto-load failed; it can be loaded from the Model page")
 

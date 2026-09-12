@@ -230,3 +230,35 @@ async def test_unloaded_snapshot_starts_at_16k_with_selective_thinking():
     assert snap["thinking_mode"] == "selective"
     assert snap["vision_mode"] == "lazy"
     assert snap["vision_loaded"] is False
+
+
+@pytest.mark.asyncio
+async def test_base_inference_backend_attaches_to_running_server(monkeypatch):
+    from app.inference.backends import InferenceBackend
+
+    backend = InferenceBackend(_settings(host="127.0.0.1", port=9991))
+
+    async def fake_probe(host, port, api_key="", timeout=8.0, retry=False):
+        assert host == "127.0.0.1"
+        assert port == 9991
+        assert retry is True
+        return {"ok": True, "health_path": "/v1/models", "models": ["suite-model"]}
+
+    monkeypatch.setattr("app.inference.backends.probe_remote_server", fake_probe)
+    ready = await backend.start(resolve_profile("balanced"), timeout=12, vision=False, context_size=8192)
+    assert ready is True
+    assert backend.last_probe["ok"] is True
+    assert backend.last_probe["models"] == ["suite-model"]
+
+
+@pytest.mark.asyncio
+async def test_base_inference_backend_start_fails_when_server_is_down(monkeypatch):
+    from app.inference.backends import InferenceBackend
+
+    backend = InferenceBackend(_settings())
+
+    async def fake_probe(*args, **kwargs):
+        return {"ok": False, "error": "connection refused"}
+
+    monkeypatch.setattr("app.inference.backends.probe_remote_server", fake_probe)
+    assert await backend.start(resolve_profile("balanced")) is False

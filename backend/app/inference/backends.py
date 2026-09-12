@@ -106,6 +106,30 @@ def parse_models_payload(path: str, payload: Any) -> list[str]:
     return out
 
 
+def resolve_advertised_model(hint: str, advertised: list[str]) -> str:
+    """Resolve a runtime catalog hint to the model identifier an endpoint exposes."""
+    cleaned_hint = (hint or "").strip()
+    names = [str(item).strip() for item in advertised if str(item).strip()]
+    if not names:
+        return cleaned_hint
+    if len(names) == 1:
+        return names[0]
+    if not cleaned_hint:
+        return names[0]
+    lower_hint = cleaned_hint.lower()
+    for name in names:
+        if name.lower() == lower_hint:
+            return name
+    stem_hint = Path(cleaned_hint).stem.lower()
+    for name in names:
+        lower_name = name.lower()
+        if lower_hint in lower_name or lower_name in lower_hint:
+            return name
+        if stem_hint and (stem_hint in lower_name or Path(name).stem.lower() in stem_hint):
+            return name
+    return cleaned_hint
+
+
 async def probe_remote_server(
     host: str,
     port: int,
@@ -202,8 +226,26 @@ class InferenceBackend:
     def missing_requirements(self, profile: ModelProfile) -> list[str]:
         return []
 
-    async def start(self, profile: ModelProfile, timeout: float = 300, vision: bool = False) -> bool:
-        raise NotImplementedError
+    async def start(
+        self,
+        profile: ModelProfile,
+        timeout: float = 300,
+        vision: bool = False,
+        **kwargs: Any,
+    ) -> bool:
+        """Attach to an already-running OpenAI-compatible server.
+
+        Process-owning backends (llama.cpp) override this to spawn ``llama-server``.
+        """
+        del profile, vision, kwargs
+        self.last_probe = await probe_remote_server(
+            self.settings.inference.host,
+            self.settings.inference.port,
+            self.settings.inference.api_key,
+            timeout=timeout,
+            retry=True,
+        )
+        return bool(self.last_probe.get("ok"))
 
     async def stop(self) -> None:
         return None
@@ -375,16 +417,6 @@ class RemoteOpenAICompatibleBackend(InferenceBackend):
 
     def health_url(self) -> str:
         return f"http://{self.settings.inference.host}:{self.settings.inference.port}/v1/models"
-
-    async def start(self, profile: ModelProfile, timeout: float = 60) -> bool:
-        self.last_probe = await probe_remote_server(
-            self.settings.inference.host,
-            self.settings.inference.port,
-            self.settings.inference.api_key,
-            timeout=timeout,
-            retry=True,
-        )
-        return bool(self.last_probe.get("ok"))
 
 
 class OllamaBackend(RemoteOpenAICompatibleBackend):

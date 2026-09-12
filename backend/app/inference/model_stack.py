@@ -167,6 +167,32 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         enabled_by_default=False,
         description="Deeper DFIR/detection-engineering consult model; password-gated with the Blue security role.",
     ),
+    "hexstrike-suite": SpecialistModel(
+        key="hexstrike-suite",
+        runtime_profile_name="hexstrike-suite",
+        label="HexStrike AI",
+        model_id="hexstrike-ai/hexstrike",
+        role="cyber-suite",
+        provider="hexstrike",
+        endpoint="http://127.0.0.1:8888",
+        context_limit=0,
+        quantization="suite",
+        capability_tags=(
+            "suite",
+            "suite:hexstrike",
+            "cybersecurity",
+        ),
+        specialization_tags=("hexstrike", "cyber-suite"),
+        is_local=True,
+        privacy_class=PRIVACY_LOCAL_ONLY,
+        enabled_by_default=True,
+        description=(
+            "Cybersecurity suite: starts HexStrike AI on loopback and presents it in the HUD. "
+            "Not an inference model."
+        ),
+        ship_runtime_template=True,
+        manual_gate=False,
+    ),
     "deephat-red": SpecialistModel(
         key="deephat-red",
         runtime_profile_name="deephat-7b",

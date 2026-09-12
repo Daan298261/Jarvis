@@ -40,7 +40,7 @@ class SettingsUpdate(BaseModel):
     self_dev_max_consecutive_failures: int | None = None
     self_dev_experimental_port: int | None = None
     presentation_shell: Literal["classic", "hud"] | None = None
-    presentation_requested_presence: Literal["none", "neural", "humanoid"] | None = None
+    presentation_requested_presence: Literal["none", "neural", "humanoid", "particle_bust"] | None = None
     presentation_performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] | None = None
     presentation_attention_mode: Literal["off", "pointer", "camera"] | None = None
     presentation_reduced_motion: Literal["system", "reduce", "full"] | None = None
