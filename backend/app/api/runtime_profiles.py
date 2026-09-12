@@ -8,6 +8,9 @@ from ..inference.model_stack import (
     normalize_role,
     routing_preferences_for_role,
 )
+from ..config import load_settings
+from ..inference.hotswap import activate_runtime_profile
+from ..inference.manager import MANAGER
 from ..inference.runtime_profiles import (
     create_runtime_profile,
     delete_runtime_profile,
@@ -396,6 +399,27 @@ async def update_profile(profile_id: str, body: RuntimeProfileUpdate):
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return profile.as_dict()
+
+
+@router.post("/{profile_id}/activate")
+async def activate_profile(profile_id: str):
+    profile = get_runtime_profile(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Runtime profile not found")
+    try:
+        await activate_runtime_profile(profile)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:500]) from exc
+    settings = load_settings()
+    return {
+        "ok": True,
+        "profile": profile.as_dict(),
+        "load": await MANAGER.snapshot(settings),
+    }
 
 
 @router.delete("/{profile_id}")

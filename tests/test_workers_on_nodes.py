@@ -11,7 +11,7 @@ from app.swarm.nodes import register_localhost_node
 from app.swarm.workers import bind_workers_to_node, worker_catalog
 from app.workers.browser import BrowserUseBackend
 from app.workers.code import OpenHandsBackend
-from app.workers.computer import CuaBackend, UFOBackend
+from app.workers.computer import CuaBackend, NativeWindowsBackend, UFOBackend
 from app.workers.interpreter import OpenInterpreterBackend
 
 
@@ -27,6 +27,7 @@ async def test_worker_catalog_includes_known_adapters():
     assert catalog["openhands"]["name"] == OpenHandsBackend.name
     assert catalog["ufo"]["name"] == UFOBackend.name
     assert catalog["cua"]["name"] == CuaBackend.name
+    assert catalog["windows_ui"]["name"] == "Windows UI Automation"
     assert catalog["open-interpreter"]["name"] == OpenInterpreterBackend.name
     assert catalog["cursor-acp"]["name"] == "Cursor ACP"
     assert catalog["local-llm"]["kind"] == "inference"

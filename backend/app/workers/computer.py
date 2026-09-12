@@ -165,15 +165,40 @@ class NativeWindowsBackend(ComputerUseBackend):
                     "Use the desktop tool on Windows with pywinauto installed."
                 ),
             )
-        hint = f" for app {app}" if app else ""
-        return ToolResult(
-            True,
-            (
-                f"Use the native desktop tool{hint} for: {goal.strip()}. "
-                "Prefer named UI Automation controls over coordinates."
-            ),
-            data={"backend": self.id, "goal": goal, "app": app},
+        del timeout_seconds
+        from ..tools.desktop import DesktopTool
+
+        tool = DesktopTool()
+        data: dict[str, Any] = {"backend": self.id, "goal": goal, "app": app}
+        parts: list[str] = []
+        if app:
+            focused = await tool.execute(action="focus", title=app)
+            data["focus_ok"] = focused.success
+            if not focused.success:
+                windows = await tool.execute(action="windows")
+                data["windows"] = windows.output
+                return ToolResult(
+                    False,
+                    windows.output or "",
+                    error=focused.error or f"Could not focus {app}",
+                    data=data,
+                )
+            parts.append(focused.output)
+        inspected = await tool.execute(action="inspect", title=app or "")
+        data["inspect_ok"] = inspected.success
+        if inspected.data:
+            data["controls"] = inspected.data.get("controls")
+        if inspected.success:
+            parts.append(inspected.output)
+        elif not parts:
+            windows = await tool.execute(action="windows")
+            parts.append(windows.output or inspected.error or "")
+        reminder = (
+            f"Native UI Automation is ready for: {goal}. "
+            "Use named desktop controls (name / automation_id) for remaining clicks. "
+            "Do not start with coordinates."
         )
+        return ToolResult(True, "\n\n".join([part for part in parts if part] + [reminder]), data=data)
 
 
 class UFOBackend(ComputerUseBackend):

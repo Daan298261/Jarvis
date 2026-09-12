@@ -3,10 +3,19 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from ..config import load_settings, save_settings
+from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
+from .backends import (
+    DEFAULT_PORTS,
+    LMSTUDIO_ALIASES,
+    probe_remote_server,
+    resolve_advertised_model,
+    suggested_port,
+)
 from .manager import MANAGER
 from .profiles import PROFILES
 from .runtime_profiles import RuntimeProfile
-from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
+
+LOCAL_BACKEND_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
 
 
 def parse_runtime_endpoint(endpoint: str) -> tuple[str, int]:
@@ -27,6 +36,20 @@ def parse_runtime_endpoint(endpoint: str) -> tuple[str, int]:
     return raw, 8088
 
 
+def _normalize_provider(provider: str) -> str:
+    cleaned = (provider or "").strip().lower()
+    if cleaned in LMSTUDIO_ALIASES:
+        return "lmstudio"
+    return cleaned
+
+
+def _provider_needs_remote_probe(provider: str) -> bool:
+    normalized = _normalize_provider(provider)
+    if not normalized or normalized in LOCAL_BACKEND_ALIASES:
+        return False
+    return True
+
+
 def _resolve_builtin_profile_name(runtime: RuntimeProfile, fallback: str) -> str:
     candidate = (runtime.model_profile or "").strip()
     if candidate and candidate in PROFILES:
@@ -36,17 +59,51 @@ def _resolve_builtin_profile_name(runtime: RuntimeProfile, fallback: str) -> str
     return fallback
 
 
-def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
+async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
     settings = load_settings()
-    provider = (runtime.provider or "").strip().lower()
-    if provider in {"lmstudio", "lm-studio", "lm_studio"}:
+    provider = _normalize_provider(runtime.provider or "")
+    if provider == "lmstudio":
         settings.inference.backend = "lmstudio"
     elif provider:
         settings.inference.backend = provider
+
     host, port = parse_runtime_endpoint(runtime.endpoint)
+    if provider == "lmstudio" and not (runtime.endpoint or "").strip():
+        port = int(DEFAULT_PORTS["lmstudio"])
+    elif provider:
+        port = suggested_port(provider, port)
     settings.inference.host = host
     settings.inference.port = port
-    settings.inference.remote_model = (runtime.model or "").strip()
+
+    hint = (runtime.model or "").strip()
+    if _provider_needs_remote_probe(provider):
+        probe = await probe_remote_server(
+            host,
+            port,
+            settings.inference.api_key,
+            timeout=8.0,
+            retry=True,
+        )
+        if not probe.get("ok"):
+            detail = probe.get("error") or "inference server did not respond"
+            raise RuntimeError(
+                f"Could not reach {provider or 'inference server'} at {host}:{port}. "
+                f"Load the model in LM Studio (or start the server), then try again. ({detail})"
+            )
+        advertised = list(probe.get("models") or [])
+        resolved = resolve_advertised_model(hint, advertised)
+        if hint and advertised and resolved == hint and hint not in advertised:
+            if not any(hint.lower() in name.lower() for name in advertised):
+                shown = ", ".join(advertised[:5])
+                raise RuntimeError(
+                    f"Model '{hint}' is not loaded on the server. Currently loaded: {shown}"
+                )
+        settings.inference.remote_model = resolved
+    else:
+        settings.inference.remote_model = hint
+
+    if runtime.model_profile and runtime.model_profile in PROFILES:
+        settings.inference.profile = runtime.model_profile
     if runtime.context_limit:
         settings.inference.context_size = int(runtime.context_limit)
     save_settings(settings)
@@ -64,7 +121,7 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Tru
 
     settings = load_settings()
     previous_context = int(MANAGER.state.context_size or settings.inference.context_size or 0)
-    apply_runtime_profile_to_settings(runtime)
+    await apply_runtime_profile_to_settings(runtime)
     settings = load_settings()
     profile_name = _resolve_builtin_profile_name(runtime, settings.inference.profile)
     context_size = int(runtime.context_limit or settings.inference.context_size or 0) or None
