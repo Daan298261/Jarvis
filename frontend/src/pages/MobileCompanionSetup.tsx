@@ -55,26 +55,36 @@ export function MobileCompanionSetup() {
     }
   }
 
-  async function startBuild() {
-    const target = endpoint || connection?.endpoints[0] || ""
-    const created = await startCompanionBuild(target)
+  async function startBuild(mode: "personalized" | "generic") {
+    const created = await startCompanionBuild({
+      mode,
+      endpoint: mode === "personalized" ? endpoint || connection?.endpoints[0] || "" : "",
+      prepareConnection: mode === "personalized",
+      remote,
+    })
     setBuild(created)
+    if (mode === "personalized") {
+      api<Connection>("/api/mobile/manage/connection").then(setConnection).catch(() => undefined)
+    }
   }
 
   async function retryBuild() {
-    await startBuild()
+    const mode = build?.mode === "generic" ? "generic" : "personalized"
+    await startBuild(mode)
   }
 
   const buildPhase = build ? companionBuildPhase(build.state) : null
   const buildLocked = buildPhase === "queued" || buildPhase === "building"
-  const canStartBuild = !busy && (endpoint.length > 0 || (connection?.endpoints.length ?? 0) > 0) && !buildLocked
+  const canStartPersonalized = !busy && !buildLocked
+  const canStartGeneric = !busy && !buildLocked
 
   return (
     <section className="card" style={{ marginBottom: 20 }}>
       <h2>Android companion</h2>
       <p className="lede">
-        Build your personalized app, then confirm the phone’s fingerprint here. Each phone gets its own revocable
-        identity.
+        Generate the companion APK entirely from this page — prepare the connection when needed, watch build
+        progress, then download or send. Use a generic APK for releases and sideload; pair in the app after
+        install.
       </p>
       <label>
         <input type="checkbox" checked={remote} onChange={(event) => setRemote(event.target.checked)} /> Enable
@@ -119,7 +129,9 @@ export function MobileCompanionSetup() {
       {connection && (
         <div role="status" style={{ marginTop: 12 }}>
           <strong>{connection.state}</strong> · {connection.activity}
-          {connection.local_verified && <p>Desktop encryption and device authentication verified. Test the phone on Wi-Fi next.</p>}
+          {connection.local_verified && (
+            <p>Desktop encryption and device authentication verified. Test the phone on Wi-Fi next.</p>
+          )}
           {connection.remote_verified && <p>Hosted fallback reached this Jarvis gateway.</p>}
           {connection.limitation && <p>{connection.limitation}</p>}
           {connection.endpoints.map((address) => (
@@ -148,10 +160,17 @@ export function MobileCompanionSetup() {
         </label>
       </details>
       <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-        <button className="btn" disabled={!canStartBuild} onClick={() => run(startBuild)}>
-          {buildLocked ? "Build in progress…" : "Build Android APK"}
+        <button className="btn" disabled={!canStartPersonalized} onClick={() => run(() => startBuild("personalized"))}>
+          {buildLocked && build?.mode !== "generic" ? "Build in progress…" : "Build personalized APK"}
+        </button>
+        <button className="btn secondary" disabled={!canStartGeneric} onClick={() => run(() => startBuild("generic"))}>
+          {buildLocked && build?.mode === "generic" ? "Build in progress…" : "Build generic companion APK"}
         </button>
       </div>
+      <p className="companion-apk-build-hint" style={{ marginTop: 8 }}>
+        Personalized auto-prepares the connection when needed and bakes this desktop’s endpoints. Generic ships
+        every companion feature and pairs with the 6-digit code / QR after install — use that for releases.
+      </p>
       {build && (
         <CompanionApkBuildPanel
           build={build}
@@ -164,8 +183,7 @@ export function MobileCompanionSetup() {
       )}
       {!build && (
         <p className="companion-apk-build-hint" style={{ marginTop: 12 }}>
-          Prepare a connection, then start a build. Progress and download options appear here while the APK is
-          generating.
+          Start a build above. Progress, Download to Desktop, and optional WhatsApp/email send appear here.
         </p>
       )}
       <div style={{ marginTop: 16 }}>
