@@ -49,6 +49,11 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Local release artifacts (Windows installer is desktop-only)
+release/portal/
+release/*.zip
+release/*.tar.gz
+
 # Test artifacts
 tests/output/
 desktop.ini

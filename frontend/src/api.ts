@@ -4162,3 +4162,48 @@ export async function sendCompanionApkEmail(buildId: string): Promise<CompanionA
 export async function sendCompanionApkWhatsApp(buildId: string): Promise<CompanionApkSendResult> {
   return sendCompanionApk(buildId, "whatsapp")
 }
+
+export type HelpTopic = {
+  id: string
+  title: string
+  summary: string
+  href: string
+  keywords: string[]
+  body: string
+}
+
+export type HelpStatus = {
+  docs_first: boolean
+  web_fallback: boolean
+  help_profile: string
+  startup_profile: string
+  qwen38_9b_installed: boolean
+  qwen38_9b_path: string
+  topics: HelpTopic[]
+}
+
+export type HelpChatReply = {
+  ok: boolean
+  conversation_id: string
+  text: string
+  used_model: boolean
+  help_profile: string
+  used_web: boolean
+  citations: { id: string; path: string }[]
+  web: { title: string; url: string }[]
+}
+
+export async function getHelpStatus(): Promise<HelpStatus> {
+  return api("/api/help/status")
+}
+
+export async function listHelpTopics(): Promise<{ topics: HelpTopic[] }> {
+  return api("/api/help/topics")
+}
+
+export async function postHelpChat(message: string, conversationId?: string): Promise<HelpChatReply> {
+  return api("/api/help/chat", {
+    method: "POST",
+    body: JSON.stringify({ message, conversation_id: conversationId || null }),
+  })
+}

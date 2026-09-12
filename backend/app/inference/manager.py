@@ -13,7 +13,7 @@ from ..config import AppSettings, logs_dir
 from ..persona.pack import inject_persona_messages
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, normalize_chat_messages, probe_remote_server, resolve_backend
-from .profiles import ModelProfile, profile_gguf, resolve_mmproj, resolve_profile, declared_profiles
+from .profiles import ModelProfile, declared_profiles, profile_gguf, qwen38_9b_profile, resolve_mmproj, resolve_profile
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
@@ -543,7 +543,7 @@ class InferenceManager:
                     "thinking_mode": p.thinking_mode,
                     "context_size": p.context_size,
                 }
-                for p in declared_profiles()
+                for p in _snapshot_profiles()
             ],
             "context_policy": {
                 "live": self.state.context_size or profile.context_size,
@@ -577,6 +577,14 @@ class InferenceManager:
             )
         except Exception:
             pass
+
+
+def _snapshot_profiles() -> list[ModelProfile]:
+    profiles = list(declared_profiles())
+    extra = qwen38_9b_profile()
+    if extra is not None and extra.name not in {item.name for item in profiles}:
+        profiles.insert(0, extra)
+    return profiles
 
 
 MANAGER = InferenceManager()
