@@ -27,6 +27,7 @@ class ModelProfile:
     description: str
     vision: bool = False
     fallbacks: tuple[str, ...] = ()
+    absolute_path: str = ""
 
 
 # Community GGUF of wangzhang/Qwen3.5-9B-abliterated (legacy primary model).
@@ -219,6 +220,8 @@ def declared_profiles() -> list[ModelProfile]:
 
 
 def profile_gguf(profile: ModelProfile) -> Path:
+    if profile.absolute_path:
+        return Path(profile.absolute_path)
     return models_dir() / profile.repo_dir / profile.filename
 
 
@@ -279,8 +282,45 @@ def model_paths() -> dict[str, Path]:
     }
 
 
+def qwen38_9b_profile() -> ModelProfile | None:
+    """Local Qwen3.8-9B uncensored (RFC-0078) when a matching GGUF is on disk."""
+    from .qwen38_local import discover_qwen38_9b_uncensored
+
+    found = discover_qwen38_9b_uncensored()
+    if found is None:
+        return None
+    quant = found.quantization or "Q4_K_M"
+    tag = "uncensored" if found.uncensored else "local"
+    return ModelProfile(
+        name="qwen38_9b",
+        label=f"Qwen3.8 9B {tag}",
+        quant=quant,
+        filename=found.filename,
+        family="qwen38-9b",
+        alias="Qwen3.8-9B",
+        repo="local/qwen3.8-9b",
+        repo_dir=found.path.parent.name,
+        mmproj_filename="",
+        thinking=True,
+        thinking_mode="selective",
+        context_size=32768,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        presence_penalty=0.0,
+        description="Local Qwen3.8-9B (uncensored preferred) used as the everyday default when installed.",
+        vision=False,
+        fallbacks=("balanced", "fast", "bootstrap", "expert"),
+        absolute_path=str(found.path),
+    )
+
+
 def available_profiles() -> list[ModelProfile]:
-    return [profile for profile in PROFILES.values() if profile_gguf(profile).exists()]
+    installed = [profile for profile in PROFILES.values() if profile_gguf(profile).exists()]
+    extra = qwen38_9b_profile()
+    if extra is not None:
+        installed = [extra, *[item for item in installed if item.name != extra.name]]
+    return installed
 
 
 def _with_alt_weights(requested: ModelProfile, alt: ModelProfile) -> ModelProfile:
@@ -302,7 +342,15 @@ def resolve_profile(name: str) -> ModelProfile:
     key = (name or "bootstrap").lower()
     if key == "reliable":
         key = "quality"
+    if key in {"qwen38_9b", "qwen3.8-9b", "qwen38-9b"}:
+        extra = qwen38_9b_profile()
+        if extra is not None:
+            return extra
+        key = "balanced"
     if key not in PROFILES:
+        extra = qwen38_9b_profile()
+        if extra is not None and key == extra.name:
+            return extra
         key = "bootstrap" if profile_gguf(PROFILES["bootstrap"]).exists() else "balanced"
     profile = PROFILES[key]
     if profile_gguf(profile).exists():
@@ -334,7 +382,18 @@ def profile_as_dict(profile: ModelProfile) -> dict:
         "repo": profile.repo,
         "installed": profile_gguf(profile).exists(),
         "vision": profile.vision,
+        "absolute_path": profile.absolute_path or "",
     }
+
+
+def preferred_startup_profile(requested: str | None = None) -> str:
+    """Everyday autoload: Qwen3.8-9B uncensored when installed (RFC-0078)."""
+    from .qwen38_local import should_prefer_qwen38_default
+
+    name = (requested or "balanced").strip().lower() or "balanced"
+    if should_prefer_qwen38_default(name) and qwen38_9b_profile() is not None:
+        return "qwen38_9b"
+    return name
 
 
 def expert_profile() -> ModelProfile:

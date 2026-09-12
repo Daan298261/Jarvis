@@ -141,7 +141,7 @@ Skip this section only if you will use a **remote** OpenAI-compatible server and
 
 ## 7. Model weights (GGUF)
 
-The default primary model is **Qwen3.5-9B Abliterated** (source `wangzhang/Qwen3.5-9B-abliterated`, GGUF `Abiray/Qwen3.5-9B-abliterated-GGUF`). Qwen3.5-27B stays available as the Expert profile.
+The default primary model is **Qwen3.5-9B Abliterated** (source `wangzhang/Qwen3.5-9B-abliterated`, GGUF `Abiray/Qwen3.5-9B-abliterated-GGUF`). If a **Qwen3.8-9B uncensored** GGUF is already on disk under `models/` or `%USERPROFILE%\.lmstudio\models` (`~/.lmstudio/models`), Jarvis autoloads that instead (RFC-0078). Qwen3.5-27B stays available as the Expert profile. Expert / Ornith / bootstrap pins are not overridden.
 
 Preferred files under `models/Qwen3.5-9B-abliterated-GGUF/`:
 

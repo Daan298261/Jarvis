@@ -29,6 +29,7 @@ import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
 import { api, getAwayMode, getDiagnostics, getLicenseStatus, getSetupStatus, listCodingDecisionInbox, listSwarmNodes, type AwayModeState, type LicenseStatus, type SwarmNode, type Task } from "./api"
 import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
+import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
 import { HudShell } from "./hud/HudShell"
 import { HudChatHome } from "./hud/HudChatHome"
 import { getUiMode, setUiMode as persistUiMode, type UiMode } from "./hud/uiMode"
@@ -110,6 +111,7 @@ function OwnerPortal() {
   const [model, setModel] = useState<any>(null)
   const [away, setAway] = useState<AwayModeState | null>(null)
   const [navOpen, setNavOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
   const [shellStatus, setShellStatus] = useState<BackendLifecycleStatus>("unknown")
   const [recents, setRecents] = useState<Task[]>([])
@@ -345,13 +347,16 @@ function OwnerPortal() {
           Menu
         </button>
         <strong>JARVIS</strong>
+        <HelpTrigger variant="classic" onClick={() => setHelpOpen((open) => !open)} />
         <span className={`dot ${status.tone}`} />
       </header>
+      <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} variant="classic" />
       {navOpen && <button className="nav-backdrop" type="button" aria-label="Close menu" onClick={closeNav} />}
       <aside className="sidebar">
         <div className="brand">
           <strong>JARVIS</strong>
           <span>On this PC</span>
+          <HelpTrigger variant="classic" onClick={() => setHelpOpen((open) => !open)} />
         </div>
 
         <NavLink to="/" end className="rail-new" onClick={closeNav}>

@@ -19,5 +19,6 @@ This directory is the **primary** corpus for RFC-0060 docs-first grounding. When
 | [companion-realtime-voice.md](companion-realtime-voice.md) | RFC-0064 duplex voice session summary |
 | [humanoid-runtime.md](humanoid-runtime.md) | Humanoid presence runtime setup |
 | [spec-summaries/](spec-summaries/) | Short digests of key RFCs and root specs |
+| [help-topics/](help-topics/) | In-app Help guides (phone pairing, custom models, swarms, autonomy) |
 
 Full RFCs and architect specs remain in `docs/rfcs/` and repo root `*.md` files; this pack holds **concise** product-facing summaries only.

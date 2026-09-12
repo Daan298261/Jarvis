@@ -22,7 +22,7 @@ Override via `data/settings.json`, Settings UI, or env `JARVIS_BIND_HOST` / `JAR
 ## Model download / LM Studio paths
 
 - **Bundled llama.cpp** — `runtime/llama.cpp/llama-server.exe` plus CUDA DLLs; not in git.
-- **Default GGUFs** — `models/Qwen3.5-9B-abliterated-GGUF/` (primary), `models/Qwen3.5-27B-GGUF/` (Expert). Download via install docs or Hugging Face Hub scripts in `docs/INSTALL.md`.
+- **Default GGUFs** — `models/Qwen3.5-9B-abliterated-GGUF/` (primary), `models/Qwen3.5-27B-GGUF/` (Expert). If a **Qwen3.8-9B uncensored** GGUF is already present under `models/` or `~/.lmstudio/models`, that becomes the everyday autoload default (RFC-0078). Download via install docs or Hugging Face Hub scripts in `docs/INSTALL.md`.
 - **LM Studio** — backend `lmstudio` discovers GGUFs under the user LM Studio models folder (RFC-0043 graded catalog). Jarvis does not download models for LM Studio; it binds profiles to on-disk files.
 - **Remote inference** — set `inference.backend` to `remote`, `ollama`, `lmstudio`, `vllm`, or `sglang` and configure host/port; Jarvis probes but does not start remote servers.
 

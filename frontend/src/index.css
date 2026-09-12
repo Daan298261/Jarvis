@@ -1908,3 +1908,98 @@ label { display: block; color: var(--muted); font-size: 13px; }
 .lm-catalog-picker.compact .lm-catalog-meta { font-size: 10px; }
 .lm-catalog-picker.compact .lm-ungraded { display: none; }
 .lm-catalog-picker.compact .lm-catalog-root { display: none; }
+
+.classic-help-trigger {
+  margin-left: auto;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--gold);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.classic-help-panel {
+  position: fixed;
+  top: 72px;
+  right: 18px;
+  z-index: 40;
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel, #14110d);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.classic-help-head,
+.classic-help-tabs,
+.classic-help-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.classic-help-head {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.classic-help-meta {
+  margin-right: auto;
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.classic-help-close,
+.classic-help-tabs button,
+.classic-help-form button,
+.help-back {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+
+.classic-help-tabs button.active {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.classic-help-ask,
+.classic-help-guides {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 0 12px 12px;
+}
+
+.classic-help-thread { display: flex; flex-direction: column; gap: 10px; min-height: 180px; }
+.classic-help-form { padding: 8px 0 0; }
+.classic-help-form input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  padding: 8px 10px;
+}
+.classic-help-guides ul { list-style: none; margin: 0; padding: 0; }
+.classic-help-guides li button,
+.classic-help-guides article {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}

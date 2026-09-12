@@ -1357,3 +1357,132 @@
     width: min(calc(var(--jarvis-apex-size) * 1.05), min(78vw, 920px));
   }
 }
+
+.hud-help-panel {
+  position: fixed;
+  top: 68px;
+  right: 18px;
+  z-index: 140;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hud-line-strong);
+  border-radius: 16px;
+  background: rgba(6, 16, 22, 0.96);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.hud-help-head,
+.hud-help-tabs,
+.hud-help-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.hud-help-head {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--hud-line);
+}
+
+.hud-help-meta {
+  margin-right: auto;
+  margin-left: 8px;
+  font-size: 11px;
+  color: rgba(215, 234, 242, 0.55);
+}
+
+.hud-help-tabs button,
+.hud-help-form button,
+.help-back {
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(215, 234, 242, 0.75);
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+
+.hud-help-tabs button.active,
+.hud-help-tabs button:hover,
+.help-back:hover {
+  border-color: var(--hud-line-strong);
+  color: #eefbff;
+}
+
+.hud-help-ask,
+.hud-help-guides {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 0 12px 12px;
+}
+
+.hud-help-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 180px;
+}
+
+.help-turn span {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--hud-cyan);
+}
+
+.help-turn p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+}
+
+.help-turn em,
+.help-error {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: rgba(215, 234, 242, 0.55);
+}
+
+.hud-help-form {
+  padding: 8px 0 0;
+}
+
+.hud-help-form input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid var(--hud-line);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 8px 10px;
+}
+
+.hud-help-guides ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hud-help-guides li button,
+.hud-help-guides article {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--hud-line);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.hud-help-guides li span,
+.hud-help-guides article p {
+  display: block;
+  margin-top: 4px;
+  color: rgba(215, 234, 242, 0.7);
+  font-size: 12px;
+}
