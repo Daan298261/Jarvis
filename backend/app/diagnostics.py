@@ -14,6 +14,7 @@ from .config import (
     repo_root,
     runtime_dir,
 )
+from . import __version__
 from .hardware import detect_hardware
 from .setup_state import load_setup_state
 from .swarm.nodes import load_or_create_local_node_id
@@ -70,7 +71,7 @@ def app_version() -> str:
                     return line.split("=", 1)[1].strip().strip('"')
         except Exception:
             pass
-    return "1.0.0"
+    return __version__
 
 
 def build_diagnostics(
@@ -94,7 +95,7 @@ def build_diagnostics(
     payload: dict[str, Any] = {
         "application_version": app_version(),
         "frontend_version": frontend_version(),
-        "backend_version": "1.0.0",
+        "backend_version": __version__,
         "backend_status": "ready",
         "backend_pid": backend_pid or os.getpid(),
         "api_port": settings.bind_port,

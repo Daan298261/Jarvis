@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import __version__
+
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
 from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, computer_use, context_repo, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, owner_chat, packs, perception, perception_identity, permissions, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
@@ -36,7 +38,7 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 logging.getLogger().addHandler(console)
 
-app = FastAPI(title="Jarvis", version="1.0.0")
+app = FastAPI(title="Jarvis", version=__version__)
 settings_obj = load_settings()
 origins = [
     f"http://127.0.0.1:{settings_obj.bind_port}",
