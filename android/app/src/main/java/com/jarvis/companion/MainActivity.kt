@@ -3,9 +3,16 @@ package com.jarvis.companion
 import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,15 +30,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
 import org.json.JSONObject
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicBoolean
 
 private val Gold = Color(0xFFF5A623)
 private val Ink = Color(0xFF070B12)
@@ -480,10 +492,16 @@ class MainActivity : ComponentActivity() {
     var endpoint by remember { mutableStateOf(model.api.endpoint) }
     var pin by remember { mutableStateOf(model.api.pin) }
     var pairingCode by remember { mutableStateOf(model.api.invitation) }
+    var scannerOpen by remember { mutableStateOf(false) }
+    var scanError by remember { mutableStateOf<String?>(null) }
     var schedulePrompt by remember { mutableStateOf("") }
     var whenText by remember { mutableStateOf(LocalDateTime.now().plusHours(1).withSecond(0).withNano(0).toString()) }
     var recurrence by remember { mutableStateOf("once") }
     var editingSchedule by remember { mutableStateOf<String?>(null) }
+    val qrPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) scannerOpen = true
+        else scanError = "Camera permission is needed to scan the desktop pairing QR code. You can still enter the code manually."
+    }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Connection", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
@@ -497,12 +515,47 @@ class MainActivity : ComponentActivity() {
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (model.api.deviceId.isEmpty()) {
+                Button(
+                    onClick = {
+                        scanError = null
+                        if (ContextCompat.checkSelfPermission(model.getApplication(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                            scannerOpen = true
+                        } else qrPermission.launch(Manifest.permission.CAMERA)
+                    },
+                    enabled = !state.busy,
+                    modifier = Modifier.padding(top = 8.dp),
+                ) { Text("Scan desktop QR") }
+                scanError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+            }
             Button(onClick = { model.pair(endpoint, pin, pairingCode) },
                 enabled = !state.busy && (model.api.deviceId.isNotEmpty() || CompanionCodeValidator.isComplete(pairingCode))) {
                 Text(if (model.api.deviceId.isEmpty()) "Pair with Jarvis" else "Connect / check approval")
             }
             Text("Phone fingerprint: ${model.api.fingerprint().chunked(8).joinToString(" ")}", color = Muted, fontSize = 11.sp)
             Text("Confirm this fingerprint on your Jarvis desktop to finish pairing.", color = Muted, fontSize = 12.sp)
+        }
+
+        if (scannerOpen) item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Scan the pairing QR shown on your Jarvis desktop", fontWeight = FontWeight.Medium)
+                    PairingQrScanner(
+                        onScanned = { value ->
+                            runCatching { CompanionPairingQrParser.parse(value) }
+                                .onSuccess { invitation ->
+                                    endpoint = invitation.endpoint
+                                    pin = invitation.serverPin
+                                    pairingCode = invitation.code
+                                    scannerOpen = false
+                                }
+                                .onFailure { error -> scanError = error.message ?: "That QR code is not a valid Jarvis pairing invitation." }
+                        },
+                        onDismiss = { scannerOpen = false },
+                    )
+                    TextButton(onClick = { scannerOpen = false }) { Text("Cancel scanner") }
+                }
+            }
         }
 
         item {
@@ -587,4 +640,50 @@ class MainActivity : ComponentActivity() {
         items(state.calls) { call -> InfoCard("Jarvis · ${call.optString("state")}", call.optString("direction")) }
         item { Spacer(Modifier.height(20.dp)) }
     }
+}
+
+@androidx.annotation.OptIn(markerClass = [ExperimentalGetImage::class])
+@Composable private fun PairingQrScanner(onScanned: (String) -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val previewView = remember { PreviewView(context) }
+    val cameraProvider = remember { ProcessCameraProvider.getInstance(context) }
+    val barcodeScanner = remember { BarcodeScanning.getClient() }
+    val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
+    val delivered = remember { AtomicBoolean(false) }
+
+    DisposableEffect(cameraProvider, lifecycleOwner) {
+        cameraProvider.addListener({
+            val provider = runCatching { cameraProvider.get() }.getOrElse {
+                onDismiss()
+                return@addListener
+            }
+            val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+            analysis.setAnalyzer(mainExecutor) { imageProxy ->
+                val image = imageProxy.image
+                if (image == null) {
+                    imageProxy.close()
+                    return@setAnalyzer
+                }
+                barcodeScanner.process(InputImage.fromMediaImage(image, imageProxy.imageInfo.rotationDegrees))
+                    .addOnSuccessListener { barcodes ->
+                        val raw = barcodes.firstOrNull { !it.rawValue.isNullOrBlank() }?.rawValue
+                        if (raw != null && delivered.compareAndSet(false, true)) onScanned(raw)
+                    }
+                    .addOnCompleteListener { imageProxy.close() }
+            }
+            runCatching {
+                provider.unbindAll()
+                provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+            }.onFailure { onDismiss() }
+        }, mainExecutor)
+        onDispose {
+            cameraProvider.addListener({ runCatching { cameraProvider.get().unbindAll() } }, mainExecutor)
+            barcodeScanner.close()
+        }
+    }
+    AndroidView(factory = { previewView }, modifier = Modifier.fillMaxWidth().height(300.dp))
 }
