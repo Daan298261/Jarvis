@@ -1,3 +1,8 @@
+from app.inference.candidate_routing import (
+    candidate_keys_for_role,
+    candidates_for_role,
+    normalize_candidate_role,
+)
 from app.inference.default_candidates import (
     MODEL_CANDIDATES,
     PERSONALITY_PRESETS,
@@ -38,6 +43,21 @@ def test_weight_fit_is_not_confused_with_unknown_frontier_size():
 def test_small_and_micro_roles_exist():
     assert get_model_candidate("minicpm5-1b-abliterated").role == "micro"
     assert get_model_candidate("minicpm5-2b-abliterated").role == "small"
+
+
+def test_candidate_route_aliases_keep_kimi_lab_only():
+    assert normalize_candidate_role("brain") == "primary"
+    assert normalize_candidate_role("translator") == "presentation"
+    assert normalize_candidate_role("colibri_expert") == "expert"
+    assert "kimi-k3-colibri" == candidate_keys_for_role("lab")[0]
+    assert "kimi-k3-colibri" not in candidate_keys_for_role("primary")
+
+
+def test_candidate_routes_return_models_in_preference_order():
+    primary = candidates_for_role("primary")
+    assert primary[0].key == "qwen38-9b-heretic-q6"
+    assert primary[1].key == "qwen38-9b-heretic-q8"
+    assert all(candidate.role == "primary" for candidate in primary)
 
 
 def test_tts_quality_and_fallback_are_separate():
