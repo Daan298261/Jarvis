@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -11,6 +12,7 @@ import psutil
 
 from ..config import AppSettings, logs_dir
 from ..persona.pack import inject_persona_messages
+from ..providers.base import ChatMessage
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import InferenceBackend, normalize_chat_messages, probe_remote_server, resolve_backend
 from .profiles import ModelProfile, declared_profiles, profile_gguf, qwen38_9b_profile, resolve_mmproj, resolve_profile
@@ -77,6 +79,115 @@ def _default_load_context(profile: ModelProfile) -> int:
     return min(16384, cap)
 
 
+def _message_text(message: ChatMessage) -> str:
+    if isinstance(message.content, str):
+        return message.content
+    return json.dumps(message.content, ensure_ascii=False)
+
+
+def _trim_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    if limit <= 48:
+        return text[:limit]
+    head = max(24, int(limit * 0.62))
+    tail = max(12, limit - head - 30)
+    return text[:head] + "\n[Earlier context trimmed]\n" + text[-tail:]
+
+
+def _message_with_content(message: ChatMessage, content: str) -> ChatMessage:
+    """Trim display content without breaking an OpenAI tool-call transcript."""
+    return ChatMessage(
+        role=message.role,
+        content=content,
+        name=message.name,
+        tool_call_id=message.tool_call_id,
+        tool_calls=message.tool_calls,
+        reasoning_content=message.reasoning_content,
+    )
+
+
+def fit_messages_to_context(
+    messages: list[ChatMessage],
+    *,
+    context_size: int,
+    max_tokens: int | None,
+    tool_schema_chars: int = 0,
+) -> list[ChatMessage]:
+    """Keep a request below the active server context before llama.cpp rejects it.
+
+    The runtime may expose less context than a model's nominal cap (for
+    example, a 4K LM Studio server). Use a deliberately conservative two
+    characters/token estimate, reserve output/template headroom, retain the
+    first system message and newest user turn, then discard oldest history.
+    """
+    limit = int(context_size or 0)
+    if limit <= 0:
+        return messages
+    completion_reserve = max(256, min(int(max_tokens or 1024), max(256, limit // 2)))
+    prompt_chars = max(768, (limit - completion_reserve - 256) * 2)
+    message_budget = max(512, prompt_chars - max(0, tool_schema_chars))
+    if sum(len(_message_text(message)) for message in messages) <= message_budget:
+        return messages
+
+    system = next((message for message in messages if message.role == "system"), None)
+    non_system = [message for message in messages if message.role != "system"]
+    kept: list[ChatMessage] = []
+    used = 0
+    if system is not None:
+        system_limit = max(256, int(message_budget * 0.55))
+        text = _trim_text(_message_text(system), system_limit)
+        kept.append(_message_with_content(system, text))
+        used += len(text)
+
+    tail: list[ChatMessage] = []
+    for message in reversed(non_system):
+        remaining = message_budget - used
+        if remaining <= 0:
+            break
+        text = _message_text(message)
+        # Always preserve the latest turn, even when the system block was long.
+        if not tail or len(text) <= remaining:
+            clipped = _trim_text(text, max(96, remaining))
+            tail.append(_message_with_content(message, clipped))
+            used += len(clipped)
+        else:
+            break
+    ordered_tail = list(reversed(tail))
+    # A tool response cannot begin a retained OpenAI transcript: its matching
+    # assistant tool call may have been discarded with older history.
+    while ordered_tail and ordered_tail[0].role == "tool":
+        ordered_tail.pop(0)
+    return [*kept, *ordered_tail]
+
+
+def fit_tools_to_context(
+    tools: list[dict[str, Any]] | None,
+    *,
+    context_size: int,
+    max_tokens: int | None,
+) -> list[dict[str, Any]] | None:
+    """Avoid serialising a tool catalog larger than a small server can hold."""
+    if not tools:
+        return tools
+    limit = int(context_size or 0)
+    if limit <= 0:
+        return tools
+    reserve = max(256, min(int(max_tokens or 1024), max(256, limit // 2)))
+    char_budget = max(512, int((limit - reserve - 256) * 2 * 0.55))
+    kept: list[dict[str, Any]] = []
+    used = 0
+    for tool in tools:
+        size = len(json.dumps(tool, ensure_ascii=False))
+        if kept and used + size > char_budget:
+            continue
+        if size > char_budget:
+            continue
+        kept.append(tool)
+        used += size
+    return kept
+
+
 class InferenceManager:
     """Owns model lifecycle. Process control is delegated to an InferenceBackend."""
 
@@ -108,16 +219,26 @@ class InferenceManager:
             model=self.provider_model(settings, advertised),
         )
 
-    def prepare_chat_messages(self, messages: list[Any]) -> list[Any]:
+    def prepare_chat_messages(
+        self,
+        messages: list[Any],
+        *,
+        max_tokens: int | None = None,
+        tool_schema_chars: int = 0,
+    ) -> list[ChatMessage]:
         """Normalize message order before llama.cpp / Qwen chat template rendering."""
-        from ..providers.base import ChatMessage
-
         typed = [
             message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
             for message in messages
         ]
         with_persona = inject_persona_messages(typed)
-        return normalize_chat_messages(with_persona)
+        normalized = normalize_chat_messages(with_persona)
+        return fit_messages_to_context(
+            normalized,
+            context_size=self.state.context_size,
+            max_tokens=max_tokens,
+            tool_schema_chars=tool_schema_chars,
+        )
 
     async def chat(
         self,
@@ -133,10 +254,20 @@ class InferenceManager:
     ):
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
-        prepared = self.prepare_chat_messages(messages)
+        fitted_tools = fit_tools_to_context(
+            tools,
+            context_size=self.state.context_size,
+            max_tokens=max_tokens,
+        )
+        tool_schema_chars = len(json.dumps(fitted_tools, ensure_ascii=False)) if fitted_tools else 0
+        prepared = self.prepare_chat_messages(
+            messages,
+            max_tokens=max_tokens,
+            tool_schema_chars=tool_schema_chars,
+        )
         return await self.provider.chat(
             prepared,
-            tools=tools,
+            tools=fitted_tools,
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
@@ -158,7 +289,7 @@ class InferenceManager:
     ) -> AsyncIterator[str]:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
-        prepared = self.prepare_chat_messages(messages)
+        prepared = self.prepare_chat_messages(messages, max_tokens=max_tokens)
         async for delta in self.provider.chat_stream(
             prepared,
             temperature=temperature,

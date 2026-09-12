@@ -12,12 +12,17 @@ QWEN38_9B_RE = re.compile(
     r"qwen[\s_\-]*3(?:[.\-_]|m)?8[\s_\-]*9b",
     re.IGNORECASE,
 )
+QWEN38_27B_RE = re.compile(
+    r"qwen[\s_\-]*3(?:[.\-_]|m)?8[\s_\-]*27b",
+    re.IGNORECASE,
+)
 UNCENSORED_RE = re.compile(
     r"uncensored|abliterat|defiant|heretic|unfiltered|norefusal|no[\-_]?refusal",
     re.IGNORECASE,
 )
 MMPROJ_RE = re.compile(r"mmproj", re.IGNORECASE)
-QUANT_RANK = ("Q8_0", "Q6_K", "Q5_K_M", "Q5_K", "Q4_K_M", "Q4_K_S", "Q4_K", "Q4")
+QUANT_RANK = ("Q8_0", "Q6_K", "Q5_K_M", "Q5_K", "Q4_K_M", "Q4_K_S", "Q4_K", "Q4", "Q3_K_S", "Q3_K_M", "Q3")
+HERETIC_27B_FILENAME = "RVN-Q3_K_S-multilingual.gguf"
 
 EVERYDAY_PROFILE_NAMES = frozenset({"balanced", "fast", "quality", "qwen38_9b"})
 PINNED_PROFILE_NAMES = frozenset(
@@ -51,6 +56,14 @@ def is_qwen38_9b_filename(name: str) -> bool:
     if not name.lower().endswith(".gguf"):
         return False
     return bool(QWEN38_9B_RE.search(name))
+
+
+def is_qwen38_27b_heretic_path(path: Path) -> bool:
+    """Recognize the RVN 27B GGUF even though its filename omits Qwen/27B."""
+    if MMPROJ_RE.search(path.name) or path.suffix.lower() != ".gguf":
+        return False
+    marker = str(path).replace("\\", "/")
+    return bool(QWEN38_27B_RE.search(marker) and UNCENSORED_RE.search(marker))
 
 
 def is_uncensored_filename(name: str) -> bool:
@@ -105,6 +118,33 @@ def discover_qwen38_9b_uncensored(extra_roots: list[Path] | None = None) -> Disc
         return None
     preferred = [item for item in candidates if item.uncensored]
     return (preferred or candidates)[0]
+
+
+def discover_qwen38_27b_heretic(extra_roots: list[Path] | None = None) -> DiscoveredQwen38 | None:
+    """Find the requested internal Qwen3.8 27B Heretic/RVN quantization."""
+    roots = [models_dir(), _lmstudio_root()]
+    if extra_roots:
+        roots.extend(extra_roots)
+    found: list[DiscoveredQwen38] = []
+    seen: set[str] = set()
+    for root in roots:
+        for path in _iter_ggufs(root):
+            if not is_qwen38_27b_heretic_path(path):
+                continue
+            marker = str(path.resolve()) if path.exists() else str(path)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            found.append(
+                DiscoveredQwen38(
+                    path=path,
+                    filename=path.name,
+                    uncensored=True,
+                    quantization=_quant_from_name(path.name),
+                )
+            )
+    found.sort(key=lambda item: (item.filename.lower() != HERETIC_27B_FILENAME.lower(), _quant_rank(item.quantization), item.filename.lower()))
+    return found[0] if found else None
 
 
 def should_prefer_qwen38_default(current_profile: str) -> bool:
