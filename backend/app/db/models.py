@@ -281,6 +281,25 @@ class AcpSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class AcpAdapterSession(Base):
+    """Durable state owned by Jarvis for one local ACP client session."""
+
+    __tablename__ = "acp_adapter_sessions"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    agent_profile_id: Mapped[str] = mapped_column(String(80), default="balanced")
+    workspace: Mapped[str] = mapped_column(Text, default="")
+    task_id: Mapped[str] = mapped_column(String(36), default="")
+    client_name: Mapped[str] = mapped_column(String(120), default="")
+    client_version: Mapped[str] = mapped_column(String(80), default="")
+    capabilities_json: Mapped[str] = mapped_column(Text, default="{}")
+    events_json: Mapped[str] = mapped_column(Text, default="[]")
+    request_cache_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(32), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Node(Base):
     """A physical or virtual machine participating in the Jarvis swarm.
 
