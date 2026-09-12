@@ -8,7 +8,13 @@ handles swarm registration and opaque push identifiers.
 Deploy with Docker Compose on a public Linux host. Copy `.env.example` to `.env` and set
 `RELAY_HOSTNAME`, a random `RELAY_REGISTRATION_CODE`, and `FIREBASE_CREDENTIAL_FILE`.
 The Firebase service account stays only on the service host. Allow TCP 80/443 and
-15000–15099. The relay is not a TURN server; configure coturn separately for WebRTC.
+15000–15099. For local relay-and-call development, use the included coturn overlay:
+`docker compose -f compose.yaml -f compose.dev.yaml up -d --build`.
+It exposes TURN on UDP/TCP 3478 and relay candidates on UDP 49160–49200 using
+time-limited shared-secret credentials. Set `TURN_SHARED_SECRET` only in the relay
+host environment and the Jarvis gateway secret store; do not put it in the APK.
+Production may use the same direct-VM topology. Keep the relay hostname DNS-only at
+Cloudflare: normal HTTP proxying cannot carry raw relay TCP or TURN UDP traffic.
 
 1. `docker compose up -d --build`
 2. An authorized Jarvis installation posts its operator-provided registration code
