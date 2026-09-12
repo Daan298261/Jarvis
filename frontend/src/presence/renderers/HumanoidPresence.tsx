@@ -76,7 +76,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
     })
     renderer.setClearColor(0x03070b, 1)
     renderer.toneMapping = THREE.ReinhardToneMapping
-    renderer.toneMappingExposure = 0.96
+    renderer.toneMappingExposure = 0.82
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40)
     camera.position.set(0.55, 0.28, 5.6)
@@ -109,7 +109,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
     const composer = efficient ? null : new EffectComposer(renderer)
     const bloom = efficient
       ? null
-      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.32, 0.82)
+      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.28, 0.78)
     const output = efficient ? null : new OutputPass()
     if (composer && bloom && output) {
       composer.addPass(new RenderPass(scene, camera))
@@ -139,7 +139,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       camera.lookAt(0, 0.06, 0)
       // Keep the environment full-bleed. Only the bust is framed to occupy roughly
       // three quarters of the stage height on desktop.
-      bust.scale.setScalar(aspect < 0.85 ? 0.9 : aspect > 2.05 ? 0.8 : 0.84)
+      bust.scale.setScalar(aspect < 0.85 ? 0.98 : aspect > 2.05 ? 0.91 : 0.98)
       camera.updateProjectionMatrix()
       const scaleCap = aspect > 2.05 ? 720 : 580
       uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.72, height / scaleCap)
@@ -198,9 +198,9 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       const mode = current.settings.attentionMode
       const follow = !reduced && mode !== "off"
       const att = attentionRef.current
-      const yawGain = THREE.MathUtils.degToRad(6)
-      const pitchGain = THREE.MathUtils.degToRad(3.5)
-      const rotationLerp = 1 - Math.exp(-delta * 5.5)
+      const yawGain = THREE.MathUtils.degToRad(3.2)
+      const pitchGain = THREE.MathUtils.degToRad(1.35)
+      const rotationLerp = 1 - Math.exp(-delta * 3.4)
       if (reduced) {
         bust.rotation.set(0, baseYaw, 0)
         bust.position.set(basePos[0], basePos[1], basePos[2])
@@ -213,8 +213,9 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
         bust.position.x = basePos[0]
         bust.position.z = basePos[2]
         bust.position.y = basePos[1] + Math.sin(animationTime * 1.05) * 0.016
-        uniforms.uPointer.value.set(ax * 1.75, 0.08 - ay * 1.6)
-        uniforms.uPointerStrength.value += ((follow ? 1 : 0) - uniforms.uPointerStrength.value)
+        uniforms.uPointer.value.set(ax * 1.45, 0.12 - ay * 1.35)
+        const pointerTarget = follow ? THREE.MathUtils.clamp(att.confidence, 0, 1) * 0.42 : 0
+        uniforms.uPointerStrength.value += (pointerTarget - uniforms.uPointerStrength.value)
           * Math.min(1, delta * 5)
       }
       try {

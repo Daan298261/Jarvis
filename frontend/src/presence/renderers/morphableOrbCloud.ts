@@ -47,7 +47,9 @@ export const particleVertexShader = `
       float sweep = pow(max(0.0, sin(t * 0.4 + p.y * 0.8)), 5.0);
       float drift = loose * (0.08 + uActivity * 0.2) * sweep * uMotion;
       p.x += drift * (0.5 + aSeed) * smoothstep(-0.3, 0.5, p.x);
-      float dissolve = smoothstep(0.65, 1.0, uActivity) * smoothstep(0.65, 0.95, aSeed) * uMotion;
+      // State energy may loosen the halo, but must never tear the anatomical
+      // head/shoulder cloud apart.
+      float dissolve = loose * smoothstep(0.65, 1.0, uActivity) * smoothstep(0.65, 0.95, aSeed) * uMotion;
       p.x += dissolve * (0.35 + sin(t * 0.7 + aSeed * 8.0) * 0.2);
       p.y += dissolve * sin(t * 0.55 + aSeed * 13.0) * 0.35;
       p.z += sin(p.y * 7.0 - t * 1.3) * (0.004 + uSpeech * 0.025) * uMotion;
@@ -56,14 +58,14 @@ export const particleVertexShader = `
       float pointerDistance = length(pointerDelta);
       float pointerFalloff = 1.0 - smoothstep(0.12, 0.82, pointerDistance);
       vec2 pointerDirection = pointerDelta / max(pointerDistance, 0.045);
-      p.xy += pointerDirection * pointerFalloff * loose * uPointerStrength * 0.2 * uMotion;
-      p.z += pointerFalloff * loose * uPointerStrength * (0.04 + aSeed * 0.06) * uMotion;
+      p.xy += pointerDirection * pointerFalloff * loose * uPointerStrength * 0.065 * uMotion;
+      p.z += pointerFalloff * loose * uPointerStrength * (0.012 + aSeed * 0.018) * uMotion;
     } else {
       p *= 1.0 + uSpeech * 0.03 * sin(t * 9.5);
     }
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = clamp(size * uPixelScale * 7.1 / -mv.z, 0.8, 120.0);
+    gl_PointSize = clamp(size * uPixelScale * 6.6 / -mv.z, 0.72, 96.0);
     vGold = mix(aGold, bGold, m);
     vFlow = flow;
     vDepth = p.z;
@@ -169,8 +171,10 @@ export function createMorphablePresenceSystem(
   material: THREE.ShaderMaterial,
   initialShapeId?: PresenceShapeId,
 ): MorphablePresenceSystem {
-  const figureBudget = Math.round(52000 * density)
-  const fieldBudget = Math.round(18000 * density)
+  // Put the budget where the user reads identity: the face and shoulders.
+  // The flowing environment stays intact but no longer outnumbers the bust.
+  const figureBudget = Math.round(82000 * density)
+  const fieldBudget = Math.round(15000 * density)
   let shape = resolvePresenceShape(initialShapeId)
   const figureOrbs = resampleOrbs(shape.buildFigure(density), figureBudget)
   const figure = geometryFromOrbs(figureOrbs, material)
