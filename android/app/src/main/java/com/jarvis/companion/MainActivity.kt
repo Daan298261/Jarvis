@@ -642,7 +642,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalGetImage::class)
+@androidx.annotation.OptIn(markerClass = [ExperimentalGetImage::class])
 @Composable private fun PairingQrScanner(onScanned: (String) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
