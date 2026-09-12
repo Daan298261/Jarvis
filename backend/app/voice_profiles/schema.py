@@ -20,6 +20,7 @@ class VoiceProfileTTS(BaseModel):
     license: str = ""
     offline: bool = True
     quality_tier: QualityTier = "natural"
+    speaking_rate: float = Field(default=1.0, ge=0.75, le=1.35)
 
     def resolved_engine_id(self) -> str:
         raw = (self.engine_id or self.engine_hint or "system").strip().lower()

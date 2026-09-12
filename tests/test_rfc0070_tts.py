@@ -28,6 +28,7 @@ def test_default_butler_profile_uses_kokoro_engine():
     assert profile is not None
     assert profile.tts.resolved_engine_id() == "kokoro"
     assert profile.tts.speaker_ref == "bm_george"
+    assert profile.tts.speaking_rate == pytest.approx(1.08)
     assert (Path("voice_packs/butler_original_v1/pack.json")).is_file()
 
 
@@ -160,3 +161,34 @@ async def test_synthesize_routes_through_picked_engine(monkeypatch):
 
     wav = await voice_worker.synthesize_speech("Hello")
     assert wav == b"RIFF"
+
+
+@pytest.mark.asyncio
+async def test_kokoro_receives_profile_speaking_rate(monkeypatch):
+    import numpy as np
+
+    from app.tts.synthesize import synthesize_with_engine
+
+    reload_catalog()
+    profile = reload_catalog().get(DEFAULT_VOICE_PROFILE_ID)
+    assert profile is not None
+    observed: dict[str, float] = {}
+
+    class FakePipeline:
+        def __call__(self, text, *, voice, speed):
+            assert text == "Ready when you are."
+            assert voice == "bm_george"
+            observed["speed"] = speed
+            yield None, None, np.zeros(16, dtype=np.float32)
+
+    monkeypatch.setattr("app.tts.synthesize.is_kokoro_available", lambda **_: True)
+    monkeypatch.setattr("app.tts.synthesize.get_kokoro_pipeline", lambda *_: FakePipeline())
+
+    wav = await synthesize_with_engine(
+        "Ready when you are.",
+        engine_id="kokoro",
+        profile=profile,
+    )
+
+    assert observed["speed"] == pytest.approx(1.08)
+    assert wav.startswith(b"RIFF")

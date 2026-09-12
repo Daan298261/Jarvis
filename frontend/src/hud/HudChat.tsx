@@ -3,8 +3,9 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
-import { speakChatReply, stopChatTts } from "../tts/chatTtsPlayer"
+import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
+import { useTaskSpeech } from "../tts/useTaskSpeech"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null }) => void
@@ -22,7 +23,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [speaking, setSpeaking] = useState(false)
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
-  const spokenRef = useRef<string>("")
+
+  useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies, setSpeaking)
 
   useEffect(() => {
     if (!id) {
@@ -49,20 +51,6 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   useEffect(() => {
     onMoodChange?.({ recording, speaking, task: id && task?.id === id ? task : null })
   }, [recording, speaking, task, id, onMoodChange])
-
-  useEffect(() => {
-    const shown = id && task?.id === id ? task : null
-    if (!speakChatReplies || !shown || shown.status !== "completed") return
-    const text = (shown.result || shown.error || "").trim()
-    if (!text) return
-    const key = `${shown.id}:${text}`
-    if (spokenRef.current === key) return
-    spokenRef.current = key
-    void speakChatReply(text, {
-      onStart: () => setSpeaking(true),
-      onEnd: () => setSpeaking(false),
-    })
-  }, [speakChatReplies, task, id])
 
   useEffect(() => {
     const node = threadRef.current

@@ -3,8 +3,9 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api, apiForm, getPrivateKey, setPrivateKey, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
-import { speakChatReply, stopChatTts } from "../tts/chatTtsPlayer"
+import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
+import { useTaskSpeech } from "../tts/useTaskSpeech"
 import { TaskActivityPanel } from "../components/TaskActivity"
 import { DelegationPanel } from "./Delegation"
 
@@ -29,8 +30,9 @@ export function ChatPage() {
   const [helpersOpen, setHelpersOpen] = useState(true)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
-  const spokenRef = useRef<string>("")
   const threadRef = useRef<HTMLDivElement | null>(null)
+
+  useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies)
 
   useEffect(() => {
     api<VoiceStatus>("/api/voice/status").then(setVoice).catch(() => undefined)
@@ -69,16 +71,6 @@ export function ChatPage() {
     const timer = window.setInterval(tick, 1000)
     return () => clearInterval(timer)
   }, [task?.status, task?.id, task?.started_at, task?.duration_seconds])
-
-  useEffect(() => {
-    if (!speakChatReplies || !task || task.status !== "completed") return
-    const text = (task.result || task.error || "").trim()
-    if (!text) return
-    const key = `${task.id}:${text}`
-    if (spokenRef.current === key) return
-    spokenRef.current = key
-    void speakChatReply(text)
-  }, [speakChatReplies, task?.id, task?.status, task?.result, task?.error])
 
   useEffect(() => {
     const node = threadRef.current

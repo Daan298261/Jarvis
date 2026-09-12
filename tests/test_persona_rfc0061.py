@@ -157,11 +157,13 @@ def test_persona_pack_changes_apply_without_model_code_edits(tmp_path, monkeypat
 async def test_voice_speak_returns_audio_bytes(monkeypatch):
     from app.api.voice import SpeakIn
 
-    async def fake_synthesize(text: str) -> bytes:
+    async def fake_synthesize(text: str, *, voice_profile_id: str | None = None) -> bytes:
         assert text == "Hello there."
+        assert voice_profile_id == "butler_original_v1"
         return b"RIFFfake-wav"
 
     monkeypatch.setattr("app.api.voice.synthesize_speech", fake_synthesize)
-    response = await voice_speak(SpeakIn(text="Hello there."))
+    response = await voice_speak(SpeakIn(text="Hello there.", voice_profile_id="butler_original_v1"))
     assert response.body == b"RIFFfake-wav"
     assert response.media_type == "audio/wav"
+    assert response.headers["server-timing"].startswith("tts;dur=")

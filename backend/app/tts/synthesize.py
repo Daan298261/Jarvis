@@ -50,13 +50,25 @@ async def synthesize_with_engine(
 ) -> bytes:
     engine = (engine_id or "system").strip().lower()
     voice = speaker_ref or (profile.tts.speaker_ref if profile else "") or ""
+    speaking_rate = profile.tts.speaking_rate if profile else 1.0
     if engine == "kokoro":
-        return await _synthesize_kokoro(text, voice=voice, model_dir=model_dir, profile=profile)
+        return await _synthesize_kokoro(
+            text,
+            voice=voice,
+            model_dir=model_dir,
+            profile=profile,
+            speaking_rate=speaking_rate,
+        )
     if engine == "chatterbox":
         return await _synthesize_chatterbox(text, voice=voice)
     if engine == "piper":
         return await _synthesize_piper(text, voice=voice, profile=profile)
-    return await _synthesize_system(text, engine=engine, speaker_ref=voice)
+    return await _synthesize_system(
+        text,
+        engine=engine,
+        speaker_ref=voice,
+        speaking_rate=speaking_rate,
+    )
 
 
 async def _synthesize_kokoro(
@@ -65,6 +77,7 @@ async def _synthesize_kokoro(
     voice: str,
     model_dir: Path | None,
     profile: VoiceProfile | None,
+    speaking_rate: float,
 ) -> bytes:
     if not is_kokoro_available(model_dir=model_dir):
         raise RuntimeError(
@@ -82,7 +95,7 @@ async def _synthesize_kokoro(
         chosen = voice or "bm_george"
         chunks: list[bytes] = []
         sample_rate = 24000
-        for _gs, _ps, audio in pipeline(text, voice=chosen, speed=1.0):
+        for _gs, _ps, audio in pipeline(text, voice=chosen, speed=speaking_rate):
             if audio is None:
                 continue
             chunks.append(_float32_to_pcm16(audio))
@@ -173,15 +186,21 @@ def _resolve_piper_onnx(voice: str, profile: VoiceProfile | None) -> Path | None
     return None
 
 
-async def _synthesize_system(text: str, *, engine: str, speaker_ref: str) -> bytes:
+async def _synthesize_system(
+    text: str,
+    *,
+    engine: str,
+    speaker_ref: str,
+    speaking_rate: float,
+) -> bytes:
     if not legacy_system_tts_available():
         raise RuntimeError("No legacy system TTS backend is available.")
     backend = legacy_tts_backend()
     if backend == "sapi":
-        return await speak_sapi(text, speaker_ref=speaker_ref)
+        return await speak_sapi(text, speaker_ref=speaker_ref, speaking_rate=speaking_rate)
     if backend in {"espeak", "espeak-ng"}:
-        return await speak_espeak(text, backend, speaker_ref=speaker_ref)
-    return speak_pyttsx3(text, speaker_ref=speaker_ref)
+        return await speak_espeak(text, backend, speaker_ref=speaker_ref, speaking_rate=speaking_rate)
+    return speak_pyttsx3(text, speaker_ref=speaker_ref, speaking_rate=speaking_rate)
 
 
 def load_pack_manifest(pack_dir: Path) -> dict[str, Any]:
