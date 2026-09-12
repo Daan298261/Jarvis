@@ -95,7 +95,7 @@ Cloud agents run headless Linux **without GPU** and **without Windows COM/deskto
 | Live harness tok/s / VRAM | No | Yes |
 | Office / pywinauto desktop tool | No | Yes |
 
-**Rule:** A cloud worker may implement and unit-test P0 code, but **cannot** mark P0 live-model or Windows e2e queue items as VERIFIED. Leave them `TODO` or `CODE PRESENT` and note "desktop sign-off required" in the PR.
+**Rule:** A cloud worker may implement and unit-test P0 code, but **cannot** mark P0 live-model or Windows e2e queue items as VERIFIED. Leave them **unverified** / **CODE PRESENT** and note "desktop sign-off required" in the PR.
 
 ---
 

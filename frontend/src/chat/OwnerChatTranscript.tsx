@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { api } from "../api"
+import { PermissionPrompt } from "./PermissionPrompt"
 import {
   assistantReplyText,
   filterWorkEvents,
@@ -18,6 +18,7 @@ type OwnerChatTranscriptProps = {
   current_action?: string | null
   current_tool?: string | null
   waiting_for_confirmation?: boolean
+  confirmation_payload?: unknown
   result?: string | null
   error?: string | null
   events?: OwnerChatEvent[]
@@ -32,6 +33,7 @@ export function OwnerChatTranscript({
   current_action,
   current_tool,
   waiting_for_confirmation,
+  confirmation_payload,
   result,
   error,
   events = [],
@@ -86,10 +88,8 @@ export function OwnerChatTranscript({
         </div>
       )}
 
-      {!running && waiting_for_confirmation && !detailsOpen && (
-        <p className={isHud ? "hud-chat-status" : "chat-status-line"}>
-          Waiting for your approval — open Details to approve or reject.
-        </p>
+      {waiting_for_confirmation && (
+        <PermissionPrompt taskId={taskId} payload={confirmation_payload} variant={isHud ? "hud" : "classic"} />
       )}
 
       <div className={isHud ? "hud-chat-details" : "chat-work-details"}>
@@ -127,34 +127,6 @@ export function OwnerChatTranscript({
             )}
             {!workEvents.length && running && (
               <p className={isHud ? "hud-thread-empty" : "lede"}>No steps logged yet.</p>
-            )}
-            {waiting_for_confirmation && (
-              <div className="row" style={{ marginTop: 12 }}>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() =>
-                    api(`/api/tasks/${taskId}/continue`, {
-                      method: "POST",
-                      body: JSON.stringify({ approve: true }),
-                    })
-                  }
-                >
-                  Approve
-                </button>
-                <button
-                  className="btn secondary"
-                  type="button"
-                  onClick={() =>
-                    api(`/api/tasks/${taskId}/continue`, {
-                      method: "POST",
-                      body: JSON.stringify({ approve: false }),
-                    })
-                  }
-                >
-                  Reject
-                </button>
-              </div>
             )}
           </div>
         )}

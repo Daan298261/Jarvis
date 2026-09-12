@@ -1,6 +1,7 @@
 import type { ParticleOrb, PresenceShapeDefinition, PresenceShapeId } from "../particleTypes"
 import { humanoidBustShape } from "./humanoidBust"
 import { energyCoreShape } from "./energyCore"
+import { hexAegisShape } from "./hexAegis"
 
 export const DEFAULT_PRESENCE_SHAPE_ID: PresenceShapeId = "humanoid_bust"
 
@@ -54,3 +55,4 @@ export function resampleOrbs(orbs: ParticleOrb[], count: number): ParticleOrb[] 
 // Built-in shapes. Additional shapes register at module load or at runtime.
 registerPresenceShape(humanoidBustShape)
 registerPresenceShape(energyCoreShape)
+registerPresenceShape(hexAegisShape)

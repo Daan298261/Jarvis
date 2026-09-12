@@ -701,6 +701,41 @@
   }
 }
 
+.hud-home.hexstrike-active {
+  position: relative;
+  display: block;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.hud-home.hexstrike-active > .hud-orb-zone {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+}
+
+.hud-home.hexstrike-active .hud-orb-caption {
+  position: absolute;
+  left: clamp(16px, 3vw, 36px);
+  top: clamp(16px, 3vh, 36px);
+  width: min(360px, calc(100% - 48px));
+  margin: 0;
+}
+
+.hud-home.hexstrike-active > .hud-chat {
+  position: absolute;
+  z-index: 8;
+  left: 50%;
+  bottom: clamp(16px, 2.2vh, 30px);
+  width: min(1000px, calc(100% - 64px));
+  transform: translateX(-50%);
+}
+
 /* High-resolution neural core. WebGL sits over a CSS fallback. */
 .jarvis-neural-orb {
   --jarvis-orb-size: 520px;

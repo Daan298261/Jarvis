@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from ..tools.base import RiskLevel
 from .inheritance import resolve_capability, resolve_effective_level
-from .levels import AutonomyLevel, LEVEL_RANK, can_execute, parse_level
+from .levels import AutonomyLevel, can_execute, parse_level
 from .store import get_agent_autonomy_map, get_platform_autonomy_caps, get_platform_policy
 
 
@@ -30,12 +30,15 @@ def authorize(
     tool_name: str,
     *,
     action: str | None = None,
+    arguments: dict | None = None,
     risk: RiskLevel = RiskLevel.MEDIUM,
     profile_id: str | None = None,
     approved: bool = False,
     agent_autonomy: dict[str, str] | None = None,
     platform_caps: dict[str, str] | None = None,
 ) -> AuthorizationResult:
+    from .computer_permissions import evaluate_tool_permissions
+
     capability = resolve_capability(tool_name, action)
     platform = get_platform_policy()
     default_agent = parse_level(platform.get("default_agent_autonomy"))
@@ -47,13 +50,30 @@ def authorize(
         platform_levels,
         default_agent=default_agent,
     )
-    rank = LEVEL_RANK[effective]
 
     if not can_execute(effective):
         return AuthorizationResult(
             allowed=False,
             requires_approval=False,
             reason=f"effective autonomy {effective.value} does not permit tool execution",
+            effective_level=effective,
+            capability=capability,
+        )
+
+    perm = evaluate_tool_permissions(tool_name, arguments or ({"action": action} if action else {}))
+    if perm.status == "deny":
+        return AuthorizationResult(
+            allowed=False,
+            requires_approval=False,
+            reason=perm.reason,
+            effective_level=effective,
+            capability=capability,
+        )
+    if perm.status == "ask" and not approved:
+        return AuthorizationResult(
+            allowed=False,
+            requires_approval=True,
+            reason=perm.reason,
             effective_level=effective,
             capability=capability,
         )

@@ -202,8 +202,26 @@ class InferenceBackend:
     def missing_requirements(self, profile: ModelProfile) -> list[str]:
         return []
 
-    async def start(self, profile: ModelProfile, timeout: float = 300, vision: bool = False) -> bool:
-        raise NotImplementedError
+    async def start(
+        self,
+        profile: ModelProfile,
+        timeout: float = 300,
+        vision: bool = False,
+        **kwargs: Any,
+    ) -> bool:
+        """Attach to an already-running OpenAI-compatible server.
+
+        Process-owning backends (llama.cpp) override this to spawn ``llama-server``.
+        """
+        del profile, vision, kwargs
+        self.last_probe = await probe_remote_server(
+            self.settings.inference.host,
+            self.settings.inference.port,
+            self.settings.inference.api_key,
+            timeout=timeout,
+            retry=True,
+        )
+        return bool(self.last_probe.get("ok"))
 
     async def stop(self) -> None:
         return None
@@ -375,16 +393,6 @@ class RemoteOpenAICompatibleBackend(InferenceBackend):
 
     def health_url(self) -> str:
         return f"http://{self.settings.inference.host}:{self.settings.inference.port}/v1/models"
-
-    async def start(self, profile: ModelProfile, timeout: float = 60) -> bool:
-        self.last_probe = await probe_remote_server(
-            self.settings.inference.host,
-            self.settings.inference.port,
-            self.settings.inference.api_key,
-            timeout=timeout,
-            retry=True,
-        )
-        return bool(self.last_probe.get("ok"))
 
 
 class OllamaBackend(RemoteOpenAICompatibleBackend):

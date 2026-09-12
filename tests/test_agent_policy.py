@@ -183,7 +183,7 @@ def test_agent_policy_api_roundtrip(policy_store):
 
     authz = client.post(
         "/api/agent-policy/authorize",
-        json={"tool_name": "web_fetch", "risk": "medium", "profile_id": profile_id},
+        json={"tool_name": "filesystem", "action": "read", "risk": "low", "profile_id": profile_id},
     )
     assert authz.status_code == 200
     assert authz.json()["allowed"] is True
@@ -196,7 +196,7 @@ def test_agent_policy_api_roundtrip(policy_store):
 
     denied = client.post(
         "/api/agent-policy/authorize",
-        json={"tool_name": "web_fetch", "risk": "medium", "profile_id": profile_id},
+        json={"tool_name": "filesystem", "action": "read", "risk": "low", "profile_id": profile_id},
     )
     assert denied.status_code == 200
     assert denied.json()["allowed"] is True

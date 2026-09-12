@@ -90,3 +90,5 @@ def test_specialist_runtime_templates_are_disabled_by_default():
     assert "blue-team" in profiles["redsage-8b"].capability_tags
     assert "dfir" in profiles["imperum-cyber"].capability_tags
     assert "red-team" in profiles["deephat-7b"].capability_tags
+    assert profiles["hexstrike-suite"].enabled is True
+    assert "suite:hexstrike" in profiles["hexstrike-suite"].capability_tags

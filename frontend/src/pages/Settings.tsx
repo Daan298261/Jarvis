@@ -12,6 +12,7 @@ import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { AutonomySection } from "./Autonomy"
 import { LicenseSettings } from "./License"
 import { CompanionPairingPanel } from "../components/CompanionPairingPanel"
+import { ComputerUsePermissions } from "./ComputerUsePermissions"
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -372,6 +373,8 @@ export function SettingsPage() {
           Create backups before overwriting files
         </label>
       </div>
+
+      <ComputerUsePermissions />
 
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
         <h2>Self-development trial budget</h2>
