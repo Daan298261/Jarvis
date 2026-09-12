@@ -50,6 +50,19 @@ class SettingsUpdate(BaseModel):
         max_length=80,
         pattern=r"^[A-Za-z0-9_.-]+$",
     )
+    dialogue_enabled: bool | None = None
+    dialogue_worker_profile: str | None = Field(default=None, min_length=1, max_length=120)
+    dialogue_output_language: str | None = Field(default=None, min_length=1, max_length=32)
+    dialogue_translate_only_when_needed: bool | None = None
+    dialogue_verbosity: Literal["very-short", "concise", "balanced", "detailed", "exhaustive", "auto"] | None = None
+    dialogue_auto_preference: Literal["concise", "balanced", "detailed"] | None = None
+    dialogue_personality_preset: Literal["minimal", "professional", "jarvis_dry", "friendly", "custom"] | None = None
+    dialogue_humor_frequency: float | None = Field(default=None, ge=0.0, le=1.0)
+    dialogue_warmth: float | None = Field(default=None, ge=0.0, le=1.0)
+    dialogue_formality: float | None = Field(default=None, ge=0.0, le=1.0)
+    dialogue_dryness: float | None = Field(default=None, ge=0.0, le=1.0)
+    dialogue_directness: float | None = Field(default=None, ge=0.0, le=1.0)
+    dialogue_preserve_structured_content: bool | None = None
     social_perception_enabled: bool | None = None
     social_perception_semantic_observer: str | None = Field(default=None, min_length=1, max_length=64)
     social_perception_sample_interval_seconds: float | None = Field(default=None, ge=1.0, le=3600.0)
@@ -71,6 +84,14 @@ class SettingsUpdate(BaseModel):
     identity_recognition_expose_identity_to_dialogue: bool | None = None
     tts_speak_chat_replies: bool | None = None
     tts_voice_profile_id: str | None = Field(default=None, min_length=1, max_length=80)
+    tts_engine: Literal["auto", "chatterbox_multilingual_v3", "kokoro", "chatterbox_turbo", "external"] | None = None
+    tts_quality_engine: str | None = Field(default=None, min_length=1, max_length=120)
+    tts_fallback_engine: str | None = Field(default=None, min_length=1, max_length=120)
+    tts_loading_policy: Literal["resident", "lazy", "cpu-preferred"] | None = None
+    tts_language: str | None = Field(default=None, min_length=1, max_length=32)
+    tts_speed: float | None = Field(default=None, ge=0.5, le=2.0)
+    tts_expressiveness: float | None = Field(default=None, ge=0.0, le=1.0)
+    tts_prefer_cpu_fallback: bool | None = None
 
 
 @router.get("")
@@ -160,6 +181,27 @@ async def update_settings(body: SettingsUpdate):
             presentation_values[key] = value
     settings.presentation = type(settings.presentation).model_validate(presentation_values)
 
+    dialogue_values = settings.dialogue.model_dump()
+    dialogue_updates = {
+        "enabled": body.dialogue_enabled,
+        "worker_profile": body.dialogue_worker_profile,
+        "output_language": body.dialogue_output_language,
+        "translate_only_when_needed": body.dialogue_translate_only_when_needed,
+        "verbosity": body.dialogue_verbosity,
+        "auto_preference": body.dialogue_auto_preference,
+        "personality_preset": body.dialogue_personality_preset,
+        "humor_frequency": body.dialogue_humor_frequency,
+        "warmth": body.dialogue_warmth,
+        "formality": body.dialogue_formality,
+        "dryness": body.dialogue_dryness,
+        "directness": body.dialogue_directness,
+        "preserve_structured_content": body.dialogue_preserve_structured_content,
+    }
+    for key, value in dialogue_updates.items():
+        if value is not None:
+            dialogue_values[key] = value
+    settings.dialogue = type(settings.dialogue).model_validate(dialogue_values)
+
     perception = settings.social_perception
     if body.social_perception_enabled is not None:
         perception.enabled = body.social_perception_enabled
@@ -199,10 +241,23 @@ async def update_settings(body: SettingsUpdate):
             recognition_values[key] = value
     settings.identity_recognition = type(settings.identity_recognition).model_validate(recognition_values)
 
-    if body.tts_speak_chat_replies is not None:
-        settings.tts.speak_chat_replies = body.tts_speak_chat_replies
-    if body.tts_voice_profile_id is not None:
-        settings.tts.voice_profile_id = body.tts_voice_profile_id
+    tts_values = settings.tts.model_dump()
+    tts_updates = {
+        "speak_chat_replies": body.tts_speak_chat_replies,
+        "voice_profile_id": body.tts_voice_profile_id,
+        "engine": body.tts_engine,
+        "quality_engine": body.tts_quality_engine,
+        "fallback_engine": body.tts_fallback_engine,
+        "loading_policy": body.tts_loading_policy,
+        "language": body.tts_language,
+        "speed": body.tts_speed,
+        "expressiveness": body.tts_expressiveness,
+        "prefer_cpu_fallback": body.tts_prefer_cpu_fallback,
+    }
+    for key, value in tts_updates.items():
+        if value is not None:
+            tts_values[key] = value
+    settings.tts = type(settings.tts).model_validate(tts_values)
 
     save_settings(settings)
     REGISTRY.apply_settings(settings)
