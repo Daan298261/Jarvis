@@ -96,6 +96,14 @@ class CodingSettings(BaseModel):
     local_max_attempts: int = 2
 
 
+class AcpAdapterSettings(BaseModel):
+    """Local ACP server is opt-in; it never opens a network listener."""
+
+    enabled: bool = False
+    allowed_profiles: list[str] = Field(default_factory=lambda: ["balanced"])
+    max_replay_events: int = Field(default=40, ge=1, le=200)
+
+
 class SelfDevSettings(BaseModel):
     max_duration_hours: float = 12.0
     max_paid_spend_eur: float = 0.0
@@ -235,6 +243,7 @@ class AppSettings(BaseModel):
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
     coding: CodingSettings = Field(default_factory=CodingSettings)
+    acp_adapter: AcpAdapterSettings = Field(default_factory=AcpAdapterSettings)
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
