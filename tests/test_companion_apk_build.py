@@ -45,6 +45,38 @@ def mobile_env(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_resolve_java_home_uses_temurin_layout(tmp_path, monkeypatch):
+    module = _load_build_android()
+    jdk = tmp_path / "Eclipse Adoptium" / "jdk-17.0.17.10-hotspot"
+    (jdk / "bin").mkdir(parents=True)
+    (jdk / "bin" / module._exe("java")).write_bytes(b"")
+    (jdk / "bin" / module._exe("keytool")).write_bytes(b"")
+    monkeypatch.delenv("JAVA_HOME", raising=False)
+    monkeypatch.setattr(module, "_jdk_candidates", lambda: [jdk])
+    monkeypatch.setattr(module, "_java_major", lambda path: 17)
+    assert module.resolve_java_home() == jdk
+
+
+def test_resolve_java_home_explains_how_to_install(monkeypatch):
+    module = _load_build_android()
+    monkeypatch.delenv("JAVA_HOME", raising=False)
+    monkeypatch.setattr(module, "_jdk_candidates", lambda: [])
+    with pytest.raises(RuntimeError, match="Temurin"):
+        module.resolve_java_home()
+
+
+def test_resolve_android_sdk_finds_jarvis_sdk(tmp_path, monkeypatch):
+    module = _load_build_android()
+    sdk = tmp_path / "Jarvis" / "android-sdk"
+    jar = sdk / "platforms" / "android-35" / "android.jar"
+    jar.parent.mkdir(parents=True)
+    jar.write_bytes(b"")
+    monkeypatch.delenv("ANDROID_HOME", raising=False)
+    monkeypatch.delenv("ANDROID_SDK_ROOT", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert module.resolve_android_sdk() == sdk
+
+
 def test_ensure_feature_sources_passes_on_tree():
     module = _load_build_android()
     module.ensure_feature_sources()
