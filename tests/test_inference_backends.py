@@ -11,6 +11,7 @@ from app.inference.backends import (
     resolve_backend,
     suggested_port,
 )
+from app.inference.manager import fit_messages_to_context, fit_tools_to_context
 from app.inference.profiles import resolve_profile
 from app.providers.base import ChatMessage
 
@@ -36,6 +37,35 @@ def test_normalize_chat_messages_keeps_single_system_first():
     assert [message.role for message in normalized] == ["system", "user", "assistant"]
     assert "rules" in normalized[0].content
     assert "extra context" in normalized[0].content
+
+
+def test_request_context_is_trimmed_before_a_4k_server_rejects_it():
+    messages = [
+        ChatMessage(role="system", content="system rules " * 1400),
+        ChatMessage(role="user", content="old request " * 700),
+        ChatMessage(role="assistant", content="old reply " * 700),
+        ChatMessage(role="user", content="latest request must survive"),
+    ]
+
+    fitted = fit_messages_to_context(messages, context_size=4096, max_tokens=256)
+
+    assert fitted[0].role == "system"
+    assert "system rules" in fitted[0].content
+    assert fitted[-1].role == "user"
+    assert "latest request must survive" in fitted[-1].content
+    assert sum(len(str(message.content)) for message in fitted) <= 7168
+
+
+def test_tool_catalog_is_trimmed_for_small_context_servers():
+    tools = [
+        {"type": "function", "function": {"name": f"tool_{index}", "parameters": {"description": "x" * 1200}}}
+        for index in range(8)
+    ]
+
+    fitted = fit_tools_to_context(tools, context_size=4096, max_tokens=256)
+
+    assert fitted is not None
+    assert 0 < len(fitted) < len(tools)
 
 
 async def test_manager_chat_normalizes_messages_before_provider(monkeypatch):

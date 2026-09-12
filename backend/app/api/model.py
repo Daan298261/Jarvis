@@ -21,6 +21,7 @@ from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
 from ..inference.profiles import available_profiles, declared_profiles, resolve_profile
+from ..runtime_install import component_status_payload, start_component_install
 from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 
 router = APIRouter(prefix="/api/model", tags=["model"])
@@ -33,6 +34,13 @@ class LoadBody(BaseModel):
 class HarnessBody(BaseModel):
     live: bool = False
     background: bool = False
+
+
+@router.post("/install/heretic-27b")
+async def install_heretic_27b():
+    """Start the owner-requested internal 27B download; never installs LM Studio."""
+    state = await start_component_install("heretic_27b_model")
+    return {"component": state, "status": component_status_payload()}
 
 
 class AgentSuiteRunBody(BaseModel):
