@@ -8,9 +8,9 @@
   isolation: isolate;
   overflow: hidden;
   background:
-    radial-gradient(ellipse 28% 52% at 46% 46%, rgba(0, 140, 210, 0.07), transparent 72%),
-    radial-gradient(ellipse 60% 40% at 70% 70%, rgba(255, 140, 40, 0.03), transparent 70%),
-    #03070b;
+    radial-gradient(ellipse 30% 58% at 50% 43%, rgba(0, 126, 190, 0.045), transparent 70%),
+    radial-gradient(ellipse 52% 34% at 50% 72%, rgba(255, 128, 28, 0.018), transparent 72%),
+    #02050a;
   mask-image: linear-gradient(180deg, transparent, black 4%, black 94%, transparent);
 }
 .jarvis-presence-host:has(.jarvis-presence-humanoid) {
