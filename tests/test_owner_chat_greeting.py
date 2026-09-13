@@ -91,6 +91,11 @@ async def test_conversation_follow_up_stays_off_the_tool_loop(jarvis_env, monkey
     MANAGER.state.loaded = True
     MANAGER.state.context_size = 16384
 
+    async def skip_weather(prompt: str):
+        return None
+
+    monkeypatch.setattr("app.agent.loop.weather_system_message", skip_weather)
+
     task = await AGENT.create_task("How are you this evening?")
     runner = AGENT._tasks.get(task.id)
     if runner:
@@ -112,6 +117,57 @@ async def test_conversation_follow_up_stays_off_the_tool_loop(jarvis_env, monkey
         assert "step limit" not in (row.error or "").lower()
         assert "well" in (row.result or "").lower()
     assert chats == ["stream", "stream"]
+
+
+@pytest.mark.asyncio
+async def test_weather_ask_uses_live_briefing_not_the_tool_loop(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    seen: list[str] = []
+
+    class StreamProvider:
+        async def chat_stream(self, messages, **kwargs):
+            del kwargs
+            joined = "\n".join(message.content or "" for message in messages if message.role == "system")
+            seen.append(joined)
+            assert "Open-Meteo" in joined
+            assert "Do not write code" in joined
+            yield "Tomorrow in Dinteloord looks mild with light rain, sir."
+
+        async def chat(self, messages, **kwargs):
+            del messages, kwargs
+            from app.providers.base import ChatResult
+
+            raise AssertionError("weather must not enter the tool loop")
+
+    async def briefing(prompt: str):
+        assert "dinteloord" in prompt.lower()
+        return (
+            "Live meteorological briefing (Open-Meteo). Do not write code, scripts, files.\n"
+            "Place: Dinteloord, Netherlands\nDay: tomorrow\nHigh: 16°C  Low: 10°C"
+        )
+
+    monkeypatch.setattr("app.agent.loop.weather_system_message", briefing)
+    MANAGER.provider = StreamProvider()
+    MANAGER.state.loaded = True
+    MANAGER.state.context_size = 16384
+
+    task = await AGENT.create_task("what is the weather in dinteloord, tomorrow")
+    assert task.task_class == CONVERSATION_CLASS
+    runner = AGENT._tasks.get(task.id)
+    if runner:
+        await runner
+
+    from app.db.session import SessionLocal
+    from app.db.models import Task
+
+    async with SessionLocal() as session:
+        row = await session.get(Task, task.id)
+        assert row is not None
+        assert row.status == "completed"
+        assert row.waiting_for_confirmation is False
+        assert "dinteloord" in (row.result or "").lower()
+        assert "script" not in (row.result or "").lower()
+    assert seen
 
 
 @pytest.mark.asyncio

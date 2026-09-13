@@ -15,6 +15,7 @@ from .chat_delivery import (
     publish_owner_text,
     stream_speak_offset,
 )
+from .weather import weather_system_message
 from ..events import BUS
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
@@ -25,6 +26,8 @@ An occasional original dry observation is welcome when the situation is low-stak
 When the topic involves danger, distress, failure, privacy, money, or destructive action, drop the wit and be direct.
 This is dialogue only: do not produce task plans, status dumps, RFC lists, or setup wizard steps unless the owner explicitly asks.
 Do not call tools or describe tool execution.
+Never write a program, script, or file to answer a spoken factual question such as the weather.
+If a live briefing is attached, use those facts and do not invent numbers.
 Use internal reasoning when useful, but provide only the concise answer rather than hidden reasoning."""
 
 OWNER_CHAT_MAX_TOKENS = 256
@@ -98,13 +101,15 @@ def _ensure_conversation(conversation_id: str | None) -> str:
     return cid
 
 
-def _owner_messages(conversation_id: str, user_text: str) -> list[ChatMessage]:
+def _owner_messages(conversation_id: str, user_text: str, briefing: str | None = None) -> list[ChatMessage]:
     history = _conversations[conversation_id]
     messages = [
         ChatMessage(role="system", content=OWNER_CHAT_SYSTEM),
-        *history,
-        ChatMessage(role="user", content=user_text.strip()),
     ]
+    if briefing:
+        messages.append(ChatMessage(role="system", content=briefing))
+    messages.extend(history)
+    messages.append(ChatMessage(role="user", content=user_text.strip()))
     return messages
 
 
@@ -128,7 +133,8 @@ async def stream_owner_chat(
 
     settings = load_settings()
     profile = resolve_profile(settings.inference.profile)
-    messages = _owner_messages(cid, cleaned)
+    briefing = await weather_system_message(cleaned)
+    messages = _owner_messages(cid, cleaned, briefing)
     parts: list[str] = []
     stream_key = f"owner:{cid}"
     clear_stream_speak_state(stream_key)
