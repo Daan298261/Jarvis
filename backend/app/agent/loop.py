@@ -659,9 +659,6 @@ class AgentRuntime:
             grounding = maybe_docs_first(DocsFirstContext(user_message=prompt))
             if grounding and grounding.prompt_block():
                 system_prompt += "\n\n" + grounding.prompt_block()
-            audit = professional_prompt_block(prompt)
-            if audit:
-                system_prompt += "\n\n" + audit
             matched_skills = await relevant_skills(working.task_class, working.goal)
             skills = skills_prompt_block(matched_skills)
             if skills:
@@ -681,6 +678,10 @@ class AgentRuntime:
                 system_prompt += "\n\n" + lessons
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
             system_prompt += "\n\n" + describe_exposure(working.task_class, working.requested_tools)
+            audit = professional_prompt_block(prompt)
+            if audit:
+                # Append after tool exposure so context fitting keeps this block in the tail.
+                system_prompt += "\n\n" + audit
             messages = [
                 ChatMessage(role="system", content=system_prompt),
                 ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
