@@ -94,10 +94,41 @@ _CONVERSATION_BLOCKERS = (
     "desktop",
 )
 
+_WEATHER_RE = re.compile(
+    r"\b(weather|forecast|temperature|temperatures|raining|rain|umbrella|humidity|windy)\b",
+    re.IGNORECASE,
+)
+_SOCIAL_STEMS = (
+    "what is ",
+    "what's ",
+    "whats ",
+    "what are ",
+    "how is ",
+    "how's ",
+    "how are ",
+    "when is ",
+    "when's ",
+    "tell me ",
+    "can you tell",
+)
+_COMPANION_USER_MARKER = "\nUser: "
+
+
+def latest_user_utterance(prompt: str) -> str:
+    """Companion retries wrap history; classify the owner's latest line only."""
+    text = (prompt or "").strip()
+    if "Continue this conversation." in text and _COMPANION_USER_MARKER in text:
+        return text.rsplit(_COMPANION_USER_MARKER, 1)[-1].strip()
+    return text
+
+
+def is_weather_query(prompt: str) -> bool:
+    return bool(_WEATHER_RE.search(latest_user_utterance(prompt)))
+
 
 def is_plain_conversation(prompt: str) -> bool:
     """Heuristic: casual owner talk that should not enter the tool/approval agent loop."""
-    text = (prompt or "").strip()
+    text = latest_user_utterance(prompt)
     if not text or len(text) > 800:
         return False
     lowered = text.lower()
@@ -106,8 +137,11 @@ def is_plain_conversation(prompt: str) -> bool:
     action_hits = sum(1 for _, keywords in TASK_CATEGORIES for keyword in keywords if keyword in lowered)
     if action_hits > 0:
         return False
+    if is_weather_query(text):
+        return True
     chatty = (
         "?" in text
+        or any(stem in lowered for stem in _SOCIAL_STEMS)
         or lowered.startswith(("hi", "hello", "hey", "good morning", "good afternoon", "good evening"))
         or lowered in {"thanks", "thank you", "how are you", "how are you?"}
     )

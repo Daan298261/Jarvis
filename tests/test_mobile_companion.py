@@ -127,7 +127,13 @@ async def test_mobile_auth_required_even_on_localhost_and_revoke(mobile_env):
     async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
         assert (await client.get("/api/companion/models")).status_code == 401
         headers = {"Authorization": "Bearer " + session["access_token"], "X-Jarvis-Device": device["id"]}
-        assert (await client.get("/api/companion/models", headers=headers)).status_code == 200
+        models = await client.get("/api/companion/models", headers=headers)
+        assert models.status_code == 200
+        body = models.json()
+        assert "inference" in body
+        assert "loaded" in body["inference"]
+        assert body["models"]
+        assert "active" in body["models"][0]
         identity.set_status(device["id"], "revoked")
         assert (await client.get("/api/companion/models", headers=headers)).status_code == 401
 

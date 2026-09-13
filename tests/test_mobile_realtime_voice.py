@@ -98,13 +98,20 @@ def test_rate_limit_blocks_excessive_turns(mobile_env):
 
 @pytest.mark.asyncio
 async def test_stream_reply_emits_tts_before_final_and_uses_profile(mobile_env, monkeypatch):
-    session = realtime_voice.create_session({"id": "phone"}, voice_profile_id="butler_original_v1")
+    session = realtime_voice.create_session(
+        {"id": "phone"},
+        voice_profile_id="butler_original_v1",
+        inference_profile="qwen38_9b",
+    )
     turn = realtime_voice.begin_turn(session)
     turn.finalized = True
     turn.transcript = "Hello"
     spoken = []
+    submitted = {}
 
     async def submit(device_id, request_id, prompt, profile=None, conversation_id=None, attachments=None):
+        submitted["profile"] = profile
+        submitted["conversation_id"] = conversation_id
         return {"task_id": "t1", "conversation_id": "c1"}
 
     snapshots = iter([
@@ -129,6 +136,7 @@ async def test_stream_reply_emits_tts_before_final_and_uses_profile(mobile_env, 
     assert any(event["type"] == "done" for event in events)
     assert spoken and all(profile == "butler_original_v1" for _, profile in spoken)
     assert spoken[0][0] == "One sentence."
+    assert submitted["profile"] == "qwen38_9b"
 
 
 def test_websocket_requires_device_auth_and_accepts_hello(mobile_env):
