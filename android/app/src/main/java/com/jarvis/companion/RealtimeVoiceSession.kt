@@ -24,6 +24,7 @@ class RealtimeVoiceSession(
     private val api: JarvisApi,
     private val conversationId: String?,
     private val voiceProfileId: String?,
+    private val inferenceProfile: String? = null,
 ) {
     private var socket: WebSocket? = null
     private val events = Channel<JSONObject>(Channel.BUFFERED)
@@ -71,6 +72,7 @@ class RealtimeVoiceSession(
         val hello = JSONObject().put("type", "hello")
         conversationId?.let { hello.put("conversation_id", it) }
         voiceProfileId?.takeIf { it.isNotEmpty() }?.let { hello.put("voice_profile_id", it) }
+        inferenceProfile?.takeIf { it.isNotEmpty() && it != "auto" }?.let { hello.put("profile", it) }
         send(hello)
         val opened = awaitType("session")
         sessionId = opened.getString("session_id")
