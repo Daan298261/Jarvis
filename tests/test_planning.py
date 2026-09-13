@@ -1,4 +1,11 @@
-from app.agent.planning import classify_task, follow_up_stays_conversation, parse_plan_block, resolve_execution_policy
+from app.agent.planning import (
+    CONVERSATION_CLASS,
+    classify_task,
+    follow_up_stays_conversation,
+    is_plain_conversation,
+    parse_plan_block,
+    resolve_execution_policy,
+)
 
 
 def test_parse_plan_block_extracts_sections():
@@ -16,6 +23,12 @@ PLAN:
     assert "Jarvis-Test" in parsed["end_state"]
     assert parsed["acceptance_criteria"] == ["folder exists", "file is non-empty"]
     assert parsed["plan"][0] == "inspect desktop"
+
+
+def test_weather_and_time_questions_stay_conversational():
+    assert is_plain_conversation("weather forecast for tomorrow")
+    assert classify_task("What's the weather today") == CONVERSATION_CLASS
+    assert classify_task("What time is it") == CONVERSATION_CLASS
 
 
 def test_classify_task_categories():
