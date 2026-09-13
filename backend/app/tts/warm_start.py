@@ -48,6 +48,13 @@ def _warm_spacy_english() -> None:
 
 
 def _warmup_sync() -> None:
+    from .pack_install import ensure_kokoro_runtime
+
+    try:
+        ensure_kokoro_runtime()
+    except Exception:
+        _log.warning("Household voice runtime could not be prepared during warm-start", exc_info=True)
+        return
     if not is_kokoro_available():
         return
     _warm_spacy_english()

@@ -30,6 +30,7 @@ def test_bootstrap_covers_required_steps():
         ".venv",
         "requirements.txt",
         "ensure-ttspythonpackages",
+        "ensure-kokorovoice",
         "kokoro",
         "soundfile",
         "playwright",

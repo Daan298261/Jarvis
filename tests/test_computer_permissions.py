@@ -90,6 +90,42 @@ def test_confirmation_payload_is_chatgpt_shaped(permission_store):
     assert payload["permission_id"] == "computer.this_device"
     assert "allow_once" in payload["options"]
     assert payload["title"]
+    assert "search the internet" in payload["spoken_prompt"].lower() or "this computer" in payload["spoken_prompt"].lower()
+    assert payload["voice_reply_hint"]
+
+
+def test_web_fetch_spoken_prompt_asks_to_grant_internet(permission_store):
+    payload = confirmation_payload_for_tool(
+        call_id="call-web",
+        name="web_fetch",
+        arguments={"url": "https://example.com"},
+    )
+    assert payload["permission_id"] == "network.internet"
+    assert "search the internet" in payload["spoken_prompt"].lower()
+    assert "sir" in payload["spoken_prompt"].lower()
+
+
+def test_interpret_spoken_grant_maps_yes_always_no():
+    from app.policy.computer_permissions import interpret_spoken_grant
+
+    assert interpret_spoken_grant("Yes sir") == "allow_once"
+    assert interpret_spoken_grant("I grant it") == "allow_once"
+    assert interpret_spoken_grant("Always allow") == "always"
+    assert interpret_spoken_grant("No") == "deny"
+    assert interpret_spoken_grant("Don't allow") == "deny"
+    assert interpret_spoken_grant("Do you grant it?") is None
+    assert interpret_spoken_grant("") is None
+
+
+def test_sapi_prefers_british_male_for_kokoro_butler_ids():
+    from app.tts.system_sapi import _sapi_voice_select_script
+
+    script = _sapi_voice_select_script("bm_daniel")
+    assert "en-GB" in script
+    assert "Male" in script
+    named = _sapi_voice_select_script("Microsoft Hazel Desktop")
+    assert "SelectVoice" in named
+    assert "Microsoft Hazel Desktop" in named
 
 
 def test_rdp_host_validation():

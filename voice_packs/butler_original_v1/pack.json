@@ -3,10 +3,10 @@
   "engine_id": "kokoro",
   "model_id": "kokoro-82m",
   "model_rel_path": "models/tts/kokoro-82m",
-  "speaker_ref": "bm_george",
+  "speaker_ref": "bm_daniel",
   "license": "Apache-2.0",
   "offline": true,
   "quality_tier": "natural",
-  "speaking_rate": 1.08,
+  "speaking_rate": 0.96,
   "bundled": true
 }

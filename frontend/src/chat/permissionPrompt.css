@@ -28,11 +28,23 @@
 
 .permission-prompt-detail,
 .permission-prompt-warn,
+.permission-prompt-spoken,
+.permission-prompt-listening,
 .permission-more-lede,
 .permission-prompt-error {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--muted);
+}
+
+.permission-prompt-spoken {
+  color: rgba(196, 228, 240, 0.92);
+  font-style: italic;
+}
+
+.permission-prompt-listening {
+  color: rgba(132, 210, 234, 0.95);
+  font-weight: 600;
 }
 
 .permission-prompt-warn { color: var(--warn); }

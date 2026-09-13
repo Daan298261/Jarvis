@@ -58,4 +58,5 @@ def test_health_and_auth_status_open_when_auth_required(jarvis_env, monkeypatch)
 
     client = TestClient(app)
     assert client.get("/api/health").status_code == 200
+    assert client.get("/api/system/self-check").status_code == 200
     assert client.get("/api/auth/status").status_code == 200

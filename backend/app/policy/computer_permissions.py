@@ -467,6 +467,64 @@ def evaluate_tool_permissions(tool_name: str, arguments: dict[str, Any] | None =
     )
 
 
+_SPOKEN_ASKS: dict[str, str] = {
+    "network.internet": "Sir, I need your permission to search the internet. Do you grant it?",
+    "network.local": "Sir, I need your permission to use the local network. Do you grant it?",
+    "computer.this_device": "Sir, I need your permission to use this computer. Do you grant it?",
+    "computer.worker_nodes": "Sir, I need your permission to use a worker-node computer. Do you grant it?",
+    "computer.rdp": "Sir, I need your permission to open Remote Desktop. Do you grant it?",
+    "cyber.hexstrike": "Sir, I need your permission to use the HexStrike suite. Do you grant it?",
+    "blue.static_rules": "Sir, I need your permission to apply blue-team static rules. Do you grant it?",
+    "blue.active_response": "Sir, I need your permission for blue-team active response. Do you grant it?",
+    "blue.isolate_device": "Sir, I need your permission to plan isolating a device. Do you grant it?",
+    "red.entry": "Sir, red-team entry is a permission flag only. Do you grant it?",
+    "red.exploration": "Sir, red-team exploration is a permission flag only. Do you grant it?",
+}
+
+_DENY_RE = re.compile(
+    r"\b(no|nope|nah|deny|denied|refuse|refused|cancel|stop|never|don'?t|dont)\b|"
+    r"do not|not now",
+    re.IGNORECASE,
+)
+_ALWAYS_RE = re.compile(r"\b(always|every time|from now on|remember this)\b", re.IGNORECASE)
+_SESSION_RE = re.compile(r"\b(this session|for this session|just this session|for now)\b", re.IGNORECASE)
+_ALLOW_RE = re.compile(
+    r"\b(yes|yeah|yep|yup|allow|allowed|proceed|okay|ok|sure|certainly|affirmative)\b|"
+    r"go ahead|of course|i grant|grant(?:ed)? (?:it|permission|this)|you may",
+    re.IGNORECASE,
+)
+
+
+def spoken_prompt_for_permission(permission_id: str, pending: list[str] | None = None) -> str:
+    """Original household-aide ask. Not a copyrighted character line."""
+    primary = _SPOKEN_ASKS.get(permission_id) or (
+        f"Sir, I need your permission for {permission_id.replace('.', ' ')}. Do you grant it?"
+    )
+    extra = [item for item in (pending or []) if item != permission_id]
+    if extra:
+        return primary.replace(" Do you grant it?", " Further permissions are listed on screen. Do you grant it?")
+    return primary
+
+
+def interpret_spoken_grant(transcript: str) -> str | None:
+    """Map a short spoken reply to a grant mode. Returns None when unclear."""
+    cleaned = re.sub(r"[^a-z0-9\s']+", " ", (transcript or "").lower())
+    cleaned = re.sub(r"\bdo you grant(?: it)?\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return None
+    denied = bool(_DENY_RE.search(cleaned))
+    if _ALWAYS_RE.search(cleaned) and not denied:
+        return "always"
+    if _SESSION_RE.search(cleaned) and not denied:
+        return "allow_session"
+    if denied:
+        return "deny"
+    if _ALLOW_RE.search(cleaned):
+        return "allow_once"
+    return None
+
+
 def confirmation_payload_for_tool(
     *,
     call_id: str,
@@ -493,12 +551,21 @@ def confirmation_payload_for_tool(
                 "reason": decision.reason,
                 "options": list(PROMPT_OPTIONS),
                 "catalog": [describe_permission(item) for item in decision.pending],
+                "spoken_prompt": spoken_prompt_for_permission(primary.id, decision.pending),
+                "voice_reply_hint": "Say yes, always, or no.",
             }
         )
     else:
         payload["kind"] = "destructive" if irreversible else "confirm"
         payload["title"] = "Approve this action"
         payload["detail"] = f"Jarvis wants to run {name}."
+        if irreversible:
+            payload["spoken_prompt"] = (
+                "Sir, this can delete or irreversibly change files. Do you approve?"
+            )
+        else:
+            payload["spoken_prompt"] = f"Sir, I need your permission to run {name}. Do you grant it?"
+        payload["voice_reply_hint"] = "Say yes or no."
     return payload
 
 

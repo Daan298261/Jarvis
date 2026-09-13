@@ -211,3 +211,5 @@ async def test_voice_command_and_listen(jarvis_env, monkeypatch):
 
     status = await get_voice_status()
     assert "stt_ready" in status
+    assert "engines" in status
+    assert "backend" in status["tts"]
