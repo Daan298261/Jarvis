@@ -8,17 +8,18 @@
     "engine_id": "kokoro",
     "engine_hint": "kokoro",
     "model_id": "kokoro-82m",
-    "speaker_ref": "bm_george",
+    "speaker_ref": "bm_lewis",
     "pack_path": "voice_packs/dry_butler_original_v1",
     "quality_tier": "natural",
     "offline": true,
-    "license": "Apache-2.0"
+    "license": "Apache-2.0",
+    "speaking_rate": 0.94
   },
   "persona_hooks": {
     "register": "british_understated",
     "humour": "dry"
   },
-  "sample_utterance": "Very well.",
+  "sample_utterance": "Very well, sir.",
   "vram_class": "balanced",
   "builtin": false
 }

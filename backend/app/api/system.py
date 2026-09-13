@@ -12,7 +12,15 @@ from ..mcp_server import jarvis_mcp_manifest
 from ..swarm.snapshot import swarm_snapshot
 from ..tools.capabilities import capability_snapshot
 
+from ..systems.self_check import run_self_check
+
 router = APIRouter(prefix="/api/system", tags=["system"])
+
+
+@router.get("/self-check")
+async def system_self_check():
+    """Launch readiness snapshot for the initializing overlay (RFC-0082)."""
+    return await run_self_check()
 
 
 @router.get("")

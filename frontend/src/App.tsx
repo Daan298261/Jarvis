@@ -30,6 +30,7 @@ import { CodingPage } from "./pages/Coding"
 import { api, getAwayMode, getDiagnostics, getLicenseStatus, getSetupStatus, listCodingDecisionInbox, listSwarmNodes, type AwayModeState, type LicenseStatus, type SwarmNode, type Task } from "./api"
 import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
 import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
+import { BootNova } from "./boot/BootNova"
 import { HudShell } from "./hud/HudShell"
 import { HudChatHome } from "./hud/HudChatHome"
 import { getUiMode, setUiMode as persistUiMode, type UiMode } from "./hud/uiMode"
@@ -316,6 +317,7 @@ function OwnerPortal() {
 
   if (uiMode === "hud") {
     return (
+      <BootNova enabled>
       <HudShell
         isChat={chat}
         uiMode={uiMode}
@@ -337,10 +339,12 @@ function OwnerPortal() {
       >
         {routes}
       </HudShell>
+      </BootNova>
     )
   }
 
   return (
+    <BootNova enabled>
     <div className={`app${navOpen ? " nav-open" : ""}${chat ? " chat-shell" : ""}`}>
       <header className="mobile-bar">
         <button className="nav-toggle" type="button" aria-label="Open menu" onClick={() => setNavOpen((open) => !open)}>
@@ -595,5 +599,6 @@ function OwnerPortal() {
         {routes}
       </main>
     </div>
+    </BootNova>
   )
 }

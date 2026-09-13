@@ -133,8 +133,8 @@ export function SettingsPage() {
       <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
         <h2>Voice &amp; speech</h2>
         <p className="lede" style={{ margin: "0 0 12px" }}>
-          Jarvis can speak typed chat replies aloud using local TTS (Windows SAPI, espeak-ng, or pyttsx3).
-          Text always appears even when speech is off or TTS fails.
+          Jarvis speaks typed chat replies with local Kokoro TTS (natural British household voice).
+          Windows SAPI is fallback only. Text always appears even when speech is off or TTS fails.
         </p>
         <VoiceProfilePicker />
 

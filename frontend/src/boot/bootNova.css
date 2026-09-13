@@ -1,0 +1,435 @@
+.boot-nova {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(980px 560px at 50% 42%, rgba(103, 220, 255, 0.14), transparent 58%),
+    radial-gradient(1200px 700px at 50% 108%, rgba(212, 160, 23, 0.1), transparent 54%),
+    #04070b;
+  color: #e8fbff;
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+
+.boot-nova.leaving {
+  opacity: 0;
+  transform: scale(1.045);
+  pointer-events: none;
+}
+
+.boot-nova-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 46%, rgba(2, 4, 8, 0.72) 100%);
+  pointer-events: none;
+}
+
+.boot-nova-grid {
+  position: absolute;
+  inset: -12%;
+  background-image:
+    linear-gradient(rgba(103, 220, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(103, 220, 255, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 18%, transparent 72%);
+  animation: boot-grid-drift 22s linear infinite;
+  pointer-events: none;
+}
+
+.boot-nova-scan {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 3px,
+    rgba(4, 10, 16, 0.08) 3px 4px
+  );
+  animation: boot-scan 7s linear infinite;
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+.boot-nova-field {
+  position: absolute;
+  inset: -20%;
+  background-image:
+    radial-gradient(1.6px 1.6px at 12% 22%, rgba(232, 251, 255, 0.62), transparent 2px),
+    radial-gradient(1px 1px at 78% 18%, rgba(103, 220, 255, 0.55), transparent 2px),
+    radial-gradient(1.3px 1.3px at 64% 72%, rgba(212, 160, 23, 0.5), transparent 2px),
+    radial-gradient(1px 1px at 28% 68%, rgba(103, 220, 255, 0.38), transparent 2px),
+    radial-gradient(1.5px 1.5px at 88% 54%, rgba(232, 251, 255, 0.42), transparent 2px),
+    radial-gradient(1px 1px at 46% 12%, rgba(212, 160, 23, 0.4), transparent 2px),
+    radial-gradient(1.2px 1.2px at 8% 82%, rgba(103, 220, 255, 0.32), transparent 2px);
+  animation: boot-field-drift 18s linear infinite;
+  opacity: 0.78;
+  pointer-events: none;
+}
+
+.boot-nova-stage {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 24px;
+  text-align: center;
+}
+
+.boot-nova-orb {
+  position: relative;
+  width: min(62vw, 52vh, 440px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+  perspective: 920px;
+}
+
+.boot-nova-aura {
+  position: absolute;
+  inset: 16%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(94, 213, 255, 0.3) 0%, rgba(36, 142, 181, 0.12) 38%, transparent 72%);
+  filter: blur(34px);
+  animation: boot-aura 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.boot-nova-orbit {
+  position: absolute;
+  z-index: 2;
+  width: 78%;
+  height: 30%;
+  border-radius: 50%;
+  border: 1px solid rgba(124, 222, 251, 0.22);
+  box-shadow: 0 0 22px rgba(83, 201, 238, 0.08);
+  pointer-events: none;
+}
+
+.boot-nova-orbit::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  left: 10%;
+  top: 50%;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: #ffd080;
+  box-shadow: 0 0 16px #f5a623, 0 0 28px rgba(103, 220, 255, 0.55);
+}
+
+.boot-nova-orbit-a { animation: boot-orbit-a 11s linear infinite; }
+.boot-nova-orbit-b {
+  width: 68%;
+  height: 36%;
+  opacity: 0.78;
+  animation: boot-orbit-b 16s linear infinite reverse;
+}
+.boot-nova-orbit-c {
+  width: 60%;
+  height: 24%;
+  opacity: 0.5;
+  animation: boot-orbit-c 21s linear infinite;
+}
+
+.boot-nova-radar {
+  position: absolute;
+  inset: 17%;
+  border-radius: 50%;
+  background: conic-gradient(from 210deg, transparent 0 74%, rgba(103, 220, 255, 0.2) 88%, transparent 100%);
+  mask-image: radial-gradient(circle, transparent 38%, black 40%, black 68%, transparent 70%);
+  animation: boot-spin 4.8s linear infinite;
+  pointer-events: none;
+}
+
+.boot-nova-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 32px rgba(103, 220, 255, 0.32));
+}
+
+.boot-nova-ambient { animation: boot-breathe 3.4s ease-in-out infinite; }
+
+.boot-nova-tick {
+  stroke: rgba(103, 220, 255, 0.28);
+  stroke-width: 1.1;
+}
+
+.boot-nova-tick.major {
+  stroke: rgba(232, 251, 255, 0.55);
+  stroke-width: 1.6;
+}
+
+.boot-nova-ticks { transform-origin: 320px 320px; animation: boot-spin 48s linear infinite; }
+
+.boot-nova-ring {
+  fill: none;
+  stroke: #67dcff;
+  stroke-width: 1.2;
+  opacity: 0.55;
+  transform-origin: 320px 320px;
+}
+
+.boot-nova-ring.dashed { stroke-dasharray: 7 11; opacity: 0.42; }
+.boot-nova-ring.tight { stroke-dasharray: 18 14; opacity: 0.35; }
+.boot-nova-ring.faint { stroke-width: 0.6; opacity: 0.22; }
+.boot-nova-ring.solid { stroke-width: 10; opacity: 0.16; }
+.boot-nova-ring.bright { stroke-width: 2.4; stroke: #e8fbff; opacity: 0.92; }
+
+.boot-nova-spin-slow { transform-origin: 320px 320px; animation: boot-spin 28s linear infinite; }
+.boot-nova-spin-rev { transform-origin: 320px 320px; animation: boot-spin-rev 16s linear infinite; }
+.boot-nova-sparks { transform-origin: 320px 320px; animation: boot-spin 7.5s linear infinite; }
+
+.boot-nova-shock {
+  fill: none;
+  stroke: #67dcff;
+  stroke-width: 1.4;
+  transform-origin: 320px 320px;
+  animation: boot-shock 2.8s ease-out infinite;
+}
+
+.boot-nova-shock-1 { animation-delay: 0.7s; }
+.boot-nova-shock-2 { animation-delay: 1.4s; }
+.boot-nova-shock-3 { animation-delay: 2.1s; }
+
+.boot-nova-core { animation: boot-core-pulse 2.2s ease-in-out infinite; transform-origin: 320px 320px; }
+
+.boot-nova-spec {
+  fill: rgba(255, 255, 255, 0.42);
+  filter: blur(2px);
+}
+
+.boot-nova-spark {
+  fill: #ffd080;
+  filter: drop-shadow(0 0 12px #f5a623);
+}
+
+.boot-nova-spark.dim { fill: #67dcff; opacity: 0.85; filter: drop-shadow(0 0 8px #67dcff); }
+
+.boot-nova-flare {
+  fill: none;
+  stroke: #e8fbff;
+  stroke-width: 3;
+  opacity: 0;
+  animation: boot-flare 0.9s ease-out 1;
+}
+
+.boot-nova.ready .boot-nova-svg {
+  filter: drop-shadow(0 0 48px rgba(103, 220, 255, 0.62));
+}
+
+.boot-nova.ready .boot-nova-aura {
+  background: radial-gradient(circle, rgba(103, 220, 255, 0.42) 0%, rgba(212, 160, 23, 0.16) 40%, transparent 74%);
+}
+
+.boot-nova-copy {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 58%;
+}
+
+.boot-nova-kicker {
+  margin: 0;
+  letter-spacing: 0.52em;
+  font-size: 11px;
+  color: rgba(103, 220, 255, 0.78);
+  text-transform: uppercase;
+  text-indent: 0.52em;
+}
+
+.boot-nova-title {
+  margin: 0;
+  font-family: "IBM Plex Sans", sans-serif;
+  font-weight: 500;
+  font-size: clamp(15px, 2.4vw, 22px);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: #e8fbff;
+  text-shadow: 0 0 22px rgba(103, 220, 255, 0.7), 0 0 48px rgba(103, 220, 255, 0.28);
+  animation: boot-title-pulse 1.8s ease-in-out infinite;
+}
+
+.boot-nova-title span {
+  display: block;
+  margin-top: 6px;
+  letter-spacing: 0.18em;
+  font-size: 0.78em;
+}
+
+.boot-nova-colon {
+  display: inline !important;
+  margin: 0 0.18em !important;
+  color: #67dcff;
+  text-shadow: 0 0 18px rgba(103, 220, 255, 1);
+}
+
+.boot-nova.ready .boot-nova-title {
+  animation: none;
+  letter-spacing: 0.16em;
+  font-size: clamp(14px, 2.1vw, 20px);
+  text-shadow:
+    0 0 22px rgba(103, 220, 255, 0.8),
+    0 0 48px rgba(212, 160, 23, 0.35);
+}
+
+.boot-nova-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 28px;
+  width: min(88vw, 520px);
+  text-align: left;
+  z-index: 5;
+}
+
+.boot-nova-checks li {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 10px;
+  align-items: start;
+  font-size: 13px;
+  animation: boot-check-in 0.55s ease;
+}
+
+.boot-nova-checks strong {
+  display: block;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.boot-nova-checks em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  color: rgba(154, 163, 173, 0.92);
+  font-size: 12px;
+}
+
+.boot-nova-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: rgba(103, 220, 255, 0.25);
+  box-shadow: 0 0 10px rgba(103, 220, 255, 0.2);
+}
+
+.boot-nova-checks li[data-status="starting"] .boot-nova-dot {
+  background: #67dcff;
+  animation: boot-dot-pulse 1.1s ease-in-out infinite;
+}
+
+.boot-nova-checks li[data-status="ready"] .boot-nova-dot {
+  background: #3dba7a;
+  box-shadow: 0 0 12px rgba(61, 186, 122, 0.7);
+}
+
+.boot-nova-checks li[data-status="degraded"] .boot-nova-dot {
+  background: #d59a3a;
+  box-shadow: 0 0 12px rgba(213, 154, 58, 0.6);
+}
+
+.boot-nova-checks li[data-status="missing"] .boot-nova-dot {
+  background: #d4655a;
+}
+
+@keyframes boot-spin { to { transform: rotate(360deg); } }
+@keyframes boot-spin-rev { to { transform: rotate(-360deg); } }
+
+@keyframes boot-shock {
+  0% { opacity: 0.55; transform: scale(0.92); stroke-width: 2.2; }
+  100% { opacity: 0; transform: scale(1.85); stroke-width: 0.4; }
+}
+
+@keyframes boot-core-pulse {
+  0%, 100% { transform: scale(0.94); opacity: 0.88; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes boot-breathe {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+@keyframes boot-aura {
+  0%, 100% { opacity: 0.62; transform: scale(1.12); }
+  50% { opacity: 1; transform: scale(1.28); }
+}
+
+@keyframes boot-dot-pulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.65; }
+  50% { transform: scale(1.2); opacity: 1; }
+}
+
+@keyframes boot-flare {
+  0% { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.45); }
+}
+
+@keyframes boot-field-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-4%, 3%, 0); }
+}
+
+@keyframes boot-grid-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, 48px, 0); }
+}
+
+@keyframes boot-scan {
+  from { transform: translateY(-8%); }
+  to { transform: translateY(8%); }
+}
+
+@keyframes boot-title-pulse {
+  0%, 100% { opacity: 0.72; letter-spacing: 0.26em; }
+  50% { opacity: 1; letter-spacing: 0.32em; }
+}
+
+@keyframes boot-check-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes boot-orbit-a {
+  from { transform: rotate(18deg) rotateX(66deg) rotateZ(0deg); }
+  to { transform: rotate(18deg) rotateX(66deg) rotateZ(360deg); }
+}
+
+@keyframes boot-orbit-b {
+  from { transform: rotate(-48deg) rotateX(58deg) rotateZ(0deg); }
+  to { transform: rotate(-48deg) rotateX(58deg) rotateZ(360deg); }
+}
+
+@keyframes boot-orbit-c {
+  from { transform: rotate(72deg) rotateX(70deg) rotateZ(0deg); }
+  to { transform: rotate(72deg) rotateX(70deg) rotateZ(360deg); }
+}
+
+@media (max-width: 720px) {
+  .boot-nova-orb { width: min(86vw, 380px); }
+  .boot-nova-title { letter-spacing: 0.12em; }
+  .boot-nova-copy { max-width: 70%; }
+  .boot-nova-checks { grid-template-columns: 1fr; width: min(88vw, 360px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-nova *,
+  .boot-nova *::after {
+    animation: none !important;
+  }
+  .boot-nova-checks li { opacity: 1; }
+}

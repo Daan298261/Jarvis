@@ -57,7 +57,7 @@ def test_catalog_loads_default_butler_profile():
     assert profile.archetype == "british_butler"
     assert profile.display_name == "Household butler (original)"
     assert profile.license == "original"
-    assert profile.sample_utterance == "At your service."
+    assert profile.sample_utterance == "At your service, sir."
 
 
 def test_catalog_lists_stub_profiles_as_unavailable(monkeypatch):

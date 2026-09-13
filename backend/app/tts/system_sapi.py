@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -32,6 +33,33 @@ def legacy_tts_backend() -> str | None:
     return None
 
 
+def _sapi_voice_select_script(speaker_ref: str) -> str:
+    """Prefer a British male SAPI voice for Kokoro butler ids; otherwise match by name."""
+    ref = (speaker_ref or "").strip()
+    kokoro_like = bool(re.match(r"^[ab][mf]_", ref, re.IGNORECASE)) if ref else True
+    if kokoro_like:
+        british = (not ref) or ref.lower().startswith(("bm_", "bf_"))
+        male = (not ref) or ref.lower().startswith(("bm_", "am_"))
+        culture = "en-GB" if british else "en-US"
+        gender = "Male" if male else "Female"
+        return (
+            "$voices = $s.GetInstalledVoices(); "
+            f"$match = $voices | Where-Object {{ $_.Enabled -and $_.VoiceInfo.Culture.Name -eq '{culture}' "
+            f"-and $_.VoiceInfo.Gender.ToString() -eq '{gender}' }} | Select-Object -First 1; "
+            "if ($null -eq $match) { "
+            f"$match = $voices | Where-Object {{ $_.Enabled -and $_.VoiceInfo.Culture.Name -like 'en-*' "
+            f"-and $_.VoiceInfo.Gender.ToString() -eq '{gender}' }} | Select-Object -First 1 "
+            "}; "
+            "if ($null -ne $match) { $s.SelectVoice($match.VoiceInfo.Name) }"
+        )
+    safe_voice = ref.replace("'", "''")
+    return (
+        f"try {{ $s.SelectVoice('{safe_voice}') }} catch {{ "
+        f"$match = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{safe_voice}*' }} | Select-Object -First 1; "
+        "if ($null -ne $match) { $s.SelectVoice($match.VoiceInfo.Name) } }"
+    )
+
+
 async def speak_sapi(
     text: str,
     *,
@@ -40,14 +68,7 @@ async def speak_sapi(
 ) -> bytes:
     out = _temp_path(".wav")
     escaped = text.replace("'", "''")
-    voice_line = ""
-    if speaker_ref:
-        safe_voice = speaker_ref.replace("'", "''")
-        voice_line = (
-            f"try {{ $s.SelectVoice('{safe_voice}') }} catch {{ "
-            f"$match = $s.GetInstalledVoices() | Where-Object {{ $_.VoiceInfo.Name -like '*{safe_voice}*' }} | Select-Object -First 1; "
-            "if ($null -ne $match) { $s.SelectVoice($match.VoiceInfo.Name) } }"
-        )
+    voice_line = _sapi_voice_select_script(speaker_ref)
     sapi_rate = max(-10, min(10, round((speaking_rate - 1.0) * 10)))
     script = (
         "Add-Type -AssemblyName System.Speech; "

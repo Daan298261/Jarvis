@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from ..agent.loop import AGENT
 from ..config import load_settings
 from ..persona.quiet import should_speak_chat_reply
+from ..tts.engines import engine_availability
 from ..workers.voice import VoiceSTTError, synthesize_speech, transcribe_audio, voice_status
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
@@ -46,10 +47,13 @@ def _stt_error_response(exc: VoiceSTTError) -> JSONResponse:
 async def get_voice_status():
     settings = load_settings()
     status = voice_status()
+    tts_backend = status.get("tts")
+    status["engines"] = engine_availability()
     status["tts"] = {
         "speak_chat_replies": settings.tts.speak_chat_replies,
         "voice_profile_id": settings.tts.voice_profile_id or None,
         "speak_allowed": should_speak_chat_reply(settings),
+        "backend": tts_backend,
     }
     return status
 
