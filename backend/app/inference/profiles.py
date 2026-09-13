@@ -58,6 +58,11 @@ ORNITH_35B_GGUF_REPO = "ornith-ai/Ornith-1.5-35B-A3B-GGUF"
 ORNITH_35B_DIR = "Ornith-1.5-35B-A3B-GGUF"
 ORNITH_35B_MMPROJ = "mmproj-Ornith-1.5-35B-BF16.gguf"
 
+HERETIC_27B_GGUF_REPO = "0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF"
+HERETIC_27B_DIR = "Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF"
+HERETIC_27B_FILENAME = "RVN-Q3_K_S-multilingual.gguf"
+HERETIC_27B_SHA256 = "b6419bd23d26ba9f3c2803779171c6e233dbed30631aa8d0350049c4011248a8"
+
 # Backward-compatible names used by older docs and tests.
 MODEL_REPO = EXPERT_GGUF_REPO
 OFFICIAL_MODEL = EXPERT_SOURCE
@@ -315,8 +320,42 @@ def qwen38_9b_profile() -> ModelProfile | None:
     )
 
 
+def qwen38_27b_heretic_profile() -> ModelProfile | None:
+    """Internal llama.cpp profile for the owner-selected RVN Q3 multilingual 27B."""
+    from .qwen38_local import discover_qwen38_27b_heretic
+
+    found = discover_qwen38_27b_heretic()
+    if found is None:
+        return None
+    return ModelProfile(
+        name="qwen38_27b_heretic",
+        label="Qwen3.8 27B Heretic · RVN Q3 multilingual",
+        quant=found.quantization or "Q3_K_S",
+        filename=found.filename,
+        family="qwen38-27b-heretic",
+        alias="Qwen3.8-27B-Heretic",
+        repo=HERETIC_27B_GGUF_REPO,
+        repo_dir=found.path.parent.name,
+        mmproj_filename="",
+        thinking=True,
+        thinking_mode="on",
+        context_size=8192,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        presence_penalty=0.0,
+        description="Owner-selected internal 27B reasoning model. Starts at an 8K context to preserve VRAM headroom on a 16 GB GPU.",
+        vision=False,
+        fallbacks=("qwen38_9b", "quality", "bootstrap"),
+        absolute_path=str(found.path),
+    )
+
+
 def available_profiles() -> list[ModelProfile]:
     installed = [profile for profile in PROFILES.values() if profile_gguf(profile).exists()]
+    heretic = qwen38_27b_heretic_profile()
+    if heretic is not None:
+        installed = [heretic, *installed]
     extra = qwen38_9b_profile()
     if extra is not None:
         installed = [extra, *[item for item in installed if item.name != extra.name]]
@@ -347,6 +386,11 @@ def resolve_profile(name: str) -> ModelProfile:
         if extra is not None:
             return extra
         key = "balanced"
+    if key in {"qwen38_27b_heretic", "qwen38-27b-heretic", "heretic-27b", "rvn-q3"}:
+        heretic = qwen38_27b_heretic_profile()
+        if heretic is not None:
+            return heretic
+        key = "quality"
     if key not in PROFILES:
         extra = qwen38_9b_profile()
         if extra is not None and key == extra.name:

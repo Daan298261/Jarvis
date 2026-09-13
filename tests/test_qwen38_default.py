@@ -1,7 +1,9 @@
 from pathlib import Path
 
 from app.inference.qwen38_local import (
+    discover_qwen38_27b_heretic,
     discover_qwen38_9b_uncensored,
+    is_qwen38_27b_heretic_path,
     is_qwen38_9b_filename,
     is_uncensored_filename,
     should_prefer_qwen38_default,
@@ -67,3 +69,26 @@ def test_preferred_startup_profile_uses_discovered(tmp_path, monkeypatch):
     assert resolved.name == "qwen38_9b"
     assert Path(resolved.absolute_path) == gguf
     assert profiles_mod.preferred_startup_profile("expert") == "expert"
+
+
+def test_discovers_rvn_27b_from_parent_folder_and_resolves_internal_profile(tmp_path, monkeypatch):
+    from app.inference import profiles as profiles_mod
+    from app.inference import qwen38_local as local_mod
+
+    models = tmp_path / "models"
+    folder = models / "Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF"
+    folder.mkdir(parents=True)
+    gguf = folder / "RVN-Q3_K_S-multilingual.gguf"
+    gguf.write_bytes(b"gguf")
+    monkeypatch.setattr(local_mod, "models_dir", lambda: models)
+    monkeypatch.setattr(local_mod, "_lmstudio_root", lambda: tmp_path / "missing-lm")
+    monkeypatch.setattr(profiles_mod, "models_dir", lambda: models)
+
+    assert is_qwen38_27b_heretic_path(gguf)
+    found = discover_qwen38_27b_heretic()
+    assert found is not None
+    assert found.path == gguf
+    resolved = profiles_mod.resolve_profile("qwen38_27b_heretic")
+    assert resolved.name == "qwen38_27b_heretic"
+    assert resolved.context_size == 8192
+    assert resolved.thinking is True
