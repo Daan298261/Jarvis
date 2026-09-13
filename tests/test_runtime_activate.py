@@ -168,3 +168,32 @@ async def test_activate_runtime_profile_endpoint(jarvis_env, monkeypatch):
     assert body["ok"] is True
     assert body["profile"]["id"] == profile.id
     assert body["load"]["loaded"] is True
+
+
+@pytest.mark.asyncio
+async def test_activate_runtime_profile_wraps_load_errors(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.config.data_dir", lambda: jarvis_env["tmp"])
+
+    profile = create_runtime_profile(
+        name="lm-load-fail-test",
+        label="Broken load",
+        model="stem-model",
+        provider="llama.cpp",
+        endpoint="127.0.0.1:8088",
+        is_local=True,
+    )
+
+    async def fake_apply_settings(_runtime):
+        return None
+
+    async def failing_load(*_args, **_kwargs):
+        raise RuntimeError("llama.cpp did not become ready")
+
+    monkeypatch.setattr("app.inference.hotswap.apply_runtime_profile_to_settings", fake_apply_settings)
+    monkeypatch.setattr("app.inference.hotswap.MANAGER.load", failing_load)
+
+    from app.inference.hotswap import activate_runtime_profile
+
+    with pytest.raises(RuntimeError, match="Hotswap failed for Broken load"):
+        await activate_runtime_profile(profile)

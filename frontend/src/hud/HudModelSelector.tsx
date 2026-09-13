@@ -160,7 +160,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const hexstrikeActive = !!(selectedProfile && isHexStrikeSuiteProfile(selectedProfile))
 
   const headline = useMemo(() => {
-    if (transferring) return "Transferring conversation…"
+    if (transferring) return "Loading model…"
     if (model?.loading) return "Loading…"
     if (selectedProfile) return selectedProfile.label || selectedProfile.name
     if (model?.active_model) return model.active_model
@@ -388,7 +388,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
 
           {transferring && (
             <p className="hud-model-transferring" role="status">
-              Transferring conversation…
+              Loading model…
             </p>
           )}
 

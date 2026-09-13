@@ -111,17 +111,24 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
         )
         if not probe.get("ok"):
             detail = probe.get("error") or "inference server did not respond"
+            server = provider or "inference server"
             raise RuntimeError(
-                f"Could not reach {provider or 'inference server'} at {host}:{port}. "
-                f"Load the model in LM Studio (or start the server), then try again. ({detail})"
+                f"Could not reach {server} at {host}:{port}. "
+                f"Start the server and load a model, then try Play again. ({detail})"
             )
         advertised = list(probe.get("models") or [])
         resolved = resolve_advertised_model(hint, advertised)
         if hint and advertised and resolved == hint and hint not in advertised:
             if not any(hint.lower() in name.lower() for name in advertised):
                 shown = ", ".join(advertised[:5])
+                suffix = (
+                    f" Currently loaded: {shown}."
+                    if shown
+                    else " No models are loaded on that server."
+                )
                 raise RuntimeError(
-                    f"Model '{hint}' is not loaded on the server. Currently loaded: {shown}"
+                    f"Model '{hint}' is not loaded in LM Studio at {host}:{port}.{suffix} "
+                    "Load the GGUF in LM Studio, start the server, then press Play again."
                 )
         settings.inference.remote_model = resolved
     else:
@@ -150,12 +157,24 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Tru
     settings = load_settings()
     profile_name = _resolve_builtin_profile_name(runtime, settings.inference.profile)
     context_size = int(runtime.context_limit or settings.inference.context_size or 0) or None
-    await MANAGER.load(
-        settings,
-        profile_name,
-        context_size=context_size,
-        force=force,
-    )
+    label = (runtime.label or runtime.name or "runtime profile").strip()
+    try:
+        await MANAGER.load(
+            settings,
+            profile_name,
+            context_size=context_size,
+            force=force,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"Could not load {label}: missing model files ({exc}). "
+            "Install the GGUF or choose another runtime profile."
+        ) from exc
+    except RuntimeError as exc:
+        message = str(exc).strip()
+        if message.lower().startswith("hotswap failed"):
+            raise
+        raise RuntimeError(f"Hotswap failed for {label}: {message}") from exc
     new_context = int(MANAGER.state.context_size or context_size or settings.inference.context_size or 0)
     rebind_owner_conversations_after_hotswap(
         new_context,
