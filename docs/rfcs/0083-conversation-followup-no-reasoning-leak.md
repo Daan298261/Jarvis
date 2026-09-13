@@ -1,6 +1,6 @@
 # RFC-0083: Conversation follow-ups stay conversational; hide model reasoning
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Owner chat must not dump thinking or hit the step limit  
 **Author:** Taco report via Cursor  
 **Date:** 2026-09-13
