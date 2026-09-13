@@ -39,6 +39,7 @@ class VoiceTurn:
     device_id: str
     conversation_id: str | None
     voice_profile_id: str | None
+    inference_profile: str | None = None
     started_at: float = field(default_factory=time.monotonic)
     audio: bytearray = field(default_factory=bytearray)
     last_seq: int = -1
@@ -56,6 +57,7 @@ class VoiceSession:
     device_id: str
     conversation_id: str | None = None
     voice_profile_id: str | None = None
+    inference_profile: str | None = None
     created_at: float = field(default_factory=time.monotonic)
     turns: dict[str, VoiceTurn] = field(default_factory=dict)
     current_turn_id: str | None = None
@@ -96,7 +98,12 @@ def _rate_ok(device_id: str) -> bool:
     return True
 
 
-def create_session(device: dict, conversation_id: str | None = None, voice_profile_id: str | None = None) -> VoiceSession:
+def create_session(
+    device: dict,
+    conversation_id: str | None = None,
+    voice_profile_id: str | None = None,
+    inference_profile: str | None = None,
+) -> VoiceSession:
     _purge_expired()
     device_id = device["id"]
     active = _DEVICE_SESSIONS[device_id]
@@ -108,6 +115,7 @@ def create_session(device: dict, conversation_id: str | None = None, voice_profi
         device_id=device_id,
         conversation_id=conversation_id,
         voice_profile_id=voice_profile_id,
+        inference_profile=inference_profile,
     )
     _SESSIONS[session.session_id] = session
     active.add(session.session_id)
@@ -134,6 +142,7 @@ def begin_turn(session: VoiceSession, turn_id: str | None = None) -> VoiceTurn:
         device_id=session.device_id,
         conversation_id=session.conversation_id,
         voice_profile_id=session.voice_profile_id,
+        inference_profile=session.inference_profile,
     )
     session.turns[tid] = turn
     session.current_turn_id = tid
@@ -226,6 +235,7 @@ async def stream_reply(turn: VoiceTurn, text: str) -> AsyncIterator[dict[str, An
             turn.device_id,
             request_id,
             text,
+            profile=turn.inference_profile,
             conversation_id=turn.conversation_id,
         )
     except HTTPException:
@@ -298,7 +308,8 @@ async def handle_realtime(websocket: WebSocket, device: dict) -> None:
                     continue
                 conversation_id = message.get("conversation_id")
                 voice_profile_id = message.get("voice_profile_id")
-                session = create_session(device, conversation_id, voice_profile_id)
+                inference_profile = message.get("profile") or message.get("inference_profile")
+                session = create_session(device, conversation_id, voice_profile_id, inference_profile)
                 _SEND[session.session_id] = send
                 await send({
                     "type": "session",

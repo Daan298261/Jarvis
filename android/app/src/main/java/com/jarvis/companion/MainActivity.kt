@@ -199,8 +199,9 @@ class MainActivity : ComponentActivity() {
                                 }
                                 Text(if (state.recording) "I’m listening." else if (state.speaking) "Speaking" else "What’s on your mind?", fontSize = 28.sp, fontWeight = FontWeight.Light)
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
-                                Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                                ConversationPickers(state, model::selectModel, model::selectVoice)
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
                                     Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
                                         Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else "Talk to Jarvis")
                                     }
@@ -211,7 +212,7 @@ class MainActivity : ComponentActivity() {
                                 TextButton(onClick = { tab = "Chat" }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Or write a message", color = Muted) }
                             }
                             "Chat" -> {
-                                ModelPicker(state, model::selectModel)
+                                ConversationPickers(state, model::selectModel, model::selectVoice)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     TextButton(onClick = { model.openConversation(null) }) { Text("New conversation") }
                                     var history by remember { mutableStateOf(false) }
@@ -300,13 +301,51 @@ class MainActivity : ComponentActivity() {
     })
 }
 
+@Composable private fun ConversationPickers(
+    state: CompanionState,
+    selectModel: (String) -> Unit,
+    selectVoice: (String) -> Unit,
+) {
+    Column {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            ModelPicker(state, selectModel)
+            VoicePicker(state, selectVoice)
+        }
+        Text(inferenceStatus(state), color = Muted, fontSize = 11.sp)
+        if (!state.inferenceLoaded && state.inferenceError.isNotEmpty()) {
+            Text(state.inferenceError, color = Muted, fontSize = 11.sp, maxLines = 2)
+        }
+    }
+}
+
+private fun inferenceStatus(state: CompanionState): String {
+    val name = state.inferenceFamily.ifBlank { state.inferenceProfile }.ifBlank { "conversation model" }
+    return when {
+        !state.connected -> "Jarvis is offline"
+        state.inferenceLoading -> "Loading $name…"
+        state.inferenceLoaded -> "Model loaded · $name"
+        else -> "Conversation model is not loaded on Jarvis"
+    }
+}
+
 @Composable private fun ModelPicker(state: CompanionState, select: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         TextButton(onClick = { expanded = true }) { Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(16.dp)); Text("  ${state.selectedModel.uppercase()}  ▾") }
         DropdownMenu(expanded, { expanded = false }) {
             DropdownMenuItem(text = { Text("Auto · Jarvis selects") }, onClick = { select("auto"); expanded = false })
-            state.models.forEach { model -> DropdownMenuItem(text = { Text(model.optString("label") + if (!model.optBoolean("installed")) " · unavailable" else "") }, enabled = model.optBoolean("installed"), onClick = { select(model.getString("name")); expanded = false }) }
+            state.models.forEach { model ->
+                val extra = when {
+                    model.optBoolean("active") -> " · loaded"
+                    !model.optBoolean("installed") -> " · unavailable"
+                    else -> ""
+                }
+                DropdownMenuItem(
+                    text = { Text(model.optString("label") + extra) },
+                    enabled = model.optBoolean("installed"),
+                    onClick = { select(model.getString("name")); expanded = false },
+                )
+            }
         }
     }
 }
@@ -595,11 +634,12 @@ class MainActivity : ComponentActivity() {
                 FilterChip(state.presenceMode == "orb", { model.selectPresence("orb") }, { Text("Glowing orb") })
                 FilterChip(state.presenceMode == "humanoid", { model.selectPresence("humanoid") }, { Text("Humanoid HUD") })
             }
-            Text("Server voice", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+            Text("Conversation model", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+            ConversationPickers(state, model::selectModel, model::selectVoice)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { VoicePicker(state, model::selectVoice) }
+                Spacer(Modifier.weight(1f))
                 OutlinedButton(onClick = { model.previewVoice(state.selectedVoice) },
-                    enabled = state.connected && state.selectedVoice.isNotEmpty() && !state.busy) { Text("Preview") }
+                    enabled = state.connected && state.selectedVoice.isNotEmpty() && !state.busy) { Text("Preview voice") }
             }
             val voice = state.capabilities.optJSONObject("voice")
             Text("Speech recognition · ${if (voice?.optBoolean("stt_ready") == true) "ready" else "unavailable"}  ·  Speech output · ${if (voice?.optBoolean("tts_ready") == true) "ready" else "unavailable"}",

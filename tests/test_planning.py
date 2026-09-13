@@ -1,4 +1,4 @@
-from app.agent.planning import classify_task, follow_up_stays_conversation, parse_plan_block, resolve_execution_policy
+from app.agent.planning import classify_task, follow_up_stays_conversation, parse_plan_block, resolve_execution_policy, CONVERSATION_CLASS, is_plain_conversation
 
 
 def test_parse_plan_block_extracts_sections():
@@ -22,6 +22,9 @@ def test_classify_task_categories():
     assert classify_task("Organize these files on the desktop") == "filesystem"
     assert classify_task("Fix the login bug in this repository and run pytest") == "software engineering"
     assert classify_task("Open the website and save the page title") == "browser automation"
+    assert classify_task("what is the weather in dinteloord, tomorrow") == CONVERSATION_CLASS
+    assert is_plain_conversation("what is the weather in dinteloord, tomorrow")
+    assert not is_plain_conversation("create a weather script for dinteloord")
 
 
 def test_follow_up_stays_conversation_for_questions_not_file_jobs():

@@ -81,6 +81,7 @@ from ..persona.chat_delivery import (
 from ..persona.acknowledgements import task_acknowledgement
 from ..persona.owner_chat import OWNER_CHAT_SYSTEM
 from ..persona.think_aloud import run_with_think_aloud
+from ..persona.weather import weather_system_message
 from .recovery import recovery_hint
 from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
@@ -463,6 +464,9 @@ class AgentRuntime:
         ]
         user_text = (extra_prompt or "").strip() or prompt
         messages = [ChatMessage(role="system", content=OWNER_CHAT_SYSTEM), *prior]
+        briefing = await weather_system_message(user_text)
+        if briefing:
+            messages.insert(1, ChatMessage(role="system", content=briefing))
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             messages.append(ChatMessage(role="user", content=user_text))

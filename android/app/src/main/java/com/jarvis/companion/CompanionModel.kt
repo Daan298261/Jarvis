@@ -43,6 +43,8 @@ data class CompanionState(
     val codingDecisions: List<JSONObject> = emptyList(), val voiceProfiles: List<JSONObject> = emptyList(),
     val selectedVoice: String = "", val presenceMode: String = "orb",
     val liveTranscript: String = "", val voiceMode: String = "clip",
+    val inferenceLoaded: Boolean = false, val inferenceLoading: Boolean = false,
+    val inferenceProfile: String = "", val inferenceFamily: String = "", val inferenceError: String = "",
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
@@ -51,6 +53,7 @@ private data class RefreshPayload(
     val capabilities: JSONObject,
     val tasks: List<JSONObject>,
     val models: List<JSONObject>,
+    val inference: JSONObject,
     val conversations: List<JSONObject>,
     val schedules: List<JSONObject>,
     val calls: List<JSONObject>,
@@ -64,6 +67,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     val api = (app as JarvisApp).api
     private val companionPrefs = app.getSharedPreferences("companion_ui", Application.MODE_PRIVATE)
     private val mutable = MutableStateFlow(CompanionState(
+        selectedModel = companionPrefs.getString("inference_profile", "auto") ?: "auto",
         selectedVoice = companionPrefs.getString("voice_profile", "") ?: "",
         presenceMode = companionPrefs.getString("presence_mode", "orb").takeIf { it in setOf("orb", "humanoid") } ?: "orb",
     ))
@@ -108,7 +112,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val payload = kotlinx.coroutines.coroutineScope {
             val capabilities = async { api.json("/capabilities") }
             val tasks = async { api.array("/tasks").objects() }
-            val models = async { api.json("/models").getJSONArray("models").objects() }
+            val modelsBody = async { api.json("/models") }
             val conversations = async { api.array("/conversations").objects() }
             val schedules = async { api.array("/schedules").objects() }
             val calls = async { api.array("/calls").objects() }
@@ -118,8 +122,20 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             val swarm = async { runCatching { api.json("/swarm") }.getOrDefault(previous.swarm) }
             val coding = async { runCatching { api.json("/coding") }.getOrDefault(previousCoding) }
             val voices = async { runCatching { api.json("/voice/profiles") }.getOrDefault(previousVoices) }
-            RefreshPayload(capabilities.await(), tasks.await(), models.await(), conversations.await(), schedules.await(), calls.await(),
-                messages.await(), swarm.await(), coding.await(), voices.await())
+            val modelsJson = modelsBody.await()
+            RefreshPayload(
+                capabilities.await(),
+                tasks.await(),
+                modelsJson.optJSONArray("models")?.objects() ?: emptyList(),
+                modelsJson.optJSONObject("inference") ?: JSONObject(),
+                conversations.await(),
+                schedules.await(),
+                calls.await(),
+                messages.await(),
+                swarm.await(),
+                coding.await(),
+                voices.await(),
+            )
         }
         val active = payload.tasks.firstOrNull { it.optString("status") in listOf("queued", "running", "waiting") }
         val voiceProfiles = payload.voices.optJSONArray("profiles")?.objects() ?: emptyList()
@@ -128,12 +144,22 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         } ?: payload.voices.optString("active_voice_profile_id").takeIf { activeVoice ->
             voiceProfiles.any { it.optString("id") == activeVoice && it.optBoolean("available") }
         } ?: voiceProfiles.firstOrNull { it.optBoolean("available") }?.optString("id").orEmpty()
+        val selectedModel = previous.selectedModel.takeIf { selected ->
+            selected == "auto" || payload.models.any { it.optString("name") == selected && it.optBoolean("installed") }
+        } ?: "auto"
+        val inference = payload.inference
+        val inferenceProfile = inference.optString("profile")
+        val inferenceLabel = payload.models.firstOrNull { it.optString("name") == inferenceProfile }?.optString("label")
+            ?: inference.optString("family").ifBlank { inferenceProfile }
         mutable.value = mutable.value.copy(connected = true, activity = active?.optString("activity") ?: "Ready when you are",
             tasks = payload.tasks, models = payload.models, conversations = payload.conversations, schedules = payload.schedules,
             calls = payload.calls, messages = payload.messages, capabilities = payload.capabilities, swarm = payload.swarm,
             coding = payload.coding.optJSONObject("overview") ?: JSONObject(),
             codingDecisions = payload.coding.optJSONObject("decisions")?.optJSONArray("items")?.objects() ?: emptyList(),
-            voiceProfiles = voiceProfiles, selectedVoice = selectedVoice,
+            voiceProfiles = voiceProfiles, selectedVoice = selectedVoice, selectedModel = selectedModel,
+            inferenceLoaded = inference.optBoolean("loaded"), inferenceLoading = inference.optBoolean("loading"),
+            inferenceProfile = inferenceProfile, inferenceFamily = inferenceLabel,
+            inferenceError = inference.optString("last_error"),
             pendingMessage = outbox.read() != null)
     }
     fun pair(endpoint: String, pin: String, credential: String) = action {
@@ -155,7 +181,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         if (fallback != null && fallback.length() > 0) return fallback
         throw IllegalStateException("Connect to Jarvis to check BlackGrid Studio status.")
     }
-    fun selectModel(value: String) { mutable.value = mutable.value.copy(selectedModel = value) }
+    fun selectModel(value: String) {
+        val allowed = value == "auto" || mutable.value.models.any { it.optString("name") == value && it.optBoolean("installed") }
+        if (!allowed) return
+        companionPrefs.edit().putString("inference_profile", value).apply()
+        mutable.value = mutable.value.copy(selectedModel = value)
+    }
     fun selectVoice(value: String) {
         if (mutable.value.voiceProfiles.none { it.optString("id") == value && it.optBoolean("available") }) return
         companionPrefs.edit().putString("voice_profile", value).apply()
@@ -329,7 +360,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             return@action
         }
         stopSpeaking()
-        val session = RealtimeVoiceSession(api, mutable.value.conversationId, mutable.value.selectedVoice)
+        val session = RealtimeVoiceSession(api, mutable.value.conversationId, mutable.value.selectedVoice, mutable.value.selectedModel)
         realtime = session
         session.connect()
         session.startTurn()
