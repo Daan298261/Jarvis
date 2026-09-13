@@ -22,6 +22,10 @@ from .config import models_dir, repo_root, runtime_dir
 from .inference.profiles import (
     EXPERT_DIR,
     EXPERT_GGUF_REPO,
+    HERETIC_27B_DIR,
+    HERETIC_27B_FILENAME,
+    HERETIC_27B_GGUF_REPO,
+    HERETIC_27B_SHA256,
     PRIMARY_DIR,
     PRIMARY_GGUF_REPO,
     PRIMARY_MMPROJ,
@@ -43,6 +47,7 @@ COMPONENT_IDS = (
     "primary_model",
     "vision_projector",
     "expert_model",
+    "heretic_27b_model",
     "playwright_chromium",
 )
 
@@ -73,6 +78,7 @@ def _label(component_id: str) -> str:
         "primary_model": "Primary model (9B)",
         "vision_projector": "Vision projector",
         "expert_model": "Expert model (27B, optional)",
+        "heretic_27b_model": "Qwen3.8 27B Heretic reasoning model (optional)",
         "playwright_chromium": "Playwright Chromium",
     }.get(component_id, component_id)
 
@@ -146,6 +152,15 @@ def discover_component_states(*, include_optional_expert: bool | None = None) ->
             optional=True,
             detail="Optional — not selected",
         )
+    heretic = models_dir() / HERETIC_27B_DIR / HERETIC_27B_FILENAME
+    states["heretic_27b_model"] = ComponentState(
+        id="heretic_27b_model",
+        label=_label("heretic_27b_model"),
+        status="ready" if heretic.exists() else "skipped",
+        path=str(heretic),
+        optional=True,
+        detail="Owner-selected download" if not heretic.exists() else "",
+    )
     marker = repo_root() / ".venv" / ".playwright-chromium-ready"
     if want_playwright:
         states["playwright_chromium"] = ComponentState(
@@ -328,6 +343,19 @@ def _install_expert() -> None:
     _hf_download(EXPERT_GGUF_REPO, profile.filename, models_dir() / EXPERT_DIR, "expert_model")
 
 
+def _install_heretic_27b() -> None:
+    target = _hf_download(
+        HERETIC_27B_GGUF_REPO,
+        HERETIC_27B_FILENAME,
+        models_dir() / HERETIC_27B_DIR,
+        "heretic_27b_model",
+    )
+    digest = _sha256(target).lower()
+    if digest != HERETIC_27B_SHA256:
+        raise ValueError("Downloaded Qwen3.8 27B Heretic file failed SHA-256 verification")
+    _set_state("heretic_27b_model", status="ready", path=str(target), detail=f"sha256={digest[:16]}…", error="")
+
+
 def _install_playwright() -> None:
     marker = repo_root() / ".venv" / ".playwright-chromium-ready"
     if marker.exists():
@@ -367,6 +395,7 @@ _INSTALLERS: dict[str, Callable[[], None]] = {
     "primary_model": _install_primary,
     "vision_projector": _install_mmproj,
     "expert_model": _install_expert,
+    "heretic_27b_model": _install_heretic_27b,
     "playwright_chromium": _install_playwright,
 }
 
