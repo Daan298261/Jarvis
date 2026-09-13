@@ -114,6 +114,20 @@ def is_plain_conversation(prompt: str) -> bool:
     return chatty
 
 
+def follow_up_stays_conversation(follow: str | None) -> bool:
+    """Keep an existing chat thread conversational unless the follow-up is a tool task."""
+    text = (follow or "").strip()
+    if not text:
+        return True
+    if is_plain_conversation(text):
+        return True
+    lowered = text.lower()
+    if any(marker in lowered for marker in _CONVERSATION_BLOCKERS):
+        return False
+    action_hits = sum(1 for _, keywords in TASK_CATEGORIES for keyword in keywords if keyword in lowered)
+    return action_hits == 0
+
+
 def classify_task(prompt: str) -> str:
     if is_plain_conversation(prompt):
         return CONVERSATION_CLASS

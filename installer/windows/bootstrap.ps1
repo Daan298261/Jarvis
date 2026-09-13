@@ -322,6 +322,28 @@ function Ensure-DefaultModels([string]$VenvPython) {
     }
 }
 
+function Ensure-KokoroVoice([string]$VenvPython) {
+    if ($SkipModelDownload) {
+        Write-Host "    Skipping household voice download (-SkipModelDownload)."
+        return
+    }
+    $dir = Join-Path $Root "models\tts\kokoro-82m"
+    $marker = Join-Path $dir ".jarvis_staged_ok"
+    $existing = Get-ChildItem -Path $dir -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ((Test-Path $marker) -and $existing) {
+        Write-Skip "Household voice (Kokoro-82M)"
+        return
+    }
+    Write-Host "    Downloading the household voice (one-time)..."
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Invoke-HfDownload -VenvPython $VenvPython `
+        -RepoId "hexgrad/Kokoro-82M" `
+        -Includes @() `
+        -LocalDir $dir
+    "ok" | Set-Content -Encoding ascii -Path $marker
+    Write-Ok "Household voice ready."
+}
+
 function Test-NvidiaDriver {
     if (-not (Test-Command nvidia-smi)) {
         Write-Host "    WARNING: nvidia-smi not found. Install an NVIDIA CUDA 13-capable driver for GPU inference." -ForegroundColor Yellow
@@ -363,6 +385,7 @@ Ensure-LlamaCpp
 
 Write-Step "AI model weights"
 Ensure-DefaultModels -VenvPython $venvPython
+Ensure-KokoroVoice -VenvPython $venvPython
 
 Write-Step "Finishing"
 New-Item -ItemType Directory -Force -Path `

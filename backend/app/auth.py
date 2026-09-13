@@ -158,6 +158,7 @@ def is_auth_required_for_request(request: Request, settings: AppSettings) -> boo
         return False
     if path in {
         "/api/health",
+        "/api/system/self-check",
         "/api/auth/status",
         "/api/auth/verify",
         "/api/mobile",

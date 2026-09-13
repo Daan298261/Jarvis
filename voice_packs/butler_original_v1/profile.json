@@ -8,20 +8,20 @@
     "engine_id": "kokoro",
     "engine_hint": "kokoro",
     "model_id": "kokoro-82m",
-    "speaker_ref": "bm_george",
+    "speaker_ref": "bm_daniel",
     "pack_path": "voice_packs/butler_original_v1",
     "vram_class": "balanced",
     "latency_class": "interactive",
     "license": "Apache-2.0",
     "offline": true,
     "quality_tier": "natural",
-    "speaking_rate": 1.08
+    "speaking_rate": 0.96
   },
   "persona_hooks": {
     "register": "british_understated",
     "humour": "dry"
   },
-  "sample_utterance": "At your service.",
+  "sample_utterance": "At your service, sir.",
   "vram_class": "balanced",
   "builtin": true
 }

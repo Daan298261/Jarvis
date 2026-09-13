@@ -18,7 +18,12 @@ Set-Location $Root
 function Write-Step($message) { Write-Host "`n==> $message" -ForegroundColor Cyan }
 
 Write-Step "Verifying dependencies"
-$python = (Get-Command python).Source
+$venvPython = Join-Path $Root ".venv\Scripts\python.exe"
+if (Test-Path $venvPython) {
+    $python = $venvPython
+} else {
+    $python = (Get-Command python).Source
+}
 $node = (Get-Command node).Source
 $llama = Join-Path $Root "runtime\llama.cpp\llama-server.exe"
 $q8 = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF\Qwen3.5-9B-abliterated-Q8_0.gguf"

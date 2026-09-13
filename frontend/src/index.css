@@ -400,6 +400,13 @@ h2 { font-size: 18px; margin: 0 0 12px; }
   cursor: not-allowed;
 }
 
+.voice-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .voice-profile-preview {
   align-self: center;
   font-size: 12px;

@@ -64,6 +64,7 @@ from .planning import (
     best_of_n_plan_prompt,
     best_of_n_select_prompt,
     classify_task,
+    follow_up_stays_conversation,
     format_selected_plan,
     is_plain_conversation,
     parse_plan_block,
@@ -444,6 +445,9 @@ class AgentRuntime:
         settings: AppSettings,
         working: WorkingState,
         metrics: LiveTaskMetrics,
+        *,
+        history: list[ChatMessage] | None = None,
+        extra_prompt: str | None = None,
     ) -> None:
         """Plain owner dialogue: stream text, no tools, no confirmation gates."""
         profile = resolve_profile(profile_name)
@@ -451,10 +455,17 @@ class AgentRuntime:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
             await MANAGER.load(settings, profile_name)
         await self._update(task_id, stage="act", current_action="Replying", task_class=CONVERSATION_CLASS)
-        messages = [
-            ChatMessage(role="system", content=OWNER_CHAT_SYSTEM),
-            ChatMessage(role="user", content=prompt),
+        working.task_class = CONVERSATION_CLASS
+        prior = [
+            message
+            for message in (history or [])
+            if message.role in {"user", "assistant"} and (message.content or "").strip()
         ]
+        user_text = (extra_prompt or "").strip() or prompt
+        messages = [ChatMessage(role="system", content=OWNER_CHAT_SYSTEM), *prior]
+        last = prior[-1] if prior else None
+        if last is None or last.role != "user" or (last.content or "").strip() != user_text:
+            messages.append(ChatMessage(role="user", content=user_text))
         parts: list[str] = []
         stream_key = f"task:{task_id}"
         clear_stream_speak_state(stream_key)
@@ -539,14 +550,20 @@ class AgentRuntime:
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
         metrics = LiveTaskMetrics()
-        if (
-            working.task_class == CONVERSATION_CLASS
-            and not continue_existing
-            and not pending_tool
-            and not extra_prompt
-        ):
-            await self._run_conversation(task_id, prompt, profile_name, settings, working, metrics)
-            return
+        if working.task_class == CONVERSATION_CLASS and not pending_tool:
+            if follow_up_stays_conversation(extra_prompt):
+                await self._run_conversation(
+                    task_id,
+                    prompt,
+                    profile_name,
+                    settings,
+                    working,
+                    metrics,
+                    history=existing,
+                    extra_prompt=extra_prompt,
+                )
+                return
+            working.task_class = classify_task(extra_prompt or prompt)
         if not continue_existing and not pending_tool and not extra_prompt:
             await BUS.publish(
                 task_id,
@@ -902,8 +919,6 @@ class AgentRuntime:
                 await MANAGER.record_timings(result.timings)
                 metrics.note_model(result.timings)
                 await self._update(task_id, **metrics.as_fields())
-                if result.reasoning:
-                    await BUS.publish(task_id, "progress", "Reasoning complete", result.reasoning[-1500:], stage="act")
 
                 if force_final:
                     content = (result.content or "").strip() or (

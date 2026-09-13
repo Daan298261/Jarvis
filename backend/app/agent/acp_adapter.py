@@ -81,7 +81,7 @@ class ACPAgentAdapter:
 
     async def initialize(self, params: dict[str, Any]) -> dict[str, Any]:
         info = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
-        return {"protocolVersion": PROTOCOL_VERSION, "serverInfo": {"name": "jarvis-acp", "version": "1.3.1"}, "capabilities": {"session": True, "streaming": "normalized-events", "mcp": True, "filesystem": "delegated-only"}, "client": {"name": str(info.get("name") or ""), "version": str(info.get("version") or "")}}
+        return {"protocolVersion": PROTOCOL_VERSION, "serverInfo": {"name": "jarvis-acp", "version": "1.3.2"}, "capabilities": {"session": True, "streaming": "normalized-events", "mcp": True, "filesystem": "delegated-only"}, "client": {"name": str(info.get("name") or ""), "version": str(info.get("version") or "")}}
 
     async def new_session(self, params: dict[str, Any]) -> dict[str, Any]:
         profile = str(params.get("agentProfileId") or "balanced")

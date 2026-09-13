@@ -13,8 +13,9 @@ from .engines import (
     CHATTERBOX_MODEL_DIR,
     KOKORO_MODEL_DIR,
     is_chatterbox_available,
-    is_kokoro_available,
     is_piper_available,
+    kokoro_python_ready,
+    kokoro_weights_ready,
     legacy_system_tts_available,
     resolve_pack_model_dir,
 )
@@ -52,13 +53,23 @@ async def synthesize_with_engine(
     voice = speaker_ref or (profile.tts.speaker_ref if profile else "") or ""
     speaking_rate = profile.tts.speaking_rate if profile else 1.0
     if engine == "kokoro":
-        return await _synthesize_kokoro(
-            text,
-            voice=voice,
-            model_dir=model_dir,
-            profile=profile,
-            speaking_rate=speaking_rate,
-        )
+        try:
+            return await _synthesize_kokoro(
+                text,
+                voice=voice,
+                model_dir=model_dir,
+                profile=profile,
+                speaking_rate=speaking_rate,
+            )
+        except Exception:
+            if legacy_system_tts_available():
+                return await _synthesize_system(
+                    text,
+                    engine="system",
+                    speaker_ref=voice,
+                    speaking_rate=speaking_rate,
+                )
+            raise
     if engine == "chatterbox":
         return await _synthesize_chatterbox(text, voice=voice)
     if engine == "piper":
@@ -79,20 +90,23 @@ async def _synthesize_kokoro(
     profile: VoiceProfile | None,
     speaking_rate: float,
 ) -> bytes:
-    if not is_kokoro_available(model_dir=model_dir):
-        raise RuntimeError(
-            "Kokoro TTS is not ready. Install the kokoro package and stage Kokoro-82M weights "
-            f"under {KOKORO_MODEL_DIR} (Windows Setup bundles the default butler pack)."
-        )
-
     resolved_dir = model_dir
     if resolved_dir is None and profile is not None:
         resolved_dir = resolve_pack_model_dir(profile)
+    if not kokoro_python_ready() or not kokoro_weights_ready(resolved_dir or KOKORO_MODEL_DIR):
+        from .pack_install import ensure_kokoro_runtime
+
+        await asyncio.to_thread(ensure_kokoro_runtime)
+    if not kokoro_python_ready():
+        raise RuntimeError(
+            "The household voice could not be prepared. Try Install household voice in Settings, "
+            "or re-run Jarvis Setup."
+        )
 
     def _run() -> bytes:
-        lang = "b" if voice.startswith("b") else "a"
+        lang = "b" if (voice or "bm_daniel").startswith("b") else "a"
         pipeline = get_kokoro_pipeline(lang, resolved_dir)
-        chosen = voice or "bm_george"
+        chosen = voice or "bm_daniel"
         chunks: list[bytes] = []
         sample_rate = 24000
         for _gs, _ps, audio in pipeline(text, voice=chosen, speed=speaking_rate):

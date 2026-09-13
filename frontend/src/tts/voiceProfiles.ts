@@ -15,6 +15,9 @@ const FORBIDDEN_TOKENS = [
   "marvel",
   "disney",
   "stephen russell",
+  "iron man",
+  "tony stark",
+  "jarvis_marvel",
 ]
 
 export type VoiceProfile = {
@@ -23,6 +26,7 @@ export type VoiceProfile = {
   display_name: string
   available: boolean
   unavailable_reason?: string
+  install_hint?: string
   sample_utterance?: string
 }
 
@@ -63,9 +67,12 @@ export function sanitizeVoiceProfile(raw: Record<string, unknown>): VoiceProfile
     ? raw.unavailable_reason
     : typeof raw.unavailableReason === "string"
       ? raw.unavailableReason
-      : typeof raw.install_hint === "string"
-        ? raw.install_hint
-        : undefined
+      : undefined
+  const install_hint = typeof raw.install_hint === "string"
+    ? raw.install_hint
+    : typeof raw.installHint === "string"
+      ? raw.installHint
+      : undefined
 
   const sample_utterance = typeof raw.sample_utterance === "string"
     ? raw.sample_utterance
@@ -79,6 +86,7 @@ export function sanitizeVoiceProfile(raw: Record<string, unknown>): VoiceProfile
     display_name,
     available,
     unavailable_reason,
+    install_hint,
     sample_utterance,
   }
 }
@@ -195,6 +203,19 @@ export async function setActiveVoiceProfile(voiceProfileId: string): Promise<str
   }
 
   return id
+}
+
+export async function installVoiceProfile(profileId: string): Promise<{ installed: boolean; detail?: string }> {
+  const id = profileId.trim()
+  if (!id) return { installed: false, detail: "Voice profile id is required." }
+  const result = await api<{ installed?: boolean; detail?: string }>(
+    `/api/voice-profiles/${encodeURIComponent(id)}/install`,
+    { method: "POST" },
+  )
+  return {
+    installed: result.installed !== false,
+    detail: result.detail,
+  }
 }
 
 async function requestPreviewBlob(profileId: string): Promise<Blob | null> {

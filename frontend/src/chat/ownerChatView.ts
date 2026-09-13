@@ -35,9 +35,11 @@ export function useShowWorkPreference(): [boolean, (showWork: boolean) => void] 
   return [showWork, persist]
 }
 
+const HIDDEN_WORK_TITLES = new Set(["Model is thinking", "Reasoning complete", "Thinking"])
+
 /** Events suitable for the work / details panel (drops noisy model heartbeat). */
 export function filterWorkEvents(events: OwnerChatEvent[]): OwnerChatEvent[] {
-  return events.filter((event) => !(event.kind === "model" && event.title === "Model is thinking"))
+  return events.filter((event) => !HIDDEN_WORK_TITLES.has(event.title))
 }
 
 export function assistantReplyText(result?: string | null, error?: string | null): string {

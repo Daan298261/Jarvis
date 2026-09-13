@@ -51,8 +51,13 @@ def kokoro_python_ready() -> bool:
 
 
 def is_kokoro_available(*, model_dir: Path | None = None) -> bool:
-    root = model_dir or KOKORO_MODEL_DIR
-    return kokoro_python_ready() and kokoro_weights_ready(root)
+    """Kokoro is selectable when the Python package is installed.
+
+    Weights are staged lazily on first synthesis so the default butler does not
+    fall through to robotic SAPI just because Setup has not copied the GGUF yet.
+    """
+    del model_dir
+    return kokoro_python_ready()
 
 
 def is_piper_available() -> bool:
