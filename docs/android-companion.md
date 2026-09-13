@@ -45,8 +45,10 @@ preview, not a production remote-access release.
 ## Build
 
 Prerequisites: JDK 17, Android SDK platform 35, Node.js, Python backend dependencies.
-Set `JAVA_HOME` and `ANDROID_HOME` for your installation. Android dependencies are
-pinned in Gradle; `gradlew` downloads Gradle 8.9.
+The APK builder auto-discovers Eclipse Temurin / Microsoft JDK 17 and the
+Jarvis Android SDK (`%LOCALAPPDATA%\Jarvis\android-sdk`) when `JAVA_HOME` /
+`ANDROID_HOME` are unset. Android dependencies are pinned in Gradle; `gradlew`
+downloads Gradle 8.9.
 
 ```powershell
 npm --prefix frontend ci
