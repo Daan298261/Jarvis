@@ -47,6 +47,9 @@
   animation-name: soundWaveActive;
   animation-duration: 2s;
 }
+.apex-orb-wrap[data-state="offline"] .sound-wave {
+  animation-duration: 5.5s;
+}
 
 /* Ring breathe - always */
 @keyframes ringBreathe {
