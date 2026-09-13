@@ -70,6 +70,51 @@ def test_is_plain_conversation_heuristic():
 
 
 @pytest.mark.asyncio
+async def test_conversation_follow_up_stays_off_the_tool_loop(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    chats: list[str] = []
+
+    class StreamProvider:
+        async def chat_stream(self, messages, **kwargs):
+            del kwargs
+            chats.append("stream")
+            assert messages[0].role == "system"
+            yield "Quite well, sir."
+
+        async def chat(self, messages, **kwargs):
+            del messages, kwargs
+            from app.providers.base import ChatResult
+
+            raise AssertionError("follow-up must not enter the tool loop")
+
+    MANAGER.provider = StreamProvider()
+    MANAGER.state.loaded = True
+    MANAGER.state.context_size = 16384
+
+    task = await AGENT.create_task("How are you this evening?")
+    runner = AGENT._tasks.get(task.id)
+    if runner:
+        await runner
+
+    continued = await AGENT.continue_task(task.id, "And the weather?")
+    runner = AGENT._tasks.get(continued.id)
+    if runner:
+        await runner
+
+    from app.db.session import SessionLocal
+    from app.db.models import Task
+
+    async with SessionLocal() as session:
+        row = await session.get(Task, task.id)
+        assert row is not None
+        assert row.status == "completed"
+        assert row.error in (None, "")
+        assert "step limit" not in (row.error or "").lower()
+        assert "well" in (row.result or "").lower()
+    assert chats == ["stream", "stream"]
+
+
+@pytest.mark.asyncio
 async def test_owner_chat_streams_without_confirmation(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
 
