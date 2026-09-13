@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
             val state by model.state.collectAsStateWithLifecycle()
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
             var tab by remember { mutableStateOf(if (model.api.endpoint.isEmpty()) "More" else "Home") }
+            var pairingScanRequest by remember { mutableStateOf(false) }
             var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
             var incomingCall by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
             DisposableEffect(model) {
@@ -195,20 +196,48 @@ class MainActivity : ComponentActivity() {
                                 Spacer(Modifier.height(12.dp))
                                 Text("YOUR INTELLIGENCE, EVERYWHERE", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
                                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                                    PresenceHud(state.presenceMode, if (state.recording) "listening" else if (state.speaking) "speaking" else if (state.tasks.any { it.optString("status") in listOf("queued", "running") }) "thinking" else "idle")
+                                    val phase = if (state.recording) "listening"
+                                    else if (state.speaking) "speaking"
+                                    else if (state.tasks.any { it.optString("status") in listOf("queued", "running") }) "thinking"
+                                    else "idle"
+                                    PresenceHud(state.presenceMode, state.connected, phase)
                                 }
-                                Text(if (state.recording) "I’m listening." else if (state.speaking) "Speaking" else "What’s on your mind?", fontSize = 28.sp, fontWeight = FontWeight.Light)
+                                Text(
+                                    if (state.recording) "I’m listening."
+                                    else if (state.speaking) "Speaking"
+                                    else if (!state.connected) "Pair with Jarvis on your desktop to connect."
+                                    else "What’s on your mind?",
+                                    fontSize = if (!state.connected && !state.recording && !state.speaking) 22.sp else 28.sp,
+                                    fontWeight = FontWeight.Light,
+                                )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
-                                        Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else "Talk to Jarvis")
+                                if (!state.connected) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                        Button(
+                                            onClick = { pairingScanRequest = true; tab = "More" },
+                                            enabled = !state.busy,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            Icon(Icons.Outlined.QrCodeScanner, null)
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Scan desktop QR")
+                                        }
+                                        OutlinedButton(onClick = { tab = "More" }, enabled = !state.busy, modifier = Modifier.weight(1f)) {
+                                            Text("Enter code")
+                                        }
                                     }
-                                    OutlinedButton(onClick = {
-                                        callPermission.launch(Manifest.permission.RECORD_AUDIO)
-                                    }, enabled = state.connected && state.capabilities.optJSONObject("calls")?.optBoolean("available") == true) { Icon(Icons.Outlined.Call, "Start call") }
+                                } else {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
+                                            Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else "Talk to Jarvis")
+                                        }
+                                        OutlinedButton(onClick = {
+                                            callPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                        }, enabled = state.capabilities.optJSONObject("calls")?.optBoolean("available") == true) { Icon(Icons.Outlined.Call, "Start call") }
+                                    }
+                                    TextButton(onClick = { tab = "Chat" }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Or write a message", color = Muted) }
                                 }
-                                TextButton(onClick = { tab = "Chat" }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Or write a message", color = Muted) }
                             }
                             "Chat" -> {
                                 ModelPicker(state, model::selectModel)
@@ -254,7 +283,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
-                            "More" -> MoreScreen(model, state)
+                            "More" -> MoreScreen(model, state, pairingScanRequest) { pairingScanRequest = false }
                         }
                     }
                 }
@@ -263,9 +292,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun PresenceHud(mode: String, phase: String) {
+@Composable private fun PresenceHud(mode: String, connected: Boolean, phase: String) {
     var web by remember { mutableStateOf<WebView?>(null) }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    fun pushState(view: WebView?) {
+        val target = view ?: return
+        target.evaluateJavascript("window.setJarvisConnected && window.setJarvisConnected($connected)", null)
+        target.evaluateJavascript("window.setJarvisAppearance && window.setJarvisAppearance(${JSONObject.quote(mode)})", null)
+        target.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null)
+    }
     DisposableEffect(owner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) web?.onPause()
@@ -274,6 +309,7 @@ class MainActivity : ComponentActivity() {
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer); web?.destroy(); web = null }
     }
+    LaunchedEffect(mode, connected, phase, web) { pushState(web) }
     AndroidView(modifier = Modifier.fillMaxWidth().height(310.dp), factory = { context ->
         WebView(context).apply {
             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
@@ -291,13 +327,13 @@ class MainActivity : ComponentActivity() {
                     return loader.shouldInterceptRequest(request.url)
                         ?: android.webkit.WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 }
+                override fun onPageFinished(view: WebView, url: String?) {
+                    pushState(view)
+                }
             }
             loadUrl("https://appassets.androidplatform.net/assets/orb/index.html")
         }
-    }, update = {
-        it.evaluateJavascript("window.setJarvisAppearance && window.setJarvisAppearance(${JSONObject.quote(mode)})", null)
-        it.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null)
-    })
+    }, update = { pushState(it) })
 }
 
 @Composable private fun ModelPicker(state: CompanionState, select: (String) -> Unit) {
@@ -488,7 +524,12 @@ class MainActivity : ComponentActivity() {
     } }
 }
 
-@Composable private fun MoreScreen(model: CompanionModel, state: CompanionState) {
+@Composable private fun MoreScreen(
+    model: CompanionModel,
+    state: CompanionState,
+    openPairingScanner: Boolean = false,
+    onPairingScannerConsumed: () -> Unit = {},
+) {
     var endpoint by remember { mutableStateOf(model.api.endpoint) }
     var pin by remember { mutableStateOf(model.api.pin) }
     var pairingCode by remember { mutableStateOf(model.api.invitation) }
@@ -501,6 +542,18 @@ class MainActivity : ComponentActivity() {
     val qrPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) scannerOpen = true
         else scanError = "Camera permission is needed to scan the desktop pairing QR code. You can still enter the code manually."
+    }
+    fun requestScanner() {
+        scanError = null
+        if (ContextCompat.checkSelfPermission(model.getApplication(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            scannerOpen = true
+        } else qrPermission.launch(Manifest.permission.CAMERA)
+    }
+    LaunchedEffect(openPairingScanner) {
+        if (openPairingScanner) {
+            requestScanner()
+            onPairingScannerConsumed()
+        }
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -517,12 +570,7 @@ class MainActivity : ComponentActivity() {
             )
             if (model.api.deviceId.isEmpty()) {
                 Button(
-                    onClick = {
-                        scanError = null
-                        if (ContextCompat.checkSelfPermission(model.getApplication(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                            scannerOpen = true
-                        } else qrPermission.launch(Manifest.permission.CAMERA)
-                    },
+                    onClick = { requestScanner() },
                     enabled = !state.busy,
                     modifier = Modifier.padding(top = 8.dp),
                 ) { Text("Scan desktop QR") }
@@ -548,6 +596,7 @@ class MainActivity : ComponentActivity() {
                                     pin = invitation.serverPin
                                     pairingCode = invitation.code
                                     scannerOpen = false
+                                    model.pair(invitation.endpoint, invitation.serverPin, invitation.code)
                                 }
                                 .onFailure { error -> scanError = error.message ?: "That QR code is not a valid Jarvis pairing invitation." }
                         },
