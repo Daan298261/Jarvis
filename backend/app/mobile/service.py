@@ -16,6 +16,7 @@ from ..api.tasks import _task_dict
 from ..config import load_settings
 from ..db.models import Conversation, Task, TaskEvent
 from ..db.session import SessionLocal
+from ..inference.manager import MANAGER
 from ..inference.profiles import PROFILES, profile_as_dict, profile_gguf
 from .store import database, get, put, root, rows
 
@@ -28,7 +29,23 @@ def iso(value):
 
 
 def models():
-    return {"default": "auto", "models": [profile_as_dict(p) for p in PROFILES.values()]}
+    loaded_name = (MANAGER.state.profile or "").strip() if MANAGER.state.loaded else ""
+    items = []
+    for profile in PROFILES.values():
+        item = profile_as_dict(profile)
+        item["active"] = bool(loaded_name and profile.name == loaded_name)
+        items.append(item)
+    return {
+        "default": "auto",
+        "models": items,
+        "inference": {
+            "loaded": bool(MANAGER.state.loaded),
+            "loading": bool(MANAGER.state.loading),
+            "profile": MANAGER.state.profile or "",
+            "family": MANAGER.state.family or "",
+            "last_error": MANAGER.state.last_error or "",
+        },
+    }
 
 
 def profile_choice(profile: str | None) -> str | None:
