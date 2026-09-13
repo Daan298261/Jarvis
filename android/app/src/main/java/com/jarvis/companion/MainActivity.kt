@@ -195,7 +195,11 @@ class MainActivity : ComponentActivity() {
                                 Spacer(Modifier.height(12.dp))
                                 Text("YOUR INTELLIGENCE, EVERYWHERE", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
                                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                                    PresenceHud(state.presenceMode, if (state.recording) "listening" else if (state.speaking) "speaking" else if (state.tasks.any { it.optString("status") in listOf("queued", "running") }) "thinking" else "idle")
+                                    val phase = if (state.recording) "listening"
+                                    else if (state.speaking) "speaking"
+                                    else if (state.tasks.any { it.optString("status") in listOf("queued", "running") }) "thinking"
+                                    else "idle"
+                                    PresenceHud(state.presenceMode, state.connected, phase)
                                 }
                                 Text(if (state.recording) "I’m listening." else if (state.speaking) "Speaking" else "What’s on your mind?", fontSize = 28.sp, fontWeight = FontWeight.Light)
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
@@ -263,9 +267,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable private fun PresenceHud(mode: String, phase: String) {
+@Composable private fun PresenceHud(mode: String, connected: Boolean, phase: String) {
     var web by remember { mutableStateOf<WebView?>(null) }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    fun pushState(view: WebView?) {
+        val target = view ?: return
+        target.evaluateJavascript("window.setJarvisConnected && window.setJarvisConnected($connected)", null)
+        target.evaluateJavascript("window.setJarvisAppearance && window.setJarvisAppearance(${JSONObject.quote(mode)})", null)
+        target.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null)
+    }
     DisposableEffect(owner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) web?.onPause()
@@ -274,6 +284,7 @@ class MainActivity : ComponentActivity() {
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer); web?.destroy(); web = null }
     }
+    LaunchedEffect(mode, connected, phase, web) { pushState(web) }
     AndroidView(modifier = Modifier.fillMaxWidth().height(310.dp), factory = { context ->
         WebView(context).apply {
             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
@@ -291,13 +302,13 @@ class MainActivity : ComponentActivity() {
                     return loader.shouldInterceptRequest(request.url)
                         ?: android.webkit.WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 }
+                override fun onPageFinished(view: WebView, url: String?) {
+                    pushState(view)
+                }
             }
             loadUrl("https://appassets.androidplatform.net/assets/orb/index.html")
         }
-    }, update = {
-        it.evaluateJavascript("window.setJarvisAppearance && window.setJarvisAppearance(${JSONObject.quote(mode)})", null)
-        it.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null)
-    })
+    }, update = { pushState(it) })
 }
 
 @Composable private fun ModelPicker(state: CompanionState, select: (String) -> Unit) {
