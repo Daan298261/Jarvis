@@ -4,7 +4,6 @@ import {
   assistantReplyText,
   filterWorkEvents,
   isTaskRunning,
-  readShowWorkPreference,
   taskStatusLine,
   writeShowWorkPreference,
   type OwnerChatEvent,
@@ -39,7 +38,7 @@ export function OwnerChatTranscript({
   events = [],
   variant,
 }: OwnerChatTranscriptProps) {
-  const [detailsOpen, setDetailsOpen] = useState(() => readShowWorkPreference())
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const workEvents = useMemo(() => filterWorkEvents(events), [events])
   const running = isTaskRunning(status)
   const reply = assistantReplyText(result, error)

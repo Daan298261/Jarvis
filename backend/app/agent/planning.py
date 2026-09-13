@@ -71,6 +71,13 @@ def resolve_execution_policy(name: str | None) -> ExecutionPolicy:
 
 CONVERSATION_CLASS = "conversation"
 
+_SOCIAL_ROUTING_HINTS = re.compile(
+    r"(?i)\b("
+    r"weather|temperature|forecast|rain|sunny|cloud|degrees|"
+    r"what time|time is it|tell me a joke"
+    r")\b",
+)
+
 _CONVERSATION_BLOCKERS = (
     "fix ",
     "install ",
@@ -106,6 +113,8 @@ def is_plain_conversation(prompt: str) -> bool:
     action_hits = sum(1 for _, keywords in TASK_CATEGORIES for keyword in keywords if keyword in lowered)
     if action_hits > 0:
         return False
+    if _SOCIAL_ROUTING_HINTS.search(lowered):
+        return True
     chatty = (
         "?" in text
         or lowered.startswith(("hi", "hello", "hey", "good morning", "good afternoon", "good evening"))

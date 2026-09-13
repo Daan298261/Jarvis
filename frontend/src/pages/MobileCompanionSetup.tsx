@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import {
   api,
   companionBuildPhase,
+  fetchCompanionOnboarding,
   startCompanionBuild,
   type CompanionBuildJob,
+  type CompanionOnboardingSnapshot,
 } from "../api"
 import { CompanionApkBuildPanel } from "../components/CompanionApkBuildPanel"
 import { CompanionPairingPanel } from "../components/CompanionPairingPanel"
@@ -29,6 +32,7 @@ export function MobileCompanionSetup() {
   const [build, setBuild] = useState<CompanionBuildJob | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
+  const [onboarding, setOnboarding] = useState<CompanionOnboardingSnapshot | null>(null)
 
   const refresh = () => api<Device[]>("/api/mobile/manage/devices").then(setDevices)
 
@@ -40,6 +44,12 @@ export function MobileCompanionSetup() {
     tick()
     const interval = window.setInterval(tick, 5000)
     return () => window.clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    fetchCompanionOnboarding()
+      .then(setOnboarding)
+      .catch(() => setOnboarding(null))
   }, [])
 
   async function run(action: () => Promise<unknown>) {
@@ -186,7 +196,39 @@ export function MobileCompanionSetup() {
           Start a build above. Progress, Download to Desktop, and optional WhatsApp/email send appear here.
         </p>
       )}
-      <div style={{ marginTop: 16 }}>
+      <div className="companion-offline-pair-cta" style={{ marginTop: 16 }}>
+        <h3 style={{ marginBottom: 8 }}>Pair after install (offline-friendly)</h3>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Generic and sideload APKs pair on your LAN with the same 6-digit code and QR as this desktop — no
+          rebuild required.
+          {connection?.state !== "ready" &&
+            " Prepare connection above first, then open the full pairing screen for the code and QR."}
+          {onboarding && onboarding.paired_device_count === 0 && onboarding.connection.ready && (
+            <> The live code below updates from the server.</>
+          )}
+        </p>
+        <div className="row" style={{ gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+          <Link className="btn" to="/companion-pairing">Open pairing code + QR</Link>
+          {connection?.state !== "ready" && (
+            <button
+              className="btn secondary"
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                run(async () =>
+                  setConnection(
+                    await api<Connection>("/api/mobile/manage/connection", {
+                      method: "POST",
+                      body: JSON.stringify({ enabled: true, remote }),
+                    }),
+                  ),
+                )
+              }
+            >
+              Prepare connection for pairing
+            </button>
+          )}
+        </div>
         <CompanionPairingPanel compact />
       </div>
       {error && <p role="alert">{error}</p>}

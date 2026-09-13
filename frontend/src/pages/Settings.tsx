@@ -111,8 +111,9 @@ export function SettingsPage() {
         <h2>Pair phone</h2>
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Show a 6-digit code for the Android companion app. Regenerate anytime; the previous unclaimed code
-          stops working.{" "}
-          <Link to="/companion-pairing">Open full pairing page</Link>.
+          stops working. The full pairing page includes the QR and spoken pair-vs-explore walkthrough.{" "}
+          <Link to="/companion-pairing">Open full pairing page</Link> ·{" "}
+          <Link to="/phone">Android companion home</Link> for offline generic APK pairing.
         </p>
         <CompanionPairingPanel compact />
       </div>

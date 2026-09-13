@@ -12,7 +12,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = providers.gradleProperty("releaseCode").orElse("1").get().toInt()
-        versionName = "1.3.2"
+        versionName = "1.3.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -28,7 +28,10 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            if (System.getenv("JARVIS_APK_KEYSTORE") != null) signingConfig = signingConfigs.getByName("swarm")
+            signingConfig = when {
+                System.getenv("JARVIS_APK_KEYSTORE") != null -> signingConfigs.getByName("swarm")
+                else -> signingConfigs.getByName("debug")
+            }
         }
     }
     buildFeatures { compose = true; buildConfig = true }
