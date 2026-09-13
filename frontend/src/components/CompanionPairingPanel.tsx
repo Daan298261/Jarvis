@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { QRCodeSVG } from "qrcode.react"
 import {
   api,
@@ -14,6 +15,8 @@ import { speakChatReply } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 
 type CompanionDevice = { id: string; name: string; status: string; fingerprint: string }
+
+const COMPANION_ONBOARDING_SPOKEN_KEY = "jarvis_companion_onboarding_spoken_v1"
 
 function formatDigits(code: string): string {
   const digits = code.replace(/\D/g, "").slice(0, 6)
@@ -62,6 +65,7 @@ type PanelState =
   | { mode: "error"; message: string }
 
 export function CompanionPairingPanel({ compact = false }: { compact?: boolean }) {
+  const navigate = useNavigate()
   const [state, setState] = useState<PanelState>({ mode: "loading" })
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState("")
@@ -69,6 +73,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
   const [onboarding, setOnboarding] = useState<CompanionOnboardingSnapshot | null>(null)
   const [spokenOfferId, setSpokenOfferId] = useState<string | null>(null)
   const [speakChatReplies] = useSpeakChatReplies()
+  const autoSpokenRef = useRef(false)
 
   const refreshDevices = useCallback(() => {
     if (compact) return Promise.resolve()
@@ -121,6 +126,32 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
       .then(setOnboarding)
       .catch(() => setOnboarding(null))
   }, [])
+
+  useEffect(() => {
+    if (compact || !onboarding || autoSpokenRef.current) return
+    if (onboarding.paired_device_count > 0) return
+    try {
+      if (sessionStorage.getItem(COMPANION_ONBOARDING_SPOKEN_KEY)) return
+    } catch {
+      return
+    }
+    const pairOffer = onboarding.offers.find((offer) => offer.id === "pair_phone")
+    if (!pairOffer) return
+    autoSpokenRef.current = true
+    try {
+      sessionStorage.setItem(COMPANION_ONBOARDING_SPOKEN_KEY, "1")
+    } catch {
+      // ignore
+    }
+    void speakOffer(pairOffer)
+  }, [compact, onboarding])
+
+  useEffect(() => {
+    if (!onboarding?.connection.ready) return
+    getActiveCompanionPairingCode()
+      .then(applyResult)
+      .catch(() => undefined)
+  }, [onboarding?.connection.ready, applyResult])
 
   useEffect(() => {
     if (compact) return
@@ -188,6 +219,9 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
     if (shouldSpeak) {
       await speakChatReply(offer.spoken_prompt)
     }
+    if (offer.id === "explore_features") {
+      navigate("/")
+    }
   }
 
   const displayCode =
@@ -226,6 +260,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
                 type="button"
                 disabled={busy}
                 onClick={() => void speakOffer(offer)}
+                title={offer.spoken_prompt}
               >
                 {offer.label}
               </button>

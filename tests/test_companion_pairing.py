@@ -226,6 +226,28 @@ def test_companion_onboarding_snapshot_offers_pair_and_explore(companion_env):
     offer_ids = {item["id"] for item in body["offers"]}
     assert offer_ids == {"pair_phone", "explore_features"}
     assert all("spoken_prompt" in item for item in body["offers"])
+    assert "connection" in body
+    assert body["connection"]["ready"] is False
+
+
+def test_companion_onboarding_marks_connection_ready(companion_env, monkeypatch):
+    from app.mobile import connectivity
+
+    monkeypatch.setattr(
+        connectivity.CONNECTIVITY,
+        "snapshot",
+        lambda: {
+            "state": "ready",
+            "activity": "listening",
+            "endpoints": ["https://192.168.1.5:4781"],
+            "server_pin": "b" * 64,
+        },
+    )
+    client = companion_env["client"]
+    body = client.get("/api/mobile/onboarding/companion").json()
+    assert body["connection"]["ready"] is True
+    pair = next(item for item in body["offers"] if item["id"] == "pair_phone")
+    assert "QR" in pair["spoken_prompt"] or "qr" in pair["spoken_prompt"].lower()
 
 
 def test_companion_enroll_legacy_invitation_without_owner_key(companion_env):
