@@ -4,6 +4,7 @@ from typing import Any, Iterable
 
 from ..tools.mcp_runtime import MCP
 from ..tools.registry import REGISTRY
+from ..inference.security_gates import gate_is_enabled
 
 # Task class → native tools Jarvis should send to the model.
 # Mixed / long-horizon tasks keep the full enabled set.
@@ -53,10 +54,18 @@ CAPABILITY_ALIASES: dict[str, str] = {
 ESCAPE_TOOL = "request_tools"
 ESCAPE_TOOLS = ("request_tools", "request_capability")
 MCP_CAPABILITY = "mcp"
+RESTRICTED_TOOLS = frozenset({"hexstrike_defensive"})
 
 
-def _enabled_native() -> list[str]:
-    return [name for name, tool in REGISTRY.tools.items() if tool.enabled and name != ESCAPE_TOOL]
+def _enabled_native(security_role: str = "") -> list[str]:
+    blue = security_role == "blue-team" and gate_is_enabled("blue-team")
+    return [
+        name
+        for name, tool in REGISTRY.tools.items()
+        if tool.enabled
+        and name != ESCAPE_TOOL
+        and (name not in RESTRICTED_TOOLS or blue)
+    ]
 
 
 def is_full_exposure(task_class: str, extra: Iterable[str] | None = None) -> bool:
@@ -86,26 +95,38 @@ def normalize_capabilities(raw: Iterable[str] | str | None) -> list[str]:
     return out
 
 
-def tool_names_for(task_class: str, extra: Iterable[str] | None = None) -> list[str]:
+def tool_names_for(
+    task_class: str,
+    extra: Iterable[str] | None = None,
+    *,
+    security_role: str = "",
+) -> list[str]:
     extras = normalize_capabilities(extra)
     if is_full_exposure(task_class, extras):
-        return _enabled_native()
+        return _enabled_native(security_role)
     wanted = list(CLASS_TOOLS.get((task_class or "").strip().lower(), ()))
     for name in extras:
         if name == MCP_CAPABILITY:
             continue
         if name not in wanted:
             wanted.append(name)
-    enabled = set(_enabled_native())
+    if security_role == "blue-team" and "hexstrike_defensive" not in wanted:
+        wanted.append("hexstrike_defensive")
+    enabled = set(_enabled_native(security_role))
     names = [name for name in wanted if name in enabled]
     if "filesystem" not in names and "filesystem" in enabled:
         names.insert(0, "filesystem")
     return names
 
 
-def schemas_for(task_class: str, extra: Iterable[str] | None = None) -> list[dict[str, Any]]:
+def schemas_for(
+    task_class: str,
+    extra: Iterable[str] | None = None,
+    *,
+    security_role: str = "",
+) -> list[dict[str, Any]]:
     extras = normalize_capabilities(extra)
-    names = tool_names_for(task_class, extras)
+    names = tool_names_for(task_class, extras, security_role=security_role)
     schemas = [REGISTRY.tools[name].schema() for name in names if name in REGISTRY.tools]
     full = is_full_exposure(task_class, extras)
     if not full:
@@ -118,8 +139,13 @@ def schemas_for(task_class: str, extra: Iterable[str] | None = None) -> list[dic
     return schemas
 
 
-def describe_exposure(task_class: str, extra: Iterable[str] | None = None) -> str:
-    names = tool_names_for(task_class, extra)
+def describe_exposure(
+    task_class: str,
+    extra: Iterable[str] | None = None,
+    *,
+    security_role: str = "",
+) -> str:
+    names = tool_names_for(task_class, extra, security_role=security_role)
     full = is_full_exposure(task_class, extra)
     listed = ", ".join(names) or "(none)"
     if full:

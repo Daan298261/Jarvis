@@ -26,6 +26,7 @@ from .external_ingest import ExternalIngestTool
 from .internal_references import InternalReferencesTool
 from .web_fetch import WebFetchTool
 from .mobile_call import MobileCallTool
+from .hexstrike_defensive import HexStrikeDefensiveTool
 
 
 class ToolRegistry:
@@ -59,6 +60,7 @@ class ToolRegistry:
             UFOTool(),
             CuaTool(),
             MobileCallTool(),
+            HexStrikeDefensiveTool(getter),
         ]
         self.tools = {tool.name: tool for tool in items}
 
@@ -68,12 +70,14 @@ class ToolRegistry:
     def apply_settings(self, settings: AppSettings) -> None:
         allowed = settings.allowed_directories or default_allowed_directories()
         exposure = self._context.get("exposure")
+        security_role = self._context.get("security_role")
         self._context = {
             "allowed_directories": allowed,
             "autonomy": settings.autonomy,
             "browser": settings.browser.model_dump(),
             "backup_enabled": settings.backup_enabled,
             "exposure": exposure,
+            "security_role": security_role,
         }
         disabled = set(settings.disabled_tools or [])
         for name, tool in self.tools.items():
@@ -105,7 +109,14 @@ class ToolRegistry:
         if name in self.tools:
             self.tools[name].enabled = enabled
 
-    async def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        security_role: str | None = None,
+    ) -> ToolResult:
+        self._context["security_role"] = security_role or ""
         exposure = self._context.get("exposure")
         if isinstance(exposure, ToolExposure):
             if name in {REQUEST_CAPABILITY, "request_tools"}:

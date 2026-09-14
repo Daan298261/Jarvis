@@ -47,6 +47,8 @@ def _add_missing_columns(sync_conn) -> None:
         statements.append("ALTER TABLE tasks ADD COLUMN execution_mode VARCHAR(32) DEFAULT 'balanced'")
     if "task_class" not in columns:
         statements.append("ALTER TABLE tasks ADD COLUMN task_class VARCHAR(64) DEFAULT ''")
+    if "security_role" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN security_role VARCHAR(32) DEFAULT ''")
     if "response_route" not in columns:
         statements.append("ALTER TABLE tasks ADD COLUMN response_route VARCHAR(32) DEFAULT 'managed_task'")
     if "first_response_ms" not in columns:

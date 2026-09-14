@@ -401,6 +401,7 @@ class WorkingState:
     blockers: list[str] = field(default_factory=list)
     next_action: str = ""
     task_class: str = ""
+    security_role: str = ""
     verified: bool = False
     requested_tools: list[str] = field(default_factory=list)
     extra_tools: list[str] = field(default_factory=list)
@@ -440,6 +441,7 @@ class WorkingState:
             "Compact working state:\n"
             f"Goal: {self.goal or '(same as user request)'}\n"
             f"Task class: {self.task_class or 'mixed'}\n"
+            f"Security role: {self.security_role or 'none'}\n"
             f"Acceptance criteria:\n{criteria}\n"
             f"Plan:\n{plan}\n"
             f"Current state: {self.current_state or 'starting'}\n"
