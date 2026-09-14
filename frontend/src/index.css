@@ -533,6 +533,9 @@ input[type="text"], input[type="email"], input[type="number"], input[type="passw
 }
 
 .toggle { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.worker-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.worker-actions .btn { padding: 8px 12px; font-size: 13px; white-space: nowrap; }
+.worker-install-error { color: var(--bad); }
 
 .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
 

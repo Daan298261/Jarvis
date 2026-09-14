@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
+import { prunePendingUserTexts } from "../chat/ownerChatView"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
@@ -16,6 +17,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const navigate = useNavigate()
   const [prompt, setPrompt] = useState("")
   const [task, setTask] = useState<Task | null>(null)
+  const [pending, setPending] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [keyInput, setKeyInput] = useState<string>(getPrivateKey())
   const [showAuthModal, setShowAuthModal] = useState(false)
@@ -29,6 +31,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   useEffect(() => {
     if (!id) {
       setTask(null)
+      setPending([])
       return
     }
     let timer: number
@@ -56,7 +59,19 @@ export function HudChat({ onMoodChange }: HudChatProps) {
     const node = threadRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [task?.events?.length, task?.result, task?.status, task?.id])
+  }, [task?.events?.length, task?.result, task?.status, task?.id, task?.messages?.length, pending.length])
+
+  useEffect(() => {
+    if (!task) return
+    setPending((current) =>
+      prunePendingUserTexts(current, {
+        prompt: task.prompt,
+        result: task.result,
+        error: task.error,
+        messages: task.messages,
+      }),
+    )
+  }, [task?.messages, task?.prompt, task?.result, task?.error])
 
   async function submit() {
     const text = prompt.trim()
@@ -66,6 +81,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
     setBusy(true)
     try {
       if (id) {
+        if (text) setPending((current) => (current.includes(text) ? current : [...current, text]))
         await api(`/api/tasks/${id}/continue`, {
           method: "POST",
           body: JSON.stringify({ prompt: text || "Continue this." }),
@@ -145,6 +161,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
             result={shown.result}
               error={shown.error}
               events={shown.events}
+              messages={shown.messages}
+              pending={pending}
             />
           )}
         </div>
@@ -156,7 +174,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder={id ? "Follow up…" : "Ask Jarvis anything…"}
+          placeholder={id ? "Message…" : "Ask Jarvis anything…"}
           rows={2}
           aria-label="Message Jarvis"
         />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { api, getDiagnostics, getDiagnosticsText } from "../api"
+import { OptionalWorkerRow } from "../components/OptionalWorkerRow"
 import { DesktopBridge } from "../desktop/bridge"
 
 export function SystemPage() {
@@ -209,13 +210,17 @@ export function SystemPage() {
         <div className="card" style={{ marginTop: 16 }}>
           <h2>Backends</h2>
           {(info.capabilities.all || []).map((item: any) => (
-            <div className="toggle" key={item.id}>
-              <div>
-                <strong>{item.name}</strong>
-                <div className="lede" style={{ margin: "4px 0 0" }}>{item.detail}</div>
+            item.installable || item.install_status === "installing" || item.install_error ? (
+              <OptionalWorkerRow key={item.id} worker={item} onChanged={() => { void refresh() }} />
+            ) : (
+              <div className="toggle" key={item.id}>
+                <div>
+                  <strong>{item.name}</strong>
+                  <div className="lede" style={{ margin: "4px 0 0" }}>{item.detail}</div>
+                </div>
+                <span className={`badge ${item.available ? "completed" : "queued"}`}>{item.status}</span>
               </div>
-              <span className={`badge ${item.available ? "completed" : "queued"}`}>{item.status}</span>
-            </div>
+            )
           ))}
         </div>
       )}

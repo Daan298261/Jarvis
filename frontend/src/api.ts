@@ -145,6 +145,7 @@ export type Task = {
     timestamp?: string | null
   }
   events?: { kind: string; title: string; detail: string; stage: string; phase?: string; source?: string; created_at: string }[]
+  messages?: { role: "user" | "assistant" | string; content: string }[]
 }
 
 export type SwarmNodeHardware = {

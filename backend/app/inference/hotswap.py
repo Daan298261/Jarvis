@@ -109,6 +109,20 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
             timeout=8.0,
             retry=True,
         )
+        if not probe.get("ok") and provider == "lmstudio" and host in {"127.0.0.1", "localhost", "::1"}:
+            from .lmstudio_server import ensure_local_lmstudio
+
+            boot = await ensure_local_lmstudio(host=host, port=port, model=hint)
+            if boot.get("ok"):
+                probe = await probe_remote_server(
+                    host,
+                    port,
+                    settings.inference.api_key,
+                    timeout=8.0,
+                    retry=True,
+                )
+            elif not probe.get("error"):
+                probe = {**probe, "error": boot.get("detail") or probe.get("error")}
         if not probe.get("ok"):
             detail = probe.get("error") or "inference server did not respond"
             server = provider or "inference server"
