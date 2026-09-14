@@ -255,7 +255,7 @@ def apply_grant(permission_id: str, mode: str, *, persist: bool | None = None) -
     if spec.offensive and normalized in {"allow_once", "allow_session", "always"}:
         if not _gate_enabled(spec.gated):
             raise PermissionError(
-                f"{spec.title} stays denied until the Red Team password gate is unlocked. "
+                f"{spec.title} stays denied until the Red Team password gate is unlocked and a valid in-person ATO with LE is installed. "
                 "This flag does not add offensive tools."
             )
     if spec.gated and spec.group == "blue" and normalized in {"allow_once", "allow_session", "always"}:
@@ -304,7 +304,7 @@ def evaluate_permission(permission_id: str) -> PermissionDecision:
             return PermissionDecision(
                 permission_id,
                 "deny",
-                f"{spec.title} is locked. Unlock the {spec.gated} password gate first. "
+                f"{spec.title} is locked. Unlock the {spec.gated} password gate and install a valid in-person ATO license first. "
                 + ("Offensive tools are not shipped with this flag." if spec.offensive else ""),
                 spec,
             )

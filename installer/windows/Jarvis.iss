@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.3.4"
+#define MyAppVersion "1.3.5"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -43,7 +43,7 @@ Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDesc
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
 ; Exclude heavy or machine-local dirs — bootstrap recreates them on first run.
-Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**"
+Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,JarvisLicenseManager.exe"
 ; Always ship bootstrap beside the installed tree (also under installer\windows in source).
 Source: "bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 #ifndef SkipBootstrapModel

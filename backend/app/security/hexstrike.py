@@ -291,6 +291,14 @@ class HexStrikeManager:
             if current.running:
                 await self._enrich(current)
                 return current
+            from ..policy.cyber_ato import license_blocks
+
+            blocked = license_blocks("hexstrike")
+            if blocked:
+                self.last_error = blocked
+                current.last_error = self.last_error
+                audit_hexstrike("start_skipped", reason="license_locked")
+                return current
             if not current.installed:
                 self.last_error = (
                     "HexStrike AI is not installed. Clone https://github.com/0x4m4/hexstrike-ai "
@@ -354,8 +362,11 @@ class HexStrikeManager:
         self._log_handle = open(log_file, "ab", buffering=0)
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        compat = Path(__file__).with_name("hexstrike_compat.py")
         args = [
             current.python_executable or sys.executable,
+            str(compat),
+            "--server",
             str(server),
             "--port",
             str(current.port),

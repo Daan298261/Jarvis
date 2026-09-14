@@ -23,6 +23,7 @@ from app.workers.remote_desktop import rdp_command, validate_rdp_host
 def permission_store(tmp_path, monkeypatch):
     monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
     monkeypatch.setattr("app.inference.security_gates.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.policy.cyber_ato.data_dir", lambda: tmp_path)
     reset_computer_permission_state()
     return tmp_path
 

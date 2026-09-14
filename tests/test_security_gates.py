@@ -13,6 +13,7 @@ from app.inference.security_gates import (
     set_gate_password,
     unlock_gate,
 )
+from app.policy.cyber_ato import issue_license
 
 
 @pytest.fixture
@@ -20,7 +21,9 @@ def security_gate_store(jarvis_env, monkeypatch):
     root = jarvis_env["tmp"]
     monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: root)
     monkeypatch.setattr("app.inference.security_gates.data_dir", lambda: root)
+    monkeypatch.setattr("app.policy.cyber_ato.data_dir", lambda: root)
     reset_runtime_profiles()
+    issue_license(law_enforcement=True, blue_team=True, red_team=True, valid_days=90, install=True)
     return root
 
 
@@ -86,6 +89,7 @@ def test_security_gate_api_and_role_routing(security_gate_store, monkeypatch):
 
     monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: security_gate_store)
     monkeypatch.setattr("app.inference.security_gates.data_dir", lambda: security_gate_store)
+    monkeypatch.setattr("app.policy.cyber_ato.data_dir", lambda: security_gate_store)
     reset_runtime_profiles()
     client = TestClient(app)
 

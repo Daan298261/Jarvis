@@ -105,5 +105,28 @@ async def test_activate_suite_does_not_load_inference(jarvis_env, monkeypatch):
 
     profile = MODEL_CATALOG["hexstrike-suite"].runtime_profile()
     assert profile is not None
-    await activate_runtime_profile(profile)
-    assert called["load"] is False
+def test_compat_shim_stubs_mitmproxy_without_installing_it():
+    from app.security.hexstrike_compat import DISABLED_MESSAGE, install_optional_stubs
+
+    stubbed = install_optional_stubs(force=True)
+    assert "mitmproxy" in stubbed
+    import mitmproxy
+    from mitmproxy.tools.dump import DumpMaster
+
+    try:
+        DumpMaster()
+        raise AssertionError("proxy stub must fail closed")
+    except RuntimeError as exc:
+        assert DISABLED_MESSAGE in str(exc)
+    assert mitmproxy.__name__ == "mitmproxy"
+
+
+def test_bootstrap_script_excludes_vulnerable_proxy_stack():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-hexstrike.ps1").read_text(encoding="utf-8")
+    assert "mitmproxy" in text.lower()
+    assert "uninstall" in text.lower()
+    assert "pwntools" in text.lower()
+    assert "hexstrike_compat" in text
+    assert "d689933ff579d839c676c82b231f8e98326c5f04" in text

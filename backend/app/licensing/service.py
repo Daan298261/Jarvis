@@ -35,6 +35,11 @@ def _effective_expiry(payload) -> datetime:
 
 
 def _detect_clock_tamper(last_validated_at: str | None, now: datetime) -> str | None:
+    from .clock_log import CLOCK_ROLLBACK_MESSAGE, inspect_clock
+
+    verdict = inspect_clock(now=now, record=False)
+    if verdict.locked:
+        return CLOCK_ROLLBACK_MESSAGE
     if not last_validated_at:
         return None
     try:
