@@ -26,6 +26,7 @@ class Task(Base):
     profile: Mapped[str] = mapped_column(String(32), default="balanced")
     execution_mode: Mapped[str] = mapped_column(String(32), default="balanced")
     task_class: Mapped[str] = mapped_column(String(64), default="")
+    security_role: Mapped[str] = mapped_column(String(32), default="")
     response_route: Mapped[str] = mapped_column(String(32), default="managed_task")
     first_response_ms: Mapped[float] = mapped_column(Float, default=0)
     acceptance_criteria: Mapped[str] = mapped_column(Text, default="")

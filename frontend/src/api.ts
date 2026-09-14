@@ -841,6 +841,58 @@ export type HexStrikeStatus = {
   processes: Record<string, unknown>
   dashboard: Record<string, unknown> | null
   health: Record<string, unknown>
+  install: HexStrikeInstallStatus
+  capabilities: HexStrikeCapability[]
+  dependencies: HexStrikeDependency[]
+  missing_dependencies: string[]
+  managed_jobs: HexStrikeJob[]
+}
+
+export type HexStrikeInstallStatus = {
+  state: string
+  stage: string
+  progress: number
+  install_path: string
+  approved_remote: string
+  approved_commit: string
+  installed_commit: string
+  error: string
+  log_tail: string
+}
+
+export type HexStrikeCapability = {
+  id: string
+  title: string
+  scope_kinds: string[]
+  permission: string
+  upstream_path: string
+}
+
+export type HexStrikeDependency = {
+  id: string
+  command: string
+  available: boolean
+}
+
+export type HexStrikeScope = {
+  id: string
+  kind: string
+  value: string
+  label: string
+  attested_owned: boolean
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type HexStrikeJob = {
+  id: string
+  action: string
+  scope_id: string
+  status: string
+  started_at: string
+  finished_at?: string | null
+  error?: string
 }
 
 export async function getHexStrikeStatus(): Promise<HexStrikeStatus> {
@@ -862,6 +914,38 @@ export async function configureHexStrike(body: {
 }): Promise<HexStrikeStatus> {
   return api<HexStrikeStatus>("/api/hexstrike/config", {
     method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function installHexStrike(installPath?: string): Promise<HexStrikeInstallStatus> {
+  return api<HexStrikeInstallStatus>("/api/hexstrike/install", {
+    method: "POST",
+    body: JSON.stringify({ install_path: installPath || null }),
+  })
+}
+
+export async function listHexStrikeScopes(): Promise<{ scopes: HexStrikeScope[] }> {
+  return api<{ scopes: HexStrikeScope[] }>("/api/hexstrike/scopes")
+}
+
+export async function upsertHexStrikeScope(
+  scopeId: string,
+  body: { kind: string; value: string; label?: string; attested_owned: boolean },
+): Promise<HexStrikeScope> {
+  return api<HexStrikeScope>(`/api/hexstrike/scopes/${encodeURIComponent(scopeId)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function runHexStrikeAction(body: {
+  action: string
+  scope_id: string
+  options?: Record<string, unknown>
+}): Promise<HexStrikeJob> {
+  return api<HexStrikeJob>("/api/hexstrike/actions", {
+    method: "POST",
     body: JSON.stringify(body),
   })
 }

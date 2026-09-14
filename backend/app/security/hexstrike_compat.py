@@ -11,7 +11,7 @@ are outside Jarvis's defensive surface. This shim:
 from __future__ import annotations
 
 import argparse
-import runpy
+import os
 import sys
 import types
 from pathlib import Path
@@ -96,7 +96,16 @@ def _install_stub_tree(names: tuple[str, ...]) -> None:
         if parent_name and parent_name in sys.modules:
             setattr(sys.modules[parent_name], child, module)
     for module in created.values():
-        for attr in ("DumpMaster", "Options", "http", "webdriver", "TimeoutException", "WebDriverException"):
+        for attr in (
+            "By",
+            "DumpMaster",
+            "Options",
+            "WebDriverWait",
+            "WebDriverException",
+            "TimeoutException",
+            "http",
+            "webdriver",
+        ):
             if not hasattr(module, attr):
                 setattr(module, attr, _Stub(attr))
 
@@ -122,13 +131,37 @@ def install_optional_stubs(*, force: bool = False) -> list[str]:
 
 
 def launch_reviewed_server(server: Path, argv: list[str] | None = None) -> None:
-    path = Path(server)
+    path = Path(server).resolve()
     if not path.is_file():
         raise SystemExit(f"HexStrike server not found: {path}")
+    if path.name != "hexstrike_server.py":
+        raise SystemExit("refusing to launch an unexpected server file")
     _ensure_required()
-    install_optional_stubs()
+    install_optional_stubs(force=True)
+    state_root = Path(
+        os.environ.get("JARVIS_HEXSTRIKE_STATE_DIR", path.parent / "jarvis-state")
+    ).resolve()
+    state_root.mkdir(parents=True, exist_ok=True)
+    source = path.read_text(encoding="utf-8")
+    replacements = {
+        'base_dir: str = "/tmp/hexstrike_envs"': f"base_dir: str = {str(state_root / 'python-envs')!r}",
+        'base_dir: str = "/tmp/hexstrike_files"': f"base_dir: str = {str(state_root / 'files')!r}",
+        'app.run(host="0.0.0.0", port=API_PORT, debug=DEBUG_MODE)': (
+            'app.run(host=API_HOST, port=API_PORT, debug=DEBUG_MODE)'
+        ),
+    }
+    for marker, replacement in replacements.items():
+        if source.count(marker) != 1:
+            raise SystemExit(f"refusing unexpected pinned source layout: {marker}")
+        source = source.replace(marker, replacement)
     sys.argv = [str(path), *(argv or [])]
-    runpy.run_path(str(path), run_name="__main__")
+    namespace = {
+        "__name__": "__main__",
+        "__file__": str(path),
+        "__package__": None,
+        "__cached__": None,
+    }
+    exec(compile(source, str(path), "exec"), namespace)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -3,6 +3,8 @@ models/
 runtime/llama.cpp/
 runtime/*.zip
 runtime/llama-server-help.txt
+runtime/hexstrike-ai/
+runtime/hexstrike-ai.staging-*/
 
 # Installer-staged multi-GB model payloads
 installer/windows/payload/models/

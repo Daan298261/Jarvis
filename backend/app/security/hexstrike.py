@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -40,7 +41,18 @@ ALLOWED_GET_EXACT = frozenset(
     }
 )
 ALLOWED_GET_PREFIXES = ("api/processes/status/",)
-ALLOWED_POST_PREFIXES = ("api/processes/terminate/",)
+ALLOWED_POST_PREFIXES: tuple[str, ...] = ()
+
+DEFENSIVE_POST_EXACT = frozenset(
+    {
+        "api/tools/nmap",
+        "api/tools/trivy",
+        "api/tools/checkov",
+        "api/tools/docker-bench-security",
+        "api/tools/exiftool",
+    }
+)
+_MANAGED_TERMINATE_RE = re.compile(r"^api/processes/terminate/[1-9][0-9]*$")
 
 _BLOCKED_TOKENS = (
     "command",
@@ -237,6 +249,7 @@ class HexStrikeManager:
         self._log_handle: Any = None
         self._starting = False
         self.last_error = ""
+        self._health: dict[str, Any] = {}
 
     @property
     def is_running(self) -> bool:
@@ -307,6 +320,13 @@ class HexStrikeManager:
                 current.last_error = self.last_error
                 audit_hexstrike("start_skipped", reason="not_installed")
                 return current
+            from .hexstrike_install import HEXSTRIKE_INSTALLER
+
+            if not HEXSTRIKE_INSTALLER.installation_ready(Path(current.install_path)):
+                self.last_error = "HexStrike checkout is not the reviewed clean pinned commit. Run Install/Repair."
+                current.last_error = self.last_error
+                audit_hexstrike("start_skipped", reason="unreviewed_source")
+                return current
             self._starting = True
             current.starting = True
             try:
@@ -336,14 +356,25 @@ class HexStrikeManager:
     async def _stop_unlocked(self) -> None:
         process = self._process
         self._process = None
+        self._health = {}
         if process and process.returncode is None:
             try:
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=8)
-                except TimeoutError:
-                    process.kill()
-                    await process.wait()
+                if os.name == "nt":
+                    taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
+                    killer = await asyncio.create_subprocess_exec(
+                        str(taskkill), "/PID", str(process.pid), "/T", "/F",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await asyncio.wait_for(killer.wait(), timeout=10)
+                    await asyncio.wait_for(process.wait(), timeout=10)
+                else:
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=8)
+                    except TimeoutError:
+                        process.kill()
+                        await process.wait()
             except Exception:
                 log.debug("HexStrike stop failed", exc_info=True)
         if self._log_handle:
@@ -362,6 +393,11 @@ class HexStrikeManager:
         self._log_handle = open(log_file, "ab", buffering=0)
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        env["HEXSTRIKE_HOST"] = "127.0.0.1"
+        env["HEXSTRIKE_PORT"] = str(current.port)
+        env["JARVIS_HEXSTRIKE_STATE_DIR"] = str(install / "jarvis-state")
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         compat = Path(__file__).with_name("hexstrike_compat.py")
         args = [
             current.python_executable or sys.executable,
@@ -380,21 +416,44 @@ class HexStrikeManager:
         if os.name == "nt":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         self._process = await asyncio.create_subprocess_exec(*args, **kwargs)
-        from ..inference.backends import wait_for_health
-
-        ready = await wait_for_health(current.health_url, timeout=45, process=self._process)
+        ready = await self._wait_for_loopback_health(current.health_url, timeout=180)
         if not ready:
             self.last_error = "HexStrike process started but /health did not respond on loopback."
             await self._stop_unlocked()
             return False
         return True
 
+    async def _wait_for_loopback_health(self, url: str, *, timeout: float) -> bool:
+        deadline = asyncio.get_running_loop().time() + timeout
+        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+            while asyncio.get_running_loop().time() < deadline:
+                if self._process is not None and self._process.returncode is not None:
+                    return False
+                try:
+                    response = await client.get(url)
+                    if response.status_code < 500:
+                        try:
+                            payload = response.json()
+                            self._health = payload if isinstance(payload, dict) else {}
+                        except ValueError:
+                            self._health = {}
+                        return True
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(1)
+        return False
+
     async def _enrich(self, snapshot: HexStrikeStatus) -> None:
         base = f"http://{snapshot.host}:{snapshot.port}"
-        health = await self._get_json(f"{base}/health")
+        health = self._health
         if isinstance(health, dict):
             snapshot.health = health
-            tools = health.get("tools") or health.get("available_tools") or health.get("tool_status")
+            tools = (
+                health.get("tools")
+                or health.get("available_tools")
+                or health.get("tool_status")
+                or health.get("tools_status")
+            )
             if isinstance(tools, dict):
                 snapshot.tools = tools
             elif isinstance(tools, list):
@@ -429,6 +488,29 @@ class HexStrikeManager:
         content_type = response.headers.get("content-type", "application/json")
         audit_hexstrike("proxy", method=method, path=cleaned, status=response.status_code)
         return response.status_code, response.content, content_type
+
+    async def post_defensive(self, path: str, payload: dict[str, Any]) -> Any:
+        """Call one reviewed defensive endpoint; never accept arbitrary upstream paths."""
+        cleaned = normalize_upstream_path(path)
+        if cleaned not in DEFENSIVE_POST_EXACT and not _MANAGED_TERMINATE_RE.fullmatch(cleaned):
+            audit_hexstrike("defensive_proxy_denied", path=cleaned)
+            raise PermissionError(f"HexStrike defensive gateway does not allow POST /{cleaned}")
+        if any(token in cleaned.lower() for token in _BLOCKED_TOKENS):
+            audit_hexstrike("defensive_proxy_denied", path=cleaned)
+            raise PermissionError(f"HexStrike defensive gateway denied POST /{cleaned}")
+        snapshot = self._base_status()
+        if not snapshot.running:
+            raise RuntimeError("HexStrike is not running")
+        url = f"http://{snapshot.host}:{snapshot.port}/{cleaned}"
+        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+            response = await client.post(url, json=payload)
+        audit_hexstrike("defensive_proxy", path=cleaned, status=response.status_code)
+        if response.status_code >= 400:
+            raise RuntimeError(f"HexStrike returned HTTP {response.status_code}")
+        try:
+            return response.json()
+        except ValueError:
+            return {"text": response.text[:12000]}
 
     async def _get_json(self, url: str) -> Any | None:
         parsed = urlparse(url)

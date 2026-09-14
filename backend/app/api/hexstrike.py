@@ -1,11 +1,24 @@
-"""HexStrike AI cybersecurity suite API (RFC-0078)."""
+"""HexStrike AI cybersecurity suite API (RFC-0078/0086)."""
 from __future__ import annotations
+
+import shutil
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from ..security.hexstrike import HEXSTRIKE, gateway_allows
+from ..security.hexstrike import HEXSTRIKE, audit_hexstrike, gateway_allows
+from ..security.hexstrike_defensive import (
+    CAPABILITY_BY_ID,
+    capability_snapshot,
+    execute_defensive,
+    list_jobs,
+    list_scopes,
+    stop_managed_job,
+    upsert_scope,
+)
+from ..security.hexstrike_install import HEXSTRIKE_INSTALLER
 
 router = APIRouter(prefix="/api/hexstrike", tags=["hexstrike"])
 
@@ -16,32 +29,113 @@ class HexStrikeConfigIn(BaseModel):
     port: int | None = Field(default=None, ge=1, le=65535)
 
 
+class HexStrikeInstallIn(BaseModel):
+    install_path: str | None = None
+
+
+class HexStrikeScopeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["private_host", "private_cidr", "local_path", "container_image", "local_infrastructure"]
+    value: str = Field(min_length=1, max_length=1000)
+    label: str = Field(default="", max_length=120)
+    attested_owned: bool = False
+
+
+class HexStrikeActionOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cve: str | None = Field(default=None, pattern=r"^CVE-[0-9]{4}-[0-9]{4,}$")
+
+
+class HexStrikeActionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal[
+        "lan_inventory",
+        "container_scan",
+        "iac_scan",
+        "host_baseline",
+        "forensic_inspection",
+        "threat_intel_lookup",
+    ]
+    scope_id: str = Field(min_length=1, max_length=80)
+    options: HexStrikeActionOptions = Field(default_factory=HexStrikeActionOptions)
+
+
+def _operator_permission(permission_id: str) -> None:
+    from ..policy.computer_permissions import evaluate_permission, operator_intent_grant
+
+    for required in dict.fromkeys(("cyber.hexstrike", permission_id)):
+        decision = evaluate_permission(required)
+        if decision.status == "deny":
+            audit_hexstrike("permission_denied", permission=required, reason=decision.reason)
+            raise HTTPException(status_code=403, detail=decision.reason)
+        if decision.status == "ask":
+            try:
+                operator_intent_grant(required, "allow_session")
+            except PermissionError as exc:
+                audit_hexstrike("permission_denied", permission=required, reason=str(exc))
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+async def _status_payload() -> dict[str, Any]:
+    payload = (await HEXSTRIKE.status()).as_dict()
+    payload["install"] = HEXSTRIKE_INSTALLER.status().as_dict()
+    payload["capabilities"] = capability_snapshot()
+    commands = {
+        "lan_inventory": "nmap",
+        "container_scan": "trivy",
+        "iac_scan": "checkov",
+        "host_baseline": "docker",
+        "forensic_inspection": "exiftool",
+        "threat_intel_lookup": "network",
+    }
+    dependencies = [
+        {
+            "id": action,
+            "command": command,
+            "available": command == "network" or shutil.which(command) is not None,
+        }
+        for action, command in commands.items()
+    ]
+    payload["dependencies"] = dependencies
+    payload["missing_dependencies"] = [item["command"] for item in dependencies if not item["available"]]
+    payload["managed_jobs"] = list_jobs()
+    return payload
+
+
 @router.get("")
 async def hexstrike_status():
-    status = await HEXSTRIKE.status()
-    return status.as_dict()
+    return await _status_payload()
 
 
 @router.post("/start")
 async def hexstrike_start():
-    from ..policy.computer_permissions import evaluate_permission, operator_intent_grant
-
-    decision = evaluate_permission("cyber.hexstrike")
-    if decision.status == "deny":
-        raise HTTPException(status_code=403, detail=decision.reason)
-    if decision.status == "ask":
-        try:
-            operator_intent_grant("cyber.hexstrike", "allow_session")
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-    status = await HEXSTRIKE.ensure_started()
-    return status.as_dict()
+    _operator_permission("cyber.hexstrike")
+    return (await HEXSTRIKE.ensure_started()).as_dict()
 
 
 @router.post("/stop")
 async def hexstrike_stop():
-    status = await HEXSTRIKE.stop()
-    return status.as_dict()
+    return (await HEXSTRIKE.stop()).as_dict()
+
+
+@router.get("/install")
+async def hexstrike_install_status():
+    return HEXSTRIKE_INSTALLER.status().as_dict()
+
+
+@router.post("/install")
+async def hexstrike_install(body: HexStrikeInstallIn | None = None):
+    _operator_permission("blue.static_rules")
+    return HEXSTRIKE_INSTALLER.start(body.install_path if body else None).as_dict()
+
+
+@router.post("/install/cancel")
+async def hexstrike_install_cancel():
+    _operator_permission("cyber.hexstrike")
+    return (await HEXSTRIKE_INSTALLER.cancel()).as_dict()
 
 
 @router.put("/config")
@@ -54,9 +148,75 @@ async def hexstrike_config(body: HexStrikeConfigIn):
     return status.as_dict()
 
 
+@router.get("/capabilities")
+async def hexstrike_capabilities():
+    return {"capabilities": capability_snapshot()}
+
+
+@router.get("/scopes")
+async def hexstrike_scopes():
+    return {"scopes": list_scopes()}
+
+
+@router.put("/scopes/{scope_id}")
+async def hexstrike_scope_put(scope_id: str, body: HexStrikeScopeIn):
+    _operator_permission("blue.static_rules")
+    try:
+        return upsert_scope(
+            scope_id,
+            kind=body.kind,
+            value=body.value,
+            label=body.label,
+            attested_owned=body.attested_owned,
+        )
+    except PermissionError as exc:
+        audit_hexstrike("scope_denied", scope_id=scope_id, kind=body.kind, reason=str(exc))
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        audit_hexstrike("scope_denied", scope_id=scope_id, kind=body.kind, reason=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/actions")
+async def hexstrike_actions():
+    return {"jobs": list_jobs(), "capabilities": capability_snapshot()}
+
+
+@router.post("/actions")
+async def hexstrike_action(body: HexStrikeActionIn):
+    capability = CAPABILITY_BY_ID[body.action]
+    _operator_permission(capability.permission)
+    if body.action == "threat_intel_lookup":
+        _operator_permission("network.internet")
+    try:
+        return await execute_defensive(body.action, body.scope_id, body.options.model_dump(exclude_none=True))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown or disabled HexStrike scope") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/actions/{job_id}/stop")
+async def hexstrike_action_stop(job_id: str):
+    _operator_permission("blue.active_response")
+    try:
+        return await stop_managed_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown managed HexStrike job") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.api_route("/upstream/{path:path}", methods=["GET", "POST"])
 async def hexstrike_upstream(path: str, request: Request):
     if not gateway_allows(request.method, path):
+        audit_hexstrike("proxy_denied", method=request.method, path=path)
         raise HTTPException(status_code=403, detail="HexStrike gateway denied this path")
     body = b""
     if request.method.upper() != "GET":
