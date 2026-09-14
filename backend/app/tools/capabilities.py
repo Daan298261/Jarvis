@@ -9,6 +9,7 @@ from ..agent.coding_workers import coding_worker_catalog
 from ..workers.computer import CuaBackend, NativeWindowsBackend, UFOBackend
 from ..workers.browser import BrowserUseBackend
 from ..workers.code import OpenHandsBackend
+from ..workers.install import overlay_install_state
 from ..workers.interpreter import OpenInterpreterBackend
 from ..workers.voice import voice_status
 
@@ -115,13 +116,15 @@ def native_capabilities() -> list[dict[str, Any]]:
 
 
 def optional_workers() -> list[dict[str, Any]]:
-    return [
-        BrowserUseBackend().probe(),
-        UFOBackend().probe(),
-        CuaBackend().probe(),
-        OpenInterpreterBackend().probe(),
-        OpenHandsBackend().probe(),
-    ]
+    return overlay_install_state(
+        [
+            BrowserUseBackend().probe(),
+            UFOBackend().probe(),
+            CuaBackend().probe(),
+            OpenInterpreterBackend().probe(),
+            OpenHandsBackend().probe(),
+        ]
+    )
 
 
 def professional_analysis_policy() -> dict[str, Any]:

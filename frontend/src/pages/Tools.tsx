@@ -1,11 +1,22 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { api } from "../api"
+import { isWorkerInstalling, OptionalWorkerRow } from "../components/OptionalWorkerRow"
 
 type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
   native: { id: string; name: string; available: boolean; status: string; detail: string }[]
-  optional_workers: { id: string; name: string; available: boolean; status: string; detail: string }[]
+  optional_workers: {
+    id: string
+    name: string
+    available: boolean
+    status: string
+    detail: string
+    installable?: boolean
+    install_status?: string
+    install_error?: string
+    install_detail?: string
+  }[]
   coding_workers?: { id: string; name: string; available?: boolean; status: string; detail?: string }[]
   cursor_acp?: { status?: string; detail?: string; command?: string; available?: boolean; session_id?: string }
 }
@@ -28,6 +39,11 @@ export function ToolsPage() {
     if (codingData) setCoding(codingData)
   }
   useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    if (!catalog?.optional_workers.some(isWorkerInstalling)) return
+    const timer = window.setInterval(() => { void refresh() }, 2000)
+    return () => window.clearInterval(timer)
+  }, [catalog])
   if (!catalog) return <div>Loading tools…</div>
   const codingWorkers = catalog.coding_workers?.length
     ? catalog.coding_workers
@@ -41,7 +57,7 @@ export function ToolsPage() {
   return (
     <div>
       <h1>Tools</h1>
-      <p className="lede">Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing. Browser Use and OpenHands adapters are present; they show as missing until those packages are installed. Playwright remains the default browser backend.</p>
+      <p className="lede">Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing. Click <strong>Install now</strong> to add a missing worker to this Python environment. Playwright remains the default browser backend.</p>
       <div className="card">
         {catalog.tools.map((tool) => (
           <div className="toggle" key={tool.name}>
@@ -79,13 +95,7 @@ export function ToolsPage() {
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Optional workers</h2>
         {catalog.optional_workers.map((worker) => (
-          <div className="toggle" key={worker.id}>
-            <div>
-              <strong>{worker.name}</strong>
-              <div className="lede" style={{ margin: "4px 0 0" }}>{worker.detail}</div>
-            </div>
-            <span className={`badge ${worker.available ? "completed" : "queued"}`}>{worker.status}</span>
-          </div>
+          <OptionalWorkerRow key={worker.id} worker={worker} onChanged={() => { void refresh() }} />
         ))}
       </div>
       {!!codingWorkers.length && (

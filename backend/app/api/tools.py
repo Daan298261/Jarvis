@@ -9,9 +9,10 @@ from ..agent.acp import acp_status
 from ..agent.coding_workers import coding_worker_catalog, route_software_task
 from ..config import load_settings, save_settings
 from ..mcp_server import jarvis_mcp_manifest
-from ..tools.capabilities import capability_snapshot
+from ..tools.capabilities import capability_snapshot, optional_workers
 from ..tools.exposure import exposure_catalog, tools_for_task
 from ..tools.registry import REGISTRY
+from ..workers.install import start_worker_install
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
@@ -40,6 +41,19 @@ async def tool_catalog():
         **caps,
         "jarvis_mcp": jarvis_mcp_manifest(),
         "cursor_acp": acp_status(),
+    }
+
+
+@router.post("/optional-workers/{worker_id}/install")
+async def install_optional_worker(worker_id: str):
+    try:
+        result = await start_worker_install(worker_id)
+    except KeyError as exc:
+        raise HTTPException(404, f"Unknown optional worker: {worker_id}") from exc
+    return {
+        "worker_id": worker_id,
+        **result,
+        "optional_workers": optional_workers(),
     }
 
 

@@ -46,6 +46,77 @@ export function assistantReplyText(result?: string | null, error?: string | null
   return (result || error || "").trim()
 }
 
+export type ChatTurn = {
+  role: "user" | "assistant"
+  content: string
+}
+
+const FOLLOW_UP_MARKER = "\n\nFollow-up: "
+const CONTINUE_PREFIX = "Continue the existing task."
+
+export function stripContinueWrapper(text: string): string {
+  const raw = (text || "").trim()
+  if (!raw.startsWith(CONTINUE_PREFIX)) return raw
+  const split = raw.indexOf("\n\n")
+  if (split >= 0) return raw.slice(split + 2).trim()
+  return ""
+}
+
+export function visibleChatTurns(input: {
+  prompt?: string | null
+  result?: string | null
+  error?: string | null
+  messages?: { role: string; content: string }[] | null
+  pending?: string[]
+}): ChatTurn[] {
+  const turns: ChatTurn[] = []
+  const fromApi = (input.messages || []).filter((item) => item.role === "user" || item.role === "assistant")
+  if (fromApi.length) {
+    for (const item of fromApi) {
+      const content = stripContinueWrapper(item.content || "")
+      if (!content) continue
+      const role: ChatTurn["role"] = item.role === "assistant" ? "assistant" : "user"
+      const last = turns[turns.length - 1]
+      if (last && last.role === role && last.content === content) continue
+      turns.push({ role, content })
+    }
+  } else {
+    const blob = (input.prompt || "").trim()
+    if (blob) {
+      for (const part of blob.split(FOLLOW_UP_MARKER)) {
+        const content = part.trim()
+        if (content) turns.push({ role: "user", content })
+      }
+    }
+    const reply = assistantReplyText(input.result, input.error)
+    if (reply) turns.push({ role: "assistant", content: reply })
+  }
+  const knownUsers = new Set(turns.filter((item) => item.role === "user").map((item) => item.content))
+  for (const pending of input.pending || []) {
+    const content = pending.trim()
+    if (content && !knownUsers.has(content)) {
+      turns.push({ role: "user", content })
+      knownUsers.add(content)
+    }
+  }
+  return turns
+}
+
+export function prunePendingUserTexts(
+  pending: string[],
+  input: Omit<Parameters<typeof visibleChatTurns>[0], "pending">,
+): string[] {
+  const known = new Set(
+    visibleChatTurns({ ...input, pending: [] })
+      .filter((item) => item.role === "user")
+      .map((item) => item.content.trim()),
+  )
+  return pending.filter((text) => {
+    const content = text.trim()
+    return Boolean(content) && !known.has(content)
+  })
+}
+
 export function isTaskRunning(status: string): boolean {
   return ["running", "queued", "waiting"].includes(status)
 }

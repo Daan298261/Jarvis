@@ -116,6 +116,16 @@ async def test_conversation_follow_up_stays_off_the_tool_loop(jarvis_env, monkey
         assert row.error in (None, "")
         assert "step limit" not in (row.error or "").lower()
         assert "well" in (row.result or "").lower()
+        from app.agent.chat_turns import visible_chat_turns
+        from app.agent.compaction import deserialize_messages
+
+        users = [item.content for item in deserialize_messages(row.conversation_json) if item.role == "user"]
+        assert "How are you this evening?" in users
+        assert "And the weather?" in users
+        assert all("Follow-up:" not in (item or "") for item in users)
+        turns = visible_chat_turns(row.prompt, row.conversation_json, row.result or "")
+        assert turns[-1]["role"] == "assistant"
+        assert turns[-2]["content"] == "And the weather?"
     assert chats == ["stream", "stream"]
 
 

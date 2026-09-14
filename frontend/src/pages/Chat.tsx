@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api, apiForm, getPrivateKey, setPrivateKey, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
+import { prunePendingUserTexts } from "../chat/ownerChatView"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
@@ -20,6 +21,7 @@ export function ChatPage() {
   const navigate = useNavigate()
   const [prompt, setPrompt] = useState("")
   const [task, setTask] = useState<Task | null>(null)
+  const [pending, setPending] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [keyInput, setKeyInput] = useState<string>(getPrivateKey())
@@ -39,7 +41,10 @@ export function ChatPage() {
   }, [])
 
   useEffect(() => {
-    if (!id) return
+    if (!id) {
+      setPending([])
+      return
+    }
     let timer: number
     const load = async () => {
       try {
@@ -76,7 +81,19 @@ export function ChatPage() {
     const node = threadRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [task?.events?.length, task?.result, task?.status, task?.id])
+  }, [task?.events?.length, task?.result, task?.status, task?.id, task?.messages?.length, pending.length])
+
+  useEffect(() => {
+    if (!task) return
+    setPending((current) =>
+      prunePendingUserTexts(current, {
+        prompt: task.prompt,
+        result: task.result,
+        error: task.error,
+        messages: task.messages,
+      }),
+    )
+  }, [task?.messages, task?.prompt, task?.result, task?.error])
 
   async function submit() {
     const text = prompt.trim()
@@ -85,6 +102,7 @@ export function ChatPage() {
     setBusy(true)
     try {
       if (id) {
+        if (text) setPending((current) => (current.includes(text) ? current : [...current, text]))
         await api(`/api/tasks/${id}/continue`, { method: "POST", body: JSON.stringify({ prompt: text || "Continue this." }) })
         setPrompt("")
         const data = await api<Task>(`/api/tasks/${id}`)
@@ -249,6 +267,8 @@ export function ChatPage() {
             result={shown.result}
             error={shown.error}
             events={shown.events}
+            messages={shown.messages}
+            pending={pending}
           />
         )}
       </div>
@@ -259,7 +279,7 @@ export function ChatPage() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder={id ? "Add a follow-up, or press Send to continue…" : "Organize these files, fix this project, research a topic…"}
+          placeholder={id ? "Message…" : "Organize these files, fix this project, research a topic…"}
         />
         <div className="row composer-actions">
           <button className="btn" disabled={busy || (!id && !prompt.trim())} onClick={submit}>
