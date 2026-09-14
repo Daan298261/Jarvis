@@ -217,6 +217,27 @@ def test_pairing_status_includes_qr_fields_when_connection_ready(companion_env, 
     assert created["qr"]["server_pin"] == "a" * 64
 
 
+def test_pairing_status_get_includes_qr_when_connection_ready(companion_env, monkeypatch):
+    from app.mobile import connectivity
+
+    monkeypatch.setattr(
+        connectivity.CONNECTIVITY,
+        "snapshot",
+        lambda: {
+            "state": "ready",
+            "endpoints": ["https://192.168.1.8:4781"],
+            "server_pin": "c" * 64,
+        },
+    )
+    client = companion_env["client"]
+    owner = owner_headers(companion_env["owner_key"])
+    client.post("/api/mobile/manage/pairing-codes", headers=owner, json={})
+    status = client.get("/api/mobile/manage/pairing-codes/status", headers=owner).json()
+    assert status["endpoint"] == "https://192.168.1.8:4781"
+    assert status["qr"]["server_pin"] == "c" * 64
+    assert len(status["qr"]["code"]) == 6
+
+
 def test_companion_onboarding_snapshot_offers_pair_and_explore(companion_env):
     client = companion_env["client"]
     response = client.get("/api/mobile/onboarding/companion")

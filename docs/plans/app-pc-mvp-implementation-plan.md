@@ -61,8 +61,8 @@ Code for streams A–G is largely on `main` / `development` (through **v1.3.3** 
 - [x] Merge spec wave to `development` (#223–#231)
 - [x] Stable cut to `main` (#232) including weather + JDK autodetect
 - [x] GitHub Release **v1.3.3** + generic APK (prior cut)
-- [ ] Tag **v1.3.4** after next version bump on `main` (optional housekeeping)
-- [ ] Refresh [`ANDROID_MVP_LAN_CHECKLIST.md`](../ANDROID_MVP_LAN_CHECKLIST.md) §0 for current release artifact
+- [ ] Tag **v1.3.4** after next version bump on `main` (in progress)
+- [x] Refresh [`ANDROID_MVP_LAN_CHECKLIST.md`](../ANDROID_MVP_LAN_CHECKLIST.md) §0 for current release artifact
 
 ---
 
@@ -89,12 +89,12 @@ Code for streams A–G is largely on `main` / `development` (through **v1.3.3** 
 
 | Task | RFC / stream | Suggested PR scope | Tests |
 | --- | --- | --- | --- |
-| P2.1 | F | Assert QR/json payload includes endpoint + pin + code end-to-end | `test_companion_pairing.py` |
-| P2.2 | F | Surface gateway failure reason in Prepare connection UI (firewall hint) | manual + component test if feasible |
-| P2.3 | B | RFC-0075: first-chunk social TTS + `tests/test_rfc0075_speak_path.py` green | pytest |
-| P2.4 | C | Play button error surfacing when llama/LM Studio missing (HUD copy) | `test_runtime_activate.py` |
-| P2.5 | D | Post–stable-cut: upload fresh generic APK to GitHub Release notes | release job |
-| P2.6 | A | Spoken onboarding already wired; verify TTS gate on pair page with model loaded | `test_companion_pairing.py` onboarding |
+| P2.1 | F | Assert QR/json payload includes endpoint + pin + code end-to-end | [x] `test_companion_pairing.py` |
+| P2.2 | F | Surface gateway failure reason in Prepare connection UI (firewall hint) | [x] `MobileCompanionSetup` hints |
+| P2.3 | B | RFC-0075: first-chunk social TTS + `tests/test_rfc0075_speak_path.py` green | [x] pytest |
+| P2.4 | C | Play button error surfacing when llama/LM Studio missing (HUD copy) | [x] `HudModelSelector` + `test_runtime_activate.py` |
+| P2.5 | D | Post–stable-cut: upload fresh generic APK to GitHub Release notes | [ ] v1.3.4 release |
+| P2.6 | A | Spoken onboarding already wired; verify TTS gate on pair page with model loaded | [x] `test_companion_pairing.py` onboarding |
 
 One RFC or one checklist row **per PR** ([`docs/PROCESS.md`](../PROCESS.md)).
 
@@ -157,3 +157,4 @@ Copy each **P1.x** and **P2.x** row as a task with:
 | Date | Note |
 | --- | --- |
 | 2026-09-13 | Plan created; `main` promoted via #232; blockers ranked; Phase 0–2 defined |
+| 2026-09-14 | Phase 2 dev tasks P2.1–P2.4/P2.6 closed in code/tests; gateway UI hints; v1.3.4 release pending |
