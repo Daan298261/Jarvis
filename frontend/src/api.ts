@@ -925,6 +925,19 @@ export async function installHexStrike(installPath?: string): Promise<HexStrikeI
   })
 }
 
+export async function installHexStrikeDependencies(tool?: string): Promise<{
+  command?: string
+  ok?: boolean
+  detail?: string
+  results?: { command: string; ok: boolean; detail: string }[]
+  missing_before?: string[]
+}> {
+  return api("/api/hexstrike/dependencies/install", {
+    method: "POST",
+    body: JSON.stringify({ tool: tool || null }),
+  })
+}
+
 export async function listHexStrikeScopes(): Promise<{ scopes: HexStrikeScope[] }> {
   return api<{ scopes: HexStrikeScope[] }>("/api/hexstrike/scopes")
 }

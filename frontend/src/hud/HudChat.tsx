@@ -7,6 +7,7 @@ import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 import { useTaskSpeech } from "../tts/useTaskSpeech"
+import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null }) => void
@@ -25,6 +26,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [speaking, setSpeaking] = useState(false)
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
+  const { active: hexStrikeActive } = useHexStrikeSuiteActive()
 
   useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies, setSpeaking)
 
@@ -90,7 +92,9 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         const data = await api<Task>(`/api/tasks/${id}`)
         setTask(data)
       } else {
-        const created = await api<Task>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt: text }) })
+        const body: { prompt: string; security_role?: string } = { prompt: text }
+        if (hexStrikeActive) body.security_role = "blue-team"
+        const created = await api<Task>("/api/tasks", { method: "POST", body: JSON.stringify(body) })
         setPrompt("")
         navigate(`/tasks/${created.id}`)
       }

@@ -924,12 +924,44 @@
   padding: clamp(10px, 1.1vw, 14px) clamp(12px, 1.2vw, 16px);
   border: 1px solid rgba(142, 219, 241, 0.1);
   border-radius: 13px;
-  background: rgba(12, 18, 25, 0.52);
-  backdrop-filter: blur(9px);
+  background: rgba(8, 12, 18, 0.88);
+  backdrop-filter: blur(6px);
   font-size: clamp(13px, 0.72vw, 14px);
   line-height: 1.55;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.hud-bubble-internal,
+.hud-bubble-thought {
+  background: rgba(20, 16, 8, 0.82);
+  border-color: rgba(212, 175, 90, 0.22);
+}
+
+.hud-portal-nav,
+.portal-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.hud-admin-nav {
+  padding: 8px 16px 0;
+}
+
+.hex-tool-install-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .hud-bubble p,

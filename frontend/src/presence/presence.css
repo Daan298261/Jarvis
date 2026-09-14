@@ -47,10 +47,12 @@
 
 .jarvis-presence-controls {
   position: absolute;
-  top: 12px;
-  right: 3%;
-  z-index: 12;
+  top: 10px;
+  left: max(12px, env(safe-area-inset-left));
+  right: auto;
+  z-index: 20;
   width: auto;
+  max-width: min(420px, calc(100vw - 180px));
   margin: 0;
   color: rgba(225, 244, 250, 0.82);
   font-size: 12px;
@@ -58,7 +60,7 @@
 
 .jarvis-presence-controls > summary {
   width: fit-content;
-  margin: 0 auto;
+  margin: 0;
   cursor: pointer;
   user-select: none;
   color: rgba(177, 218, 231, 0.74);
@@ -69,7 +71,8 @@
 .jarvis-presence-controls-body {
   position: absolute;
   top: calc(100% + 9px);
-  right: 0;
+  left: 0;
+  right: auto;
   width: min(560px, calc(100vw - 32px));
   margin-top: 10px;
   padding: 12px;
@@ -112,6 +115,14 @@
   display: grid;
   gap: 5px;
   color: rgba(162, 199, 211, 0.78);
+}
+
+.jarvis-presence-voice-row {
+  grid-column: 1 / -1;
+}
+
+.hud-home {
+  position: relative;
 }
 
 .jarvis-presence-controls-message {

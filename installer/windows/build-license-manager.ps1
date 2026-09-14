@@ -38,7 +38,8 @@ if (-not $pyinstaller) {
     $useModule = $false
 }
 
-$entry = Join-Path $RepoRoot "backend\app\licensing\manager_app.py"
+# Run as a package entry so manager_app relative imports resolve (not as a loose script).
+$entry = Join-Path $RepoRoot "tools\license_manager\__main__.py"
 $backend = Join-Path $RepoRoot "backend"
 
 if ($pyinstaller -or $useModule) {

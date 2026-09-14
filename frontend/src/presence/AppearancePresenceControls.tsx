@@ -1,14 +1,67 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import {
+  loadVoiceProfileCatalog,
+  setActiveVoiceProfile,
+  type VoiceProfile,
+  type VoiceProfileCatalog,
+  VOICE_PROFILE_CHANGED_EVENT,
+} from "../tts/voiceProfiles"
 import { updatePresentation } from "./presentationSettings"
 import type { PresentationSettings } from "./presenceTypes"
 
 type AppearancePresenceControlsProps = {
   settings: PresentationSettings
+  hexStrikeActive?: boolean
 }
 
-export function AppearancePresenceControls({ settings }: AppearancePresenceControlsProps) {
+export function AppearancePresenceControls({ settings, hexStrikeActive = false }: AppearancePresenceControlsProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
+  const [voiceCatalog, setVoiceCatalog] = useState<VoiceProfileCatalog | null>(null)
+  const [voiceBusy, setVoiceBusy] = useState(false)
+  const [activeVoiceId, setActiveVoiceId] = useState<string>("")
+
+  useEffect(() => {
+    let cancelled = false
+    loadVoiceProfileCatalog()
+      .then((catalog) => {
+        if (cancelled) return
+        setVoiceCatalog(catalog)
+        setActiveVoiceId(catalog.active_voice_profile_id || "")
+      })
+      .catch(() => {
+        if (!cancelled) setVoiceCatalog(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const onVoiceChanged = (event: Event) => {
+      const custom = event as CustomEvent<string | null>
+      setActiveVoiceId(custom.detail || "")
+    }
+    window.addEventListener(VOICE_PROFILE_CHANGED_EVENT, onVoiceChanged)
+    return () => window.removeEventListener(VOICE_PROFILE_CHANGED_EVENT, onVoiceChanged)
+  }, [])
+
+  async function onVoiceChange(profileId: string) {
+    const id = profileId.trim()
+    if (!id || id === activeVoiceId) return
+    setVoiceBusy(true)
+    setMessage("")
+    try {
+      const next = await setActiveVoiceProfile(id)
+      setActiveVoiceId(next || id)
+      const profile = voiceCatalog?.profiles.find((item) => item.id === id)
+      setMessage(profile ? `Voice: ${profile.display_name}` : "Voice profile updated.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not change voice profile.")
+    } finally {
+      setVoiceBusy(false)
+    }
+  }
 
   async function apply(patch: Partial<PresentationSettings>, note = "") {
     setBusy(true)
@@ -24,12 +77,32 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
   }
 
   const selected = settings.shell === "classic" ? "classic" : settings.requestedPresence
+  const voiceProfiles = voiceCatalog?.profiles ?? []
+  const voiceSelectDisabled = voiceBusy || !voiceCatalog?.apiAvailable || voiceProfiles.length === 0
 
   return (
     <details className="jarvis-presence-controls">
-      <summary>Appearance & Presence</summary>
+      <summary>Appearance &amp; voice</summary>
       <div className="jarvis-presence-controls-body">
-        <div className="jarvis-presence-mode-row" role="group" aria-label="Jarvis interface">
+        <label className="jarvis-presence-voice-row">
+          Voice (TTS)
+          <select
+            disabled={voiceSelectDisabled}
+            value={activeVoiceId || ""}
+            onChange={(event) => void onVoiceChange(event.target.value)}
+          >
+            {!activeVoiceId && <option value="">Select a voice…</option>}
+            {voiceProfiles.map((profile: VoiceProfile) => (
+              <option key={profile.id} value={profile.id} disabled={!profile.available}>
+                {profile.display_name}
+                {!profile.available ? " (install in Settings)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {!hexStrikeActive && (
+          <div className="jarvis-presence-mode-row" role="group" aria-label="Jarvis interface">
           <button type="button" disabled={busy} className={selected === "classic" ? "active" : ""}
             onClick={() => apply({ shell: "classic", requestedPresence: "none" })}>
             Classic
@@ -52,8 +125,11 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
             )}>
             Particle bust · experimental
           </button>
-        </div>
+          </div>
+        )}
 
+        {!hexStrikeActive && (
+          <>
         <label>
           Rendering
           <select disabled={busy} value={settings.performancePreset}
@@ -87,6 +163,8 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
             <option value="full">Full motion</option>
           </select>
         </label>
+          </>
+        )}
 
         {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
       </div>

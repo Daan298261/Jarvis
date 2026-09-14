@@ -9,7 +9,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from .vendor_issuer import (
+from app.licensing.vendor_issuer import (
     init_db,
     issue_customer_license,
     issuer_data_dir,

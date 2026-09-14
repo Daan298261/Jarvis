@@ -17,7 +17,8 @@ const MOOD_COPY: Record<OrbMood, { label: string; detail: string }> = {
   alert: { label: "Attention", detail: "Review or approval is required" },
 }
 
-function taskDetail(task: Task | null, mood: OrbMood): string {
+function taskDetail(task: Task | null, mood: OrbMood, threadActive: boolean): string {
+  if (threadActive) return MOOD_COPY[mood].detail
   if (!task) return MOOD_COPY[mood].detail
   if (task.waiting_for_confirmation) return "Approval required before execution can continue"
   if (task.status === "failed") return task.error || "The current task needs attention"
@@ -51,6 +52,7 @@ export function HudChatHome() {
     speaking: moodState.speaking,
     systemDegraded: moodState.task?.status === "failed" || !!moodState.task?.waiting_for_confirmation,
   })
+  const threadActive = Boolean(moodState.task?.messages?.length)
   const copy = MOOD_COPY[mood]
   const presenceSettings = hexStrikeActive
     ? { ...presentation, requestedPresence: "humanoid" as const }
@@ -58,6 +60,7 @@ export function HudChatHome() {
 
   return (
     <div className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}`}>
+      <AppearancePresenceControls settings={presentation} hexStrikeActive={hexStrikeActive} />
       <section className="hud-orb-zone" aria-label="Jarvis state">
         <PresenceHost
           snapshot={snapshot}
@@ -70,10 +73,9 @@ export function HudChatHome() {
             {hexStrikeActive ? "Aegis" : copy.label}
           </span>
           <span className="hud-orb-detail">
-            {hexStrikeActive ? "HexStrike cybersecurity suite" : taskDetail(moodState.task, mood)}
+            {hexStrikeActive ? "HexStrike cybersecurity suite" : taskDetail(moodState.task, mood, threadActive)}
           </span>
         </div>
-        {!hexStrikeActive && <AppearancePresenceControls settings={presentation} />}
       </section>
       {hexStrikeActive && <HudHexStrikeSuite />}
       <HudChat onMoodChange={onMoodChange} />
