@@ -61,6 +61,8 @@ from .escalation import (
 )
 from .planning import (
     CONVERSATION_CLASS,
+    MANAGED_TASK,
+    RequestRoute,
     WorkingState,
     best_of_n_plan_prompt,
     best_of_n_select_prompt,
@@ -275,6 +277,9 @@ class AgentRuntime:
         mode = execution_mode or settings.execution_mode or "balanced"
         route = route_request(prompt)
         task_class = route.task_class
+        if security_role == "blue-team" and route.kind != "managed_task":
+            task_class = classify_task(prompt)
+            route = RequestRoute(MANAGED_TASK, task_class)
         REGISTRY.apply_settings(settings)
         task = Task(
             id=request_id or str(uuid.uuid4()),
@@ -589,7 +594,7 @@ class AgentRuntime:
         metrics = LiveTaskMetrics()
         follow_route = route_request(extra_prompt or prompt) if extra_prompt else None
         if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
-            if follow_up_stays_conversation(extra_prompt):
+            if follow_up_stays_conversation(extra_prompt, security_role=working.security_role):
                 working.task_class = CONVERSATION_CLASS
                 await self._run_conversation(
                     task_id,

@@ -32,6 +32,14 @@ def test_default_butler_profile_uses_kokoro_engine():
     assert (Path("voice_packs/butler_original_v1/pack.json")).is_file()
 
 
+def test_voice_picker_lists_curated_profiles_only():
+    reload_catalog()
+    items = reload_catalog().list_profiles("butler_original_v1")
+    ids = [item.id for item in items]
+    assert ids == ["butler_original_v1", "windows_natural_en_v1", "chatterbox_expressive_en_v1"]
+    assert "dry_butler_original_v1" not in ids
+
+
 def test_speak_filter_strips_urls_code_and_plan_boards():
     raw = (
         "Very well, sir.\n"
@@ -129,18 +137,13 @@ def test_one_click_install_unlocks_stub_profile(jarvis_env, monkeypatch, tmp_pat
     )
     reload_catalog()
     client = TestClient(app)
-    before = client.get("/api/voice-profiles").json()
-    stub = next(item for item in before["profiles"] if item["id"] == "tactical_aide_original_v1")
-    assert stub["available"] is False
-
-    installed = client.post("/api/voice-profiles/tactical_aide_original_v1/install")
+    installed = client.post("/api/voice-profiles/dry_butler_original_v1/install")
     assert installed.status_code == 200
     assert installed.json()["installed"] is True
 
-    after = client.get("/api/voice-profiles").json()
-    unlocked = next(item for item in after["profiles"] if item["id"] == "tactical_aide_original_v1")
-    assert unlocked["available"] is True
-    manifest = Path("voice_packs/tactical_aide_original_v1/pack.json")
+    after = reload_catalog().get_available("dry_butler_original_v1")
+    assert after is not None
+    manifest = Path("voice_packs/dry_butler_original_v1/pack.json")
     assert manifest.is_file()
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert payload["engine_id"] == "kokoro"

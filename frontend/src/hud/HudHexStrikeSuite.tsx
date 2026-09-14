@@ -3,6 +3,7 @@ import {
   configureHexStrike,
   getHexStrikeStatus,
   installHexStrike,
+  installHexStrikeDependencies,
   listHexStrikeScopes,
   runHexStrikeAction,
   startHexStrike,
@@ -116,7 +117,34 @@ export function HudHexStrikeSuite() {
           <ul className="hex-tool-list">
             {(status?.capabilities || []).map((capability) => <li key={capability.id} className="ok">{capability.title}</li>)}
           </ul>
-          {!!status?.missing_dependencies?.length && <p className="hex-suite-error">Missing optional tools: {status.missing_dependencies.join(", ")}. Install them separately after review.</p>}
+          {!!status?.missing_dependencies?.length && (
+            <>
+              <p className="hex-suite-error">
+                Missing host tools: {status.missing_dependencies.join(", ")}. Install via winget (review each vendor first).
+              </p>
+              <div className="hex-tool-install-row">
+                {status.missing_dependencies.map((tool) => (
+                  <button
+                    key={tool}
+                    type="button"
+                    className="hex-suite-btn ghost"
+                    disabled={busy}
+                    onClick={() => void run(() => installHexStrikeDependencies(tool), `Requested install for ${tool}.`)}
+                  >
+                    Install {tool}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="hex-suite-btn"
+                  disabled={busy}
+                  onClick={() => void run(() => installHexStrikeDependencies(), "Installing all missing defensive tools.")}
+                >
+                  Install all missing
+                </button>
+              </div>
+            </>
+          )}
           {!!tools.length && <p className="hex-suite-hint">Upstream health reports {tools.filter((tool) => tool.ok).length} available tools.</p>}
         </section>
 

@@ -28,6 +28,7 @@ from app.security.hexstrike_install import (
     HexStrikeInstaller,
 )
 from app.tools.hexstrike_defensive import HexStrikeDefensiveTool
+from app.agent.planning import follow_up_stays_conversation, is_defensive_operator_prompt
 
 
 @pytest.fixture
@@ -244,3 +245,9 @@ def test_status_api_includes_install_capabilities_dependencies_and_jobs(jarvis_e
     assert body["capabilities"]
     assert isinstance(body["missing_dependencies"], list)
     assert body["managed_jobs"] == list_jobs()
+
+
+def test_defensive_operator_prompts_skip_conversation_lane():
+    assert is_defensive_operator_prompt("Run a lan inventory with nmap on my subnet")
+    assert not follow_up_stays_conversation("please scan containers with trivy", security_role="blue-team")
+    assert follow_up_stays_conversation("how are you?", security_role="blue-team")

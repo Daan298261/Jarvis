@@ -30,6 +30,7 @@ import { CodingPage } from "./pages/Coding"
 import { api, getAwayMode, getDiagnostics, getLicenseStatus, getSetupStatus, listCodingDecisionInbox, listSwarmNodes, type AwayModeState, type LicenseStatus, type SwarmNode, type Task } from "./api"
 import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
 import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
+import { PortalNav } from "./components/PortalNav"
 import { BootNova } from "./boot/BootNova"
 import { HudShell } from "./hud/HudShell"
 import { HudChatHome } from "./hud/HudChatHome"
@@ -347,6 +348,7 @@ function OwnerPortal() {
     <BootNova enabled>
     <div className={`app${navOpen ? " nav-open" : ""}${chat ? " chat-shell" : ""}`}>
       <header className="mobile-bar">
+        <PortalNav variant="classic" />
         <button className="nav-toggle" type="button" aria-label="Open menu" onClick={() => setNavOpen((open) => !open)}>
           Menu
         </button>
