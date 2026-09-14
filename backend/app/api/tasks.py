@@ -91,6 +91,8 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         "profile": task.profile,
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
         "task_class": task_class,
+        "response_route": getattr(task, "response_route", "managed_task") or "managed_task",
+        "first_response_ms": getattr(task, "first_response_ms", 0) or 0,
         "exposed_tools": db_exposed if db_exposed else allowed_tools,
         "allowed_tools": allowed_tools,
         "result": task.result,

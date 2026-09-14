@@ -5,6 +5,7 @@ from app.agent.planning import (
     is_plain_conversation,
     parse_plan_block,
     resolve_execution_policy,
+    route_request,
 )
 
 
@@ -38,6 +39,14 @@ def test_classify_task_categories():
     assert classify_task("what is the weather in dinteloord, tomorrow") == CONVERSATION_CLASS
     assert is_plain_conversation("what is the weather in dinteloord, tomorrow")
     assert not is_plain_conversation("create a weather script for dinteloord")
+
+
+def test_request_routes_use_the_smallest_safe_lane():
+    assert route_request("what is the weather in dinteloord tomorrow").kind == "direct_lookup"
+    assert route_request("How are you?").kind == "direct_reply"
+    managed = route_request("Install the update and verify it works")
+    assert managed.kind == "managed_task"
+    assert managed.task_class == "shell"
 
 
 def test_follow_up_stays_conversation_for_questions_not_file_jobs():
