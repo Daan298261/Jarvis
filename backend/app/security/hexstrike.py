@@ -362,8 +362,11 @@ class HexStrikeManager:
         self._log_handle = open(log_file, "ab", buffering=0)
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        compat = Path(__file__).with_name("hexstrike_compat.py")
         args = [
             current.python_executable or sys.executable,
+            str(compat),
+            "--server",
             str(server),
             "--port",
             str(current.port),
