@@ -10,7 +10,11 @@ Full build/API reference: [`docs/android-companion.md`](android-companion.md). A
 
 ## 0. APK to install
 
-**Use for this MVP pass:** `JarvisCompanion-a1be0f1.apk` (Jarvis **1.2.0** build [`a1be0f1`](https://github.com/Daan298261/Jarvis/commit/a1be0f1)), then pair to `https://192.168.1.212:4781` with the gateway **server pin** and the desktop **6-digit code** (steps below). Do not commit APKs or pins to git.
+**Preferred for this MVP pass:** GitHub Release **`JarvisCompanion-1.3.3-generic.apk`** from [v1.3.3](https://github.com/Daan298261/Jarvis/releases/tag/v1.3.3) (or newer stable tag on `main`). Generic bootstrap + debug signing when no release keystore — installable for LAN pairing.
+
+After **`main`** moves ahead of v1.3.3, rebuild from tip (§ “Rebuild from tip”) or attach the matching **`JarvisCompanion-<version>-generic.apk`** from the latest GitHub Release. Do not commit APKs or pins to git.
+
+**Legacy (avoid unless nothing else works):** `JarvisCompanion-a1be0f1.apk` (Jarvis **1.2.0** build [`a1be0f1`](https://github.com/Daan298261/Jarvis/commit/a1be0f1)) — missing offline orb, pairing UX, and JDK/signing fixes landed in 1.3.x.
 
 ### Where Taco keeps installable APKs
 
@@ -65,7 +69,9 @@ You do **not** need LAN bind on `:4780` for this path; pairing management uses l
 
 ## 2. PC — start mobile TLS gateway (LAN)
 
-Use the **LAN IPv4** the phone will dial. `--host` is a **certificate SAN** (not the bind address); the gateway listens on `0.0.0.0:4781`.
+**Portal (recommended):** Settings → **Android companion** → **Prepare connection**. That starts the encrypted gateway, lists LAN endpoints, and shows the **server pin** for the phone. Keep Jarvis running while the phone is paired.
+
+**Manual (same as portal backend):** use the **LAN IPv4** the phone will dial. `--host` is a **certificate SAN** (not the bind address); the gateway listens on `0.0.0.0:4781`.
 
 ```powershell
 cd <Jarvis-repo>
@@ -110,9 +116,9 @@ Related owner routes: `POST /api/mobile/manage/pairing-codes/regenerate`, `GET /
 
 ## 4. Phone — install and pair
 
-1. **Install** `JarvisCompanion-a1be0f1.apk` (Releases `Jarvis-1.2.0-a1be0f1-2026-09-10\` or Drive `JarvisCompanion-a1be0f1.apk`). Enable “Install unknown apps” for your file manager if needed.
+1. **Install** the current generic companion APK (see §0 — GitHub **v1.3.3+** or a fresh Gradle release build). Enable “Install unknown apps” for your file manager if needed.
 2. **Same Wi‑Fi** as the PC (no VPN isolating the phone).
-3. In the app **More** (connection settings):
+3. In the app **Home** (when offline) use **Scan desktop QR** / **Enter code**, or open **More** for connection settings:
    - Endpoint: `https://192.168.1.212:4781`
    - **Server pin:** exact 64-hex fingerprint from the gateway console (step 2).
 4. **Pair:** enter the **6-digit code** from the desktop when prompted.
