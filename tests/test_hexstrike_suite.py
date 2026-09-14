@@ -34,7 +34,7 @@ def test_gateway_allowlist_is_deny_by_default():
     assert gateway_allows("GET", "/api/telemetry")
     assert gateway_allows("GET", "api/processes/list")
     assert gateway_allows("GET", "api/processes/status/12")
-    assert gateway_allows("POST", "api/processes/terminate/12")
+    assert not gateway_allows("POST", "api/processes/terminate/12")
     assert not gateway_allows("POST", "api/command")
     assert not gateway_allows("POST", "api/intelligence/analyze-target")
     assert not gateway_allows("GET", "api/command")

@@ -146,7 +146,13 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _exposed_csv(working: WorkingState) -> str:
-    return ",".join(tool_names_for(working.task_class, working.requested_tools))
+    return ",".join(
+        tool_names_for(
+            working.task_class,
+            working.requested_tools,
+            security_role=working.security_role,
+        )
+    )
 
 
 def _authorization_observation(result: AuthorizationResult) -> str:
@@ -250,6 +256,7 @@ class AgentRuntime:
         profile: str | None = None,
         execution_mode: str | None = None,
         request_id: str | None = None,
+        security_role: str | None = None,
     ) -> Task:
         if kill_switch_active():
             raise KillSwitchActive(
@@ -279,8 +286,9 @@ class AgentRuntime:
             profile=profile or settings.inference.profile,
             execution_mode=mode,
             task_class=task_class,
+            security_role=security_role or "",
             response_route=route.kind,
-            exposed_tools=",".join(tool_names_for(task_class)),
+            exposed_tools=",".join(tool_names_for(task_class, security_role=security_role or "")),
         )
         async with SessionLocal() as session:
             session.add(task)
@@ -577,6 +585,7 @@ class AgentRuntime:
                 working.goal = prompt.strip().splitlines()[0][:240]
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
+            working.security_role = getattr(task, "security_role", "") or ""
         metrics = LiveTaskMetrics()
         follow_route = route_request(extra_prompt or prompt) if extra_prompt else None
         if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
@@ -707,7 +716,11 @@ class AgentRuntime:
             if lessons:
                 system_prompt += "\n\n" + lessons
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
-            system_prompt += "\n\n" + describe_exposure(working.task_class, working.requested_tools)
+            system_prompt += "\n\n" + describe_exposure(
+                working.task_class,
+                working.requested_tools,
+                security_role=working.security_role,
+            )
             audit = professional_prompt_block(prompt)
             if audit:
                 # Append after tool exposure so context fitting keeps this block in the tail.
@@ -878,7 +891,13 @@ class AgentRuntime:
                         return await asyncio.wait_for(
                             MANAGER.chat(
                                 messages,
-                                tools=None if force_final else exposure_schemas_for(working.task_class, working.requested_tools),
+                                tools=None
+                                if force_final
+                                else exposure_schemas_for(
+                                    working.task_class,
+                                    working.requested_tools,
+                                    security_role=working.security_role,
+                                ),
                                 temperature=profile.temperature,
                                 top_p=profile.top_p,
                                 top_k=profile.top_k,
@@ -1286,6 +1305,11 @@ class AgentRuntime:
         started = datetime.now(timezone.utc)
 
         async def _run_tool():
+            async with SessionLocal() as session:
+                task = await session.get(Task, task_id)
+                security_role = getattr(task, "security_role", "") if task else ""
+            if security_role:
+                return await REGISTRY.execute(name, arguments, security_role=security_role)
             return await REGISTRY.execute(name, arguments)
 
         result = await run_with_think_aloud(

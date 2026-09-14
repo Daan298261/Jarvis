@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -23,9 +23,7 @@ from ..agent.self_dev import KillSwitchActive
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
-from ..agent.tool_exposure import is_full_exposure, tool_names_for
-from ..tools.exposure import schema_names
-from ..tools.registry import REGISTRY
+from ..agent.tool_exposure import tool_names_for
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -35,6 +33,7 @@ class TaskCreate(BaseModel):
     autonomy: str | None = None
     profile: str | None = None
     execution_mode: str | None = None
+    security_role: Literal["blue-team"] | None = None
 
 
 class ContinueBody(BaseModel):
@@ -63,11 +62,11 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         except (TypeError, json.JSONDecodeError):
             extra = []
     task_class = getattr(task, "task_class", None) or ""
-    if is_full_exposure(task_class, extra):
-        allowed_tools = schema_names(REGISTRY.openai_tools())
-    else:
-        allowed_tools = sorted(tool_names_for(task_class, extra))
+    security_role = getattr(task, "security_role", None) or ""
+    allowed_tools = sorted(tool_names_for(task_class, extra, security_role=security_role))
     db_exposed = [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item]
+    current_allowed = set(allowed_tools)
+    exposed_tools = [item for item in db_exposed if item in current_allowed] if db_exposed else allowed_tools
     runtime = AGENT.runtime_status(task.id)
     state = normalized_state(task)
     heartbeat_status = runtime["heartbeat_status"]
@@ -98,9 +97,10 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         "profile": task.profile,
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
         "task_class": task_class,
+        "security_role": security_role or None,
         "response_route": getattr(task, "response_route", "managed_task") or "managed_task",
         "first_response_ms": getattr(task, "first_response_ms", 0) or 0,
-        "exposed_tools": db_exposed if db_exposed else allowed_tools,
+        "exposed_tools": exposed_tools,
         "allowed_tools": allowed_tools,
         "result": task.result,
         "error": task.error,
@@ -134,7 +134,13 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
 @router.post("")
 async def create_task(body: TaskCreate):
     try:
-        task = await AGENT.create_task(body.prompt, body.autonomy, body.profile, body.execution_mode)
+        task = await AGENT.create_task(
+            body.prompt,
+            body.autonomy,
+            body.profile,
+            body.execution_mode,
+            security_role=body.security_role,
+        )
     except KillSwitchActive as exc:
         raise HTTPException(409, str(exc)) from exc
     return _task_dict(task)

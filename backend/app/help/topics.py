@@ -97,6 +97,21 @@ TOPICS: tuple[HelpTopic, ...] = (
             "old debug snapshot."
         ),
     ),
+    HelpTopic(
+        id="hexstrike-blue",
+        title="Daybreak Blue defensive suite",
+        summary="Install and use the owner-scoped HexStrike defensive gateway.",
+        href="/hud?view=hexstrike",
+        keywords=("hexstrike", "blue team", "defensive", "cve", "forensics", "container", "lan"),
+        body=(
+            "Daybreak Blue installs the reviewed HexStrike commit into `runtime/hexstrike-ai` and "
+            "binds it to `127.0.0.1` only. Unlock the Blue gate, grant `cyber.hexstrike` and the "
+            "requested Blue permission, then attest an owned private-LAN, local path, container "
+            "image, or local-infrastructure scope. Only the listed typed defensive actions are "
+            "available. Public targets, arbitrary flags, commands, payloads, credential attacks, "
+            "exploit routes, and upstream MCP registration are always rejected."
+        ),
+    ),
 )
 
 

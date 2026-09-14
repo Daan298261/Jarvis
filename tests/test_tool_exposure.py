@@ -4,6 +4,7 @@ from app.agent.tool_exposure import (
     is_full_exposure,
     schemas_for,
     tool_names_for,
+    RESTRICTED_TOOLS,
 )
 from app.tools.registry import REGISTRY
 
@@ -36,7 +37,11 @@ def test_browser_research_does_not_include_office_by_default():
 def test_mixed_and_long_horizon_get_every_enabled_native_tool():
     mixed = set(tool_names_for("mixed"))
     long_h = set(tool_names_for("long-horizon autonomous"))
-    native = {name for name, tool in REGISTRY.tools.items() if tool.enabled and name != "request_tools"}
+    native = {
+        name
+        for name, tool in REGISTRY.tools.items()
+        if tool.enabled and name != "request_tools" and name not in RESTRICTED_TOOLS
+    }
     assert mixed == native
     assert long_h == native
     assert is_full_exposure("mixed")

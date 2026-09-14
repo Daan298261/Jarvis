@@ -431,8 +431,22 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
             pending.append("computer.this_device")
     if name in INTERNET_TOOLS:
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
-    if name in {"hexstrike", "hexstrike_suite"}:
+    if name in {"hexstrike", "hexstrike_suite", "hexstrike_defensive"}:
         pending.append("cyber.hexstrike")
+    if name == "hexstrike_defensive":
+        action_permissions = {
+            "lan_inventory": "blue.active_response",
+            "container_scan": "blue.static_rules",
+            "iac_scan": "blue.static_rules",
+            "host_baseline": "blue.static_rules",
+            "forensic_inspection": "blue.static_rules",
+            "threat_intel_lookup": "blue.static_rules",
+        }
+        permission = action_permissions.get(str((arguments or {}).get("action") or ""))
+        if permission:
+            pending.append(permission)
+        if str((arguments or {}).get("action") or "") == "threat_intel_lookup":
+            pending.append("network.internet")
     # unique, stable order following catalog
     order = [spec.id for spec in CATALOG]
     return [item for item in order if item in set(pending)]
