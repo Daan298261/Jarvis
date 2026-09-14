@@ -64,6 +64,7 @@ from .planning import (
     best_of_n_plan_prompt,
     best_of_n_select_prompt,
     classify_task,
+    route_request,
     follow_up_stays_conversation,
     format_selected_plan,
     is_plain_conversation,
@@ -264,9 +265,8 @@ class AgentRuntime:
                     return existing
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
-        task_class = classify_task(prompt)
-        if is_plain_conversation(prompt):
-            task_class = CONVERSATION_CLASS
+        route = route_request(prompt)
+        task_class = route.task_class
         REGISTRY.apply_settings(settings)
         task = Task(
             id=request_id or str(uuid.uuid4()),
@@ -278,11 +278,22 @@ class AgentRuntime:
             profile=profile or settings.inference.profile,
             execution_mode=mode,
             task_class=task_class,
+            response_route=route.kind,
             exposed_tools=",".join(tool_names_for(task_class)),
         )
         async with SessionLocal() as session:
             session.add(task)
             await session.commit()
+        if route.kind == "managed_task":
+            acknowledgement = task_acknowledgement(prompt)
+            task.current_action = acknowledgement
+            async with SessionLocal() as session:
+                stored = await session.get(Task, task.id)
+                assert stored
+                stored.current_action = acknowledgement
+                stored.first_response_ms = 0.0
+                await session.commit()
+            await BUS.publish(task.id, "acknowledgement", "Acknowledged", acknowledgement, stage="queued")
         self._start_runner(task.id, self._run(task.id, continue_existing=False))
         return task
 
@@ -554,8 +565,10 @@ class AgentRuntime:
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
         metrics = LiveTaskMetrics()
-        if working.task_class == CONVERSATION_CLASS and not pending_tool:
+        follow_route = route_request(extra_prompt or prompt) if extra_prompt else None
+        if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
             if follow_up_stays_conversation(extra_prompt):
+                working.task_class = CONVERSATION_CLASS
                 await self._run_conversation(
                     task_id,
                     prompt,
@@ -567,7 +580,7 @@ class AgentRuntime:
                     extra_prompt=extra_prompt,
                 )
                 return
-            working.task_class = classify_task(extra_prompt or prompt)
+            working.task_class = (follow_route.task_class if follow_route else classify_task(extra_prompt or prompt))
         if not continue_existing and not pending_tool and not extra_prompt:
             await BUS.publish(
                 task_id,

@@ -71,6 +71,19 @@ def resolve_execution_policy(name: str | None) -> ExecutionPolicy:
 
 CONVERSATION_CLASS = "conversation"
 
+
+@dataclass(frozen=True)
+class RequestRoute:
+    """Smallest safe execution lane for an incoming owner request."""
+
+    kind: str
+    task_class: str
+
+
+DIRECT_REPLY = "direct_reply"
+DIRECT_LOOKUP = "direct_lookup"
+MANAGED_TASK = "managed_task"
+
 _SOCIAL_ROUTING_HINTS = re.compile(
     r"(?i)\b("
     r"weather|temperature|forecast|rain|sunny|cloud|degrees|"
@@ -186,6 +199,15 @@ def classify_task(prompt: str) -> str:
     if len(scored) >= 2 and scored[0][0] == scored[1][0]:
         return "mixed"
     return scored[0][1]
+
+
+def route_request(prompt: str) -> RequestRoute:
+    """Route before creating a durable agent loop or exposing its tool catalog."""
+    if is_weather_query(prompt):
+        return RequestRoute(DIRECT_LOOKUP, CONVERSATION_CLASS)
+    if is_plain_conversation(prompt):
+        return RequestRoute(DIRECT_REPLY, CONVERSATION_CLASS)
+    return RequestRoute(MANAGED_TASK, classify_task(prompt))
 
 
 def parse_plan_block(text: str) -> dict[str, Any]:
