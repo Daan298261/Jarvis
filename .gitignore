@@ -40,6 +40,7 @@ frontend/src-tauri/sidecars/jarvis-backend/
 
 # PyInstaller / packaged backend
 runtime/backend/
+runtime/optional-workers/
 *.spec
 
 # OS / editor

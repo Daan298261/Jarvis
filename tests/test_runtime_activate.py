@@ -67,6 +67,11 @@ async def test_unreachable_lmstudio_profile_does_not_save_or_mutate_current_sett
     monkeypatch.setattr("app.inference.hotswap.probe_remote_server", unavailable)
     monkeypatch.setattr("app.inference.hotswap.load_settings", lambda: settings)
     monkeypatch.setattr("app.inference.hotswap.save_settings", lambda value: saved.append(value))
+
+    async def no_autostart(**_kwargs):
+        return {"ok": False, "method": "test", "detail": "not started"}
+
+    monkeypatch.setattr("app.inference.lmstudio_server.ensure_local_lmstudio", no_autostart)
     runtime = create_runtime_profile(
         name="lm-unavailable-test",
         model="catalog-stem",
@@ -81,6 +86,43 @@ async def test_unreachable_lmstudio_profile_does_not_save_or_mutate_current_sett
     assert settings.inference.backend == "llama.cpp"
     assert settings.inference.port == 8088
     assert saved == []
+
+
+@pytest.mark.asyncio
+async def test_unreachable_local_lmstudio_is_started_then_saved(jarvis_env, monkeypatch):
+    settings = jarvis_env["settings"]
+    settings.inference.backend = "llama.cpp"
+    saved = []
+    probes = {"n": 0}
+
+    async def flaky_probe(*_args, **_kwargs):
+        probes["n"] += 1
+        if probes["n"] == 1:
+            return {"ok": False, "error": "connection refused", "models": []}
+        return {"ok": True, "health_path": "/v1/models", "models": ["my-loaded-model"]}
+
+    async def fake_start(**kwargs):
+        assert kwargs["host"] == "127.0.0.1"
+        assert kwargs["port"] == 1234
+        return {"ok": True, "method": "auto-start"}
+
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.inference.hotswap.probe_remote_server", flaky_probe)
+    monkeypatch.setattr("app.inference.hotswap.load_settings", lambda: settings)
+    monkeypatch.setattr("app.inference.hotswap.save_settings", lambda value: saved.append(value))
+    monkeypatch.setattr("app.inference.lmstudio_server.ensure_local_lmstudio", fake_start)
+    runtime = create_runtime_profile(
+        name="lm-autostart-test",
+        model="catalog-stem",
+        provider="lmstudio",
+        endpoint="127.0.0.1:1234",
+        is_local=True,
+    )
+    await apply_runtime_profile_to_settings(runtime)
+    assert saved
+    assert saved[0].inference.backend == "lmstudio"
+    assert saved[0].inference.remote_model == "my-loaded-model"
+    assert probes["n"] >= 2
 
 
 def test_local_lmstudio_fallback_is_limited_to_loopback_and_uses_managed_runtime(jarvis_env):

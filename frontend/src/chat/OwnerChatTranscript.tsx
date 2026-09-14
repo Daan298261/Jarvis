@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react"
 import { PermissionPrompt } from "./PermissionPrompt"
 import {
-  assistantReplyText,
   filterWorkEvents,
   isTaskRunning,
   taskStatusLine,
+  visibleChatTurns,
   writeShowWorkPreference,
   type OwnerChatEvent,
 } from "./ownerChatView"
@@ -21,6 +21,8 @@ type OwnerChatTranscriptProps = {
   result?: string | null
   error?: string | null
   events?: OwnerChatEvent[]
+  messages?: { role: string; content: string }[] | null
+  pending?: string[]
   variant: "hud" | "classic"
 }
 
@@ -36,12 +38,17 @@ export function OwnerChatTranscript({
   result,
   error,
   events = [],
+  messages,
+  pending,
   variant,
 }: OwnerChatTranscriptProps) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const workEvents = useMemo(() => filterWorkEvents(events), [events])
+  const turns = useMemo(
+    () => visibleChatTurns({ prompt, result, error, messages, pending }),
+    [prompt, result, error, messages, pending],
+  )
   const running = isTaskRunning(status)
-  const reply = assistantReplyText(result, error)
   const statusLine = taskStatusLine({
     status,
     stage,
@@ -66,25 +73,21 @@ export function OwnerChatTranscript({
 
   return (
     <>
-      {prompt && (
-        <div className={userBubbleClass}>
-          {userLabel}
-          <p>{prompt}</p>
+      {turns.map((turn, index) => (
+        <div
+          className={turn.role === "user" ? userBubbleClass : assistantBubbleClass}
+          key={`${turn.role}-${index}-${turn.content.slice(0, 24)}`}
+        >
+          {turn.role === "user" ? userLabel : assistantLabel}
+          {turn.role === "user" ? <p>{turn.content}</p> : <div className="report">{turn.content}</div>}
         </div>
-      )}
+      ))}
 
       {running && statusLine && (
         <p className={isHud ? "hud-chat-status" : "chat-status-line"} aria-live="polite">
           <span className={isHud ? "hud-typing-dot" : "chat-typing-dot"} aria-hidden />
           {statusLine}
         </p>
-      )}
-
-      {reply && (
-        <div className={assistantBubbleClass}>
-          {assistantLabel}
-          <div className="report">{reply}</div>
-        </div>
       )}
 
       {waiting_for_confirmation && (

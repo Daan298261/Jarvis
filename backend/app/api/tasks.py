@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sse_starlette.sse import EventSourceResponse
 
+from ..agent.chat_turns import visible_chat_turns
 from ..agent.execution_status import (
     active_worker,
     elapsed_seconds,
@@ -83,6 +84,12 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         "id": task.id,
         "title": task.title,
         "prompt": task.prompt,
+        "messages": visible_chat_turns(
+            task.prompt or "",
+            getattr(task, "conversation_json", None) or "[]",
+            task.result or "",
+            task.error or "",
+        ),
         "status": task.status,
         "state": state,
         "stage": task.stage,

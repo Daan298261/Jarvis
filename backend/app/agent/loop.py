@@ -30,6 +30,7 @@ from ..policy.computer_permissions import (
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, classify_command, is_destructive_operation, needs_confirmation
+from .chat_turns import visible_chat_turns
 from .compaction import (
     compact_history,
     deserialize_messages,
@@ -308,7 +309,19 @@ class AgentRuntime:
             if not task:
                 raise KeyError(task_id)
             if prompt:
-                task.prompt = task.prompt + "\n\nFollow-up: " + prompt
+                previous_prompt = task.prompt or ""
+                task.prompt = previous_prompt + "\n\nFollow-up: " + prompt
+                history = deserialize_messages(task.conversation_json)
+                if not any(message.role in {"user", "assistant"} for message in history):
+                    seeded = visible_chat_turns(previous_prompt, "[]", task.result or "", task.error or "")
+                    history = [
+                        ChatMessage(role=item["role"], content=item["content"])
+                        for item in seeded
+                    ]
+                last = history[-1] if history else None
+                if last is None or last.role != "user" or (last.content or "").strip() != prompt.strip():
+                    history.append(ChatMessage(role="user", content=prompt.strip()))
+                task.conversation_json = serialize_messages(history)
             task.status = "queued"
             task.waiting_for_confirmation = False
             task.updated_at = utcnow()
