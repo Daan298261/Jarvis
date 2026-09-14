@@ -44,10 +44,15 @@ class GateStatus:
     enabled: bool
 
     def as_dict(self) -> dict[str, Any]:
+        from ..policy.cyber_ato import evaluate, role_allowed
+
+        ato = evaluate()
         return {
             "role": self.role,
             "configured": self.configured,
             "enabled": self.enabled,
+            "ops_allowed": bool(self.enabled and role_allowed(self.role)),
+            "ato": ato.as_dict(),
         }
 
 
@@ -206,7 +211,12 @@ def lock_gate(role: str) -> GateStatus:
 
 
 def gate_is_enabled(role: str) -> bool:
-    return get_gate_status(role).enabled
+    """Password unlocked AND a valid in-person ATO covers this role."""
+    if not get_gate_status(role).enabled:
+        return False
+    from ..policy.cyber_ato import role_allowed
+
+    return role_allowed(role)
 
 
 def authorized_runtime_profiles(role: str) -> list[RuntimeProfile]:
@@ -219,6 +229,10 @@ def authorized_runtime_profiles(role: str) -> list[RuntimeProfile]:
     """
     normalized = normalize_gate_role(role)
     if not gate_is_enabled(normalized):
+        if get_gate_status(normalized).enabled:
+            raise PermissionError(
+                f"{normalized} in-person ATO license is missing, expired, or does not cover this role"
+            )
         raise PermissionError(f"{normalized} password gate is locked")
     allowed_names = set(ROLE_PROFILES[normalized])
     return [

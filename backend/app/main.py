@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, computer_use, context_repo, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, owner_chat, packs, perception, perception_identity, permissions, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, owner_chat, packs, perception, perception_identity, permissions, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -91,6 +91,7 @@ app.include_router(agent_portability.router)
 app.include_router(guest_portals.owner_router)
 app.include_router(guest_portals.guest_router)
 app.include_router(license.router)
+app.include_router(cyber_ato.router)
 app.include_router(autonomy.router)
 app.include_router(agent_policy.router)
 app.include_router(amazon_ads.router)
@@ -150,6 +151,12 @@ async def startup() -> None:
     REGISTRY.apply_settings(current)
     logs_dir().mkdir(exist_ok=True)
     Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
+    try:
+        from .licensing.clock_log import record_clock_sample
+
+        record_clock_sample()
+    except Exception:
+        logging.debug("UTC clock log sample skipped", exc_info=True)
     if current.mcp_servers:
         try:
             await MCP.refresh(current.mcp_servers)

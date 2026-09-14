@@ -56,6 +56,7 @@ def _make_lease(
 @pytest.fixture
 def license_store(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.config.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.licensing.clock_log.data_dir", lambda: jarvis_env["tmp"])
     reset_licensing_store()
     cluster_id = ensure_cluster_identity()
     return {"tmp": jarvis_env["tmp"], "cluster_id": cluster_id}

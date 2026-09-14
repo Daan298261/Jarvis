@@ -62,6 +62,8 @@ or:
 - Editing `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, or `PORTAL_UX.md` (Architect-only)
 - Adding Jarvis 2.0 / swarm / Browser Use / model-stack work unless that is the named ticket
 - Adding offensive / red / counter-response capability (tools, payloads, hack-back skills, enabling Red beyond the refuse-stub). **Hard guardrail:** only Taco (manual) or PolitieGPT (named LE bot, under the LE gate) may add it. Developers, PR fixer, CoS, generic cloud agents, and home Jarvis self-dev must not. See `SECURITY_AGENTS.md` §3.4.
+- Blue/Red **runtime** unlock (specialist routing / cyber flags) requires a valid in-person cyber ATO (`docs/rfcs/0086-in-person-cyber-ato-license.md`). Red requires the ATO law-enforcement flag. Issuing that license is not permission to add exploits in a product PR.
+- Shipping `JarvisLicenseManager` (RFC-0087) inside the customer Inno payload, or committing the vendor signing private key. The manager belongs in `installer/windows/dist/` beside `JarvisSetup.exe` only.
 - Overwriting `installer/windows/` files unless that is the named installer **implementation** ticket. Architect specs are `INSTALLER.md` / `WINDOWS_SHELL.md` (outcomes only).
 - Editing voice backend files unless that is the named voice ticket (D1 owns the listen/system-message crash fix).
 

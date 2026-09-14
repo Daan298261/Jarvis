@@ -66,3 +66,8 @@ android/bootstrap.json
 android/*.jks
 android/*.keystore
 android/app/src/main/assets/orb/
+
+# Vendor license issuer (RFC-0087) — private keys never belong in git
+tools/license_manager/*.key
+*.trusted.pub
+

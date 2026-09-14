@@ -2587,6 +2587,61 @@ export async function getLicenseStatus(): Promise<LicenseStatus> {
   return api<LicenseStatus>("/api/license/status")
 }
 
+export type CyberAtoStatus = {
+  installed: boolean
+  valid: boolean
+  law_enforcement: boolean
+  blue_team: boolean
+  red_team: boolean
+  in_person_verified: boolean
+  expired: boolean
+  renewal_due: boolean
+  can_issue: boolean
+  license_id: string
+  expires_at: string
+  renew_by: string
+  case_ref: string
+  reason: string
+}
+
+export type CyberAtoDocument = {
+  payload: Record<string, unknown>
+  signature: string
+  public_key: string
+}
+
+export async function getCyberAtoStatus(): Promise<CyberAtoStatus> {
+  return api<CyberAtoStatus>("/api/cyber-ato/status")
+}
+
+export async function issueCyberAto(body: {
+  law_enforcement: boolean
+  blue_team: boolean
+  red_team: boolean
+  valid_days: number
+  renew_in_days?: number | null
+  case_ref?: string
+  install?: boolean
+}): Promise<{ license: CyberAtoDocument; status: CyberAtoStatus }> {
+  return api("/api/cyber-ato/issue", { method: "POST", body: JSON.stringify(body) })
+}
+
+export async function installCyberAto(license: CyberAtoDocument | Record<string, unknown>): Promise<CyberAtoStatus> {
+  return api("/api/cyber-ato/install", { method: "POST", body: JSON.stringify({ license }) })
+}
+
+export async function renewCyberAto(body?: {
+  valid_days?: number
+  renew_in_days?: number | null
+  install?: boolean
+}): Promise<{ license: CyberAtoDocument; status: CyberAtoStatus }> {
+  return api("/api/cyber-ato/renew", { method: "POST", body: JSON.stringify(body || {}) })
+}
+
+export async function revokeCyberAto(): Promise<CyberAtoStatus> {
+  return api("/api/cyber-ato/revoke", { method: "POST" })
+}
+
 export async function getLicenseCluster(): Promise<LicenseCluster> {
   return api<LicenseCluster>("/api/license/cluster")
 }
