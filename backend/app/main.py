@@ -151,6 +151,12 @@ async def startup() -> None:
     REGISTRY.apply_settings(current)
     logs_dir().mkdir(exist_ok=True)
     Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
+    try:
+        from .licensing.clock_log import record_clock_sample
+
+        record_clock_sample()
+    except Exception:
+        logging.debug("UTC clock log sample skipped", exc_info=True)
     if current.mcp_servers:
         try:
             await MCP.refresh(current.mcp_servers)

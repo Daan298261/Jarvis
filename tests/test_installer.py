@@ -102,6 +102,23 @@ def test_build_script_invokes_iscc():
     assert "JarvisSetup.exe" in text
     lower = text.lower()
     assert "localappdata" in lower or r"programs\inno setup 6" in lower
+    assert "build-license-manager.ps1" in text
+    assert "JarvisLicenseManager" in text
+
+
+def test_vendor_license_manager_is_excluded_from_inno_payload():
+    iss = _read(ISS)
+    assert "tools\\license_manager" in iss
+    assert "JarvisLicenseManager.exe" in iss
+    for line in iss.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Source:") and "JarvisLicenseManager" in stripped and "Excludes:" not in stripped:
+            raise AssertionError("JarvisLicenseManager must not be copied into the customer payload")
+    manager = INSTALLER_DIR / "build-license-manager.ps1"
+    assert manager.is_file()
+    manager_text = _read(manager)
+    assert "JarvisLicenseManager" in manager_text
+    assert "vendor-only" in manager_text.lower() or "not in jarvis.iss" in manager_text.lower()
 
 
 def test_readme_documents_build_oneliner():

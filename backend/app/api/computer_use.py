@@ -32,6 +32,11 @@ async def computer_use_targets():
 
 @router.post("/plan")
 async def computer_use_plan(body: PlanBody):
+    from ..policy.cyber_ato import license_blocks
+
+    blocked = license_blocks("computer-use")
+    if blocked:
+        raise HTTPException(403, blocked)
     try:
         return await plan_computer_use(
             body.goal,

@@ -57,6 +57,7 @@ Implement and unit-test; leave P0 live-model items as `TODO` / desktop sign-off 
 - Start swarm / Browser Use / P4–P5 / model-stack work unless that is the named ticket
 - Add offensive / red / counter-response **tools, payloads, or attack procedures**. **Hard guardrail:** only Taco (manual) or PolitieGPT (named LE bot, under the LE gate) may add them. Developers, PR fixer, CoS, generic cloud agents, and home Jarvis self-dev must not. Home/product workers have no API to register offensive tools, payloads, or hack-back skills. See `SECURITY_AGENTS.md` §3.4.
 - **Blue/Red runtime** (specialist models, cyber permission flags) is allowed only when a valid **in-person cyber ATO license** is installed (`/api/cyber-ato`, `python -m app.policy.cyber_ato`). Red additionally requires the license **law-enforcement** flag and is still a refuse-stub for offensive capability until Taco or PolitieGPT adds it. Password gates are not a substitute for the ATO.
+- **License issuer** (`JarvisLicenseManager`) is vendor-only: build it into `installer/windows/dist/` beside `JarvisSetup.exe`. Do not add it to the Inno customer payload and do not commit issuer private keys.
 
 Design work belongs in **`docs/rfcs/`** ([template](docs/rfcs/TEMPLATE.md)).
 

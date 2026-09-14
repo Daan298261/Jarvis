@@ -95,3 +95,9 @@ if (-not $SkipBootstrapModel) {
 if (-not $SkipVoicePack) {
     Write-Host "Includes: Kokoro-82M default household butler voice" -ForegroundColor Green
 }
+
+Write-Host "==> Vendor license manager JarvisLicenseManager (release folder only; not in Jarvis.iss)" -ForegroundColor Cyan
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "build-license-manager.ps1") -OutDir $OutDir
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "License manager build failed with exit code $LASTEXITCODE (JarvisSetup.exe is still usable)."
+}
