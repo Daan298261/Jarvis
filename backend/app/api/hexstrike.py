@@ -19,6 +19,7 @@ from ..security.hexstrike_defensive import (
     upsert_scope,
 )
 from ..security.hexstrike_install import HEXSTRIKE_INSTALLER
+from ..security.hexstrike_tools import install_all_missing, install_host_tool, missing_host_tools
 
 router = APIRouter(prefix="/api/hexstrike", tags=["hexstrike"])
 
@@ -31,6 +32,10 @@ class HexStrikeConfigIn(BaseModel):
 
 class HexStrikeInstallIn(BaseModel):
     install_path: str | None = None
+
+
+class HexStrikeDependencyInstallIn(BaseModel):
+    tool: Literal["nmap", "trivy", "checkov", "docker", "exiftool"] | None = None
 
 
 class HexStrikeScopeIn(BaseModel):
@@ -130,6 +135,18 @@ async def hexstrike_install_status():
 async def hexstrike_install(body: HexStrikeInstallIn | None = None):
     _operator_permission("blue.static_rules")
     return HEXSTRIKE_INSTALLER.start(body.install_path if body else None).as_dict()
+
+
+@router.post("/dependencies/install")
+async def hexstrike_install_dependencies(body: HexStrikeDependencyInstallIn | None = None):
+    _operator_permission("blue.static_rules")
+    if body and body.tool:
+        return (await install_host_tool(body.tool)).as_dict()
+    results = await install_all_missing()
+    return {
+        "missing_before": missing_host_tools(),
+        "results": [item.as_dict() for item in results],
+    }
 
 
 @router.post("/install/cancel")

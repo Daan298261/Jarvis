@@ -114,6 +114,32 @@ _CONVERSATION_BLOCKERS = (
     "desktop",
 )
 
+_DEFENSIVE_OPERATOR_KEYWORDS = (
+    "hexstrike",
+    "daybreak",
+    "aegis",
+    "nmap",
+    "trivy",
+    "checkov",
+    "exiftool",
+    "docker bench",
+    "lan inventory",
+    "container scan",
+    "iac scan",
+    "host baseline",
+    "forensic",
+    "cve-",
+    "defensive action",
+    "run defense",
+)
+
+
+def is_defensive_operator_prompt(text: str) -> bool:
+    lowered = (text or "").strip().lower()
+    if not lowered:
+        return False
+    return any(token in lowered for token in _DEFENSIVE_OPERATOR_KEYWORDS)
+
 _WEATHER_RE = re.compile(
     r"\b(weather|forecast|temperature|temperatures|raining|rain|umbrella|humidity|windy)\b",
     re.IGNORECASE,
@@ -168,9 +194,11 @@ def is_plain_conversation(prompt: str) -> bool:
     return chatty
 
 
-def follow_up_stays_conversation(follow: str | None) -> bool:
+def follow_up_stays_conversation(follow: str | None, *, security_role: str = "") -> bool:
     """Keep an existing chat thread conversational unless the follow-up is a tool task."""
     text = (follow or "").strip()
+    if security_role == "blue-team" and is_defensive_operator_prompt(text):
+        return False
     if not text:
         return True
     if is_plain_conversation(text):

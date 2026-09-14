@@ -136,6 +136,11 @@ export function VoiceProfilePicker() {
             uses the system voice. You can also click <strong>Install household voice</strong> below.
           </p>
         )}
+        <p className="lede voice-profile-msg" style={{ margin: "0 0 10px", fontSize: 13 }}>
+          Pick <strong>Windows natural</strong> for Microsoft SAPI (en-GB male). Pick{" "}
+          <strong>Household butler (expressive)</strong> after enabling Chatterbox (
+          <code>JARVIS_TTS_CHATTERBOX=1</code>).
+        </p>
         <div className="axis-options voice-profile-options" role="radiogroup" aria-label="Voice profile">
           {catalog.profiles.map((profile) => {
             const selected = activeId === profile.id

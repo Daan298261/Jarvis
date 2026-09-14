@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react"
 import { Link, NavLink } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode, Task } from "../api"
 import { HelpPanel, HelpTrigger } from "../help/HelpPanel"
+import { PortalNav } from "../components/PortalNav"
 import { HudHealthRail } from "./HudHealthRail"
 import { HudModelSelector } from "./HudModelSelector"
 import { HudOpsRail } from "./HudOpsRail"
@@ -60,9 +61,12 @@ export function HudTopChrome({
   return (
     <header className="hud-top">
       <div className="hud-top-left">
+        <PortalNav variant="hud" />
         <div className="hud-brand-lockup">
-          <span className={`hud-brand-mark${statusOnline ? "" : " degraded"}`} aria-hidden />
-          <strong>JARVIS</strong>
+          <Link to="/" className="hud-brand-link" title="New task">
+            <span className={`hud-brand-mark${statusOnline ? "" : " degraded"}`} aria-hidden />
+            <strong>JARVIS</strong>
+          </Link>
         </div>
         <span className={`hud-local-state${statusOnline ? "" : " degraded"}`}>
           LOCAL · {statusOnline ? "ONLINE" : "DEGRADED"}
@@ -256,7 +260,12 @@ export function HudShell({
           <div className="hud-center">{children}</div>
         </div>
       ) : (
-        <main className="hud-admin-main">{children}</main>
+        <>
+          <div className="hud-admin-nav">
+            <PortalNav variant="hud" />
+          </div>
+          <main className="hud-admin-main">{children}</main>
+        </>
       )}
 
       {isChat && panel && (

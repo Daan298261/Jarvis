@@ -12,6 +12,13 @@ from .schema import VoiceProfile, VoiceProfileListItem
 
 DEFAULT_VOICE_PROFILE_ID = "butler_original_v1"
 
+# Picker shows one Kokoro preset plus distinct engine paths (RFC-0070).
+CURATED_VOICE_PROFILE_IDS: tuple[str, ...] = (
+    "butler_original_v1",
+    "windows_natural_en_v1",
+    "chatterbox_expressive_en_v1",
+)
+
 
 def voice_packs_dir() -> Path:
     return repo_root() / "voice_packs"
@@ -49,10 +56,16 @@ def _profile_is_available(profile: VoiceProfile) -> tuple[bool, str | None, str 
 
     engine = pick_engine_for_profile(profile)
     if engine is None:
+        hint = "No local TTS engine is available for this profile. Re-run Jarvis Setup or install Kokoro weights."
+        if profile.tts.resolved_engine_id() == "chatterbox":
+            hint = (
+                "Chatterbox is opt-in: set JARVIS_TTS_CHATTERBOX=1, pip install chatterbox, "
+                "stage models/tts/chatterbox-turbo, then restart Jarvis."
+            )
         return (
             False,
             "tts_unavailable",
-            "No local TTS engine is available for this profile. Re-run Jarvis Setup or install Kokoro weights.",
+            hint,
         )
     return True, None, None
 
@@ -90,7 +103,8 @@ class VoiceProfileCatalog:
 
     def list_profiles(self, active_id: str) -> list[VoiceProfileListItem]:
         items: list[VoiceProfileListItem] = []
-        for profile in sorted(self._profiles.values(), key=lambda item: item.display_name.lower()):
+        ordered = [self._profiles[pid] for pid in CURATED_VOICE_PROFILE_IDS if pid in self._profiles]
+        for profile in ordered:
             available, reason, hint = _profile_is_available(profile)
             items.append(
                 VoiceProfileListItem(

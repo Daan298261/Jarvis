@@ -61,15 +61,19 @@ def test_catalog_loads_default_butler_profile():
 
 
 def test_catalog_lists_stub_profiles_as_unavailable(monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
+    monkeypatch.setattr(
+        "app.voice_profiles.catalog.pick_engine_for_profile",
+        lambda profile: None if profile.id == "chatterbox_expressive_en_v1" else "system",
+    )
     reload_catalog()
     catalog = reload_catalog()
     items = catalog.list_profiles(DEFAULT_VOICE_PROFILE_ID)
     by_id = {item.id: item for item in items}
     assert by_id[DEFAULT_VOICE_PROFILE_ID].available is True
-    stub = by_id["tactical_aide_original_v1"]
+    assert "tactical_aide_original_v1" not in by_id
+    stub = by_id["chatterbox_expressive_en_v1"]
     assert stub.available is False
-    assert stub.unavailable_reason == "install_required"
+    assert stub.unavailable_reason == "tts_unavailable"
     assert stub.install_hint is not None
     assert "install" in stub.install_hint.lower()
 

@@ -92,7 +92,7 @@ def test_installer_and_desktop_versions_match():
     installer_version = re.search(r'#define MyAppVersion "([^"]+)"', iss_text).group(1)
     cargo = tomllib.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "Cargo.toml"))
     tauri = json.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "tauri.conf.json"))
-    assert installer_version == "1.3.7"
+    assert installer_version == "1.3.8"
     assert cargo["package"]["version"] == installer_version
     assert tauri["version"] == installer_version
 
@@ -119,6 +119,7 @@ def test_vendor_license_manager_is_excluded_from_inno_payload():
     assert manager.is_file()
     manager_text = _read(manager)
     assert "JarvisLicenseManager" in manager_text
+    assert "tools\\license_manager\\__main__.py" in manager_text
     assert "vendor-only" in manager_text.lower() or "not in jarvis.iss" in manager_text.lower()
 
 

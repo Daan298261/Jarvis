@@ -1,0 +1,27 @@
+{
+  "id": "windows_natural_en_v1",
+  "archetype": "household_butler",
+  "display_name": "Windows natural (British male)",
+  "license": "original",
+  "provenance": "Microsoft SAPI / OneCore voice mapped to en-GB male (RFC-0070 system fallback, selectable).",
+  "tts": {
+    "engine_id": "system",
+    "engine_hint": "system",
+    "model_id": "windows-sapi",
+    "speaker_ref": "bm_",
+    "pack_path": "voice_packs/windows_natural_en_v1",
+    "vram_class": "edge",
+    "latency_class": "interactive",
+    "license": "OS",
+    "offline": true,
+    "quality_tier": "natural",
+    "speaking_rate": 1.0
+  },
+  "persona_hooks": {
+    "register": "british_understated",
+    "humour": "dry"
+  },
+  "sample_utterance": "At your service, sir.",
+  "vram_class": "edge",
+  "builtin": true
+}

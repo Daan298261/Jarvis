@@ -42,6 +42,40 @@ export function filterWorkEvents(events: OwnerChatEvent[]): OwnerChatEvent[] {
   return events.filter((event) => !HIDDEN_WORK_TITLES.has(event.title))
 }
 
+/** Heartbeat / reasoning lines — separate collapsible stream from tool work. */
+export function filterThoughtEvents(events: OwnerChatEvent[]): OwnerChatEvent[] {
+  return events.filter((event) => HIDDEN_WORK_TITLES.has(event.title))
+}
+
+const INTERNAL_LINE = /^(?:\*\*)?(?:VERIFICATION|PLAN|END STATE|ACCEPTANCE CRITERIA|DIAGNOSIS|OBSERVATION)\b/i
+const PSEUDO_USER_LINE = /^(?:User|Human|You):\s+/i
+
+export function splitAssistantContent(content: string): { public: string; internal: string } {
+  const publicLines: string[] = []
+  const internalLines: string[] = []
+  for (const line of (content || "").split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      if (internalLines.length && internalLines[internalLines.length - 1] !== "") {
+        internalLines.push("")
+      } else if (publicLines.length) {
+        publicLines.push(line)
+      }
+      continue
+    }
+    if (PSEUDO_USER_LINE.test(trimmed) || INTERNAL_LINE.test(trimmed)) {
+      internalLines.push(line)
+      continue
+    }
+    if (internalLines.length && !publicLines.length) {
+      internalLines.push(line)
+      continue
+    }
+    publicLines.push(line)
+  }
+  return { public: publicLines.join("\n").trim(), internal: internalLines.join("\n").trim() }
+}
+
 export function assistantReplyText(result?: string | null, error?: string | null): string {
   return (result || error || "").trim()
 }
@@ -49,6 +83,8 @@ export function assistantReplyText(result?: string | null, error?: string | null
 export type ChatTurn = {
   role: "user" | "assistant"
   content: string
+  internal?: string
+  public?: string
 }
 
 const FOLLOW_UP_MARKER = "\n\nFollow-up: "
@@ -77,6 +113,14 @@ export function visibleChatTurns(input: {
       if (!content) continue
       const role: ChatTurn["role"] = item.role === "assistant" ? "assistant" : "user"
       const last = turns[turns.length - 1]
+      if (role === "assistant") {
+        const split = splitAssistantContent(content)
+        const publicText = split.public || (!split.internal ? content : "")
+        if (!publicText && !split.internal) continue
+        if (last && last.role === role && last.content === publicText && last.internal === split.internal) continue
+        turns.push({ role, content: publicText, public: publicText, internal: split.internal || undefined })
+        continue
+      }
       if (last && last.role === role && last.content === content) continue
       turns.push({ role, content })
     }
