@@ -327,7 +327,7 @@ async def preview_role_route(body: RoleRouteRequest):
         raise HTTPException(
             status_code=403,
             detail={
-                "reason": f"{security_gate_role} password gate is locked",
+                "reason": f"{security_gate_role} password gate is locked or the in-person ATO license does not cover this role",
                 "code": "password_gate_locked",
             },
         )
