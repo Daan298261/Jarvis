@@ -24,6 +24,28 @@ type Connection = {
   updated_at?: number
 }
 
+function gatewayTroubleshooting(connection: Connection | null): string | null {
+  if (!connection) {
+    return "Prepare connection starts the TLS gateway on port 4781. The phone never talks to the portal on :4780 directly."
+  }
+  if (connection.state === "failed") {
+    return (
+      "Gateway failed to start. On Windows, allow inbound TCP 4781 on your private network profile, " +
+      "ensure nothing else is using port 4781, and confirm Jarvis is running on localhost:4780."
+    )
+  }
+  if (connection.state === "ready" && connection.endpoints.length === 0) {
+    return "No phone-reachable LAN address was found. Connect this PC to Wi‑Fi, then Prepare connection again."
+  }
+  if (connection.limitation) {
+    return connection.limitation
+  }
+  if (connection.state !== "ready" && connection.state !== "running") {
+    return "Prepare connection before pairing. Copy the server fingerprint into the phone when prompted."
+  }
+  return null
+}
+
 export function MobileCompanionSetup() {
   const [devices, setDevices] = useState<Device[]>([])
   const [endpoint, setEndpoint] = useState("")
@@ -87,6 +109,7 @@ export function MobileCompanionSetup() {
   const buildLocked = buildPhase === "queued" || buildPhase === "building"
   const canStartPersonalized = !busy && !buildLocked
   const canStartGeneric = !busy && !buildLocked
+  const gatewayHint = gatewayTroubleshooting(connection)
 
   return (
     <section className="card" style={{ marginBottom: 20 }}>
@@ -143,7 +166,11 @@ export function MobileCompanionSetup() {
             <p>Desktop encryption and device authentication verified. Test the phone on Wi-Fi next.</p>
           )}
           {connection.remote_verified && <p>Hosted fallback reached this Jarvis gateway.</p>}
-          {connection.limitation && <p>{connection.limitation}</p>}
+          {gatewayHint && (
+            <p className="companion-gateway-hint" role="note">
+              {gatewayHint}
+            </p>
+          )}
           {connection.endpoints.map((address) => (
             <div key={address}>
               <code>{address}</code>
