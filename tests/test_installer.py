@@ -63,6 +63,7 @@ def test_jarvis_iss_wiring():
     assert "Stop Jarvis" in text
     lower = text.lower()
     assert "models" in lower and "excludes" in lower
+    assert "release\\" in lower or "release\\*" in lower
     assert "runtime" in lower
     assert "start-jarvis.ps1" in lower
     assert "diskspanning=yes" in lower
