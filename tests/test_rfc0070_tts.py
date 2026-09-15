@@ -21,13 +21,13 @@ def _reset_delivery():
     reset_chat_delivery()
 
 
-def test_default_voice_profile_is_windows_natural():
+def test_default_voice_profile_is_kokoro_butler():
     reload_catalog()
     catalog = reload_catalog()
     profile = catalog.get(DEFAULT_VOICE_PROFILE_ID)
     assert profile is not None
-    assert profile.id == "windows_natural_en_v1"
-    assert profile.tts.resolved_engine_id() == "system"
+    assert profile.id == "butler_original_v1"
+    assert profile.tts.resolved_engine_id() == "kokoro"
 
 
 def test_butler_profile_uses_kokoro_engine():
@@ -36,7 +36,7 @@ def test_butler_profile_uses_kokoro_engine():
     profile = catalog.get(KOKORO_BUTLER_VOICE_PROFILE_ID)
     assert profile is not None
     assert profile.tts.resolved_engine_id() == "kokoro"
-    assert profile.tts.speaker_ref == "bm_daniel"
+    assert profile.tts.speaker_ref == "bm_george"
     assert profile.tts.speaking_rate == pytest.approx(0.96)
     assert (Path("voice_packs/butler_original_v1/pack.json")).is_file()
 
@@ -45,7 +45,7 @@ def test_voice_picker_lists_curated_profiles_only():
     reload_catalog()
     items = reload_catalog().list_profiles("butler_original_v1")
     ids = [item.id for item in items]
-    assert ids == ["windows_natural_en_v1", "butler_original_v1", "chatterbox_expressive_en_v1"]
+    assert ids == ["butler_original_v1", "chatterbox_expressive_en_v1", "windows_natural_en_v1"]
     assert "dry_butler_original_v1" not in ids
 
 
@@ -173,7 +173,7 @@ async def test_synthesize_routes_through_picked_engine(monkeypatch):
 
     async def fake_synth(text, *, engine_id, profile=None, speaker_ref="", model_dir=None):
         assert engine_id == "kokoro"
-        assert speaker_ref == "bm_daniel"
+        assert speaker_ref == "bm_george"
         return b"RIFF"
 
     monkeypatch.setattr("app.workers.voice.pick_engine_for_profile", lambda _p: "kokoro")
@@ -197,7 +197,7 @@ async def test_kokoro_receives_profile_speaking_rate(monkeypatch):
     class FakePipeline:
         def __call__(self, text, *, voice, speed):
             assert text == "Ready when you are."
-            assert voice == "bm_daniel"
+            assert voice == "bm_george"
             observed["speed"] = speed
             yield None, None, np.zeros(16, dtype=np.float32)
 

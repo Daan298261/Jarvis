@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
-import { api, fetchAudio } from "../api"
+import { api, fetchAudioWithMetadata } from "../api"
 import { stopChatTts } from "./chatTtsPlayer"
 
 export const WINDOWS_NATURAL_VOICE_PROFILE_ID = "windows_natural_en_v1"
 export const KOKORO_BUTLER_VOICE_PROFILE_ID = "butler_original_v1"
-export const DEFAULT_VOICE_PROFILE_ID = WINDOWS_NATURAL_VOICE_PROFILE_ID
+export const DEFAULT_VOICE_PROFILE_ID = KOKORO_BUTLER_VOICE_PROFILE_ID
 
 const STORAGE_KEY = "jarvis.voice-profile.v1"
 export const VOICE_PROFILE_CHANGED_EVENT = "jarvis:voice-profile-changed"
@@ -167,11 +167,11 @@ function pickDefaultActiveId(profiles: VoiceProfile[], preferred: string | null)
 
   if (preferred && available.some((profile) => profile.id === preferred)) return preferred
 
-  const windowsNatural = available.find((profile) => profile.id === WINDOWS_NATURAL_VOICE_PROFILE_ID)
-  if (windowsNatural) return windowsNatural.id
-
   const butler = available.find((profile) => profile.id === KOKORO_BUTLER_VOICE_PROFILE_ID)
   if (butler) return butler.id
+
+  const windowsSystem = available.find((profile) => profile.id === WINDOWS_NATURAL_VOICE_PROFILE_ID)
+  if (windowsSystem) return windowsSystem.id
 
   return available[0]?.id ?? null
 }
@@ -255,7 +255,13 @@ export async function installVoiceProfile(profileId: string): Promise<{ installe
   }
 }
 
-async function requestPreviewBlob(profileId: string): Promise<Blob | null> {
+export type VoicePreviewResult = {
+  ok: boolean
+  engineId?: string
+  profileId?: string
+}
+
+async function requestPreviewAudio(profileId: string): Promise<{ blob: Blob; engineId: string | null; profileId: string | null } | null> {
   const encoded = encodeURIComponent(profileId)
   const attempts = [
     { path: `/api/voice-profiles/${encoded}/preview`, body: undefined },
@@ -264,7 +270,7 @@ async function requestPreviewBlob(profileId: string): Promise<Blob | null> {
 
   for (const attempt of attempts) {
     try {
-      return await fetchAudio(attempt.path, {
+      return await fetchAudioWithMetadata(attempt.path, {
         method: "POST",
         body: attempt.body,
       })
@@ -275,13 +281,13 @@ async function requestPreviewBlob(profileId: string): Promise<Blob | null> {
   return null
 }
 
-export async function previewVoiceProfile(profile: VoiceProfile): Promise<boolean> {
-  if (!profile.available) return false
+export async function previewVoiceProfile(profile: VoiceProfile): Promise<VoicePreviewResult> {
+  if (!profile.available) return { ok: false }
 
   try {
-    const blob = await requestPreviewBlob(profile.id)
-    if (!blob) return false
-    const url = URL.createObjectURL(blob)
+    const result = await requestPreviewAudio(profile.id)
+    if (!result) return { ok: false }
+    const url = URL.createObjectURL(result.blob)
     const audio = new Audio(url)
     await new Promise<void>((resolve) => {
       const finish = () => {
@@ -292,9 +298,13 @@ export async function previewVoiceProfile(profile: VoiceProfile): Promise<boolea
       audio.onerror = finish
       void audio.play().catch(finish)
     })
-    return true
+    return {
+      ok: true,
+      engineId: result.engineId || undefined,
+      profileId: result.profileId || undefined,
+    }
   } catch {
-    return false
+    return { ok: false }
   }
 }
 

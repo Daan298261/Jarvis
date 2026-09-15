@@ -66,9 +66,11 @@ export function VoiceProfilePicker() {
     if (!profile.available || previewingId) return
     setPreviewingId(profile.id)
     setMsg("")
-    const ok = await previewVoiceProfile(profile)
-    if (!ok) {
+    const result = await previewVoiceProfile(profile)
+    if (!result.ok) {
       setMsg("Preview is not available for this voice yet.")
+    } else {
+      setMsg(`Preview: ${result.engineId || "unknown engine"} · ${result.profileId || profile.id}`)
     }
     setPreviewingId(null)
   }
@@ -132,14 +134,15 @@ export function VoiceProfilePicker() {
         </p>
         {kokoroReady === false && (
           <p className="lede voice-profile-msg" style={{ margin: "0 0 10px", fontSize: 13 }}>
-            Jarvis is preparing the household voice in the background. Until that finishes, speech
-            uses the system voice. You can also click <strong>Install household voice</strong> below.
+            Jarvis is preparing the household voice in the background. Speech stays silent if the
+            neural voice fails; it will not pretend that SAPI is Kokoro. You can also click
+            <strong> Install household voice</strong> below.
           </p>
         )}
         <p className="lede voice-profile-msg" style={{ margin: "0 0 10px", fontSize: 13 }}>
-          Pick <strong>Windows natural</strong> for Microsoft SAPI (en-GB male). Pick{" "}
-          <strong>Household butler (expressive)</strong> after enabling Chatterbox (
-          <code>JARVIS_TTS_CHATTERBOX=1</code>).
+          <strong>Household butler</strong> is the default local Kokoro voice. Windows SAPI is an
+          explicit baseline choice. <strong>Household butler (expressive)</strong> can be installed
+          here without environment-variable setup.
         </p>
         <div className="axis-options voice-profile-options" role="radiogroup" aria-label="Voice profile">
           {catalog.profiles.map((profile) => {

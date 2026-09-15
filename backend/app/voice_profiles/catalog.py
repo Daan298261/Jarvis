@@ -6,20 +6,20 @@ from pathlib import Path
 from typing import Any
 
 from ..config import data_dir, load_settings, repo_root, save_settings
-from ..tts.engines import pick_engine_for_profile
+from ..tts.engines import is_engine_available
 from .ip_guard import contains_forbidden_ip_term, validate_profile_ip_fields
 from .schema import VoiceProfile, VoiceProfileListItem
 
 WINDOWS_NATURAL_VOICE_PROFILE_ID = "windows_natural_en_v1"
 KOKORO_BUTLER_VOICE_PROFILE_ID = "butler_original_v1"
-DEFAULT_VOICE_PROFILE_ID = WINDOWS_NATURAL_VOICE_PROFILE_ID
+DEFAULT_VOICE_PROFILE_ID = KOKORO_BUTLER_VOICE_PROFILE_ID
 FALLBACK_VOICE_PROFILE_ID = KOKORO_BUTLER_VOICE_PROFILE_ID
 
-# Picker shows Windows natural first, then Kokoro, then Chatterbox (RFC-0070).
+# Neural voices lead the picker; SAPI remains an explicit baseline choice.
 CURATED_VOICE_PROFILE_IDS: tuple[str, ...] = (
-    "windows_natural_en_v1",
     "butler_original_v1",
     "chatterbox_expressive_en_v1",
+    "windows_natural_en_v1",
 )
 
 
@@ -57,13 +57,12 @@ def _profile_is_available(profile: VoiceProfile) -> tuple[bool, str | None, str 
                 "One-click install is available in Settings for this voice profile.",
             )
 
-    engine = pick_engine_for_profile(profile)
-    if engine is None:
+    engine = profile.tts.resolved_engine_id()
+    if not is_engine_available(engine):
         hint = "No local TTS engine is available for this profile. Re-run Jarvis Setup or install Kokoro weights."
         if profile.tts.resolved_engine_id() == "chatterbox":
             hint = (
-                "Chatterbox is opt-in: set JARVIS_TTS_CHATTERBOX=1, pip install chatterbox, "
-                "stage models/tts/chatterbox-turbo, then restart Jarvis."
+                "Install the expressive local voice from Settings. Jarvis will prepare Chatterbox automatically."
             )
         return (
             False,
@@ -150,14 +149,11 @@ def reload_catalog() -> VoiceProfileCatalog:
 
 
 def preferred_default_voice_profile_id() -> str:
-    catalog = get_catalog()
-    if catalog.get_available(WINDOWS_NATURAL_VOICE_PROFILE_ID):
-        return WINDOWS_NATURAL_VOICE_PROFILE_ID
-    return FALLBACK_VOICE_PROFILE_ID
+    return DEFAULT_VOICE_PROFILE_ID
 
 
-def _voice_windows_default_migration_marker() -> Path:
-    return data_dir() / ".migrated_voice_windows_natural_v1"
+def _voice_kokoro_default_migration_marker() -> Path:
+    return data_dir() / ".migrated_voice_kokoro_default_v1"
 
 
 def get_active_voice_profile_id() -> str:
@@ -170,13 +166,12 @@ def get_active_voice_profile_id() -> str:
             save_settings(settings)
         return preferred
     if (
-        active == KOKORO_BUTLER_VOICE_PROFILE_ID
-        and preferred == WINDOWS_NATURAL_VOICE_PROFILE_ID
-        and not _voice_windows_default_migration_marker().is_file()
+        active == WINDOWS_NATURAL_VOICE_PROFILE_ID
+        and not _voice_kokoro_default_migration_marker().is_file()
     ):
         settings.voice.active_profile_id = preferred
         save_settings(settings)
-        _voice_windows_default_migration_marker().touch()
+        _voice_kokoro_default_migration_marker().touch()
         return preferred
     return active
 
@@ -186,8 +181,8 @@ def get_active_voice_profile() -> VoiceProfile | None:
     active_id = get_active_voice_profile_id()
     return (
         catalog.get_available(active_id)
-        or catalog.get_available(WINDOWS_NATURAL_VOICE_PROFILE_ID)
         or catalog.get_available(FALLBACK_VOICE_PROFILE_ID)
+        or catalog.get(active_id)
     )
 
 

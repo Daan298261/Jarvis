@@ -49,19 +49,19 @@ def _write_profile(tmp_path, profile_id: str, **overrides):
     (pack_dir / "profile.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_catalog_loads_windows_natural_default_profile():
+def test_catalog_loads_kokoro_default_profile():
     reload_catalog()
     catalog = reload_catalog()
     profile = catalog.get(DEFAULT_VOICE_PROFILE_ID)
     assert profile is not None
-    assert profile.id == "windows_natural_en_v1"
-    assert "Windows natural" in profile.display_name
+    assert profile.id == "butler_original_v1"
+    assert profile.tts.resolved_engine_id() == "kokoro"
 
 
 def test_catalog_lists_stub_profiles_as_unavailable(monkeypatch):
     monkeypatch.setattr(
-        "app.voice_profiles.catalog.pick_engine_for_profile",
-        lambda profile: None if profile.id == "chatterbox_expressive_en_v1" else "system",
+        "app.voice_profiles.catalog.is_engine_available",
+        lambda engine_id: engine_id != "chatterbox",
     )
     reload_catalog()
     catalog = reload_catalog()
@@ -80,7 +80,7 @@ def test_active_selection_persists(voice_profiles_env, monkeypatch):
     settings = voice_profiles_env["settings"]
     settings.voice.active_profile_id = DEFAULT_VOICE_PROFILE_ID
     save_settings(settings)
-    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
+    monkeypatch.setattr("app.voice_profiles.catalog.is_engine_available", lambda _engine: True)
     reload_catalog()
 
     activated = set_active_voice_profile_id(DEFAULT_VOICE_PROFILE_ID)
@@ -101,21 +101,21 @@ def test_forbidden_id_rejection():
 
 
 def test_set_active_rejects_forbidden_id(voice_profiles_env, monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
+    monkeypatch.setattr("app.voice_profiles.catalog.is_engine_available", lambda _engine: True)
     reload_catalog()
     with pytest.raises(ValueError, match="forbidden"):
         set_active_voice_profile_id("codsworth_voice_v1")
 
 
 def test_set_active_rejects_unavailable_stub(voice_profiles_env, monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
+    monkeypatch.setattr("app.voice_profiles.catalog.is_engine_available", lambda _engine: True)
     reload_catalog()
     with pytest.raises(PermissionError):
         set_active_voice_profile_id("tactical_aide_original_v1")
 
 
 def test_api_list_and_set_active(voice_profiles_env, monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
+    monkeypatch.setattr("app.voice_profiles.catalog.is_engine_available", lambda _engine: True)
     reload_catalog()
     client = TestClient(app)
 
@@ -147,7 +147,7 @@ def test_api_list_and_set_active(voice_profiles_env, monkeypatch):
 
 
 def test_api_preview_unavailable_stub_returns_409(voice_profiles_env, monkeypatch):
-    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
+    monkeypatch.setattr("app.voice_profiles.catalog.is_engine_available", lambda _engine: True)
     reload_catalog()
     client = TestClient(app)
     response = client.post("/api/voice-profiles/tactical_aide_original_v1/preview")
@@ -158,16 +158,20 @@ def test_api_preview_unavailable_stub_returns_409(voice_profiles_env, monkeypatc
 async def test_preview_available_profile(voice_profiles_env, monkeypatch):
     from app.api.voice_profiles import preview_voice_profile
 
-    async def fake_synthesize(text: str, *, voice_profile_id: str | None = None) -> bytes:
-        assert voice_profile_id == DEFAULT_VOICE_PROFILE_ID
-        return b"RIFF"
+    from app.workers.voice import SynthesizedSpeech
 
-    monkeypatch.setattr("app.api.voice_profiles.synthesize_speech", fake_synthesize)
-    monkeypatch.setattr("app.voice_profiles.catalog.pick_engine_for_profile", lambda _profile: "system")
+    async def fake_synthesize(text: str, *, voice_profile_id: str | None = None) -> SynthesizedSpeech:
+        assert voice_profile_id == DEFAULT_VOICE_PROFILE_ID
+        return SynthesizedSpeech(b"RIFF", "kokoro", DEFAULT_VOICE_PROFILE_ID)
+
+    monkeypatch.setattr("app.api.voice_profiles.synthesize_speech_result", fake_synthesize)
+    monkeypatch.setattr("app.voice_profiles.catalog.is_engine_available", lambda _engine: True)
     reload_catalog()
     response = await preview_voice_profile(DEFAULT_VOICE_PROFILE_ID)
     assert response.body == b"RIFF"
     assert response.media_type == "audio/wav"
+    assert response.headers["X-Jarvis-TTS-Engine"] == "kokoro"
+    assert response.headers["X-Jarvis-Voice-Profile"] == DEFAULT_VOICE_PROFILE_ID
 
 
 def test_catalog_skips_forbidden_pack_on_load(tmp_path, monkeypatch):

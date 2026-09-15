@@ -10,7 +10,7 @@ from ..agent.loop import AGENT
 from ..config import load_settings
 from ..persona.quiet import should_speak_chat_reply
 from ..tts.engines import engine_availability
-from ..workers.voice import VoiceSTTError, synthesize_speech, transcribe_audio, voice_status
+from ..workers.voice import VoiceSTTError, synthesize_speech_result, transcribe_audio, voice_status
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
@@ -112,12 +112,16 @@ async def voice_transcribe(audio: UploadFile = File(...)):
 async def voice_speak(body: SpeakIn):
     started = time.perf_counter()
     try:
-        wav = await synthesize_speech(body.text, voice_profile_id=body.voice_profile_id)
+        result = await synthesize_speech_result(body.text, voice_profile_id=body.voice_profile_id)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     duration_ms = (time.perf_counter() - started) * 1000
     return Response(
-        content=wav,
+        content=result.audio,
         media_type="audio/wav",
-        headers={"Server-Timing": f"tts;dur={duration_ms:.1f}"},
+        headers={
+            "Server-Timing": f"tts;dur={duration_ms:.1f}",
+            "X-Jarvis-TTS-Engine": result.engine_id,
+            "X-Jarvis-Voice-Profile": result.profile_id,
+        },
     )
