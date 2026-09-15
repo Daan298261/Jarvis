@@ -52,7 +52,12 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Local release artifacts (Windows installer is desktop-only)
+# Local release bundles and upload staging (never commit or ship inside JarvisSetup)
+release/
+_release_upload/
+installer-build*.log
+
+# Legacy narrow patterns (kept for clarity; release/ covers these)
 release/portal/
 release/*.zip
 release/*.tar.gz
