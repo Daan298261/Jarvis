@@ -4,7 +4,7 @@ Ships **sources** that produce `JarvisSetup.exe` on a Windows machine. The cloud
 
 ## What it does
 
-1. **JarvisSetup.exe** (Inno Setup) copies the repo into `%LOCALAPPDATA%\Jarvis` (default), excluding `.venv`, `node_modules`, `models/`, `runtime/`, `data/`, `logs/`, and `.git`.
+1. **JarvisSetup.exe** (Inno Setup) copies the repo into `%LOCALAPPDATA%\Jarvis` (default), excluding `.venv`, `node_modules`, `models/`, `runtime/`, `data/`, `logs/`, local `release/` bundles, `_release_upload/`, and `.git`.
 2. Runs **`bootstrap.ps1`** once: installs Python/Node via `winget` if needed, creates `.venv`, `pip install -r backend/requirements.txt`, Playwright Chromium, `npm run build`, downloads llama.cpp CUDA 13.3 binaries and default **Qwen3.5-9B** GGUFs.
 3. Adds **Start Jarvis** / **Stop Jarvis** shortcuts (Desktop + Start Menu) that call `start-jarvis.ps1` and `stop-jarvis.ps1`.
 4. Uninstall removes shortcuts; **does not** delete `data/` by default.
