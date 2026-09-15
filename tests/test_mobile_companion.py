@@ -182,9 +182,9 @@ async def test_mobile_voice_profiles_are_minimized_and_tts_selection_is_forwarde
 
     async def synthesize(text, *, voice_profile_id=None):
         received.update(text=text, voice_profile_id=voice_profile_id)
-        return b"RIFFtest"
+        return voice.SynthesizedSpeech(b"RIFFtest", "kokoro", voice_profile_id or "")
 
-    monkeypatch.setattr(voice, "synthesize_speech", synthesize)
+    monkeypatch.setattr(voice, "synthesize_speech_result", synthesize)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
         assert (await client.get("/api/companion/voice/profiles")).status_code == 401
         profiles = (await client.get("/api/companion/voice/profiles", headers=headers)).json()["profiles"]
@@ -194,6 +194,7 @@ async def test_mobile_voice_profiles_are_minimized_and_tts_selection_is_forwarde
         response = await client.post("/api/companion/voice/speak", headers=headers,
                                      json={"text": "Status report", "voice_profile_id": "butler_original_v1"})
     assert response.status_code == 200 and response.content == b"RIFFtest"
+    assert response.headers["X-Jarvis-TTS-Engine"] == "kokoro"
     assert received == {"text": "Status report", "voice_profile_id": "butler_original_v1"}
 
 

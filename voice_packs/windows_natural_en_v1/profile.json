@@ -1,7 +1,7 @@
 {
   "id": "windows_natural_en_v1",
   "archetype": "household_butler",
-  "display_name": "Windows natural (British male)",
+  "display_name": "Windows system (SAPI)",
   "license": "original",
   "provenance": "Microsoft SAPI / OneCore voice mapped to en-GB male (RFC-0070 system fallback, selectable).",
   "tts": {
@@ -14,7 +14,7 @@
     "latency_class": "interactive",
     "license": "OS",
     "offline": true,
-    "quality_tier": "natural",
+    "quality_tier": "baseline",
     "speaking_rate": 1.0
   },
   "persona_hooks": {

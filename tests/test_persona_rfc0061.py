@@ -156,14 +156,16 @@ def test_persona_pack_changes_apply_without_model_code_edits(tmp_path, monkeypat
 @pytest.mark.asyncio
 async def test_voice_speak_returns_audio_bytes(monkeypatch):
     from app.api.voice import SpeakIn
+    from app.workers.voice import SynthesizedSpeech
 
-    async def fake_synthesize(text: str, *, voice_profile_id: str | None = None) -> bytes:
+    async def fake_synthesize(text: str, *, voice_profile_id: str | None = None) -> SynthesizedSpeech:
         assert text == "Hello there."
         assert voice_profile_id == "butler_original_v1"
-        return b"RIFFfake-wav"
+        return SynthesizedSpeech(b"RIFFfake-wav", "kokoro", voice_profile_id)
 
-    monkeypatch.setattr("app.api.voice.synthesize_speech", fake_synthesize)
+    monkeypatch.setattr("app.api.voice.synthesize_speech_result", fake_synthesize)
     response = await voice_speak(SpeakIn(text="Hello there.", voice_profile_id="butler_original_v1"))
     assert response.body == b"RIFFfake-wav"
     assert response.media_type == "audio/wav"
     assert response.headers["server-timing"].startswith("tts;dur=")
+    assert response.headers["X-Jarvis-TTS-Engine"] == "kokoro"

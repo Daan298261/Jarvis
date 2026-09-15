@@ -209,9 +209,9 @@ async def test_clip_endpoints_remain_as_fallback(mobile_env, monkeypatch):
     _device, headers = _headers()
 
     async def synthesize(text, *, voice_profile_id=None):
-        return b"RIFFclip"
+        return voice.SynthesizedSpeech(b"RIFFclip", "kokoro", voice_profile_id or "")
 
-    monkeypatch.setattr(voice, "synthesize_speech", synthesize)
+    monkeypatch.setattr(voice, "synthesize_speech_result", synthesize)
     import httpx
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(

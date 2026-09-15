@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from ..config import models_dir
-from ..tts.engines import engine_availability, pick_engine_for_profile, primary_tts_backend
+from ..tts.engines import (
+    engine_availability,
+    engine_chain_for_profile,
+    is_engine_available,
+    pick_engine_for_profile,
+    primary_tts_backend,
+)
 from ..tts.synthesize import synthesize_with_engine
 
 
@@ -26,6 +32,13 @@ class VoiceSTTError(RuntimeError):
 
     def __str__(self) -> str:
         return self.message
+
+
+@dataclass(frozen=True)
+class SynthesizedSpeech:
+    audio: bytes
+    engine_id: str
+    profile_id: str
 
 
 def _module_available(name: str) -> bool:
@@ -424,7 +437,7 @@ def active_voice_profile_id() -> str:
         return FALLBACK_VOICE_PROFILE_ID
 
 
-async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -> bytes:
+async def synthesize_speech_result(text: str, *, voice_profile_id: str | None = None) -> SynthesizedSpeech:
     cleaned = (text or "").strip()
     if not cleaned:
         raise RuntimeError("text is required")
@@ -447,15 +460,38 @@ async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -
 
     engine_id = pick_engine_for_profile(profile) if profile else tts_backend()
     if not engine_id:
+        if profile and profile.tts.resolved_engine_id() != "system":
+            raise RuntimeError(
+                f"The selected {profile.tts.resolved_engine_id()} voice is not available. "
+                "Install it from Settings and retry."
+            )
         raise RuntimeError(
-            "No local TTS backend is available. Run Jarvis Setup to bundle Kokoro, "
-            "or install espeak-ng / pyttsx3 as fallback."
+            "No local TTS backend is available. Run Jarvis Setup or install a voice from Settings."
         )
     speaker_ref = (profile.tts.speaker_ref if profile else "").strip()
-    return await synthesize_with_engine(
-        cleaned,
-        engine_id=engine_id,
-        profile=profile,
-        speaker_ref=speaker_ref,
-    )
+    candidates = [engine_id]
+    if profile:
+        candidates.extend(
+            candidate
+            for candidate in engine_chain_for_profile(profile)
+            if candidate != engine_id and is_engine_available(candidate)
+        )
+    last_error: RuntimeError | None = None
+    for candidate in candidates:
+        try:
+            audio = await synthesize_with_engine(
+                cleaned,
+                engine_id=candidate,
+                profile=profile if candidate == engine_id else None,
+                speaker_ref=speaker_ref if candidate == engine_id else "",
+            )
+            return SynthesizedSpeech(audio=audio, engine_id=candidate, profile_id=selected_profile_id)
+        except RuntimeError as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -> bytes:
+    return (await synthesize_speech_result(text, voice_profile_id=voice_profile_id)).audio
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import wave
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,6 @@ from typing import Any
 from ..config import repo_root
 from ..voice_profiles.schema import VoiceProfile
 from .engines import (
-    CHATTERBOX_MODEL_DIR,
     KOKORO_MODEL_DIR,
     is_chatterbox_available,
     is_piper_available,
@@ -21,6 +21,18 @@ from .engines import (
 )
 from .system_sapi import legacy_tts_backend, speak_espeak, speak_pyttsx3, speak_sapi
 from .warm_start import get_kokoro_pipeline
+
+logger = logging.getLogger(__name__)
+
+
+class TtsSynthesisError(RuntimeError):
+    def __init__(self, engine_id: str, profile_id: str, detail: str) -> None:
+        self.engine_id = engine_id
+        self.profile_id = profile_id
+        self.detail = detail
+        super().__init__(
+            f"{engine_id} synthesis failed for {profile_id or 'unprofiled speech'}: {detail}"
+        )
 
 
 def _pcm_to_wav(pcm: bytes, *, sample_rate: int = 24000, channels: int = 1, sample_width: int = 2) -> bytes:
@@ -61,17 +73,17 @@ async def synthesize_with_engine(
                 profile=profile,
                 speaking_rate=speaking_rate,
             )
-        except Exception:
-            if legacy_system_tts_available():
-                return await _synthesize_system(
-                    text,
-                    engine="system",
-                    speaker_ref=voice,
-                    speaking_rate=speaking_rate,
-                )
-            raise
+        except Exception as exc:
+            profile_id = profile.id if profile else ""
+            logger.exception("Kokoro synthesis failed for profile=%s; SAPI fallback is disabled", profile_id)
+            raise TtsSynthesisError("kokoro", profile_id, str(exc)) from exc
     if engine == "chatterbox":
-        return await _synthesize_chatterbox(text, voice=voice)
+        try:
+            return await _synthesize_chatterbox(text, voice=voice)
+        except Exception as exc:
+            profile_id = profile.id if profile else ""
+            logger.exception("Chatterbox synthesis failed for profile=%s; system fallback is disabled", profile_id)
+            raise TtsSynthesisError("chatterbox", profile_id, str(exc)) from exc
     if engine == "piper":
         return await _synthesize_piper(text, voice=voice, profile=profile)
     return await _synthesize_system(
@@ -124,19 +136,21 @@ async def _synthesize_kokoro(
 async def _synthesize_chatterbox(text: str, *, voice: str) -> bytes:
     if not is_chatterbox_available():
         raise RuntimeError(
-            "Chatterbox is opt-in. Set JARVIS_TTS_CHATTERBOX=1, pip install chatterbox, "
-            f"and stage weights under {CHATTERBOX_MODEL_DIR}."
+            "Chatterbox is not installed. Use Get this voice in Settings and retry."
         )
 
     def _run() -> bytes:
-        from chatterbox import ChatterboxTTS  # type: ignore[import-not-found]
+        import torch
+        from chatterbox.tts import ChatterboxTTS  # type: ignore[import-not-found]
 
-        model = ChatterboxTTS.from_pretrained(str(CHATTERBOX_MODEL_DIR))
-        wav = model.generate(text, voice=voice or None)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = ChatterboxTTS.from_pretrained(device=device)
+        kwargs = {"audio_prompt_path": voice} if voice and Path(voice).is_file() else {}
+        wav = model.generate(text, **kwargs)
         if isinstance(wav, bytes):
             return wav
         pcm = _float32_to_pcm16(wav)
-        return _pcm_to_wav(pcm)
+        return _pcm_to_wav(pcm, sample_rate=int(getattr(model, "sr", 24000)))
 
     return await asyncio.to_thread(_run)
 
