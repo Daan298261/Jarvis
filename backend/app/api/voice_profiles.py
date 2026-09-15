@@ -14,7 +14,7 @@ from ..voice_profiles.catalog import (
 from ..voice_profiles.ip_guard import contains_forbidden_ip_term
 from ..voice_profiles.schema import ActiveVoiceProfileIn, ActiveVoiceProfileOut
 from ..tts.pack_install import install_voice_pack
-from ..workers.voice import synthesize_speech
+from ..workers.voice import synthesize_speech_result
 
 router = APIRouter(prefix="/api/voice-profiles", tags=["voice-profiles"])
 
@@ -119,7 +119,14 @@ async def preview_voice_profile(profile_id: str):
 
     text = (profile.sample_utterance or "At your service.").strip()
     try:
-        wav = await synthesize_speech(text, voice_profile_id=profile_id)
+        result = await synthesize_speech_result(text, voice_profile_id=profile_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return Response(content=wav, media_type="audio/wav")
+    return Response(
+        content=result.audio,
+        media_type="audio/wav",
+        headers={
+            "X-Jarvis-TTS-Engine": result.engine_id,
+            "X-Jarvis-Voice-Profile": result.profile_id,
+        },
+    )

@@ -8,7 +8,7 @@
     "engine_id": "kokoro",
     "engine_hint": "kokoro",
     "model_id": "kokoro-82m",
-    "speaker_ref": "bm_daniel",
+    "speaker_ref": "bm_george",
     "pack_path": "voice_packs/butler_original_v1",
     "vram_class": "balanced",
     "latency_class": "interactive",

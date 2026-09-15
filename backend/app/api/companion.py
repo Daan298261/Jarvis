@@ -258,22 +258,31 @@ def voice_profiles(device=Device):
 @router.post("/voice/profiles/{profile_id}/preview")
 async def preview_voice_profile(profile_id: str, device=Device):
     from ..voice_profiles.catalog import get_catalog
-    from ..workers.voice import synthesize_speech
+    from ..workers.voice import synthesize_speech_result
     profile = get_catalog().get_available(profile_id)
     if profile is None:
         raise HTTPException(404, "Voice profile is not available")
     try:
-        audio = await synthesize_speech(profile.sample_utterance, voice_profile_id=profile.id)
+        result = await synthesize_speech_result(profile.sample_utterance, voice_profile_id=profile.id)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
-    return Response(audio, media_type="audio/wav")
+    return Response(
+        result.audio,
+        media_type="audio/wav",
+        headers={"X-Jarvis-TTS-Engine": result.engine_id, "X-Jarvis-Voice-Profile": result.profile_id},
+    )
 
 
 @router.post("/voice/speak")
 async def speak(body: Speak, device=Device):
-    from ..workers.voice import synthesize_speech
+    from ..workers.voice import synthesize_speech_result
     try:
-        return Response(await synthesize_speech(body.text, voice_profile_id=body.voice_profile_id), media_type="audio/wav")
+        result = await synthesize_speech_result(body.text, voice_profile_id=body.voice_profile_id)
+        return Response(
+            result.audio,
+            media_type="audio/wav",
+            headers={"X-Jarvis-TTS-Engine": result.engine_id, "X-Jarvis-Voice-Profile": result.profile_id},
+        )
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
 

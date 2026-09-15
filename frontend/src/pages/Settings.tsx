@@ -135,7 +135,8 @@ export function SettingsPage() {
         <h2>Voice &amp; speech</h2>
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Jarvis speaks typed chat replies with local Kokoro TTS (natural British household voice).
-          Windows SAPI is fallback only. Text always appears even when speech is off or TTS fails.
+          Windows SAPI is an explicit baseline choice, never a silent neural fallback. Text always
+          appears even when speech is off or TTS fails.
         </p>
         <VoiceProfilePicker />
 

@@ -18,6 +18,7 @@ from ..voice_profiles.schema import VoiceProfile
 from .engines import (
     KOKORO_HF_REPO,
     KOKORO_MODEL_DIR,
+    is_chatterbox_available,
     kokoro_python_ready,
     kokoro_weights_ready,
 )
@@ -25,17 +26,22 @@ from .engines import (
 logger = logging.getLogger(__name__)
 
 KOKORO_PY_PACKAGES = ("kokoro>=0.9.2", "soundfile>=0.13.0")
+CHATTERBOX_PY_PACKAGES = ("chatterbox-tts",)
 _ENSURE_LOCK = threading.Lock()
 KOKORO_RUNTIME_ERROR = (
     "The household voice could not be prepared. Check that this PC is online, then try "
     "Install household voice in Settings, or re-run Jarvis Setup."
+)
+CHATTERBOX_RUNTIME_ERROR = (
+    "The expressive voice could not be prepared. Check that this PC is online, then try "
+    "Get this voice in Settings again."
 )
 
 OPTIONAL_PACK_INSTALL: dict[str, dict[str, Any]] = {
     "butler_original_v1": {
         "engine_id": "kokoro",
         "model_id": "kokoro-82m",
-        "speaker_ref": "bm_daniel",
+        "speaker_ref": "bm_george",
         "model_rel_path": "models/tts/kokoro-82m",
         "quality_tier": "natural",
         "license": "Apache-2.0",
@@ -62,13 +68,14 @@ OPTIONAL_PACK_INSTALL: dict[str, dict[str, Any]] = {
     },
     "chatterbox_expressive_en_v1": {
         "engine_id": "chatterbox",
-        "model_id": "chatterbox-turbo",
-        "speaker_ref": "jarvis_butler_expressive_v1",
-        "model_rel_path": "models/tts/chatterbox-turbo",
+        "model_id": "chatterbox",
+        "speaker_ref": "",
+        "model_rel_path": "",
         "quality_tier": "expressive",
         "license": "MIT",
         "download_kokoro": False,
-        "detail": "Enable JARVIS_TTS_CHATTERBOX=1 and stage Chatterbox-Turbo weights under models/tts/chatterbox-turbo.",
+        "install_chatterbox": True,
+        "detail": "Chatterbox is installed. Its neural weights are prepared automatically on first preview.",
     },
     "synthetic_command_original_v1": {
         "engine_id": "kokoro",
@@ -129,6 +136,32 @@ def ensure_kokoro_python(*, force: bool = False) -> None:
         raise RuntimeError(KOKORO_RUNTIME_ERROR)
 
 
+def ensure_chatterbox_python(*, force: bool = False) -> None:
+    """Install the optional expressive engine into the Jarvis interpreter."""
+    if not force and is_chatterbox_available():
+        return
+    logger.info("Installing Chatterbox TTS into %s", sys.executable)
+    command = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "--upgrade",
+        *CHATTERBOX_PY_PACKAGES,
+    ]
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    except OSError as exc:
+        raise RuntimeError(CHATTERBOX_RUNTIME_ERROR) from exc
+    if completed.returncode != 0:
+        logger.error("Chatterbox package install failed: %s", (completed.stderr or completed.stdout)[-2000:])
+        raise RuntimeError(CHATTERBOX_RUNTIME_ERROR)
+    importlib.invalidate_caches()
+    if not is_chatterbox_available():
+        raise RuntimeError(CHATTERBOX_RUNTIME_ERROR)
+
+
 def ensure_kokoro_weights(*, force: bool = False) -> Path:
     KOKORO_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     if not force and kokoro_weights_ready(KOKORO_MODEL_DIR):
@@ -172,6 +205,8 @@ def install_voice_pack(profile: VoiceProfile, *, force: bool = False) -> VoicePa
 
     if merged.get("download_kokoro"):
         ensure_kokoro_runtime(force=force)
+    if merged.get("install_chatterbox"):
+        ensure_chatterbox_python(force=force)
 
     manifest_path = pack_dir / "pack.json"
     manifest_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")

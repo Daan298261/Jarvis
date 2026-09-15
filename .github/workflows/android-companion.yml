@@ -19,8 +19,10 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      # Legacy SDK package "tools" was removed from Google's repo; v3 default breaks on ubuntu-24.04 (202609+).
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Verify companion feature sources
         run: |
           python3 - <<'PY'

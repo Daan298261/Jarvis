@@ -67,12 +67,6 @@ def is_piper_available() -> bool:
 
 
 def is_chatterbox_available() -> bool:
-    if os.environ.get("JARVIS_TTS_CHATTERBOX", "").strip() not in {"1", "true", "yes"}:
-        return False
-    if not _module_available("chatterbox"):
-        return False
-    if CHATTERBOX_MODEL_DIR.is_dir() and any(CHATTERBOX_MODEL_DIR.iterdir()):
-        return True
     return _module_available("chatterbox")
 
 
@@ -104,13 +98,13 @@ def is_engine_available(engine_id: str) -> bool:
 def engine_chain_for_profile(profile: Any) -> list[str]:
     primary = resolve_engine_id(profile.tts)
     if primary == "chatterbox":
-        return ["chatterbox", "kokoro", "piper", "system"]
+        return ["chatterbox", "kokoro"]
     if primary == "kokoro":
-        return ["kokoro", "piper", "system"]
+        return ["kokoro"]
     if primary == "piper":
-        return ["piper", "kokoro", "system"]
+        return ["piper"]
     if primary in {"orpheus", "qwen3-tts"}:
-        return [primary, "kokoro", "piper", "system"]
+        return [primary, "kokoro"]
     return ["system"]
 
 
@@ -149,7 +143,7 @@ def engine_availability() -> dict[str, bool]:
         "system": legacy_system_tts_available(),
         "kokoro_weights": kokoro_weights_ready(),
         "kokoro_model_dir": str(KOKORO_MODEL_DIR),
-        "chatterbox_opt_in": os.environ.get("JARVIS_TTS_CHATTERBOX", "").strip() in {"1", "true", "yes"},
+        "chatterbox_opt_in": is_chatterbox_available(),
     }
 
 

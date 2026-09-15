@@ -91,10 +91,24 @@ export async function apiForm<T>(path: string, body: FormData, init?: RequestIni
 }
 
 export async function fetchAudio(path: string, init?: RequestInit): Promise<Blob> {
+  return (await fetchAudioWithMetadata(path, init)).blob
+}
+
+export type AudioResponse = {
+  blob: Blob
+  engineId: string | null
+  profileId: string | null
+}
+
+export async function fetchAudioWithMetadata(path: string, init?: RequestInit): Promise<AudioResponse> {
   const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
   const response = await fetch(path, { ...init, headers })
   await throwIfNotOk(response)
-  return response.blob()
+  return {
+    blob: await response.blob(),
+    engineId: response.headers.get("X-Jarvis-TTS-Engine"),
+    profileId: response.headers.get("X-Jarvis-Voice-Profile"),
+  }
 }
 
 export type Task = {

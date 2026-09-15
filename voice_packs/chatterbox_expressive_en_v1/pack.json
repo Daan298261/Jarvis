@@ -1,5 +1,5 @@
 {
   "engine_id": "chatterbox",
-  "model_id": "chatterbox-turbo",
-  "model_rel_path": "models/tts/chatterbox-turbo"
+  "model_id": "chatterbox",
+  "model_rel_path": ""
 }
