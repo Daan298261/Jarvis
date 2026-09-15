@@ -19,6 +19,7 @@ export function AppearancePresenceControls({ settings, hexStrikeActive = false }
   const [message, setMessage] = useState("")
   const [voiceCatalog, setVoiceCatalog] = useState<VoiceProfileCatalog | null>(null)
   const [voiceBusy, setVoiceBusy] = useState(false)
+  const [switchingToId, setSwitchingToId] = useState<string | null>(null)
   const [activeVoiceId, setActiveVoiceId] = useState<string>("")
 
   useEffect(() => {
@@ -48,18 +49,24 @@ export function AppearancePresenceControls({ settings, hexStrikeActive = false }
 
   async function onVoiceChange(profileId: string) {
     const id = profileId.trim()
-    if (!id || id === activeVoiceId) return
+    if (!id || id === activeVoiceId || voiceBusy) return
+    const profile = voiceCatalog?.profiles.find((item) => item.id === id)
+    if (!profile?.available) return
     setVoiceBusy(true)
-    setMessage("")
+    setSwitchingToId(id)
+    setMessage("Switching voice…")
     try {
       const next = await setActiveVoiceProfile(id)
       setActiveVoiceId(next || id)
-      const profile = voiceCatalog?.profiles.find((item) => item.id === id)
-      setMessage(profile ? `Voice: ${profile.display_name}` : "Voice profile updated.")
+      const refreshed = await loadVoiceProfileCatalog()
+      setVoiceCatalog(refreshed)
+      setActiveVoiceId(refreshed.active_voice_profile_id || next || id)
+      setMessage(profile ? `Active: ${profile.display_name}` : "Voice profile updated.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not change voice profile.")
     } finally {
       setVoiceBusy(false)
+      setSwitchingToId(null)
     }
   }
 
@@ -78,28 +85,55 @@ export function AppearancePresenceControls({ settings, hexStrikeActive = false }
 
   const selected = settings.shell === "classic" ? "classic" : settings.requestedPresence
   const voiceProfiles = voiceCatalog?.profiles ?? []
-  const voiceSelectDisabled = voiceBusy || !voiceCatalog?.apiAvailable || voiceProfiles.length === 0
+  const voiceListDisabled = voiceBusy || !voiceCatalog?.apiAvailable || voiceProfiles.length === 0
+  const activeProfile = voiceProfiles.find((profile) => profile.id === activeVoiceId)
 
   return (
     <details className="jarvis-presence-controls">
       <summary>Appearance &amp; voice</summary>
       <div className="jarvis-presence-controls-body">
-        <label className="jarvis-presence-voice-row">
-          Voice (TTS)
-          <select
-            disabled={voiceSelectDisabled}
-            value={activeVoiceId || ""}
-            onChange={(event) => void onVoiceChange(event.target.value)}
+        <div className="jarvis-presence-voice-row">
+          <span className="jarvis-presence-voice-label">Voice (TTS)</span>
+          {activeProfile && (
+            <span className="jarvis-presence-voice-active" aria-live="polite">
+              {voiceBusy ? "Switching…" : `Active: ${activeProfile.display_name}`}
+            </span>
+          )}
+          {!voiceCatalog?.apiAvailable && (
+            <p className="jarvis-presence-voice-hint">{voiceCatalog?.loadMessage ?? "Voice catalog unavailable."}</p>
+          )}
+          <ul
+            className={`jarvis-presence-voice-list${voiceBusy ? " switching" : ""}`}
+            role="listbox"
+            aria-label="Voice profile"
+            aria-busy={voiceBusy}
           >
-            {!activeVoiceId && <option value="">Select a voice…</option>}
-            {voiceProfiles.map((profile: VoiceProfile) => (
-              <option key={profile.id} value={profile.id} disabled={!profile.available}>
-                {profile.display_name}
-                {!profile.available ? " (install in Settings)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+            {voiceProfiles.map((profile: VoiceProfile) => {
+              const selected = profile.id === activeVoiceId
+              return (
+                <li key={profile.id} role="presentation">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    disabled={voiceListDisabled || !profile.available}
+                    className={`jarvis-presence-voice-option${selected ? " active" : ""}${voiceBusy && switchingToId === profile.id ? " pending" : ""}`}
+                    onClick={() => void onVoiceChange(profile.id)}
+                  >
+                    <span className="jarvis-presence-voice-option-name">{profile.display_name}</span>
+                    {!profile.available && (
+                      <span className="jarvis-presence-voice-option-meta">Install in Settings</span>
+                    )}
+                    {selected && !voiceBusy && <span className="jarvis-presence-voice-check" aria-hidden>✓</span>}
+                    {voiceBusy && switchingToId === profile.id && (
+                      <span className="jarvis-presence-voice-spinner" aria-hidden />
+                    )}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
 
         {!hexStrikeActive && (
           <div className="jarvis-presence-mode-row" role="group" aria-label="Jarvis interface">

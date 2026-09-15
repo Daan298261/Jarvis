@@ -81,7 +81,7 @@ class VoiceSettings(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     active_profile_id: str = Field(
-        default="butler_original_v1",
+        default="windows_natural_en_v1",
         min_length=1,
         max_length=80,
         pattern=r"^[a-z0-9_]+$",

@@ -5,17 +5,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from ..config import load_settings, repo_root, save_settings
+from ..config import data_dir, load_settings, repo_root, save_settings
 from ..tts.engines import pick_engine_for_profile
 from .ip_guard import contains_forbidden_ip_term, validate_profile_ip_fields
 from .schema import VoiceProfile, VoiceProfileListItem
 
-DEFAULT_VOICE_PROFILE_ID = "butler_original_v1"
+WINDOWS_NATURAL_VOICE_PROFILE_ID = "windows_natural_en_v1"
+KOKORO_BUTLER_VOICE_PROFILE_ID = "butler_original_v1"
+DEFAULT_VOICE_PROFILE_ID = WINDOWS_NATURAL_VOICE_PROFILE_ID
+FALLBACK_VOICE_PROFILE_ID = KOKORO_BUTLER_VOICE_PROFILE_ID
 
-# Picker shows one Kokoro preset plus distinct engine paths (RFC-0070).
+# Picker shows Windows natural first, then Kokoro, then Chatterbox (RFC-0070).
 CURATED_VOICE_PROFILE_IDS: tuple[str, ...] = (
-    "butler_original_v1",
     "windows_natural_en_v1",
+    "butler_original_v1",
     "chatterbox_expressive_en_v1",
 )
 
@@ -146,18 +149,46 @@ def reload_catalog() -> VoiceProfileCatalog:
     return get_catalog()
 
 
+def preferred_default_voice_profile_id() -> str:
+    catalog = get_catalog()
+    if catalog.get_available(WINDOWS_NATURAL_VOICE_PROFILE_ID):
+        return WINDOWS_NATURAL_VOICE_PROFILE_ID
+    return FALLBACK_VOICE_PROFILE_ID
+
+
+def _voice_windows_default_migration_marker() -> Path:
+    return data_dir() / ".migrated_voice_windows_natural_v1"
+
+
 def get_active_voice_profile_id() -> str:
     settings = load_settings()
     active = (settings.voice.active_profile_id or "").strip()
-    if active and not contains_forbidden_ip_term(active):
-        return active
-    return DEFAULT_VOICE_PROFILE_ID
+    preferred = preferred_default_voice_profile_id()
+    if not active or contains_forbidden_ip_term(active):
+        if settings.voice.active_profile_id != preferred:
+            settings.voice.active_profile_id = preferred
+            save_settings(settings)
+        return preferred
+    if (
+        active == KOKORO_BUTLER_VOICE_PROFILE_ID
+        and preferred == WINDOWS_NATURAL_VOICE_PROFILE_ID
+        and not _voice_windows_default_migration_marker().is_file()
+    ):
+        settings.voice.active_profile_id = preferred
+        save_settings(settings)
+        _voice_windows_default_migration_marker().touch()
+        return preferred
+    return active
 
 
 def get_active_voice_profile() -> VoiceProfile | None:
     catalog = get_catalog()
     active_id = get_active_voice_profile_id()
-    return catalog.get_available(active_id) or catalog.get_available(DEFAULT_VOICE_PROFILE_ID)
+    return (
+        catalog.get_available(active_id)
+        or catalog.get_available(WINDOWS_NATURAL_VOICE_PROFILE_ID)
+        or catalog.get_available(FALLBACK_VOICE_PROFILE_ID)
+    )
 
 
 def set_active_voice_profile_id(profile_id: str) -> VoiceProfileListItem:

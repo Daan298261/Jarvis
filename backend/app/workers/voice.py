@@ -417,11 +417,11 @@ async def _transcribe_windows_sapi(path: Path) -> str:
 def active_voice_profile_id() -> str:
     """Return the persisted active voice profile id for TTS routing."""
     try:
-        from ..voice_profiles.catalog import get_active_voice_profile_id
+        from ..voice_profiles.catalog import FALLBACK_VOICE_PROFILE_ID, get_active_voice_profile_id
 
         return get_active_voice_profile_id()
     except Exception:
-        return "butler_original_v1"
+        return FALLBACK_VOICE_PROFILE_ID
 
 
 async def synthesize_speech(text: str, *, voice_profile_id: str | None = None) -> bytes:

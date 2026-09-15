@@ -1,10 +1,25 @@
 import { useEffect, useState } from "react"
 import { api, fetchAudio } from "../api"
+import { stopChatTts } from "./chatTtsPlayer"
 
-export const DEFAULT_VOICE_PROFILE_ID = "butler_original_v1"
+export const WINDOWS_NATURAL_VOICE_PROFILE_ID = "windows_natural_en_v1"
+export const KOKORO_BUTLER_VOICE_PROFILE_ID = "butler_original_v1"
+export const DEFAULT_VOICE_PROFILE_ID = WINDOWS_NATURAL_VOICE_PROFILE_ID
 
 const STORAGE_KEY = "jarvis.voice-profile.v1"
 export const VOICE_PROFILE_CHANGED_EVENT = "jarvis:voice-profile-changed"
+export const VOICE_PROFILE_SWITCHING_EVENT = "jarvis:voice-profile-switching"
+
+let voiceProfileSwitching = false
+
+export function isVoiceProfileSwitching(): boolean {
+  return voiceProfileSwitching
+}
+
+function announceVoiceProfileSwitching(switching: boolean): void {
+  voiceProfileSwitching = switching
+  window.dispatchEvent(new CustomEvent<boolean>(VOICE_PROFILE_SWITCHING_EVENT, { detail: switching }))
+}
 
 const FORBIDDEN_TOKENS = [
   "codsworth",
@@ -152,7 +167,10 @@ function pickDefaultActiveId(profiles: VoiceProfile[], preferred: string | null)
 
   if (preferred && available.some((profile) => profile.id === preferred)) return preferred
 
-  const butler = available.find((profile) => profile.id === DEFAULT_VOICE_PROFILE_ID)
+  const windowsNatural = available.find((profile) => profile.id === WINDOWS_NATURAL_VOICE_PROFILE_ID)
+  if (windowsNatural) return windowsNatural.id
+
+  const butler = available.find((profile) => profile.id === KOKORO_BUTLER_VOICE_PROFILE_ID)
   if (butler) return butler.id
 
   return available[0]?.id ?? null
@@ -186,23 +204,42 @@ export async function loadVoiceProfileCatalog(): Promise<VoiceProfileCatalog> {
   }
 }
 
-export async function setActiveVoiceProfile(voiceProfileId: string): Promise<string | null> {
+export async function setActiveVoiceProfile(
+  voiceProfileId: string,
+  options?: { preview?: boolean },
+): Promise<string | null> {
   const id = voiceProfileId.trim()
   if (!id) return null
 
-  cacheActiveVoiceProfileId(id)
-  announceActiveVoiceProfile(id)
-
+  announceVoiceProfileSwitching(true)
   try {
-    await api("/api/voice-profiles/active", {
-      method: "PUT",
-      body: JSON.stringify({ voice_profile_id: id }),
-    })
-  } catch {
-    // D2: persist locally until backend accepts PUT /api/voice-profiles/active.
-  }
+    stopChatTts()
 
-  return id
+    try {
+      await api("/api/voice-profiles/active", {
+        method: "PUT",
+        body: JSON.stringify({ voice_profile_id: id }),
+      })
+    } catch {
+      // D2: persist locally until backend accepts PUT /api/voice-profiles/active.
+    }
+
+    cacheActiveVoiceProfileId(id)
+    announceActiveVoiceProfile(id)
+
+    if (options?.preview !== false) {
+      await previewVoiceProfile({
+        id,
+        archetype: "original",
+        display_name: id,
+        available: true,
+      })
+    }
+
+    return id
+  } finally {
+    announceVoiceProfileSwitching(false)
+  }
 }
 
 export async function installVoiceProfile(profileId: string): Promise<{ installed: boolean; detail?: string }> {
@@ -263,6 +300,21 @@ export async function previewVoiceProfile(profile: VoiceProfile): Promise<boolea
 
 export function getActiveVoiceProfileId(): string | null {
   return readActiveVoiceProfileBootstrap()
+}
+
+export function useVoiceProfileSwitching(): boolean {
+  const [switching, setSwitching] = useState(() => voiceProfileSwitching)
+
+  useEffect(() => {
+    const onSwitching = (event: Event) => {
+      const custom = event as CustomEvent<boolean>
+      setSwitching(Boolean(custom.detail))
+    }
+    window.addEventListener(VOICE_PROFILE_SWITCHING_EVENT, onSwitching)
+    return () => window.removeEventListener(VOICE_PROFILE_SWITCHING_EVENT, onSwitching)
+  }, [])
+
+  return switching
 }
 
 export function useActiveVoiceProfileId(): string | null {

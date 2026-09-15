@@ -16,6 +16,7 @@ When Jarvis is already installed, Setup compares the installed version with the 
 - A newer installer offers an in-place **Upgrade** and keeps settings, models, task data, logs, and connections.
 - The same version offers **Repair** with the same preservation behavior.
 - **Reinstall and keep custom files** removes the old application files before reinstalling while leaving generated files in place.
+- **Semi-clean reinstall** removes chats, tasks, routines, memory, logs, and most settings while keeping downloaded models, runtime binaries, your private key, and license files.
 - **Clean reinstall** removes the application and all custom files only after a separate permanent-deletion confirmation.
 - An older installer is blocked to prevent an accidental downgrade.
 
