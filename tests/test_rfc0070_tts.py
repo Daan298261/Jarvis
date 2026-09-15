@@ -10,7 +10,7 @@ from app.main import app
 from app.persona.chat_delivery import enqueue_chat_tts, pending_chat_tts, reset_chat_delivery
 from app.tts.engines import engine_chain_for_profile, pick_engine_for_profile, resolve_engine_id
 from app.tts.speak_filter import filter_text_for_speech
-from app.voice_profiles.catalog import DEFAULT_VOICE_PROFILE_ID, reload_catalog
+from app.voice_profiles.catalog import DEFAULT_VOICE_PROFILE_ID, KOKORO_BUTLER_VOICE_PROFILE_ID, reload_catalog
 from app.voice_profiles.schema import VoiceProfile, VoiceProfilePersonaHooks, VoiceProfileTTS
 
 
@@ -21,10 +21,19 @@ def _reset_delivery():
     reset_chat_delivery()
 
 
-def test_default_butler_profile_uses_kokoro_engine():
+def test_default_voice_profile_is_windows_natural():
     reload_catalog()
     catalog = reload_catalog()
     profile = catalog.get(DEFAULT_VOICE_PROFILE_ID)
+    assert profile is not None
+    assert profile.id == "windows_natural_en_v1"
+    assert profile.tts.resolved_engine_id() == "system"
+
+
+def test_butler_profile_uses_kokoro_engine():
+    reload_catalog()
+    catalog = reload_catalog()
+    profile = catalog.get(KOKORO_BUTLER_VOICE_PROFILE_ID)
     assert profile is not None
     assert profile.tts.resolved_engine_id() == "kokoro"
     assert profile.tts.speaker_ref == "bm_daniel"
@@ -36,7 +45,7 @@ def test_voice_picker_lists_curated_profiles_only():
     reload_catalog()
     items = reload_catalog().list_profiles("butler_original_v1")
     ids = [item.id for item in items]
-    assert ids == ["butler_original_v1", "windows_natural_en_v1", "chatterbox_expressive_en_v1"]
+    assert ids == ["windows_natural_en_v1", "butler_original_v1", "chatterbox_expressive_en_v1"]
     assert "dry_butler_original_v1" not in ids
 
 
@@ -159,7 +168,7 @@ async def test_synthesize_routes_through_picked_engine(monkeypatch):
 
     reload_catalog()
     catalog = reload_catalog()
-    profile = catalog.get(DEFAULT_VOICE_PROFILE_ID)
+    profile = catalog.get(KOKORO_BUTLER_VOICE_PROFILE_ID)
     assert profile is not None
 
     async def fake_synth(text, *, engine_id, profile=None, speaker_ref="", model_dir=None):
@@ -170,7 +179,7 @@ async def test_synthesize_routes_through_picked_engine(monkeypatch):
     monkeypatch.setattr("app.workers.voice.pick_engine_for_profile", lambda _p: "kokoro")
     monkeypatch.setattr(voice_worker, "synthesize_with_engine", fake_synth)
 
-    wav = await voice_worker.synthesize_speech("Hello")
+    wav = await voice_worker.synthesize_speech("Hello", voice_profile_id=KOKORO_BUTLER_VOICE_PROFILE_ID)
     assert wav == b"RIFF"
 
 
@@ -181,7 +190,7 @@ async def test_kokoro_receives_profile_speaking_rate(monkeypatch):
     from app.tts.synthesize import synthesize_with_engine
 
     reload_catalog()
-    profile = reload_catalog().get(DEFAULT_VOICE_PROFILE_ID)
+    profile = reload_catalog().get(KOKORO_BUTLER_VOICE_PROFILE_ID)
     assert profile is not None
     observed: dict[str, float] = {}
 

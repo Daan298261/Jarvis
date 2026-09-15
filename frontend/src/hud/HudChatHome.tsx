@@ -1,7 +1,8 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { HudChat } from "./HudChat"
 import { HudHexStrikeSuite } from "./HudHexStrikeSuite"
 import { HEXSTRIKE_SHAPE_ID, useHexStrikeSuiteActive } from "./hexstrikeSuite"
+import { useHudOverlay } from "./hudOverlayContext"
 import { deriveOrbMood, type OrbMood } from "./orbMood"
 import type { Task } from "../api"
 import { AppearancePresenceControls } from "../presence/AppearancePresenceControls"
@@ -30,6 +31,8 @@ function taskDetail(task: Task | null, mood: OrbMood, threadActive: boolean): st
 export function HudChatHome() {
   const presentation = usePresentationSettings()
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
+  const { hexSuiteExpanded, setHexSuiteExpanded } = useHudOverlay()
+  const wasHexStrike = useRef(false)
   const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null }>({
     recording: false,
     speaking: false,
@@ -40,6 +43,15 @@ export function HudChatHome() {
     (opts: { recording: boolean; speaking: boolean; task: Task | null }) => setMoodState(opts),
     [],
   )
+
+  useEffect(() => {
+    if (hexStrikeActive && !wasHexStrike.current) {
+      setHexSuiteExpanded(true)
+    }
+    wasHexStrike.current = hexStrikeActive
+  }, [hexStrikeActive, setHexSuiteExpanded])
+
+  const showHexSuite = hexStrikeActive && hexSuiteExpanded
 
   const mood = deriveOrbMood(moodState.task, {
     recording: moodState.recording,
@@ -59,7 +71,9 @@ export function HudChatHome() {
     : presentation
 
   return (
-    <div className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}`}>
+    <div
+      className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}${hexStrikeActive && !showHexSuite ? " hex-suite-collapsed" : ""}`}
+    >
       <AppearancePresenceControls settings={presentation} hexStrikeActive={hexStrikeActive} />
       <section className="hud-orb-zone" aria-label="Jarvis state">
         <PresenceHost
@@ -77,7 +91,7 @@ export function HudChatHome() {
           </span>
         </div>
       </section>
-      {hexStrikeActive && <HudHexStrikeSuite />}
+      {showHexSuite && <HudHexStrikeSuite />}
       <HudChat onMoodChange={onMoodChange} />
     </div>
   )

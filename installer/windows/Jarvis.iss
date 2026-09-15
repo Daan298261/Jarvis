@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.3.8"
+#define MyAppVersion "1.3.9"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -192,6 +192,7 @@ begin
     True, False);
   ExistingInstallPage.Add(PrimaryAction + ' - keep all custom files');
   ExistingInstallPage.Add('&Reinstall Jarvis - remove the application, but keep custom files');
+  ExistingInstallPage.Add('&Semi-clean reinstall - reset chats, routines, memory, and logs; keep models');
   ExistingInstallPage.Add('&Clean reinstall - remove Jarvis and all custom files');
   ExistingInstallPage.SelectedValueIndex := 0;
 end;
@@ -202,7 +203,7 @@ begin
   if (ExistingInstallPage = nil) or (CurPageID <> ExistingInstallPage.ID) then
     Exit;
 
-  if ExistingInstallPage.SelectedValueIndex = 2 then
+  if ExistingInstallPage.SelectedValueIndex = 3 then
   begin
     if not IsSafeJarvisInstallDir(ExistingInstallDir) then
     begin
@@ -219,6 +220,26 @@ begin
       ExistingInstallDir + #13#10 + #13#10 +
       'This cannot be undone. Continue?',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+    Exit;
+  end;
+
+  if ExistingInstallPage.SelectedValueIndex = 2 then
+  begin
+    if not IsSafeJarvisInstallDir(ExistingInstallDir) then
+    begin
+      MsgBox(
+        'Jarvis cannot safely verify the existing installation folder, so user data will not be reset.' + #13#10 + #13#10 +
+        'Choose an option that keeps custom files.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+
+    Result := MsgBox(
+      'Semi-clean reinstall removes chats, tasks, routines, memory, browser profile, and logs.' + #13#10 +
+      'Your private key, license files, and downloaded models are kept.' + #13#10 + #13#10 +
+      'Continue?',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
   end;
 end;
 
@@ -228,7 +249,10 @@ var
   StopScript: String;
   AppDir: String;
 begin
-  AppDir := ExpandConstant('{app}');
+  if ExistingInstallDir <> '' then
+    AppDir := ExistingInstallDir
+  else
+    AppDir := ExpandConstant('{app}');
   StopScript := AppDir + '\stop-jarvis.ps1';
   if not FileExists(StopScript) then
     Exit;
@@ -266,6 +290,31 @@ begin
     Log('Existing Jarvis uninstaller failed with code ' + IntToStr(ResultCode));
 end;
 
+function ResetJarvisUserData(const AppRoot: String): Boolean;
+var
+  ResultCode: Integer;
+  ResetScript: String;
+begin
+  ResetScript := AddBackslash(AppRoot) + 'installer\windows\reset-user-data.ps1';
+  if not FileExists(ResetScript) then
+  begin
+    Log('reset-user-data.ps1 was not found: ' + ResetScript);
+    Result := False;
+    Exit;
+  end;
+
+  Log('Resetting Jarvis user data (semi-clean reinstall).');
+  Result := Exec(
+    'powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ResetScript + '" -InstallRoot "' + AppRoot + '"',
+    AppRoot,
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode) and (ResultCode = 0);
+  if not Result then
+    Log('reset-user-data.ps1 failed with code ' + IntToStr(ResultCode));
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   SelectedAction: Integer;
@@ -287,18 +336,42 @@ begin
     Exit;
   end;
 
-  if not RemoveExistingApplication then
+  if SelectedAction = 1 then
   begin
-    Result := 'Setup could not remove the existing Jarvis application. Close Jarvis and try again.';
+    if not RemoveExistingApplication then
+    begin
+      Result := 'Setup could not remove the existing Jarvis application. Close Jarvis and try again.';
+      Exit;
+    end;
     Exit;
   end;
 
   if SelectedAction = 2 then
   begin
+    if not ResetJarvisUserData(ExistingInstallDir) then
+    begin
+      Result := 'Setup could not reset Jarvis user data. Close Jarvis and try again.';
+      Exit;
+    end;
+    if not RemoveExistingApplication then
+    begin
+      Result := 'Setup reset user data but could not remove the old application. Close Jarvis and try again.';
+      Exit;
+    end;
+    Exit;
+  end;
+
+  if SelectedAction = 3 then
+  begin
+    if not RemoveExistingApplication then
+    begin
+      Result := 'Setup could not remove the existing Jarvis application. Close Jarvis and try again.';
+      Exit;
+    end;
     if DirExists(ExistingInstallDir) and
        (not DelTree(ExistingInstallDir, True, True, True)) then
       Result := 'Setup removed Jarvis but could not remove all custom files. Check the installation folder and try again.';
   end;
 end;
 
-{ Normal upgrade/uninstall preserves generated custom data unless clean reinstall is explicitly selected. }
+{ Normal upgrade/uninstall preserves generated custom data unless semi-clean or clean reinstall is selected. }
