@@ -2418,6 +2418,14 @@ Reason:
 
 Taco wants all local LM Studio models discovered for whoever is logged in, play-to-load without resetting chat, and no overlapping HUD chrome when the selector opens.
 
+Decision: RFC-0092 neural TTS default, no silent SAPI (accepted)
+
+CoS urgent 2026-09-15. Default spoken profile is `butler_original_v1` (Kokoro `bm_daniel`), never Windows SAPI / `windows_natural_en_v1` labeled `natural`. Neural engine failure must surface/retry, not silently return SAPI (closes RFC-0089 unchecked TTS criterion). Chatterbox (or in-tree MIT/Apache successor) is a Desktop Setup one-click quality path without `JARVIS_TTS_CHATTERBOX` on the shipping Windows build. Preview/samples record engine + profile id. OpenViking is not TTS. Specs-only; implement follow-up.
+
+Reason:
+
+Through 1.3.9 the spoken default is still robotic SAPI; catalog prefers and can migrate owners off Kokoro; `synthesize.py` swallows Kokoro errors into SAPI.
+
 ---
 
 ## 60. Expected Example Behavior
