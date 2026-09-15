@@ -38,6 +38,8 @@
 
 /* Top chrome: quiet by default, controls only when needed. */
 .hud-top {
+  position: relative;
+  z-index: 40;
   min-height: 58px;
   grid-template-columns: minmax(210px, 1fr) auto minmax(210px, 1fr);
   padding: 10px 18px;
@@ -710,6 +712,42 @@
     width: min(1000px, calc(100% - 64px));
     transform: translateX(-50%);
   }
+}
+
+.hud-home.hexstrike-active > .jarvis-presence-controls {
+  z-index: 26;
+}
+
+.hud-home.hexstrike-active.hex-suite-collapsed > .hud-orb-zone {
+  opacity: 1;
+}
+
+.hud-daybreak-toggle {
+  border-color: rgba(240, 195, 107, 0.35);
+  color: rgba(255, 244, 214, 0.88);
+}
+
+.hud-daybreak-toggle.active {
+  border-color: rgba(240, 195, 107, 0.72);
+  color: #fff4d6;
+  box-shadow: 0 0 16px rgba(240, 195, 107, 0.12);
+}
+
+.hud-composer.voice-switching {
+  border-color: rgba(255, 196, 103, 0.35);
+}
+
+.hud-composer.voice-switching .hud-send,
+.hud-app .hud-composer.voice-switching .btn.hud-send {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hud-composer-voice-status {
+  margin-right: auto;
+  color: rgba(255, 196, 103, 0.88);
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 
 .hud-home.hexstrike-active {

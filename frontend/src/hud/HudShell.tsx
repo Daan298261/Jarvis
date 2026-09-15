@@ -7,6 +7,8 @@ import { HudHealthRail } from "./HudHealthRail"
 import { HudModelSelector } from "./HudModelSelector"
 import { HudOpsRail } from "./HudOpsRail"
 import type { UiMode } from "./uiMode"
+import { HudOverlayProvider, useHudOverlay } from "./hudOverlayContext"
+import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 import "./hud.css"
 import "./hud-v2.css"
 
@@ -39,6 +41,10 @@ type HudTopChromeProps = {
   attentionCount: number
   model: { loaded?: boolean; loading?: boolean; active_model?: string; last_error?: string } | null
   onModelMenuOpenChange?: (open: boolean) => void
+  hexStrikeActive?: boolean
+  hexSuiteExpanded?: boolean
+  onDaybreakFocus?: () => void
+  onAdminNav?: () => void
 }
 
 export function HudTopChrome({
@@ -57,6 +63,10 @@ export function HudTopChrome({
   attentionCount,
   model,
   onModelMenuOpenChange,
+  hexStrikeActive = false,
+  hexSuiteExpanded = false,
+  onDaybreakFocus,
+  onAdminNav,
 }: HudTopChromeProps) {
   return (
     <header className="hud-top">
@@ -75,6 +85,16 @@ export function HudTopChrome({
       </div>
 
       <div className="hud-top-center">
+        {hexStrikeActive && (
+          <button
+            type="button"
+            className={`hud-panel-toggle hud-daybreak-toggle${hexSuiteExpanded ? " active" : ""}`}
+            onClick={() => onDaybreakFocus?.()}
+            aria-pressed={hexSuiteExpanded}
+          >
+            Daybreak
+          </button>
+        )}
         {showPanels && (
           <>
             <button
@@ -116,16 +136,16 @@ export function HudTopChrome({
 
       {adminOpen && (
         <nav className="hud-admin-drawer" aria-label="Admin navigation">
-          <NavLink to="/" end>New task</NavLink>
+          <NavLink to="/" end onClick={() => onAdminNav?.()}>New task</NavLink>
           {ADMIN_QUICK.map((link) => (
-            <NavLink key={link.to} to={link.to}>{link.label}</NavLink>
+            <NavLink key={link.to} to={link.to} onClick={() => onAdminNav?.()}>{link.label}</NavLink>
           ))}
-          <Link to="/agents">Agents</Link>
-          <Link to="/coding">Coding</Link>
-          <Link to="/environments">Environments</Link>
-          <Link to="/model">Model</Link>
-          <Link to="/tools">Tools</Link>
-          <Link to="/mcp">MCP</Link>
+          <Link to="/agents" onClick={() => onAdminNav?.()}>Agents</Link>
+          <Link to="/coding" onClick={() => onAdminNav?.()}>Coding</Link>
+          <Link to="/environments" onClick={() => onAdminNav?.()}>Environments</Link>
+          <Link to="/model" onClick={() => onAdminNav?.()}>Model</Link>
+          <Link to="/tools" onClick={() => onAdminNav?.()}>Tools</Link>
+          <Link to="/mcp" onClick={() => onAdminNav?.()}>MCP</Link>
         </nav>
       )}
     </header>
@@ -178,7 +198,15 @@ export type HudShellProps = {
   systemDegraded: boolean
 }
 
-export function HudShell({
+export function HudShell(props: HudShellProps) {
+  return (
+    <HudOverlayProvider>
+      <HudShellInner {...props} />
+    </HudOverlayProvider>
+  )
+}
+
+function HudShellInner({
   children,
   isChat,
   uiMode,
@@ -198,6 +226,8 @@ export function HudShell({
   systemDegraded,
   model,
 }: HudShellProps) {
+  const { active: hexStrikeActive } = useHexStrikeSuiteActive()
+  const { hexSuiteExpanded, focusHexSuite, dismissHexSuiteForOverlay } = useHudOverlay()
   const [adminOpen, setAdminOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [panel, setPanel] = useState<HudPanel>(null)
@@ -208,25 +238,43 @@ export function HudShell({
   function togglePanel(next: Exclude<HudPanel, null>) {
     setAdminOpen(false)
     setHelpOpen(false)
+    dismissHexSuiteForOverlay()
     setPanel((current) => current === next ? null : next)
   }
 
   function toggleAdmin() {
     setPanel(null)
     setHelpOpen(false)
-    setAdminOpen((open) => !open)
+    setAdminOpen((open) => {
+      const next = !open
+      if (next) dismissHexSuiteForOverlay()
+      return next
+    })
   }
 
   function toggleHelp() {
     setPanel(null)
     setAdminOpen(false)
-    setHelpOpen((open) => !open)
+    setHelpOpen((open) => {
+      const next = !open
+      if (next) dismissHexSuiteForOverlay()
+      return next
+    })
+  }
+
+  function closeAdminDrawer() {
+    setAdminOpen(false)
   }
 
   function closePanels() {
     setPanel(null)
     setAdminOpen(false)
     setHelpOpen(false)
+  }
+
+  function onDaybreakFocus() {
+    closePanels()
+    focusHexSuite()
   }
 
   return (
@@ -246,10 +294,15 @@ export function HudShell({
         runningCount={runningCount}
         attentionCount={attentionCount}
         model={model}
+        hexStrikeActive={hexStrikeActive}
+        hexSuiteExpanded={hexSuiteExpanded}
+        onDaybreakFocus={onDaybreakFocus}
+        onAdminNav={closeAdminDrawer}
         onModelMenuOpenChange={(open) => {
           if (open) {
             setAdminOpen(false)
             setHelpOpen(false)
+            dismissHexSuiteForOverlay()
           }
         }}
       />

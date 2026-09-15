@@ -7,6 +7,7 @@ import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 import { useTaskSpeech } from "../tts/useTaskSpeech"
+import { useVoiceProfileSwitching } from "../tts/voiceProfiles"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 
 type HudChatProps = {
@@ -27,6 +28,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
+  const voiceSwitching = useVoiceProfileSwitching()
+  const composerLocked = busy || voiceSwitching
 
   useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies, setSpeaking)
 
@@ -78,6 +81,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   async function submit() {
     const text = prompt.trim()
     if (!id && !text) return
+    if (voiceSwitching) return
     stopChatTts()
     setSpeaking(false)
     setBusy(true)
@@ -121,7 +125,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
-      if (!busy) void submit()
+      if (!composerLocked) void submit()
     }
   }
 
@@ -172,17 +176,23 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         </div>
       )}
 
-      <div className="hud-composer">
+      <div className={`hud-composer${voiceSwitching ? " voice-switching" : ""}`}>
         <textarea
           className="hud-command"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder={id ? "Message…" : "Ask Jarvis anything…"}
+          placeholder={voiceSwitching ? "Switching voice…" : id ? "Message…" : "Ask Jarvis anything…"}
           rows={2}
           aria-label="Message Jarvis"
+          aria-disabled={voiceSwitching}
         />
         <div className="hud-composer-actions">
+          {voiceSwitching && (
+            <span className="hud-composer-voice-status" role="status">
+              Switching voice…
+            </span>
+          )}
           <ChatTtsMuteButton
             enabled={speakChatReplies}
             variant="hud"
@@ -197,7 +207,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
               Cancel
             </button>
           )}
-          <button className="btn hud-send" type="button" disabled={busy || (!id && !prompt.trim())} onClick={submit}>
+          <button className="btn hud-send" type="button" disabled={composerLocked || (!id && !prompt.trim())} onClick={submit}>
             {id ? (prompt.trim() ? "Send" : "Continue") : "Send"}
           </button>
         </div>

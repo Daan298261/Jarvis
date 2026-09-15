@@ -49,15 +49,13 @@ def _write_profile(tmp_path, profile_id: str, **overrides):
     (pack_dir / "profile.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_catalog_loads_default_butler_profile():
+def test_catalog_loads_windows_natural_default_profile():
     reload_catalog()
     catalog = reload_catalog()
     profile = catalog.get(DEFAULT_VOICE_PROFILE_ID)
     assert profile is not None
-    assert profile.archetype == "british_butler"
-    assert profile.display_name == "Household butler (original)"
-    assert profile.license == "original"
-    assert profile.sample_utterance == "At your service, sir."
+    assert profile.id == "windows_natural_en_v1"
+    assert "Windows natural" in profile.display_name
 
 
 def test_catalog_lists_stub_profiles_as_unavailable(monkeypatch):

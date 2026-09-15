@@ -79,7 +79,9 @@ def test_existing_install_upgrade_and_removal_choices_are_wired():
     assert "existing jarvis installation found" in lower
     assert "upgrade to jarvis" in lower
     assert "reinstall jarvis" in lower
+    assert "semi-clean reinstall" in lower
     assert "clean reinstall" in lower
+    assert "reset-user-data.ps1" in lower
     assert "removeexistingapplication" in lower
     assert "/verysilent /suppressmsgboxes /norestart" in lower
     assert "deltree(existinginstalldir, true, true, true)" in lower
@@ -92,9 +94,18 @@ def test_installer_and_desktop_versions_match():
     installer_version = re.search(r'#define MyAppVersion "([^"]+)"', iss_text).group(1)
     cargo = tomllib.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "Cargo.toml"))
     tauri = json.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "tauri.conf.json"))
-    assert installer_version == "1.3.8"
+    assert installer_version == "1.3.9"
     assert cargo["package"]["version"] == installer_version
     assert tauri["version"] == installer_version
+
+
+def test_reset_user_data_script_exists():
+    script = INSTALLER_DIR / "reset-user-data.ps1"
+    assert script.is_file()
+    text = _read(script).lower()
+    assert "jarvis.db" in text
+    assert "workflows" in text
+    assert "private_key" in text or "preserved" in text
 
 
 def test_build_script_invokes_iscc():
