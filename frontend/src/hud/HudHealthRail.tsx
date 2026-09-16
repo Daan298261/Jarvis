@@ -75,7 +75,7 @@ export function HudHealthRail({
                 : "Proactivity may continue"
               : "Normal autonomy"
           }
-          href="/settings"
+          href="/settings/advanced"
         />
         {systemDegraded && (
           <HealthCard

@@ -239,3 +239,80 @@ async def test_activate_runtime_profile_wraps_load_errors(jarvis_env, monkeypatc
 
     with pytest.raises(RuntimeError, match="Hotswap failed for Broken load"):
         await activate_runtime_profile(profile)
+
+
+@pytest.mark.asyncio
+async def test_local_llama_slot_clears_mismatched_lmstudio_remote_model(jarvis_env, monkeypatch):
+    settings = jarvis_env["settings"]
+    settings.inference.backend = "lmstudio"
+    settings.inference.host = "127.0.0.1"
+    settings.inference.port = 1234
+    settings.inference.remote_model = (
+        "0bserverx/qwen3.8-27b-heretic-abliterated-uncensored-gguf/rvn-q3_k_s-multilingual.gguf"
+    )
+    settings.inference.profile = "bootstrap"
+    saved = []
+
+    async def must_not_probe(*_args, **_kwargs):
+        raise AssertionError("local llama.cpp slots must not probe a remote server")
+
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.inference.hotswap.probe_remote_server", must_not_probe)
+    monkeypatch.setattr("app.inference.hotswap.load_settings", lambda: settings)
+    monkeypatch.setattr("app.inference.hotswap.save_settings", lambda value: saved.append(value))
+
+    runtime = create_runtime_profile(
+        name="bootstrap-ornith-slot",
+        label="Bootstrap - Ornith 1.5 9B",
+        model="Ornith-1.5-9B",
+        provider="local-llama",
+        endpoint="127.0.0.1:8088",
+        context_limit=16384,
+        model_profile="bootstrap",
+        is_local=True,
+    )
+    await apply_runtime_profile_to_settings(runtime)
+
+    assert saved
+    applied = saved[0]
+    assert applied.inference.backend == "llama.cpp"
+    assert applied.inference.host == "127.0.0.1"
+    assert applied.inference.port == 8088
+    assert applied.inference.remote_model == ""
+    assert applied.inference.profile == "bootstrap"
+
+
+@pytest.mark.asyncio
+async def test_activate_local_slot_reports_missing_weights(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.config.data_dir", lambda: jarvis_env["tmp"])
+
+    profile = create_runtime_profile(
+        name="bootstrap-missing-gguf",
+        label="Bootstrap - Ornith 1.5 9B",
+        model="Ornith-1.5-9B",
+        provider="local-llama",
+        endpoint="127.0.0.1:8088",
+        model_profile="bootstrap",
+        is_local=True,
+    )
+
+    async def fake_apply_settings(_runtime):
+        return None
+
+    async def missing_load(*_args, **_kwargs):
+        raise FileNotFoundError(
+            "Bootstrap · Ornith 1.5 9B weights are missing at "
+            "/models/bootstrap/Ornith-1.5-9B-Q4_K_M.gguf. "
+            "Install Ornith-1.5-9B-Q4_K_M.gguf (or run Jarvis Setup) and try this slot again."
+        )
+
+    monkeypatch.setattr("app.inference.hotswap.apply_runtime_profile_to_settings", fake_apply_settings)
+    monkeypatch.setattr("app.inference.hotswap.MANAGER.load", missing_load)
+
+    from app.inference.hotswap import activate_runtime_profile
+
+    with pytest.raises(RuntimeError, match="missing model files") as raised:
+        await activate_runtime_profile(profile)
+    assert "Ornith-1.5-9B-Q4_K_M.gguf" in str(raised.value)
+    assert "Could not load this slot" not in str(raised.value)

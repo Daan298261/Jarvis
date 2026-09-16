@@ -1,7 +1,21 @@
 #Requires -Version 5.1
 param(
-    [switch]$IncludeTray
+    [switch]$IncludeTray,
+    [switch]$ForceKillLockers
 )
+
+if ($ForceKillLockers) {
+    $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $forceScript = Join-Path $Root "installer\windows\force-stop-jarvis.ps1"
+    if (-not (Test-Path $forceScript)) {
+        Write-Error "force-stop-jarvis.ps1 not found: $forceScript"
+        exit 1
+    }
+    $forceArgs = @("-InstallRoot", $Root)
+    if ($IncludeTray) { $forceArgs += "-IncludeTray" }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $forceScript @forceArgs
+    exit $LASTEXITCODE
+}
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pidFile = Join-Path $Root "data\jarvis.pids"

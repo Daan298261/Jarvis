@@ -59,6 +59,8 @@ def test_bootstrap_27b_is_optional_switch_only():
 def test_jarvis_iss_wiring():
     text = _read(ISS)
     assert "bootstrap.ps1" in text
+    assert "run-installer-bootstrap.ps1" in text
+    assert "force-stop-jarvis.ps1" in text
     assert "Start Jarvis" in text
     assert "Stop Jarvis" in text
     lower = text.lower()

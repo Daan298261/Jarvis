@@ -17,6 +17,7 @@ from ..tts.engines import (
     is_engine_available,
     pick_engine_for_profile,
     primary_tts_backend,
+    resolve_engine_id,
 )
 from ..tts.synthesize import synthesize_with_engine
 
@@ -459,6 +460,10 @@ async def synthesize_speech_result(text: str, *, voice_profile_id: str | None = 
             profile = None
 
     engine_id = pick_engine_for_profile(profile) if profile else tts_backend()
+    if profile and not engine_id:
+        primary = resolve_engine_id(profile.tts)
+        if primary in {"kokoro", "chatterbox", "piper"}:
+            engine_id = primary
     if not engine_id:
         if profile and profile.tts.resolved_engine_id() != "system":
             raise RuntimeError(

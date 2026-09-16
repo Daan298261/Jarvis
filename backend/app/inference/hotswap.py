@@ -6,6 +6,7 @@ from ..config import load_settings, save_settings
 from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 from .backends import (
     DEFAULT_PORTS,
+    LLAMA_CPP_ALIASES,
     LMSTUDIO_ALIASES,
     probe_remote_server,
     resolve_advertised_model,
@@ -15,7 +16,7 @@ from .manager import MANAGER
 from .profiles import PROFILES
 from .runtime_profiles import RuntimeProfile
 
-LOCAL_BACKEND_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
+LOCAL_BACKEND_ALIASES = LLAMA_CPP_ALIASES
 
 
 def parse_runtime_endpoint(endpoint: str) -> tuple[str, int]:
@@ -40,12 +41,14 @@ def _normalize_provider(provider: str) -> str:
     cleaned = (provider or "").strip().lower()
     if cleaned in LMSTUDIO_ALIASES:
         return "lmstudio"
+    if cleaned in LOCAL_BACKEND_ALIASES:
+        return "llama.cpp"
     return cleaned
 
 
 def _provider_needs_remote_probe(provider: str) -> bool:
     normalized = _normalize_provider(provider)
-    if not normalized or normalized in LOCAL_BACKEND_ALIASES:
+    if not normalized or normalized in LOCAL_BACKEND_ALIASES or normalized == "llama.cpp":
         return False
     return True
 
@@ -101,7 +104,14 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
     settings.inference.port = port
 
     hint = (runtime.model or "").strip()
-    if _provider_needs_remote_probe(provider):
+    if not _provider_needs_remote_probe(provider):
+        # Managed local llama.cpp must not keep a leftover LM Studio model id.
+        settings.inference.backend = "llama.cpp"
+        settings.inference.remote_model = ""
+        if not (runtime.endpoint or "").strip():
+            settings.inference.host = "127.0.0.1"
+            settings.inference.port = int(DEFAULT_PORTS["llama.cpp"])
+    elif _provider_needs_remote_probe(provider):
         probe = await probe_remote_server(
             host,
             port,
@@ -145,8 +155,6 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
                     "Load the GGUF in LM Studio, start the server, then press Play again."
                 )
         settings.inference.remote_model = resolved
-    else:
-        settings.inference.remote_model = hint
 
     if runtime.model_profile and runtime.model_profile in PROFILES:
         settings.inference.profile = runtime.model_profile
@@ -182,7 +190,7 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Tru
     except FileNotFoundError as exc:
         raise RuntimeError(
             f"Could not load {label}: missing model files ({exc}). "
-            "Install the GGUF or choose another runtime profile."
+            "Install the GGUF for this slot or choose another runtime profile."
         ) from exc
     except RuntimeError as exc:
         message = str(exc).strip()

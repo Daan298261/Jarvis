@@ -39,6 +39,24 @@ async def test_kokoro_failure_never_silently_returns_system_audio(monkeypatch):
     assert system_calls == []
 
 
+@pytest.mark.asyncio
+async def test_unknown_engine_does_not_silently_return_system_audio(monkeypatch):
+    profile = reload_catalog().get(DEFAULT_VOICE_PROFILE_ID)
+    assert profile is not None
+    system_calls: list[str] = []
+
+    async def system_synth(text, **_kwargs):
+        system_calls.append(text)
+        return b"RIFFsystem"
+
+    monkeypatch.setattr("app.tts.synthesize._synthesize_system", system_synth)
+
+    with pytest.raises(TtsSynthesisError, match="Unknown TTS engine"):
+        await synthesize_with_engine("Hello", engine_id="orpheus", profile=profile)
+
+    assert system_calls == []
+
+
 def test_neural_profile_chains_do_not_include_system_fallback():
     catalog = reload_catalog()
     for profile_id in ("butler_original_v1", "chatterbox_expressive_en_v1"):

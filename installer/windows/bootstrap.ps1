@@ -20,7 +20,9 @@
 param(
     [switch]$InstallExpert27B,
     [switch]$SkipModelDownload,
-    [switch]$SkipLlamaDownload
+    [switch]$SkipLlamaDownload,
+    [switch]$SkipHeavyPrepare,
+    [int]$StepTimeoutMinutes = 45
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,9 +32,56 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 Set-Location $Root
 
+$BootstrapLogPath = Join-Path $Root "logs\bootstrap.log"
+$logDir = Split-Path -Parent $BootstrapLogPath
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+}
+
+function Write-BootstrapLog([string]$Message) {
+    $line = "{0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $Message
+    Add-Content -LiteralPath $BootstrapLogPath -Value $line -Encoding UTF8
+}
+
 function Write-Step([string]$Message) {
+    Write-BootstrapLog "==> $Message"
     Write-Host ""
     Write-Host "==> $Message" -ForegroundColor Cyan
+}
+
+function Invoke-ProcessWithTimeout {
+    param(
+        [string]$Label,
+        [string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$WorkingDirectory = $Root,
+        [int]$TimeoutMinutes = $StepTimeoutMinutes
+    )
+    Write-BootstrapLog "start step=$Label timeout=${TimeoutMinutes}m"
+    $proc = Start-Process -FilePath $FilePath -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -PassThru -NoNewWindow
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    while (-not $proc.HasExited) {
+        if ((Get-Date) -ge $deadline) {
+            try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { }
+            Write-BootstrapLog "timeout step=$Label after ${TimeoutMinutes}m"
+            throw "${Label} timed out after $TimeoutMinutes minutes (see logs\bootstrap.log)."
+        }
+        Start-Sleep -Seconds 2
+    }
+    if ($proc.ExitCode -ne 0) {
+        Write-BootstrapLog "failed step=$Label exit=$($proc.ExitCode)"
+        throw "${Label} failed with exit code $($proc.ExitCode) (see logs\bootstrap.log)."
+    }
+    Write-BootstrapLog "done step=$Label"
+}
+
+function Test-HeavyPrepareSkippable {
+    $venv = Join-Path $Root ".venv\Scripts\python.exe"
+    $dist = Join-Path $Root "frontend\dist\index.html"
+    $llama = Join-Path $Root "runtime\llama.cpp\llama-server.exe"
+    $modelsDir = Join-Path $Root "models"
+    $hasModels = (Test-Path $modelsDir) -and ((Get-ChildItem -Path $modelsDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1))
+    return (Test-Path $venv) -and (Test-Path $dist) -and (Test-Path $llama) -and $hasModels
 }
 
 function Write-Ok([string]$Message) {
@@ -66,7 +115,7 @@ function Ensure-WingetPackage {
         $wingetArgs += "--version"
         $wingetArgs += $VersionPrefixes[0]
     }
-    & winget @wingetArgs | Out-Host
+    Invoke-ProcessWithTimeout -Label "winget $FriendlyName" -FilePath "winget" -Arguments $wingetArgs -TimeoutMinutes $StepTimeoutMinutes
     if (-not (Test-Command $FriendlyName.ToLower())) {
         throw "winget finished but $FriendlyName is still not on PATH. Close this window, open a new one, and run setup again."
     }
@@ -109,7 +158,9 @@ function Ensure-Node {
         if (-not (Test-Command winget)) {
             throw "Node.js 24 or newer is required. Install the current Node.js LTS release, then re-run setup."
         }
-        & winget upgrade --id "OpenJS.NodeJS.LTS" -e --accept-package-agreements --accept-source-agreements | Out-Host
+        Invoke-ProcessWithTimeout -Label "winget Node.js upgrade" -FilePath "winget" -Arguments @(
+            "upgrade", "--id", "OpenJS.NodeJS.LTS", "-e", "--accept-package-agreements", "--accept-source-agreements"
+        ) -TimeoutMinutes $StepTimeoutMinutes
         $ver = node --version
         $major = [int]($ver.TrimStart("v").Split(".")[0])
         if ($major -lt 24) {
@@ -130,9 +181,9 @@ function Ensure-McpConnectors {
     }
     Write-Host "    Installing Gmail and WhatsApp connectors..."
     $env:PUPPETEER_SKIP_DOWNLOAD = "true"
-    npm ci --prefix (Join-Path $Root "mcp")
+    $mcpDir = Join-Path $Root "mcp"
+    Invoke-ProcessWithTimeout -Label "mcp npm ci" -FilePath "npm" -Arguments @("ci", "--prefix", $mcpDir) -TimeoutMinutes $StepTimeoutMinutes
     Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
-    if ($LASTEXITCODE -ne 0) { throw "Connector installation failed." }
     Write-Ok "Gmail and WhatsApp connectors installed."
 }
 
@@ -153,8 +204,8 @@ function Ensure-PipPackages([string]$VenvPython) {
     $req = Join-Path $Root "backend\requirements.txt"
     if (-not (Test-Path $req)) { throw "Missing $req" }
     Write-Host "    Installing Python packages (this may take several minutes)..."
-    & $VenvPython -m pip install --upgrade pip --quiet
-    & $VenvPython -m pip install -r $req
+    Invoke-ProcessWithTimeout -Label "pip upgrade" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
+    Invoke-ProcessWithTimeout -Label "pip requirements" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "-r", $req) -TimeoutMinutes $StepTimeoutMinutes
     Write-Ok "Python packages from requirements.txt installed."
 }
 
@@ -176,8 +227,9 @@ if missing:
         return
     }
     Write-Host "    Ensuring Kokoro TTS packages (kokoro, soundfile)..."
-    & $VenvPython -m pip install "kokoro>=0.9.2" "soundfile>=0.13.0"
-    if ($LASTEXITCODE -ne 0) { throw "Kokoro TTS package install failed." }
+    Invoke-ProcessWithTimeout -Label "pip kokoro tts" -FilePath $VenvPython -Arguments @(
+        "-m", "pip", "install", "kokoro>=0.9.2", "soundfile>=0.13.0"
+    ) -TimeoutMinutes $StepTimeoutMinutes
     & $VenvPython -c $check
     if ($LASTEXITCODE -ne 0) { throw "Kokoro TTS packages are still missing after pip install." }
     New-Item -ItemType File -Force -Path $marker | Out-Null
@@ -191,7 +243,7 @@ function Ensure-Playwright([string]$VenvPython) {
         return
     }
     Write-Host "    Downloading Playwright Chromium for the browser tool..."
-    & $VenvPython -m playwright install chromium
+    Invoke-ProcessWithTimeout -Label "playwright chromium" -FilePath $VenvPython -Arguments @("-m", "playwright", "install", "chromium") -TimeoutMinutes $StepTimeoutMinutes
     New-Item -ItemType File -Force -Path $marker | Out-Null
     Write-Ok "Playwright Chromium installed."
 }
@@ -200,11 +252,9 @@ function Ensure-FrontendBuild {
     $dist = Join-Path $Root "frontend\dist\index.html"
     Push-Location (Join-Path $Root "frontend")
     Write-Host "    Installing frontend packages..."
-    npm ci
-    if ($LASTEXITCODE -ne 0) { throw "Frontend package installation failed." }
+    Invoke-ProcessWithTimeout -Label "frontend npm ci" -FilePath "npm" -Arguments @("ci") -WorkingDirectory (Join-Path $Root "frontend") -TimeoutMinutes $StepTimeoutMinutes
     Write-Host "    Building portal (npm run build)..."
-    npm run build
-    if ($LASTEXITCODE -ne 0) { throw "Frontend build failed." }
+    Invoke-ProcessWithTimeout -Label "frontend npm run build" -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory (Join-Path $Root "frontend") -TimeoutMinutes $StepTimeoutMinutes
     Pop-Location
     if (-not (Test-Path $dist)) { throw "frontend build failed; dist/index.html missing" }
     Write-Ok "Portal built."
@@ -278,7 +328,8 @@ function Invoke-HfDownload {
         $includeArgs += $inc
     }
     $env:HF_XET_HIGH_PERFORMANCE = "1"
-    & $VenvPython -m huggingface_hub.cli.hf download $RepoId @includeArgs --local-dir $LocalDir
+    $hfArgs = @("-m", "huggingface_hub.cli.hf", "download", $RepoId) + $includeArgs + @("--local-dir", $LocalDir)
+    Invoke-ProcessWithTimeout -Label "huggingface download $RepoId" -FilePath $VenvPython -Arguments $hfArgs -TimeoutMinutes ($StepTimeoutMinutes * 2)
 }
 
 function Ensure-DefaultModels([string]$VenvPython) {
@@ -354,10 +405,28 @@ function Test-NvidiaDriver {
 }
 
 # --- main ---
+Write-BootstrapLog "bootstrap start SkipHeavyPrepare=$SkipHeavyPrepare SkipModelDownload=$SkipModelDownload"
 Write-Host ""
 Write-Host "Jarvis setup" -ForegroundColor White
 Write-Host "This window prepares Jarvis on your PC. You can close it when you see 'Setup complete'." -ForegroundColor DarkGray
 Write-Host "Install folder: $Root" -ForegroundColor DarkGray
+Write-Host "Log: $BootstrapLogPath" -ForegroundColor DarkGray
+
+if ($SkipHeavyPrepare -or (Test-HeavyPrepareSkippable)) {
+    Write-BootstrapLog "skip-heavy-prepare: repair/upgrade path or artifacts already present"
+    Write-Host ""
+    Write-Host "Skipping heavy prepare (connectors, pip, models, portal rebuild already present or not required)." -ForegroundColor DarkGray
+    Write-Step "Finishing"
+    New-Item -ItemType Directory -Force -Path `
+        (Join-Path $Root "data"), `
+        (Join-Path $Root "logs"), `
+        (Join-Path $Root "data\queue\pending"), `
+        (Join-Path $Root "data\queue\processed"), `
+        (Join-Path $Root "data\queue\failed") | Out-Null
+    Write-Host ""
+    Write-Host "Setup complete (heavy prepare skipped)." -ForegroundColor Green
+    exit 0
+}
 
 Write-Step "Checking NVIDIA driver (recommended)"
 Test-NvidiaDriver

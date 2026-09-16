@@ -2434,6 +2434,22 @@ Reason:
 
 Through 1.3.9 the spoken default is still robotic SAPI; catalog prefers and can migrate owners off Kokoro; `synthesize.py` swallows Kokoro errors into SAPI.
 
+Decision: RFC-0093 installer force-stop and prepare unstick (accepted)
+
+CoS urgent 2026-09-16. Before Repair / Upgrade / Reinstall-keep / Semi-clean / Clean (and uninstall), Setup must force-stop all Jarvis lockers under the install tree — not only polite `stop-jarvis.ps1`. Kill failure aborts with a visible error; never hang. Post-copy bootstrap that shows “Preparing Jarvis, its AI model, Gmail and WhatsApp…” must timeout / be cancelable, skip heavy prepare when models are already present, and surface the real error plus killed-PID log. Specs-only; do not fold RFC-0092; implement follow-up. No new §58 backlog checkboxes.
+
+Reason:
+
+1.3.13 clean reinstall fails after `stop-jarvis.ps1`; upgrade freezes on the full-bar Preparing screen. Tip `StopJarvisProcesses` only launches the polite stop; `[Run]` `bootstrap.ps1` is `runhidden waituntilterminated` with no timeout.
+
+Decision: RFC-0094 settings menu information architecture (accepted)
+
+CoS 2026-09-16. Replace the flat Settings heap with six submenus (Voice, Appearance, Models / Inference, Network / Companion, Integrations, Advanced). **Voice** and **Appearance** are first-class groups on **both** the Daybreak left-bar **and** the main Settings screen — not a combined dump. Same organized IA on **Desktop HUD** (not portal-only). Every current Settings control maps to exactly one primary pane; prefer deep-links. Persist last submenu; deep-link `/settings/voice` (hash alias ok). Specs-only IA; do not fold RFC-0092 TTS engines. No new §58 backlog checkboxes.
+
+Reason:
+
+`Settings.tsx` is a stacked dump; Daybreak left-bar is one mixed Appearance & voice panel (`AppearancePresenceControls`, #263). Owners cannot find Voice vs inference vs pairing without scrolling.
+
 ---
 
 ## 60. Expected Example Behavior

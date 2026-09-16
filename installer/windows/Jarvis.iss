@@ -46,6 +46,10 @@ Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDesc
 Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,_release_upload\*,_release_upload\**,installer-build*.log,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,JarvisLicenseManager.exe"
 ; Always ship bootstrap beside the installed tree (also under installer\windows in source).
 Source: "bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
+Source: "force-stop-jarvis.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
+Source: "force-stop-jarvis.ps1"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "run-installer-bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
+Source: "run-installer-bootstrap.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 #ifndef SkipBootstrapModel
 ; Release distributions carry a local bootstrap brain. The multi-GB file is staged
 ; by build-installer.ps1 and is not committed to the repository.
@@ -67,15 +71,15 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 ; Normal release installers already contain the bootstrap GGUF and therefore skip
 ; model downloads entirely during target-machine bootstrap.
 #ifndef SkipBootstrapModel
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\windows\bootstrap.ps1"" -SkipModelDownload"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, Gmail and WhatsApp..."; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, Gmail and WhatsApp..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #else
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\windows\bootstrap.ps1"""; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model, Gmail and WhatsApp (this can take a while)..."; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model, Gmail and WhatsApp (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #endif
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -OpenPath ""/setup?step=integrations"""; WorkingDir: "{app}"; Description: "Connect Gmail and WhatsApp in Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 
 [UninstallRun]
 ; Stop backend, llama-server, and tray helper before uninstall.
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopJarvis"
+Filename: "powershell.exe"; Parameters: "{code:GetUninstallForceStopParameters}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopJarvis"
 
 [Code]
 const
@@ -87,6 +91,8 @@ var
   ExistingInstallDir: String;
   ExistingVersion: String;
   ExistingVersionRelation: Integer;
+  BootstrapSkipHeavy: Boolean;
+  BootstrapSkipModelDownload: Boolean;
 
 function NormalizeVersion(const Value: String): String;
 var
@@ -160,6 +166,12 @@ end;
 
 function InitializeSetup: Boolean;
 begin
+  BootstrapSkipHeavy := False;
+  BootstrapSkipModelDownload := False;
+#ifdef SkipBootstrapModel
+#else
+  BootstrapSkipModelDownload := True;
+#endif
   DetectExistingInstallation;
   Result := True;
   if ExistingInstallDetected and (ExistingVersionRelation < 0) then
@@ -243,25 +255,108 @@ begin
   end;
 end;
 
-procedure StopJarvisProcesses;
+function ResolveForceStopScript(const AppDir: String): String;
+begin
+  Result := AppDir + '\installer\windows\force-stop-jarvis.ps1';
+  if FileExists(Result) then
+    Exit;
+  Result := ExpandConstant('{tmp}\force-stop-jarvis.ps1');
+  if FileExists(Result) then
+    Exit;
+  Result := '';
+end;
+
+function ForceStopJarvisUnder(const AppDir: String): Boolean;
 var
   ResultCode: Integer;
-  StopScript: String;
+  ForceScript: String;
+  Params: String;
+begin
+  Result := True;
+  if AppDir = '' then
+    Exit;
+  ForceScript := ResolveForceStopScript(AppDir);
+  if ForceScript = '' then
+  begin
+    Log('force-stop-jarvis.ps1 not found; falling back to stop-jarvis.ps1 -IncludeTray');
+    if FileExists(AppDir + '\stop-jarvis.ps1') then
+    begin
+      if not Exec('powershell.exe',
+        '-NoProfile -ExecutionPolicy Bypass -File "' + AppDir + '\stop-jarvis.ps1" -IncludeTray',
+        AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      begin
+        Log('Failed to launch stop-jarvis.ps1 -IncludeTray');
+        Result := False;
+      end
+      else
+        Log('stop-jarvis.ps1 -IncludeTray finished with code ' + IntToStr(ResultCode));
+    end;
+    Exit;
+  end;
+
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ForceScript + '" -InstallRoot "' + AppDir + '" -IncludeTray -MaxWaitSeconds 90';
+  if Exec('powershell.exe', Params, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('force-stop-jarvis.ps1 finished with code ' + IntToStr(ResultCode));
+    Result := (ResultCode = 0);
+  end
+  else
+  begin
+    Log('Failed to launch force-stop-jarvis.ps1');
+    Result := False;
+  end;
+end;
+
+procedure StopJarvisProcesses;
+var
   AppDir: String;
 begin
   if ExistingInstallDir <> '' then
     AppDir := ExistingInstallDir
   else
-    AppDir := ExpandConstant('{app}');
-  StopScript := AppDir + '\stop-jarvis.ps1';
-  if not FileExists(StopScript) then
-    Exit;
-  if Exec('powershell.exe',
-    '-NoProfile -ExecutionPolicy Bypass -File "' + StopScript + '" -IncludeTray',
-    AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    Log('stop-jarvis.ps1 -IncludeTray finished with code ' + IntToStr(ResultCode))
+    AppDir := ExpandConstant('{localappdata}\Jarvis');
+  if not ForceStopJarvisUnder(AppDir) then
+    Log('Force-stop reported lockers still running under ' + AppDir);
+end;
+
+function StopJarvisProcessesForPrepare: Boolean;
+var
+  AppDir: String;
+begin
+  if ExistingInstallDir <> '' then
+    AppDir := ExistingInstallDir
   else
-    Log('Failed to launch stop-jarvis.ps1 -IncludeTray');
+    AppDir := ExpandConstant('{localappdata}\Jarvis');
+  Result := ForceStopJarvisUnder(AppDir);
+end;
+
+function GetUninstallForceStopParameters(Param: String): String;
+begin
+  Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\installer\windows\force-stop-jarvis.ps1') +
+    '" -InstallRoot "' + ExpandConstant('{app}') + '" -IncludeTray -MaxWaitSeconds 90';
+  if not FileExists(ExpandConstant('{app}\installer\windows\force-stop-jarvis.ps1')) then
+    Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\stop-jarvis.ps1') + '" -IncludeTray';
+end;
+
+function ShouldRunInstallerBootstrap: Boolean;
+begin
+  Result := True;
+end;
+
+function GetBootstrapRunParameters(Param: String): String;
+var
+  Wrapper: String;
+  Params: String;
+begin
+  Wrapper := ExpandConstant('{app}\installer\windows\run-installer-bootstrap.ps1');
+  if not FileExists(Wrapper) then
+    Wrapper := ExpandConstant('{tmp}\run-installer-bootstrap.ps1');
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Wrapper + '" -MaxMinutes 180';
+  if BootstrapSkipHeavy then
+    Params := Params + ' -SkipHeavyPrepare';
+  if BootstrapSkipModelDownload then
+    Params := Params + ' -SkipModelDownload';
+  Result := Params;
 end;
 
 function RemoveExistingApplication: Boolean;
@@ -320,13 +415,29 @@ var
   SelectedAction: Integer;
 begin
   Result := '';
+  BootstrapSkipHeavy := False;
+#ifdef SkipBootstrapModel
+  BootstrapSkipModelDownload := False;
+#else
+  BootstrapSkipModelDownload := True;
+#endif
   { Windows Settings -> Apps -> Modify and direct setup launches use this same safe path. }
-  StopJarvisProcesses;
+  if not StopJarvisProcessesForPrepare then
+  begin
+    Result := 'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
+      'See logs\installer-stop.log in your Jarvis folder for details.';
+    Exit;
+  end;
 
   if not ExistingInstallDetected then
     Exit;
 
-  SelectedAction := ExistingInstallPage.SelectedValueIndex;
+  if ExistingInstallPage <> nil then
+    SelectedAction := ExistingInstallPage.SelectedValueIndex
+  else
+    SelectedAction := 0;
+  if SelectedAction <= 2 then
+    BootstrapSkipHeavy := True;
   if SelectedAction = 0 then
   begin
     if ExistingVersionRelation > 0 then

@@ -1,68 +1,73 @@
 import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
+import { Navigate, useLocation, useParams } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
+import { usePresentationSettings } from "../presence/presentationSettings"
+import { AdvancedSettingsPane } from "../settings/AdvancedSettingsPane"
+import { AppearanceSettingsPane } from "../settings/AppearanceSettingsPane"
+import { IntegrationsSettingsPane } from "../settings/IntegrationsSettingsPane"
+import { ModelsSettingsPane } from "../settings/ModelsSettingsPane"
+import { NetworkSettingsPane } from "../settings/NetworkSettingsPane"
+import { SettingsNav } from "../settings/SettingsNav"
 import {
-  readTtsBootstrap,
-  refreshTtsFromBackend,
-  TTS_SETTINGS_CHANGED_EVENT,
-  updateTtsSettings,
-  type TtsSettings,
-} from "../tts/chatTtsSettings"
-import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
-import { AutonomySection } from "./Autonomy"
-import { LicenseSettings } from "./License"
-import { CompanionPairingPanel } from "../components/CompanionPairingPanel"
-import { ComputerUsePermissions } from "./ComputerUsePermissions"
+  DEFAULT_SETTINGS_SUBMENU,
+  isSettingsSubmenu,
+  persistLastSettingsSubmenu,
+  readLastSettingsSubmenu,
+  resolveSettingsSubmenuFromLocation,
+  settingsSubmenuPath,
+  SETTINGS_SUBMENU_LABELS,
+  type SettingsSubmenu,
+} from "../settings/settingsSubmenus"
+import { VoiceSettingsPane } from "../settings/VoiceSettingsPane"
+import "../settings/settings.css"
 
 export function SettingsPage() {
-  const [settings, setSettings] = useState<any>(null)
+  const { submenu: routeSubmenu } = useParams<{ submenu?: string }>()
+  const location = useLocation()
+  const presentation = usePresentationSettings()
+
+  const [settings, setSettings] = useState<Record<string, unknown> | null>(null)
   const [localKey, setLocalKey] = useState<string>(getPrivateKey())
   const [showKey, setShowKey] = useState(false)
-  const [authStatus, setAuthStatus] = useState<any>(null)
-  const [queueStatus, setQueueStatus] = useState<any>(null)
+  const [authStatus, setAuthStatus] = useState<Record<string, unknown> | null>(null)
+  const [queueStatus, setQueueStatus] = useState<Record<string, unknown> | null>(null)
   const [inferenceKeyDraft, setInferenceKeyDraft] = useState("")
   const [msg, setMsg] = useState("")
-  const [speakChatReplies, setSpeakChatReplies] = useState(() => readTtsBootstrap().speak_chat_replies)
+
+  const activeSubmenu: SettingsSubmenu | null = isSettingsSubmenu(routeSubmenu) ? routeSubmenu : null
+
+  useEffect(() => {
+    if (activeSubmenu) persistLastSettingsSubmenu(activeSubmenu)
+  }, [activeSubmenu])
 
   async function loadData() {
     const [s, a, q] = await Promise.all([
-      api<any>("/api/settings").catch(() => null),
-      api<any>("/api/auth/status").catch(() => null),
-      api<any>("/api/queue").catch(() => null),
+      api<Record<string, unknown>>("/api/settings").catch(() => null),
+      api<Record<string, unknown>>("/api/auth/status").catch(() => null),
+      api<Record<string, unknown>>("/api/queue").catch(() => null),
     ])
     if (s) {
       const inference = s.inference && typeof s.inference === "object" ? { ...s.inference } : s.inference
       if (inference && typeof inference === "object" && "api_key" in inference) {
-        delete inference.api_key
+        delete (inference as Record<string, unknown>).api_key
       }
       setSettings({ ...s, inference })
-      if (s.tts && typeof s.tts.speak_chat_replies === "boolean") {
-        setSpeakChatReplies(s.tts.speak_chat_replies)
-      }
     }
     if (a) setAuthStatus(a)
     if (q) setQueueStatus(q)
   }
 
-  useEffect(() => { loadData() }, [])
-
   useEffect(() => {
-    const onChanged = (event: Event) => {
-      const custom = event as CustomEvent<TtsSettings>
-      setSpeakChatReplies(custom.detail.speak_chat_replies)
-    }
-    window.addEventListener(TTS_SETTINGS_CHANGED_EVENT, onChanged)
-    refreshTtsFromBackend().then((tts) => setSpeakChatReplies(tts.speak_chat_replies)).catch(() => undefined)
-    return () => window.removeEventListener(TTS_SETTINGS_CHANGED_EVENT, onChanged)
+    void loadData()
   }, [])
 
-  async function save(patch: any) {
+  async function save(patch: Record<string, unknown>) {
     await api("/api/settings", { method: "PUT", body: JSON.stringify(patch) })
     await loadData()
   }
 
   async function generateKey() {
-    const res = await api<any>("/api/auth/generate-key", { method: "POST" })
+    const res = await api<{ private_key?: string }>("/api/auth/generate-key", { method: "POST" })
     if (res.private_key) {
       setLocalKey(res.private_key)
       setPrivateKey(res.private_key)
@@ -76,345 +81,96 @@ export function SettingsPage() {
     setMsg("Private key saved to this browser session.")
   }
 
+  if (location.pathname === "/settings" && !routeSubmenu) {
+    const alias = resolveSettingsSubmenuFromLocation(undefined, location.search, location.hash)
+    return <Navigate to={settingsSubmenuPath(alias ?? readLastSettingsSubmenu())} replace />
+  }
+
+  if (!activeSubmenu) {
+    return <Navigate to={settingsSubmenuPath(DEFAULT_SETTINGS_SUBMENU)} replace />
+  }
+
+  const needsApiSettings = activeSubmenu === "models" || activeSubmenu === "network" || activeSubmenu === "advanced"
+
+  function renderPane() {
+    switch (activeSubmenu) {
+      case "voice":
+        return <VoiceSettingsPane />
+      case "appearance":
+        return (
+          <div className="card grid settings-pane-card">
+            <h2>Appearance</h2>
+            <p className="lede" style={{ margin: "0 0 12px" }}>
+              Theme, shell, presence, rendering, attention, and motion — shared with the Daybreak HUD.
+            </p>
+            <AppearanceSettingsPane settings={presentation} />
+          </div>
+        )
+      case "integrations":
+        return <IntegrationsSettingsPane />
+      case "models":
+        if (!settings) return <div className="card settings-pane-card">Loading settings…</div>
+        return (
+          <ModelsSettingsPane
+            settings={settings}
+            inferenceKeyDraft={inferenceKeyDraft}
+            setInferenceKeyDraft={setInferenceKeyDraft}
+            setSettings={setSettings}
+            save={save}
+            setMsg={setMsg}
+          />
+        )
+      case "network":
+        if (!settings) return <div className="card settings-pane-card">Loading settings…</div>
+        return (
+          <NetworkSettingsPane
+            settings={settings}
+            localKey={localKey}
+            setLocalKey={setLocalKey}
+            showKey={showKey}
+            setShowKey={setShowKey}
+            authStatus={authStatus}
+            save={save}
+            saveLocalKeyOnly={saveLocalKeyOnly}
+            generateKey={generateKey}
+            setMsg={setMsg}
+          />
+        )
+      case "advanced":
+        if (!settings) return <div className="card settings-pane-card">Loading settings…</div>
+        return <AdvancedSettingsPane settings={settings} queueStatus={queueStatus} save={save} />
+      default:
+        return null
+    }
+  }
+
   return (
-    <div>
+    <div className="settings-page">
       <h1>Settings</h1>
       <p className="lede">
         Preferences for this PC. To stop Jarvis entirely, use <strong>Stop</strong> on the Windows tray —
-        it is not in this window. Local models are yours; the license below is only for Jarvis the
-        orchestrator.{" "}
-        <Link to="/license">Open the license page</Link>.
+        it is not in this window. License and advanced execution options are under <strong>Advanced</strong>.
       </p>
 
-      <LicenseSettings />
-
-      {!settings ? (
-        <div className="card" style={{ marginTop: 16 }}>Loading other settings…</div>
-      ) : (
-        <>
-      <AutonomySection />
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Agent profiles</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          A short interview for how a specialist should behave — mission, tone, what it may do,
-          what needs your OK, and how much freedom it has. Not a server console.
-        </p>
-        <div className="row">
-          <Link className="btn" to="/agents">
-            Open agent interview
-          </Link>
-        </div>
-      </div>
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Pair phone</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          Show a 6-digit code for the Android companion app. Regenerate anytime; the previous unclaimed code
-          stops working. The full pairing page includes the QR and spoken pair-vs-explore walkthrough.{" "}
-          <Link to="/companion-pairing">Open full pairing page</Link> ·{" "}
-          <Link to="/phone">Android companion home</Link> for offline generic APK pairing.
-        </p>
-        <CompanionPairingPanel compact />
-      </div>
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Guest portals</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          Issue a scoped, revocable link so a client can see one task or decision — not this PC&apos;s
-          files, tools, or settings. Preview effective permissions before the token is created.
-        </p>
-        <div className="row">
-          <Link className="btn" to="/guest-portals">
-            Open guest portals
-          </Link>
-        </div>
-      </div>
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Voice &amp; speech</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          Jarvis speaks typed chat replies with local Kokoro TTS (natural British household voice).
-          Windows SAPI is an explicit baseline choice, never a silent neural fallback. Text always
-          appears even when speech is off or TTS fails.
-        </p>
-        <VoiceProfilePicker />
-
-        <label className="row" style={{ marginTop: 12 }}>
-          <input
-            type="checkbox"
-            checked={speakChatReplies}
-            onChange={(e) => {
-              const enabled = e.target.checked
-              setSpeakChatReplies(enabled)
-              void updateTtsSettings({ speak_chat_replies: enabled })
-            }}
-          />
-          <strong>Speak chat replies</strong>
-        </label>
-        <p className="lede" style={{ margin: 0, fontSize: 13 }}>
-          Spoken replies use the active voice profile and universal Jarvis persona pack (backend injection — RFC-0061/0062 D1/D2).
-          You can also mute speech from the chat composer without opening Settings.
-        </p>
-      </div>
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Advisor</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          When a local job is stuck, preview exactly what would leave this PC, then ask for
-          recommendations. The advisor has no tools and cannot act. You keep execution.
-        </p>
-        <div className="row">
-          <Link className="btn" to="/advisor">
-            Open advisor
-          </Link>
-        </div>
-      </div>
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Trajectories</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          Import a Cursor transcript or record a finished Jarvis task. Imported records are
-          evidence only — they do not grant capabilities or change policy. Skills stay on Memory.
-        </p>
-        <div className="row">
-          <Link className="btn" to="/trajectories">
-            Open trajectories
-          </Link>
-        </div>
-      </div>
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Coding isolation</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          Parallel coding tasks each get a Git worktree. Integrate is blocked until a verifier or
-          you approve — nothing lands silently. Conflicts wait in Decision Inbox.
-        </p>
-        <div className="row">
-          <Link className="btn" to="/coding">
-            Open coding isolation
-          </Link>
-        </div>
-      </div>
-
       {msg && (
-        <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
+        <div className="card settings-flash" style={{ borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
           {msg}
         </div>
       )}
 
-      <div className="card grid" style={{ maxWidth: 760 }}>
-        <h2>Security & Remote Access</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          Expose Jarvis remotely or over LAN with strict Private Key authentication. Every query requires <code>X-Jarvis-Key</code> or <code>Authorization: Bearer</code>.
-        </p>
-
-        <label className="row">
-          <input
-            type="checkbox"
-            checked={settings.auth_required}
-            onChange={(e) => save({ auth_required: e.target.checked })}
-          />
-          <strong>Require Private Key Authentication for all queries</strong>
-        </label>
-
-        <label className="row">
-          <input
-            type="checkbox"
-            checked={settings.lan_access}
-            onChange={(e) => save({ lan_access: e.target.checked })}
-          />
-          Allow LAN / Remote exposure (binds to <code>0.0.0.0</code>)
-        </label>
-
-        <div style={{ marginTop: 8 }}>
-          <label>Private Key (Client & Server)
-            <div className="row" style={{ marginTop: 6, gap: 8 }}>
-              <input
-                type={showKey ? "text" : "password"}
-                value={localKey}
-                placeholder="jarvis_pk_..."
-                style={{ fontFamily: "monospace", flex: 1 }}
-                onChange={(e) => setLocalKey(e.target.value)}
-              />
-              <button className="btn secondary" type="button" onClick={() => setShowKey(!showKey)}>
-                {showKey ? "Hide" : "Show"}
-              </button>
-              <button className="btn secondary" type="button" onClick={saveLocalKeyOnly}>
-                Save in Browser
-              </button>
-              <button
-                className="btn secondary"
-                type="button"
-                onClick={() => save({ private_key: localKey }).then(() => setMsg("Private key saved to server."))}
-              >
-                Save to Server
-              </button>
-            </div>
-          </label>
-          <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" type="button" onClick={generateKey}>
-              Generate New Private Key
-            </button>
-            {authStatus?.has_key && <span className="stat" style={{ marginLeft: 12 }}>Server has active private key</span>}
-          </div>
+      <div className="settings-shell">
+        <SettingsNav active={activeSubmenu} />
+        <div className="settings-content" aria-labelledby="settings-pane-title">
+          <h2 id="settings-pane-title" className="settings-pane-heading">
+            {SETTINGS_SUBMENU_LABELS[activeSubmenu]}
+          </h2>
+          {needsApiSettings && !settings ? (
+            <div className="card settings-pane-card">Loading…</div>
+          ) : (
+            renderPane()
+          )}
         </div>
       </div>
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Inference server</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          Your models, your PC or LAN box — this is not the Jarvis subscription. Local llama.cpp is started by Jarvis. A dedicated LAN GPU box, LM Studio, Ollama, vLLM, or SGLang is health-checked only — point host/port at its OpenAI-compatible <code>/v1</code> endpoint.
-        </p>
-        <label>Backend
-          <select value={settings.inference?.backend || "llama.cpp"} onChange={(e) => save({ inference_backend: e.target.value })}>
-            <option value="llama.cpp">llama.cpp (this PC)</option>
-            <option value="remote">Remote OpenAI-compatible</option>
-            <option value="ollama">Ollama</option>
-            <option value="lmstudio">LM Studio</option>
-            <option value="vllm">vLLM</option>
-            <option value="sglang">SGLang</option>
-          </select>
-        </label>
-        <label>Host
-          <input
-            value={settings.inference?.host || "127.0.0.1"}
-            onBlur={(e) => save({ inference_host: e.target.value.trim() || "127.0.0.1" })}
-            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, host: e.target.value } })}
-          />
-        </label>
-        <label>Port
-          <input
-            type="number"
-            value={settings.inference?.port || 8088}
-            onChange={(e) => save({ inference_port: Number(e.target.value) })}
-          />
-        </label>
-        <label>Remote model name (optional)
-          <input
-            value={settings.inference?.remote_model || ""}
-            placeholder="Leave blank to use the first advertised model"
-            onBlur={(e) => save({ inference_remote_model: e.target.value.trim() })}
-            onChange={(e) => setSettings({ ...settings, inference: { ...settings.inference, remote_model: e.target.value } })}
-          />
-        </label>
-        <label>Inference API key (optional)
-          <input
-            type="password"
-            value={inferenceKeyDraft}
-            placeholder="Type to replace. Jarvis will not show a saved key."
-            autoComplete="new-password"
-            onChange={(e) => setInferenceKeyDraft(e.target.value)}
-            onBlur={() => {
-              const next = inferenceKeyDraft.trim()
-              if (!next) return
-              save({ inference_api_key: next }).then(() => {
-                setInferenceKeyDraft("")
-                setMsg("Inference key saved. It will not be shown again.")
-              })
-            }}
-          />
-        </label>
-      </div>
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Core Execution</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          How strictly Jarvis asks before risky tools. How long a job stays open, and whether Jarvis
-          may start work on its own, is in Stay with a job &amp; Away Mode above.
-        </p>
-        <label>Ask before risky tools
-          <select value={settings.autonomy} onChange={(e) => save({ autonomy: e.target.value })}>
-            <option value="interactive">Interactive</option>
-            <option value="trusted">Trusted</option>
-            <option value="autonomous">Autonomous</option>
-          </select>
-        </label>
-        <label>Execution mode
-          <select value={settings.execution_mode || "balanced"} onChange={(e) => save({ execution_mode: e.target.value })}>
-            <option value="fast">Fast</option>
-            <option value="balanced">Balanced</option>
-            <option value="reliable">Reliable</option>
-          </select>
-        </label>
-        <label>Default timeout (seconds)
-          <input type="number" value={settings.default_timeout_seconds} onChange={(e) => save({ default_timeout_seconds: Number(e.target.value) })} />
-        </label>
-        <label>Retry limit
-          <input type="number" value={settings.retry_limit} onChange={(e) => save({ retry_limit: Number(e.target.value) })} />
-        </label>
-        <label>Model profile
-          <select value={settings.inference?.profile} onChange={(e) => save({ profile: e.target.value })}>
-            <option value="fast">Fast</option>
-            <option value="balanced">Balanced</option>
-            <option value="quality">Quality (9B thinking on)</option>
-            <option value="expert">Expert (27B)</option>
-          </select>
-        </label>
-        <label>Vision
-          <select value={settings.inference?.vision_mode || "lazy"} onChange={(e) => save({ vision_mode: e.target.value })}>
-            <option value="lazy">Lazy (load projector only when needed)</option>
-            <option value="always">Always load mmproj</option>
-            <option value="off">Off</option>
-          </select>
-        </label>
-        <label>Allowed directories (one per line)
-          <textarea className="field" rows={4} defaultValue={(settings.allowed_directories || []).join("\n")}
-            onBlur={(e) => save({ allowed_directories: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })} />
-        </label>
-        <label className="row">
-          <input type="checkbox" checked={!!settings.inference?.vision} onChange={(e) => save({ inference_vision: e.target.checked })} />
-          Load vision projector (uses extra VRAM; leave off for text/tool work)
-        </label>
-        <label className="row">
-          <input type="checkbox" checked={settings.browser?.headless} onChange={(e) => save({ browser_headless: e.target.checked })} />
-          Headless browser
-        </label>
-        <label className="row">
-          <input type="checkbox" checked={settings.backup_enabled} onChange={(e) => save({ backup_enabled: e.target.checked })} />
-          Create backups before overwriting files
-        </label>
-      </div>
-
-      <ComputerUsePermissions />
-
-      <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-        <h2>Self-development trial budget</h2>
-        <p className="lede" style={{ margin: "0 0 12px" }}>
-          Isolated worktrees never auto-merge. Paid workers stay off unless you set a spend or invocation limit above zero.
-        </p>
-        <label>Maximum duration (hours)
-          <input type="number" value={settings.self_dev?.max_duration_hours ?? 12} onChange={(e) => save({ self_dev_max_duration_hours: Number(e.target.value) })} />
-        </label>
-        <label>Maximum paid spend (€)
-          <input type="number" value={settings.self_dev?.max_paid_spend_eur ?? 0} onChange={(e) => save({ self_dev_max_paid_spend_eur: Number(e.target.value) })} />
-        </label>
-        <label>Maximum paid worker invocations
-          <input type="number" value={settings.self_dev?.max_paid_invocations ?? 0} onChange={(e) => save({ self_dev_max_paid_invocations: Number(e.target.value) })} />
-        </label>
-        <label>Maximum consecutive failures
-          <input type="number" value={settings.self_dev?.max_consecutive_failures ?? 3} onChange={(e) => save({ self_dev_max_consecutive_failures: Number(e.target.value) })} />
-        </label>
-        <label>Experimental Jarvis port
-          <input type="number" value={settings.self_dev?.experimental_port ?? 4781} onChange={(e) => save({ self_dev_experimental_port: Number(e.target.value) })} />
-        </label>
-      </div>
-
-      {queueStatus && (
-        <div className="card grid" style={{ maxWidth: 760, marginTop: 16 }}>
-          <h2>Launch & Task Queue</h2>
-          <p className="lede">
-            Queue directory: <code>{queueStatus.queue_directory}</code>. Drop any <code>.json</code> or <code>.prompt</code> file to automatically run on launch or in background.
-          </p>
-          <div className="kv">
-            <b>Pending files</b><span>{queueStatus.pending_count}</span>
-            <b>Processed files</b><span>{queueStatus.processed?.length || 0}</span>
-            <b>Failed files</b><span>{queueStatus.failed?.length || 0}</span>
-          </div>
-        </div>
-      )}
-        </>
-      )}
     </div>
   )
 }

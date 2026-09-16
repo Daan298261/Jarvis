@@ -14,7 +14,16 @@ from ..hardware import detect_hardware
 from ..providers.base import ChatMessage
 from .profiles import ModelProfile, profile_gguf, resolve_mmproj
 
-LLAMA_CPP_ALIASES = {"llama.cpp", "llamacpp", "llama_cpp", "llama", "local"}
+LLAMA_CPP_ALIASES = {
+    "llama.cpp",
+    "llamacpp",
+    "llama_cpp",
+    "llama",
+    "local",
+    "local-llama",
+    "local_llama",
+    "local-llama.cpp",
+}
 OLLAMA_ALIASES = {"ollama"}
 LMSTUDIO_ALIASES = {"lmstudio", "lm-studio", "lm_studio"}
 VLLM_ALIASES = {"vllm"}
@@ -291,7 +300,10 @@ class LlamaCppBackend(InferenceBackend):
         missing = []
         model = self.model_path(profile)
         if not model.exists():
-            missing.append(f"model file missing: {model}")
+            missing.append(
+                f"{profile.label} weights are missing at {model}. "
+                f"Install {profile.filename} (or run Jarvis Setup) and try this slot again."
+            )
         if not self.server_path().exists():
             missing.append(f"llama-server missing at {self.server_path()}")
         return missing
