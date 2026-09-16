@@ -83,6 +83,7 @@ function isChatPath(pathname: string): boolean {
 }
 
 function isAdminPath(pathname: string): boolean {
+  if (pathname === "/settings" || pathname.startsWith("/settings/")) return true
   return ADMIN_LINKS.some((link) => pathname === link.to || pathname.startsWith(`${link.to}/`))
 }
 
@@ -278,6 +279,7 @@ function OwnerPortal() {
       <Route path="/tools" element={<ToolsPage />} />
       <Route path="/mcp" element={<McpPage />} />
       <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/settings/:submenu" element={<SettingsPage />} />
       <Route path="/license" element={<LicensePage />} />
       <Route path="/advisor" element={<AdvisorPage />} />
       <Route path="/guest-portals" element={<GuestPortalsPage />} />
