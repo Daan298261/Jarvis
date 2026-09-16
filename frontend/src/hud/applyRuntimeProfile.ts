@@ -62,9 +62,8 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
   }
   const profile = await getRuntimeProfile(id)
 
-  syncRuntimeSelection(id)
-
   if (isHexStrikeSuiteProfile(profile)) {
+    syncRuntimeSelection(id)
     await startHexStrike()
     return profile
   }
@@ -77,6 +76,7 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
 
   const result = await activateRuntimeProfile(id)
   await waitForModelLoaded()
+  syncRuntimeSelection(id)
   return result.profile || profile
 }
 

@@ -51,13 +51,15 @@ def kokoro_python_ready() -> bool:
 
 
 def is_kokoro_available(*, model_dir: Path | None = None) -> bool:
-    """Kokoro is selectable when the Python package is installed.
+    """Kokoro is selectable unless explicitly disabled.
 
-    Weights are staged lazily on first synthesis so the default butler does not
-    fall through to robotic SAPI just because Setup has not copied the GGUF yet.
+    Python and weights are staged lazily on first synthesis so a fresh
+    Windows install does not fall through to robotic SAPI.
     """
     del model_dir
-    return kokoro_python_ready()
+    if os.environ.get("JARVIS_DISABLE_KOKORO", "").strip() in {"1", "true", "yes"}:
+        return False
+    return True
 
 
 def is_piper_available() -> bool:
@@ -92,7 +94,7 @@ def is_engine_available(engine_id: str) -> bool:
         return False
     if key in {"system", "sapi", "windows", "espeak", "espeak-ng", "pyttsx3"}:
         return legacy_system_tts_available()
-    return legacy_system_tts_available()
+    return False
 
 
 def engine_chain_for_profile(profile: Any) -> list[str]:

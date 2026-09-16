@@ -83,9 +83,10 @@ from ..persona.chat_delivery import (
     stream_speak_offset,
 )
 from ..persona.acknowledgements import task_acknowledgement
-from ..persona.owner_chat import OWNER_CHAT_SYSTEM
+from ..persona.owner_chat import OWNER_CHAT_SYSTEM, owner_chat_max_tokens
 from ..persona.think_aloud import run_with_think_aloud
 from ..persona.weather import weather_system_message
+from ..providers.completion_text import empty_generation_error
 from .recovery import recovery_hint
 from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
@@ -516,8 +517,8 @@ class AgentRuntime:
                 temperature=profile.temperature,
                 top_p=profile.top_p,
                 top_k=profile.top_k,
-                max_tokens=256,
-                thinking=False,
+                max_tokens=owner_chat_max_tokens(profile),
+                thinking=None,
             ):
                 parts.append(delta)
                 accumulated = "".join(parts)
@@ -543,7 +544,19 @@ class AgentRuntime:
             )
             await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
             return
-        content = "".join(parts).strip() or "I'm afraid I couldn't form a reply just then."
+        content = "".join(parts).strip()
+        if not content:
+            err = empty_generation_error()
+            await self._update(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=err,
+                result=err,
+                **metrics.as_fields(),
+            )
+            await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
+            return
         await publish_owner_text(
             content,
             source="task_chat",

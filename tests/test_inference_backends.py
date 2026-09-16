@@ -26,6 +26,11 @@ def test_llama_cpp_is_the_default_backend():
     assert isinstance(resolve_backend(_settings()), LlamaCppBackend)
 
 
+def test_local_llama_alias_uses_managed_llama_cpp():
+    assert isinstance(resolve_backend(_settings(backend="local-llama")), LlamaCppBackend)
+    assert isinstance(resolve_backend(_settings(backend="local_llama")), LlamaCppBackend)
+
+
 def test_normalize_chat_messages_keeps_single_system_first():
     messages = [
         ChatMessage(role="system", content="rules"),
@@ -178,7 +183,7 @@ async def test_remote_backend_load_does_not_require_local_gguf(monkeypatch):
 def test_llama_cpp_reports_missing_local_files():
     backend = LlamaCppBackend(_settings())
     missing = backend.missing_requirements(resolve_profile("balanced"))
-    assert any("model file missing" in item for item in missing)
+    assert any("weights are missing" in item and ".gguf" in item for item in missing)
 
 
 def test_expert_profile_is_the_27b_escalation_alias():
