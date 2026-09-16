@@ -28,12 +28,20 @@ def test_visible_text_strips_think_blocks_then_keeps_the_answer():
     assert visible_completion_text(raw) == "Markets closed mixed."
 
 
-def test_visible_text_uses_reasoning_content_channel_from_parts():
+def test_visible_text_prefers_text_parts_over_reasoning_parts():
+    parts = [
+        {"type": "reasoning", "text": "Need current events."},
+        {"type": "text", "text": "BBC: a brief recap."},
+    ]
+    assert visible_completion_text(parts) == "BBC: a brief recap."
+
+
+def test_visible_text_uses_reasoning_parts_when_text_is_empty():
     parts = [
         {"type": "reasoning", "text": "Need current events."},
         {"type": "text", "text": ""},
     ]
-    assert visible_completion_text(parts, "BBC: a brief recap.") == "BBC: a brief recap."
+    assert visible_completion_text(parts) == "Need current events."
 
 
 def test_delta_channels_read_reasoning_content():
