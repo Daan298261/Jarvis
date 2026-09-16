@@ -2450,6 +2450,14 @@ Reason:
 
 CoS assigned this ledger tick after #267 landed on development. `Settings.tsx` was a stacked dump; Daybreak left-bar was one mixed Appearance & voice panel (`AppearancePresenceControls`, #263).
 
+Decision: RFC-0095 Instagram jarvis collection module catalog + Download (accepted)
+
+Taco Instagram `@tacotcr` Saved→jarvis (~140) ingest is a four-step pipeline (Download → usefulness review → integrate decision → implement). Module Catalog/Packs **Download** clones or zips to Desktop/`projects` (library `projects/` on Architect’s box). Full-assistant repos tagged `persona_candidate` (no persona merge). Offensive/pentest (Strix, Pentagi, Claude-Red, Exploitarium, …) stay `le_gated` / archive-only — PolitieGPT/LE only. Black Grid media children reserved RFC-0096/0097. Specs-only; no new §58 checkbox.
+
+Reason:
+
+Owner saves UI/repo inspiration on Instagram with no path into Jarvis modules/skills/DLCs or a downloadable module pack.
+
 ---
 
 ## 60. Expected Example Behavior
