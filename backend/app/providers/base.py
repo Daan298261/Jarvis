@@ -8,6 +8,15 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
+from .completion_text import (
+    content_text_from_payload,
+    delta_text_channels,
+    empty_generation_error,
+    message_payload_from_openai,
+    reasoning_text_from_payload,
+    visible_completion_text,
+)
+
 
 @dataclass
 class ChatMessage:
@@ -135,11 +144,18 @@ class ModelProvider:
         usage = {}
         if response.usage:
             usage = response.usage.model_dump()
-        raw = response.model_dump()
+        raw = response.model_dump() if hasattr(response, "model_dump") else {}
+        if not isinstance(raw, dict):
+            raw = {}
         timings = raw.get("timings") if isinstance(raw.get("timings"), dict) else {}
-        reasoning = getattr(message, "reasoning_content", None) or ""
+        payload = message_payload_from_openai(message, raw)
+        reasoning = reasoning_text_from_payload(payload) or getattr(message, "reasoning_content", None) or ""
+        content = visible_completion_text(
+            content_text_from_payload(payload) or getattr(message, "content", None) or "",
+            reasoning,
+        )
         return ChatResult(
-            content=message.content or "",
+            content=content,
             reasoning=reasoning or "",
             tool_calls=tool_calls,
             usage=usage,
@@ -180,13 +196,29 @@ class ModelProvider:
         if extra_body:
             kwargs["extra_body"] = extra_body
         stream = await self.client.chat.completions.create(**kwargs)
+        yielded = False
+        reasoning_parts: list[str] = []
+        finish_reason: str | None = None
         async for chunk in stream:
-            choice = chunk.choices[0] if chunk.choices else None
+            choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
             if not choice:
                 continue
-            delta = choice.delta.content or ""
-            if delta:
-                yield delta
+            reason = getattr(choice, "finish_reason", None)
+            if reason:
+                finish_reason = str(reason)
+            delta = getattr(choice, "delta", None)
+            content_delta, reasoning_delta = delta_text_channels(delta)
+            if reasoning_delta:
+                reasoning_parts.append(reasoning_delta)
+            if content_delta:
+                yielded = True
+                yield content_delta
+        if not yielded:
+            fallback = visible_completion_text("", "".join(reasoning_parts))
+            if fallback:
+                yield fallback
+                return
+            raise RuntimeError(empty_generation_error(finish_reason))
 
 
 def parse_tool_arguments(payload: str) -> dict[str, Any]:

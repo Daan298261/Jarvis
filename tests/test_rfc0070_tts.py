@@ -93,6 +93,18 @@ def test_kokoro_is_selectable_before_weights_are_staged(monkeypatch):
     assert is_kokoro_available() is True
 
 
+def test_kokoro_stays_selectable_before_python_is_installed(monkeypatch):
+    from app.tts.engines import is_kokoro_available, pick_engine_for_profile
+    from app.voice_profiles.catalog import reload_catalog
+
+    monkeypatch.delenv("JARVIS_DISABLE_KOKORO", raising=False)
+    monkeypatch.setattr("app.tts.engines.kokoro_python_ready", lambda: False)
+    assert is_kokoro_available() is True
+    profile = reload_catalog().get("butler_original_v1")
+    assert profile is not None
+    assert pick_engine_for_profile(profile) == "kokoro"
+
+
 def test_tts_modules_import_without_circular_import():
     import importlib
 

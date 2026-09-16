@@ -197,8 +197,9 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
       const applied = await applyRuntimeProfile(slot.profileId)
       setSelectedId(applied.id || applied.name)
       setMsg(`Loaded ${applied.label || applied.name}.`)
-    } catch {
-      setMsg("Could not load this slot.")
+    } catch (err: unknown) {
+      const text = err instanceof Error ? err.message : "Could not load this slot."
+      setMsg(text.length > 180 ? `${text.slice(0, 177)}…` : text)
     } finally {
       setBusySlot(null)
     }

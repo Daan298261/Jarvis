@@ -69,6 +69,15 @@ def test_is_plain_conversation_heuristic():
     assert not is_plain_conversation("Organize these files on my desktop and delete duplicates")
 
 
+def test_owner_chat_max_tokens_grows_for_reasoning_models():
+    from app.inference.profiles import PROFILES
+    from app.persona.owner_chat import OWNER_CHAT_MAX_TOKENS, owner_chat_max_tokens
+
+    assert owner_chat_max_tokens(PROFILES["bootstrap"]) == 2048
+    assert owner_chat_max_tokens(PROFILES["fast"]) == OWNER_CHAT_MAX_TOKENS
+    assert owner_chat_max_tokens(PROFILES["fast"]) >= 1024
+
+
 @pytest.mark.asyncio
 async def test_conversation_follow_up_stays_off_the_tool_loop(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
@@ -186,7 +195,7 @@ async def test_owner_chat_streams_without_confirmation(jarvis_env, monkeypatch):
 
     class StreamProvider:
         async def chat_stream(self, messages, **kwargs):
-            assert kwargs["max_tokens"] == 256
+            assert kwargs["max_tokens"] >= 1024
             assert messages[0].role == "system"
             assert "useful answer in the first sentence" in messages[0].content
             yield "Certainly."
@@ -248,3 +257,39 @@ async def test_conversation_task_skips_tool_confirmation(jarvis_env, monkeypatch
 
     deltas = [item for item in pending_chat_tts() if item["source"] in {"owner_chat", "task_chat"}]
     assert deltas
+
+
+@pytest.mark.asyncio
+async def test_empty_conversation_stream_surfaces_generation_error(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+
+    class EmptyProvider:
+        async def chat_stream(self, messages, **kwargs):
+            del messages, kwargs
+            if False:
+                yield ""
+
+        async def chat(self, messages, **kwargs):
+            del messages, kwargs
+            from app.providers.base import ChatResult
+
+            return ChatResult(content="", reasoning="")
+
+    MANAGER.provider = EmptyProvider()
+    MANAGER.state.loaded = True
+    MANAGER.state.context_size = 16384
+
+    task = await AGENT.create_task("what latest news?")
+    runner = AGENT._tasks.get(task.id)
+    if runner:
+        await runner
+
+    from app.db.session import SessionLocal
+    from app.db.models import Task
+
+    async with SessionLocal() as session:
+        row = await session.get(Task, task.id)
+        assert row is not None
+        assert row.status == "failed"
+        assert "couldn't form a reply" not in (row.result or "").lower()
+        assert "no text" in (row.error or "").lower()

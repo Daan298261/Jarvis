@@ -8,6 +8,7 @@ from ..config import load_settings
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
 from ..providers.base import ChatMessage
+from ..providers.completion_text import empty_generation_error
 from .chat_delivery import (
     OWNER_CHAT_CHANNEL,
     clear_stream_speak_state,
@@ -30,7 +31,22 @@ Never write a program, script, or file to answer a spoken factual question such 
 If a live briefing is attached, use those facts and do not invent numbers.
 Use internal reasoning when useful, but provide only the concise answer rather than hidden reasoning."""
 
-OWNER_CHAT_MAX_TOKENS = 256
+OWNER_CHAT_MAX_TOKENS = 1024
+OWNER_CHAT_REASONING_MAX_TOKENS = 2048
+
+
+def owner_chat_max_tokens(profile: Any | None = None) -> int:
+    """Reasoning models need headroom so hidden thinking does not consume the whole budget."""
+    if profile is None:
+        return OWNER_CHAT_MAX_TOKENS
+    mode = str(getattr(profile, "thinking_mode", "") or "").strip().lower()
+    family = str(getattr(profile, "family", "") or "").strip().lower()
+    thinking = bool(getattr(profile, "thinking", False))
+    if thinking or mode in {"on", "selective"}:
+        return OWNER_CHAT_REASONING_MAX_TOKENS
+    if "qwen3.8" in family or "qwen38" in family or "ornith" in family:
+        return OWNER_CHAT_REASONING_MAX_TOKENS
+    return OWNER_CHAT_MAX_TOKENS
 
 _conversations: dict[str, list[ChatMessage]] = defaultdict(list)
 
@@ -146,8 +162,8 @@ async def stream_owner_chat(
             temperature=profile.temperature,
             top_p=profile.top_p,
             top_k=profile.top_k,
-            max_tokens=OWNER_CHAT_MAX_TOKENS,
-            thinking=False,
+            max_tokens=owner_chat_max_tokens(profile),
+            thinking=None,
         ):
             parts.append(delta)
             accumulated = "".join(parts)
@@ -194,7 +210,7 @@ async def stream_owner_chat(
         }
     else:
         clear_stream_speak_state(stream_key)
-        yield {"type": "done", "conversation_id": cid, "text": ""}
+        yield {"type": "error", "detail": empty_generation_error()}
 
 
 async def complete_owner_chat(user_text: str, *, conversation_id: str | None = None) -> dict[str, Any]:

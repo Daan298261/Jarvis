@@ -61,9 +61,10 @@ async def synthesize_with_engine(
     speaker_ref: str = "",
     model_dir: Path | None = None,
 ) -> bytes:
-    engine = (engine_id or "system").strip().lower()
+    engine = (engine_id or "").strip().lower()
     voice = speaker_ref or (profile.tts.speaker_ref if profile else "") or ""
     speaking_rate = profile.tts.speaking_rate if profile else 1.0
+    profile_id = profile.id if profile else ""
     if engine == "kokoro":
         try:
             return await _synthesize_kokoro(
@@ -74,23 +75,27 @@ async def synthesize_with_engine(
                 speaking_rate=speaking_rate,
             )
         except Exception as exc:
-            profile_id = profile.id if profile else ""
             logger.exception("Kokoro synthesis failed for profile=%s; SAPI fallback is disabled", profile_id)
             raise TtsSynthesisError("kokoro", profile_id, str(exc)) from exc
-    if engine == "chatterbox":
+    if engine in {"chatterbox", "chatterbox_turbo", "chatterbox-turbo"}:
         try:
             return await _synthesize_chatterbox(text, voice=voice)
         except Exception as exc:
-            profile_id = profile.id if profile else ""
             logger.exception("Chatterbox synthesis failed for profile=%s; system fallback is disabled", profile_id)
             raise TtsSynthesisError("chatterbox", profile_id, str(exc)) from exc
     if engine == "piper":
         return await _synthesize_piper(text, voice=voice, profile=profile)
-    return await _synthesize_system(
-        text,
-        engine=engine,
-        speaker_ref=voice,
-        speaking_rate=speaking_rate,
+    if engine in {"system", "sapi", "windows", "espeak", "espeak-ng", "pyttsx3"}:
+        return await _synthesize_system(
+            text,
+            engine=engine,
+            speaker_ref=voice,
+            speaking_rate=speaking_rate,
+        )
+    raise TtsSynthesisError(
+        engine or "unknown",
+        profile_id,
+        f"Unknown TTS engine '{engine or 'none'}' was requested; refusing silent SAPI fallback.",
     )
 
 
