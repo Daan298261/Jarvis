@@ -2442,6 +2442,14 @@ Reason:
 
 1.3.13 clean reinstall fails after `stop-jarvis.ps1`; upgrade freezes on the full-bar Preparing screen. Tip `StopJarvisProcesses` only launches the polite stop; `[Run]` `bootstrap.ps1` is `runhidden waituntilterminated` with no timeout.
 
+Decision: RFC-0094 settings menu information architecture (accepted)
+
+CoS 2026-09-16. Replace the flat Settings heap with six submenus (Voice, Appearance, Models / Inference, Network / Companion, Integrations, Advanced). Every current Settings control maps to exactly one primary pane; prefer deep-links to `/model`, `/mcp`, `/companion-pairing`, `/license`. Daybreak Appearance & voice is a shortcut into Voice + Appearance (shared components or deep-links), not a second hierarchy. Persist last submenu; deep-link `/settings/voice` (hash alias ok). Specs-only IA; do not fold RFC-0092 TTS engines. No new §58 backlog checkboxes.
+
+Reason:
+
+`Settings.tsx` is a stacked dump; Appearance lives only on the Daybreak HUD (`AppearancePresenceControls`, #263). Owners cannot find Voice vs inference vs pairing without scrolling.
+
 ---
 
 ## 60. Expected Example Behavior
