@@ -1,6 +1,6 @@
 # RFC-0094: Settings menu information architecture
 
-**Status:** accepted
+**Status:** implemented
 **Queue item:** (none — no new §58 checkbox; implement is a Desktop HUD + Settings IA follow-up after CoS names it)
 **Author:** Jarvis Architect
 **Date:** 2026-09-16
@@ -111,19 +111,19 @@ Composer **Speak chat replies** mute stays a chat-local shortcut into the same T
 
 ## Acceptance criteria
 
-- [ ] Settings / menu screen is a category list + content pane (not a single scrolling heap of all cards)
-- [ ] **Voice** and **Appearance** are **first-class submenu groups** on the **main Settings/menu screen** (not nested, not a combined dump)
-- [ ] **Voice** and **Appearance** are **first-class submenu groups** on the **Daybreak left-bar** (today’s single “Appearance & voice” `<details>` heap is split; not buried)
-- [ ] **Desktop HUD** (`HudShell` / Daybreak) uses the **same organized IA** as Settings — not portal-only
-- [ ] Six groups present with the intents above; every tip Settings control appears in **exactly one** primary submenu per the mapping table
-- [ ] Mixed Core Execution card is split (model/vision → Models / Inference; autonomy/timeouts/dirs/browser/backup → Advanced)
-- [ ] Heavy UIs (`/license`, `/model`, `/mcp`, `/companion-pairing`, `/agents`, …) are deep-linked, not duplicated
-- [ ] HUD and Settings share Voice + Appearance components (or HUD deep-links into those Settings panes) — no second conflicting hierarchy
-- [ ] HexStrike left-bar / suite behavior unchanged
-- [ ] `/settings/voice` (and `#voice` / `?section=voice` aliases) opens Voice; same for the other ids; last submenu restored on bare `/settings`
-- [ ] RFC-0092 **not** implemented here: no TTS engine/default/speak-filter edits
-- [ ] Specs-only in this PR (no `frontend/src` / backend product edits)
-- [ ] Implement follow-up: `python3 -m pytest`; `npm --prefix frontend run build` (and lint if TS changed)
+- [x] Settings / menu screen is a category list + content pane (not a single scrolling heap of all cards)
+- [x] **Voice** and **Appearance** are **first-class submenu groups** on the **main Settings/menu screen** (not nested, not a combined dump)
+- [x] **Voice** and **Appearance** are **first-class submenu groups** on the **Daybreak left-bar** (today’s single “Appearance & voice” `<details>` heap is split; not buried)
+- [x] **Desktop HUD** (`HudShell` / Daybreak) uses the **same organized IA** as Settings — not portal-only
+- [x] Six groups present with the intents above; every tip Settings control appears in **exactly one** primary submenu per the mapping table
+- [x] Mixed Core Execution card is split (model/vision → Models / Inference; autonomy/timeouts/dirs/browser/backup → Advanced)
+- [x] Heavy UIs (`/license`, `/model`, `/mcp`, `/companion-pairing`, `/agents`, …) are deep-linked, not duplicated
+- [x] HUD and Settings share Voice + Appearance components (or HUD deep-links into those Settings panes) — no second conflicting hierarchy
+- [x] HexStrike left-bar / suite behavior unchanged
+- [x] `/settings/voice` (and `#voice` / `?section=voice` aliases) opens Voice; same for the other ids; last submenu restored on bare `/settings`
+- [x] RFC-0092 **not** implemented here: no TTS engine/default/speak-filter edits
+- [x] Specs-only in this PR (no `frontend/src` / backend product edits) — specs PR #265
+- [x] Implement follow-up: `python3 -m pytest`; `npm --prefix frontend run build` (and lint if TS changed)
 
 ## Likely files
 
@@ -144,3 +144,7 @@ Product implementation in this PR. **RFC-0092** neural TTS / no silent SAPI (Sol
 - Tip evidence (do not treat as already grouped): `Settings.tsx` flat cards; `App.tsx` `path="/settings"` only; Daybreak left-bar one `Appearance & voice` details dump; `/mcp` + `/model` + `/companion-pairing` as sibling routes; HudShell / classic nav Settings → `/settings`.
 - Linux cloud VMs can verify routes, last-submenu persistence, and that Appearance/Voice are first-class on Settings + HUD chrome. Live Daybreak desktop HUD is desktop sign-off.
 - Implement launch: implement this RFC only; branch from `development`; pytest + frontend build; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via specs **#265** @ `01bd56e` + implement **#267** @ `73d93d2` (six-group Settings nav + panes, Daybreak Voice/Appearance split, `/settings/:submenu` + last-submenu persistence). RFC-0092 not folded (Voice pane hosts speak toggle + picker only). Live Daybreak desktop HUD chrome remains desktop sign-off.
