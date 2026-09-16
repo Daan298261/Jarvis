@@ -2434,6 +2434,14 @@ Reason:
 
 Through 1.3.9 the spoken default is still robotic SAPI; catalog prefers and can migrate owners off Kokoro; `synthesize.py` swallows Kokoro errors into SAPI.
 
+Decision: RFC-0093 installer force-stop and prepare unstick (accepted)
+
+CoS urgent 2026-09-16. Before Repair / Upgrade / Reinstall-keep / Semi-clean / Clean (and uninstall), Setup must force-stop all Jarvis lockers under the install tree — not only polite `stop-jarvis.ps1`. Kill failure aborts with a visible error; never hang. Post-copy bootstrap that shows “Preparing Jarvis, its AI model, Gmail and WhatsApp…” must timeout / be cancelable, skip heavy prepare when models are already present, and surface the real error plus killed-PID log. Specs-only; do not fold RFC-0092; implement follow-up. No new §58 backlog checkboxes.
+
+Reason:
+
+1.3.13 clean reinstall fails after `stop-jarvis.ps1`; upgrade freezes on the full-bar Preparing screen. Tip `StopJarvisProcesses` only launches the polite stop; `[Run]` `bootstrap.ps1` is `runhidden waituntilterminated` with no timeout.
+
 ---
 
 ## 60. Expected Example Behavior
