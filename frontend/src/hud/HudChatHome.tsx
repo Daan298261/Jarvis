@@ -74,7 +74,7 @@ export function HudChatHome() {
     <div
       className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}${hexStrikeActive && !showHexSuite ? " hex-suite-collapsed" : ""}`}
     >
-      <AppearancePresenceControls settings={presentation} hexStrikeActive={hexStrikeActive} />
+      <AppearancePresenceControls settings={presentation} />
       <section className="hud-orb-zone" aria-label="Jarvis state">
         <PresenceHost
           snapshot={snapshot}

@@ -11,10 +11,9 @@ import type { PresentationSettings } from "./presenceTypes"
 
 type AppearancePresenceControlsProps = {
   settings: PresentationSettings
-  hexStrikeActive?: boolean
 }
 
-export function AppearancePresenceControls({ settings, hexStrikeActive = false }: AppearancePresenceControlsProps) {
+export function AppearancePresenceControls({ settings }: AppearancePresenceControlsProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
   const [voiceCatalog, setVoiceCatalog] = useState<VoiceProfileCatalog | null>(null)
@@ -135,8 +134,7 @@ export function AppearancePresenceControls({ settings, hexStrikeActive = false }
           </ul>
         </div>
 
-        {!hexStrikeActive && (
-          <div className="jarvis-presence-mode-row" role="group" aria-label="Jarvis interface">
+        <div className="jarvis-presence-mode-row" role="group" aria-label="Jarvis interface">
           <button type="button" disabled={busy} className={selected === "classic" ? "active" : ""}
             onClick={() => apply({ shell: "classic", requestedPresence: "none" })}>
             Classic
@@ -159,11 +157,8 @@ export function AppearancePresenceControls({ settings, hexStrikeActive = false }
             )}>
             Particle bust · experimental
           </button>
-          </div>
-        )}
+        </div>
 
-        {!hexStrikeActive && (
-          <>
         <label>
           Rendering
           <select disabled={busy} value={settings.performancePreset}
@@ -197,8 +192,6 @@ export function AppearancePresenceControls({ settings, hexStrikeActive = false }
             <option value="full">Full motion</option>
           </select>
         </label>
-          </>
-        )}
 
         {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
       </div>
