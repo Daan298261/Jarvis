@@ -57,9 +57,10 @@ def test_jarvis_iss_modify_stops_processes_via_prepare_to_install():
     text = _read(ISS)
     assert "[Code]" in text
     assert "PrepareToInstall" in text
-    assert "StopJarvisProcesses" in text
+    assert "StopJarvisProcessesForPrepare" in text
+    assert "ForceStopJarvisUnder" in text
     assert "IsUpgrade()" not in text
     lower = text.lower()
-    assert "stop-jarvis.ps1" in lower
+    assert "force-stop-jarvis.ps1" in lower
     assert "includetray" in lower.replace("-", "")
     assert "modify" in lower
