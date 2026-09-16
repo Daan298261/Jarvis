@@ -2444,11 +2444,11 @@ Reason:
 
 Decision: RFC-0094 settings menu information architecture (accepted)
 
-CoS 2026-09-16. Replace the flat Settings heap with six submenus (Voice, Appearance, Models / Inference, Network / Companion, Integrations, Advanced). Every current Settings control maps to exactly one primary pane; prefer deep-links to `/model`, `/mcp`, `/companion-pairing`, `/license`. Daybreak Appearance & voice is a shortcut into Voice + Appearance (shared components or deep-links), not a second hierarchy. Persist last submenu; deep-link `/settings/voice` (hash alias ok). Specs-only IA; do not fold RFC-0092 TTS engines. No new §58 backlog checkboxes.
+CoS 2026-09-16. Replace the flat Settings heap with six submenus (Voice, Appearance, Models / Inference, Network / Companion, Integrations, Advanced). **Voice** and **Appearance** are first-class groups on **both** the Daybreak left-bar **and** the main Settings screen — not a combined dump. Same organized IA on **Desktop HUD** (not portal-only). Every current Settings control maps to exactly one primary pane; prefer deep-links. Persist last submenu; deep-link `/settings/voice` (hash alias ok). Specs-only IA; do not fold RFC-0092 TTS engines. No new §58 backlog checkboxes.
 
 Reason:
 
-`Settings.tsx` is a stacked dump; Appearance lives only on the Daybreak HUD (`AppearancePresenceControls`, #263). Owners cannot find Voice vs inference vs pairing without scrolling.
+`Settings.tsx` is a stacked dump; Daybreak left-bar is one mixed Appearance & voice panel (`AppearancePresenceControls`, #263). Owners cannot find Voice vs inference vs pairing without scrolling.
 
 ---
 

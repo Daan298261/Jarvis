@@ -1,7 +1,7 @@
 # RFC-0094: Settings menu information architecture
 
 **Status:** accepted
-**Queue item:** (none — no new §58 checkbox; implement is a portal IA follow-up after CoS names it)
+**Queue item:** (none — no new §58 checkbox; implement is a Desktop HUD + Settings IA follow-up after CoS names it)
 **Author:** Jarvis Architect
 **Date:** 2026-09-16
 
@@ -15,13 +15,21 @@ The Daybreak / portal Settings screen is a **heap of random settings**. On tip (
 
 Dedicated pages already exist beside that dump: `/model` (LM Studio catalog + `RuntimeProfilesSection`), `/mcp` (`IntegrationSetup` Gmail/WhatsApp + advanced MCP), `/companion-pairing`, `/phone`, `/license`, `/system`, `/agents`, `/guest-portals`, `/advisor`, `/trajectories`, `/coding`. Settings often **re-embeds** or **re-links** them instead of grouping by job.
 
-Appearance does not live on Settings at all. `#263` restored **Appearance + Voice** on the Daybreak HUD left-bar (`AppearancePresenceControls` in `HudChatHome`: voice profile list, Classic / Neural / Humanoid / Particle, Rendering, Attention, Motion). Settings has the heavier `VoiceProfilePicker` + **Speak chat replies**, but no presentation controls. The HUD panel and Settings are two incomplete surfaces, not one IA. Entry today: HudShell `ADMIN_QUICK` Settings, classic rail Settings, HudHealthRail Away → `/settings`.
+Appearance does not live on Settings at all. `#263` restored **Appearance + Voice** on the Daybreak HUD left-bar (`AppearancePresenceControls` in `HudChatHome`: voice profile list, Classic / Neural / Humanoid / Particle, Rendering, Attention, Motion) as **one combined dump**, not two first-class groups. Settings has the heavier `VoiceProfilePicker` + **Speak chat replies**, but no presentation controls. Desktop HUD (`HudShell`) and portal Settings are two incomplete surfaces, not one IA. Entry today: HudShell `ADMIN_QUICK` Settings, classic rail Settings, HudHealthRail Away → `/settings`.
 
 Owners cannot find Voice vs Inference vs pairing without scrolling a server-console dump (`PORTAL_UX.md` already wants Settings findable, not a console).
 
 ## Decision
 
 Replace the flat Settings dump with a **clear submenu IA**: category list (left nav or equivalent) + one content pane. This RFC is **IA / layout only**.
+
+**Surfaces in scope (same IA, not portal-only):**
+
+- Main Settings / menu screen (`Settings.tsx`, classic rail, HudShell Settings link).
+- **Daybreak left-bar** Voice & Appearance area (`AppearancePresenceControls` in `HudChatHome`).
+- **Desktop HUD** (Daybreak `HudShell` / `uiMode === "hud"` on the Windows desktop) — organized the same way as the portal Settings screen. A portal-only regroup of `/settings` that leaves the desktop HUD as a heap is a **fail**.
+
+**Voice** and **Appearance** are **first-class submenu groups** on every surface above. They must not be buried in a flat heap, a single combined “Appearance & voice” dump, or nested under Advanced / Models.
 
 ### 1. Top-level groups (canonical ids)
 
@@ -34,7 +42,7 @@ Replace the flat Settings dump with a **clear submenu IA**: category list (left 
 | `integrations` | Integrations | Gmail / WhatsApp MCP setup — deep-link `/mcp` (do not duplicate the heavy forms). |
 | `advanced` | Advanced | Autonomy, agent interview, queue, computer-use permissions, worktrees / coding isolation, license, advisor, trajectories, self-dev, System escape. |
 
-Architect may refine visible labels after implement review; **ids and intents stay**. Every **current** Settings control lands in **exactly one** primary submenu (table below). Prefer **deep-links** to existing dedicated pages over duplicating heavy UIs. Mixed cards (today’s Core Execution) **split** by intent; do not clone the same control into two panes.
+Architect may refine visible labels after implement review; **ids and intents stay**. **`voice` and `appearance` stay first-class** (never merged into one group, never demoted). Every **current** Settings control lands in **exactly one** primary submenu (table below). Prefer **deep-links** to existing dedicated pages over duplicating heavy UIs. Mixed cards (today’s Core Execution) **split** by intent; do not clone the same control into two panes.
 
 ### 2. Mapping — every current Settings control → one submenu
 
@@ -78,33 +86,39 @@ Verified against `Settings.tsx` on tip. “Keep in pane” = compact control sta
 
 Admin destinations that are **not** Settings controls today (Tools, Memory, Swarm, Packs, Ads, …) stay on existing nav. This RFC does **not** absorb the whole admin rail into Settings.
 
-### 3. Daybreak Voice & Appearance panel vs full Settings
+### 3. Daybreak left-bar + Desktop HUD (same first-class groups)
 
-`HudChatHome` left-bar `AppearancePresenceControls` (summary **Appearance & voice**, restored `#263`) stays a **focused shortcut**, not a second taxonomy.
+CoS/Taco addendum: **Voice** and **Appearance** must be first-class submenu groups on **both** the Daybreak left-bar **and** the main Settings/menu screen. Desktop HUD is in scope.
 
-- **Required:** HUD uses the **same** Voice + Appearance building blocks as the Settings submenus (shared components), **or** it is a short cut with explicit deep-links into `/settings/voice` and `/settings/appearance`. Implement may mix: embed the compact shared controls (so chat is not abandoned for a theme tweak) **and** “Open Voice settings” / “Open Appearance settings” links.
-- **Forbidden:** a third hierarchy, different group names, or HUD-only presentation settings that Settings Appearance cannot reach. Unavailable-profile copy “Install in Settings” must deep-link **Voice** (`/settings/voice` or `#voice`), not the flat heap.
+Today `HudChatHome` left-bar `AppearancePresenceControls` is one `<details>` summary **Appearance & voice** (`#263`) mixing a voice list with shell/presence/rendering/attention/motion. That combined dump is the same class of heap this RFC removes from Settings.
+
+- **Required:** split that left-bar into **two first-class groups** — Voice and Appearance — matching Settings ids `voice` and `appearance`. Compact panes or a two-item category list are fine. Shared components with Settings are required so HUD and Settings are one IA. Deep-links (“Open full Voice settings” → `/settings/voice`, Appearance → `/settings/appearance`) are allowed **in addition**, not instead of first-class HUD groups.
+- **Desktop HUD:** `HudShell`, health-rail Settings/Away targets, and any in-HUD menu must use the **same six-group IA** (at least Voice + Appearance as first-class; remaining groups reachable via Settings nav / deep-link). Do not ship a portal Settings IA while the desktop Daybreak chrome stays an ungrouped heap.
+- **Forbidden:** one mixed “Appearance & voice” panel as the only HUD IA; burying Voice or Appearance under Advanced; HUD-only presentation settings that Settings Appearance cannot reach; a third taxonomy with different group names. Unavailable-profile copy “Install in Settings” must deep-link **Voice** (`/settings/voice` or `#voice`).
 - HexStrike: `HudChatHome` still forces humanoid while the suite is active. **Do not** rewrite HexStrike / RFC-0086 in this ticket.
 
-Composer **Speak chat replies** mute stays a chat-local shortcut into the same TTS setting; it is not a Settings category.
+Composer **Speak chat replies** mute stays a chat-local shortcut into the same TTS setting; it is not a substitute for the Voice submenu.
 
 ### 4. Persistence and deep-links
 
 - Canonical URL: **`/settings/:submenu`** with `submenu` ∈ `voice` \| `appearance` \| `models` \| `network` \| `integrations` \| `advanced`. Left nav marks the active group.
 - Aliases that select the same pane: **`/settings#voice`** (etc.) and optional `?section=voice`. Hash/query must not invent a parallel tree.
 - Persist **last-opened submenu** in `localStorage` (e.g. `jarvis.settings.last_submenu`). Bare **`/settings`** (HudShell, classic rail) restores last pane; first visit with no memory opens **`voice`**.
-- HUD / health-rail later targets a submenu when the job is known (Away → `/settings/advanced`; pairing copy → `/settings/network`).
-- **Optional** backend preference for last-submenu (tiny PUT on existing `/api/settings`) is **not** required. localStorage + URL is enough for the owner portal. If added, it must not store secrets.
+- HUD / health-rail later targets a submenu when the job is known (Away → `/settings/advanced`; pairing copy → `/settings/network`). Daybreak left-bar Voice / Appearance groups select those panes (HUD-local and/or `/settings/voice` | `/settings/appearance`).
+- **Optional** backend preference for last-submenu (tiny PUT on existing `/api/settings`) is **not** required. localStorage + URL is enough for the owner portal / desktop HUD. If added, it must not store secrets.
 
-**Will not:** change TTS defaults, engines, catalog ranking, speak-filter, or SAPI/Kokoro fallback (RFC-0092). Touch installer / RFC-0093. Redesign HexStrike. Add Settings groups beyond the six intents. Dump inference API keys. New backend APIs except the optional last-submenu preference.
+**Will not:** change TTS defaults, engines, catalog ranking, speak-filter, or SAPI/Kokoro fallback (RFC-0092). Touch installer / RFC-0093. Redesign HexStrike. Add Settings groups beyond the six intents. Dump inference API keys. New backend APIs except the optional last-submenu preference. Portal-only IA that leaves Desktop HUD / Daybreak left-bar ungrouped.
 
 ## Acceptance criteria
 
-- [ ] Settings is a category list + content pane (not a single scrolling heap of all cards)
+- [ ] Settings / menu screen is a category list + content pane (not a single scrolling heap of all cards)
+- [ ] **Voice** and **Appearance** are **first-class submenu groups** on the **main Settings/menu screen** (not nested, not a combined dump)
+- [ ] **Voice** and **Appearance** are **first-class submenu groups** on the **Daybreak left-bar** (today’s single “Appearance & voice” `<details>` heap is split; not buried)
+- [ ] **Desktop HUD** (`HudShell` / Daybreak) uses the **same organized IA** as Settings — not portal-only
 - [ ] Six groups present with the intents above; every tip Settings control appears in **exactly one** primary submenu per the mapping table
 - [ ] Mixed Core Execution card is split (model/vision → Models / Inference; autonomy/timeouts/dirs/browser/backup → Advanced)
 - [ ] Heavy UIs (`/license`, `/model`, `/mcp`, `/companion-pairing`, `/agents`, …) are deep-linked, not duplicated
-- [ ] Appearance submenu hosts presentation controls that today exist only on Daybreak; Daybreak remains a shortcut using the same components and/or deep-links — no second IA
+- [ ] HUD and Settings share Voice + Appearance components (or HUD deep-links into those Settings panes) — no second conflicting hierarchy
 - [ ] HexStrike left-bar / suite behavior unchanged
 - [ ] `/settings/voice` (and `#voice` / `?section=voice` aliases) opens Voice; same for the other ids; last submenu restored on bare `/settings`
 - [ ] RFC-0092 **not** implemented here: no TTS engine/default/speak-filter edits
@@ -122,11 +136,11 @@ Composer **Speak chat replies** mute stays a chat-local shortcut into the same T
 
 ## Out of scope
 
-Product implementation in this PR. **RFC-0092** neural TTS / no silent SAPI (Sol-priority; Voice submenu only **hosts** today’s speak toggle + picker). RFC-0093 installer. HexStrike defensive suite redesign (RFC-0086). New MCP/Gmail/WhatsApp APIs. Swarm / model-stack. Architect rewrites of `PORTAL_UX.md` beyond the ledger tick. Absorbing Tools / Memory / Swarm / Packs into Settings.
+Product implementation in this PR. **RFC-0092** neural TTS / no silent SAPI (Sol-priority; Voice submenu only **hosts** today’s speak toggle + picker — layout/IA, not engine quality). RFC-0093 installer. HexStrike defensive suite redesign (RFC-0086). New MCP/Gmail/WhatsApp APIs. Swarm / model-stack. Architect rewrites of `PORTAL_UX.md` beyond the ledger tick. Absorbing Tools / Memory / Swarm / Packs into Settings.
 
 ## Notes
 
-- Taco / CoS 2026-09-16: Daybreak/settings is a heap — needs organized submenus. Architect + CoS assign this spec **accepted**. Implement is a **separate** named ticket after CoS names it; do not merge this specs PR as if the portal IA shipped.
-- Tip evidence (do not treat as already grouped): `Settings.tsx` flat cards; `App.tsx` `path="/settings"` only; `AppearancePresenceControls` on HUD not Settings; `/mcp` + `/model` + `/companion-pairing` as sibling routes; HudShell / classic nav Settings → `/settings`.
-- Linux cloud VMs can verify routes, last-submenu persistence, and that Appearance/Voice share components. Live Daybreak/GPU is desktop sign-off.
+- Taco / CoS 2026-09-16: Daybreak/settings is a heap — needs organized submenus. Addendum: Voice + Appearance first-class on **both** Daybreak left-bar **and** Settings; scope **Desktop HUD** (not portal-only). Architect + CoS assign this spec **accepted**. Implement is a **separate** named ticket after CoS names it; do not merge this specs PR as if the IA shipped.
+- Tip evidence (do not treat as already grouped): `Settings.tsx` flat cards; `App.tsx` `path="/settings"` only; Daybreak left-bar one `Appearance & voice` details dump; `/mcp` + `/model` + `/companion-pairing` as sibling routes; HudShell / classic nav Settings → `/settings`.
+- Linux cloud VMs can verify routes, last-submenu persistence, and that Appearance/Voice are first-class on Settings + HUD chrome. Live Daybreak desktop HUD is desktop sign-off.
 - Implement launch: implement this RFC only; branch from `development`; pytest + frontend build; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
