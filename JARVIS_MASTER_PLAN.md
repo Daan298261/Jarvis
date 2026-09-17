@@ -2458,6 +2458,14 @@ Reason:
 
 Owner saves UI/repo inspiration on Instagram with no path into Jarvis modules/skills/DLCs or a downloadable module pack.
 
+Decision: RFC-0096–0104 Instagram jarvis child integrations (accepted)
+
+Parent RFC-0095 ([#270](https://github.com/Daan298261/Jarvis/pull/270); umbrella on development — not rewritten here). Nine accepted children, four-step pipeline (Download already local under `/workspace/projects/{rfc|persona}/<name>` — do not commit clones → usefulness score → integrate decision → implement later): **0096** ComfyUI+SANA BlackGrid gen (`partial`); **0097** OpenCut/OpenMontage/Hyperframes stitch + optional Real-ESRGAN preprocess (`partial`); **0098** Browser-Use deepen (`partial`; Playwright default); **0099** OpenViking+RAGFlow memory (`partial`; OpenViking is not TTS); **0100** Firecrawl+Crawl4AI research (`partial`); **0101** Pipecat realtime voice (`partial`; do not rewrite RFC-0092); **0102** LocalSend LAN share (`partial`); **0103** RuView Wi‑Fi home presence (`partial`; not HexStrike, not RFC-0069 HUD); **0104** persona_candidate pack later (hermes-agent, openhuman, F.R.I.D.A.Y, deer-flow, openclaude, opencode, locally-uncensored — full assistants, no butler merge). Offensive (Strix/Pentagi/Claude-Red) stay LE-gated under 0095 — no child RFCs. Specs-only; no new §58 checkbox. Taco may override integrate decisions.
+
+Reason:
+
+Instagram Saved→jarvis high-value subset needs scored child tickets so implementers do not start from the umbrella alone or merge personas/offensive tools.
+
 ---
 
 ## 60. Expected Example Behavior
