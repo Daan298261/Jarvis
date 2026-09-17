@@ -1,6 +1,6 @@
 # RFC-0106: HexStrike Jarvis full operator control
 
-**Status:** accepted  
+**Status:** implemented
 **Queue item:** (none — no new §58 checkbox; implement is a follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17
@@ -130,7 +130,7 @@ Light `JARVIS_MASTER_PLAN.md` §59 Decision Log line only. No §57 rewrite. No n
 
 Specs-only in **this** PR:
 
-- [x] RFC-0106 filed as `docs/rfcs/0106-hexstrike-jarvis-full-operator-control.md`, status **accepted**, Author Jarvis Architect, Date 2026-09-17
+- [x] RFC-0106 filed as `docs/rfcs/0106-hexstrike-jarvis-full-operator-control.md`, status **accepted**, Author Jarvis Architect, Date 2026-09-17 — specs PR #276
 - [x] North star recorded: Jarvis = HexStrike operator; full upstream operator toolchain; no invented gating; real, not stubs
 - [x] RFC-0106 **intent wins** over RFC-0086 “Blue-only enum / no MCP / no command proxy” for HexStrike operation; loopback + install pin kept
 - [x] RFC-0105 called out as sibling (do not collapse)
@@ -138,20 +138,20 @@ Specs-only in **this** PR:
 - [x] Light §59 Decision Log line only
 - [x] No `frontend/src/` or backend product edits in this PR
 
-Implement follow-up (separate named ticket — **Taco’s full-implementation bar**):
+Implement follow-up (landed — **Taco’s full-implementation bar**):
 
-- [ ] Half-shell **health-only** Daybreak UI without operator drive is a **fail**
-- [ ] Stubs, mock MCP, five-enum-only invoke, or skipped discovered host-tool install (when Windows can install it) are a **fail**
-- [ ] Managed pin/repair + loopback start/stop still work; unknown remotes / non-loopback still refused
-- [ ] Host toolchain discovered from the managed install; Daybreak shows missing deps; Jarvis can orchestrate install beyond the original five winget tools
-- [ ] Upstream HexStrike MCP is registered to the HexStrike-suite / owner-operator context when the suite is active or owner chat engages it
-- [ ] `/api/hexstrike` operator routes (or equivalent) invoke discovered capabilities, **not** only the RFC-0086 six enums
-- [ ] Owner chat can start/stop and operate HexStrike without requiring a GGUF swap; Daybreak remains the HUD console
-- [ ] Jobs, logs, and artifacts stream into Jarvis under owned paths; HUD and chat share the job store
-- [ ] RFC-0105 module remains a sibling (no collapse)
-- [ ] No new LE/Red/Purple/ATO gates added by this implement
-- [ ] Unit tests: `python3 -m pytest` (catalog not limited to six enums; MCP registration hook; loopback/pin still enforced; jobs only stop Jarvis pids; artifacts path-bound). Do **not** encode attack procedures in tests
-- [ ] `npm --prefix frontend run build` (and lint if TS changed)
+- [x] Half-shell **health-only** Daybreak UI without operator drive is a **fail** — Daybreak operator console #283
+- [x] Stubs, mock MCP, five-enum-only invoke, or skipped discovered host-tool install (when Windows can install it) are a **fail** — backend #279
+- [x] Managed pin/repair + loopback start/stop still work; unknown remotes / non-loopback still refused
+- [x] Host toolchain discovered from the managed install; Daybreak shows missing deps; Jarvis can orchestrate install beyond the original five winget tools
+- [x] Upstream HexStrike MCP is registered to the HexStrike-suite / owner-operator context when the suite is active or owner chat engages it
+- [x] `/api/hexstrike` operator routes (or equivalent) invoke discovered capabilities, **not** only the RFC-0086 six enums
+- [x] Owner chat can start/stop and operate HexStrike without requiring a GGUF swap; Daybreak remains the HUD console
+- [x] Jobs, logs, and artifacts stream into Jarvis under owned paths; HUD and chat share the job store
+- [x] RFC-0105 module remains a sibling (no collapse)
+- [x] No new LE/Red/Purple/ATO gates added by this implement
+- [x] Unit tests: `python3 -m pytest` (catalog not limited to six enums; MCP registration hook; loopback/pin still enforced; jobs only stop Jarvis pids; artifacts path-bound). Do **not** encode attack procedures in tests
+- [x] `npm --prefix frontend run build` (and lint if TS changed)
 - [ ] Windows desktop sign-off: live pinned install, start/stop, discovered tool status, one real operator invoke through HUD **and** chat, job/log/artifact visible in Jarvis. Cloud VMs cannot sign this off
 
 ## Likely files
@@ -183,3 +183,7 @@ Implement follow-up (separate named ticket — **Taco’s full-implementation ba
 - Upstream project (pin, do not vendor): https://github.com/0x4m4/hexstrike-ai
 - Linux cloud VMs: unit-test discovery, catalog-not-five-enums, MCP registration hooks, loopback/pin guards, job path bounds. Live HexStrike + host-tool winget + HUD/chat invoke is **Windows desktop sign-off**.
 - Implement launch: this RFC only; branch from `development`; pytest + frontend build; do not edit Architect spec docs beyond what Architect already landed; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via specs **#276** @ `7c1be3f` + backend **#279** @ `175b2dc` + Daybreak UX **#283** @ `69eebd7` (operator catalog / MCP / `/api/hexstrike` operate→jobs; Daybreak tabbed console — Runtime / Catalog / Operate / Jobs; `hexstrike_operator` chat tool). RFC-0105 cybersecurity module stays a sibling (no collapse). Loopback bind + install pin kept. Gating/authorization not invented. Live pinned install / HUD+chat invoke / job-log-artifact remains Windows desktop sign-off. No new §58 checkbox.
