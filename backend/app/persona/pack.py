@@ -65,6 +65,18 @@ def persona_instructions() -> str:
     return build_persona_instructions()
 
 
+def compact_identity_instructions(pack: PersonaPack | None = None) -> str:
+    """Short identity/tone for RFC-0107 turn working set — not the full persona pack."""
+    chosen = pack or load_persona_pack()
+    prefix = (chosen.system_prefix or "").strip()
+    if not prefix:
+        return "You are Jarvis, a local operations assistant."
+    first_para = prefix.split("\n\n")[0].strip()
+    if len(first_para) > 480:
+        first_para = first_para[:477].rstrip() + "..."
+    return first_para
+
+
 def inject_persona_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
     """Prepend the portable persona pack as the first system segment.
 
@@ -72,6 +84,15 @@ def inject_persona_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
     persona text always remains at the front of the merged block.
     """
     instructions = persona_instructions()
+    if not instructions:
+        return messages
+    persona_message = ChatMessage(role="system", content=instructions)
+    return [persona_message, *messages]
+
+
+def inject_compact_identity_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """RFC-0107: compact register only — avoids stuffing the full persona pack."""
+    instructions = compact_identity_instructions()
     if not instructions:
         return messages
     persona_message = ChatMessage(role="system", content=instructions)

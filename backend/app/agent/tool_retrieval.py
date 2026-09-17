@@ -144,6 +144,57 @@ def suggest_tools_for_prompt(
     return [name for _score, name in ranked[:cap]]
 
 
+# Installable module catalog entries (RFC-0095) — searchable, not pre-stuffed in prompts.
+_CATALOG_INSTALLABLE: tuple[dict[str, str], ...] = (
+    {
+        "entry_id": "obsidian-brain",
+        "label": "Obsidian Brain patterns",
+        "terms": ("obsidian", "brain", "router", "taxonomy", "linked", "vault", "wiki"),
+        "download_api": "/api/modules/catalog/obsidian-brain/download",
+    },
+)
+
+
+def _register_catalog_sources() -> None:
+    from ..modules.catalog_download import register_allowlisted_source
+
+    register_allowlisted_source(
+        "obsidian-brain",
+        "https://github.com/Rob-Morris/obsidian-brain",
+        slug="obsidian-brain",
+    )
+
+
+_register_catalog_sources()
+
+
+def suggest_installable_catalog(prompt: str, *, limit: int = 3) -> list[dict[str, str]]:
+    """Module catalog packs that match the ask but are not integrated until downloaded."""
+    text = (prompt or "").strip()
+    if not text:
+        return []
+    tokens = _tokens(text)
+    hits: list[tuple[int, dict[str, str]]] = []
+    for row in _CATALOG_INSTALLABLE:
+        score = 0
+        terms = row.get("terms") or ()
+        if isinstance(terms, str):
+            terms = tuple(terms.split(","))
+        for term in terms:
+            cleaned = str(term).strip().lower()
+            if not cleaned:
+                continue
+            if " " in cleaned and cleaned in text.lower():
+                score += 6
+            elif cleaned in tokens:
+                score += 5
+        if score <= 0:
+            continue
+        hits.append((score, dict(row)))
+    hits.sort(key=lambda item: (-item[0], item[1]["entry_id"]))
+    return [row for _score, row in hits[:limit]]
+
+
 def suggest_installable_for_prompt(prompt: str, *, limit: int = 4) -> list[str]:
     """Optional workers that match this message and are not already retrieved."""
     text = (prompt or "").strip()
