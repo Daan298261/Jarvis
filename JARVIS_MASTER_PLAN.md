@@ -2466,13 +2466,13 @@ Reason:
 
 Instagram Saved→jarvis high-value subset needs scored child tickets so implementers do not start from the umbrella alone or merge personas/offensive tools.
 
-Decision: RFC-0105 cybersecurity module (accepted)
+Decision: RFC-0105 cybersecurity module (implemented)
 
-The six RFC-0095 Instagram clones (Strix, Anthropic Cybersecurity Skills, Exploitarium, Pentagi, Claude-Red, Flowsint) are one Module Catalog pack `cybersecurity` with **partial** connectors first. **Implement surface = Daybreak** (HUD / HexStrike-adjacent left-bar or suite panel), not Settings-only. HexStrike (RFC-0078/0086) stays beside it. Jarvis UX owns Daybreak UI; backend worker hooks are a later D1 slice. Gating/authorization is out of scope (owner). Specs-only; no new §58 checkbox. RFC numbers 0096–0104 landed on development via #271.
+RFC-0105 is implemented on development via specs #272 (`8d607b5`) + Daybreak UI #274 (`ca5fac8`) + backend hooks #277 (`7e6338c`): one Module Catalog pack `cybersecurity` (six members, **partial** connectors), Daybreak left-bar panel (enable / status / path / open-folder / Download), catalog API + generic module-worker supervisor. HexStrike (RFC-0078/0086) stays beside it. RFC-0106 remains accepted / implementing (sibling; not rewritten here). Gating/authorization still out of scope (owner). No new §58 checkbox. Live Daybreak HUD / Open folder / subprocess remains desktop sign-off.
 
 Reason:
 
-Owner directed these former archive clones into a Jarvis cybersecurity module on Daybreak (surface + wiring), not six orphan tools, not a Settings dump, and not a HexStrike rewrite.
+CoS assigned this ledger tick after #277 landed on development. Owner directed these former archive clones into a Jarvis cybersecurity module on Daybreak (surface + wiring), not six orphan tools, not a Settings dump, and not a HexStrike rewrite.
 
 Decision: RFC-0106 HexStrike Jarvis full operator control (accepted)
 

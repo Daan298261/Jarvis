@@ -1,6 +1,6 @@
 # RFC-0105: Cybersecurity module (six Instagram clones)
 
-**Status:** accepted  
+**Status:** implemented
 **Queue item:** (none — no new §58 checkbox; implement is a follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17
@@ -119,17 +119,17 @@ Skill packs are resources of module `cybersecurity`, not butler persona (RFC-009
 
 ## Acceptance criteria
 
-- [ ] Specs-only in this PR (no `frontend/src` / backend product edits; no `projects/` clones committed)
-- [ ] Six tools named and grouped under module id `cybersecurity` (not six orphan catalog rows)
-- [ ] Four-step pipeline specified: Download (done) → usefulness `module` / cybersecurity → integrate **`partial`** → implement (follow-up)
-- [ ] Module UX specified as **Daybreak** (HUD / HexStrike-adjacent left-bar or Daybreak suite panel): per-tool enable, status, local path, open-folder; RFC-0095 Download for re-fetch. Settings-only / Advanced dump is a fail
-- [ ] Jarvis UX owns `frontend/src` Daybreak UI; backend worker hooks are a separate D1 slice after CoS names it
-- [ ] Architecture wiring specified only: discovery, optional-worker / subprocess hooks, skill-pack register (Anthropic Cybersecurity Skills + Claude-Red), graph/UI entry (Flowsint), harness entry (Strix + Pentagi)
-- [ ] HexStrike remains the existing defensive suite beside this module (RFC-0078 / 0086 not rewritten)
-- [ ] No exploit recipes, PoCs, attack steps, or payload docs in this RFC
-- [ ] Gating / authorization not invented here (see Out of scope)
-- [ ] Light §59 Decision Log line only (no §57 rewrite, no new §58 checkbox)
-- [ ] Implement follow-up (separate tickets): Jarvis UX Daybreak — `npm --prefix frontend run build` (and lint if TS changed). D1 worker hooks — `python3 -m pytest`
+- [x] Specs-only in this PR (no `frontend/src` / backend product edits; no `projects/` clones committed) — specs PR #272
+- [x] Six tools named and grouped under module id `cybersecurity` (not six orphan catalog rows)
+- [x] Four-step pipeline specified: Download (done) → usefulness `module` / cybersecurity → integrate **`partial`** → implement (follow-up)
+- [x] Module UX specified as **Daybreak** (HUD / HexStrike-adjacent left-bar or Daybreak suite panel): per-tool enable, status, local path, open-folder; RFC-0095 Download for re-fetch. Settings-only / Advanced dump is a fail
+- [x] Jarvis UX owns `frontend/src` Daybreak UI (#274); backend worker hooks are the D1 slice (#277)
+- [x] Architecture wiring specified only: discovery, optional-worker / subprocess hooks, skill-pack register (Anthropic Cybersecurity Skills + Claude-Red), graph/UI entry (Flowsint), harness entry (Strix + Pentagi)
+- [x] HexStrike remains the existing defensive suite beside this module (RFC-0078 / 0086 not rewritten)
+- [x] No exploit recipes, PoCs, attack steps, or payload docs in this RFC
+- [x] Gating / authorization not invented here (see Out of scope)
+- [x] Light §59 Decision Log line only (no §57 rewrite, no new §58 checkbox)
+- [x] Implement follow-up (separate tickets): Jarvis UX Daybreak — `npm --prefix frontend run build` (and lint if TS changed). D1 worker hooks — `python3 -m pytest`
 
 ## Likely files
 
@@ -160,3 +160,7 @@ Skill packs are resources of module `cybersecurity`, not butler persona (RFC-009
 - Source: Taco owner directive 2026-09-17 after RFC-0095. Addendum: **implement surface = Daybreak** (HUD / HexStrike-adjacent left-bar or suite panel); Jarvis UX owns `frontend/src`; D1 owns worker hooks later. These six were LE-gated archive clones; this RFC is the named product path for **module grouping + partial connectors**.
 - Linux cloud VMs can unit-test discovery + enable flags and Daybreak panel wiring. Live subprocess / Open folder / Desktop HUD is Windows desktop sign-off.
 - Implement launch (UX): Daybreak panel only; branch from `development`; `npm --prefix frontend run build` + lint; do not edit Architect spec docs; PR against `development`; do not merge other PRs (including #271). D1 worker hooks: separate named ticket.
+
+## Implementation note
+
+Landed on `development` via specs **#272** @ `8d607b5` + Daybreak UI **#274** @ `ca5fac8` + backend hooks **#277** @ `7e6338c` (Module Catalog `cybersecurity` with six members; Daybreak left-bar panel — enable / status / path / open-folder / Download; catalog API + generic module-worker supervisor; skill-pack register). HexStrike (RFC-0078 / 0086) not rewritten. RFC-0106 remains accepted / implementing (sibling). Gating/authorization not invented. Live Daybreak HUD / Open folder / subprocess remains Windows desktop sign-off. No new §58 checkbox.
