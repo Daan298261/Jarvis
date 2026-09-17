@@ -2468,23 +2468,23 @@ Instagram Saved→jarvis high-value subset needs scored child tickets so impleme
 
 Decision: RFC-0105 cybersecurity module (implemented)
 
-RFC-0105 is implemented on development via specs #272 (`8d607b5`) + Daybreak UI #274 (`ca5fac8`) + backend hooks #277 (`7e6338c`): one Module Catalog pack `cybersecurity` (six members, **partial** connectors), Daybreak left-bar panel (enable / status / path / open-folder / Download), catalog API + generic module-worker supervisor. HexStrike (RFC-0078/0086) stays beside it. RFC-0106 remains accepted / implementing (sibling; not rewritten here). Gating/authorization still out of scope (owner). No new §58 checkbox. Live Daybreak HUD / Open folder / subprocess remains desktop sign-off.
+RFC-0105 is implemented on development via specs #272 (`8d607b5`) + Daybreak UI #274 (`ca5fac8`) + backend hooks #277 (`7e6338c`): one Module Catalog pack `cybersecurity` (six members, **partial** connectors), Daybreak left-bar panel (enable / status / path / open-folder / Download), catalog API + generic module-worker supervisor. HexStrike (RFC-0078/0086) stays beside it. RFC-0106 is implemented (sibling; not rewritten here). Gating/authorization still out of scope (owner). No new §58 checkbox. Live Daybreak HUD / Open folder / subprocess remains desktop sign-off.
 
 Reason:
 
 CoS assigned this ledger tick after #277 landed on development. Owner directed these former archive clones into a Jarvis cybersecurity module on Daybreak (surface + wiring), not six orphan tools, not a Settings dump, and not a HexStrike rewrite.
 
-Decision: RFC-0106 HexStrike Jarvis full operator control (accepted)
+Decision: RFC-0106 HexStrike Jarvis full operator control (implemented)
 
-Jarvis is the HexStrike operator (Daybreak HUD + owner chat). RFC-0106 **intent wins** over RFC-0086’s Blue-only enum / no-MCP / no-command-proxy product stance for this module; loopback bind and install pinning remain. No invented LE/Red/Purple/ATO gates (owner later). Real invoke + host-toolchain orchestration, not a health-only shell. RFC-0105 cybersecurity module stays a sibling. Specs-only; no new §58 checkbox.
+RFC-0106 is implemented on development via specs #276 (`7c1be3f`) + backend #279 (`175b2dc`) + Daybreak UX #283 (`69eebd7`): Jarvis is the HexStrike operator (Daybreak HUD + owner chat). RFC-0106 **intent wins** over RFC-0086’s Blue-only enum / no-MCP / no-command-proxy product stance for this module; loopback bind and install pinning remain. Operator catalog / MCP / `/api/hexstrike` operate→jobs; Daybreak tabbed console (Runtime / Catalog / Operate / Jobs). No invented LE/Red/Purple/ATO gates (owner later). RFC-0105 cybersecurity module stays a sibling. No new §58 checkbox. Live pinned install / HUD+chat invoke remains desktop sign-off.
 
 Reason:
 
-Taco: complete control over HexStrike and its toolchain; Jarvis is the “human” using it; do not ship stubs.
+CoS assigned this ledger tick after #283 landed on development. Taco: complete control over HexStrike and its toolchain; Jarvis is the “human” using it; do not ship stubs.
 
 Decision: INTEGRATION_SPECS.md + RFC-0107–0109 (accepted)
 
-Living architect priority list for third-party / reel-sourced integrations lives at repo-root [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) (not a master-plan rewrite). Taco ladder, quick/highest impact first: **0107** Obsidian linked memory/brain; **0108** phone companion on-device model (PC orchestrator when online); **0109** media/file/video upload on Android + Desktop/portal. Then reel children in impact order (0098 Browser-Use, 0101 Pipecat, 0096 ComfyUI, 0097 stitch, 0099 memory, 0100 research, 0103 RuView, 0102 LocalSend; 0104 persona later; 0105 cyber implemented; 0106 HexStrike operator). RFC-0095 remains the umbrella + Module Catalog Download. Local clones stay under `C:\Users\daanv\projects\jarvis-ig\` and `/workspace/projects/` (not git). Specs-only; no new §58 checkbox; no invented LE gates.
+Living architect priority list for third-party / reel-sourced integrations lives at repo-root [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) (not a master-plan rewrite). Taco ladder, quick/highest impact first: **0107** Obsidian linked memory/brain; **0108** phone companion on-device model (PC orchestrator when online); **0109** media/file/video upload on Android + Desktop/portal. Then reel children in impact order (0098 Browser-Use, 0101 Pipecat, 0096 ComfyUI, 0097 stitch, 0099 memory, 0100 research, 0103 RuView, 0102 LocalSend; 0104 persona later; 0105 cyber implemented; 0106 HexStrike operator implemented). RFC-0095 remains the umbrella + Module Catalog Download. Local clones stay under `C:\Users\daanv\projects\jarvis-ig\` and `/workspace/projects/` (not git). Specs-only; no new §58 checkbox; no invented LE gates.
 
 Reason:
 

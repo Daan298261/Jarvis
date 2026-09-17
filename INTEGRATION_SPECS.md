@@ -107,7 +107,7 @@ One Module Catalog pack `cybersecurity` with six Instagram clones (Strix, Anthro
 
 ### RFC-0106 — HexStrike Daybreak operator
 
-Jarvis **is** the HexStrike operator: Daybreak HUD + owner chat drive the **full** upstream operator surface (install/repair, discovered toolchain, MCP and/or operator HTTP, jobs/logs/artifacts), not a health-only shell and not the RFC-0086 five-enum ceiling. Loopback bind + pinned install stay. RFC-0105 remains a sibling. No invented LE/Red/Purple/ATO gates in this ticket. No exploit recipes in specs, help, or tests. **RFC:** [`docs/rfcs/0106-hexstrike-jarvis-full-operator-control.md`](docs/rfcs/0106-hexstrike-jarvis-full-operator-control.md). **Status:** accepted (specs-only; implement is a named follow-up). **Local clone:** managed pin `runtime/hexstrike-ai` (not git-vendored); upstream https://github.com/0x4m4/hexstrike-ai. **Lane:** D1 + UX (Daybreak `HudHexStrikeSuite`).
+Jarvis **is** the HexStrike operator: Daybreak HUD + owner chat drive the **full** upstream operator surface (install/repair, discovered toolchain, MCP and/or operator HTTP, jobs/logs/artifacts), not a health-only shell and not the RFC-0086 five-enum ceiling. Loopback bind + pinned install stay. RFC-0105 remains a sibling. No invented LE/Red/Purple/ATO gates in this ticket. No exploit recipes in specs, help, or tests. **RFC:** [`docs/rfcs/0106-hexstrike-jarvis-full-operator-control.md`](docs/rfcs/0106-hexstrike-jarvis-full-operator-control.md). **Status:** **implemented** on `development` (specs [#276](https://github.com/Daan298261/Jarvis/pull/276), backend [#279](https://github.com/Daan298261/Jarvis/pull/279), Daybreak UX [#283](https://github.com/Daan298261/Jarvis/pull/283)). Live pinned install / HUD+chat invoke is Windows desktop sign-off. **Local clone:** managed pin `runtime/hexstrike-ai` (not git-vendored); upstream https://github.com/0x4m4/hexstrike-ai. **Lane:** D1 (landed) + UX (Daybreak `HudHexStrikeSuite`, landed).
 
 ---
 
@@ -118,7 +118,7 @@ Jarvis **is** the HexStrike operator: Daybreak HUD + owner chat drive the **full
 | 0095 | Instagram collection + Module Catalog Download | Umbrella |
 | 0096–0104 | Reel children | Reserved by RFC-0095 / PR #271 |
 | 0105 | Cybersecurity module | Implemented |
-| 0106 | HexStrike full operator control | Accepted |
+| 0106 | HexStrike full operator control | Implemented |
 | **0107** | Obsidian linked memory / durable brain | Taco add — vault/graph + DB/cache; per-turn tool search; not compress-forever |
 | **0108** | Phone companion offline AI model | Taco add — same priority pack / ladder |
 | **0109** | Media/file/video upload (phone + PC) | Taco add — same priority pack / ladder |
