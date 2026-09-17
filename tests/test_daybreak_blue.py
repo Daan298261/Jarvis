@@ -107,11 +107,19 @@ async def test_execution_and_stop_are_managed_and_audited(blue_store, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_defensive_proxy_rejects_offensive_and_arbitrary_routes(monkeypatch):
+async def test_operator_proxy_blocks_command_routes_but_allows_discovered_tools(monkeypatch):
     monkeypatch.setattr(HEXSTRIKE, "_base_status", lambda: SimpleNamespace(running=True, host="127.0.0.1", port=8888))
-    for path in ("api/command", "api/payload/generate", "api/exploits/run", "api/tools/sqlmap"):
+    for path in ("api/command", "api/payload/generate", "api/exploits/run"):
         with pytest.raises(PermissionError):
-            await HEXSTRIKE.post_defensive(path, {})
+            await HEXSTRIKE.post_operator(path, {})
+    async def fake_post(url_path, payload):
+        return {"ok": True, "path": url_path}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    assert await HEXSTRIKE.post_operator("api/tools/custom-scanner", {}) == {
+        "ok": True,
+        "path": "api/tools/custom-scanner",
+    }
 
 
 def test_role_limited_tool_exposure(monkeypatch):
@@ -245,6 +253,8 @@ def test_status_api_includes_install_capabilities_dependencies_and_jobs(jarvis_e
     assert body["capabilities"]
     assert isinstance(body["missing_dependencies"], list)
     assert body["managed_jobs"] == list_jobs()
+    assert "catalog" in body
+    assert body["catalog_count"] >= len(body["capabilities"])
 
 
 def test_defensive_operator_prompts_skip_conversation_lane():

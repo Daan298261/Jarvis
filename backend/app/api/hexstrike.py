@@ -1,8 +1,7 @@
-"""HexStrike AI cybersecurity suite API (RFC-0078/0086)."""
+"""HexStrike AI operator suite API (RFC-0078/0086/0106)."""
 from __future__ import annotations
 
-import shutil
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
@@ -13,13 +12,31 @@ from ..security.hexstrike_defensive import (
     CAPABILITY_BY_ID,
     capability_snapshot,
     execute_defensive,
-    list_jobs,
+    list_jobs as list_defensive_jobs,
     list_scopes,
     stop_managed_job,
     upsert_scope,
 )
 from ..security.hexstrike_install import HEXSTRIKE_INSTALLER
-from ..security.hexstrike_tools import install_all_missing, install_host_tool, missing_host_tools
+from ..security.hexstrike_mcp import register_hexstrike_mcp
+from ..security.hexstrike_operator import (
+    catalog_snapshot,
+    get_operator_job,
+    list_job_artifacts,
+    list_operator_jobs,
+    operate,
+    operator_status_extras,
+    refresh_discovered_catalog,
+    stop_operator_job,
+)
+from ..security.hexstrike_tools import (
+    dependency_catalog_rows,
+    install_all_missing,
+    install_dependency_by_id,
+    install_host_tool,
+    install_job_overlay,
+    missing_host_tools,
+)
 
 router = APIRouter(prefix="/api/hexstrike", tags=["hexstrike"])
 
@@ -34,14 +51,10 @@ class HexStrikeInstallIn(BaseModel):
     install_path: str | None = None
 
 
-class HexStrikeDependencyInstallIn(BaseModel):
-    tool: Literal["nmap", "trivy", "checkov", "docker", "exiftool"] | None = None
-
-
 class HexStrikeScopeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["private_host", "private_cidr", "local_path", "container_image", "local_infrastructure"]
+    kind: str = Field(min_length=1, max_length=64)
     value: str = Field(min_length=1, max_length=1000)
     label: str = Field(default="", max_length=120)
     attested_owned: bool = False
@@ -56,22 +69,22 @@ class HexStrikeActionOptions(BaseModel):
 class HexStrikeActionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal[
-        "lan_inventory",
-        "container_scan",
-        "iac_scan",
-        "host_baseline",
-        "forensic_inspection",
-        "threat_intel_lookup",
-    ]
+    action: str = Field(min_length=1, max_length=80)
     scope_id: str = Field(min_length=1, max_length=80)
     options: HexStrikeActionOptions = Field(default_factory=HexStrikeActionOptions)
 
 
-def _operator_permission(permission_id: str) -> None:
+class HexStrikeOperateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    capability_id: str = Field(min_length=1, max_length=160)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+def _operator_permission(permission_id: str = "cyber.hexstrike") -> None:
     from ..policy.computer_permissions import evaluate_permission, operator_intent_grant
 
-    for required in dict.fromkeys(("cyber.hexstrike", permission_id)):
+    for required in dict.fromkeys((permission_id, "cyber.hexstrike")):
         decision = evaluate_permission(required)
         if decision.status == "deny":
             audit_hexstrike("permission_denied", permission=required, reason=decision.reason)
@@ -88,25 +101,12 @@ async def _status_payload() -> dict[str, Any]:
     payload = (await HEXSTRIKE.status()).as_dict()
     payload["install"] = HEXSTRIKE_INSTALLER.status().as_dict()
     payload["capabilities"] = capability_snapshot()
-    commands = {
-        "lan_inventory": "nmap",
-        "container_scan": "trivy",
-        "iac_scan": "checkov",
-        "host_baseline": "docker",
-        "forensic_inspection": "exiftool",
-        "threat_intel_lookup": "network",
-    }
-    dependencies = [
-        {
-            "id": action,
-            "command": command,
-            "available": command == "network" or shutil.which(command) is not None,
-        }
-        for action, command in commands.items()
-    ]
-    payload["dependencies"] = dependencies
-    payload["missing_dependencies"] = [item["command"] for item in dependencies if not item["available"]]
-    payload["managed_jobs"] = list_jobs()
+    payload.update(operator_status_extras())
+    payload["dependencies"] = dependency_catalog_rows(payload.get("install_path") or "")
+    payload["missing_dependencies"] = missing_host_tools()
+    payload["dependency_install_jobs"] = install_job_overlay()
+    payload["managed_jobs"] = list_defensive_jobs()
+    payload["operator_jobs"] = list_operator_jobs()
     return payload
 
 
@@ -117,7 +117,7 @@ async def hexstrike_status():
 
 @router.post("/start")
 async def hexstrike_start():
-    _operator_permission("cyber.hexstrike")
+    _operator_permission()
     return (await HEXSTRIKE.ensure_started()).as_dict()
 
 
@@ -138,10 +138,11 @@ async def hexstrike_install(body: HexStrikeInstallIn | None = None):
 
 
 @router.post("/dependencies/install")
-async def hexstrike_install_dependencies(body: HexStrikeDependencyInstallIn | None = None):
+async def hexstrike_install_dependencies(body: dict[str, Any] | None = None):
     _operator_permission("blue.static_rules")
-    if body and body.tool:
-        return (await install_host_tool(body.tool)).as_dict()
+    tool = (body or {}).get("tool")
+    if tool:
+        return (await install_host_tool(str(tool))).as_dict()
     results = await install_all_missing()
     return {
         "missing_before": missing_host_tools(),
@@ -151,7 +152,7 @@ async def hexstrike_install_dependencies(body: HexStrikeDependencyInstallIn | No
 
 @router.post("/install/cancel")
 async def hexstrike_install_cancel():
-    _operator_permission("cyber.hexstrike")
+    _operator_permission()
     return (await HEXSTRIKE_INSTALLER.cancel()).as_dict()
 
 
@@ -167,7 +168,91 @@ async def hexstrike_config(body: HexStrikeConfigIn):
 
 @router.get("/capabilities")
 async def hexstrike_capabilities():
-    return {"capabilities": capability_snapshot()}
+    return {"capabilities": capability_snapshot(), **catalog_snapshot()}
+
+
+@router.get("/tools")
+async def hexstrike_tools_catalog():
+    return catalog_snapshot()
+
+
+@router.post("/tools/refresh")
+async def hexstrike_tools_refresh():
+    _operator_permission()
+    snapshot = await HEXSTRIKE.status(enrich=True)
+    if snapshot.running and snapshot.installed:
+        from pathlib import Path
+
+        await register_hexstrike_mcp(
+            install_path=Path(snapshot.install_path),
+            python_executable=snapshot.python_executable,
+            host=snapshot.host,
+            port=snapshot.port,
+        )
+    catalog = await refresh_discovered_catalog(force=True)
+    return {"catalog": catalog, "count": len(catalog), "mcp": catalog_snapshot()["mcp"]}
+
+
+@router.post("/tools/{tool_id}/install")
+async def hexstrike_tool_install(tool_id: str):
+    _operator_permission("blue.static_rules")
+    status = await HEXSTRIKE.status(enrich=False)
+    result = await install_dependency_by_id(tool_id, install_path=status.install_path)
+    if not result.ok:
+        raise HTTPException(status_code=503, detail=result.detail[:400])
+    await refresh_discovered_catalog(force=True)
+    return result.as_dict()
+
+
+@router.post("/operate")
+async def hexstrike_operate(body: HexStrikeOperateIn):
+    _operator_permission()
+    try:
+        return await operate(body.capability_id, body.arguments)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/jobs")
+async def hexstrike_jobs():
+    return {"jobs": list_operator_jobs(), "legacy_jobs": list_defensive_jobs()}
+
+
+@router.get("/jobs/{job_id}")
+async def hexstrike_job_detail(job_id: str):
+    try:
+        job = get_operator_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown HexStrike job") from exc
+    job = dict(job)
+    job["artifacts"] = list_job_artifacts(job_id)
+    return job
+
+
+@router.get("/jobs/{job_id}/artifacts")
+async def hexstrike_job_artifacts(job_id: str):
+    try:
+        get_operator_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown HexStrike job") from exc
+    return {"artifacts": list_job_artifacts(job_id)}
+
+
+@router.post("/jobs/{job_id}/stop")
+async def hexstrike_job_stop(job_id: str):
+    _operator_permission("blue.active_response")
+    try:
+        return await stop_operator_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown HexStrike job") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/scopes")
@@ -196,12 +281,14 @@ async def hexstrike_scope_put(scope_id: str, body: HexStrikeScopeIn):
 
 @router.get("/actions")
 async def hexstrike_actions():
-    return {"jobs": list_jobs(), "capabilities": capability_snapshot()}
+    return {"jobs": list_defensive_jobs(), "capabilities": capability_snapshot(), "catalog": discovered_catalog_safe()}
 
 
 @router.post("/actions")
 async def hexstrike_action(body: HexStrikeActionIn):
-    capability = CAPABILITY_BY_ID[body.action]
+    capability = CAPABILITY_BY_ID.get(body.action)
+    if capability is None:
+        raise HTTPException(status_code=422, detail="Unknown defensive action")
     _operator_permission(capability.permission)
     if body.action == "threat_intel_lookup":
         _operator_permission("network.internet")
@@ -228,6 +315,12 @@ async def hexstrike_action_stop(job_id: str):
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def discovered_catalog_safe() -> list[dict[str, Any]]:
+    from ..security.hexstrike_operator import discovered_catalog
+
+    return discovered_catalog()
 
 
 @router.api_route("/upstream/{path:path}", methods=["GET", "POST"])

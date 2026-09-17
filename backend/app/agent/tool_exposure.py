@@ -49,6 +49,8 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "interpreter": "open_interpreter",
     "open-interpreter": "open_interpreter",
     "ufo2": "ufo",
+    "hexstrike": "hexstrike_operator",
+    "daybreak": "hexstrike_operator",
 }
 
 ESCAPE_TOOL = "request_tools"
@@ -112,6 +114,8 @@ def tool_names_for(
             wanted.append(name)
     if security_role == "blue-team" and "hexstrike_defensive" not in wanted:
         wanted.append("hexstrike_defensive")
+    if "hexstrike_operator" not in wanted and ("hexstrike_operator" in extras or "hexstrike" in {item.lower() for item in extras}):
+        wanted.append("hexstrike_operator")
     enabled = set(_enabled_native(security_role))
     names = [name for name in wanted if name in enabled]
     if "filesystem" not in names and "filesystem" in enabled:

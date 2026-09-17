@@ -431,7 +431,7 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
             pending.append("computer.this_device")
     if name in INTERNET_TOOLS:
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
-    if name in {"hexstrike", "hexstrike_suite", "hexstrike_defensive"}:
+    if name in {"hexstrike", "hexstrike_suite", "hexstrike_defensive", "hexstrike_operator"}:
         pending.append("cyber.hexstrike")
     if name == "hexstrike_defensive":
         action_permissions = {
