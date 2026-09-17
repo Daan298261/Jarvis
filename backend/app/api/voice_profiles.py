@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -14,9 +15,11 @@ from ..voice_profiles.catalog import (
 from ..voice_profiles.ip_guard import contains_forbidden_ip_term
 from ..voice_profiles.schema import ActiveVoiceProfileIn, ActiveVoiceProfileOut
 from ..tts.pack_install import install_voice_pack
+from ..tts.engines import resolve_engine_id
 from ..workers.voice import synthesize_speech_result
 
 router = APIRouter(prefix="/api/voice-profiles", tags=["voice-profiles"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("")
@@ -118,15 +121,63 @@ async def preview_voice_profile(profile_id: str):
         )
 
     text = (profile.sample_utterance or "At your service.").strip()
+    requested_engine = resolve_engine_id(profile.tts)
+    event = {
+        "profile_id": profile_id,
+        "requested_engine": requested_engine,
+        "model_id": profile.tts.model_id,
+        "speaker_ref": profile.tts.speaker_ref,
+    }
+    logger.info("voice_preview_requested %s", json.dumps(event, sort_keys=True))
     try:
-        result = await synthesize_speech_result(text, voice_profile_id=profile_id)
+        result = await synthesize_speech_result(
+            text,
+            voice_profile_id=profile_id,
+            exact_profile=True,
+        )
     except RuntimeError as exc:
+        logger.warning(
+            "voice_preview_failed %s",
+            json.dumps({**event, "error": str(exc)}, sort_keys=True),
+        )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if result.profile_id != profile_id or result.engine_id != requested_engine:
+        detail = (
+            f"Preview returned {result.engine_id or 'no engine'} for {result.profile_id or 'no profile'} "
+            f"instead of selected {requested_engine} profile {profile_id}."
+        )
+        logger.warning(
+            "voice_preview_failed %s",
+            json.dumps({**event, "actual_engine": result.engine_id, "error": detail}, sort_keys=True),
+        )
+        raise HTTPException(status_code=503, detail=detail)
+    if len(result.audio) < 44 or not result.audio.startswith(b"RIFF"):
+        detail = "The selected voice produced an empty or invalid WAV preview."
+        logger.warning(
+            "voice_preview_failed %s",
+            json.dumps({**event, "actual_engine": result.engine_id, "error": detail}, sort_keys=True),
+        )
+        raise HTTPException(status_code=503, detail=detail)
+    logger.info(
+        "voice_preview_succeeded %s",
+        json.dumps(
+            {
+                **event,
+                "actual_engine": result.engine_id,
+                "model_id": result.model_id,
+                "speaker_ref": result.speaker_ref,
+                "bytes": len(result.audio),
+            },
+            sort_keys=True,
+        ),
+    )
     return Response(
         content=result.audio,
         media_type="audio/wav",
         headers={
             "X-Jarvis-TTS-Engine": result.engine_id,
             "X-Jarvis-Voice-Profile": result.profile_id,
+            "X-Jarvis-TTS-Model": result.model_id,
+            "X-Jarvis-TTS-Voice": result.speaker_ref,
         },
     )

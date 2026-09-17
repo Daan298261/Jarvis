@@ -57,7 +57,14 @@ def is_piper_available() -> bool:
 
 
 def is_chatterbox_available() -> bool:
-    return _module_available("chatterbox")
+    if not _module_available("chatterbox"):
+        return False
+    try:
+        import perth
+
+        return callable(getattr(perth, "PerthImplicitWatermarker", None))
+    except Exception:
+        return False
 
 
 def legacy_system_tts_available() -> bool:
