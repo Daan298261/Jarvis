@@ -4374,3 +4374,350 @@ export async function postHelpChat(message: string, conversationId?: string): Pr
     body: JSON.stringify({ message, conversation_id: conversationId || null }),
   })
 }
+
+/** RFC-0105 — Cybersecurity module catalog (Daybreak HUD). */
+export const CYBERSECURITY_MODULE_ID = "cybersecurity"
+
+export type CybersecurityToolStatus =
+  | "missing"
+  | "found"
+  | "starting"
+  | "running"
+  | "error"
+  | "disabled"
+
+export type CybersecurityToolMember = {
+  id: string
+  display_name: string
+  source_url: string
+  local_path: string | null
+  enabled: boolean
+  status: CybersecurityToolStatus
+  role: string
+}
+
+export type CybersecurityModule = {
+  id: string
+  display_name: string
+  enabled: boolean
+  members: CybersecurityToolMember[]
+}
+
+export type CybersecurityModuleCatalog = {
+  module: CybersecurityModule
+  apiAvailable: boolean
+  loadMessage?: string
+}
+
+export type CybersecurityActionResult = {
+  ok: boolean
+  notAvailable?: boolean
+  message: string
+  job_id?: string
+}
+
+const CYBERSECURITY_MEMBER_META: Record<
+  string,
+  { display_name: string; source_url: string; role: string }
+> = {
+  strix: {
+    display_name: "Strix",
+    source_url: "https://github.com/usestrix/strix",
+    role: "harness",
+  },
+  "anthropic-cybersecurity-skills": {
+    display_name: "Anthropic Cybersecurity Skills",
+    source_url: "https://github.com/mukul975/Anthropic-Cybersecurity-Skills",
+    role: "skill_pack",
+  },
+  exploitarium: {
+    display_name: "Exploitarium",
+    source_url: "https://github.com/bikini/exploitarium",
+    role: "library_backend",
+  },
+  pentagi: {
+    display_name: "Pentagi",
+    source_url: "https://github.com/vxcontrol/pentagi",
+    role: "harness",
+  },
+  "claude-red": {
+    display_name: "Claude-Red",
+    source_url: "https://github.com/SnailSploit/Claude-Red",
+    role: "skill_pack",
+  },
+  flowsint: {
+    display_name: "Flowsint",
+    source_url: "https://github.com/reconurge/flowsint",
+    role: "graph_ui",
+  },
+}
+
+const CYBERSECURITY_MEMBER_ORDER = [
+  "strix",
+  "anthropic-cybersecurity-skills",
+  "exploitarium",
+  "pentagi",
+  "claude-red",
+  "flowsint",
+] as const
+
+function normalizeCybersecurityStatus(value: unknown): CybersecurityToolStatus {
+  const raw = String(value || "missing").toLowerCase()
+  if (
+    raw === "found" ||
+    raw === "starting" ||
+    raw === "running" ||
+    raw === "error" ||
+    raw === "disabled"
+  ) {
+    return raw
+  }
+  return "missing"
+}
+
+function normalizeCybersecurityMember(raw: Record<string, unknown>): CybersecurityToolMember | null {
+  const id = String(raw.id || raw.member_id || "").trim()
+  if (!id) return null
+  const meta = CYBERSECURITY_MEMBER_META[id]
+  const displayName =
+    (typeof raw.display_name === "string" && raw.display_name) ||
+    (typeof raw.name === "string" && raw.name) ||
+    meta?.display_name ||
+    id
+  const sourceUrl =
+    (typeof raw.source_url === "string" && raw.source_url) ||
+    (typeof raw.url === "string" && raw.url) ||
+    meta?.source_url ||
+    ""
+  const localPath =
+    typeof raw.local_path === "string"
+      ? raw.local_path
+      : typeof raw.path === "string"
+        ? raw.path
+        : null
+  const role =
+    (typeof raw.role === "string" && raw.role) ||
+    (typeof raw.connector === "string" && raw.connector) ||
+    meta?.role ||
+    "module"
+  return {
+    id,
+    display_name: displayName,
+    source_url: sourceUrl,
+    local_path: localPath,
+    enabled: raw.enabled === true || raw.enabled === "true",
+    status: normalizeCybersecurityStatus(raw.status),
+    role,
+  }
+}
+
+function staticCybersecurityModule(): CybersecurityModule {
+  const members = CYBERSECURITY_MEMBER_ORDER.map((id) => {
+    const meta = CYBERSECURITY_MEMBER_META[id]
+    return {
+      id,
+      display_name: meta.display_name,
+      source_url: meta.source_url,
+      local_path: null,
+      enabled: false,
+      status: "missing" as const,
+      role: meta.role,
+    }
+  })
+  return {
+    id: CYBERSECURITY_MODULE_ID,
+    display_name: "Cybersecurity",
+    enabled: false,
+    members,
+  }
+}
+
+function mergeCybersecurityModule(payload: Record<string, unknown>): CybersecurityModule {
+  const base = staticCybersecurityModule()
+  const root = (payload.module as Record<string, unknown> | undefined) || payload
+  const enabled = root.enabled === true || root.enabled === "true"
+  const displayName =
+    (typeof root.display_name === "string" && root.display_name) ||
+    (typeof root.name === "string" && root.name) ||
+    base.display_name
+  const rawMembers = Array.isArray(root.members)
+    ? root.members
+    : Array.isArray(payload.members)
+      ? payload.members
+      : []
+  const byId = new Map<string, CybersecurityToolMember>()
+  for (const item of rawMembers) {
+    if (!item || typeof item !== "object") continue
+    const member = normalizeCybersecurityMember(item as Record<string, unknown>)
+    if (member) byId.set(member.id, member)
+  }
+  const members = CYBERSECURITY_MEMBER_ORDER.map((id) => byId.get(id) || base.members.find((m) => m.id === id)!)
+  return {
+    id: CYBERSECURITY_MODULE_ID,
+    display_name: displayName,
+    enabled,
+    members,
+  }
+}
+
+async function fetchCybersecurityJson<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ ok: true; data: T } | { ok: false; notAvailable: boolean; message: string }> {
+  const headers = authHeaders({
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  })
+  try {
+    const response = await fetch(path, { ...init, headers })
+    if (response.status === 404 || response.status === 501) {
+      return {
+        ok: false,
+        notAvailable: true,
+        message: "Cybersecurity module catalog API is not available on this Jarvis version yet.",
+      }
+    }
+    if (!response.ok) {
+      const text = await response.text()
+      let message = text || response.statusText
+      try {
+        const parsed = JSON.parse(text)
+        message = formatApiDetail(parsed.detail, message)
+      } catch {
+        // not JSON
+      }
+      return { ok: false, notAvailable: false, message }
+    }
+    const data = (await response.json()) as T
+    return { ok: true, data }
+  } catch (err) {
+    return {
+      ok: false,
+      notAvailable: false,
+      message: err instanceof Error ? err.message : "Cybersecurity catalog request failed.",
+    }
+  }
+}
+
+export async function loadCybersecurityModuleCatalog(): Promise<CybersecurityModuleCatalog> {
+  const result = await fetchCybersecurityJson<Record<string, unknown>>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}`,
+  )
+  if (!result.ok) {
+    return {
+      module: staticCybersecurityModule(),
+      apiAvailable: false,
+      loadMessage: result.message,
+    }
+  }
+  return {
+    module: mergeCybersecurityModule(result.data),
+    apiAvailable: true,
+  }
+}
+
+export async function setCybersecurityModuleEnabled(enabled: boolean): Promise<CybersecurityActionResult> {
+  const result = await fetchCybersecurityJson<{ enabled?: boolean; detail?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/enable`,
+    { method: "POST", body: JSON.stringify({ enabled }) },
+  )
+  if (!result.ok) {
+    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || (enabled ? "Cybersecurity module enabled." : "Cybersecurity module disabled."),
+  }
+}
+
+export async function setCybersecurityToolEnabled(
+  toolId: string,
+  enabled: boolean,
+): Promise<CybersecurityActionResult> {
+  const id = toolId.trim()
+  const result = await fetchCybersecurityJson<{ enabled?: boolean; detail?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/tools/${encodeURIComponent(id)}/enable`,
+    { method: "POST", body: JSON.stringify({ enabled }) },
+  )
+  if (!result.ok) {
+    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || (enabled ? "Tool enabled." : "Tool disabled."),
+  }
+}
+
+export async function downloadModuleCatalogEntry(
+  entryId: string,
+  options?: { mode?: "clone" | "zip"; dest?: "desktop_projects" | "library" },
+): Promise<CybersecurityActionResult> {
+  const result = await fetchCybersecurityJson<{ job_id?: string; detail?: string; message?: string }>(
+    `/api/modules/catalog/${encodeURIComponent(entryId)}/download`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        mode: options?.mode ?? "clone",
+        dest: options?.dest ?? "library",
+      }),
+    },
+  )
+  if (!result.ok) {
+    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+  }
+  return {
+    ok: true,
+    job_id: result.data.job_id,
+    message: result.data.detail || result.data.message || "Download started.",
+  }
+}
+
+export async function startCybersecurityTool(toolId: string): Promise<CybersecurityActionResult> {
+  const id = toolId.trim()
+  const result = await fetchCybersecurityJson<{ detail?: string; message?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/tools/${encodeURIComponent(id)}/start`,
+    { method: "POST", body: "{}" },
+  )
+  if (!result.ok) {
+    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || result.data.message || "Start requested.",
+  }
+}
+
+export async function stopCybersecurityTool(toolId: string): Promise<CybersecurityActionResult> {
+  const id = toolId.trim()
+  const result = await fetchCybersecurityJson<{ detail?: string; message?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/tools/${encodeURIComponent(id)}/stop`,
+    { method: "POST", body: "{}" },
+  )
+  if (!result.ok) {
+    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || result.data.message || "Stop requested.",
+  }
+}
+
+export async function openCybersecurityToolFolder(toolId: string): Promise<CybersecurityActionResult> {
+  const id = toolId.trim()
+  const result = await fetchCybersecurityJson<{ detail?: string; message?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/tools/${encodeURIComponent(id)}/open-folder`,
+    { method: "POST", body: "{}" },
+  )
+  if (!result.ok) {
+    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || result.data.message || "Opened folder in the system file manager.",
+  }
+}
+
+export function cybersecurityToolSupportsProcessControl(role: string): boolean {
+  const normalized = role.toLowerCase().replace(/-/g, "_")
+  return normalized === "harness" || normalized === "graph_ui" || normalized === "graph/ui"
+}
