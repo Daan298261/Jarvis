@@ -29,11 +29,17 @@ Typical layout (RFC-0095 Download destinations): `…/rfc/<slug>`, `…/persona/
 
 ## Priority ladder (Taco)
 
-Quick / highest impact first. Numbers **0107–0109** are new (tip’s latest reel/cyber RFC was **0106**). Reel children keep their reserved numbers; this list **reorders them by impact**, it does not renumber them.
+Quick / highest impact first. Numbers **0107–0109** are the Taco priority pack (tip’s latest reel/cyber RFC was **0106**). **0110** is a related owner-chat UX contract (below) — it does **not** bump 0108/0109. Reel children keep their reserved numbers; this list **reorders them by impact**, it does not renumber them.
 
-### 1. Obsidian as linked memory/brain — NEW
+### 1. Obsidian as linked memory / durable brain — NEW (strengthened)
 
-Jarvis treats an owner Obsidian vault as the **linked memory / brain**: notes, wiki-links, and the graph are first-class memory the agent can retrieve, follow, and act on, kept in sync with Jarvis structured memory (RFC-0011 ContextRepo + DB). This is not a second orchestrator and not TTS. Canonical human-readable knowledge lives as plain Markdown in the vault; Jarvis indexes, watches, and writes managed notes with provenance. When the owner says “open the project note,” “follow that link,” “add this decision to the vault,” or “what did we decide about X,” Jarvis resolves wiki-links / backlinks, reads the graph neighborhood, and either answers with vault provenance or mutates a note the way a human in Obsidian would. OpenViking/RAGFlow (RFC-0099) may index the same files as a sidecar; Markdown on disk stays canonical. **RFC:** [`docs/rfcs/0107-obsidian-linked-memory-brain.md`](docs/rfcs/0107-obsidian-linked-memory-brain.md). **Status:** accepted (specs-only). **Local clone:** optional pattern source `Rob-Morris/obsidian-brain` under `/workspace/projects/` or `C:\Users\daanv\projects\jarvis-ig\` if Architect clones it; vault itself is the owner’s Obsidian folder (not a reel repo). **Lane:** D1 (watch/index/sync/act-on-links) + UX (vault picker, health, broken-link repair).
+Jarvis treats an owner Obsidian vault **plus** the existing DB/cache (RFC-0011 ContextRepo + memory) as the **external durable brain**. Large durable context — persona packs, tools catalogs, history dumps — must **not** live in every inference prompt. Immediate `n_keep ≥ n_ctx` 400 band-aids are a **separate** inference ticket; this row’s end-state is **external store + on-demand retrieval**, not “compress forever.”
+
+Canonical human-readable knowledge lives as plain Markdown in the vault (wiki-links + graph). Jarvis indexes, watches, caches, and writes managed notes with provenance, in sync with structured memory. When the owner says “open the project note,” “follow that link,” “add this decision to the vault,” or “what did we decide about X,” Jarvis resolves wiki-links / backlinks, reads a hop-capped graph neighborhood, and either answers with vault provenance or mutates a note the way a human in Obsidian would. OpenViking/RAGFlow (RFC-0099) may index the same files as a sidecar; Markdown on disk stays canonical. This is not a second orchestrator and not TTS.
+
+**On each user ask** (any ask; this ticket does not invent LE/Red/Purple/ATO gates): a quick **internal search** over **installed and installable** tools that aid **that** task, then pull only the matched schemas/docs into the turn. Do **not** pre-stuff the context window with the whole catalog. Installable-but-missing hits use a real RFC-0090 / RFC-0095 install path — not a soft-fail empty chip.
+
+**RFC:** [`docs/rfcs/0107-obsidian-linked-memory-brain.md`](docs/rfcs/0107-obsidian-linked-memory-brain.md). **Status:** accepted (specs-only; full intent, no stubs). **Local clone:** optional pattern source `Rob-Morris/obsidian-brain` under `/workspace/projects/` or `C:\Users\daanv\projects\jarvis-ig\` if Architect clones it; vault itself is the owner’s Obsidian folder (not a reel repo). **Lane:** D1 (watch/index/sync/act-on-links + per-turn working-set/tool search) + UX (vault picker, health, broken-link repair).
 
 ### 2. Phone companion offline AI model — NEW / extend Android companion
 
@@ -42,6 +48,10 @@ The Android companion must keep working when the Windows Leader is unreachable: 
 ### 3. Media / file / video upload on phone + PC apps — NEW
 
 Owners must **upload media, files, and videos** from both the **Android companion** and the **Desktop / portal** into Jarvis for **analyze**, **edit**, and **Black Grid / media pipelines**. Companion today has a thin attachment POST (`/api/companion/attachments`, 64 MiB) plus gallery/camera/share; Daybreak/portal Chat has **no** composer attach. This ticket makes typed ingest real on **both** surfaces: progress, size/type policy, durable artifacts (RFC-0021), and handoff into BlackGrid `image` / `video` / `timeline` / `stitch` (RFC-0096 / 0097) and analyze tools — not a chip that never reaches a worker. **RFC:** [`docs/rfcs/0109-media-file-video-upload-phone-and-pc.md`](docs/rfcs/0109-media-file-video-upload-phone-and-pc.md). **Status:** accepted (specs-only). **Local clone:** none (product surfaces). **Lane:** UX (composer + Android attach/studio) + D1 (ingest API, artifact store, pipeline handoff).
+
+### Related UX contract — RFC-0110 ChatGPT-style approval / review popup — NEW
+
+Not a fourth integration clone and **not** a reorder of 0107–0109. Owner chat gets a ChatGPT-like **modal only when the model/tool flow actually needs a decision or typed input**: **Always allow** / **Allow this time** / **Deny**, plus optional (or required) free-text. **Always allow** persists per tool/action class so repeats do not re-prompt. Ordinary daily chat stays **ungated** and **streams** — this is explicitly **not** the old always-on “Review or approval is required” bar on conversation. Extends RFC-0079 computer-use catalog chrome; does not invent LE/Red/Purple gates; no exploit recipes. Full intent, no stubs/soft-fail. **RFC:** [`docs/rfcs/0110-chatgpt-style-approval-popup.md`](docs/rfcs/0110-chatgpt-style-approval-popup.md). **Status:** accepted (specs-only). **Lane:** UX (modal + idle HUD copy) + D1 (grant store, park/resume only for real decisions).
 
 ---
 
@@ -109,11 +119,12 @@ Jarvis **is** the HexStrike operator: Daybreak HUD + owner chat drive the **full
 | 0096–0104 | Reel children | Reserved by RFC-0095 / PR #271 |
 | 0105 | Cybersecurity module | Implemented |
 | 0106 | HexStrike full operator control | Accepted |
-| **0107** | Obsidian linked memory / brain | Taco add — this pass |
-| **0108** | Phone companion offline AI model | Taco add — this pass |
-| **0109** | Media/file/video upload (phone + PC) | Taco add — this pass |
+| **0107** | Obsidian linked memory / durable brain | Taco add — vault/graph + DB/cache; per-turn tool search; not compress-forever |
+| **0108** | Phone companion offline AI model | Taco add — same priority pack / ladder |
+| **0109** | Media/file/video upload (phone + PC) | Taco add — same priority pack / ladder |
+| **0110** | ChatGPT-style approval / review popup | Taco add — Always / Allow this time / Deny + persist + free-text; **not** always-on chat gate |
 
-If a later tip already occupied 0107+, Architect takes the next free numbers. As of `development` @ `60f832c` (2026-09-17), **0107–0109 were free**.
+If a later tip already occupied 0107+, Architect takes the next free numbers. **0107–0109** landed as specs on `development` via [#280](https://github.com/Daan298261/Jarvis/pull/280). Next free after 0109 was **0110**.
 
 ---
 

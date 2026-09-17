@@ -2490,6 +2490,14 @@ Reason:
 
 Taco: separate integration specs document; Instagram Saved→jarvis plus three new high-impact adds; do not merge product code in this pass.
 
+Decision: RFC-0107 durable-brain strengthen + RFC-0110 approval popup (accepted)
+
+RFC-0107 end-state is an **external durable brain** (Obsidian linked vault/graph + Jarvis DB/cache, synced with RFC-0011) plus **per-turn internal search** over installed **or** installable tools — pull only what the ask needs; do **not** pre-stuff persona packs, full tool catalogs, or history dumps into every inference prompt. Immediate `n_keep ≥ n_ctx` 400 band-aids stay a separate inference ticket; this is not “compress forever.” RFC-0108 phone offline and RFC-0109 media upload stay on the same Taco ladder. RFC-0110 is a ChatGPT-style modal (**Always allow** / **Allow this time** / **Deny**, optional free-text, persist Always allow per tool/action class) shown only when the model/tool flow actually needs a decision or typed input; ordinary owner chat stays ungated and streams — not the always-on “Review or approval is required” gate. Specs-only; no new §58 checkbox; no invented LE/Red/Purple gates.
+
+Reason:
+
+Taco: large durable context out of the prompt; search tools per ask; approval popup like ChatGPT only when needed.
+
 ---
 
 ## 60. Expected Example Behavior
