@@ -184,6 +184,16 @@ class TtsSettings(BaseModel):
     prefer_cpu_fallback: bool = True
 
 
+class KnowledgeVaultSettings(BaseModel):
+    """RFC-0107 Obsidian-linked vault binding (path is write-only in API responses)."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    vault_path: str = ""
+    jarvis_managed_layout: bool = False
+    watch_enabled: bool = True
+
+
 class HexStrikeSettings(BaseModel):
     """Local HexStrike AI suite (RFC-0078). Loopback only; never a WAN listener."""
 
@@ -239,6 +249,7 @@ class AppSettings(BaseModel):
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
+    knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)

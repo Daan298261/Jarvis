@@ -96,7 +96,13 @@ class SettingsUpdate(BaseModel):
 
 @router.get("")
 async def get_settings():
-    return load_settings().model_dump()
+    payload = load_settings().model_dump()
+    vault = payload.get("knowledge_vault")
+    if isinstance(vault, dict) and vault.get("vault_path"):
+        vault = dict(vault)
+        vault["vault_path"] = "[configured]"
+        payload["knowledge_vault"] = vault
+    return payload
 
 
 @router.put("")

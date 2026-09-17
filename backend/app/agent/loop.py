@@ -96,7 +96,7 @@ from ..persona.think_aloud import run_with_think_aloud
 from ..persona.weather import weather_system_message
 from ..providers.completion_text import empty_generation_error
 from .recovery import recovery_hint
-from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
+from .tool_exposure import grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import (
     bind_parameters,
@@ -119,6 +119,7 @@ from .prompts import (
     VERIFY_REQUIRED_PROMPT,
 )
 from .docs_first_grounding import DocsFirstContext, maybe_docs_first
+from .turn_working_set import apply_working_set_to_system, compose_turn_working_set
 from .self_dev import KillSwitchActive, kill_switch_active
 
 
@@ -788,12 +789,14 @@ class AgentRuntime:
             if lessons:
                 system_prompt += "\n\n" + lessons
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
-            system_prompt += "\n\n" + describe_exposure(
-                working.task_class,
-                working.requested_tools,
+            turn_ws = await compose_turn_working_set(
+                prompt,
+                task_class=working.task_class,
+                extra_capabilities=working.requested_tools,
                 security_role=working.security_role,
-                prompt=prompt,
+                agent_id="owner",
             )
+            system_prompt = apply_working_set_to_system(system_prompt, turn_ws)
             audit = professional_prompt_block(prompt)
             if audit:
                 # Append after tool exposure so context fitting keeps this block in the tail.

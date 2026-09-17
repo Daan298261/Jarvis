@@ -151,6 +151,37 @@ async def remove_entry(agent_id: str, entry_id: str):
     return entry.model_dump(mode="json")
 
 
+class VaultSearchIn(BaseModel):
+    query: str = Field(min_length=1)
+    limit: int = Field(default=12, ge=1, le=50)
+
+
+@router.post("/{agent_id}/vault/search")
+async def vault_search_for_agent(agent_id: str, body: VaultSearchIn):
+    """RFC-0107: lexical vault search with provenance (agent-scoped alias)."""
+    from ..memory.obsidian_vault import public_binding_status, search_vault
+
+    if not public_binding_status().get("bound"):
+        raise HTTPException(status_code=400, detail="Vault is not bound")
+    hits = search_vault(body.query, limit=body.limit)
+    return {
+        "agent_id": agent_id,
+        "query": body.query,
+        "hits": [
+            {
+                "rel_path": h.rel_path,
+                "title": h.title,
+                "heading": h.heading,
+                "excerpt": h.excerpt,
+                "content_hash": h.content_hash,
+                "score": h.score,
+                "provenance": {"source": "obsidian_vault", "path": h.rel_path},
+            }
+            for h in hits
+        ],
+    }
+
+
 @router.post("/{agent_id}/revert/{mutation_id}")
 async def revert_repo_mutation(agent_id: str, mutation_id: str):
     try:

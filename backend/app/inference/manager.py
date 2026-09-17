@@ -12,7 +12,7 @@ import psutil
 from openai import APIStatusError
 
 from ..config import AppSettings, load_settings, logs_dir
-from ..persona.pack import inject_persona_messages, persona_instructions
+from ..persona.pack import compact_identity_instructions, inject_compact_identity_messages, persona_instructions
 from ..providers.base import ChatMessage
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import (
@@ -253,7 +253,7 @@ class InferenceManager:
             message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
             for message in messages
         ]
-        with_persona = inject_persona_messages(typed)
+        with_persona = inject_compact_identity_messages(typed)
         normalized = normalize_chat_messages(with_persona)
         return fit_messages_to_context(
             normalized,
@@ -300,7 +300,7 @@ class InferenceManager:
         requested = payload.get("n_keep")
         if requested is None and not self._supports_n_keep():
             return payload
-        identity = persona_instructions()
+        identity = compact_identity_instructions()
         if requested is None:
             payload["n_keep"] = n_keep_for_messages(
                 messages,
