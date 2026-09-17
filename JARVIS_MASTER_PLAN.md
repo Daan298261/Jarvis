@@ -2498,6 +2498,26 @@ Reason:
 
 Taco: large durable context out of the prompt; search tools per ask; approval popup like ChatGPT only when needed.
 
+Decision: Jarvis 1.4.0 release scope lock (RFC-0111–0115 accepted)
+
+Living spec [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md) is on `development` (copied from `main` @ `6f6a633`; light path note only). Implementable contracts:
+
+- **RFC-0111** Kokoro as real runtime (`TtsRuntimeState`, adapter, pinned versions, no pip during speak, no silent SAPI, health probe, requested-vs-actual engine) — deepens RFC-0070 / RFC-0092; does not change 0092 defaults.
+- **RFC-0112** Voice preview uses the exact selected profile (canonical route, error preservation, playback failure is failure).
+- **RFC-0113** Admin > Settings 1.4 IA deltas (Appearance & Voice composed, Phone Pairing, Network & Swarm, redirects) — RFC-0094 remains implemented; HUD Voice/Appearance split stays.
+- **RFC-0114** Context overflow preflight + automatic recovery (canonical `PromptBudget`, expand 8K→16K→32K, recoverable 400, retry limits). RFC-0107 durable brain stays the non-compress-forever end-state; this is the separate inference ticket.
+- **RFC-0115** Ornith 9B orchestrator-router + complexity tiers + visible model handoff (gates before warm-score; no Continue button).
+
+**IN 1.4.0:** core packages above **plus** already-filed interesting integrations **RFC-0107** Obsidian durable brain, **0108** phone offline, **0109** media upload, **0110** approval modal, **plus** HexStrike / Daybreak / cyber already in flight (**0105** implemented, **0106** implemented).
+
+**OUT of the 1.4 cut:** bulk Instagram / catalog RFCs **0095–0104** — they stay on [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) / later queue. Do **not** re-scope them into 1.4 RFCs or block the cut.
+
+Specs-only; no new §58 checkbox; no invented LE/Red/Purple/ATO gates; no exploit recipes.
+
+Reason:
+
+Taco 1.4.0 scope lock: split `JARVIS_1.4_SPECS.md` into RFC-0111–0115; keep interesting 0107–0110 and in-flight HexStrike/cyber; leave bulk reel catalog for later.
+
 ---
 
 ## 60. Expected Example Behavior

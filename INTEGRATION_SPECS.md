@@ -8,6 +8,8 @@ This file is the Architect priority list for **Instagram Saved → jarvis** reel
 
 **Related (do not rewrite here):** [RFC-0095](docs/rfcs/0095-instagram-jarvis-collection-module-catalog.md) umbrella + Module Catalog **Download**. [`EXTERNAL_AGENT_INFRA_INTEGRATION_SPECS.md`](EXTERNAL_AGENT_INFRA_INTEGRATION_SPECS.md) / [`EXTERNAL_AGENT_INFRA_INTEGRATION_SPECS_V2.md`](EXTERNAL_AGENT_INFRA_INTEGRATION_SPECS_V2.md) (Obsidian ReferenceStore + Browser Use + OpenViking evaluation). [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md) (phone is a Leader controller). [`JARVIS_2.0.md`](JARVIS_2.0.md) §76 multimedia / BlackGrid. Architect ledger: master plan **§59 Decision Log** only — no §57 rewrite, no new §58 checkbox.
 
+**Jarvis 1.4.0 interesting set (not a reorder of this ladder):** RFC-**0107–0110** (Obsidian brain, phone offline model, media upload, ChatGPT-style approval modal) are **in** the 1.4 cut together with core packages RFC-0111–0115 from [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md) and HexStrike/Daybreak/cyber already in flight (0105 implemented, 0106 implemented). **Bulk catalog / reel children RFC-0095–0104 stay later** on this document — do not re-scope them into 1.4 RFCs or block the 1.4 cut.
+
 **Hard rules for every row below:** full product intent; implement tickets ship the real surface, not a placeholder chip / health-only panel / “coming soon” path as the deliverable. Do **not** invent LE / Red / Purple / ATO gates in these tickets (owner later). Do **not** put exploit recipes, PoCs, payloads, or attack steps in specs or product help. Do **not** vendor third-party trees into Jarvis git. Do **not** merge `persona_candidate` assistants into butler/voice.
 
 **Assignee lanes:** **D1** = backend / workers / inference / connectors. **UX** = Daybreak / portal / Android companion chrome. A row may name both; the named implement ticket still does **one** RFC.
@@ -119,12 +121,13 @@ Jarvis **is** the HexStrike operator: Daybreak HUD + owner chat drive the **full
 | 0096–0104 | Reel children | Reserved by RFC-0095 / PR #271 |
 | 0105 | Cybersecurity module | Implemented |
 | 0106 | HexStrike full operator control | Implemented |
-| **0107** | Obsidian linked memory / durable brain | Taco add — vault/graph + DB/cache; per-turn tool search; not compress-forever |
-| **0108** | Phone companion offline AI model | Taco add — same priority pack / ladder |
-| **0109** | Media/file/video upload (phone + PC) | Taco add — same priority pack / ladder |
-| **0110** | ChatGPT-style approval / review popup | Taco add — Always / Allow this time / Deny + persist + free-text; **not** always-on chat gate |
+| **0107** | Obsidian linked memory / durable brain | Taco add — vault/graph + DB/cache; per-turn tool search; not compress-forever; **in 1.4 interesting set** |
+| **0108** | Phone companion offline AI model | Taco add — same priority pack / ladder; **in 1.4 interesting set** |
+| **0109** | Media/file/video upload (phone + PC) | Taco add — same priority pack / ladder; **in 1.4 interesting set** |
+| **0110** | ChatGPT-style approval / review popup | Taco add — Always / Allow this time / Deny + persist + free-text; **not** always-on chat gate; **in 1.4 interesting set** |
+| **0111–0115** | 1.4 core (Kokoro runtime, voice preview, Settings IA deltas, context recovery, Ornith router) | Not integration clones — see [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md). **0095–0104 bulk catalog remains later / out of 1.4 cut.** |
 
-If a later tip already occupied 0107+, Architect takes the next free numbers. **0107–0109** landed as specs on `development` via [#280](https://github.com/Daan298261/Jarvis/pull/280). Next free after 0109 was **0110**.
+If a later tip already occupied 0107+, Architect takes the next free numbers. **0107–0109** landed as specs on `development` via [#280](https://github.com/Daan298261/Jarvis/pull/280). Next free after 0109 was **0110**. **0111–0115** are the 1.4 spec split (not Instagram children).
 
 ---
 
