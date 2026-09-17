@@ -2482,6 +2482,14 @@ Reason:
 
 Taco: complete control over HexStrike and its toolchain; Jarvis is the “human” using it; do not ship stubs.
 
+Decision: INTEGRATION_SPECS.md + RFC-0107–0109 (accepted)
+
+Living architect priority list for third-party / reel-sourced integrations lives at repo-root [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) (not a master-plan rewrite). Taco ladder, quick/highest impact first: **0107** Obsidian linked memory/brain; **0108** phone companion on-device model (PC orchestrator when online); **0109** media/file/video upload on Android + Desktop/portal. Then reel children in impact order (0098 Browser-Use, 0101 Pipecat, 0096 ComfyUI, 0097 stitch, 0099 memory, 0100 research, 0103 RuView, 0102 LocalSend; 0104 persona later; 0105 cyber implemented; 0106 HexStrike operator). RFC-0095 remains the umbrella + Module Catalog Download. Local clones stay under `C:\Users\daanv\projects\jarvis-ig\` and `/workspace/projects/` (not git). Specs-only; no new §58 checkbox; no invented LE gates.
+
+Reason:
+
+Taco: separate integration specs document; Instagram Saved→jarvis plus three new high-impact adds; do not merge product code in this pass.
+
 ---
 
 ## 60. Expected Example Behavior
