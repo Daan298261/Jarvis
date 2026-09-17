@@ -1,6 +1,6 @@
 # RFC-0114: Context overflow preflight + automatic recovery
 
-**Status:** accepted  
+**Status:** implemented
 **Queue item:** (none — no new §58 checkbox; implement is a named follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17
@@ -225,19 +225,25 @@ Jarvis must either answer or **visibly** switch models (RFC-0115). A few visible
 
 ## Acceptance criteria
 
-- [ ] Specs-only in this PR (no product code)
-- [ ] One `PromptBudget` implementation used by all inference paths; tool schemas **and** output reserve are in the budget (tests 31–32)
-- [ ] Token estimation is consistent for a given request (tokenizer priority as specified)
-- [ ] Preflight runs before inference; compaction occurs before unnecessary model failure (test 25)
-- [ ] 16K pressure expands to 32K when profile/server allow it (test 24); no mid-turn shrink
-- [ ] `is_context_overflow` treats simulated 400 `Context size has been exceeded` as recoverable (test 26)
-- [ ] One context error does **not** immediately mark the task failed (test 27)
-- [ ] Same model turn is retried after successful recovery (test 28)
-- [ ] If the current model cannot satisfy required context, routing escalates to an eligible model (test 29 — hook to RFC-0115)
-- [ ] Recovery retry limits prevent infinite loops (test 30); caps as specified
-- [ ] Screenshot scenario (test 33): few visible messages → answer or visible model switch; **never** raw overflow as the outcome
-- [ ] Structured context events as specified
-- [ ] Implement follow-up: `python3 -m pytest` (`tests/test_rfc0114_*.py`). Live llama.cpp 400 reproduction is Windows desktop sign-off; cloud uses a simulated 400.
+Specs-only in **this** PR:
+
+- [x] Specs-only in this PR (no product code) — specs PR #286
+
+Implement follow-up (landed):
+
+- [x] One `PromptBudget` implementation used by all inference paths; tool schemas **and** output reserve are in the budget (tests 31–32) — #293 `PromptBudget` / `tests/test_rfc0114_prompt_budget.py`
+- [x] Token estimation is consistent for a given request (tokenizer priority as specified) — #293 shared `estimate_prompt_tokens`
+- [x] Preflight runs before inference; compaction occurs before unnecessary model failure (test 25) — #293 `prepare_inference`
+- [x] 16K pressure expands to 32K when profile/server allow it (test 24); no mid-turn shrink — #293 `choose_context_window` / expand preflight
+- [x] `is_context_overflow` treats simulated 400 `Context size has been exceeded` as recoverable (test 26) — #293
+- [x] One context error does **not** immediately mark the task failed (test 27) — #293 `test_overflow_does_not_immediately_fail_task`
+- [x] Same model turn is retried after successful recovery (test 28) — #293 compact/expand/retry on the same model
+- [ ] If the current model cannot satisfy required context, routing escalates to an eligible model (test 29 — hook to RFC-0115) — **not in #293**; same-model recovery only; **no** escalate placeholder
+- [x] Recovery retry limits prevent infinite loops (test 30); caps as specified — #293 `context_recovery_attempts < 2` (≤2)
+- [ ] Screenshot scenario (test 33): few visible messages → answer or visible model switch; **never** raw overflow as the outcome — simulated 400 recovery is covered in unit tests; live llama.cpp 400 + screenshot remain Windows desktop sign-off. Visible model switch is RFC-0115
+- [x] Structured context events as specified — #293 `context_pressure_detected` / `context_compaction_started` / `context_expanded` / `context_retry` / `context_recovery_failed`
+- [x] Implement follow-up: `python3 -m pytest` (`tests/test_rfc0114_*.py`) — #293. Live llama.cpp 400 reproduction is Windows desktop sign-off; cloud uses a simulated 400
+- [ ] Windows desktop sign-off: live llama.cpp `Context size has been exceeded` reproduction. Cloud VMs cannot sign this off
 
 ## Likely files
 
@@ -256,3 +262,7 @@ Product implementation in this PR. RFC-0107 vault indexer / per-turn tool search
 - 1.4 suggested implement order: **PR 2** (after RFC-0115 role/tier contract **PR 1**, or combined if CoS names both). Architecture first.
 - Linux cloud unit-tests simulated 400 + budget math. Live GGUF overflow remains desktop sign-off.
 - Implement launch: this RFC only; branch from `development`; pytest; recommended Grok 4.6; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via specs **#286** @ `1f8320d` (Jarvis 1.4 RFC split) + implement **#293** @ `265b758` (`PromptBudget` + `prepare_inference` preflight; overflow recoverable via compact/expand/retry ≤2; identity-only `n_keep` + per-message tools preserved). **No** RFC-0115 escalate placeholder — same-model recovery only; exhausted recovery fails with `context_capacity_error`. RFC-0107 durable brain stays the non-compress-forever end-state. Live llama.cpp 400 remains Windows desktop sign-off. No new §58 checkbox.
