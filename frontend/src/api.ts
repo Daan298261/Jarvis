@@ -835,6 +835,65 @@ export async function activateRuntimeProfile(profileId: string): Promise<Runtime
   })
 }
 
+export type HexStrikeOperatorReadiness = {
+  operator_ready?: boolean
+  catalog_count?: number
+  catalog_stale?: boolean
+  mcp?: { ok?: boolean; servers?: unknown; error?: string; transport?: string }
+  mcp_error?: string
+  reason?: string
+}
+
+export type HexStrikeCatalogItem = {
+  id: string
+  source: string
+  title: string
+  available?: boolean
+  missing_dependencies?: string[]
+  input_schema?: Record<string, unknown>
+  install_id?: string
+  install_method?: string
+  defensive_action?: string
+  upstream_path?: string
+  mcp_tool_key?: string
+  guidance?: string
+}
+
+export type HexStrikeOperatorJob = {
+  id: string
+  capability_id: string
+  source: string
+  status: string
+  started_at: string
+  finished_at?: string | null
+  upstream_pid?: number | null
+  log_tail?: string
+  artifact_paths?: string[]
+  result?: Record<string, unknown>
+  error?: string
+  artifacts?: { name: string; path: string; size: number }[]
+}
+
+export type HexStrikeDependencyInstallJob = {
+  id: string
+  dependency_id: string
+  status: string
+  ok: boolean
+  detail: string
+  started_at: string
+  finished_at?: string | null
+}
+
+export type HexStrikeToolsCatalogResponse = {
+  catalog: HexStrikeCatalogItem[]
+  count: number
+  catalog_stale: boolean
+  missing_host_tools: string[]
+  legacy_capabilities: HexStrikeCapability[]
+  mcp: Record<string, unknown>
+  mcp_error?: string
+}
+
 export type HexStrikeStatus = {
   suite: string
   shape_id: string
@@ -860,6 +919,15 @@ export type HexStrikeStatus = {
   dependencies: HexStrikeDependency[]
   missing_dependencies: string[]
   managed_jobs: HexStrikeJob[]
+  catalog?: HexStrikeCatalogItem[]
+  catalog_count?: number
+  catalog_stale?: boolean
+  operator?: HexStrikeOperatorReadiness
+  operator_jobs?: HexStrikeOperatorJob[]
+  dependency_install_jobs?: Record<string, HexStrikeDependencyInstallJob>
+  mcp?: Record<string, unknown>
+  mcp_error?: string
+  missing_host_tools?: string[]
 }
 
 export type HexStrikeInstallStatus = {
@@ -974,6 +1042,66 @@ export async function runHexStrikeAction(body: {
   return api<HexStrikeJob>("/api/hexstrike/actions", {
     method: "POST",
     body: JSON.stringify(body),
+  })
+}
+
+export async function getHexStrikeToolsCatalog(): Promise<HexStrikeToolsCatalogResponse> {
+  return api<HexStrikeToolsCatalogResponse>("/api/hexstrike/tools")
+}
+
+export async function refreshHexStrikeToolsCatalog(): Promise<{
+  catalog: HexStrikeCatalogItem[]
+  count: number
+  operator: HexStrikeOperatorReadiness
+}> {
+  return api("/api/hexstrike/tools/refresh", { method: "POST" })
+}
+
+export async function installHexStrikeTool(toolId: string): Promise<HexStrikeDependencyInstallJob> {
+  return api<HexStrikeDependencyInstallJob>(
+    `/api/hexstrike/tools/${encodeURIComponent(toolId)}/install`,
+    { method: "POST" },
+  )
+}
+
+export async function getHexStrikeToolInstallJob(
+  jobId: string,
+): Promise<HexStrikeDependencyInstallJob> {
+  return api<HexStrikeDependencyInstallJob>(
+    `/api/hexstrike/tools/install-jobs/${encodeURIComponent(jobId)}`,
+  )
+}
+
+export async function operateHexStrike(body: {
+  capability_id: string
+  arguments?: Record<string, unknown>
+}): Promise<HexStrikeOperatorJob> {
+  return api<HexStrikeOperatorJob>("/api/hexstrike/operate", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function listHexStrikeOperatorJobs(): Promise<{
+  jobs: HexStrikeOperatorJob[]
+  legacy_jobs: HexStrikeJob[]
+}> {
+  return api("/api/hexstrike/jobs")
+}
+
+export async function getHexStrikeOperatorJob(jobId: string): Promise<HexStrikeOperatorJob> {
+  return api<HexStrikeOperatorJob>(`/api/hexstrike/jobs/${encodeURIComponent(jobId)}`)
+}
+
+export async function getHexStrikeOperatorJobArtifacts(jobId: string): Promise<{
+  artifacts: { name: string; path: string; size: number }[]
+}> {
+  return api(`/api/hexstrike/jobs/${encodeURIComponent(jobId)}/artifacts`)
+}
+
+export async function stopHexStrikeOperatorJob(jobId: string): Promise<HexStrikeOperatorJob> {
+  return api<HexStrikeOperatorJob>(`/api/hexstrike/jobs/${encodeURIComponent(jobId)}/stop`, {
+    method: "POST",
   })
 }
 
