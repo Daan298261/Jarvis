@@ -12,7 +12,7 @@ import psutil
 from openai import APIStatusError
 
 from ..config import AppSettings, logs_dir
-from ..persona.pack import inject_persona_messages
+from ..persona.pack import inject_persona_messages, persona_instructions
 from ..providers.base import ChatMessage
 from ..providers.openai_compat import OpenAICompatProvider
 from .backends import (
@@ -150,6 +150,7 @@ def fit_messages_to_context(
     kept: list[ChatMessage] = []
     used = 0
     if system is not None:
+        # Prompt may still include this-turn guidance; n_keep pins identity only.
         system_limit = max(256, int(message_budget * 0.55))
         text = _trim_text(_message_text(system), system_limit)
         kept.append(_message_with_content(system, text))
@@ -293,12 +294,23 @@ class InferenceManager:
         requested = payload.get("n_keep")
         if requested is None and not self._supports_n_keep():
             return payload
+        identity = persona_instructions()
         if requested is None:
-            payload["n_keep"] = n_keep_for_messages(messages, n_ctx, max_tokens=max_tokens)
+            payload["n_keep"] = n_keep_for_messages(
+                messages,
+                n_ctx,
+                max_tokens=max_tokens,
+                identity_text=identity,
+            )
         else:
             raw = int(requested)
             if raw < 0:
-                raw = n_ctx
+                raw = n_keep_for_messages(
+                    messages,
+                    n_ctx,
+                    max_tokens=max_tokens,
+                    identity_text=identity,
+                )
             payload["n_keep"] = clamp_n_keep(raw, n_ctx, max_tokens=max_tokens)
         return payload
 

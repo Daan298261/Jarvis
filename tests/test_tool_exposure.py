@@ -34,19 +34,20 @@ def test_browser_research_does_not_include_office_by_default():
     assert "docker" not in names
 
 
-def test_mixed_and_long_horizon_get_every_enabled_native_tool():
+def test_mixed_does_not_preload_the_full_catalog():
     mixed = set(tool_names_for("mixed"))
-    long_h = set(tool_names_for("long-horizon autonomous"))
     native = {
         name
         for name, tool in REGISTRY.tools.items()
         if tool.enabled and name != "request_tools" and name not in RESTRICTED_TOOLS
     }
-    assert mixed == native
-    assert long_h == native
-    assert is_full_exposure("mixed")
+    assert "filesystem" in mixed
+    assert "docker" not in mixed
+    assert "office" not in mixed
+    assert mixed < native
+    assert not is_full_exposure("mixed")
     schema_names = [item["function"]["name"] for item in schemas_for("mixed")]
-    assert "request_tools" not in schema_names
+    assert "request_tools" in schema_names
     assert "filesystem" in schema_names
 
 
@@ -81,3 +82,56 @@ def test_exposure_prompt_mentions_the_escape_hatch():
     text = describe_exposure("filesystem")
     assert "filesystem" in text
     assert "request_tools" in text
+    assert "catalog is not kept" in text
+
+
+def test_prompt_retrieves_office_without_dumping_docker():
+    names = tool_names_for("mixed", prompt="Update the excel spreadsheet with this week's numbers")
+    assert "office" in names
+    assert "filesystem" in names
+    assert "docker" not in names
+    assert "hexstrike_defensive" not in names
+
+
+def test_voice_check_does_not_retrieve_the_catalog():
+    names = set(tool_names_for("conversation", prompt="do a voice check"))
+    native = {
+        name
+        for name, tool in REGISTRY.tools.items()
+        if tool.enabled and name not in {"request_tools", "request_capability"}
+    }
+    assert names <= {"filesystem", "python"}
+    assert len(names) < len(native)
+
+
+def test_request_capability_grant_appears_in_next_turn_without_full_catalog():
+    names = tool_names_for("mixed", ["docker"])
+    assert "docker" in names
+    assert "office" not in names
+    assert "desktop" not in names
+
+
+def test_file_task_prompt_does_not_retrieve_unrelated_tools():
+    names = set(tool_names_for("filesystem", prompt="Organize files into a folder and write the notes file"))
+    assert "filesystem" in names
+    assert "python" in names
+    assert "office" not in names
+    assert "docker" not in names
+    assert "browser" not in names
+    assert "desktop" not in names
+
+
+def test_openhands_prompt_hints_installable_worker_without_loading_it():
+    from app.agent.tool_retrieval import suggest_installable_for_prompt, suggest_tools_for_prompt
+
+    enabled = REGISTRY.tools.get("code_worker")
+    if enabled is not None:
+        enabled.enabled = False
+    try:
+        hints = suggest_installable_for_prompt("Use OpenHands on this repository")
+        assert "openhands" in hints
+        retrieved = suggest_tools_for_prompt("Use OpenHands on this repository")
+        assert "code_worker" not in retrieved
+    finally:
+        if enabled is not None:
+            enabled.enabled = True
