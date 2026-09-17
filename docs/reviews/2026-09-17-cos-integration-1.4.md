@@ -1,11 +1,11 @@
 # CoS review notes — integration / Jarvis 1.4 completed work
 
 **Reviewer:** Cursor cloud (code review only; no product-code changes)  
-**Base:** `development` tip `a8cacae` (2026-09-17)  
+**Base:** `development` tip `69eebd7` (2026-09-17, includes Daybreak HexStrike UX **#283**)  
 **Compared to:** `main` `25825e5` (1.3.13 via #268)  
-**Open PRs at review time:** none (this notes PR excepted)
+**Prior notes revision:** scored HUD against `a8cacae` (pre-#283). This amend treats Daybreak operator console as **landed product code**, not “not started.”
 
-**Taco mid-review clarify (2026-09-17):** bulk Instagram/catalog integration was **not** supposed to be in Jarvis 1.4 except the most interesting ones. The first pass of this review over-counted 0095–0104 as “1.4 incomplete.” That framing is **wrong**. Recut below.
+**Taco mid-review clarify (2026-09-17):** bulk Instagram/catalog integration was **not** supposed to be in Jarvis 1.4 except the most interesting ones. RFC-0095–0104 are a later INTEGRATION queue, not “1.4 incomplete.”
 
 No one-line safety fix was applied. Operator-path issues are worse than one line; they are reported rather than drive-by patched.
 
@@ -21,7 +21,7 @@ No one-line safety fix was applied. Operator-path issues are worse than one line
 | **RFC-0108 phone offline AI** | Specs-only (#280) |
 | **RFC-0109 media upload** | Specs-only (#280) |
 | **RFC-0110 approval modal** | Not in tree (in flight / unnamed). Existing `PermissionPrompt` is not this ticket |
-| **HexStrike / Daybreak / cyber already in flight** (RFC-0105, RFC-0106, Daybreak HexStrike UX) | 0105 product code; 0106 **backend only**; Daybreak operator HUD **not started** |
+| **HexStrike / Daybreak / cyber already in flight** (RFC-0105, RFC-0106, Daybreak HexStrike UX) | 0105 product code; 0106 **backend (#279) + Daybreak operator console (#283)**; RFC file still `accepted`; help topic still 0086; desktop sign-off open |
 | **`JARVIS_1.4_SPECS` core** | **File missing on `development` and `main`** (GitHub code search empty). 1.4 core has no canonical spec file in-repo |
 | **Runtime already in flight for the cut** (`n_keep`, empty-chat/`reasoning_content`, no silent SAPI) | Empty-chat + SAPI on `development` *and* `main` (#266/#259). `n_keep` **not** in llama-server argv |
 
@@ -47,7 +47,7 @@ Park these. Do not block a 1.4 cut on them. Do not describe them as missing 1.4 
 | Ticket | PRs | Landed | Gap vs 1.4 bar |
 | --- | --- | --- | --- |
 | **RFC-0105 cybersecurity** | #272 spec, #274 HUD, #277 backend, #278 tick | Module `cybersecurity` (6 members), Daybreak left-bar, `/api/modules/catalog/cybersecurity/*`, discovery, skill-pack names, generic supervisor | Soft-fail static shell leftover; start often needs `jarvis-module.json` clones don’t have; no loopback-bind guarantee; live Windows open-folder/subprocess unsigned |
-| **RFC-0106 HexStrike operator — backend** | #276 spec, #279 backend | `/api/hexstrike/tools`, `/operate`, `/jobs`, MCP register hook, `hexstrike_operator` chat tool, catalog beyond six Blue enums, install jobs, job/artifact store | **Daybreak operator HUD not landed** (still 0086 five-action shell). RFC still `accepted`. Help still “MCP always rejected” |
+| **RFC-0106 HexStrike operator** | #276 spec, #279 backend, **#283 Daybreak HUD** | Backend operator routes + `hexstrike_operator` tool; Daybreak tabbed console (Runtime / Catalog / Operate / Jobs); catalog pagination (24/page, not a silent 48-cap); `operateHexStrike` JSON invoke; job log/artifacts/stop; copy is “operator console · loopback suite” | RFC file still `accepted` (not ticked implemented). Help `hexstrike-blue` still says MCP is always rejected. HUD still polls `GET /api/hexstrike` every 2.5s (backend still MCP-registers on status). No Always-allow modal (0110). Live Windows operate = desktop sign-off |
 | **1.3.13 owner-chat / SAPI** | #266 (and #259 on `main`) | `reasoning_content` when `content` empty; Kokoro refuses silent SAPI | Not a 0105/0106 regression. `n_keep` still absent |
 
 Settings IA (#267) is already on `main` (1.3.13). Treat as prior, not a 1.4 deliverable.
@@ -59,8 +59,7 @@ Settings IA (#267) is already on `main` (1.3.13). Treat as prior, not a 1.4 deli
 | **RFC-0107 Obsidian brain** | Accepted spec (#280). No vault bind, watch, graph retrieve/act, or picker |
 | **RFC-0108 phone offline AI** | Accepted spec. No on-device runtime / sync |
 | **RFC-0109 media upload** | Accepted spec. Daybreak composer still text+Speak; companion attach is the old 64 MiB blob |
-| **RFC-0110 approval modal** | **No RFC file, no PR.** HexStrike path auto-grants and skips the existing Always-allow buttons |
-| **Daybreak HexStrike operator UX** | Explicitly not in #279. HUD subtitle still “defensive gateway · local and owner-attested only” |
+| **RFC-0110 approval modal** | **No RFC file, no PR.** HexStrike operate (now including Daybreak “Run capability”) auto-grants and skips Always-allow |
 | **`JARVIS_1.4_SPECS` core** | File does not exist on either branch. Cannot audit 1.4 core vs code until Architect lands it |
 | **`n_keep < n_ctx`** | llama-server `build_args` has `--ctx-size` only |
 
@@ -74,7 +73,7 @@ Settings IA (#267) is already on `main` (1.3.13). Treat as prior, not a 1.4 deli
 
 ### Branch drift
 
-`main` = 1.3.13. 0105/0106/0107–0109 live only on `development`. Promoting today would ship HexStrike operator HTTP/MCP **without** operator HUD and **without** Obsidian/phone/media/0110. Still do not cut 1.4.0 from this tip — because **in-scope 1.4 work is unfinished**, not because Instagram RFCs are unfinished.
+`main` = 1.3.13. 0105/0106/0107–0109 + Daybreak operator console (#283) live only on `development`. Promoting today would ship a **full HexStrike operator HUD + HTTP/MCP** without Obsidian/phone/media/0110/`n_keep`. Still do not cut 1.4.0 from this tip — because **those in-scope 1.4 items are unfinished**, not because Instagram RFCs are unfinished, and not because Daybreak UX is missing.
 
 ---
 
@@ -82,11 +81,11 @@ Settings IA (#267) is already on `main` (1.3.13). Treat as prior, not a 1.4 deli
 
 ### Contradictions
 
-1. **RFC-0106 vs RFC-0086 vs help vs HUD.** 0106 wins over Blue-only / no-MCP. Help `hexstrike-blue` still says MCP is always rejected and only typed defensive actions exist. HUD matches 0086. Three product stories. **1.4 blocker.**
-2. **RFC-0106 status vs code.** Honest: **backend CODE PRESENT / HUD not started.** INTEGRATION_SPECS calling 0106 specs-only is stale (hygiene; the HUD gap is the real 1.4 issue).
+1. **RFC-0106 vs RFC-0086 vs help.** 0106 wins over Blue-only / no-MCP. **HUD #283 now matches 0106** (operator console). Help `hexstrike-blue` still says MCP is always rejected and only typed defensive actions exist. Two remaining stories (HUD vs help), not three. Help rewrite is Architect/should-fix, not a missing console.
+2. **RFC-0106 status vs code.** Honest as of `69eebd7`: **backend + Daybreak HUD CODE PRESENT**; RFC file still `accepted`; INTEGRATION_SPECS still “specs-only”; desktop sign-off open. Tick/help/index are stale.
 3. **RFC-0105 ticked implemented** vs HUD “until D1 lands” static six-row shell (`staticCybersecurityModule()`). D1 (#277) already landed. **1.4 should-fix / residual stub.**
 4. **RFC-0105 allowed “stub catalog for UX”** vs Taco no-stubs bar. That RFC sentence is the defect; the shell survived D1.
-5. **No invented gating** vs Daybreak still requiring attested Blue scopes for click-run, while `operate()` HTTP/MCP does not require a scope.
+5. **No invented gating.** #283 dropped the always-visible attested-scope form; defensive operate still offers optional scope quick-fill. HTTP/MCP `operate()` still does not require a scope. Daybreak “Run capability” is a one-click path into the auto-grant backend.
 6. **`JARVIS_1.4_SPECS` missing** while 0107–0109 exist as RFCs. 1.4 core (whatever is *not* those RFCs) has no in-repo contract. Review cannot confirm voice/`n_keep`/approval as specified vs accidental.
 
 RFC-0098 unchecked boxes after #273 belong on the **later INTEGRATION queue**, not this contradiction list as a 1.4 fail.
@@ -95,7 +94,7 @@ RFC-0098 unchecked boxes after #273 belong on the **later INTEGRATION queue**, n
 
 - Cyber HUD: “Module catalog API is not available yet… until D1 lands.”
 - Cyber start: “Add jarvis-module.json…” when clones have no start metadata — hole, not a harness.
-- HexStrike HUD: health + five Blue actions; discovered catalog fetched then **ignored**. RFC-0106: health-only UI is a **fail**.
+- HexStrike HUD **was** health-only; **#283 replaced it** with catalog/operate/jobs. Residual stub-adjacent: help topic still 0086; `operator_ready` still MCP-gated so HTTP-only catalogs look “not ready.”
 - `operator_ready` = MCP ok AND catalog longer than Blue enums. MCP down blocks non-`defensive:` operate even if HTTP tools exist.
 - `hexstrike_compat.py` mitmproxy stubs: host-boot, not 1.4 product UX, still a stub on the operator path.
 
@@ -107,7 +106,7 @@ Voice-catalog “system TTS until backend lands” is leftover **prior** UX, not
 
 - `cyber.hexstrike` default `ask`
 - `/api/hexstrike/operate` and `HexStrikeOperatorTool` call `operator_intent_grant(..., "allow_session")` on `ask`
-- Daybreak click or chat tool = silent session grant
+- Daybreak click (“Run capability”) or chat tool = silent session grant. **#283 makes this worse, not better:** the owner now has a first-class Operate tab that still never shows Always-allow.
 
 RFC-0110 is not in the repo. Shipping HexStrike operator without it means 1.4 would ship **always-on grant**, not an on-demand modal.
 
@@ -126,7 +125,7 @@ RFC-0110 is not in the repo. Shipping HexStrike operator without it means 1.4 wo
 ### A. Prompt bloat / `n_keep` (1.4 runtime)
 
 - llama-server argv: `--ctx-size`, **no `--n-keep`**. In-flight fix still required; HexStrike MCP + cyber skill hints make it worse.
-- `GET /api/hexstrike` (HUD poll **every 2.5s**) → `sync_operator_surface(register_mcp=True)` while running. MCP churn + schema instability.
+- `GET /api/hexstrike` (HUD poll **every 2.5s**, unchanged in #283) → `sync_operator_surface(register_mcp=True)` while running. MCP churn + schema instability. #283 also polls operator jobs every 2s while a job is selected.
 - `hexstrike_operator` `status` dumps catalog into the tool result (12k truncate).
 - Cyber catalog GET re-walks clones every 5s HUD poll.
 
@@ -139,7 +138,7 @@ RFC-0110 is not in the repo. Shipping HexStrike operator without it means 1.4 wo
 
 - HexStrike HTTP + chat tool auto `allow_session`.
 - Mixed/long-horizon tasks get `hexstrike_operator` without `request_tools`.
-- This is exactly why **0110 is in 1.4** and must land (or HexStrike operate stays dark).
+- This is exactly why **0110 is in 1.4** and must land. #283 did not darken operate; it added a first-class Run capability button on the same auto-grant path.
 
 ### D. HexStrike operate / install security
 
@@ -147,7 +146,7 @@ Loopback pin/audit remain (good). New surface:
 
 1. `operator_post_allowed`: any `api/tools/<name>` except substring denylist; HTTP rows `additionalProperties: True`.
 2. `pip:` install of any `[a-z0-9._-]+` package. Missing HexStrike home → **`sys.executable`** (Jarvis’s interpreter).
-3. Chat tool `install_dependency` / `operate` after silent grant.
+3. Chat tool **and Daybreak Operate tab** `install_dependency` / `operate` after silent grant.
 4. MCP wholesale register on start **and** on status poll.
 5. `/stop` does not call `_operator_permission`.
 6. Test `test_mcp_registration_refuses_non_loopback_host` is vacuous (no `hexstrike_mcp.py` in tmp → `[]`, not a loopback check).
@@ -160,15 +159,14 @@ Loopback pin/audit remain (good). New surface:
 
 ### F. Frontend shells / dual APIs (cyber vs HexStrike)
 
-- Cyber static catalog on **any** catalog GET failure.
-- HexStrike HUD caps tools at 48; TS types omit `catalog` / `operator` / `operator_jobs`; no operate client helper.
-- Dual job lists; HUD only shows six Blue `managed_jobs`.
+- Cyber static catalog on **any** catalog GET failure. **Unchanged by #283.**
+- HexStrike HUD **#283:** types include `catalog` / `operator` / `operator_jobs`; `operateHexStrike` client exists; catalog is paginated (24/page) rather than silently capped at 48. Dual job lists remain in the API; HUD Jobs tab shows **operator** jobs (legacy `managed_jobs` no longer the only visible list).
 - `hexstrike_defensive` is Blue-role-gated; `hexstrike_operator` is general and stronger.
-- Gateway `/upstream/{path}` POST now uses widened operator rules.
+- Gateway `/upstream/{path}` POST still uses widened operator rules.
 
-### G. Product lie
+### G. Help still lies; HUD no longer does
 
-HUD + help tell the owner the suite is defensive-only while `/operate` and MCP are live.
+#283 HUD copy is “HexStrike operator console · loopback suite.” Footer still links `/help?topic=hexstrike-blue`, whose body still says MCP is always rejected and only typed defensive actions exist. **Help is now the leftover product lie.**
 
 ---
 
@@ -176,15 +174,15 @@ HUD + help tell the owner the suite is defensive-only while `/operate` and MCP a
 
 ### Must-fix before a 1.4.0 cut
 
-1. **Do not promote this tip as 1.4.0.** In-scope gaps: Daybreak HexStrike UX, 0107–0109 product code, RFC-0110, `JARVIS_1.4_SPECS` file, `n_keep`. Instagram 0095–0104 are **not** the reason.
-2. **Stop MCP register on status poll.** `GET /api/hexstrike` must not `register_mcp=True` every 2.5s.
-3. **Land RFC-0110 (or equivalent) and remove silent `operator_intent_grant` on operate/install.** `ask` must ask (Always-allow / once / deny).
-4. **Bind `pip:` / winget to the discovered catalog**; never fall back to `sys.executable`.
-5. **Daybreak HexStrike UX must match the backend** (full catalog, operate, jobs/logs, no 48-cap, kill defensive-only copy) **or** keep `/operate` + MCP dark. Health-only HUD + live operate is the RFC-0106 fail.
+1. **Do not promote this tip as 1.4.0.** Daybreak HexStrike UX **is no longer the missing piece** (#283). In-scope gaps that remain: 0107–0109 product code, RFC-0110, `JARVIS_1.4_SPECS` file, `n_keep`, HexStrike operate safety (silent grant / pip / MCP-on-poll), desktop sign-off. Instagram 0095–0104 are **not** the reason.
+2. **Stop MCP register on status poll.** `GET /api/hexstrike` must not `register_mcp=True` every 2.5s. #283 did not change this; the new console polls *more* (status + selected job).
+3. **Land RFC-0110 (or equivalent) and remove silent `operator_intent_grant` on operate/install.** `ask` must ask (Always-allow / once / deny). The Operate tab now makes the skip obvious.
+4. **Bind `pip:` / winget to the discovered catalog**; never fall back to `sys.executable`. Catalog “Install” in #283 calls the same backend.
+5. **HexStrike help + RFC tick.** Rewrite `hexstrike-blue` (or add an operator topic). Architect: mark RFC-0106 implemented (backend+#283) pending desktop sign-off. **HUD itself is no longer a 1.4 “not started” item.**
 6. **Strip cyber HUD “until D1 lands” static shell.**
 7. **`n_keep < n_ctx`** before 27B with MCP/skill/catalog bloat.
 8. **Implement 0107 / 0108 / 0109** as named tickets (full intent, no stub vault / canned offline / attach-chip-that-never-ingests).
-9. **Architect: land `JARVIS_1.4_SPECS` on `development`** (or point at the real file). Until then 1.4 “core” is unauditable. Also mark RFC-0106 backend-implemented / HUD-open; rewrite help `hexstrike-blue`.
+9. **Architect: land `JARVIS_1.4_SPECS` on `development`** (or point at the real file). Until then 1.4 “core” is unauditable.
 
 ### Should-fix (1.4 in-flight cyber/HexStrike)
 
@@ -204,7 +202,8 @@ HUD + help tell the owner the suite is defensive-only while `/operate` and MCP a
 - RFC-0095–0104 product tickets (Comfy, stitch, Pipecat, OpenViking, Firecrawl, LocalSend, RuView, persona hold).
 - `INTEGRATION_SPECS.md` stale 0098/0106 status lines.
 - Flowsint graph embed (0105 nice-to-have vs open-folder).
-- Collapse `managed_jobs` / `operator_jobs` into one timeline (HexStrike HUD ticket can take this).
+- Collapse leftover `managed_jobs` into the operator Jobs tab if Blue-enum actions still exist as a compatibility path.
+- Desktop sign-off for #283 (live pin, catalog refresh, HUD operate, job/log/artifact). Cloud did not.
 
 ---
 
@@ -212,11 +211,11 @@ HUD + help tell the owner the suite is defensive-only while `/operate` and MCP a
 
 **0105 (in 1.4):** partial connectors + Daybreak panel are real; leftover soft-fail shell and checkout spawn remain. Desktop sign-off still required.
 
-**0106 + Daybreak UX (in 1.4):** backend is a real operator surface; **owner-visible HUD is still 0086**; new surface auto-grants + pip-installs + polls MCP. Highest-risk unintended result on this tip.
+**0106 + Daybreak UX (in 1.4):** **backend #279 + HUD #283 are real operator surfaces**, not a health-only shell. Highest remaining risk is that this console is live **on top of** silent `allow_session`, unbounded `pip:`, and MCP-register-on-poll. Help topic still 0086. Desktop sign-off open. RFC file not ticked.
 
 **0107–0109 (in 1.4):** specs-only. Required for the cut; not started in product code.
 
-**0110 (in 1.4):** missing. Current HexStrike path is the anti-pattern the modal is supposed to replace.
+**0110 (in 1.4):** missing. #283 Operate tab is the anti-pattern the modal is supposed to wrap.
 
 **`JARVIS_1.4_SPECS` (in 1.4):** missing from both branches. Architect gap, not an implementer miss.
 
