@@ -1,6 +1,10 @@
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 from app.agent.recovery import NOT_FOUND, UNAVAILABLE, alternatives_for
+from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
 from app.tools.capabilities import capability_snapshot, optional_workers
 from app.tools.docker_tools import DockerTool
 from app.tools.registry import REGISTRY
@@ -9,6 +13,13 @@ from app.workers.code import OpenHandsBackend
 from app.workers.interpreter import OpenInterpreterBackend
 from app.workers.local_llm import local_openai_env
 from app.config import AppSettings
+
+
+@pytest.fixture
+def permission_store(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    return tmp_path
 
 
 def test_playwright_remains_default_browser_backend():
@@ -35,6 +46,13 @@ def test_local_worker_llm_stays_on_jarvis_endpoint():
     assert env["LLM_API_KEY"] == "local"
 
 
+def test_browser_use_model_uses_browser_settings():
+    from app.workers.local_llm import local_browser_use_model
+
+    settings = AppSettings(browser={"browser_use_model": "Qwen3.5-27B", "headless": True})
+    assert local_browser_use_model(settings) == "Qwen3.5-27B"
+
+
 def test_browser_use_failure_falls_back_to_playwright():
     tools = [item.tool for item in alternatives_for("browser_use", UNAVAILABLE)]
     assert tools[0] == "browser"
@@ -52,19 +70,26 @@ async def test_browser_use_tool_unavailable_without_package(jarvis_env):
     assert "not installed" in result.error.lower()
 
 
-async def test_browser_use_backend_runs_when_present(monkeypatch):
+async def test_browser_use_backend_runs_when_present(monkeypatch, permission_store):
     backend = BrowserUseBackend()
     monkeypatch.setattr(backend, "available", lambda: True)
+    apply_grant("network.internet", "always")
 
-    async def fake_invoke(task, settings):
+    async def fake_invoke(task, settings, *, start_url=None):
         assert "login" in task
         assert "example.com" in task
-        return "found the login form"
+        history = MagicMock()
+        history.final_result.return_value = "found the login form"
+        history.history = []
+        return history
 
     monkeypatch.setattr(backend, "_invoke", fake_invoke)
+    apply_grant("network.internet", "always", persist=False)
     result = await backend.run("find the login form", "https://example.com")
     assert result.success is True
     assert result.data["backend"] == "browser-use"
+    assert result.data["extracted_text"] == "found the login form"
+    assert result.data["url"] == "https://example.com"
     assert "found the login form" in result.output
 
 

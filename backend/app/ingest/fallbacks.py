@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 from .adapters.base import IngestContext
 from .links import extract_urls
 from .schema import ExternalContentArtifact
+from ..workers.browser_structured import browser_use_ingest_payload
 
 _OG_TAG = re.compile(
     r'<meta[^>]+(?:property|name)=["\'](?P<key>[^"\']+)["\'][^>]+content=["\'](?P<value>[^"\']+)["\']',
@@ -110,22 +112,33 @@ async def extract_with_browser_use(ctx: IngestContext, browser_use_tool) -> Exte
     result = await browser_use_tool.execute(goal=goal, url=ctx.url)
     if not result.success:
         return None
-    text = (result.output or "").strip()
+    payload = browser_use_ingest_payload(data=getattr(result, "data", None), output=getattr(result, "output", "") or "")
+    text = payload["text"]
     if not text:
         return None
+    artifact_url = payload["url"] or ctx.url
+    title = payload["title"]
+    caption = text[:500] if not title else text[:500]
     links = extract_urls(text)
     images = [url for url in links if any(ext in url.lower() for ext in (".jpg", ".jpeg", ".png", ".webp", "cdninstagram"))]
     videos = [url for url in links if any(ext in url.lower() for ext in (".mp4", ".webm", "video"))]
     other_links = [url for url in links if url not in images and url not in videos]
+    trace = payload["action_trace"]
+    metadata: dict[str, Any] = {
+        "tier": "browser_use",
+        "steps": payload["steps"],
+    }
+    if trace:
+        metadata["action_trace"] = trace[:12]
     return ExternalContentArtifact(
         source=ctx.platform,
-        url=ctx.url,
+        url=artifact_url,
         author="",
-        title="",
-        caption=text[:500],
+        title=title,
+        caption=caption,
         text=text,
         images=images,
         video=videos,
         links=other_links,
-        metadata={"tier": "browser_use"},
+        metadata=metadata,
     )
