@@ -2466,6 +2466,14 @@ Reason:
 
 Instagram Saved→jarvis high-value subset needs scored child tickets so implementers do not start from the umbrella alone or merge personas/offensive tools.
 
+Decision: RFC-0105 cybersecurity module (accepted)
+
+The six RFC-0095 Instagram clones (Strix, Anthropic Cybersecurity Skills, Exploitarium, Pentagi, Claude-Red, Flowsint) are one Module Catalog pack `cybersecurity` with **partial** connectors first. **Implement surface = Daybreak** (HUD / HexStrike-adjacent left-bar or suite panel), not Settings-only. HexStrike (RFC-0078/0086) stays beside it. Jarvis UX owns Daybreak UI; backend worker hooks are a later D1 slice. Gating/authorization is out of scope (owner). Specs-only; no new §58 checkbox. RFC numbers 0096–0104 landed on development via #271.
+
+Reason:
+
+Owner directed these former archive clones into a Jarvis cybersecurity module on Daybreak (surface + wiring), not six orphan tools, not a Settings dump, and not a HexStrike rewrite.
+
 ---
 
 ## 60. Expected Example Behavior
