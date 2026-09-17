@@ -1,3 +1,48 @@
+.permission-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(4, 8, 14, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.permission-modal-dialog {
+  width: min(520px, 100%);
+  max-height: min(90vh, 720px);
+  overflow: auto;
+}
+
+.permission-prompt-overlay-card {
+  margin: 0;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.permission-note-field {
+  display: block;
+  margin-top: 10px;
+  font-size: 11px;
+  color: rgba(132, 210, 234, 0.75);
+}
+
+.permission-note-field textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  min-height: 72px;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid rgba(142, 219, 241, 0.18);
+  background: rgba(6, 12, 20, 0.85);
+  color: inherit;
+  font: inherit;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+
 .permission-prompt {
   margin: 10px 0 12px;
   padding: 14px 14px 12px;

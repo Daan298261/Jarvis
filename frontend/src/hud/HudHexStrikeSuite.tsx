@@ -18,6 +18,8 @@ import {
   type HexStrikeScope,
   type HexStrikeStatus,
 } from "../api"
+import { extractPendingApprovalError } from "../chat/approvalsApi"
+import { usePendingApprovals } from "../chat/pendingApprovals"
 import "./hexstrike.css"
 
 const CATALOG_PAGE_SIZE = 24
@@ -62,6 +64,7 @@ function operatorLabel(status: HexStrikeStatus | null): string {
 }
 
 export function HudHexStrikeSuite() {
+  const { registerFrom428 } = usePendingApprovals()
   const [status, setStatus] = useState<HexStrikeStatus | null>(null)
   const [scopes, setScopes] = useState<HexStrikeScope[]>([])
   const [pathDraft, setPathDraft] = useState("")
@@ -167,6 +170,13 @@ export function HudHexStrikeSuite() {
       setMsg(success)
       await refresh()
     } catch (err) {
+      const parked = extractPendingApprovalError(err)
+      if (parked) {
+        registerFrom428(parked)
+        setMsg("Approval required — choose Allow, Always allow, or Deny in the popup.")
+        setLoadError(null)
+        return
+      }
       const text = err instanceof Error ? err.message : "HexStrike action failed."
       setMsg(text)
       setLoadError(text)

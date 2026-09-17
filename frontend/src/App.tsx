@@ -33,6 +33,8 @@ import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
 import { PortalNav } from "./components/PortalNav"
 import { BootNova } from "./boot/BootNova"
 import { HudShell } from "./hud/HudShell"
+import { PendingApprovalHost } from "./chat/PendingApprovalHost"
+import { PendingApprovalsProvider } from "./chat/pendingApprovals"
 import { HudChatHome } from "./hud/HudChatHome"
 import { getUiMode, setUiMode as persistUiMode, type UiMode } from "./hud/uiMode"
 import "./hud/hud.css"
@@ -105,7 +107,12 @@ export default function App() {
   if (isGuestPath(location.pathname)) {
     return <GuestPage />
   }
-  return <OwnerPortal />
+  return (
+    <PendingApprovalsProvider>
+      <OwnerPortal />
+      <PendingApprovalHost />
+    </PendingApprovalsProvider>
+  )
 }
 
 function OwnerPortal() {
