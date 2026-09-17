@@ -1,6 +1,6 @@
 # RFC-0110: ChatGPT-style approval / review popup
 
-**Status:** accepted  
+**Status:** implemented
 **Queue item:** (none — no new §58 checkbox; implement is a follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17
@@ -90,17 +90,23 @@ Implement should **extend** `frontend/src/chat/PermissionPrompt.tsx` (and HUD/cl
 
 ## Acceptance criteria
 
-- [ ] Specs-only in this PR (no product code)
-- [ ] Ordinary owner chat streams replies with **no** approval modal and **no** idle “Review or approval is required” gate
-- [ ] Modal appears only when a gated tool/action would run or typed owner input is required for that step
-- [ ] Modal offers **Always allow**, **Allow this time**, **Deny**, plus optional/required free-text as specified
-- [ ] Always allow persists per tool/action class; repeats of that class do not re-prompt; Settings can revoke
-- [ ] Allow this time does not persist; Deny cancels the parked step
-- [ ] Required free-text blocks Allow until filled; owner note is stored on the grant/denial; model `confirmed=true` cannot satisfy it
-- [ ] Park/resume uses the same durable step; no extra model round-trip just to re-ask
-- [ ] Always allow cannot override a deterministic policy/firewall deny
-- [ ] Tests: ungated conversational turn; gated tool shows modal; Always allow skip on repeat; Allow this time re-asks; Deny does not execute; required text; no self-confirm via tool args
-- [ ] Implement follow-up: `python3 -m pytest`; `npm --prefix frontend run build` (portal)
+Specs-only in **this** PR:
+
+- [x] Specs-only in this PR (no product code) — specs PR #284
+
+Implement follow-up (landed):
+
+- [x] Ordinary owner chat streams replies with **no** approval modal and **no** idle “Review or approval is required” gate — UI #290
+- [x] Modal appears only when a gated tool/action would run or typed owner input is required for that step — grants API #288 + UI #290
+- [x] Modal offers **Always allow**, **Allow this time**, **Deny**, plus optional/required free-text as specified — UI #290 (`PermissionPrompt` + pending host)
+- [x] Always allow persists per tool/action class; repeats of that class do not re-prompt; Settings can revoke — #288 `apply_grant` / `computer-permissions.json` + #290 Settings Revoke
+- [x] Allow this time does not persist; Deny cancels the parked step — #288 decide API (`allow_once` / `deny`)
+- [x] Required free-text blocks Allow until filled; owner note is stored on the grant/denial; model `confirmed=true` cannot satisfy it — UI #290 `requires_owner_input` + `owner_note`
+- [x] Park/resume uses the same durable step; no extra model round-trip just to re-ask — #288 HTTP 428 `pending_approval` + `/api/approvals/pending*`
+- [x] Always allow cannot override a deterministic policy/firewall deny
+- [x] Tests: ungated conversational turn; gated tool shows modal; Always allow skip on repeat; Allow this time re-asks; Deny does not execute; required text; no self-confirm via tool args — `tests/test_rfc0110_hexstrike_hardening.py`
+- [x] Implement follow-up: `python3 -m pytest`; `npm --prefix frontend run build` (portal) — #288 pytest + #290 frontend build
+- [ ] Windows desktop sign-off: live HUD modal + RFC-0081 spoken grants with a real parked step. Cloud VMs cannot sign this off
 
 ## Likely files
 
@@ -120,3 +126,7 @@ Product implementation in this PR. New LE/Red/Purple/ATO product gates. Exploit 
 - Source: Taco 2026-09-17 follow-up after RFC-0107–0109. Next free RFC number after 0109 is **0110**.
 - Linux cloud can unit-test grant persistence + “conversational turn does not set `waiting_for_confirmation`.” Live HUD modal + TTS spoken grants remain Windows desktop sign-off.
 - Implement launch: this RFC only; branch from `development`; pytest + frontend build; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via specs **#284** @ `5b512d8` + grants API **#288** @ `f43d797` + UI **#290** @ `6a01f22` (ChatGPT-style modal — Always allow / Allow this time / Deny + optional/required free-text; persist Always allow per tool/action class; `/api/approvals/pending*` park/decide; idle HUD copy no longer claims approval is required). Ordinary owner chat stays ungated. No invented LE/Red/Purple/ATO gates. Live HUD modal + spoken grants remain Windows desktop sign-off. No new §58 checkbox.

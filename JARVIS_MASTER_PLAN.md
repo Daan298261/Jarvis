@@ -2490,13 +2490,13 @@ Reason:
 
 Taco: separate integration specs document; Instagram Saved→jarvis plus three new high-impact adds; do not merge product code in this pass.
 
-Decision: RFC-0107 durable-brain strengthen + RFC-0110 approval popup (accepted)
+Decision: RFC-0107 durable-brain strengthen (accepted) + RFC-0110 approval popup (implemented)
 
-RFC-0107 end-state is an **external durable brain** (Obsidian linked vault/graph + Jarvis DB/cache, synced with RFC-0011) plus **per-turn internal search** over installed **or** installable tools — pull only what the ask needs; do **not** pre-stuff persona packs, full tool catalogs, or history dumps into every inference prompt. Immediate `n_keep ≥ n_ctx` 400 band-aids stay a separate inference ticket; this is not “compress forever.” RFC-0108 phone offline and RFC-0109 media upload stay on the same Taco ladder. RFC-0110 is a ChatGPT-style modal (**Always allow** / **Allow this time** / **Deny**, optional free-text, persist Always allow per tool/action class) shown only when the model/tool flow actually needs a decision or typed input; ordinary owner chat stays ungated and streams — not the always-on “Review or approval is required” gate. Specs-only; no new §58 checkbox; no invented LE/Red/Purple gates.
+RFC-0107 end-state is an **external durable brain** (Obsidian linked vault/graph + Jarvis DB/cache, synced with RFC-0011) plus **per-turn internal search** over installed **or** installable tools — pull only what the ask needs; do **not** pre-stuff persona packs, full tool catalogs, or history dumps into every inference prompt. Immediate `n_keep ≥ n_ctx` 400 band-aids stay a separate inference ticket; this is not “compress forever.” RFC-0108 phone offline and RFC-0109 media upload stay on the same Taco ladder. RFC-0110 is implemented on development via specs #284 (`5b512d8`) + grants API #288 (`f43d797`) + UI #290 (`6a01f22`): ChatGPT-style modal (**Always allow** / **Allow this time** / **Deny**, optional free-text, persist Always allow per tool/action class) shown only when the model/tool flow actually needs a decision or typed input; ordinary owner chat stays ungated and streams — not the always-on “Review or approval is required” gate. `/api/approvals/pending*` park/decide. No new §58 checkbox; no invented LE/Red/Purple gates. Live HUD modal + spoken grants remain desktop sign-off.
 
 Reason:
 
-Taco: large durable context out of the prompt; search tools per ask; approval popup like ChatGPT only when needed.
+Taco: large durable context out of the prompt; search tools per ask; approval popup like ChatGPT only when needed. CoS assigned the RFC-0110 ledger tick after #290 landed on development.
 
 Decision: Jarvis 1.4.0 release scope lock (RFC-0111–0115 accepted)
 
@@ -2508,7 +2508,7 @@ Living spec [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md) is on `development` (co
 - **RFC-0114** Context overflow preflight + automatic recovery (canonical `PromptBudget`, expand 8K→16K→32K, recoverable 400, retry limits). RFC-0107 durable brain stays the non-compress-forever end-state; this is the separate inference ticket.
 - **RFC-0115** Ornith 9B orchestrator-router + complexity tiers + visible model handoff (gates before warm-score; no Continue button).
 
-**IN 1.4.0:** core packages above **plus** already-filed interesting integrations **RFC-0107** Obsidian durable brain, **0108** phone offline, **0109** media upload, **0110** approval modal, **plus** HexStrike / Daybreak / cyber already in flight (**0105** implemented, **0106** implemented).
+**IN 1.4.0:** core packages above **plus** already-filed interesting integrations **RFC-0107** Obsidian durable brain, **0108** phone offline, **0109** media upload, **0110** approval modal (**implemented**), **plus** HexStrike / Daybreak / cyber already in flight (**0105** implemented, **0106** implemented).
 
 **OUT of the 1.4 cut:** bulk Instagram / catalog RFCs **0095–0104** — they stay on [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) / later queue. Do **not** re-scope them into 1.4 RFCs or block the cut.
 
