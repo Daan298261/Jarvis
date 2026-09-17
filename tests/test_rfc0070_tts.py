@@ -86,23 +86,30 @@ def test_speak_filter_strips_final_reply_reasoning_and_markdown_residue():
     assert "Shall I proceed?" in filtered
 
 
-def test_kokoro_is_selectable_before_weights_are_staged(monkeypatch):
+def test_kokoro_is_not_ready_before_runtime_probe(monkeypatch):
     from app.tts.engines import is_kokoro_available
+    from app.tts.runtime_state import TtsRuntimeState
 
-    monkeypatch.setattr("app.tts.engines.kokoro_python_ready", lambda: True)
-    assert is_kokoro_available() is True
+    monkeypatch.setattr(
+        "app.tts.engines.kokoro_runtime_state",
+        lambda: TtsRuntimeState("kokoro", True, True, False, False),
+    )
+    assert is_kokoro_available() is False
 
 
-def test_kokoro_stays_selectable_before_python_is_installed(monkeypatch):
+def test_kokoro_is_unavailable_before_python_is_installed(monkeypatch):
     from app.tts.engines import is_kokoro_available, pick_engine_for_profile
+    from app.tts.runtime_state import TtsRuntimeState
     from app.voice_profiles.catalog import reload_catalog
 
-    monkeypatch.delenv("JARVIS_DISABLE_KOKORO", raising=False)
-    monkeypatch.setattr("app.tts.engines.kokoro_python_ready", lambda: False)
-    assert is_kokoro_available() is True
+    monkeypatch.setattr(
+        "app.tts.engines.kokoro_runtime_state",
+        lambda: TtsRuntimeState("kokoro", False, False, False, False),
+    )
+    assert is_kokoro_available() is False
     profile = reload_catalog().get("butler_original_v1")
     assert profile is not None
-    assert pick_engine_for_profile(profile) == "kokoro"
+    assert pick_engine_for_profile(profile) is None
 
 
 def test_tts_modules_import_without_circular_import():
@@ -145,15 +152,21 @@ def test_resolve_engine_id_alias():
 
 
 def test_one_click_install_unlocks_stub_profile(jarvis_env, monkeypatch, tmp_path):
+    from app.tts.runtime_state import TtsRuntimeState
+
     monkeypatch.setattr("app.config.data_dir", lambda: jarvis_env["tmp"])
     monkeypatch.setattr("app.tts.pack_install.ensure_kokoro_runtime", lambda **_: tmp_path / "models" / "tts" / "kokoro-82m")
     monkeypatch.setattr("app.tts.pack_install.ensure_kokoro_weights", lambda **_: tmp_path / "models" / "tts" / "kokoro-82m")
+    monkeypatch.setattr(
+        "app.tts.pack_install.verify_kokoro_runtime",
+        lambda **_: TtsRuntimeState("kokoro", True, True, True, True),
+    )
     monkeypatch.setattr(
         "app.tts.engines.is_kokoro_available",
         lambda **_: True,
     )
     monkeypatch.setattr(
-        "app.tts.engines.is_engine_available",
+        "app.voice_profiles.catalog.is_engine_available",
         lambda engine_id: engine_id in {"kokoro", "system"},
     )
     reload_catalog()
@@ -178,6 +191,7 @@ def test_one_click_install_unlocks_stub_profile(jarvis_env, monkeypatch, tmp_pat
 async def test_synthesize_routes_through_picked_engine(monkeypatch):
     from app.workers import voice as voice_worker
 
+    monkeypatch.setattr("app.voice_profiles.catalog.is_engine_available", lambda _engine: True)
     reload_catalog()
     catalog = reload_catalog()
     profile = catalog.get(KOKORO_BUTLER_VOICE_PROFILE_ID)
@@ -197,25 +211,23 @@ async def test_synthesize_routes_through_picked_engine(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_kokoro_receives_profile_speaking_rate(monkeypatch):
-    import numpy as np
-
     from app.tts.synthesize import synthesize_with_engine
+    from app.tts.runtime_state import TtsRuntimeState
 
     reload_catalog()
     profile = reload_catalog().get(KOKORO_BUTLER_VOICE_PROFILE_ID)
     assert profile is not None
-    observed: dict[str, float] = {}
+    observed: dict[str, float | str] = {}
 
-    class FakePipeline:
-        def __call__(self, text, *, voice, speed):
-            assert text == "Ready when you are."
-            assert voice == "bm_george"
-            observed["speed"] = speed
-            yield None, None, np.zeros(16, dtype=np.float32)
+    async def fake_synthesize(text, *, voice, speed):
+        observed.update(text=text, voice=voice, speed=speed)
+        return b"RIFFfake"
 
-    monkeypatch.setattr("app.tts.synthesize.kokoro_python_ready", lambda: True)
-    monkeypatch.setattr("app.tts.synthesize.kokoro_weights_ready", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr("app.tts.synthesize.get_kokoro_pipeline", lambda *_: FakePipeline())
+    monkeypatch.setattr(
+        "app.tts.synthesize.kokoro_runtime_state",
+        lambda: TtsRuntimeState("kokoro", True, True, True, True),
+    )
+    monkeypatch.setattr("app.tts.synthesize.kokoro_adapter.synthesize_async", fake_synthesize)
 
     wav = await synthesize_with_engine(
         "Ready when you are.",
@@ -224,6 +236,7 @@ async def test_kokoro_receives_profile_speaking_rate(monkeypatch):
     )
 
     assert observed["speed"] == pytest.approx(0.96)
+    assert observed["voice"] == "bm_george"
     assert wav.startswith(b"RIFF")
 
 
@@ -266,7 +279,8 @@ def test_ensure_kokoro_python_installs_without_user_facing_pip(monkeypatch):
     monkeypatch.setattr(pack_install, "kokoro_python_ready", after_install)
     pack_install.ensure_kokoro_python()
     assert "pip" in observed["command"]
-    assert "kokoro>=0.9.2" in observed["command"]
+    assert "kokoro==0.9.4" in observed["command"]
+    assert "soundfile==0.14.0" in observed["command"]
     assert pack_install.KOKORO_RUNTIME_ERROR.lower().find("pip") == -1
 
 
@@ -276,5 +290,6 @@ def test_ensure_kokoro_runtime_prepares_python_and_weights(monkeypatch, tmp_path
     steps: list[str] = []
     monkeypatch.setattr(pack_install, "ensure_kokoro_python", lambda **_: steps.append("python"))
     monkeypatch.setattr(pack_install, "ensure_kokoro_weights", lambda **_: steps.append("weights") or tmp_path)
+    monkeypatch.setattr(pack_install, "reset_kokoro_runtime_state", lambda: steps.append("reset"))
     assert pack_install.ensure_kokoro_runtime() == tmp_path
-    assert steps == ["python", "weights"]
+    assert steps == ["python", "weights", "reset"]

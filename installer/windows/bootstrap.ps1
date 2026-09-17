@@ -213,10 +213,18 @@ function Ensure-TtsPythonPackages([string]$VenvPython) {
     # RFC-0070: default butler speech needs Kokoro + soundfile in the post-install venv.
     $marker = Join-Path $Root ".venv\.jarvis-tts-python-ready"
     $check = @"
-import importlib.util
-missing = [name for name in ('kokoro', 'soundfile') if importlib.util.find_spec(name) is None]
-if missing:
-    raise SystemExit('missing:' + ','.join(missing))
+import importlib.metadata
+required = {'kokoro': '0.9.4', 'soundfile': '0.14.0'}
+wrong = []
+for name, expected in required.items():
+    try:
+        actual = importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        actual = 'missing'
+    if actual != expected:
+        wrong.append(f'{name}={actual} (expected {expected})')
+if wrong:
+    raise SystemExit('; '.join(wrong))
 "@
     & $VenvPython -c $check 2>$null
     if ($LASTEXITCODE -eq 0) {
@@ -228,7 +236,7 @@ if missing:
     }
     Write-Host "    Ensuring Kokoro TTS packages (kokoro, soundfile)..."
     Invoke-ProcessWithTimeout -Label "pip kokoro tts" -FilePath $VenvPython -Arguments @(
-        "-m", "pip", "install", "kokoro>=0.9.2", "soundfile>=0.13.0"
+        "-m", "pip", "install", "kokoro==0.9.4", "soundfile==0.14.0"
     ) -TimeoutMinutes $StepTimeoutMinutes
     & $VenvPython -c $check
     if ($LASTEXITCODE -ne 0) { throw "Kokoro TTS packages are still missing after pip install." }

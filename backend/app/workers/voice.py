@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
+import logging
 import os
 import shutil
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +23,9 @@ from ..tts.engines import (
     resolve_engine_id,
 )
 from ..tts.synthesize import synthesize_with_engine
+from ..tts.kokoro_adapter import kokoro_runtime_state
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -140,7 +146,30 @@ def stt_install_hint(backend: str | None = None) -> str:
 
 def voice_status() -> dict[str, Any]:
     stt = stt_backend()
-    tts = tts_backend()
+    fallback_tts = tts_backend()
+    kokoro_state = kokoro_runtime_state()
+    requested_engine = fallback_tts
+    requested_model = ""
+    requested_voice = ""
+    try:
+        from ..voice_profiles.catalog import get_active_voice_profile_id, get_catalog
+
+        active_id = get_active_voice_profile_id()
+        active_profile = get_catalog().get(active_id)
+        if active_profile is not None:
+            requested_engine = resolve_engine_id(active_profile.tts)
+            requested_model = active_profile.tts.model_id
+            requested_voice = active_profile.tts.speaker_ref
+    except Exception:
+        pass
+
+    if requested_engine == "kokoro":
+        actual_engine = "kokoro" if kokoro_state.ready else None
+        tts_last_error = kokoro_state.last_error
+    else:
+        actual_engine = requested_engine if requested_engine and is_engine_available(requested_engine) else None
+        tts_last_error = "" if actual_engine else f"Requested TTS engine '{requested_engine or 'none'}' is unavailable."
+    tts_ready = actual_engine is not None
     model = local_whisper_model()
     ffmpeg = _find_ffmpeg()
     stt_ready = False
@@ -166,8 +195,8 @@ def voice_status() -> dict[str, Any]:
             "STT missing. Install faster-whisper and place a model in models/whisper/ "
             "or set JARVIS_WHISPER_MODEL. Cloud speech APIs are not used."
         )
-    if tts:
-        detail_parts.append(f"TTS={tts}")
+    if tts_ready:
+        detail_parts.append(f"TTS={actual_engine}")
         engines = engine_availability()
         detail_parts.append(
             "engines="
@@ -183,20 +212,32 @@ def voice_status() -> dict[str, Any]:
             or "fallback"
         )
     else:
-        detail_parts.append(
-            "TTS missing. Install Kokoro (default), Piper, or legacy Windows SAPI / espeak-ng / pyttsx3."
-        )
+        detail_parts.append(f"TTS={requested_engine or 'unknown'} FAILED TO LOAD: {tts_last_error}")
+    runtime_payload = {
+        "requested_engine": requested_engine,
+        "actual_engine": actual_engine,
+        "model": requested_model or (kokoro_state.model_id if requested_engine == "kokoro" else ""),
+        "voice": requested_voice or (kokoro_state.speaker_ref if requested_engine == "kokoro" else ""),
+        "package_ready": kokoro_state.package_ready if requested_engine == "kokoro" else True,
+        "assets_ready": kokoro_state.assets_ready if requested_engine == "kokoro" else True,
+        "pipeline_ready": kokoro_state.pipeline_ready if requested_engine == "kokoro" else bool(actual_engine),
+        "synthesis_verified": kokoro_state.synthesis_verified if requested_engine == "kokoro" else bool(actual_engine),
+        "ready": tts_ready,
+        "fallback_active": False,
+        "last_error": tts_last_error or None,
+    }
     return {
         "id": "voice",
         "name": "Voice STT/TTS",
         "kind": "native",
-        "available": bool(stt_ready or tts),
-        "status": "ready" if stt_ready or tts else "missing",
+        "available": bool(stt_ready or tts_ready),
+        "status": "ready" if stt_ready and tts_ready else ("degraded" if stt_ready or tts_ready else "missing"),
         "detail": " ".join(detail_parts),
         "stt": stt,
-        "tts": tts,
+        "tts": actual_engine,
+        "tts_runtime": runtime_payload,
         "stt_ready": bool(stt_ready),
-        "tts_ready": bool(tts),
+        "tts_ready": tts_ready,
         "model_path": str(model) if model else "",
         "ffmpeg_available": bool(ffmpeg),
         "install_hint": stt_install_hint(stt),
@@ -483,12 +524,32 @@ async def synthesize_speech_result(text: str, *, voice_profile_id: str | None = 
         )
     last_error: RuntimeError | None = None
     for candidate in candidates:
+        started = time.perf_counter()
         try:
             audio = await synthesize_with_engine(
                 cleaned,
                 engine_id=candidate,
                 profile=profile if candidate == engine_id else None,
                 speaker_ref=speaker_ref if candidate == engine_id else "",
+            )
+            logger.info(
+                "tts_synthesis %s",
+                json.dumps(
+                    {
+                        "profile_id": selected_profile_id,
+                        "requested_engine": resolve_engine_id(profile.tts) if profile else engine_id,
+                        "actual_engine": candidate,
+                        "model_id": (
+                            getattr(profile.tts, "model_id", "")
+                            if profile
+                            else "kokoro-82m" if candidate == "kokoro" else ""
+                        ),
+                        "speaker_ref": speaker_ref,
+                        "verified": kokoro_runtime_state().ready if candidate == "kokoro" else True,
+                        "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                    },
+                    sort_keys=True,
+                ),
             )
             return SynthesizedSpeech(audio=audio, engine_id=candidate, profile_id=selected_profile_id)
         except RuntimeError as exc:

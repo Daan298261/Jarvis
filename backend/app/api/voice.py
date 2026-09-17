@@ -48,12 +48,14 @@ async def get_voice_status():
     settings = load_settings()
     status = voice_status()
     tts_backend = status.get("tts")
+    runtime = status.get("tts_runtime") or {}
     status["engines"] = engine_availability()
     status["tts"] = {
         "speak_chat_replies": settings.tts.speak_chat_replies,
         "voice_profile_id": settings.tts.voice_profile_id or None,
         "speak_allowed": should_speak_chat_reply(settings),
         "backend": tts_backend,
+        **runtime,
     }
     return status
 

@@ -9,9 +9,26 @@ import {
   type VoiceProfileCatalog,
 } from "./voiceProfiles"
 
+type VoiceRuntimeStatus = {
+  requested_engine?: string | null
+  actual_engine?: string | null
+  model?: string
+  model_id?: string
+  voice?: string
+  speaker_ref?: string
+  ready?: boolean
+  last_error?: string | null
+}
+
 type VoiceEngineStatus = {
-  engines?: { kokoro?: boolean; kokoro_weights?: boolean }
-  tts?: { backend?: string | null }
+  engines?: { kokoro?: boolean; kokoro_weights?: boolean; kokoro_runtime?: VoiceRuntimeStatus }
+  tts?: VoiceRuntimeStatus & { backend?: string | null }
+}
+
+function kokoroRuntime(status: VoiceEngineStatus): VoiceRuntimeStatus | undefined {
+  return status.tts?.requested_engine === "kokoro"
+    ? status.tts
+    : status.engines?.kokoro_runtime
 }
 
 export function VoiceProfilePicker() {
@@ -21,6 +38,7 @@ export function VoiceProfilePicker() {
   const [previewingId, setPreviewingId] = useState<string | null>(null)
   const [msg, setMsg] = useState("")
   const [kokoroReady, setKokoroReady] = useState<boolean | null>(null)
+  const [kokoroStatus, setKokoroStatus] = useState("")
 
   useEffect(() => {
     let cancelled = false
@@ -41,7 +59,15 @@ export function VoiceProfilePicker() {
       })
     api<VoiceEngineStatus>("/api/voice/status")
       .then((status) => {
-        if (!cancelled) setKokoroReady(Boolean(status.engines?.kokoro))
+        if (cancelled) return
+        const runtime = kokoroRuntime(status)
+        const ready = runtime?.ready === true
+        setKokoroReady(ready)
+        if (ready) {
+          setKokoroStatus(`${runtime?.model || runtime?.model_id || "Kokoro 82M"} · ${runtime?.voice || runtime?.speaker_ref || "voice"} · READY`)
+        } else {
+          setKokoroStatus(`Kokoro · FAILED TO LOAD${runtime?.last_error ? ` · ${runtime.last_error}` : ""}`)
+        }
       })
       .catch(() => {
         if (!cancelled) setKokoroReady(null)
@@ -91,7 +117,12 @@ export function VoiceProfilePicker() {
         setMsg(`${profile.display_name} is ready.`)
         try {
           const status = await api<VoiceEngineStatus>("/api/voice/status")
-          setKokoroReady(Boolean(status.engines?.kokoro))
+          const runtime = kokoroRuntime(status)
+          const ready = runtime?.ready === true
+          setKokoroReady(ready)
+          setKokoroStatus(ready
+            ? `${runtime?.model || runtime?.model_id || "Kokoro 82M"} · ${runtime?.voice || runtime?.speaker_ref || "voice"} · READY`
+            : `Kokoro · FAILED TO LOAD${runtime?.last_error ? ` · ${runtime.last_error}` : ""}`)
         } catch {
           setKokoroReady(null)
         }
@@ -134,9 +165,14 @@ export function VoiceProfilePicker() {
         </p>
         {kokoroReady === false && (
           <p className="lede voice-profile-msg" style={{ margin: "0 0 10px", fontSize: 13 }}>
-            Jarvis is preparing the household voice in the background. Speech stays silent if the
-            neural voice fails; it will not pretend that SAPI is Kokoro. You can also click
+            {kokoroStatus || "Kokoro · FAILED TO LOAD"}. Speech stays silent if the neural voice
+            fails; it will not pretend that SAPI is Kokoro. You can also click
             <strong> Install household voice</strong> below.
+          </p>
+        )}
+        {kokoroReady === true && kokoroStatus && (
+          <p className="lede voice-profile-msg" style={{ margin: "0 0 10px", fontSize: 13 }}>
+            {kokoroStatus}
           </p>
         )}
         <p className="lede voice-profile-msg" style={{ margin: "0 0 10px", fontSize: 13 }}>
