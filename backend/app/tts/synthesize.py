@@ -11,16 +11,12 @@ from typing import Any
 from ..config import repo_root
 from ..voice_profiles.schema import VoiceProfile
 from .engines import (
-    KOKORO_MODEL_DIR,
     is_chatterbox_available,
     is_piper_available,
-    kokoro_python_ready,
-    kokoro_weights_ready,
     legacy_system_tts_available,
-    resolve_pack_model_dir,
 )
+from .kokoro_adapter import kokoro_adapter, kokoro_runtime_state
 from .system_sapi import legacy_tts_backend, speak_espeak, speak_pyttsx3, speak_sapi
-from .warm_start import get_kokoro_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -107,35 +103,15 @@ async def _synthesize_kokoro(
     profile: VoiceProfile | None,
     speaking_rate: float,
 ) -> bytes:
-    resolved_dir = model_dir
-    if resolved_dir is None and profile is not None:
-        resolved_dir = resolve_pack_model_dir(profile)
-    if not kokoro_python_ready() or not kokoro_weights_ready(resolved_dir or KOKORO_MODEL_DIR):
-        from .pack_install import ensure_kokoro_runtime
-
-        await asyncio.to_thread(ensure_kokoro_runtime)
-    if not kokoro_python_ready():
-        raise RuntimeError(
-            "The household voice could not be prepared. Try Install household voice in Settings, "
-            "or re-run Jarvis Setup."
-        )
-
-    def _run() -> bytes:
-        lang = "b" if (voice or "bm_daniel").startswith("b") else "a"
-        pipeline = get_kokoro_pipeline(lang, resolved_dir)
-        chosen = voice or "bm_daniel"
-        chunks: list[bytes] = []
-        sample_rate = 24000
-        for _gs, _ps, audio in pipeline(text, voice=chosen, speed=speaking_rate):
-            if audio is None:
-                continue
-            chunks.append(_float32_to_pcm16(audio))
-        if not chunks:
-            raise RuntimeError("Kokoro produced no audio")
-        pcm = b"".join(chunks)
-        return _pcm_to_wav(pcm, sample_rate=sample_rate)
-
-    return await asyncio.to_thread(_run)
+    del model_dir, profile
+    state = kokoro_runtime_state()
+    if not state.ready:
+        raise RuntimeError(state.last_error or "Kokoro runtime is not ready")
+    return await kokoro_adapter.synthesize_async(
+        text,
+        voice=voice or "bm_daniel",
+        speed=speaking_rate,
+    )
 
 
 async def _synthesize_chatterbox(text: str, *, voice: str) -> bytes:
