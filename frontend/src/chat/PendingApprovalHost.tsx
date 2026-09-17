@@ -3,7 +3,7 @@ import { PermissionPrompt } from "./PermissionPrompt"
 import { usePendingApprovals } from "./pendingApprovals"
 
 export function PendingApprovalHost() {
-  const { active, decide, refresh, clearLocal } = usePendingApprovals()
+  const { active, decide, syncError } = usePendingApprovals()
   if (!active?.pending_id) return null
 
   const pendingId = active.pending_id
@@ -16,16 +16,17 @@ export function PendingApprovalHost() {
         aria-modal="true"
         aria-labelledby="permission-modal-title"
       >
+        {syncError && (
+          <p className="permission-prompt-sync-error" role="status">
+            {syncError}
+          </p>
+        )}
         <PermissionPrompt
           variant="modal"
           pendingId={pendingId}
           payload={active}
           onDecide={async (body) => {
             await decide(pendingId, body)
-          }}
-          onDismiss={() => {
-            clearLocal(pendingId)
-            void refresh()
           }}
         />
       </div>

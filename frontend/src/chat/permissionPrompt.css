@@ -1,3 +1,13 @@
+.permission-prompt-sync-error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--warn);
+  background: rgba(212, 101, 90, 0.12);
+  border: 1px solid rgba(212, 101, 90, 0.35);
+}
+
 .permission-modal-backdrop {
   position: fixed;
   inset: 0;

@@ -36,10 +36,26 @@ export type ApprovalDecideMode = "allow_once" | "always" | "deny"
 
 export type PendingApprovalSummary = {
   pending_id: string
+  id?: string
   status?: string
   title?: string
   action_kind?: string
   created_at?: string
+}
+
+export function pendingIdFromRow(row: PendingApprovalSummary | Record<string, unknown>): string {
+  const record = row as PendingApprovalSummary & { id?: string }
+  return String(record.pending_id || record.id || "").trim()
+}
+
+export function normalizePendingSummary(row: Record<string, unknown>): PendingApprovalSummary | null {
+  const pending_id = pendingIdFromRow(row)
+  if (!pending_id) return null
+  return {
+    ...(row as PendingApprovalSummary),
+    pending_id,
+    status: typeof row.status === "string" ? row.status : "pending",
+  }
 }
 
 export type PendingApprovalDetail = ConfirmationPayload & {
@@ -130,11 +146,24 @@ export function pendingDetailFromPayload(raw: unknown): PendingApprovalDetail | 
 
 export async function listPendingApprovals(): Promise<PendingApprovalSummary[]> {
   const data = await api<PendingApprovalListResponse>("/api/approvals/pending")
-  return data.pending || []
+  const rows: PendingApprovalSummary[] = []
+  for (const item of data.pending || []) {
+    const normalized = normalizePendingSummary(item as Record<string, unknown>)
+    if (normalized && normalized.status === "pending") rows.push(normalized)
+  }
+  return rows
 }
 
 export async function getPendingApproval(pendingId: string): Promise<PendingApprovalDetail> {
-  return api<PendingApprovalDetail>(`/api/approvals/pending/${encodeURIComponent(pendingId)}`)
+  const detail = await api<PendingApprovalDetail>(
+    `/api/approvals/pending/${encodeURIComponent(pendingId)}`,
+  )
+  const id = pendingIdFromRow(detail)
+  return {
+    ...detail,
+    pending_id: id || pendingId,
+    requires_owner_input: inferRequiresOwnerInput(detail as Record<string, unknown>),
+  }
 }
 
 export async function decidePendingApproval(
