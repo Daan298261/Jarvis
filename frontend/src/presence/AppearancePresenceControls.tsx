@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom"
 import { HudCybersecurityModule } from "../hud/HudCybersecurityModule"
 import { AppearanceSettingsPane } from "../settings/AppearanceSettingsPane"
-import { settingsSubmenuPath } from "../settings/settingsSubmenus"
+import { appearanceVoiceSettingsPath } from "../settings/settingsSubmenus"
 import { VoiceHudCompact } from "../settings/VoiceHudCompact"
 import type { PresentationSettings } from "./presenceTypes"
 
@@ -24,7 +24,7 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
         <div className="jarvis-presence-controls-body">
           <AppearanceSettingsPane settings={settings} />
           <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
-            <Link to={settingsSubmenuPath("appearance")}>Open full Appearance settings</Link>
+            <Link to={appearanceVoiceSettingsPath("appearance")}>Open full Appearance settings</Link>
           </p>
         </div>
       </details>
