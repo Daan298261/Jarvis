@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import httpx
 import pytest
 from openai import APIStatusError
@@ -9,7 +7,7 @@ from openai import APIStatusError
 from app.agent.loop import AGENT
 from app.inference.manager import MANAGER
 from app.inference.prompt_budget import is_context_overflow
-from app.providers.base import ChatMessage, ChatResult
+from app.providers.base import ChatResult
 from tests.test_verification_loop import ScriptedProvider, _finished, _tool
 
 
@@ -65,31 +63,6 @@ async def test_overflow_does_not_immediately_fail_task(jarvis_env, monkeypatch):
     task = await _finished(created.id)
     assert task.status == "completed"
     assert provider._calls >= 2
-
-
-@pytest.mark.asyncio
-async def test_escalation_hook_invoked_on_capacity(monkeypatch, jarvis_env):
-    from app.inference import prompt_budget as pb
-
-    hook = AsyncMock(return_value=False)
-    monkeypatch.setattr("app.inference.router_escalation.escalate_for_context_capacity", hook)
-    settings = jarvis_env["settings"]
-    profile = __import__("app.inference.profiles", fromlist=["PROFILES"]).PROFILES["fast"]
-    MANAGER.state.context_size = 8192
-    MANAGER.state.server_n_ctx = 8192
-    messages = [ChatMessage(role="user", content="q" * 60000)]
-    updated, ok, escalated = await pb.recover_context_after_overflow(
-        messages,
-        None,
-        profile,
-        1024,
-        settings,
-        manager=MANAGER,
-        allow_escalation=True,
-    )
-    assert hook.await_count == 1
-    assert ok is False
-    assert escalated is False
 
 
 def test_recovery_retry_limits_constants():

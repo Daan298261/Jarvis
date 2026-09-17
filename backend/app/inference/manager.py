@@ -396,7 +396,7 @@ class InferenceManager:
             except APIStatusError as exc:
                 if is_context_overflow(exc) and overflow_retries < 1:
                     overflow_retries += 1
-                    typed, recovered, _esc = await recover_context_after_overflow(
+                    typed, recovered = await recover_context_after_overflow(
                         typed,
                         fitted_tools,
                         profile,
@@ -404,7 +404,6 @@ class InferenceManager:
                         app_settings,
                         manager=self,
                         working_state_block=working_state_block,
-                        allow_escalation=False,
                     )
                     if recovered:
                         continue
@@ -488,7 +487,7 @@ class InferenceManager:
             except APIStatusError as exc:
                 if is_context_overflow(exc) and overflow_retries < 1:
                     overflow_retries += 1
-                    typed, recovered, _esc = await recover_context_after_overflow(
+                    typed, recovered = await recover_context_after_overflow(
                         typed,
                         fitted_tools,
                         profile,
@@ -496,7 +495,6 @@ class InferenceManager:
                         app_settings,
                         manager=self,
                         working_state_block=working_state_block,
-                        allow_escalation=False,
                     )
                     if recovered:
                         continue

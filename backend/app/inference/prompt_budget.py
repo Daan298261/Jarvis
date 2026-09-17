@@ -51,14 +51,20 @@ class PreparedInference:
 
 
 class ModelCapacityExceeded(Exception):
-    """Recovery signal when the active model cannot fit the prompt after compact + expand."""
+    """The active model window cannot fit the prompt after compact + expand (same-model recovery exhausted)."""
 
     def __init__(self, budget: PromptBudget) -> None:
         self.budget = budget
-        super().__init__(
-            f"Model capacity exceeded: required {budget.required_context} tokens, "
-            f"active window {budget.active_context}, profile cap {budget.profile_cap}"
-        )
+        super().__init__(context_capacity_error(budget))
+
+
+def context_capacity_error(budget: PromptBudget) -> str:
+    return (
+        "Context capacity exceeded after compact/expand recovery: "
+        f"required_context={budget.required_context} tokens, "
+        f"active_context={budget.active_context}, profile_cap={budget.profile_cap} "
+        f"(pressure={budget.pressure:.2f})."
+    )
 
 
 _OVERFLOW_MARKERS = (
@@ -246,9 +252,8 @@ async def recover_context_after_overflow(
     manager: Any,
     working_state_block: str | None = None,
     emit: ContextEventEmitter | None = None,
-    allow_escalation: bool = True,
-) -> tuple[list[ChatMessage], bool, bool]:
-    """Compact, expand, and optionally escalate after a recoverable overflow error."""
+) -> tuple[list[ChatMessage], bool]:
+    """Compact and expand after a recoverable overflow error (same-model recovery only)."""
     budget = calculate_prompt_budget(
         messages,
         tools,
@@ -295,27 +300,11 @@ async def recover_context_after_overflow(
         active_context=manager.live_context_size(),
     )
     if budget.pressure < PRESSURE_EXPAND_OK:
-        return messages, True, False
-
-    escalated = False
-    if allow_escalation:
-        from .router_escalation import escalate_for_context_capacity
-
-        escalated = await escalate_for_context_capacity(settings, profile, budget)
-        if escalated:
-            budget = calculate_prompt_budget(
-                messages,
-                tools,
-                profile=profile,
-                max_tokens=max_tokens,
-                active_context=manager.live_context_size(),
-            )
-            if budget.pressure < PRESSURE_EXPAND_OK:
-                return messages, True, True
+        return messages, True
 
     if emit:
         await emit("context_recovery_failed", budget, "recovery exhausted")
-    return messages, False, escalated
+    return messages, False
 
 
 # Re-export for compaction module compatibility

@@ -21,6 +21,8 @@ from ..inference.profiles import ModelProfile, resolve_profile
 from ..inference.prompt_budget import (
     ModelCapacityExceeded,
     PromptBudget,
+    calculate_prompt_budget,
+    context_capacity_error,
     is_context_overflow,
     recover_context_after_overflow,
 )
@@ -503,13 +505,12 @@ class AgentRuntime:
         *,
         tools: list[dict[str, Any]] | None,
         max_tokens: int | None,
-        allow_escalation: bool,
     ) -> tuple[list[ChatMessage], bool]:
         async def _emit(kind: str, budget: PromptBudget, detail: str) -> None:
             payload = json.dumps({**budget.as_dict(), "detail": detail})
             await BUS.publish(task_id, kind, kind.replace("_", " ").title(), payload[:4000], stage="act")
 
-        updated, recovered, _escalated = await recover_context_after_overflow(
+        updated, recovered = await recover_context_after_overflow(
             messages,
             tools,
             profile,
@@ -518,7 +519,6 @@ class AgentRuntime:
             manager=MANAGER,
             working_state_block=working.as_prompt_block(),
             emit=_emit,
-            allow_escalation=allow_escalation,
         )
         return updated, recovered
 
@@ -903,7 +903,6 @@ class AgentRuntime:
             tools_used = True
 
         context_recovery_attempts = 0
-        context_escalation_attempts = 0
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel or kill_switch_active():
@@ -1003,7 +1002,6 @@ class AgentRuntime:
                 except ModelCapacityExceeded as exc:
                     await self._release_lazy_vision()
                     if context_recovery_attempts < 2:
-                        allow_esc = context_escalation_attempts < 1 and context_recovery_attempts >= 1
                         messages, recovered = await self._recover_context_pressure(
                             task_id,
                             messages,
@@ -1012,14 +1010,11 @@ class AgentRuntime:
                             settings,
                             tools=turn_tools,
                             max_tokens=turn_max_tokens,
-                            allow_escalation=allow_esc,
                         )
                         if recovered:
                             context_recovery_attempts += 1
-                            if allow_esc:
-                                context_escalation_attempts += 1
                             continue
-                    err = str(exc)
+                    err = context_capacity_error(exc.budget)
                     await self._update(
                         task_id,
                         status="failed",
@@ -1038,7 +1033,6 @@ class AgentRuntime:
                     await self._release_lazy_vision()
                     if isinstance(exc, APIStatusError) and is_context_overflow(exc):
                         if context_recovery_attempts < 2:
-                            allow_esc = context_escalation_attempts < 1 and context_recovery_attempts >= 1
                             messages, recovered = await self._recover_context_pressure(
                                 task_id,
                                 messages,
@@ -1047,13 +1041,32 @@ class AgentRuntime:
                                 settings,
                                 tools=turn_tools,
                                 max_tokens=turn_max_tokens,
-                                allow_escalation=allow_esc,
                             )
                             if recovered:
                                 context_recovery_attempts += 1
-                                if allow_esc:
-                                    context_escalation_attempts += 1
                                 continue
+                        budget = calculate_prompt_budget(
+                            messages,
+                            turn_tools,
+                            profile=profile,
+                            max_tokens=turn_max_tokens,
+                            active_context=MANAGER.live_context_size(),
+                        )
+                        err = context_capacity_error(budget)
+                        await self._update(
+                            task_id,
+                            status="failed",
+                            stage="failed",
+                            result=err,
+                            error=err,
+                            current_action="Failed: context capacity exceeded",
+                            current_tool="",
+                            **metrics.as_fields(),
+                        )
+                        await record_trajectory(task_id, working, "failed")
+                        await complete_coding_route(task_id, "failed", err)
+                        await BUS.publish(task_id, "failed", "Context capacity exceeded", err, stage="failed")
+                        return
                     if isinstance(exc, APIStatusError):
                         detail = getattr(exc, "message", None) or str(exc)
                         err = f"Inference server error ({exc.status_code}): {detail}"
