@@ -2526,6 +2526,14 @@ Reason:
 
 Taco 2026-09-17: IG TypeSafe Jev (@albert.olgaard) as optional Jarvis decision tier; free toggle + Plus packaging; waitlist-honest until the API is actually available.
 
+Decision: RFC-0107 amend — embed real Obsidian UI (accepted)
+
+Taco 2026-09-17: Obsidian is the **operational** durable brain (vault bind + agent read/write/wiki-link/graph + per-turn tool search — not décor). Owner surface is the **real Obsidian UI hosted inside Jarvis** (Desktop Tauri/WebView2 native host of official Obsidian; official embed if it exists; Electron BrowserView only if that is the shell). Do **not** ship a custom note browser, graph viewer, or “Jarvis brain” clone. Specs: RFC-0107 amend + [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) 0107 row. Backend bind/index/working-set already on development (#295); RFC stays **accepted** until UX embed lands. No new §58 checkbox; no invented LE gates.
+
+Reason:
+
+Taco: operational soon and actually used; embed Obsidian inside Jarvis; do not build a custom brain UI.
+
 ---
 
 ## 60. Expected Example Behavior
