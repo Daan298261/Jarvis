@@ -2518,6 +2518,14 @@ Reason:
 
 Taco 1.4.0 scope lock: split `JARVIS_1.4_SPECS.md` into RFC-0111–0115; keep interesting 0107–0110 and in-flight HexStrike/cyber; leave bulk reel catalog for later. CoS assigned the RFC-0114 ledger tick after #293 landed on development.
 
+Decision: RFC-0116 TypeSafe Jev optional decision tier (accepted; post-1.4)
+
+TypeSafe **Jev** (System One) is an **optional cloud decision accelerator** for Jarvis control-path classify/route/score/branch — not chat/TTS/coding, not a Kokoro/Ornith-generation replacement. Default remains local Ornith + heuristics (`decision_tier: local`). Owner may opt into `jev_optional` (BYO TypeSafe key) or `jev_plus` (paid monthly packaging when billing exists; until then a real `has_feature(..., "decision.jev_plus")` / `GET /api/license/entitlements` check, not `if True`). **Jev is early access / waitlist** as of 2026-09-17: specs land now; implement is gated on public/early-access API availability + owner opt-in. Settings show waitlist/status + “notify when ready”; **no fake-live stubs** (enabled but unavailable → error/CTA, never silent local-LLM-as-Jev). Wires RFC-0107 tool select, RFC-0075 speak class, RFC-0115 complexity/escalate, RFC-0110 approval-needed. **Not** in the 1.4.0 cut (optional / post-1.4 interesting). No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
+
+Reason:
+
+Taco 2026-09-17: IG TypeSafe Jev (@albert.olgaard) as optional Jarvis decision tier; free toggle + Plus packaging; waitlist-honest until the API is actually available.
+
 ---
 
 ## 60. Expected Example Behavior
