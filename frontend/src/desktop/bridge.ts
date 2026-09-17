@@ -12,6 +12,34 @@ export type BackendLifecycleStatus =
   | "backend_stopped"
   | "unknown"
 
+export type ObsidianEmbedState =
+  | "idle"
+  | "launching"
+  | "embedded"
+  | "failed"
+  | "unsupported_platform"
+
+export type ObsidianProbeResult = {
+  installed: boolean
+  exe_path: string | null
+  platform_embed_supported: boolean
+  message: string
+}
+
+export type ObsidianEmbedStatus = {
+  state: ObsidianEmbedState
+  message: string
+  obsidian_hwnd: number | null
+}
+
+export type ObsidianEmbedBounds = {
+  vault_path?: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
 
 function getInvoke(): TauriInvoke | null {
@@ -176,6 +204,82 @@ export const DesktopBridge = {
       return (await invoke("data_paths")) as Record<string, string>
     } catch {
       return null
+    }
+  },
+
+  async obsidianProbe(): Promise<ObsidianProbeResult | null> {
+    const invoke = getInvoke()
+    if (!invoke) return null
+    try {
+      return (await invoke("obsidian_probe")) as ObsidianProbeResult
+    } catch {
+      return null
+    }
+  },
+
+  async obsidianBoundVaultPath(): Promise<string | null> {
+    const invoke = getInvoke()
+    if (!invoke) return null
+    try {
+      const path = await invoke("obsidian_bound_vault_path")
+      return typeof path === "string" && path.trim() ? path.trim() : null
+    } catch {
+      return null
+    }
+  },
+
+  async obsidianEmbedStart(bounds: ObsidianEmbedBounds): Promise<ObsidianEmbedStatus | null> {
+    const invoke = getInvoke()
+    if (!invoke) return null
+    try {
+      return (await invoke("obsidian_embed_start", { bounds })) as ObsidianEmbedStatus
+    } catch {
+      return null
+    }
+  },
+
+  async obsidianEmbedResize(bounds: ObsidianEmbedBounds): Promise<ObsidianEmbedStatus | null> {
+    const invoke = getInvoke()
+    if (!invoke) return null
+    try {
+      return (await invoke("obsidian_embed_resize", { bounds })) as ObsidianEmbedStatus
+    } catch {
+      return null
+    }
+  },
+
+  async obsidianEmbedStop(): Promise<ObsidianEmbedStatus | null> {
+    const invoke = getInvoke()
+    if (!invoke) return null
+    try {
+      return (await invoke("obsidian_embed_stop")) as ObsidianEmbedStatus
+    } catch {
+      return null
+    }
+  },
+
+  async obsidianFocusNote(relPath: string, vaultPath?: string): Promise<boolean> {
+    const invoke = getInvoke()
+    if (!invoke) return false
+    try {
+      await invoke("obsidian_focus_note", {
+        relPath,
+        vaultPath: vaultPath?.trim() || null,
+      })
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  async obsidianOpenInstall(): Promise<boolean> {
+    const invoke = getInvoke()
+    if (!invoke) return false
+    try {
+      await invoke("obsidian_open_install")
+      return true
+    } catch {
+      return false
     }
   },
 }
