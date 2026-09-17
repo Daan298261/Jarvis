@@ -55,17 +55,34 @@ function formatApiDetail(detail: unknown, fallback: string): string {
   return fallback
 }
 
+export class ApiError extends Error {
+  readonly status: number
+  readonly body: unknown
+
+  constructor(status: number, message: string, body: unknown = null) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.body = body
+  }
+}
+
+export function isApiError(err: unknown): err is ApiError {
+  return err instanceof ApiError
+}
+
 async function throwIfNotOk(response: Response): Promise<void> {
   if (response.ok) return
   const text = await response.text()
+  let parsed: unknown = null
   let errorDetail = text
   try {
-    const parsed = JSON.parse(text)
-    errorDetail = formatApiDetail(parsed.detail, text)
+    parsed = JSON.parse(text)
+    errorDetail = formatApiDetail((parsed as { detail?: unknown }).detail, text)
   } catch {
     // not JSON
   }
-  throw new Error(errorDetail || response.statusText)
+  throw new ApiError(response.status, errorDetail || response.statusText, parsed)
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {

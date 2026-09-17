@@ -67,6 +67,32 @@ export function ComputerUsePermissions() {
         ChatGPT-style defaults: Jarvis asks before using this PC, worker nodes, the internet, or the local
         network. Red flags never ship exploits — they stay denied unless the Red Team gate is unlocked.
       </p>
+      {items.some((item) => item.persisted === "always") && (
+        <section style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: 13 }}>Saved always-allow grants</h3>
+          <p className="lede" style={{ margin: "0 0 8px" }}>
+            These tool classes skip the approval popup until you revoke them.
+          </p>
+          {items
+            .filter((item) => item.persisted === "always")
+            .map((item) => (
+              <div key={`always-${item.id}`} className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+                <span>
+                  <strong>{item.title}</strong>
+                  <span className="lede" style={{ display: "block" }}>{item.detail}</span>
+                </span>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void save(item.id, "ask")}
+                >
+                  Revoke
+                </button>
+              </div>
+            ))}
+        </section>
+      )}
       {GROUP_ORDER.map((group) => (
         <section key={group}>
           <h3 style={{ margin: "12px 0 8px", fontSize: 13 }}>{GROUP_LABELS[group]}</h3>

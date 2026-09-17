@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } from "../api"
-import { PermissionPrompt } from "../chat/PermissionPrompt"
+import { parseConfirmationPayload, PermissionPrompt } from "../chat/PermissionPrompt"
+import { usePendingApprovals } from "../chat/pendingApprovals"
 import { MobileCompanionSetup } from "./MobileCompanionSetup"
 import { TaskHeartbeat } from "../components/TaskActivity"
 import { phaseLabel } from "../taskStatus"
@@ -24,6 +25,7 @@ export function PhonePage() {
   const chunksRef = useRef<Blob[]>([])
   const spokenRef = useRef<string>("")
   const standalone = typeof window !== "undefined" && window.matchMedia("(display-mode: standalone)").matches
+  const { ingestPayload } = usePendingApprovals()
 
   async function refreshLists(preferredId?: string) {
     const tasks = await api<Task[]>("/api/tasks").catch(() => [] as Task[])
@@ -52,6 +54,11 @@ export function PhonePage() {
     }, 2000)
     return () => window.clearInterval(timer)
   }, [active?.id, active?.status])
+
+  useEffect(() => {
+    if (!active?.waiting_for_confirmation || !active.confirmation_payload) return
+    ingestPayload(active.confirmation_payload)
+  }, [active?.waiting_for_confirmation, active?.confirmation_payload, ingestPayload])
 
   useEffect(() => {
     if (!speakResults || !active || active.status !== "completed" || !active.result) return
@@ -235,7 +242,8 @@ export function PhonePage() {
               <button className="btn secondary" type="button" onClick={speakNow}>Speak result</button>
               <button className="btn secondary" type="button" onClick={() => navigate(`/tasks/${active.id}`)}>Open on PC layout</button>
             </div>
-            {active.waiting_for_confirmation && (
+            {active.waiting_for_confirmation &&
+              !parseConfirmationPayload(active.confirmation_payload)?.pending_id && (
               <PermissionPrompt taskId={active.id} payload={active.confirmation_payload} variant="phone" />
             )}
           </>

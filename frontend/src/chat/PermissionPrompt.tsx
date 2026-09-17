@@ -2,38 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { api, apiForm } from "../api"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 import { speakChatReply, stopChatTts } from "../tts/chatTtsPlayer"
+import type { ApprovalDecideBody, ApprovalDecideMode, ConfirmationPayload, PermissionCatalogItem } from "./approvalsApi"
+import { inferRequiresOwnerInput } from "./approvalsApi"
 import { interpretSpokenGrant, spokenGrantUnclearMessage } from "./spokenGrant"
 import "./permissionPrompt.css"
 
-export type PermissionCatalogItem = {
-  id: string
-  group: string
-  title: string
-  detail: string
-  status: string
-  persisted: string
-  gated?: string | null
-  offensive?: boolean
-  gate_unlocked?: boolean
-  reason?: string
-}
-
-export type ConfirmationPayload = {
-  kind?: string
-  id?: string
-  name?: string
-  arguments?: Record<string, unknown>
-  irreversible?: boolean
-  permission_id?: string
-  pending?: string[]
-  title?: string
-  detail?: string
-  reason?: string
-  options?: string[]
-  catalog?: PermissionCatalogItem[]
-  spoken_prompt?: string
-  voice_reply_hint?: string
-}
+export type { ConfirmationPayload, PermissionCatalogItem } from "./approvalsApi"
 
 type PermissionSnapshot = {
   permissions: PermissionCatalogItem[]
@@ -41,9 +15,12 @@ type PermissionSnapshot = {
 }
 
 type PermissionPromptProps = {
-  taskId: string
+  taskId?: string
+  pendingId?: string
   payload?: unknown
-  variant?: "hud" | "classic" | "phone"
+  variant?: "hud" | "classic" | "phone" | "modal"
+  onDecide?: (body: ApprovalDecideBody) => Promise<void>
+  onDismiss?: () => void
 }
 
 const GROUP_LABELS: Record<string, string> = {
@@ -55,6 +32,7 @@ const GROUP_LABELS: Record<string, string> = {
 }
 
 const LISTEN_MS = 8000
+const OWNER_NOTE_MAX = 500
 
 export function parseConfirmationPayload(raw: unknown): ConfirmationPayload | null {
   if (raw == null || raw === "") return null
@@ -68,12 +46,29 @@ export function parseConfirmationPayload(raw: unknown): ConfirmationPayload | nu
   }
 }
 
-export function PermissionPrompt({ taskId, payload, variant = "classic" }: PermissionPromptProps) {
+export function PermissionPrompt({
+  taskId,
+  pendingId,
+  payload,
+  variant = "classic",
+  onDecide,
+  onDismiss,
+}: PermissionPromptProps) {
   const parsed = useMemo(() => parseConfirmationPayload(payload), [payload])
-  const isPermission = parsed?.kind === "permission" || Boolean(parsed?.permission_id)
+  const resolvedPendingId = pendingId || parsed?.pending_id
+  const usesDecideApi = Boolean(resolvedPendingId && onDecide)
+  const isPermission =
+    parsed?.kind === "permission" || Boolean(parsed?.permission_id) || usesDecideApi
+  const requiresOwnerInput = useMemo(() => {
+    if (!parsed) return false
+    const record = parsed as ConfirmationPayload & Record<string, unknown>
+    return inferRequiresOwnerInput(record)
+  }, [parsed])
+
   const [moreOpen, setMoreOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  const [ownerNote, setOwnerNote] = useState("")
   const [catalog, setCatalog] = useState<PermissionCatalogItem[]>(parsed?.catalog || [])
   const [speakChatReplies] = useSpeakChatReplies()
   const [listening, setListening] = useState(false)
@@ -85,6 +80,8 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
   const listenGenRef = useRef(0)
   const sttReadyRef = useRef<boolean | null>(null)
   sttReadyRef.current = sttReady
+
+  const allowBlocked = requiresOwnerInput && !ownerNote.trim()
 
   useEffect(() => {
     let cancelled = false
@@ -118,6 +115,7 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
   useEffect(() => {
     settledRef.current = false
     listenGenRef.current += 1
+    setOwnerNote("")
     const gen = listenGenRef.current
     const prompt = (parsed?.spoken_prompt || "").trim()
     if (!prompt) return
@@ -136,9 +134,8 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
       stopListening()
       stopChatTts()
     }
-    // Speak once per prompt payload; Answer by voice remains available if STT was not ready yet.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed?.spoken_prompt, taskId])
+  }, [parsed?.spoken_prompt, taskId, pendingId])
 
   function stopListening() {
     if (listenTimerRef.current != null) {
@@ -211,11 +208,13 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
         if (speakChatReplies) await speakChatReply(unclear)
         return
       }
-      if (isPermission) {
-        await grant(mode)
-      } else {
-        await continueTask({ approve: mode !== "deny" })
+      const decideMode: ApprovalDecideMode =
+        mode === "always" ? "always" : mode === "deny" ? "deny" : "allow_once"
+      if (decideMode !== "deny" && requiresOwnerInput && !ownerNote.trim()) {
+        setError("Type a note or instruction before allowing this step.")
+        return
       }
+      await submitDecision(decideMode)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not transcribe that reply.")
     } finally {
@@ -223,32 +222,50 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
     }
   }
 
-  async function continueTask(body: Record<string, unknown>) {
+  async function submitDecision(mode: ApprovalDecideMode) {
     settledRef.current = true
     listenGenRef.current += 1
     stopListening()
     stopChatTts()
     setBusy(true)
     setError("")
+    const note = ownerNote.trim()
     try {
-      await api(`/api/tasks/${taskId}/continue`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      })
+      if (usesDecideApi && onDecide) {
+        await onDecide({
+          mode,
+          ...(note ? { owner_note: note.slice(0, OWNER_NOTE_MAX) } : {}),
+        })
+        onDismiss?.()
+      } else if (taskId) {
+        if (isPermission || parsed?.permission_id) {
+          await api(`/api/tasks/${taskId}/continue`, {
+            method: "POST",
+            body: JSON.stringify({
+              approve: mode !== "deny",
+              grant_mode: mode,
+              permission_id: parsed?.permission_id,
+              owner_note: note ? note.slice(0, OWNER_NOTE_MAX) : undefined,
+            }),
+          })
+        } else {
+          await api(`/api/tasks/${taskId}/continue`, {
+            method: "POST",
+            body: JSON.stringify({
+              approve: mode !== "deny",
+              owner_note: note ? note.slice(0, OWNER_NOTE_MAX) : undefined,
+            }),
+          })
+        }
+      } else {
+        throw new Error("No approval channel available for this prompt.")
+      }
     } catch (err: unknown) {
       settledRef.current = false
       setError(err instanceof Error ? err.message : "Could not save that choice.")
     } finally {
       setBusy(false)
     }
-  }
-
-  async function grant(mode: "allow_once" | "allow_session" | "always" | "deny") {
-    await continueTask({
-      approve: mode !== "deny",
-      grant_mode: mode,
-      permission_id: parsed?.permission_id,
-    })
   }
 
   async function saveCatalogItem(id: string, mode: string) {
@@ -267,13 +284,14 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
     }
   }
 
-  const title = parsed?.title || (parsed?.irreversible ? "Approve this deletion" : "Jarvis needs permission")
+  const title =
+    parsed?.title || (parsed?.irreversible ? "Approve this deletion" : "Jarvis needs your decision")
   const detail =
     parsed?.detail ||
     parsed?.reason ||
     (parsed?.name ? `Jarvis wants to run ${parsed.name}.` : "Review this action before Jarvis continues.")
   const spoken = (parsed?.spoken_prompt || "").trim()
-  const hint = parsed?.voice_reply_hint || (isPermission ? "Say yes, always, or no." : "Say yes or no.")
+  const hint = parsed?.voice_reply_hint || "Say always, yes, or no."
 
   const groups = useMemo(() => {
     const grouped: Record<string, PermissionCatalogItem[]> = {}
@@ -284,39 +302,63 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
     return grouped
   }, [catalog])
 
+  const shellClass = `permission-prompt permission-prompt-${variant}${variant === "modal" ? " permission-prompt-overlay-card" : ""}`
+
   return (
-    <div className={`permission-prompt permission-prompt-${variant}`}>
-      <p className="permission-prompt-kicker">Permission required</p>
-      <strong className="permission-prompt-title">{title}</strong>
+    <div className={shellClass}>
+      <p className="permission-prompt-kicker">Approval required</p>
+      <strong className="permission-prompt-title" id={variant === "modal" ? "permission-modal-title" : undefined}>
+        {title}
+      </strong>
       <p className="permission-prompt-detail">{detail}</p>
       {spoken && <p className="permission-prompt-spoken">{spoken}</p>}
       {parsed?.irreversible && (
         <p className="permission-prompt-warn">This can delete or irreversibly change files.</p>
       )}
+      <label className="permission-note-field">
+        <span>{requiresOwnerInput ? "Your input (required)" : "Note or extra instruction (optional)"}</span>
+        <textarea
+          value={ownerNote}
+          onChange={(event) => setOwnerNote(event.target.value.slice(0, OWNER_NOTE_MAX))}
+          placeholder="Add a note or extra instruction"
+          rows={3}
+          disabled={busy}
+        />
+      </label>
       {listening && (
         <p className="permission-prompt-listening" role="status" aria-live="polite">
           Listening… {hint}
         </p>
       )}
-      {isPermission ? (
-        <div className="permission-prompt-actions">
-          <button className="btn" type="button" disabled={busy} onClick={() => void grant("allow_once")}>
-            Allow once
-          </button>
-          <button className="btn secondary" type="button" disabled={busy} onClick={() => void grant("always")}>
-            Always allow
-          </button>
-          <button className="btn secondary" type="button" disabled={busy} onClick={() => void grant("deny")}>
-            Don&apos;t allow
-          </button>
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={busy || listening}
-            onClick={() => void startListening(listenGenRef.current)}
-          >
-            {listening ? "Listening…" : "Answer by voice"}
-          </button>
+      <div className="permission-prompt-actions">
+        <button
+          className="btn"
+          type="button"
+          disabled={busy || allowBlocked}
+          onClick={() => void submitDecision("allow_once")}
+        >
+          Allow this time
+        </button>
+        <button
+          className="btn secondary"
+          type="button"
+          disabled={busy || allowBlocked}
+          onClick={() => void submitDecision("always")}
+        >
+          Always allow
+        </button>
+        <button className="btn secondary" type="button" disabled={busy} onClick={() => void submitDecision("deny")}>
+          Deny
+        </button>
+        <button
+          className="btn secondary"
+          type="button"
+          disabled={busy || listening}
+          onClick={() => void startListening(listenGenRef.current)}
+        >
+          {listening ? "Listening…" : "Answer by voice"}
+        </button>
+        {isPermission && (
           <button
             className="permission-more-btn"
             type="button"
@@ -326,35 +368,8 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
           >
             {moreOpen ? "Less" : "More"}
           </button>
-        </div>
-      ) : (
-        <div className="permission-prompt-actions">
-          <button
-            className="btn danger"
-            type="button"
-            disabled={busy}
-            onClick={() => void continueTask({ approve: true })}
-          >
-            Approve
-          </button>
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={busy}
-            onClick={() => void continueTask({ approve: false })}
-          >
-            Reject
-          </button>
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={busy || listening}
-            onClick={() => void startListening(listenGenRef.current)}
-          >
-            {listening ? "Listening…" : "Answer by voice"}
-          </button>
-        </div>
-      )}
+        )}
+      </div>
       {moreOpen && (
         <div className="permission-more">
           <p className="permission-more-lede">
@@ -388,14 +403,6 @@ export function PermissionPrompt({ taskId, payload, variant = "classic" }: Permi
               ))}
             </section>
           ))}
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={busy}
-            onClick={() => void grant("allow_session")}
-          >
-            Allow this session, then continue
-          </button>
         </div>
       )}
       {error && <p className="permission-prompt-error">{error}</p>}

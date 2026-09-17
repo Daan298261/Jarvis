@@ -4,9 +4,9 @@ export type OrbMood = "idle" | "listening" | "thinking" | "speaking" | "alert"
 
 export function deriveOrbMood(
   task: Task | null | undefined,
-  opts: { recording?: boolean; speaking?: boolean; systemDegraded?: boolean },
+  opts: { recording?: boolean; speaking?: boolean; systemDegraded?: boolean; pendingApproval?: boolean },
 ): OrbMood {
-  if (opts.systemDegraded || task?.status === "failed" || task?.waiting_for_confirmation) {
+  if (opts.systemDegraded || task?.status === "failed" || opts.pendingApproval) {
     return "alert"
   }
   if (opts.recording) return "listening"

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
-import { PermissionPrompt } from "./PermissionPrompt"
+import { parseConfirmationPayload, PermissionPrompt } from "./PermissionPrompt"
+import { useOptionalPendingApprovals } from "./pendingApprovals"
 import {
   filterThoughtEvents,
   filterWorkEvents,
@@ -61,12 +62,17 @@ export function OwnerChatTranscript({
     return blocks
   }, [turns])
   const running = isTaskRunning(status)
+  const confirmation = useMemo(() => parseConfirmationPayload(confirmation_payload), [confirmation_payload])
+  const pendingCtx = useOptionalPendingApprovals()
+  const showLegacyInlinePrompt =
+    waiting_for_confirmation && !confirmation?.pending_id
+  const approvalDecisionOpen = Boolean(pendingCtx?.hasPending || showLegacyInlinePrompt)
   const statusLine = taskStatusLine({
     status,
     stage,
     current_action,
     current_tool,
-    waiting_for_confirmation,
+    waiting_for_confirmation: approvalDecisionOpen ? waiting_for_confirmation : false,
   })
 
   function toggleDetails() {
@@ -134,7 +140,7 @@ export function OwnerChatTranscript({
         </p>
       )}
 
-      {waiting_for_confirmation && (
+      {showLegacyInlinePrompt && (
         <PermissionPrompt taskId={taskId} payload={confirmation_payload} variant={isHud ? "hud" : "classic"} />
       )}
 
