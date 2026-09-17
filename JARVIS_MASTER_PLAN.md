@@ -2498,17 +2498,17 @@ Reason:
 
 Taco: large durable context out of the prompt; search tools per ask; approval popup like ChatGPT only when needed. CoS assigned the RFC-0110 ledger tick after #290 landed on development.
 
-Decision: Jarvis 1.4.0 release scope lock (RFC-0111–0113, RFC-0115 accepted; RFC-0114 implemented)
+Decision: Jarvis 1.4.0 release scope lock (RFC-0112–0113, RFC-0115 accepted; RFC-0111 implemented; RFC-0114 implemented)
 
 Living spec [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md) is on `development` (copied from `main` @ `6f6a633`; light path note only). Implementable contracts:
 
-- **RFC-0111** Kokoro as real runtime (`TtsRuntimeState`, adapter, pinned versions, no pip during speak, no silent SAPI, health probe, requested-vs-actual engine) — deepens RFC-0070 / RFC-0092; does not change 0092 defaults.
-- **RFC-0112** Voice preview uses the exact selected profile (canonical route, error preservation, playback failure is failure).
+- **RFC-0111** Kokoro as real runtime — **implemented** on development via specs #286 (`1f8320d`) + implement #296 (`99a0463`): `TtsRuntimeState`, `KokoroAdapter`, pinned `kokoro==0.9.4` / `soundfile==0.14.0`, no pip during speak, no silent SAPI, synthesis health probe, requested-vs-actual engine. Deepens RFC-0070 / RFC-0092; does not change 0092 defaults. **RFC-0112** voice preview remains HOLD. Live A/B listen after Setup rebuild remains desktop sign-off.
+- **RFC-0112** Voice preview uses the exact selected profile (canonical route, error preservation, playback failure is failure). **HOLD** (Sol/Taco) — do not tick.
 - **RFC-0113** Admin > Settings 1.4 IA deltas (Appearance & Voice composed, Phone Pairing, Network & Swarm, redirects) — RFC-0094 remains implemented; HUD Voice/Appearance split stays.
 - **RFC-0114** Context overflow preflight + automatic recovery — **implemented** on development via specs #286 (`1f8320d`) + implement #293 (`265b758`): canonical `PromptBudget`, preflight, expand 8K→16K→32K, recoverable 400, compact/expand/retry ≤2. Identity-only `n_keep` + per-message tools preserved. **No** RFC-0115 escalate placeholder (same-model recovery only). RFC-0107 durable brain stays the non-compress-forever end-state. Live llama.cpp 400 remains desktop sign-off.
 - **RFC-0115** Ornith 9B orchestrator-router + complexity tiers + visible model handoff (gates before warm-score; no Continue button).
 
-**IN 1.4.0:** core packages above (**0114 implemented**) **plus** already-filed interesting integrations **RFC-0107** Obsidian durable brain, **0108** phone offline, **0109** media upload, **0110** approval modal (**implemented**), **plus** HexStrike / Daybreak / cyber already in flight (**0105** implemented, **0106** implemented).
+**IN 1.4.0:** core packages above (**0111 implemented**, **0114 implemented**) **plus** already-filed interesting integrations **RFC-0107** Obsidian durable brain, **0108** phone offline, **0109** media upload, **0110** approval modal (**implemented**), **plus** HexStrike / Daybreak / cyber already in flight (**0105** implemented, **0106** implemented).
 
 **OUT of the 1.4 cut:** bulk Instagram / catalog RFCs **0095–0104** — they stay on [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) / later queue. Do **not** re-scope them into 1.4 RFCs or block the cut.
 
@@ -2516,7 +2516,7 @@ Specs-only; no new §58 checkbox; no invented LE/Red/Purple/ATO gates; no exploi
 
 Reason:
 
-Taco 1.4.0 scope lock: split `JARVIS_1.4_SPECS.md` into RFC-0111–0115; keep interesting 0107–0110 and in-flight HexStrike/cyber; leave bulk reel catalog for later. CoS assigned the RFC-0114 ledger tick after #293 landed on development.
+Taco 1.4.0 scope lock: split `JARVIS_1.4_SPECS.md` into RFC-0111–0115; keep interesting 0107–0110 and in-flight HexStrike/cyber; leave bulk reel catalog for later. CoS assigned the RFC-0114 ledger tick after #293 landed on development. CoS assigned the RFC-0111 ledger tick after #296 landed on development.
 
 Decision: RFC-0116 TypeSafe Jev optional decision tier (accepted; post-1.4)
 
