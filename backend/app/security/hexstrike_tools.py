@@ -48,6 +48,49 @@ PIP_NAME_OVERRIDES: dict[str, str] = {
 
 _INSTALL_LOCK = asyncio.Lock()
 _INSTALL_JOBS: dict[str, dict[str, Any]] = {}
+_INSTALL_TASKS: dict[str, asyncio.Task[None]] = {}
+
+
+def get_dependency_install_job(job_id: str) -> dict[str, Any]:
+    ident = (job_id or "").strip()
+    job = _INSTALL_JOBS.get(ident)
+    if job is None:
+        raise KeyError(job_id)
+    return dict(job)
+
+
+def start_dependency_install(dep_id: str, *, install_path: str = "") -> dict[str, Any]:
+    ident = (dep_id or "").strip()
+    job_id = __import__("uuid").uuid4().hex
+    job = {
+        "id": job_id,
+        "dependency_id": ident,
+        "status": "queued",
+        "ok": False,
+        "detail": "",
+        "started_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "finished_at": None,
+    }
+    _INSTALL_JOBS[job_id] = job
+
+    async def _runner() -> None:
+        job["status"] = "installing"
+        result = await install_dependency_by_id(ident, install_path=install_path)
+        job["status"] = "ready" if result.ok else "error"
+        job["ok"] = result.ok
+        job["detail"] = result.detail[:1200]
+        job["finished_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        try:
+            from .hexstrike_operator import refresh_discovered_catalog
+
+            await refresh_discovered_catalog(force=True)
+        except Exception:
+            pass
+
+    task = asyncio.create_task(_runner())
+    _INSTALL_TASKS[job_id] = task
+    audit_hexstrike("dependency_install_queued", job_id=job_id, dependency=ident)
+    return dict(job)
 
 
 @dataclass(frozen=True)

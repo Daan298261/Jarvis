@@ -65,19 +65,21 @@ async def test_mcp_registration_hook_builds_loopback_server_and_refreshes_runtim
 
     async def fake_refresh(servers):
         refreshed["servers"] = servers
-        return {"hexstrike-upstream": "2 tools"}
+        return {"hexstrike-upstream": "3 tools"}
 
     monkeypatch.setattr("app.security.hexstrike_mcp.MCP.refresh", fake_refresh)
-    status = await register_hexstrike_mcp(
+    result = await register_hexstrike_mcp(
         install_path=install,
         python_executable="python",
         host="127.0.0.1",
         port=8888,
     )
-    assert status
-    names = {item.get("name") for item in refreshed["servers"]}
-    assert HEXSTRIKE_MCP_SERVER_NAME in names
-    assert any(str(item.get("url", "")).startswith("http://127.0.0.1:") for item in refreshed["servers"] if item.get("url"))
+    assert result.ok is True
+    stdio = refreshed["servers"][0]
+    assert stdio["transport"] == "stdio"
+    assert "--stdio" in stdio["args"]
+    assert "--server" in stdio["args"]
+    assert "127.0.0.1:8888" in stdio["args"][stdio["args"].index("--server") + 1]
 
 
 def test_mcp_registration_refuses_non_loopback_host(operator_store):
@@ -205,6 +207,24 @@ async def test_hexstrike_operator_chat_tool_runs_operate(monkeypatch, operator_s
     tool = HexStrikeOperatorTool(lambda: {})
     result = await tool.execute(operation="operate", capability_id="http:alpha", arguments={"x": 1})
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_operate_rejects_dependency_catalog_rows(operator_store, monkeypatch):
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=True,
+            install_path=str(operator_store),
+            tools={},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    await refresh_discovered_catalog(force=True)
+    with pytest.raises(ValueError, match="install via POST"):
+        await operate("dep:nmap", {})
 
 
 def test_install_pin_constants_unchanged():

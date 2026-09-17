@@ -14,12 +14,43 @@ from ..config import data_dir, default_allowed_directories, load_settings
 from ..tools.mcp_runtime import MCP
 from .hexstrike import HEXSTRIKE, audit_hexstrike
 from .hexstrike_defensive import CAPABILITIES, CAPABILITY_BY_ID, capability_snapshot
-from .hexstrike_mcp import HEXSTRIKE_MCP_SERVER_NAME, mcp_registration_status
+from .hexstrike_mcp import HEXSTRIKE_MCP_SERVER_NAME, mcp_registration_error, mcp_registration_status, register_hexstrike_mcp
 from .hexstrike_tools import dependency_catalog_rows, missing_host_tools
 
 _JOB_ID_RE = re.compile(r"^[a-f0-9-]{8,64}$", re.IGNORECASE)
 _LOCK = threading.RLock()
 _CATALOG_CACHE: list[dict[str, Any]] = []
+_CATALOG_PATH_NAME = "hexstrike/catalog.json"
+
+
+def _catalog_path() -> Path:
+    path = data_dir() / _CATALOG_PATH_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _persist_catalog(rows: list[dict[str, Any]]) -> None:
+    payload = {"version": 1, "refreshed_at": _utcnow(), "catalog": rows}
+    target = _catalog_path()
+    temp = target.with_suffix(".tmp")
+    temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temp.replace(target)
+
+
+def _load_persisted_catalog() -> list[dict[str, Any]]:
+    path = _catalog_path()
+    if not path.is_file():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = payload.get("catalog", []) if isinstance(payload, dict) else []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def catalog_is_stale() -> bool:
+    return not _CATALOG_CACHE and not _load_persisted_catalog()
 
 
 def _utcnow() -> str:
@@ -135,9 +166,12 @@ def _capabilities_from_health(tools: dict[str, Any] | list[Any] | None) -> list[
             name = str(key).strip()
             if not name:
                 continue
-            available = status not in {False, "missing", "unavailable", "absent"}
-            if isinstance(status, str):
-                available = status.lower() in {"ok", "ready", "available", "installed", "true", "yes"}
+            if isinstance(status, bool):
+                available = status
+            else:
+                available = status not in {False, "missing", "unavailable", "absent"}
+                if isinstance(status, str):
+                    available = status.lower() in {"ok", "ready", "available", "installed", "true", "yes"}
             rows.append(
                 {
                     "id": f"http:{name}",
@@ -259,13 +293,52 @@ async def refresh_discovered_catalog(*, force: bool = False) -> list[dict[str, A
             }
         )
     _CATALOG_CACHE = merged
+    _persist_catalog(merged)
     audit_hexstrike("catalog_refresh", count=len(merged), mcp=mcp_registration_status())
-    return merged if force or merged else list(_CATALOG_CACHE)
+    return merged
+
+
+async def sync_operator_surface(*, register_mcp: bool = True) -> dict[str, Any]:
+    """Register MCP (when requested) and refresh catalog from the live loopback suite."""
+    snapshot = await HEXSTRIKE.status(enrich=True)
+    if not snapshot.running:
+        return {
+            "operator_ready": False,
+            "reason": "suite_not_running",
+            "catalog_count": len(discovered_catalog()),
+            "mcp": {"ok": False, "error": "suite not running"},
+        }
+    from pathlib import Path
+
+    install = Path(snapshot.install_path)
+    mcp_payload: dict[str, Any] = {"ok": False, "error": ""}
+    if register_mcp:
+        result = await register_hexstrike_mcp(
+            install_path=install,
+            python_executable=snapshot.python_executable,
+            host=snapshot.host,
+            port=snapshot.port,
+        )
+        mcp_payload = result.as_dict()
+    catalog = await refresh_discovered_catalog(force=True)
+    mcp_ok = bool(mcp_payload.get("ok")) if register_mcp else True
+    if register_mcp and not mcp_ok:
+        mcp_payload["error"] = mcp_payload.get("error") or mcp_registration_error()
+    operator_ready = mcp_ok and len(catalog) > len(CAPABILITIES)
+    return {
+        "operator_ready": operator_ready,
+        "catalog_count": len(catalog),
+        "mcp": mcp_payload,
+        "catalog_stale": False,
+    }
 
 
 def discovered_catalog() -> list[dict[str, Any]]:
     if _CATALOG_CACHE:
         return list(_CATALOG_CACHE)
+    persisted = _load_persisted_catalog()
+    if persisted:
+        return list(persisted)
     return [item for item in _capabilities_from_defensive()]
 
 
@@ -274,9 +347,11 @@ def catalog_snapshot() -> dict[str, Any]:
     return {
         "catalog": catalog,
         "count": len(catalog),
+        "catalog_stale": catalog_is_stale(),
         "missing_host_tools": missing_host_tools(),
         "legacy_capabilities": capability_snapshot(),
         "mcp": mcp_registration_status(),
+        "mcp_error": mcp_registration_error(),
     }
 
 
@@ -300,6 +375,12 @@ def _resolve_capability(capability_id: str) -> dict[str, Any]:
 
 async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     capability = _resolve_capability(capability_id)
+    source = str(capability.get("source") or "")
+    if source == "dependency" or str(capability_id).startswith("dep:"):
+        raise ValueError("dependency rows install via POST /api/hexstrike/tools/{id}/install, not operate")
+    if capability.get("available") is False:
+        missing = capability.get("missing_dependencies") or capability.get("guidance")
+        raise RuntimeError(f"capability unavailable: {missing or capability_id}")
     args = arguments or {}
     schema = capability.get("input_schema") or {"type": "object"}
     _validate_arguments(schema if isinstance(schema, dict) else {"type": "object"}, args)
@@ -383,10 +464,13 @@ async def stop_operator_job(job_id: str) -> dict[str, Any]:
 
 
 def operator_status_extras() -> dict[str, Any]:
+    catalog = discovered_catalog()
     return {
-        "catalog": discovered_catalog(),
-        "catalog_count": len(discovered_catalog()),
+        "catalog": catalog,
+        "catalog_count": len(catalog),
+        "catalog_stale": catalog_is_stale(),
         "jobs": list_operator_jobs(),
         "mcp": mcp_registration_status(),
+        "mcp_error": mcp_registration_error(),
         "missing_host_tools": missing_host_tools(),
     }

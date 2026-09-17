@@ -368,18 +368,21 @@ class HexStrikeManager:
                 await self._enrich(snapshot)
                 try:
                     from .hexstrike_mcp import register_hexstrike_mcp
-                    from .hexstrike_operator import refresh_discovered_catalog
+                    from .hexstrike_operator import refresh_discovered_catalog, sync_operator_surface
 
                     install = Path(snapshot.install_path)
-                    await register_hexstrike_mcp(
-                        install_path=install,
-                        python_executable=snapshot.python_executable,
-                        host=snapshot.host,
-                        port=snapshot.port,
-                    )
-                    await refresh_discovered_catalog(force=True)
-                except Exception:
-                    log.debug("HexStrike MCP/catalog refresh after start failed", exc_info=True)
+                    surface = await sync_operator_surface(register_mcp=True)
+                    if not surface.get("operator_ready"):
+                        hint = surface.get("mcp", {}).get("error") or surface.get("reason") or "operator surface not ready"
+                        self.last_error = f"HexStrike server is up but operator surface failed: {hint}"[:400]
+                        snapshot.last_error = self.last_error
+                        audit_hexstrike("operator_surface_failed", detail=surface)
+                    else:
+                        await refresh_discovered_catalog(force=True)
+                except Exception as exc:
+                    self.last_error = f"HexStrike operator surface failed: {exc}"[:400]
+                    snapshot.last_error = self.last_error
+                    log.exception("HexStrike MCP/catalog refresh after start failed")
                 audit_hexstrike("started", pid=snapshot.pid, port=snapshot.port)
             else:
                 audit_hexstrike("start_failed", error=self.last_error)
@@ -494,7 +497,8 @@ class HexStrikeManager:
         if isinstance(health, dict):
             snapshot.health = health
             tools = (
-                health.get("tools")
+                health.get("tools_status")
+                or health.get("tools")
                 or health.get("available_tools")
                 or health.get("tool_status")
                 or health.get("tools_status")

@@ -5,16 +5,20 @@ from typing import Any, Callable
 
 from ..policy.computer_permissions import evaluate_permission, operator_intent_grant
 from ..security.hexstrike import HEXSTRIKE, audit_hexstrike
-from ..security.hexstrike_mcp import register_hexstrike_mcp
-from ..security.hexstrike_operator import catalog_snapshot, operate, refresh_discovered_catalog
+from ..security.hexstrike_operator import (
+    catalog_snapshot,
+    operate,
+    sync_operator_surface,
+)
+from ..security.hexstrike_tools import start_dependency_install
 from .base import RiskLevel, Tool, ToolResult
 
 
 class HexStrikeOperatorTool(Tool):
     name = "hexstrike_operator"
     description = (
-        "Drive the managed HexStrike loopback suite: refresh catalog, install missing host deps, "
-        "and invoke discovered capabilities by id with JSON arguments. Requires owner cyber.hexstrike permission."
+        "Drive the managed HexStrike loopback suite: start or sync the operator surface, install missing "
+        "dependencies, and invoke discovered capabilities by id with JSON arguments. Requires cyber.hexstrike."
     )
     risk = RiskLevel.HIGH
     parameters = {
@@ -22,9 +26,10 @@ class HexStrikeOperatorTool(Tool):
         "properties": {
             "operation": {
                 "type": "string",
-                "enum": ["status", "start", "refresh_catalog", "operate"],
+                "enum": ["status", "start", "sync", "install_dependency", "operate"],
             },
             "capability_id": {"type": "string", "minLength": 1, "maxLength": 160},
+            "dependency_id": {"type": "string", "minLength": 1, "maxLength": 120},
             "arguments": {"type": "object"},
         },
         "required": ["operation"],
@@ -54,25 +59,32 @@ class HexStrikeOperatorTool(Tool):
         operation = str(kwargs.get("operation") or "").strip().lower()
         if operation == "status":
             snapshot = await HEXSTRIKE.status(enrich=True)
-            payload = {**snapshot.as_dict(), **catalog_snapshot()}
+            operator = {}
+            if snapshot.running:
+                operator = await sync_operator_surface(register_mcp=True)
+            payload = {**snapshot.as_dict(), **catalog_snapshot(), "operator": operator}
             return ToolResult(True, json.dumps(payload, default=str), data=payload)
         if operation == "start":
             snapshot = await HEXSTRIKE.ensure_started()
             return ToolResult(True, json.dumps(snapshot.as_dict(), default=str), data=snapshot.as_dict())
-        if operation == "refresh_catalog":
-            status = await HEXSTRIKE.status(enrich=True)
-            if status.running:
-                from pathlib import Path
-
-                await register_hexstrike_mcp(
-                    install_path=Path(status.install_path),
-                    python_executable=status.python_executable,
-                    host=status.host,
-                    port=status.port,
+        if operation in {"sync", "refresh_catalog"}:
+            surface = await sync_operator_surface(register_mcp=True)
+            if not surface.get("operator_ready"):
+                return ToolResult(
+                    False,
+                    "",
+                    error=str(surface.get("mcp", {}).get("error") or "operator surface not ready"),
+                    data=surface,
                 )
-            catalog = await refresh_discovered_catalog(force=True)
-            payload = {"catalog": catalog, "count": len(catalog)}
+            payload = {"operator": surface, **catalog_snapshot()}
             return ToolResult(True, json.dumps(payload, default=str), data=payload)
+        if operation == "install_dependency":
+            dep_id = str(kwargs.get("dependency_id") or "").strip()
+            if not dep_id:
+                return ToolResult(False, "", error="dependency_id is required for install_dependency")
+            status = await HEXSTRIKE.status(enrich=False)
+            job = start_dependency_install(dep_id, install_path=status.install_path)
+            return ToolResult(True, json.dumps(job, default=str), data=job)
         if operation == "operate":
             capability_id = str(kwargs.get("capability_id") or "").strip()
             if not capability_id:

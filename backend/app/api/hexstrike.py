@@ -18,7 +18,6 @@ from ..security.hexstrike_defensive import (
     upsert_scope,
 )
 from ..security.hexstrike_install import HEXSTRIKE_INSTALLER
-from ..security.hexstrike_mcp import register_hexstrike_mcp
 from ..security.hexstrike_operator import (
     catalog_snapshot,
     get_operator_job,
@@ -26,8 +25,8 @@ from ..security.hexstrike_operator import (
     list_operator_jobs,
     operate,
     operator_status_extras,
-    refresh_discovered_catalog,
     stop_operator_job,
+    sync_operator_surface,
 )
 from ..security.hexstrike_tools import (
     dependency_catalog_rows,
@@ -36,6 +35,8 @@ from ..security.hexstrike_tools import (
     install_host_tool,
     install_job_overlay,
     missing_host_tools,
+    start_dependency_install,
+    get_dependency_install_job,
 )
 
 router = APIRouter(prefix="/api/hexstrike", tags=["hexstrike"])
@@ -98,10 +99,15 @@ def _operator_permission(permission_id: str = "cyber.hexstrike") -> None:
 
 
 async def _status_payload() -> dict[str, Any]:
-    payload = (await HEXSTRIKE.status()).as_dict()
+    snapshot = await HEXSTRIKE.status()
+    operator_surface: dict[str, Any] = {}
+    if snapshot.running:
+        operator_surface = await sync_operator_surface(register_mcp=True)
+    payload = snapshot.as_dict()
     payload["install"] = HEXSTRIKE_INSTALLER.status().as_dict()
     payload["capabilities"] = capability_snapshot()
     payload.update(operator_status_extras())
+    payload["operator"] = operator_surface
     payload["dependencies"] = dependency_catalog_rows(payload.get("install_path") or "")
     payload["missing_dependencies"] = missing_host_tools()
     payload["dependency_install_jobs"] = install_job_overlay()
@@ -179,34 +185,42 @@ async def hexstrike_tools_catalog():
 @router.post("/tools/refresh")
 async def hexstrike_tools_refresh():
     _operator_permission()
-    snapshot = await HEXSTRIKE.status(enrich=True)
-    if snapshot.running and snapshot.installed:
-        from pathlib import Path
-
-        await register_hexstrike_mcp(
-            install_path=Path(snapshot.install_path),
-            python_executable=snapshot.python_executable,
-            host=snapshot.host,
-            port=snapshot.port,
+    surface = await sync_operator_surface(register_mcp=True)
+    if not surface.get("operator_ready"):
+        raise HTTPException(
+            status_code=503,
+            detail=surface.get("mcp", {}).get("error") or "HexStrike operator surface is not ready",
         )
-    catalog = await refresh_discovered_catalog(force=True)
-    return {"catalog": catalog, "count": len(catalog), "mcp": catalog_snapshot()["mcp"]}
+    return {"catalog": discovered_catalog_safe(), "count": surface.get("catalog_count"), "operator": surface}
 
 
 @router.post("/tools/{tool_id}/install")
 async def hexstrike_tool_install(tool_id: str):
     _operator_permission("blue.static_rules")
     status = await HEXSTRIKE.status(enrich=False)
-    result = await install_dependency_by_id(tool_id, install_path=status.install_path)
-    if not result.ok:
-        raise HTTPException(status_code=503, detail=result.detail[:400])
-    await refresh_discovered_catalog(force=True)
-    return result.as_dict()
+    job = start_dependency_install(tool_id, install_path=status.install_path)
+    return job
+
+
+@router.get("/tools/install-jobs/{job_id}")
+async def hexstrike_tool_install_job(job_id: str):
+    try:
+        return get_dependency_install_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown dependency install job") from exc
 
 
 @router.post("/operate")
 async def hexstrike_operate(body: HexStrikeOperateIn):
     _operator_permission()
+    snapshot = await HEXSTRIKE.status(enrich=False)
+    if snapshot.running:
+        surface = await sync_operator_surface(register_mcp=False)
+        if not surface.get("operator_ready") and not str(body.capability_id).startswith("defensive:"):
+            raise HTTPException(
+                status_code=503,
+                detail="Refresh operator catalog before invoking discovered capabilities",
+            )
     try:
         return await operate(body.capability_id, body.arguments)
     except ValueError as exc:
