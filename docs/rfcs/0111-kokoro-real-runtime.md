@@ -1,6 +1,6 @@
 # RFC-0111: Kokoro as a real runtime (not a selectable label)
 
-**Status:** accepted  
+**Status:** implemented
 **Queue item:** (none — no new §58 checkbox; implement is a named follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17
@@ -264,21 +264,27 @@ Structured events: `voice_runtime_probe` (plus preview events owned by RFC-0112)
 
 ## Acceptance criteria
 
-- [ ] Specs-only in this PR (no product code)
-- [ ] `TtsRuntimeState` exists; `ready` requires package + assets + pipeline + **synthesis_verified**
-- [ ] `is_kokoro_available()` is equivalent to `kokoro_runtime_state().ready`; installable ≠ ready
-- [ ] Single `KokoroAdapter` owns pipeline/synth; other modules do not pass undocumented filesystem model dirs into `KPipeline`
-- [ ] `kokoro` and `soundfile` are pinned to versions validated by a real synthesis test; Setup/installer provisions them
-- [ ] Ordinary speak/preview **never** starts an implicit package install; missing runtime raises `TtsSynthesisError` (or equivalent) with `last_error`
-- [ ] Kokoro selected + healthy → `actual_engine` is `kokoro`
-- [ ] Kokoro selected + broken → synthesis fails explicitly; **never** silently returns SAPI audio
-- [ ] Status only reports `ready=true` after successful synthesis verification
-- [ ] Health probe runs real short WAV (≥1024 bytes); cached; refreshed on install/repair/restart/pack change/retry — not on every speak
-- [ ] Status API reports `requested_engine` vs `actual_engine`, readiness flags, `fallback_active`, `last_error`
-- [ ] Settings/HUD copy matches READY / FAILED TO LOAD / SYSTEM VOICE; frontend does not infer ready from `engine=kokoro` alone
-- [ ] TTS errors listed in 1.4 §10 are never swallowed
-- [ ] Tests (1.4 §12 TTS 1–4, 9–10): healthy actual engine; broken explicit fail; no silent SAPI; ready only after verify; install/repair refreshes health; no pip during speak
-- [ ] Implement follow-up: `python3 -m pytest` (`tests/test_rfc0070_tts.py` updates + `tests/test_rfc0092_*.py` / new `tests/test_rfc0111_*.py`). Live listen + installer runtime remain Windows desktop sign-off.
+Specs-only in **this** PR:
+
+- [x] Specs-only in this PR (no product code) — specs PR #286
+
+Implement follow-up (landed):
+
+- [x] `TtsRuntimeState` exists; `ready` requires package + assets + pipeline + **synthesis_verified** — #296 `backend/app/tts/runtime_state.py`
+- [x] `is_kokoro_available()` is equivalent to `kokoro_runtime_state().ready`; installable ≠ ready — #296 `engines.py` / `is_kokoro_installable()`
+- [x] Single `KokoroAdapter` owns pipeline/synth; other modules do not pass undocumented filesystem model dirs into `KPipeline` — #296 `kokoro_adapter.py` (bundled `KModel` + `KPipeline` constructed inside the adapter)
+- [x] `kokoro` and `soundfile` are pinned to versions validated by a real synthesis test; Setup/installer provisions them — #296 `kokoro==0.9.4` / `soundfile==0.14.0` in `backend/requirements.txt` + `installer/windows/bootstrap.ps1`
+- [x] Ordinary speak/preview **never** starts an implicit package install; missing runtime raises `TtsSynthesisError` (or equivalent) with `last_error` — #296 `synthesize.py` / adapter `synthesize()` refuses unverified runtime
+- [x] Kokoro selected + healthy → `actual_engine` is `kokoro` — #296 `voice_status()` + `tests/test_rfc0111_kokoro_runtime.py`
+- [x] Kokoro selected + broken → synthesis fails explicitly; **never** silently returns SAPI audio — #296 `TtsSynthesisError`; engine chain for Kokoro is `["kokoro"]` only
+- [x] Status only reports `ready=true` after successful synthesis verification — #296 `KokoroAdapter.verify()` requires WAV ≥1024 bytes
+- [x] Health probe runs real short WAV (≥1024 bytes); cached; refreshed on install/repair/restart/pack change/retry — not on every speak — #296 `verify()` cache + `pack_install.verify_kokoro_runtime(force=True)` + `warm_start`
+- [x] Status API reports `requested_engine` vs `actual_engine`, readiness flags, `fallback_active`, `last_error` — #296 `workers/voice.py` `tts_runtime`
+- [x] Settings/HUD copy matches READY / FAILED TO LOAD / SYSTEM VOICE; frontend does not infer ready from `engine=kokoro` alone — #296 `VoiceProfilePicker` uses `runtime.ready`; READY / FAILED TO LOAD copy landed. Explicit SAPI is a baseline/system voice (not a silent fallback). Full preview UX remains RFC-0112 HOLD
+- [x] TTS errors listed in 1.4 §10 are never swallowed — #296 `TtsSynthesisError` + no silent SAPI
+- [x] Tests (1.4 §12 TTS 1–4, 9–10): healthy actual engine; broken explicit fail; no silent SAPI; ready only after verify; install/repair refreshes health; no pip during speak — #296 `tests/test_rfc0111_kokoro_runtime.py` + `tests/test_rfc0070_tts.py` updates. Existing RFC-0092 tests remain (0092 files not rewritten in #296)
+- [x] Implement follow-up: `python3 -m pytest` (`tests/test_rfc0070_tts.py` updates + new `tests/test_rfc0111_*.py`) — #296
+- [ ] Windows desktop sign-off: live A/B listen quality after Setup rebuild. Cloud VMs cannot sign this off. (#296 recorded live WAV probes for `bm_george` / `bm_daniel`; human listen quality remains desktop)
 
 ## Likely files
 
@@ -298,3 +304,7 @@ Product implementation in this PR. RFC-0112 preview playback / error-preservatio
 - 1.4 suggested implement order: **PR 4** after routing/context PRs (RFC-0115 / RFC-0114). Adapter+state may land first if CoS names this ticket.
 - Linux cloud cannot sign off live Kokoro listen quality; unit-test routing/fallback/ready-contract. Desktop A/B listen after Setup rebuild.
 - Implement launch: this RFC only; branch from `development`; pytest; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via specs **#286** @ `1f8320d` (Jarvis 1.4 RFC split) + implement **#296** @ `99a0463` (`TtsRuntimeState` + `KokoroAdapter`; pinned `kokoro==0.9.4` / `soundfile==0.14.0`; synthesis-backed READY; no pip during speak/preview; no silent SAPI; requested-vs-actual engine status). Deepens RFC-0070 / RFC-0092; does **not** change 0092 defaults (`butler_original_v1` / `bm_daniel`). **RFC-0112** voice preview remains HOLD (Sol/Taco). Live A/B listen quality after Setup rebuild remains Windows desktop sign-off. No new §58 checkbox.
