@@ -46,6 +46,13 @@ def test_local_worker_llm_stays_on_jarvis_endpoint():
     assert env["LLM_API_KEY"] == "local"
 
 
+def test_browser_use_model_uses_browser_settings():
+    from app.workers.local_llm import local_browser_use_model
+
+    settings = AppSettings(browser={"browser_use_model": "Qwen3.5-27B", "headless": True})
+    assert local_browser_use_model(settings) == "Qwen3.5-27B"
+
+
 def test_browser_use_failure_falls_back_to_playwright():
     tools = [item.tool for item in alternatives_for("browser_use", UNAVAILABLE)]
     assert tools[0] == "browser"
@@ -82,6 +89,7 @@ async def test_browser_use_backend_runs_when_present(monkeypatch, permission_sto
     assert result.success is True
     assert result.data["backend"] == "browser-use"
     assert result.data["extracted_text"] == "found the login form"
+    assert result.data["url"] == "https://example.com"
     assert "found the login form" in result.output
 
 

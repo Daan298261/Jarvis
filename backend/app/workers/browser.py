@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import logging
 from typing import Any
 
 from ..config import AppSettings, data_dir, load_settings
-from ..tools.base import ToolResult
-from .local_llm import local_chat_openai
+from .browser_structured import (
+    browser_use_tool_result_data,
+    format_browser_use_output,
+    structured_payload_from_history,
+)
+from .local_llm import local_browser_use_model, local_chat_openai_for_browser_use
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BROWSER_BACKEND = "playwright"
+_DEFAULT_MAX_STEPS = 60
 
 _SESSION_LOCK = asyncio.Lock()
 _BROWSER_SESSION: Any | None = None
-_SESSION_CREATED = False
+_SESSION_STARTED = False
+_SESSION_REUSED = False
 
 
 def playwright_is_default() -> bool:
@@ -24,10 +33,34 @@ def _module_available(name: str) -> bool:
 
 
 def reset_browser_use_session() -> None:
-    """Test helper: drop the cached Browser Use session."""
-    global _BROWSER_SESSION, _SESSION_CREATED
+    """Drop the cached Browser Use session (sync; does not await browser teardown)."""
+    global _BROWSER_SESSION, _SESSION_STARTED, _SESSION_REUSED
     _BROWSER_SESSION = None
-    _SESSION_CREATED = False
+    _SESSION_STARTED = False
+    _SESSION_REUSED = False
+
+
+async def reset_browser_use_session_async() -> None:
+    """Stop the cached browser-use session and clear Jarvis-side reuse state."""
+    global _BROWSER_SESSION, _SESSION_STARTED, _SESSION_REUSED
+    async with _SESSION_LOCK:
+        session = _BROWSER_SESSION
+        _BROWSER_SESSION = None
+        _SESSION_STARTED = False
+        _SESSION_REUSED = False
+    if session is None:
+        return
+    for method_name in ("kill", "stop", "close"):
+        method = getattr(session, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            result = method()
+            if hasattr(result, "__await__"):
+                await result
+            return
+        except Exception as exc:
+            logger.debug("browser-use session %s failed during reset: %s", method_name, exc)
 
 
 def network_permission_block(tool_name: str, *, goal: str, url: str | None) -> str | None:
@@ -43,89 +76,6 @@ def network_permission_block(tool_name: str, *, goal: str, url: str | None) -> s
     if decision.status == "ask":
         return decision.reason or "Permission required before Browser Use can reach the network."
     return None
-
-
-def structured_payload_from_history(history: Any, *, start_url: str | None = None) -> dict[str, Any]:
-    """Map a browser-use AgentHistoryList into Jarvis ingest-friendly fields."""
-    final_text = ""
-    if history is not None and hasattr(history, "final_result"):
-        try:
-            final_text = str(history.final_result() or "")
-        except Exception:
-            final_text = ""
-
-    resolved_url = (start_url or "").strip()
-    title = ""
-    action_trace: list[dict[str, Any]] = []
-    extracted_chunks: list[str] = []
-
-    items = getattr(history, "history", None) or []
-    for index, item in enumerate(items):
-        step: dict[str, Any] = {"step": index + 1}
-        state = getattr(item, "state", None)
-        if state is not None:
-            if hasattr(state, "url") and getattr(state, "url", None):
-                resolved_url = str(getattr(state, "url"))
-            elif hasattr(state, "to_dict"):
-                state_dict = state.to_dict()
-                if isinstance(state_dict, dict):
-                    if state_dict.get("url"):
-                        resolved_url = str(state_dict["url"])
-                    if state_dict.get("title"):
-                        title = str(state_dict["title"])
-            if hasattr(state, "title") and getattr(state, "title", None):
-                title = str(getattr(state, "title"))
-
-        model_output = getattr(item, "model_output", None)
-        actions = getattr(model_output, "action", None) if model_output is not None else None
-        if actions:
-            serialized: list[Any] = []
-            for action in actions[:5]:
-                if hasattr(action, "model_dump"):
-                    serialized.append(action.model_dump(exclude_none=True, mode="json"))
-                else:
-                    serialized.append(str(action))
-            step["actions"] = serialized
-
-        for result in getattr(item, "result", None) or []:
-            content = getattr(result, "extracted_content", None)
-            if content:
-                text = str(content).strip()
-                if text:
-                    extracted_chunks.append(text[:800])
-                    step.setdefault("extracted", []).append(text[:400])
-            err = getattr(result, "error", None)
-            if err:
-                step.setdefault("errors", []).append(str(err)[:240])
-
-        if len(step) > 1:
-            action_trace.append(step)
-        if len(action_trace) >= 32:
-            break
-
-    extracted_text = final_text.strip()
-    if not extracted_text and extracted_chunks:
-        extracted_text = "\n\n".join(dict.fromkeys(extracted_chunks))
-
-    return {
-        "url": resolved_url,
-        "title": title,
-        "extracted_text": extracted_text,
-        "action_trace": action_trace,
-        "steps": len(items) if hasattr(items, "__len__") else 0,
-    }
-
-
-def format_browser_use_output(payload: dict[str, Any]) -> str:
-    parts: list[str] = []
-    if payload.get("title"):
-        parts.append(f"Title: {payload['title']}")
-    if payload.get("url"):
-        parts.append(f"URL: {payload['url']}")
-    body = str(payload.get("extracted_text") or "").strip()
-    if body:
-        parts.append(body)
-    return "\n".join(parts).strip() or "Browser Use finished."
 
 
 class BrowserUseBackend:
@@ -147,9 +97,11 @@ class BrowserUseBackend:
                 "available": True,
                 "status": "ready",
                 "detail": (
-                    "Intelligent browser discovery via browser-use with session reuse and structured traces. "
+                    "Intelligent browser discovery via browser-use with persistent session reuse "
+                    "and structured URL/title/text/action traces for ingest. "
                     "Playwright remains the default deterministic backend."
                 ),
+                "installable": False,
             }
         return {
             "id": self.id,
@@ -158,9 +110,13 @@ class BrowserUseBackend:
             "available": False,
             "status": "missing",
             "detail": (
-                "Adapter is integrated. Use Install now on the Tools page to add the MIT browser-use package "
-                "for intelligent discovery. Playwright stays the default; Jarvis falls back to browser and web_fetch."
+                "Adapter is integrated. Use Install now on the Tools page to install the MIT browser-use "
+                "package (browser-use[core] plus Playwright Chromium). Playwright stays the default; "
+                "Jarvis falls back to browser and web_fetch until this worker is ready."
             ),
+            "installable": True,
+            "install_worker_id": self.id,
+            "install_hint": "Install now on Tools runs the RFC-0090 allowlisted pip install for browser-use.",
         }
 
     async def run(
@@ -170,7 +126,10 @@ class BrowserUseBackend:
         settings: AppSettings | None = None,
         *,
         skip_permission_check: bool = False,
-    ) -> ToolResult:
+    ):
+        from ..tools.base import ToolResult
+
+        global _SESSION_REUSED
         if not goal or not str(goal).strip():
             return ToolResult(False, "", error="goal is required")
         cleaned_goal = str(goal).strip()
@@ -192,13 +151,14 @@ class BrowserUseBackend:
                 return ToolResult(False, "", error=blocked)
 
         current = settings or load_settings()
+        _SESSION_REUSED = False
         task = cleaned_goal
-        if cleaned_url:
+        if cleaned_url and cleaned_url not in task:
             task = f"{task}\nStart at: {cleaned_url}"
         try:
             history = await self._invoke(task, current, start_url=cleaned_url)
         except Exception as exc:
-            reset_browser_use_session()
+            await reset_browser_use_session_async()
             return ToolResult(
                 False,
                 "",
@@ -206,54 +166,115 @@ class BrowserUseBackend:
             )
         structured = structured_payload_from_history(history, start_url=cleaned_url)
         output = format_browser_use_output(structured)
-        data = {
-            "backend": self.id,
-            "goal": cleaned_goal,
-            "url": structured.get("url") or cleaned_url,
-            "title": structured.get("title") or "",
-            "extracted_text": structured.get("extracted_text") or "",
-            "action_trace": structured.get("action_trace") or [],
-            "steps": structured.get("steps") or 0,
-            "session_reused": _SESSION_CREATED,
-        }
+        data = browser_use_tool_result_data(
+            goal=cleaned_goal,
+            structured=structured,
+            start_url=cleaned_url,
+            session_reused=_SESSION_REUSED,
+        )
         return ToolResult(True, output, data=data)
 
+    def _browser_session_class(self) -> Any:
+        try:
+            from browser_use import BrowserSession
+
+            return BrowserSession
+        except ImportError:
+            from browser_use.browser.session import BrowserSession  # type: ignore[attr-defined]
+
+            return BrowserSession
+
+    def _build_browser_session(self, settings: AppSettings) -> Any:
+        BrowserSession = self._browser_session_class()
+        profile_dir = data_dir() / "browser-use-profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        headless = bool(settings.browser.headless)
+        kwargs: dict[str, Any] = {"headless": headless, "user_data_dir": str(profile_dir)}
+        try:
+            from browser_use import BrowserProfile
+
+            profile = BrowserProfile(
+                headless=headless,
+                keep_alive=True,
+                user_data_dir=str(profile_dir),
+            )
+            return BrowserSession(browser_profile=profile)
+        except (ImportError, TypeError):
+            pass
+        try:
+            return BrowserSession(**kwargs, keep_alive=True)
+        except TypeError:
+            try:
+                return BrowserSession(**kwargs)
+            except TypeError:
+                return BrowserSession(headless=headless)
+
     async def _shared_browser_session(self, settings: AppSettings) -> Any | None:
-        global _BROWSER_SESSION, _SESSION_CREATED
+        global _BROWSER_SESSION, _SESSION_STARTED, _SESSION_REUSED
         async with _SESSION_LOCK:
             if _BROWSER_SESSION is not None:
-                _SESSION_CREATED = True
-                return _BROWSER_SESSION
-            try:
-                from browser_use import BrowserSession
-            except ImportError:
+                _SESSION_REUSED = True
+                session = _BROWSER_SESSION
+            else:
                 try:
-                    from browser_use.browser.session import BrowserSession  # type: ignore[attr-defined]
+                    session = self._build_browser_session(settings)
                 except ImportError:
                     return None
+                _BROWSER_SESSION = session
+                _SESSION_REUSED = False
+                _SESSION_STARTED = False
 
-            profile_dir = data_dir() / "browser-use-profile"
-            profile_dir.mkdir(parents=True, exist_ok=True)
-            headless = bool(settings.browser.headless)
+        if session is None:
+            return None
+        if not _SESSION_STARTED and hasattr(session, "start"):
+            start = session.start
             try:
-                session = BrowserSession(headless=headless, user_data_dir=str(profile_dir))
-            except TypeError:
-                session = BrowserSession(headless=headless)
-            _BROWSER_SESSION = session
-            _SESSION_CREATED = False
-            return session
+                started = start()
+                if hasattr(started, "__await__"):
+                    await started
+                async with _SESSION_LOCK:
+                    _SESSION_STARTED = True
+            except Exception as exc:
+                await reset_browser_use_session_async()
+                raise RuntimeError(f"Browser Use session failed to start: {exc}") from exc
+        return session
+
+    def _agent_kwargs(
+        self,
+        task: str,
+        settings: AppSettings,
+        browser_session: Any | None,
+        *,
+        start_url: str | None,
+    ) -> dict[str, Any]:
+        llm = local_chat_openai_for_browser_use(settings)
+        kwargs: dict[str, Any] = {
+            "task": task,
+            "llm": llm,
+            "use_vision": False,
+            "max_steps": _DEFAULT_MAX_STEPS,
+            "directly_open_url": start_url is None,
+        }
+        if browser_session is not None:
+            kwargs["browser"] = browser_session
+        if start_url:
+            kwargs["initial_actions"] = [{"navigate": {"url": start_url, "new_tab": False}}]
+        kwargs["extend_system_message"] = (
+            "Jarvis is the supervisor. Return concise plain-text results suitable for ingest. "
+            f"Use the local model ({local_browser_use_model(settings)}) via Jarvis inference only."
+        )
+        return kwargs
 
     async def _invoke(self, task: str, settings: AppSettings, *, start_url: str | None = None) -> Any:
         from browser_use import Agent
 
-        llm = local_chat_openai(settings)
         browser_session = await self._shared_browser_session(settings)
-        agent_kwargs: dict[str, Any] = {"task": task, "llm": llm}
-        if browser_session is not None:
-            agent_kwargs["browser"] = browser_session
+        agent_kwargs = self._agent_kwargs(task, settings, browser_session, start_url=start_url)
         try:
             agent = Agent(**agent_kwargs)
         except TypeError:
+            agent_kwargs.pop("extend_system_message", None)
+            agent_kwargs.pop("initial_actions", None)
             agent_kwargs["use_vision"] = False
             agent = Agent(**agent_kwargs)
 
@@ -261,3 +282,20 @@ class BrowserUseBackend:
         if hasattr(result, "__await__"):
             result = await result
         return result
+
+
+# Re-export structured helpers for tests and ingest callers.
+from .browser_structured import browser_use_ingest_payload, browser_use_tool_result_data  # noqa: E402
+
+__all__ = [
+    "BrowserUseBackend",
+    "DEFAULT_BROWSER_BACKEND",
+    "browser_use_ingest_payload",
+    "browser_use_tool_result_data",
+    "format_browser_use_output",
+    "network_permission_block",
+    "playwright_is_default",
+    "reset_browser_use_session",
+    "reset_browser_use_session_async",
+    "structured_payload_from_history",
+]

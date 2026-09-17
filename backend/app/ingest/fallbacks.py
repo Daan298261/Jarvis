@@ -7,6 +7,7 @@ from typing import Any
 from .adapters.base import IngestContext
 from .links import extract_urls
 from .schema import ExternalContentArtifact
+from ..workers.browser_structured import browser_use_ingest_payload
 
 _OG_TAG = re.compile(
     r'<meta[^>]+(?:property|name)=["\'](?P<key>[^"\']+)["\'][^>]+content=["\'](?P<value>[^"\']+)["\']',
@@ -103,20 +104,6 @@ async def extract_with_browser(ctx: IngestContext, browser_tool) -> ExternalCont
     )
 
 
-def _browser_use_payload(result) -> dict[str, Any]:
-    data = result.data if isinstance(getattr(result, "data", None), dict) else {}
-    text = str(data.get("extracted_text") or "").strip()
-    if not text:
-        text = (getattr(result, "output", None) or "").strip()
-    return {
-        "url": str(data.get("url") or "").strip(),
-        "title": str(data.get("title") or "").strip(),
-        "text": text,
-        "action_trace": data.get("action_trace") if isinstance(data.get("action_trace"), list) else [],
-        "steps": int(data.get("steps") or 0),
-    }
-
-
 async def extract_with_browser_use(ctx: IngestContext, browser_use_tool) -> ExternalContentArtifact | None:
     goal = (
         "Extract the post title, author, caption/text, all image URLs, and video URLs from this page. "
@@ -125,7 +112,7 @@ async def extract_with_browser_use(ctx: IngestContext, browser_use_tool) -> Exte
     result = await browser_use_tool.execute(goal=goal, url=ctx.url)
     if not result.success:
         return None
-    payload = _browser_use_payload(result)
+    payload = browser_use_ingest_payload(data=getattr(result, "data", None), output=getattr(result, "output", "") or "")
     text = payload["text"]
     if not text:
         return None
