@@ -1,5 +1,11 @@
 //! Jarvis Tauri desktop shell: embeds the React portal and owns backend lifecycle.
 
+mod obsidian_host;
+
+use obsidian_host::{
+    embed_resize, embed_start, embed_stop, focus_note, open_install_page, probe_install,
+    read_bound_vault_path, ObsidianEmbedStatus, ObsidianProbeResult,
+};
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::fs;
@@ -418,6 +424,81 @@ fn data_paths() -> Result<serde_json::Value, String> {
     }))
 }
 
+#[tauri::command]
+fn obsidian_probe() -> ObsidianProbeResult {
+    probe_install()
+}
+
+#[tauri::command]
+fn obsidian_bound_vault_path() -> Option<String> {
+    read_bound_vault_path(&data_dir())
+}
+
+#[derive(serde::Deserialize)]
+struct ObsidianEmbedBounds {
+    vault_path: Option<String>,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+#[tauri::command]
+fn obsidian_embed_start(app: AppHandle, bounds: ObsidianEmbedBounds) -> Result<ObsidianEmbedStatus, String> {
+    let vault = bounds
+        .vault_path
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| read_bound_vault_path(&data_dir()));
+    let vault_path = vault.ok_or_else(|| "No bound vault path. Bind a vault in Settings first.".to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use tauri::WebviewWindowExt;
+        let window = app
+            .get_webview_window("main")
+            .ok_or_else(|| "main window missing".to_string())?;
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+        Ok(embed_start(hwnd, &vault_path, bounds.x, bounds.y, bounds.width, bounds.height))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+        Ok(embed_start(0, &vault_path, bounds.x, bounds.y, bounds.width, bounds.height))
+    }
+}
+
+#[tauri::command]
+fn obsidian_embed_resize(bounds: ObsidianEmbedBounds) -> ObsidianEmbedStatus {
+    embed_resize(bounds.x, bounds.y, bounds.width, bounds.height)
+}
+
+#[tauri::command]
+fn obsidian_embed_stop() -> ObsidianEmbedStatus {
+    embed_stop()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ObsidianFocusNoteArgs {
+    vault_path: Option<String>,
+    rel_path: String,
+}
+
+#[tauri::command]
+fn obsidian_focus_note(args: ObsidianFocusNoteArgs) -> Result<(), String> {
+    let vault = args
+        .vault_path
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| read_bound_vault_path(&data_dir()))
+        .ok_or_else(|| "No bound vault path.".to_string())?;
+    focus_note(&vault, &args.rel_path)
+}
+
+#[tauri::command]
+fn obsidian_open_install() -> Result<(), String> {
+    open_install_page()
+}
+
 fn load_shell_prefs(state: &mut BackendState) {
     let path = data_dir().join("desktop_shell.json");
     if let Ok(raw) = fs::read_to_string(path) {
@@ -590,6 +671,13 @@ pub fn run() {
             set_close_to_tray,
             quit_jarvis,
             data_paths,
+            obsidian_probe,
+            obsidian_bound_vault_path,
+            obsidian_embed_start,
+            obsidian_embed_resize,
+            obsidian_embed_stop,
+            obsidian_focus_note,
+            obsidian_open_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Jarvis desktop shell");

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { ChatPage } from "./pages/Chat"
 import { HistoryPage } from "./pages/History"
 import { MemoryPage } from "./pages/Memory"
+import { ObsidianPage } from "./pages/Obsidian"
 import { ModelPage } from "./pages/Model"
 import { ToolsPage } from "./pages/Tools"
 import { McpPage } from "./pages/Mcp"
@@ -54,6 +55,7 @@ import {
 const WORK_LINKS = [
   { to: "/history", label: "History" },
   { to: "/workflows", label: "Guide & Workflows" },
+  { to: "/obsidian", label: "Obsidian" },
   { to: "/memory", label: "Memory" },
   { to: "/phone", label: "Phone" },
 ] as const
@@ -281,6 +283,7 @@ function OwnerPortal() {
       <Route path="/history" element={<HistoryPage />} />
       <Route path="/workflows" element={<WorkflowsPage />} />
       <Route path="/memory" element={<MemoryPage />} />
+      <Route path="/obsidian" element={<ObsidianPage />} />
       <Route path="/model" element={<ModelPage />} />
       <Route path="/tools" element={<ToolsPage />} />
       <Route path="/mcp" element={<McpPage />} />

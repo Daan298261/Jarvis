@@ -15,6 +15,7 @@ import "./hud-v2.css"
 const ADMIN_QUICK = [
   { to: "/settings", label: "Settings" },
   { to: "/swarm", label: "Swarm" },
+  { to: "/obsidian", label: "Obsidian" },
   { to: "/memory", label: "Memory" },
   { to: "/history", label: "History" },
   { to: "/workflows", label: "Workflows" },
