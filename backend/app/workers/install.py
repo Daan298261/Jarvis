@@ -47,7 +47,10 @@ class InstallAttempt:
 
 SPECS: dict[str, tuple[InstallAttempt, ...]] = {
     "browser-use": (
-        InstallAttempt(pip_packages=("browser-use[core]",), extra_modules=("playwright",)),
+        InstallAttempt(
+            pip_packages=("browser-use[core]",),
+            extra_modules=("playwright",),
+        ),
         InstallAttempt(pip_packages=("browser-use",), extra_modules=("playwright",)),
     ),
     "ufo": (
