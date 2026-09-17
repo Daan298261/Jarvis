@@ -30,11 +30,16 @@ def test_hexstrike_catalog_ships_enabled_suite_profile():
 
 
 def test_gateway_allowlist_is_deny_by_default():
+    from app.security.hexstrike import operator_post_allowed
+
     assert gateway_allows("GET", "health")
     assert gateway_allows("GET", "/api/telemetry")
     assert gateway_allows("GET", "api/processes/list")
     assert gateway_allows("GET", "api/processes/status/12")
-    assert not gateway_allows("POST", "api/processes/terminate/12")
+    assert gateway_allows("GET", "api/tools/nmap")
+    assert operator_post_allowed("api/tools/nmap")
+    assert operator_post_allowed("api/processes/terminate/12")
+    assert gateway_allows("POST", "api/processes/terminate/12")
     assert not gateway_allows("POST", "api/command")
     assert not gateway_allows("POST", "api/intelligence/analyze-target")
     assert not gateway_allows("GET", "api/command")
@@ -105,6 +110,11 @@ async def test_activate_suite_does_not_load_inference(jarvis_env, monkeypatch):
 
     profile = MODEL_CATALOG["hexstrike-suite"].runtime_profile()
     assert profile is not None
+    result = await activate_runtime_profile(profile)
+    assert called["load"] is False
+    assert result is not None
+
+
 def test_compat_shim_stubs_mitmproxy_without_installing_it():
     from app.security.hexstrike_compat import DISABLED_MESSAGE, install_optional_stubs
 
