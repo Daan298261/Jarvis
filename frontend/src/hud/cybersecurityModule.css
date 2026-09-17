@@ -61,6 +61,23 @@
   color: rgba(255, 220, 170, 0.88);
 }
 
+.jarvis-cyber-module-retry {
+  margin-top: 8px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid rgba(103, 220, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(8, 20, 28, 0.92);
+  color: rgba(226, 245, 250, 0.9);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.jarvis-cyber-module-retry:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .jarvis-cyber-module-msg {
   margin: 0;
   font-size: 11px;

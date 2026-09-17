@@ -4531,15 +4531,12 @@ export type CybersecurityModule = {
   members: CybersecurityToolMember[]
 }
 
-export type CybersecurityModuleCatalog = {
-  module: CybersecurityModule
-  apiAvailable: boolean
-  loadMessage?: string
-}
+export type CybersecurityModuleCatalogResult =
+  | { ok: true; module: CybersecurityModule }
+  | { ok: false; message: string }
 
 export type CybersecurityActionResult = {
   ok: boolean
-  notAvailable?: boolean
   message: string
   job_id?: string
 }
@@ -4639,35 +4636,13 @@ function normalizeCybersecurityMember(raw: Record<string, unknown>): Cybersecuri
   }
 }
 
-function staticCybersecurityModule(): CybersecurityModule {
-  const members = CYBERSECURITY_MEMBER_ORDER.map((id) => {
-    const meta = CYBERSECURITY_MEMBER_META[id]
-    return {
-      id,
-      display_name: meta.display_name,
-      source_url: meta.source_url,
-      local_path: null,
-      enabled: false,
-      status: "missing" as const,
-      role: meta.role,
-    }
-  })
-  return {
-    id: CYBERSECURITY_MODULE_ID,
-    display_name: "Cybersecurity",
-    enabled: false,
-    members,
-  }
-}
-
-function mergeCybersecurityModule(payload: Record<string, unknown>): CybersecurityModule {
-  const base = staticCybersecurityModule()
+function parseCybersecurityModule(payload: Record<string, unknown>): CybersecurityModule {
   const root = (payload.module as Record<string, unknown> | undefined) || payload
   const enabled = root.enabled === true || root.enabled === "true"
   const displayName =
     (typeof root.display_name === "string" && root.display_name) ||
     (typeof root.name === "string" && root.name) ||
-    base.display_name
+    "Cybersecurity"
   const rawMembers = Array.isArray(root.members)
     ? root.members
     : Array.isArray(payload.members)
@@ -4679,32 +4654,34 @@ function mergeCybersecurityModule(payload: Record<string, unknown>): Cybersecuri
     const member = normalizeCybersecurityMember(item as Record<string, unknown>)
     if (member) byId.set(member.id, member)
   }
-  const members = CYBERSECURITY_MEMBER_ORDER.map((id) => byId.get(id) || base.members.find((m) => m.id === id)!)
+  const ordered: CybersecurityToolMember[] = []
+  for (const id of CYBERSECURITY_MEMBER_ORDER) {
+    const member = byId.get(id)
+    if (member) ordered.push(member)
+  }
+  for (const [id, member] of byId) {
+    if (!(CYBERSECURITY_MEMBER_ORDER as readonly string[]).includes(id)) {
+      ordered.push(member)
+    }
+  }
   return {
     id: CYBERSECURITY_MODULE_ID,
     display_name: displayName,
     enabled,
-    members,
+    members: ordered,
   }
 }
 
 async function fetchCybersecurityJson<T>(
   path: string,
   init?: RequestInit,
-): Promise<{ ok: true; data: T } | { ok: false; notAvailable: boolean; message: string }> {
+): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
   const headers = authHeaders({
     "Content-Type": "application/json",
     ...(init?.headers as Record<string, string> | undefined),
   })
   try {
     const response = await fetch(path, { ...init, headers })
-    if (response.status === 404 || response.status === 501) {
-      return {
-        ok: false,
-        notAvailable: true,
-        message: "Cybersecurity module catalog API is not available on this Jarvis version yet.",
-      }
-    }
     if (!response.ok) {
       const text = await response.text()
       let message = text || response.statusText
@@ -4714,34 +4691,30 @@ async function fetchCybersecurityJson<T>(
       } catch {
         // not JSON
       }
-      return { ok: false, notAvailable: false, message }
+      return { ok: false, message }
     }
     const data = (await response.json()) as T
     return { ok: true, data }
   } catch (err) {
     return {
       ok: false,
-      notAvailable: false,
       message: err instanceof Error ? err.message : "Cybersecurity catalog request failed.",
     }
   }
 }
 
-export async function loadCybersecurityModuleCatalog(): Promise<CybersecurityModuleCatalog> {
+export async function loadCybersecurityModuleCatalog(): Promise<CybersecurityModuleCatalogResult> {
   const result = await fetchCybersecurityJson<Record<string, unknown>>(
     `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}`,
   )
   if (!result.ok) {
-    return {
-      module: staticCybersecurityModule(),
-      apiAvailable: false,
-      loadMessage: result.message,
-    }
+    return { ok: false, message: result.message }
   }
-  return {
-    module: mergeCybersecurityModule(result.data),
-    apiAvailable: true,
+  const module = parseCybersecurityModule(result.data)
+  if (module.members.length === 0) {
+    return { ok: false, message: "Cybersecurity catalog returned no tools." }
   }
+  return { ok: true, module }
 }
 
 export async function setCybersecurityModuleEnabled(enabled: boolean): Promise<CybersecurityActionResult> {
@@ -4750,7 +4723,7 @@ export async function setCybersecurityModuleEnabled(enabled: boolean): Promise<C
     { method: "POST", body: JSON.stringify({ enabled }) },
   )
   if (!result.ok) {
-    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+    return { ok: false, message: result.message }
   }
   return {
     ok: true,
@@ -4768,7 +4741,7 @@ export async function setCybersecurityToolEnabled(
     { method: "POST", body: JSON.stringify({ enabled }) },
   )
   if (!result.ok) {
-    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+    return { ok: false, message: result.message }
   }
   return {
     ok: true,
@@ -4791,7 +4764,7 @@ export async function downloadModuleCatalogEntry(
     },
   )
   if (!result.ok) {
-    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+    return { ok: false, message: result.message }
   }
   return {
     ok: true,
@@ -4807,7 +4780,7 @@ export async function startCybersecurityTool(toolId: string): Promise<Cybersecur
     { method: "POST", body: "{}" },
   )
   if (!result.ok) {
-    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+    return { ok: false, message: result.message }
   }
   return {
     ok: true,
@@ -4822,7 +4795,7 @@ export async function stopCybersecurityTool(toolId: string): Promise<Cybersecuri
     { method: "POST", body: "{}" },
   )
   if (!result.ok) {
-    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+    return { ok: false, message: result.message }
   }
   return {
     ok: true,
@@ -4837,7 +4810,7 @@ export async function openCybersecurityToolFolder(toolId: string): Promise<Cyber
     { method: "POST", body: "{}" },
   )
   if (!result.ok) {
-    return { ok: false, notAvailable: result.notAvailable, message: result.message }
+    return { ok: false, message: result.message }
   }
   return {
     ok: true,

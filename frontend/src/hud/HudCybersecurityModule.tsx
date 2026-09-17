@@ -9,11 +9,16 @@ import {
   setCybersecurityToolEnabled,
   startCybersecurityTool,
   stopCybersecurityTool,
-  type CybersecurityModuleCatalog,
+  type CybersecurityModule,
   type CybersecurityToolMember,
 } from "../api"
 import { settingsSubmenuPath } from "../settings/settingsSubmenus"
 import "./cybersecurityModule.css"
+
+type CatalogLoadState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; module: CybersecurityModule }
 
 function roleLabel(role: string): string {
   return role.replace(/_/g, " ").replace(/\//g, " / ")
@@ -22,7 +27,7 @@ function roleLabel(role: string): string {
 function statusHint(status: CybersecurityToolMember["status"]): string {
   switch (status) {
     case "missing":
-      return "Clone not on disk — use Download when the catalog API is available."
+      return "Clone not on disk — use Download to fetch from the allowlisted source."
     case "found":
       return "Checkout found locally."
     case "starting":
@@ -39,14 +44,18 @@ function statusHint(status: CybersecurityToolMember["status"]): string {
 }
 
 export function HudCybersecurityModule() {
-  const [catalog, setCatalog] = useState<CybersecurityModuleCatalog | null>(null)
+  const [loadState, setLoadState] = useState<CatalogLoadState>({ status: "loading" })
   const [busy, setBusy] = useState(false)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
   const [message, setMessage] = useState("")
 
   const refresh = useCallback(async () => {
-    const next = await loadCybersecurityModuleCatalog()
-    setCatalog(next)
+    const result = await loadCybersecurityModuleCatalog()
+    if (result.ok) {
+      setLoadState({ status: "ready", module: result.module })
+    } else {
+      setLoadState({ status: "error", message: result.message })
+    }
   }, [])
 
   useEffect(() => {
@@ -54,14 +63,6 @@ export function HudCybersecurityModule() {
     const timer = window.setInterval(() => void refresh(), 5000)
     return () => window.clearInterval(timer)
   }, [refresh])
-
-  const module = catalog?.module
-  const apiAvailable = catalog?.apiAvailable ?? false
-  const apiBlocked = catalog != null && !apiAvailable
-
-  if (!catalog) {
-    return <p className="jarvis-cyber-module-banner">Loading cybersecurity module…</p>
-  }
 
   async function runModuleAction(action: () => Promise<{ ok: boolean; message: string }>) {
     setBusy(true)
@@ -87,8 +88,34 @@ export function HudCybersecurityModule() {
     }
   }
 
-  const masterDisabled = busy || apiBlocked || !module
-  const foundCount = module?.members.filter((m) => m.status === "found" || m.status === "running").length ?? 0
+  if (loadState.status === "loading") {
+    return <p className="jarvis-cyber-module-banner">Loading cybersecurity module…</p>
+  }
+
+  if (loadState.status === "error") {
+    return (
+      <div className="jarvis-cyber-module">
+        <p className="jarvis-cyber-module-banner warn" role="alert">
+          Could not load the cybersecurity module catalog: {loadState.message}
+        </p>
+        <button
+          type="button"
+          className="jarvis-cyber-module-retry"
+          disabled={busy}
+          onClick={() => {
+            setLoadState({ status: "loading" })
+            void refresh()
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  const module = loadState.module
+  const masterDisabled = busy
+  const foundCount = module.members.filter((m) => m.status === "found" || m.status === "running").length
 
   return (
     <div className="jarvis-cyber-module">
@@ -96,37 +123,24 @@ export function HudCybersecurityModule() {
         <h3 className="jarvis-cyber-module-title">Module · six optional backends</h3>
         <div className="jarvis-cyber-module-master">
           <span>
-            {module?.enabled ? "Enabled" : "Disabled"}
-            {module ? ` · ${foundCount}/${module.members.length} local` : ""}
+            {module.enabled ? "Enabled" : "Disabled"}
+            {` · ${foundCount}/${module.members.length} local`}
           </span>
           <button
             type="button"
             disabled={masterDisabled}
-            title={
-              apiBlocked
-                ? catalog?.loadMessage || "Backend catalog pending."
-                : module?.enabled
-                  ? "Disable entire cybersecurity module"
-                  : "Enable cybersecurity module"
-            }
+            title={module.enabled ? "Disable entire cybersecurity module" : "Enable cybersecurity module"}
             onClick={() =>
               void runModuleAction(async () => {
-                const next = !(module?.enabled ?? false)
+                const next = !module.enabled
                 return setCybersecurityModuleEnabled(next)
               })
             }
           >
-            {module?.enabled ? "Disable module" : "Enable module"}
+            {module.enabled ? "Disable module" : "Enable module"}
           </button>
         </div>
       </div>
-
-      {apiBlocked && (
-        <p className="jarvis-cyber-module-banner warn" role="status">
-          {catalog?.loadMessage ||
-            "Module catalog API is not available yet. Rows show expected tools; actions stay disabled until D1 lands."}
-        </p>
-      )}
 
       {message && (
         <p className="jarvis-cyber-module-msg" aria-live="polite">
@@ -135,16 +149,14 @@ export function HudCybersecurityModule() {
       )}
 
       <ul className="jarvis-cyber-tool-list" aria-label="Cybersecurity module tools">
-        {(module?.members ?? []).map((member) => {
+        {module.members.map((member) => {
           const rowLocked = busy || rowBusy === member.id
-          const moduleOff = !(module?.enabled ?? false)
+          const moduleOff = !module.enabled
           const pathKnown = Boolean(member.local_path)
-          const canOpenFolder = apiAvailable && pathKnown && !rowLocked
-          const canDownload =
-            apiAvailable && !rowLocked && (member.status === "missing" || !pathKnown)
+          const canOpenFolder = pathKnown && !rowLocked
+          const canDownload = !rowLocked && (member.status === "missing" || !pathKnown)
           const processControl = cybersecurityToolSupportsProcessControl(member.role)
           const canStart =
-            apiAvailable &&
             !rowLocked &&
             !moduleOff &&
             member.enabled &&
@@ -153,11 +165,8 @@ export function HudCybersecurityModule() {
             member.status !== "starting" &&
             (pathKnown || member.status === "found")
           const canStop =
-            apiAvailable &&
-            !rowLocked &&
-            processControl &&
-            (member.status === "running" || member.status === "starting")
-          const toggleDisabled = rowLocked || apiBlocked || moduleOff
+            !rowLocked && processControl && (member.status === "running" || member.status === "starting")
+          const toggleDisabled = rowLocked || moduleOff
 
           return (
             <li
@@ -190,13 +199,11 @@ export function HudCybersecurityModule() {
                   className={member.enabled ? "primary" : undefined}
                   disabled={toggleDisabled}
                   title={
-                    apiBlocked
-                      ? "Per-tool enable requires the catalog API."
-                      : moduleOff
-                        ? "Enable the module first."
-                        : member.enabled
-                          ? "Disable this tool"
-                          : "Enable this tool"
+                    moduleOff
+                      ? "Enable the module first."
+                      : member.enabled
+                        ? "Disable this tool"
+                        : "Enable this tool"
                   }
                   onClick={() =>
                     void runRowAction(member.id, () => setCybersecurityToolEnabled(member.id, !member.enabled))
@@ -207,13 +214,7 @@ export function HudCybersecurityModule() {
                 <button
                   type="button"
                   disabled={!canOpenFolder}
-                  title={
-                    !apiAvailable
-                      ? "Open folder requires the catalog API (desktop sign-off)."
-                      : !pathKnown
-                        ? "No local path yet."
-                        : "Open clone in file manager"
-                  }
+                  title={!pathKnown ? "No local path yet." : "Open clone in file manager"}
                   onClick={() => void runRowAction(member.id, () => openCybersecurityToolFolder(member.id))}
                 >
                   Open folder
@@ -222,15 +223,11 @@ export function HudCybersecurityModule() {
                   type="button"
                   disabled={!canDownload}
                   title={
-                    !apiAvailable
-                      ? "Download requires RFC-0095 catalog API."
-                      : canDownload
-                        ? "Clone or refresh from allowlisted source"
-                        : "Already on disk — use Open folder"
+                    canDownload
+                      ? "Clone or refresh from allowlisted source"
+                      : "Already on disk — use Open folder"
                   }
-                  onClick={() =>
-                    void runRowAction(member.id, () => downloadModuleCatalogEntry(member.id))
-                  }
+                  onClick={() => void runRowAction(member.id, () => downloadModuleCatalogEntry(member.id))}
                 >
                   Download
                 </button>
@@ -240,11 +237,9 @@ export function HudCybersecurityModule() {
                       type="button"
                       disabled={!canStart}
                       title={
-                        !apiAvailable
-                          ? "Start/stop hooks land with D1 worker supervisor."
-                          : !processControl
-                            ? "This connector is register-only."
-                            : "Start Jarvis-managed process"
+                        !processControl
+                          ? "This connector is register-only."
+                          : "Start Jarvis-managed process"
                       }
                       onClick={() => void runRowAction(member.id, () => startCybersecurityTool(member.id))}
                     >
@@ -253,7 +248,7 @@ export function HudCybersecurityModule() {
                     <button
                       type="button"
                       disabled={!canStop}
-                      title={!apiAvailable ? "Stop requires D1 supervisor API." : "Stop Jarvis-managed process"}
+                      title="Stop Jarvis-managed process"
                       onClick={() => void runRowAction(member.id, () => stopCybersecurityTool(member.id))}
                     >
                       Stop
