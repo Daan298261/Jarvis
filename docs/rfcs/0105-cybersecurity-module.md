@@ -6,7 +6,7 @@
 **Date:** 2026-09-17
 
 **Parent:** RFC-0095 Instagram collection ingest + Module Catalog Download.  
-**Related (read only; do not rewrite):** RFC-0006 hierarchical workers. RFC-0007 domain/workspace packs. RFC-0009 runtime portability. RFC-0024 skill lifecycle. RFC-0050 HUD / presence. RFC-0078 / RFC-0086 HexStrike (existing defensive suite + HUD panel **pattern** — **not** “HexStrike forever” as the only cyber surface; do not rewrite `HudHexStrikeSuite`). RFC-0090 optional-worker Install now. RFC-0094 Settings IA (Voice/Appearance left-bar; Advanced is **not** this module’s home). `SECURITY_AGENTS.md` (related reading only).
+**Related (read only; do not rewrite):** RFC-0006 hierarchical workers. RFC-0007 domain/workspace packs. RFC-0009 runtime portability. RFC-0024 skill lifecycle. RFC-0050 HUD / presence. RFC-0078 / RFC-0086 HexStrike (HUD panel **pattern** — **not** “HexStrike forever” as the only cyber surface; do not rewrite `HudHexStrikeSuite` in this module’s tickets). **RFC-0106** HexStrike full operator control (sibling embedded suite; do **not** collapse these six members into HexStrike, and do not replace HexStrike with this module). RFC-0090 optional-worker Install now. RFC-0094 Settings IA (Voice/Appearance left-bar; Advanced is **not** this module’s home). `SECURITY_AGENTS.md` (related reading only).
 
 This PR is **specs-only**. Product code is a follow-up implement ticket. Do not edit `frontend/src/` or backend in this PR. Local clones belong under Architect’s `projects/` library — **not** committed here.
 

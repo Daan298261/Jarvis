@@ -7,6 +7,8 @@
 
 **Related:** RFC-0078 suite shell; RFC-0079 computer-use permissions; `docs/spec.md` Stream H; `SECURITY_AGENTS.md` §3.4.
 
+**Successor (HexStrike operator surface):** [RFC-0106](0106-hexstrike-jarvis-full-operator-control.md). Install pinning, loopback bind, process supervisor, and Daybreak HUD chrome from this RFC **remain**. The “defensive-only enum / no MCP / no command proxy / ordinary Jarvis cannot operate HexStrike” product stance is **not** the end-state; **RFC-0106 intent wins** for HexStrike operation.
+
 ## Problem
 
 The HexStrike suite shell can supervise a configured loopback process and show read-only health, telemetry, and process data, but it cannot install or repair the upstream runtime. It also lacks owner-attested target scopes and a role-bound defensive action surface. Registering upstream HexStrike MCP wholesale would expose arbitrary command, payload, exploit, credential-attack, and file-mutation functions to ordinary agents.
