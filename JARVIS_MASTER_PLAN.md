@@ -2474,6 +2474,14 @@ Reason:
 
 Owner directed these former archive clones into a Jarvis cybersecurity module on Daybreak (surface + wiring), not six orphan tools, not a Settings dump, and not a HexStrike rewrite.
 
+Decision: RFC-0106 HexStrike Jarvis full operator control (accepted)
+
+Jarvis is the HexStrike operator (Daybreak HUD + owner chat). RFC-0106 **intent wins** over RFC-0086’s Blue-only enum / no-MCP / no-command-proxy product stance for this module; loopback bind and install pinning remain. No invented LE/Red/Purple/ATO gates (owner later). Real invoke + host-toolchain orchestration, not a health-only shell. RFC-0105 cybersecurity module stays a sibling. Specs-only; no new §58 checkbox.
+
+Reason:
+
+Taco: complete control over HexStrike and its toolchain; Jarvis is the “human” using it; do not ship stubs.
+
 ---
 
 ## 60. Expected Example Behavior
