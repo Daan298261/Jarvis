@@ -11,7 +11,7 @@ from typing import Any
 import psutil
 from openai import APIStatusError
 
-from ..config import AppSettings, logs_dir
+from ..config import AppSettings, load_settings, logs_dir
 from ..persona.pack import inject_persona_messages, persona_instructions
 from ..providers.base import ChatMessage
 from ..providers.openai_compat import OpenAICompatProvider
@@ -30,6 +30,12 @@ from .context_window import (
     parse_n_keep_overflow,
 )
 from .profiles import ModelProfile, declared_profiles, profile_gguf, qwen38_9b_profile, resolve_mmproj, resolve_profile
+from .prompt_budget import (
+    ModelCapacityExceeded,
+    is_context_overflow,
+    prepare_inference,
+    recover_context_after_overflow,
+)
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
@@ -333,61 +339,103 @@ class InferenceManager:
         max_tokens: int | None = None,
         thinking: bool | None = None,
         extra: dict[str, Any] | None = None,
+        settings: AppSettings | None = None,
+        working_state_block: str | None = None,
     ):
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
-        fitted_tools = fit_tools_to_context(
-            tools,
-            context_size=self.live_context_size(),
-            max_tokens=max_tokens,
-        )
-        tool_schema_chars = len(json.dumps(fitted_tools, ensure_ascii=False)) if fitted_tools else 0
-        prepared = self.prepare_chat_messages(
-            messages,
-            max_tokens=max_tokens,
-            tool_schema_chars=tool_schema_chars,
-        )
-        extra_payload = self._with_n_keep(extra, prepared, max_tokens)
-        try:
-            return await self.provider.chat(
-                prepared,
-                tools=fitted_tools,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=max_tokens,
-                thinking=thinking,
-                extra=extra_payload,
-            )
-        except APIStatusError as exc:
-            if not self._adopt_n_keep_overflow(exc):
-                raise
+        app_settings = settings or load_settings()
+        profile = resolve_profile(self.state.profile or app_settings.inference.profile)
+        typed = [
+            message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
+            for message in messages
+        ]
+        overflow_retries = 0
+        while True:
             fitted_tools = fit_tools_to_context(
                 tools,
                 context_size=self.live_context_size(),
                 max_tokens=max_tokens,
             )
+            try:
+                preflight = await prepare_inference(
+                    typed,
+                    fitted_tools,
+                    profile,
+                    max_tokens,
+                    app_settings,
+                    manager=self,
+                    working_state_block=working_state_block,
+                )
+            except ModelCapacityExceeded:
+                raise
+            typed = preflight.messages
+            fitted_tools = fit_tools_to_context(
+                fitted_tools,
+                context_size=self.live_context_size(),
+                max_tokens=max_tokens,
+            )
             tool_schema_chars = len(json.dumps(fitted_tools, ensure_ascii=False)) if fitted_tools else 0
             prepared = self.prepare_chat_messages(
-                messages,
+                typed,
                 max_tokens=max_tokens,
                 tool_schema_chars=tool_schema_chars,
             )
             extra_payload = self._with_n_keep(extra, prepared, max_tokens)
-            n_ctx = self.live_context_size()
-            keep = int(extra_payload.get("n_keep") or 0)
-            if n_ctx > 0 and keep >= n_ctx:
-                raise RuntimeError(n_keep_overflow_message(keep, n_ctx)) from exc
-            return await self.provider.chat(
-                prepared,
-                tools=fitted_tools,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=max_tokens,
-                thinking=thinking,
-                extra=extra_payload,
-            )
+            try:
+                return await self.provider.chat(
+                    prepared,
+                    tools=fitted_tools,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra_payload,
+                )
+            except APIStatusError as exc:
+                if is_context_overflow(exc) and overflow_retries < 1:
+                    overflow_retries += 1
+                    typed, recovered, _esc = await recover_context_after_overflow(
+                        typed,
+                        fitted_tools,
+                        profile,
+                        max_tokens,
+                        app_settings,
+                        manager=self,
+                        working_state_block=working_state_block,
+                        allow_escalation=False,
+                    )
+                    if recovered:
+                        continue
+                if not self._adopt_n_keep_overflow(exc):
+                    raise
+                fitted_tools = fit_tools_to_context(
+                    tools,
+                    context_size=self.live_context_size(),
+                    max_tokens=max_tokens,
+                )
+                tool_schema_chars = len(json.dumps(fitted_tools, ensure_ascii=False)) if fitted_tools else 0
+                prepared = self.prepare_chat_messages(
+                    typed,
+                    max_tokens=max_tokens,
+                    tool_schema_chars=tool_schema_chars,
+                )
+                extra_payload = self._with_n_keep(extra, prepared, max_tokens)
+                n_ctx = self.live_context_size()
+                keep = int(extra_payload.get("n_keep") or 0)
+                if n_ctx > 0 and keep >= n_ctx:
+                    raise RuntimeError(n_keep_overflow_message(keep, n_ctx)) from exc
+                return await self.provider.chat(
+                    prepared,
+                    tools=fitted_tools,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra_payload,
+                )
 
     async def chat_stream(
         self,
@@ -399,41 +447,78 @@ class InferenceManager:
         max_tokens: int | None = None,
         thinking: bool | None = False,
         extra: dict[str, Any] | None = None,
+        settings: AppSettings | None = None,
+        working_state_block: str | None = None,
     ) -> AsyncIterator[str]:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
-        prepared = self.prepare_chat_messages(messages, max_tokens=max_tokens)
-        extra_payload = self._with_n_keep(extra, prepared, max_tokens)
-        try:
-            async for delta in self.provider.chat_stream(
-                prepared,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=max_tokens,
-                thinking=thinking,
-                extra=extra_payload,
-            ):
-                yield delta
-        except APIStatusError as exc:
-            if not self._adopt_n_keep_overflow(exc):
-                raise
-            prepared = self.prepare_chat_messages(messages, max_tokens=max_tokens)
+        app_settings = settings or load_settings()
+        profile = resolve_profile(self.state.profile or app_settings.inference.profile)
+        typed = [
+            message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
+            for message in messages
+        ]
+        overflow_retries = 0
+        while True:
+            fitted_tools: list[dict[str, Any]] | None = None
+            preflight = await prepare_inference(
+                typed,
+                fitted_tools,
+                profile,
+                max_tokens,
+                app_settings,
+                manager=self,
+                working_state_block=working_state_block,
+            )
+            typed = preflight.messages
+            prepared = self.prepare_chat_messages(typed, max_tokens=max_tokens)
             extra_payload = self._with_n_keep(extra, prepared, max_tokens)
-            n_ctx = self.live_context_size()
-            keep = int(extra_payload.get("n_keep") or 0)
-            if n_ctx > 0 and keep >= n_ctx:
-                raise RuntimeError(n_keep_overflow_message(keep, n_ctx)) from exc
-            async for delta in self.provider.chat_stream(
-                prepared,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=max_tokens,
-                thinking=thinking,
-                extra=extra_payload,
-            ):
-                yield delta
+            try:
+                async for delta in self.provider.chat_stream(
+                    prepared,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra_payload,
+                ):
+                    yield delta
+                return
+            except APIStatusError as exc:
+                if is_context_overflow(exc) and overflow_retries < 1:
+                    overflow_retries += 1
+                    typed, recovered, _esc = await recover_context_after_overflow(
+                        typed,
+                        fitted_tools,
+                        profile,
+                        max_tokens,
+                        app_settings,
+                        manager=self,
+                        working_state_block=working_state_block,
+                        allow_escalation=False,
+                    )
+                    if recovered:
+                        continue
+                if not self._adopt_n_keep_overflow(exc):
+                    raise
+                prepared = self.prepare_chat_messages(typed, max_tokens=max_tokens)
+                extra_payload = self._with_n_keep(extra, prepared, max_tokens)
+                n_ctx = self.live_context_size()
+                keep = int(extra_payload.get("n_keep") or 0)
+                if n_ctx > 0 and keep >= n_ctx:
+                    raise RuntimeError(n_keep_overflow_message(keep, n_ctx)) from exc
+                async for delta in self.provider.chat_stream(
+                    prepared,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra_payload,
+                ):
+                    yield delta
+                return
 
     def _vision_requested(self, settings: AppSettings, vision: bool | None) -> bool:
         return resolve_vision(settings, vision)

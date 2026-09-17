@@ -17,7 +17,13 @@ from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.manager import MANAGER
-from ..inference.profiles import resolve_profile
+from ..inference.profiles import ModelProfile, resolve_profile
+from ..inference.prompt_budget import (
+    ModelCapacityExceeded,
+    PromptBudget,
+    is_context_overflow,
+    recover_context_after_overflow,
+)
 from ..inference.vision import messages_need_vision, should_load_vision
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..policy.authorize import AuthorizationResult, authorize
@@ -487,6 +493,35 @@ class AgentRuntime:
         except Exception:
             pass
 
+    async def _recover_context_pressure(
+        self,
+        task_id: str,
+        messages: list[ChatMessage],
+        working: WorkingState,
+        profile: ModelProfile,
+        settings: AppSettings,
+        *,
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int | None,
+        allow_escalation: bool,
+    ) -> tuple[list[ChatMessage], bool]:
+        async def _emit(kind: str, budget: PromptBudget, detail: str) -> None:
+            payload = json.dumps({**budget.as_dict(), "detail": detail})
+            await BUS.publish(task_id, kind, kind.replace("_", " ").title(), payload[:4000], stage="act")
+
+        updated, recovered, _escalated = await recover_context_after_overflow(
+            messages,
+            tools,
+            profile,
+            max_tokens,
+            settings,
+            manager=MANAGER,
+            working_state_block=working.as_prompt_block(),
+            emit=_emit,
+            allow_escalation=allow_escalation,
+        )
+        return updated, recovered
+
     async def _run_conversation(
         self,
         task_id: str,
@@ -867,6 +902,8 @@ class AgentRuntime:
             )
             tools_used = True
 
+        context_recovery_attempts = 0
+        context_escalation_attempts = 0
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel or kill_switch_active():
@@ -925,23 +962,30 @@ class AgentRuntime:
                     await MANAGER.ensure_vision(settings)
                     provider = MANAGER.provider or provider
                 try:
+                    turn_tools = (
+                        None
+                        if force_final
+                        else exposure_schemas_for(
+                            working.task_class,
+                            working.requested_tools,
+                            security_role=working.security_role,
+                            prompt=_latest_user_text(messages, working.goal or prompt),
+                        )
+                    )
+                    turn_max_tokens = 400 if force_final else 1024
+
                     async def _model_turn() -> ChatResult:
                         return await asyncio.wait_for(
                             MANAGER.chat(
                                 messages,
-                                tools=None
-                                if force_final
-                                else exposure_schemas_for(
-                                    working.task_class,
-                                    working.requested_tools,
-                                    security_role=working.security_role,
-                                    prompt=_latest_user_text(messages, working.goal or prompt),
-                                ),
+                                tools=turn_tools,
                                 temperature=profile.temperature,
                                 top_p=profile.top_p,
                                 top_k=profile.top_k,
                                 thinking=think,
-                                max_tokens=400 if force_final else 1024,
+                                max_tokens=turn_max_tokens,
+                                settings=settings,
+                                working_state_block=working.as_prompt_block(),
                             ),
                             timeout=90 if force_final else 180,
                         )
@@ -956,8 +1000,60 @@ class AgentRuntime:
                         context=think_context,
                         operation=_model_turn,
                     )
+                except ModelCapacityExceeded as exc:
+                    await self._release_lazy_vision()
+                    if context_recovery_attempts < 2:
+                        allow_esc = context_escalation_attempts < 1 and context_recovery_attempts >= 1
+                        messages, recovered = await self._recover_context_pressure(
+                            task_id,
+                            messages,
+                            working,
+                            profile,
+                            settings,
+                            tools=turn_tools,
+                            max_tokens=turn_max_tokens,
+                            allow_escalation=allow_esc,
+                        )
+                        if recovered:
+                            context_recovery_attempts += 1
+                            if allow_esc:
+                                context_escalation_attempts += 1
+                            continue
+                    err = str(exc)
+                    await self._update(
+                        task_id,
+                        status="failed",
+                        stage="failed",
+                        result=err,
+                        error=err,
+                        current_action="Failed: model capacity exceeded",
+                        current_tool="",
+                        **metrics.as_fields(),
+                    )
+                    await record_trajectory(task_id, working, "failed")
+                    await complete_coding_route(task_id, "failed", err)
+                    await BUS.publish(task_id, "failed", "Inference failed", err, stage="failed")
+                    return
                 except (APIStatusError, APIConnectionError) as exc:
                     await self._release_lazy_vision()
+                    if isinstance(exc, APIStatusError) and is_context_overflow(exc):
+                        if context_recovery_attempts < 2:
+                            allow_esc = context_escalation_attempts < 1 and context_recovery_attempts >= 1
+                            messages, recovered = await self._recover_context_pressure(
+                                task_id,
+                                messages,
+                                working,
+                                profile,
+                                settings,
+                                tools=turn_tools,
+                                max_tokens=turn_max_tokens,
+                                allow_escalation=allow_esc,
+                            )
+                            if recovered:
+                                context_recovery_attempts += 1
+                                if allow_esc:
+                                    context_escalation_attempts += 1
+                                continue
                     if isinstance(exc, APIStatusError):
                         detail = getattr(exc, "message", None) or str(exc)
                         err = f"Inference server error ({exc.status_code}): {detail}"

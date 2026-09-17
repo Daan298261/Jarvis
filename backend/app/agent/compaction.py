@@ -87,13 +87,10 @@ def compact_history(
 
 
 def estimate_prompt_tokens(messages: list[ChatMessage]) -> int:
-    """Cheap char/4 estimate so we can grow context before llama.cpp starts spilling."""
-    total = 0
-    for message in messages:
-        total += len(_text_of(message))
-        if message.tool_calls:
-            total += len(json.dumps(message.tool_calls))
-    return max(1, total // 4)
+    """Delegate to RFC-0114 budget token estimator (consistent chars/token per request)."""
+    from ..inference.prompt_budget import estimate_messages_tokens
+
+    return estimate_messages_tokens(messages)
 
 
 def _is_generated(message: ChatMessage) -> bool:
