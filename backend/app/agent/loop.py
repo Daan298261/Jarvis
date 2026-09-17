@@ -98,7 +98,7 @@ from .skills import (
     relevant_skills,
     steps_are_executable,
 )
-from .tooling import apply_capability_request, expose_called_tool, schemas_for as exposed_tool_schemas, should_enable_thinking, tools_for_task
+from .tooling import apply_capability_request, expose_called_tool, should_enable_thinking
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .policy import policy_guidance
 from .prompts import (
@@ -148,14 +148,25 @@ def _as_utc(value: datetime | None) -> datetime | None:
         return value.astimezone(timezone.utc)
 
 
-def _exposed_csv(working: WorkingState) -> str:
+def _exposed_csv(working: WorkingState, prompt: str | None = None) -> str:
     return ",".join(
         tool_names_for(
             working.task_class,
             working.requested_tools,
             security_role=working.security_role,
+            prompt=prompt or working.goal,
         )
     )
+
+
+def _latest_user_text(messages: list[ChatMessage], fallback: str = "") -> str:
+    for message in reversed(messages or []):
+        if message.role != "user":
+            continue
+        text = message.content if isinstance(message.content, str) else ""
+        if text.strip():
+            return text.strip()
+    return (fallback or "").strip()
 
 
 def _authorization_observation(result: AuthorizationResult) -> str:
@@ -294,7 +305,7 @@ class AgentRuntime:
             task_class=task_class,
             security_role=security_role or "",
             response_route=route.kind,
-            exposed_tools=",".join(tool_names_for(task_class, security_role=security_role or "")),
+            exposed_tools=",".join(tool_names_for(task_class, security_role=security_role or "", prompt=prompt)),
         )
         async with SessionLocal() as session:
             session.add(task)
@@ -629,7 +640,7 @@ class AgentRuntime:
                 task_acknowledgement(prompt),
                 stage="understand",
             )
-        await self._update(task_id, exposed_tools=_exposed_csv(working))
+        await self._update(task_id, exposed_tools=_exposed_csv(working, extra_prompt or prompt))
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         recommended_context = select_context_size(
@@ -694,7 +705,15 @@ class AgentRuntime:
         metrics = LiveTaskMetrics()
         already_escalated = bool(getattr(working, "escalated", False))
         critic_rejected = False
-        exposed_tools = tools_for_task(working.task_class)
+        exposed_tools = set(
+            tool_names_for(
+                working.task_class,
+                working.requested_tools,
+                security_role=working.security_role,
+                prompt=extra_prompt or prompt,
+            )
+        )
+        exposed_tools.update({"request_tools", "request_capability"})
 
         if existing and continue_existing:
             messages = existing
@@ -738,6 +757,7 @@ class AgentRuntime:
                 working.task_class,
                 working.requested_tools,
                 security_role=working.security_role,
+                prompt=prompt,
             )
             audit = professional_prompt_block(prompt)
             if audit:
@@ -867,7 +887,7 @@ class AgentRuntime:
                     compact_memory=working.dumps(),
                     execution_mode=execution_mode,
                     task_class=working.task_class,
-                    exposed_tools=_exposed_csv(working),
+                    exposed_tools=_exposed_csv(working, _latest_user_text(messages, extra_prompt or prompt)),
                 )
                 think = should_enable_thinking(
                     profile,
@@ -915,6 +935,7 @@ class AgentRuntime:
                                     working.task_class,
                                     working.requested_tools,
                                     security_role=working.security_role,
+                                    prompt=_latest_user_text(messages, working.goal or prompt),
                                 ),
                                 temperature=profile.temperature,
                                 top_p=profile.top_p,
@@ -1108,6 +1129,13 @@ class AgentRuntime:
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
                         if name == "request_capability":
                             exposed_tools, _added, observation = apply_capability_request(exposed_tools, arguments)
+                            granted = grant_requested_tools(arguments)
+                            working.requested_tools = sorted(set(working.requested_tools) | set(granted))
+                            await self._update(
+                                task_id,
+                                exposed_tools=_exposed_csv(working, extra_prompt or prompt),
+                                compact_memory=working.dumps(),
+                            )
                             attach = None
                             failed = False
                         else:

@@ -7,11 +7,13 @@ from openai import APIStatusError
 from app.config import AppSettings
 from app.inference.backends import LlamaCppBackend
 from app.inference.context_window import (
+    MAX_KEEP_TOKENS,
     clamp_n_keep,
     extract_loaded_n_ctx,
     n_keep_for_messages,
     n_keep_overflow_message,
     parse_n_keep_overflow,
+    stable_keep_prefix,
 )
 from app.inference.manager import InferenceManager, fit_messages_to_context
 from app.inference.profiles import resolve_profile
@@ -40,7 +42,31 @@ def _status_error(message: str = N_KEEP_ERROR) -> APIStatusError:
 def test_clamp_n_keep_rejects_prompt_sized_keep_on_4k_slot():
     kept = clamp_n_keep(6772, 4096, max_tokens=256)
     assert kept < 4096
+    assert kept <= MAX_KEEP_TOKENS
     assert kept == clamp_n_keep(kept, 4096, max_tokens=256)
+
+
+def test_n_keep_pins_identity_not_recovered_blob():
+    identity = "You are Jarvis, a composed local operations assistant."
+    recovered = (
+        identity
+        + "\n\nTool exposure: docker, office, desktop, git, browser, hexstrike_operator.\n"
+        + "Compacted earlier task memory:\n"
+        + ("old recovered conversation " * 900)
+    )
+    messages = [
+        ChatMessage(role="system", content=recovered),
+        ChatMessage(role="user", content="do a voice check"),
+    ]
+    prefix = stable_keep_prefix(messages, identity_text=identity)
+    assert prefix == identity
+    assert "Tool exposure" not in prefix
+    assert "recovered conversation" not in prefix
+    keep = n_keep_for_messages(messages, 4096, max_tokens=1024, identity_text=identity)
+    assert keep <= MAX_KEEP_TOKENS
+    assert keep < 4096
+    # Keep-set must stay far below the 6772 token blob that 400'd the 4k slot.
+    assert keep < 6772 // 4
 
 
 def test_n_keep_for_huge_system_prompt_fits_4k_with_generation_headroom():
@@ -49,8 +75,8 @@ def test_n_keep_for_huge_system_prompt_fits_4k_with_generation_headroom():
         ChatMessage(role="user", content="do a voice check"),
     ]
     keep = n_keep_for_messages(messages, 4096, max_tokens=1024)
+    assert keep <= MAX_KEEP_TOKENS
     assert keep < 4096
-    # Leave room for the completion: keep + generation must stay inside n_ctx.
     assert keep + 1024 <= 4096
 
 
@@ -99,6 +125,7 @@ def test_fit_messages_trims_recovered_context_for_4k_server():
     assert fitted[-1].content == "do a voice check"
     keep = n_keep_for_messages(fitted, 4096, max_tokens=256)
     assert keep < 4096
+    assert keep <= MAX_KEEP_TOKENS
 
 
 def test_llama_cpp_args_default_keep_to_zero():
@@ -223,4 +250,5 @@ async def test_explicit_n_keep_minus_one_is_clamped_below_n_ctx():
         max_tokens=256,
     )
     assert captured["extra"]["n_keep"] < 4096
+    assert captured["extra"]["n_keep"] <= MAX_KEEP_TOKENS
     assert captured["extra"]["n_keep"] >= 0

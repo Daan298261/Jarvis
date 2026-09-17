@@ -14,6 +14,19 @@ from typing import Any
 
 # Conservative chars/token — matches fit_messages_to_context.
 CHARS_PER_TOKEN = 2
+# Durable blobs (tools, recovered context, skills) must not become n_keep.
+# Pin only a short identity prefix so llama.cpp can drop the rest on shift.
+MAX_KEEP_TOKENS = 768
+MAX_KEEP_FRACTION = 0.22
+_KEEP_DROP_MARKERS = (
+    "Compacted earlier task memory:",
+    "Compact working state:",
+    "Tool exposure:",
+    "On-demand skills:",
+    "Recalled similar earlier tasks",
+    "Live briefing",
+    "[Look up dropped context",
+)
 
 _N_KEEP_OVERFLOW = re.compile(
     r"n_keep:\s*(\d+)\s*>=\s*n_ctx:\s*(\d+)",
@@ -146,12 +159,23 @@ def generation_headroom(n_ctx: int, max_tokens: int | None) -> int:
     return min(limit - 1, reserved + 1)
 
 
+def max_stable_keep_tokens(n_ctx: int) -> int:
+    """Upper bound for the KV keep-prefix: identity only, never the catalog."""
+    limit = int(n_ctx or 0)
+    if limit <= 1:
+        return 0
+    return max(1, min(MAX_KEEP_TOKENS, int(limit * MAX_KEEP_FRACTION)))
+
+
 def clamp_n_keep(n_keep: int, n_ctx: int, *, max_tokens: int | None = None) -> int:
     """Force n_keep strictly below n_ctx with room for the completion."""
     limit = int(n_ctx or 0)
     if limit <= 1:
         return 0
-    ceiling = limit - generation_headroom(limit, max_tokens)
+    ceiling = min(
+        limit - generation_headroom(limit, max_tokens),
+        max_stable_keep_tokens(limit),
+    )
     return max(0, min(int(n_keep), ceiling))
 
 
@@ -161,28 +185,59 @@ def estimate_text_tokens(text: str) -> int:
     return max(1, (len(text) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN)
 
 
-def n_keep_for_messages(
-    messages: list[Any],
-    n_ctx: int,
-    *,
-    max_tokens: int | None = None,
-) -> int:
-    """Keep the leading system prefix in the KV cache, capped for the live slot."""
-    prefix = ""
+def _message_content(message: Any) -> str:
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if content is not None:
+        return json.dumps(content, ensure_ascii=False)
+    return ""
+
+
+def stable_keep_prefix(messages: list[Any], *, identity_text: str | None = None) -> str:
+    """Leading identity only. Recovered context, tools, and skills are not kept.
+
+    llama.cpp n_keep pins the first N tokens of the serialized prompt. Putting
+    the durable blob there both 400s on 4k slots and prevents on-demand lookup.
+    """
+    identity = (identity_text or "").strip()
+    system = ""
     for message in messages:
         role = getattr(message, "role", None)
         if role is None and isinstance(message, dict):
             role = message.get("role")
         if role != "system":
             continue
-        content = getattr(message, "content", None)
-        if content is None and isinstance(message, dict):
-            content = message.get("content")
-        if isinstance(content, str):
-            prefix = content
-        elif content is not None:
-            prefix = json.dumps(content, ensure_ascii=False)
+        system = _message_content(message).strip()
         break
+    if identity and system.startswith(identity):
+        prefix = identity
+    elif identity and identity in system[: max(len(identity) * 2, 64)]:
+        prefix = identity
+    else:
+        prefix = system
+        for marker in _KEEP_DROP_MARKERS:
+            idx = prefix.find(marker)
+            if idx > 0:
+                prefix = prefix[:idx].rstrip()
+                break
+    cap_chars = MAX_KEEP_TOKENS * CHARS_PER_TOKEN
+    if len(prefix) > cap_chars:
+        prefix = prefix[:cap_chars].rstrip()
+    return prefix
+
+
+def n_keep_for_messages(
+    messages: list[Any],
+    n_ctx: int,
+    *,
+    max_tokens: int | None = None,
+    identity_text: str | None = None,
+) -> int:
+    """Keep only the stable identity prefix, never the full recovered blob."""
+    prefix = stable_keep_prefix(messages, identity_text=identity_text)
     estimated = estimate_text_tokens(prefix) if prefix else 0
     return clamp_n_keep(estimated, n_ctx, max_tokens=max_tokens)
 
