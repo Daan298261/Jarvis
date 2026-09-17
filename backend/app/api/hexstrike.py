@@ -82,27 +82,55 @@ class HexStrikeOperateIn(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
-def _operator_permission(permission_id: str = "cyber.hexstrike") -> None:
-    from ..policy.computer_permissions import evaluate_permission, operator_intent_grant
+def _permission_ids_to_check(permission_id: str) -> list[str]:
+    return list(dict.fromkeys((permission_id, "cyber.hexstrike")))
 
-    for required in dict.fromkeys((permission_id, "cyber.hexstrike")):
+
+def _require_permissions_grant(
+    permission_ids: list[str],
+    *,
+    action_kind: str,
+    context: dict[str, Any],
+) -> None:
+    from ..policy.approval_pending import park_action
+    from ..policy.computer_permissions import evaluate_permission
+
+    ordered = list(dict.fromkeys(permission_ids))
+    asking: list[str] = []
+    for required in ordered:
         decision = evaluate_permission(required)
         if decision.status == "deny":
             audit_hexstrike("permission_denied", permission=required, reason=decision.reason)
             raise HTTPException(status_code=403, detail=decision.reason)
         if decision.status == "ask":
-            try:
-                operator_intent_grant(required, "allow_session")
-            except PermissionError as exc:
-                audit_hexstrike("permission_denied", permission=required, reason=str(exc))
-                raise HTTPException(status_code=403, detail=str(exc)) from exc
+            asking.append(required)
+    if not asking:
+        return
+    payload = context.copy()
+    payload["_permission_ids"] = asking
+    parked = park_action(action_kind=action_kind, permission_ids=asking, context=payload)
+    audit_hexstrike("permission_pending", action_kind=action_kind, permissions=asking)
+    raise HTTPException(status_code=428, detail=parked)
+
+
+def _require_operator_grant(
+    permission_id: str,
+    *,
+    action_kind: str,
+    context: dict[str, Any],
+) -> None:
+    _require_permissions_grant(
+        _permission_ids_to_check(permission_id),
+        action_kind=action_kind,
+        context=context,
+    )
 
 
 async def _status_payload() -> dict[str, Any]:
     snapshot = await HEXSTRIKE.status()
     operator_surface: dict[str, Any] = {}
     if snapshot.running:
-        operator_surface = await sync_operator_surface(register_mcp=True)
+        operator_surface = await sync_operator_surface(register_mcp=False)
     payload = snapshot.as_dict()
     payload["install"] = HEXSTRIKE_INSTALLER.status().as_dict()
     payload["capabilities"] = capability_snapshot()
@@ -123,7 +151,7 @@ async def hexstrike_status():
 
 @router.post("/start")
 async def hexstrike_start():
-    _operator_permission()
+    _require_operator_grant("cyber.hexstrike", action_kind="hexstrike.start", context={})
     return (await HEXSTRIKE.ensure_started()).as_dict()
 
 
@@ -139,14 +167,23 @@ async def hexstrike_install_status():
 
 @router.post("/install")
 async def hexstrike_install(body: HexStrikeInstallIn | None = None):
-    _operator_permission("blue.static_rules")
-    return HEXSTRIKE_INSTALLER.start(body.install_path if body else None).as_dict()
+    install_path = body.install_path if body else None
+    _require_operator_grant(
+        "blue.static_rules",
+        action_kind="hexstrike.install",
+        context={"install_path": install_path},
+    )
+    return HEXSTRIKE_INSTALLER.start(install_path).as_dict()
 
 
 @router.post("/dependencies/install")
 async def hexstrike_install_dependencies(body: dict[str, Any] | None = None):
-    _operator_permission("blue.static_rules")
     tool = (body or {}).get("tool")
+    _require_operator_grant(
+        "blue.static_rules",
+        action_kind="hexstrike.dependencies.install",
+        context={"tool": tool},
+    )
     if tool:
         return (await install_host_tool(str(tool))).as_dict()
     results = await install_all_missing()
@@ -158,7 +195,7 @@ async def hexstrike_install_dependencies(body: dict[str, Any] | None = None):
 
 @router.post("/install/cancel")
 async def hexstrike_install_cancel():
-    _operator_permission()
+    _require_operator_grant("cyber.hexstrike", action_kind="hexstrike.stop_install", context={})
     return (await HEXSTRIKE_INSTALLER.cancel()).as_dict()
 
 
@@ -184,7 +221,7 @@ async def hexstrike_tools_catalog():
 
 @router.post("/tools/refresh")
 async def hexstrike_tools_refresh():
-    _operator_permission()
+    _require_operator_grant("cyber.hexstrike", action_kind="hexstrike.tools.refresh", context={})
     surface = await sync_operator_surface(register_mcp=True)
     if not surface.get("operator_ready"):
         raise HTTPException(
@@ -196,9 +233,16 @@ async def hexstrike_tools_refresh():
 
 @router.post("/tools/{tool_id}/install")
 async def hexstrike_tool_install(tool_id: str):
-    _operator_permission("blue.static_rules")
     status = await HEXSTRIKE.status(enrich=False)
-    job = start_dependency_install(tool_id, install_path=status.install_path)
+    _require_operator_grant(
+        "blue.static_rules",
+        action_kind="hexstrike.tool.install",
+        context={"tool_id": tool_id, "install_path": status.install_path},
+    )
+    try:
+        job = start_dependency_install(tool_id, install_path=status.install_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return job
 
 
@@ -212,7 +256,11 @@ async def hexstrike_tool_install_job(job_id: str):
 
 @router.post("/operate")
 async def hexstrike_operate(body: HexStrikeOperateIn):
-    _operator_permission()
+    _require_operator_grant(
+        "cyber.hexstrike",
+        action_kind="hexstrike.operate",
+        context={"capability_id": body.capability_id, "arguments": body.arguments},
+    )
     snapshot = await HEXSTRIKE.status(enrich=False)
     if snapshot.running:
         surface = await sync_operator_surface(register_mcp=False)
@@ -258,7 +306,11 @@ async def hexstrike_job_artifacts(job_id: str):
 
 @router.post("/jobs/{job_id}/stop")
 async def hexstrike_job_stop(job_id: str):
-    _operator_permission("blue.active_response")
+    _require_operator_grant(
+        "blue.active_response",
+        action_kind="hexstrike.job.stop",
+        context={"job_id": job_id},
+    )
     try:
         return await stop_operator_job(job_id)
     except KeyError as exc:
@@ -276,7 +328,17 @@ async def hexstrike_scopes():
 
 @router.put("/scopes/{scope_id}")
 async def hexstrike_scope_put(scope_id: str, body: HexStrikeScopeIn):
-    _operator_permission("blue.static_rules")
+    _require_operator_grant(
+        "blue.static_rules",
+        action_kind="hexstrike.scope.put",
+        context={
+            "scope_id": scope_id,
+            "kind": body.kind,
+            "value": body.value,
+            "label": body.label,
+            "attested_owned": body.attested_owned,
+        },
+    )
     try:
         return upsert_scope(
             scope_id,
@@ -303,9 +365,18 @@ async def hexstrike_action(body: HexStrikeActionIn):
     capability = CAPABILITY_BY_ID.get(body.action)
     if capability is None:
         raise HTTPException(status_code=422, detail="Unknown defensive action")
-    _operator_permission(capability.permission)
+    permission_ids = [capability.permission]
     if body.action == "threat_intel_lookup":
-        _operator_permission("network.internet")
+        permission_ids.append("network.internet")
+    _require_permissions_grant(
+        permission_ids,
+        action_kind="hexstrike.defensive.action",
+        context={
+            "action": body.action,
+            "scope_id": body.scope_id,
+            "options": body.options.model_dump(exclude_none=True),
+        },
+    )
     try:
         return await execute_defensive(body.action, body.scope_id, body.options.model_dump(exclude_none=True))
     except KeyError as exc:
@@ -320,7 +391,11 @@ async def hexstrike_action(body: HexStrikeActionIn):
 
 @router.post("/actions/{job_id}/stop")
 async def hexstrike_action_stop(job_id: str):
-    _operator_permission("blue.active_response")
+    _require_operator_grant(
+        "blue.active_response",
+        action_kind="hexstrike.defensive.stop",
+        context={"job_id": job_id},
+    )
     try:
         return await stop_managed_job(job_id)
     except KeyError as exc:

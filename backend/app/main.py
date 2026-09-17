@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, modules, owner_chat, packs, perception, perception_identity, permissions, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, integrations, license, lmstudio, mcp, memory, mobile, model, modules, owner_chat, packs, perception, perception_identity, permissions, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -82,6 +82,7 @@ app.include_router(worker_environments.router)
 app.include_router(runtime_profiles.router)
 app.include_router(hexstrike.router)
 app.include_router(permissions.router)
+app.include_router(approvals.router)
 app.include_router(computer_use.router)
 app.include_router(lmstudio.router)
 app.include_router(packs.router)

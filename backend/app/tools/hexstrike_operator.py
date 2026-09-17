@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from ..policy.computer_permissions import evaluate_permission, operator_intent_grant
+from ..policy.approval_pending import park_action
+from ..policy.computer_permissions import evaluate_permission
 from ..security.hexstrike import HEXSTRIKE, audit_hexstrike
 from ..security.hexstrike_operator import (
     catalog_snapshot,
@@ -39,35 +40,52 @@ class HexStrikeOperatorTool(Tool):
     def __init__(self, context: Callable[[], dict[str, Any]]) -> None:
         self._context = context
 
-    def _ensure_permission(self) -> str | None:
-        decision = evaluate_permission("cyber.hexstrike")
-        if decision.status == "allow":
+    def _permission_block(
+        self,
+        *,
+        action_kind: str,
+        context: dict[str, Any],
+        permission_id: str = "cyber.hexstrike",
+    ) -> ToolResult | None:
+        asking: list[str] = []
+        for required in dict.fromkeys((permission_id, "cyber.hexstrike")):
+            decision = evaluate_permission(required)
+            if decision.status == "deny":
+                return ToolResult(False, "", error=decision.reason)
+            if decision.status == "ask":
+                asking.append(required)
+        if not asking:
             return None
-        if decision.status == "ask":
-            try:
-                operator_intent_grant("cyber.hexstrike", "allow_session")
-                return None
-            except PermissionError as exc:
-                return str(exc)
-        return decision.reason
+        payload = dict(context)
+        payload["_permission_ids"] = asking
+        parked = park_action(action_kind=action_kind, permission_ids=asking, context=payload)
+        audit_hexstrike("operator_tool_pending", action_kind=action_kind, permissions=asking)
+        return ToolResult(
+            False,
+            json.dumps(parked, default=str),
+            error="pending_approval",
+            data=parked,
+        )
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        denied = self._ensure_permission()
-        if denied:
-            audit_hexstrike("operator_tool_denied", reason=denied)
-            return ToolResult(False, "", error=denied)
         operation = str(kwargs.get("operation") or "").strip().lower()
         if operation == "status":
             snapshot = await HEXSTRIKE.status(enrich=True)
             operator = {}
             if snapshot.running:
-                operator = await sync_operator_surface(register_mcp=True)
+                operator = await sync_operator_surface(register_mcp=False)
             payload = {**snapshot.as_dict(), **catalog_snapshot(), "operator": operator}
             return ToolResult(True, json.dumps(payload, default=str), data=payload)
         if operation == "start":
+            blocked = self._permission_block(action_kind="hexstrike.start", context={})
+            if blocked:
+                return blocked
             snapshot = await HEXSTRIKE.ensure_started()
             return ToolResult(True, json.dumps(snapshot.as_dict(), default=str), data=snapshot.as_dict())
         if operation in {"sync", "refresh_catalog"}:
+            blocked = self._permission_block(action_kind="hexstrike.tools.refresh", context={})
+            if blocked:
+                return blocked
             surface = await sync_operator_surface(register_mcp=True)
             if not surface.get("operator_ready"):
                 return ToolResult(
@@ -83,12 +101,28 @@ class HexStrikeOperatorTool(Tool):
             if not dep_id:
                 return ToolResult(False, "", error="dependency_id is required for install_dependency")
             status = await HEXSTRIKE.status(enrich=False)
-            job = start_dependency_install(dep_id, install_path=status.install_path)
+            blocked = self._permission_block(
+                permission_id="blue.static_rules",
+                action_kind="hexstrike.tool.install",
+                context={"tool_id": dep_id, "install_path": status.install_path},
+            )
+            if blocked:
+                return blocked
+            try:
+                job = start_dependency_install(dep_id, install_path=status.install_path)
+            except ValueError as exc:
+                return ToolResult(False, "", error=str(exc))
             return ToolResult(True, json.dumps(job, default=str), data=job)
         if operation == "operate":
             capability_id = str(kwargs.get("capability_id") or "").strip()
             if not capability_id:
                 return ToolResult(False, "", error="capability_id is required for operate")
+            blocked = self._permission_block(
+                action_kind="hexstrike.operate",
+                context={"capability_id": capability_id, "arguments": kwargs.get("arguments") or {}},
+            )
+            if blocked:
+                return blocked
             try:
                 job = await operate(capability_id, kwargs.get("arguments") or {})
             except (ValueError, PermissionError, RuntimeError) as exc:
