@@ -44,6 +44,9 @@ import org.json.JSONObject
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicBoolean
+import com.jarvis.companion.device.DeviceModelPackCatalog
+import com.jarvis.companion.device.DevicePackStatus
+import com.jarvis.companion.device.offlineChatBanner
 
 private val Gold = Color(0xFFF5A623)
 private val Ink = Color(0xFF070B12)
@@ -241,6 +244,23 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "Chat" -> {
+                                offlineChatBanner(state.connected, state.paired, state.devicePackStatus)?.let { bannerText ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2838)),
+                                    ) {
+                                        Column(Modifier.padding(12.dp)) {
+                                            Text("OFFLINE MODE", color = Gold, fontSize = 10.sp, letterSpacing = 1.sp)
+                                            Text(bannerText, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                                            if (state.devicePackStatus == DevicePackStatus.DOWNLOADING && state.devicePackDownloadProgress != null) {
+                                                LinearProgressIndicator(
+                                                    progress = { state.devicePackDownloadProgress!!.coerceIn(0f, 1f) },
+                                                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 ConversationPickers(state, model::selectModel, model::selectVoice)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     TextButton(onClick = { model.openConversation(null) }) { Text("New conversation") }
@@ -254,9 +274,19 @@ class MainActivity : ComponentActivity() {
                                     items(state.messages) { message ->
                                         Card(colors = CardDefaults.cardColors(containerColor = if (message.optString("role") == "user") Color(0xFF222B38) else Panel), modifier = Modifier.fillMaxWidth()) {
                                             Column(Modifier.padding(16.dp)) {
-                                                Text(if (message.optString("role") == "user") "YOU" else "JARVIS", color = Gold, fontSize = 10.sp)
+                                                val roleLabel = when {
+                                                    message.optString("role") == "user" -> "YOU"
+                                                    message.optBoolean("offline_local") -> "JARVIS · ON-DEVICE"
+                                                    else -> "JARVIS"
+                                                }
+                                                Text(roleLabel, color = Gold, fontSize = 10.sp)
                                                 Text(message.optString("text"), Modifier.padding(top = 8.dp), fontSize = 15.sp)
-                                                if (message.optString("role") == "assistant") TextButton(onClick = { model.speak(message.optString("text")) }) { Icon(Icons.Outlined.VolumeUp, null); Text(if (state.speaking) " Stop" else " Read aloud") }
+                                                if (message.optString("role") == "assistant" && state.connected) {
+                                                    TextButton(onClick = { model.speak(message.optString("text")) }) {
+                                                        Icon(Icons.Outlined.VolumeUp, null)
+                                                        Text(if (state.speaking) " Stop" else " Read aloud")
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -357,6 +387,8 @@ class MainActivity : ComponentActivity() {
 private fun inferenceStatus(state: CompanionState): String {
     val name = state.inferenceFamily.ifBlank { state.inferenceProfile }.ifBlank { "conversation model" }
     return when {
+        state.offlineAnswering -> "On-device · ${state.devicePackLabel.ifBlank { "companion pack" }}"
+        !state.connected && state.paired -> "Leader offline · ${devicePackStatusLabel(state.devicePackStatus)} pack"
         !state.connected -> "Jarvis is offline"
         state.inferenceLoading -> "Loading $name…"
         state.inferenceLoaded -> "Model loaded · $name"
@@ -404,6 +436,92 @@ private fun inferenceStatus(state: CompanionState): String {
             }
         }
     }
+}
+
+@Composable private fun CompanionModelsSection(model: CompanionModel, state: CompanionState) {
+    Text("Models (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(
+        "When the Leader is unreachable, the companion can answer using a downloaded model pack (RFC-0108).",
+        color = Muted,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Status · ${devicePackStatusLabel(state.devicePackStatus)}", color = Gold, fontSize = 11.sp, letterSpacing = 1.sp)
+            Text(state.devicePackLabel.ifBlank { "No pack selected" }, fontWeight = FontWeight.Medium)
+            Text(formatStorageBytes(state.devicePackBytes), color = Muted, fontSize = 12.sp)
+            state.devicePackError?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
+            if (state.devicePackStatus == DevicePackStatus.DOWNLOADING && state.devicePackDownloadProgress != null) {
+                LinearProgressIndicator(
+                    progress = { state.devicePackDownloadProgress!!.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("${(state.devicePackDownloadProgress!! * 100).toInt()}%", color = Muted, fontSize = 11.sp)
+            }
+            var packMenu by remember { mutableStateOf(false) }
+            Box {
+                OutlinedButton(onClick = { packMenu = true }) {
+                    Text("Pack · ${state.devicePackLabel.take(28)} ▾")
+                }
+                DropdownMenu(packMenu, { packMenu = false }) {
+                    DeviceModelPackCatalog.packs.forEach { pack ->
+                        DropdownMenuItem(
+                            text = { Text(pack.label) },
+                            onClick = {
+                                packMenu = false
+                                model.selectCompanionModelPack(pack.id)
+                            },
+                        )
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { model.downloadCompanionModelPack() },
+                    enabled = !state.busy && state.devicePackStatus != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        when (state.devicePackStatus) {
+                            DevicePackStatus.MISSING, DevicePackStatus.ERROR -> "Download pack"
+                            DevicePackStatus.DOWNLOADING -> "Downloading…"
+                            else -> "Re-download pack"
+                        },
+                    )
+                }
+                OutlinedButton(
+                    onClick = { model.deleteCompanionModelPack() },
+                    enabled = !state.busy && state.devicePackBytes > 0 && state.devicePackStatus != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Delete pack") }
+            }
+            if (!DeviceModelInferenceAvailable()) {
+                Text(
+                    "Native inference library: not bundled in this APK build. Pack download still works; generation requires a build with jarvis_llama.",
+                    color = Muted,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}
+
+private fun DeviceModelInferenceAvailable(): Boolean =
+    com.jarvis.companion.device.DeviceModelInference.isNativeAvailable
+
+private fun devicePackStatusLabel(status: DevicePackStatus): String = when (status) {
+    DevicePackStatus.MISSING -> "missing"
+    DevicePackStatus.DOWNLOADING -> "downloading"
+    DevicePackStatus.READY -> "ready"
+    DevicePackStatus.RUNNING -> "running"
+    DevicePackStatus.ERROR -> "error"
+}
+
+private fun formatStorageBytes(bytes: Long): String {
+    if (bytes <= 0) return "Storage used · 0 B"
+    val mb = bytes.toDouble() / (1024.0 * 1024.0)
+    return if (mb >= 1024) "Storage used · ${"%.2f".format(mb / 1024)} GiB" else "Storage used · ${"%.1f".format(mb)} MiB"
 }
 
 @Composable private fun InfoCard(title: String, text: String) {
@@ -676,6 +794,7 @@ private fun inferenceStatus(state: CompanionState): String {
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Calls for critical events", Modifier.weight(1f)); Switch(device?.optBoolean("critical_calls") == true, { model.preferences(device?.optBoolean("notifications") == true, it) }, enabled = state.connected) }
             if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text("Background push needs the Jarvis push service configured.", color = Muted, fontSize = 12.sp)
         }
+        item { CompanionModelsSection(model, state) }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
