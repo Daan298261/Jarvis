@@ -1,8 +1,9 @@
-"""HexStrike AI process supervisor and RFC-0048/0078 gateway allowlist.
+"""HexStrike AI process supervisor and loopback operator gateway (RFC-0048/0106).
 
 HexStrike is a third-party loopback MCP/API (default 127.0.0.1:8888). Jarvis
-starts it when the operator selects the cybersecurity suite profile, surfaces
-it through the HUD, and never proxies raw command / Python / payload endpoints.
+starts it when the operator selects the cybersecurity suite profile, registers
+upstream MCP for owner-operator context, and proxies discovered operator routes
+on loopback only (never WAN / command / payload / exploit endpoints).
 """
 from __future__ import annotations
 
@@ -146,22 +147,46 @@ def normalize_upstream_path(path: str) -> str:
     return raw
 
 
-def gateway_allows(method: str, path: str) -> bool:
-    """Deny-by-default allowlist for HexStrike upstream HTTP."""
+def _path_blocked(cleaned: str) -> bool:
+    lowered = cleaned.lower()
+    return any(token in lowered for token in _BLOCKED_TOKENS)
+
+
+def operator_post_allowed(path: str) -> bool:
+    """Loopback operator POST paths Jarvis may invoke after catalog discovery."""
     try:
         cleaned = normalize_upstream_path(path)
     except ValueError:
         return False
-    lowered = cleaned.lower()
-    if any(token in lowered for token in _BLOCKED_TOKENS):
+    if _path_blocked(cleaned):
+        return False
+    if cleaned in DEFENSIVE_POST_EXACT:
+        return True
+    if _MANAGED_TERMINATE_RE.fullmatch(cleaned):
+        return True
+    if cleaned.startswith("api/tools/"):
+        suffix = cleaned.split("/", 2)[-1]
+        return bool(suffix) and suffix not in {".", ".."}
+    return False
+
+
+def gateway_allows(method: str, path: str) -> bool:
+    """Deny-by-default allowlist for HexStrike upstream HTTP proxy."""
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        return False
+    if _path_blocked(cleaned):
         return False
     verb = (method or "GET").strip().upper()
     if verb == "GET":
         if cleaned in ALLOWED_GET_EXACT:
             return True
-        return any(cleaned.startswith(prefix) for prefix in ALLOWED_GET_PREFIXES)
+        if any(cleaned.startswith(prefix) for prefix in ALLOWED_GET_PREFIXES):
+            return True
+        return cleaned.startswith("api/tools/")
     if verb == "POST":
-        return any(cleaned.startswith(prefix) for prefix in ALLOWED_POST_PREFIXES)
+        return operator_post_allowed(cleaned)
     return False
 
 
@@ -341,6 +366,23 @@ class HexStrikeManager:
             snapshot.last_error = self.last_error
             if started:
                 await self._enrich(snapshot)
+                try:
+                    from .hexstrike_mcp import register_hexstrike_mcp
+                    from .hexstrike_operator import refresh_discovered_catalog, sync_operator_surface
+
+                    install = Path(snapshot.install_path)
+                    surface = await sync_operator_surface(register_mcp=True)
+                    if not surface.get("operator_ready"):
+                        hint = surface.get("mcp", {}).get("error") or surface.get("reason") or "operator surface not ready"
+                        self.last_error = f"HexStrike server is up but operator surface failed: {hint}"[:400]
+                        snapshot.last_error = self.last_error
+                        audit_hexstrike("operator_surface_failed", detail=surface)
+                    else:
+                        await refresh_discovered_catalog(force=True)
+                except Exception as exc:
+                    self.last_error = f"HexStrike operator surface failed: {exc}"[:400]
+                    snapshot.last_error = self.last_error
+                    log.exception("HexStrike MCP/catalog refresh after start failed")
                 audit_hexstrike("started", pid=snapshot.pid, port=snapshot.port)
             else:
                 audit_hexstrike("start_failed", error=self.last_error)
@@ -350,6 +392,12 @@ class HexStrikeManager:
         async with self._lock:
             await self._stop_unlocked()
             self.last_error = ""
+            try:
+                from .hexstrike_mcp import unregister_hexstrike_mcp
+
+                await unregister_hexstrike_mcp()
+            except Exception:
+                log.debug("HexStrike MCP unregister failed", exc_info=True)
             audit_hexstrike("stopped")
             return self._base_status()
 
@@ -449,7 +497,8 @@ class HexStrikeManager:
         if isinstance(health, dict):
             snapshot.health = health
             tools = (
-                health.get("tools")
+                health.get("tools_status")
+                or health.get("tools")
                 or health.get("available_tools")
                 or health.get("tool_status")
                 or health.get("tools_status")
@@ -489,28 +538,29 @@ class HexStrikeManager:
         audit_hexstrike("proxy", method=method, path=cleaned, status=response.status_code)
         return response.status_code, response.content, content_type
 
-    async def post_defensive(self, path: str, payload: dict[str, Any]) -> Any:
-        """Call one reviewed defensive endpoint; never accept arbitrary upstream paths."""
+    async def post_operator(self, path: str, payload: dict[str, Any]) -> Any:
+        """Invoke one discovered loopback operator endpoint."""
         cleaned = normalize_upstream_path(path)
-        if cleaned not in DEFENSIVE_POST_EXACT and not _MANAGED_TERMINATE_RE.fullmatch(cleaned):
-            audit_hexstrike("defensive_proxy_denied", path=cleaned)
-            raise PermissionError(f"HexStrike defensive gateway does not allow POST /{cleaned}")
-        if any(token in cleaned.lower() for token in _BLOCKED_TOKENS):
-            audit_hexstrike("defensive_proxy_denied", path=cleaned)
-            raise PermissionError(f"HexStrike defensive gateway denied POST /{cleaned}")
+        if not operator_post_allowed(cleaned):
+            audit_hexstrike("operator_proxy_denied", path=cleaned)
+            raise PermissionError(f"HexStrike operator gateway does not allow POST /{cleaned}")
         snapshot = self._base_status()
         if not snapshot.running:
             raise RuntimeError("HexStrike is not running")
         url = f"http://{snapshot.host}:{snapshot.port}/{cleaned}"
         async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
             response = await client.post(url, json=payload)
-        audit_hexstrike("defensive_proxy", path=cleaned, status=response.status_code)
+        audit_hexstrike("operator_proxy", path=cleaned, status=response.status_code)
         if response.status_code >= 400:
             raise RuntimeError(f"HexStrike returned HTTP {response.status_code}")
         try:
             return response.json()
         except ValueError:
             return {"text": response.text[:12000]}
+
+    async def post_defensive(self, path: str, payload: dict[str, Any]) -> Any:
+        """Backward-compatible alias for RFC-0086 defensive routes."""
+        return await self.post_operator(path, payload)
 
     async def _get_json(self, url: str) -> Any | None:
         parsed = urlparse(url)

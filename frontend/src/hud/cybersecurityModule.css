@@ -1,0 +1,205 @@
+.jarvis-cyber-module-body {
+  grid-template-columns: 1fr;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(420px, 52dvh);
+  overflow: auto;
+}
+
+.jarvis-cyber-module-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.jarvis-cyber-module-title {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(162, 199, 211, 0.85);
+}
+
+.jarvis-cyber-module-master {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(196, 228, 237, 0.78);
+}
+
+.jarvis-cyber-module-master button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid rgba(103, 220, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(8, 20, 28, 0.92);
+  color: rgba(226, 245, 250, 0.9);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.jarvis-cyber-module-master button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.jarvis-cyber-module-banner {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(103, 220, 255, 0.14);
+  background: rgba(6, 16, 22, 0.72);
+  color: rgba(196, 228, 237, 0.78);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.jarvis-cyber-module-banner.warn {
+  border-color: rgba(255, 196, 103, 0.35);
+  color: rgba(255, 220, 170, 0.88);
+}
+
+.jarvis-cyber-module-retry {
+  margin-top: 8px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid rgba(103, 220, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(8, 20, 28, 0.92);
+  color: rgba(226, 245, 250, 0.9);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.jarvis-cyber-module-retry:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.jarvis-cyber-module-msg {
+  margin: 0;
+  font-size: 11px;
+  color: rgba(103, 220, 255, 0.88);
+}
+
+.jarvis-cyber-tool-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.jarvis-cyber-tool-row {
+  padding: 10px;
+  border: 1px solid rgba(103, 220, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(5, 14, 20, 0.82);
+  display: grid;
+  gap: 6px;
+}
+
+.jarvis-cyber-tool-row.disabled {
+  opacity: 0.72;
+}
+
+.jarvis-cyber-tool-row-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.jarvis-cyber-tool-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(230, 246, 252, 0.92);
+}
+
+.jarvis-cyber-tool-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  color: rgba(162, 199, 211, 0.65);
+}
+
+.jarvis-cyber-status {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(162, 199, 211, 0.35);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(196, 228, 237, 0.82);
+}
+
+.jarvis-cyber-status.found {
+  border-color: rgba(103, 220, 255, 0.45);
+  color: rgba(103, 220, 255, 0.92);
+}
+
+.jarvis-cyber-status.running,
+.jarvis-cyber-status.starting {
+  border-color: rgba(120, 230, 170, 0.45);
+  color: rgba(170, 245, 200, 0.95);
+}
+
+.jarvis-cyber-status.error {
+  border-color: rgba(255, 155, 122, 0.55);
+  color: rgba(255, 180, 150, 0.95);
+}
+
+.jarvis-cyber-status.missing {
+  border-color: rgba(255, 196, 103, 0.35);
+  color: rgba(255, 210, 140, 0.9);
+}
+
+.jarvis-cyber-tool-path {
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgba(162, 199, 211, 0.72);
+  word-break: break-all;
+}
+
+.jarvis-cyber-tool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.jarvis-cyber-tool-actions button {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid rgba(103, 220, 255, 0.2);
+  border-radius: 7px;
+  background: rgba(8, 20, 28, 0.9);
+  color: rgba(226, 245, 250, 0.88);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.jarvis-cyber-tool-actions button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.jarvis-cyber-tool-actions button.primary {
+  border-color: rgba(103, 220, 255, 0.45);
+}
+
+.jarvis-cyber-module-links {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: rgba(162, 199, 211, 0.75);
+}
+
+.jarvis-cyber-module-links a {
+  color: rgba(103, 220, 255, 0.88);
+}

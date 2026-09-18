@@ -21,11 +21,17 @@ class BrowserUseTool(Tool):
         "type": "object",
         "properties": {
             "goal": {"type": "string", "description": "What to accomplish in the browser"},
-            "url": {"type": "string", "description": "Optional starting URL"},
+            "url": {"type": "string", "description": "Optional starting URL (also drives network permission scope)"},
         },
         "required": ["goal"],
     }
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         settings = load_settings()
-        return await _BACKEND.run(str(kwargs.get("goal") or ""), kwargs.get("url"), settings)
+        goal = str(kwargs.get("goal") or "")
+        url = kwargs.get("url")
+        if isinstance(url, str):
+            url = url.strip() or None
+        else:
+            url = None
+        return await _BACKEND.run(goal, url, settings)

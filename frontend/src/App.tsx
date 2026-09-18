@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { ChatPage } from "./pages/Chat"
 import { HistoryPage } from "./pages/History"
 import { MemoryPage } from "./pages/Memory"
+import { ObsidianPage } from "./pages/Obsidian"
 import { ModelPage } from "./pages/Model"
 import { ToolsPage } from "./pages/Tools"
 import { McpPage } from "./pages/Mcp"
@@ -11,7 +12,6 @@ import { SystemPage } from "./pages/System"
 import { SwarmPage } from "./pages/Swarm"
 import { WorkflowsPage } from "./pages/Workflows"
 import { PhonePage } from "./pages/Phone"
-import { CompanionPairingPage } from "./pages/CompanionPairing"
 import { SetupPage } from "./pages/Setup"
 import { AgentsPage } from "./pages/Agents"
 import { AgentInterviewPage } from "./pages/AgentInterview"
@@ -33,6 +33,8 @@ import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
 import { PortalNav } from "./components/PortalNav"
 import { BootNova } from "./boot/BootNova"
 import { HudShell } from "./hud/HudShell"
+import { PendingApprovalHost } from "./chat/PendingApprovalHost"
+import { PendingApprovalsProvider } from "./chat/pendingApprovals"
 import { HudChatHome } from "./hud/HudChatHome"
 import { getUiMode, setUiMode as persistUiMode, type UiMode } from "./hud/uiMode"
 import "./hud/hud.css"
@@ -53,6 +55,7 @@ import {
 const WORK_LINKS = [
   { to: "/history", label: "History" },
   { to: "/workflows", label: "Guide & Workflows" },
+  { to: "/obsidian", label: "Obsidian" },
   { to: "/memory", label: "Memory" },
   { to: "/phone", label: "Phone" },
 ] as const
@@ -105,7 +108,12 @@ export default function App() {
   if (isGuestPath(location.pathname)) {
     return <GuestPage />
   }
-  return <OwnerPortal />
+  return (
+    <PendingApprovalsProvider>
+      <OwnerPortal />
+      <PendingApprovalHost />
+    </PendingApprovalsProvider>
+  )
 }
 
 function OwnerPortal() {
@@ -270,11 +278,12 @@ function OwnerPortal() {
     <Routes>
       <Route path="/" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
       <Route path="/phone" element={<PhonePage />} />
-      <Route path="/companion-pairing" element={<CompanionPairingPage />} />
+      <Route path="/companion-pairing" element={<Navigate to="/settings/phone-pairing" replace />} />
       <Route path="/tasks/:id" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
       <Route path="/history" element={<HistoryPage />} />
       <Route path="/workflows" element={<WorkflowsPage />} />
       <Route path="/memory" element={<MemoryPage />} />
+      <Route path="/obsidian" element={<ObsidianPage />} />
       <Route path="/model" element={<ModelPage />} />
       <Route path="/tools" element={<ToolsPage />} />
       <Route path="/mcp" element={<McpPage />} />

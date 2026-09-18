@@ -7,9 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from ..config import models_dir, repo_root
+from .kokoro_adapter import (
+    KOKORO_HF_REPO,
+    KOKORO_MODEL_DIR,
+    is_kokoro_installable,
+    kokoro_assets_ready,
+    kokoro_package_ready,
+    kokoro_runtime_state,
+)
 
-KOKORO_MODEL_DIR = models_dir() / "tts" / "kokoro-82m"
-KOKORO_HF_REPO = "hexgrad/Kokoro-82M"
 CHATTERBOX_MODEL_DIR = models_dir() / "tts" / "chatterbox-turbo"
 PIPER_VOICES_DIR = models_dir() / "tts" / "piper"
 
@@ -31,35 +37,17 @@ def resolve_engine_id(tts: Any | None) -> str:
 
 
 def kokoro_weights_ready(model_dir: Path | None = None) -> bool:
-    root = model_dir or KOKORO_MODEL_DIR
-    if not root.is_dir():
-        return False
-    markers = list(root.glob("*.pth")) + list(root.glob("**/*.pth"))
-    if markers:
-        return True
-    if (root / "config.json").is_file():
-        return True
-    if (root / ".jarvis_staged_ok").is_file():
-        return True
-    return False
+    return kokoro_assets_ready(model_dir)
 
 
 def kokoro_python_ready() -> bool:
-    if os.environ.get("JARVIS_DISABLE_KOKORO", "").strip() in {"1", "true", "yes"}:
-        return False
-    return _module_available("kokoro")
+    return kokoro_package_ready()
 
 
 def is_kokoro_available(*, model_dir: Path | None = None) -> bool:
-    """Kokoro is selectable unless explicitly disabled.
-
-    Python and weights are staged lazily on first synthesis so a fresh
-    Windows install does not fall through to robotic SAPI.
-    """
+    """Return true only after the bundled Kokoro runtime produced valid audio."""
     del model_dir
-    if os.environ.get("JARVIS_DISABLE_KOKORO", "").strip() in {"1", "true", "yes"}:
-        return False
-    return True
+    return kokoro_runtime_state().ready
 
 
 def is_piper_available() -> bool:
@@ -69,7 +57,14 @@ def is_piper_available() -> bool:
 
 
 def is_chatterbox_available() -> bool:
-    return _module_available("chatterbox")
+    if not _module_available("chatterbox"):
+        return False
+    try:
+        import perth
+
+        return callable(getattr(perth, "PerthImplicitWatermarker", None))
+    except Exception:
+        return False
 
 
 def legacy_system_tts_available() -> bool:
@@ -137,14 +132,17 @@ def primary_tts_backend() -> str | None:
     return None
 
 
-def engine_availability() -> dict[str, bool]:
+def engine_availability() -> dict[str, Any]:
+    kokoro_state = kokoro_runtime_state()
     return {
-        "kokoro": is_kokoro_available(),
+        "kokoro": kokoro_state.ready,
+        "kokoro_installable": is_kokoro_installable(),
         "piper": is_piper_available(),
         "chatterbox": is_chatterbox_available(),
         "system": legacy_system_tts_available(),
-        "kokoro_weights": kokoro_weights_ready(),
+        "kokoro_weights": kokoro_state.assets_ready,
         "kokoro_model_dir": str(KOKORO_MODEL_DIR),
+        "kokoro_runtime": kokoro_state.to_dict(),
         "chatterbox_opt_in": is_chatterbox_available(),
     }
 

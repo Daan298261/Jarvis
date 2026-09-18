@@ -43,7 +43,8 @@ def test_worker_rdp_maps_both_permissions(permission_store):
     assert ids == ["computer.worker_nodes", "computer.rdp"]
 
 
-def test_web_fetch_splits_internet_and_local(permission_store):
+def test_computer_permissions_browser_use_local_network(permission_store):
+    assert permission_ids_for_tool("browser_use", {"url": "http://127.0.0.1:8080"}) == ["network.local"]
     assert permission_ids_for_tool("web_fetch", {"url": "https://example.com"}) == ["network.internet"]
     assert permission_ids_for_tool("web_fetch", {"url": "http://192.168.1.1/status"}) == ["network.local"]
     assert permission_ids_for_tool("browser", {"url": "http://nas.local"}) == ["network.local"]

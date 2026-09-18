@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,15 @@ from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.manager import MANAGER
-from ..inference.profiles import resolve_profile
+from ..inference.profiles import ModelProfile, resolve_profile
+from ..inference.prompt_budget import (
+    ModelCapacityExceeded,
+    PromptBudget,
+    calculate_prompt_budget,
+    context_capacity_error,
+    is_context_overflow,
+    recover_context_after_overflow,
+)
 from ..inference.vision import messages_need_vision, should_load_vision
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..policy.authorize import AuthorizationResult, authorize
@@ -87,8 +96,15 @@ from ..persona.owner_chat import OWNER_CHAT_SYSTEM, owner_chat_max_tokens
 from ..persona.think_aloud import run_with_think_aloud
 from ..persona.weather import weather_system_message
 from ..providers.completion_text import empty_generation_error
+from .front_responder import (
+    generate_front_reply,
+    is_safe_front_speech,
+    last_front_timing,
+    note_front_audio,
+    run_two_lane_chat,
+)
 from .recovery import recovery_hint
-from .tool_exposure import describe_exposure, grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
+from .tool_exposure import grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import (
     bind_parameters,
@@ -98,7 +114,7 @@ from .skills import (
     relevant_skills,
     steps_are_executable,
 )
-from .tooling import apply_capability_request, expose_called_tool, schemas_for as exposed_tool_schemas, should_enable_thinking, tools_for_task
+from .tooling import apply_capability_request, expose_called_tool, should_enable_thinking
 from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
 from .policy import policy_guidance
 from .prompts import (
@@ -111,6 +127,7 @@ from .prompts import (
     VERIFY_REQUIRED_PROMPT,
 )
 from .docs_first_grounding import DocsFirstContext, maybe_docs_first
+from .turn_working_set import apply_working_set_to_system, compose_turn_working_set
 from .self_dev import KillSwitchActive, kill_switch_active
 
 
@@ -148,14 +165,25 @@ def _as_utc(value: datetime | None) -> datetime | None:
         return value.astimezone(timezone.utc)
 
 
-def _exposed_csv(working: WorkingState) -> str:
+def _exposed_csv(working: WorkingState, prompt: str | None = None) -> str:
     return ",".join(
         tool_names_for(
             working.task_class,
             working.requested_tools,
             security_role=working.security_role,
+            prompt=prompt or working.goal,
         )
     )
+
+
+def _latest_user_text(messages: list[ChatMessage], fallback: str = "") -> str:
+    for message in reversed(messages or []):
+        if message.role != "user":
+            continue
+        text = message.content if isinstance(message.content, str) else ""
+        if text.strip():
+            return text.strip()
+    return (fallback or "").strip()
 
 
 def _authorization_observation(result: AuthorizationResult) -> str:
@@ -294,7 +322,7 @@ class AgentRuntime:
             task_class=task_class,
             security_role=security_role or "",
             response_route=route.kind,
-            exposed_tools=",".join(tool_names_for(task_class, security_role=security_role or "")),
+            exposed_tools=",".join(tool_names_for(task_class, security_role=security_role or "", prompt=prompt)),
         )
         async with SessionLocal() as session:
             session.add(task)
@@ -476,6 +504,162 @@ class AgentRuntime:
         except Exception:
             pass
 
+    async def _recover_context_pressure(
+        self,
+        task_id: str,
+        messages: list[ChatMessage],
+        working: WorkingState,
+        profile: ModelProfile,
+        settings: AppSettings,
+        *,
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int | None,
+    ) -> tuple[list[ChatMessage], bool]:
+        async def _emit(kind: str, budget: PromptBudget, detail: str) -> None:
+            payload = json.dumps({**budget.as_dict(), "detail": detail})
+            await BUS.publish(task_id, kind, kind.replace("_", " ").title(), payload[:4000], stage="act")
+
+        updated, recovered = await recover_context_after_overflow(
+            messages,
+            tools,
+            profile,
+            max_tokens,
+            settings,
+            manager=MANAGER,
+            working_state_block=working.as_prompt_block(),
+            emit=_emit,
+        )
+        return updated, recovered
+
+    async def _publish_front_events(self, task_id: str, kind: str, title: str, detail: str = "", *, persist: bool = True) -> None:
+        await BUS.publish(task_id, kind, title, detail, stage="chat", persist=persist)
+
+    async def _speak_front_reply(
+        self,
+        task_id: str,
+        front,
+        *,
+        prompt: str,
+        stream_key: str,
+        turn_started: float,
+        source: str = "task_chat",
+    ) -> None:
+        settings = load_settings()
+        if not settings.front_responder.speak_immediately:
+            return
+        if not front or not is_safe_front_speech(front.action, front.text):
+            return
+        spoken = front.text if front.text.endswith((".", "!", "?")) else f"{front.text}."
+        early_id = maybe_enqueue_streaming_social_tts(
+            spoken,
+            source=source,
+            stream_key=stream_key,
+            user_prompt=prompt,
+        )
+        audio_ms = max(0.0, (time.perf_counter() - turn_started) * 1000)
+        if early_id:
+            await BUS.publish(task_id, "chat_tts", "Speak reply", front.text, stage="chat")
+            note_front_audio(None, audio_ms)
+            front.first_audio_ms = audio_ms
+            return
+        delivery = await publish_owner_text(
+            front.text,
+            source=source,
+            speak=True,
+            user_prompt=prompt,
+        )
+        if delivery.get("tts_id"):
+            await BUS.publish(task_id, "chat_tts", "Speak reply", front.text, stage="chat")
+            note_front_audio(None, audio_ms)
+            front.first_audio_ms = audio_ms
+
+    async def _persist_front_partial(
+        self,
+        task_id: str,
+        messages: list[ChatMessage],
+        front_text: str,
+        *,
+        first_response_ms: float,
+        current_action: str,
+    ) -> None:
+        visible = [
+            message
+            for message in messages
+            if message.role in {"user", "assistant"} and (message.content or "").strip()
+        ]
+        if not visible or visible[-1].role != "assistant":
+            visible.append(ChatMessage(role="assistant", content=front_text))
+        else:
+            visible[-1] = ChatMessage(role="assistant", content=front_text)
+        await self._update(
+            task_id,
+            result=front_text,
+            conversation_json=serialize_messages(visible),
+            first_response_ms=round(first_response_ms, 1),
+            current_action=current_action,
+        )
+
+    async def _run_managed_front_lane(
+        self,
+        task_id: str,
+        prompt: str,
+        settings: AppSettings,
+        *,
+        turn_started: float,
+        history: list[ChatMessage] | None = None,
+    ) -> None:
+        """Fast first reply/TTS while a managed worker continues (does not block the loop)."""
+        try:
+            await self._publish_front_events(task_id, "front_response_started", "Front response started")
+            front = await generate_front_reply(
+                prompt,
+                history=history,
+                settings=settings,
+                turn_started=turn_started,
+            )
+            if front.skipped or front.action == "silent_skip" or not front.text:
+                await self._publish_front_events(task_id, "front_response_skipped", "Front response skipped")
+                await BUS.publish(
+                    task_id,
+                    "chat_tts",
+                    "Acknowledged",
+                    task_acknowledgement(prompt),
+                    stage="understand",
+                )
+                return
+            await self._publish_front_events(
+                task_id,
+                "front_response_completed",
+                "Front response",
+                json.dumps(front.as_dict(), ensure_ascii=False)[:4000],
+            )
+            stream_key = f"task:{task_id}:front"
+            clear_stream_speak_state(stream_key)
+            await self._speak_front_reply(
+                task_id,
+                front,
+                prompt=prompt,
+                stream_key=stream_key,
+                turn_started=turn_started,
+            )
+            async with SessionLocal() as session:
+                task = await session.get(Task, task_id)
+                if task and task.status in {"queued", "running", "waiting"} and not (task.result or "").strip():
+                    await self._update(
+                        task_id,
+                        result=front.text,
+                        first_response_ms=round(front.first_text_ms or (time.perf_counter() - turn_started) * 1000, 1),
+                        current_action=front.text[:120],
+                    )
+        except Exception:
+            await BUS.publish(
+                task_id,
+                "chat_tts",
+                "Acknowledged",
+                task_acknowledgement(prompt),
+                stage="understand",
+            )
+
     async def _run_conversation(
         self,
         task_id: str,
@@ -487,8 +671,9 @@ class AgentRuntime:
         *,
         history: list[ChatMessage] | None = None,
         extra_prompt: str | None = None,
+        turn_started: float | None = None,
     ) -> None:
-        """Plain owner dialogue: stream text, no tools, no confirmation gates."""
+        """Plain owner dialogue: front responder first, then worker if needed."""
         profile = resolve_profile(profile_name)
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
@@ -508,29 +693,108 @@ class AgentRuntime:
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             messages.append(ChatMessage(role="user", content=user_text))
-        parts: list[str] = []
+        first_response_ms = 0.0
+        model_started = time.perf_counter()
         stream_key = f"task:{task_id}"
         clear_stream_speak_state(stream_key)
-        try:
+        front_text = ""
+        front_action = ""
+        worker_started = False
+        spoken_parts: list[str] = []
+
+        async def worker_stream():
             async for delta in MANAGER.chat_stream(
                 messages,
                 temperature=profile.temperature,
                 top_p=profile.top_p,
                 top_k=profile.top_k,
                 max_tokens=owner_chat_max_tokens(profile),
-                thinking=None,
+                thinking=False,
             ):
-                parts.append(delta)
-                accumulated = "".join(parts)
-                early_id = maybe_enqueue_streaming_social_tts(
-                    accumulated,
-                    source="task_chat",
-                    stream_key=stream_key,
-                    user_prompt=prompt,
+                yield delta
+
+        async def on_delta(lane: str, delta: str) -> None:
+            nonlocal first_response_ms
+            if not delta:
+                return
+            spoken_parts.append(delta)
+            elapsed = max(0.0, (time.perf_counter() - (turn_started or model_started)) * 1000)
+            if not first_response_ms:
+                first_response_ms = elapsed
+                await self._update(task_id, first_response_ms=round(first_response_ms, 1))
+            accumulated = "".join(spoken_parts)
+            early_id = maybe_enqueue_streaming_social_tts(
+                accumulated,
+                source="task_chat",
+                stream_key=stream_key,
+                user_prompt=prompt,
+            )
+            if early_id:
+                await BUS.publish(
+                    task_id,
+                    "chat_tts",
+                    "Speak reply",
+                    accumulated[: stream_speak_offset(stream_key)],
+                    stage="chat",
                 )
-                if early_id:
-                    await BUS.publish(task_id, "chat_tts", "Speak reply", accumulated[: stream_speak_offset(stream_key)], stage="chat")
-                await BUS.publish(task_id, "assistant_delta", "Reply", delta, stage="chat")
+                note_front_audio(None, elapsed)
+            await BUS.publish(
+                task_id,
+                "assistant_delta",
+                "Reply",
+                delta,
+                stage="chat",
+                persist=False,
+            )
+
+        try:
+            done: dict[str, Any] | None = None
+            async for event in run_two_lane_chat(
+                user_text,
+                history=prior,
+                settings=settings,
+                turn_started=turn_started or model_started,
+                worker_stream=worker_stream,
+                on_delta=on_delta,
+            ):
+                kind = event.get("type")
+                if kind == "front_response_started":
+                    await self._publish_front_events(task_id, "front_response_started", "Front response started")
+                elif kind == "front_response_skipped":
+                    await self._publish_front_events(task_id, "front_response_skipped", "Front response skipped")
+                elif kind == "front_response_completed":
+                    front = event.get("reply")
+                    front_text = getattr(front, "text", "") or ""
+                    front_action = getattr(front, "action", "") or ""
+                    if front:
+                        await self._publish_front_events(
+                            task_id,
+                            "front_response_completed",
+                            "Front response",
+                            json.dumps(front.as_dict(), ensure_ascii=False)[:4000],
+                        )
+                        if front_text:
+                            await self._persist_front_partial(
+                                task_id,
+                                messages,
+                                front_text,
+                                first_response_ms=front.first_text_ms or first_response_ms,
+                                current_action="Checking details…" if front.action in {"ack_continue", "handoff_notice"} else "Replying",
+                            )
+                        await self._speak_front_reply(
+                            task_id,
+                            front,
+                            prompt=prompt,
+                            stream_key=stream_key,
+                            turn_started=turn_started or model_started,
+                        )
+                elif kind == "worker_response_started":
+                    worker_started = True
+                    await self._publish_front_events(task_id, "worker_response_started", "Worker response started")
+                elif kind == "worker_response_completed":
+                    await self._publish_front_events(task_id, "worker_response_completed", "Worker response completed")
+                elif kind == "done":
+                    done = event
         except Exception as exc:
             clear_stream_speak_state(stream_key)
             err = str(exc)
@@ -544,7 +808,21 @@ class AgentRuntime:
             )
             await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
             return
-        content = "".join(parts).strip()
+
+        content = ((done or {}).get("text") or front_text or "").strip()
+        timing = (done or {}).get("timing") or last_front_timing()
+        front_obj = (done or {}).get("front")
+        model_ms = max(0.0, (time.perf_counter() - model_started) * 1000)
+        if front_obj and not getattr(front_obj, "skipped", False):
+            metrics.note_model_elapsed(max(1.0, float(getattr(front_obj, "complete_ms", 0) or 0)))
+        if worker_started:
+            metrics.note_model_elapsed(max(1.0, float(timing.get("worker_complete_ms") or model_ms)))
+        elif not front_obj or getattr(front_obj, "skipped", False):
+            metrics.note_model_elapsed(model_ms)
+        if not first_response_ms:
+            first_response_ms = float(timing.get("front_first_text_ms") or timing.get("worker_first_text_ms") or 0)
+            if first_response_ms:
+                await self._update(task_id, first_response_ms=round(first_response_ms, 1))
         if not content:
             err = empty_generation_error()
             await self._update(
@@ -565,7 +843,28 @@ class AgentRuntime:
             tts_char_offset=stream_speak_offset(stream_key),
         )
         clear_stream_speak_state(stream_key)
-        messages.append(ChatMessage(role="assistant", content=content))
+        await BUS.publish(
+            task_id,
+            "response_timing",
+            "Response timing",
+            (
+                f"First word {first_response_ms / 1000:.2f}s · completed {model_ms / 1000:.2f}s\n"
+                + json.dumps(
+                    {
+                        **timing,
+                        "first_word_s": round((first_response_ms or 0) / 1000, 2),
+                        "completed_s": round(model_ms / 1000, 2),
+                        "front_action": front_action or timing.get("front_action"),
+                    },
+                    ensure_ascii=False,
+                )
+            )[:4000],
+            stage="chat",
+        )
+        if messages and messages[-1].role == "assistant":
+            messages[-1] = ChatMessage(role="assistant", content=content)
+        else:
+            messages.append(ChatMessage(role="assistant", content=content))
         working.verified = True
         await self._complete(task_id, messages, content, content, working, metrics)
 
@@ -576,6 +875,7 @@ class AgentRuntime:
         extra_prompt: str | None = None,
         pending_tool: dict[str, Any] | None = None,
     ) -> None:
+        turn_started = time.perf_counter()
         settings = load_settings()
         REGISTRY.apply_settings(settings)
         exposure = ToolExposure("mixed")
@@ -585,6 +885,7 @@ class AgentRuntime:
             "stage": "understand",
             "current_action": "Understanding the request",
             "waiting_for_confirmation": False,
+            "first_response_ms": 0.0,
         }
         if not continue_existing:
             fields["started_at"] = utcnow()
@@ -618,18 +919,30 @@ class AgentRuntime:
                     metrics,
                     history=existing,
                     extra_prompt=extra_prompt,
+                    turn_started=turn_started,
                 )
                 return
             working.task_class = (follow_route.task_class if follow_route else classify_task(extra_prompt or prompt))
         if not continue_existing and not pending_tool and not extra_prompt:
-            await BUS.publish(
-                task_id,
-                "chat_tts",
-                "Acknowledged",
-                task_acknowledgement(prompt),
-                stage="understand",
-            )
-        await self._update(task_id, exposed_tools=_exposed_csv(working))
+            if settings.front_responder.enabled:
+                asyncio.create_task(
+                    self._run_managed_front_lane(
+                        task_id,
+                        extra_prompt or prompt,
+                        settings,
+                        turn_started=turn_started,
+                        history=existing,
+                    )
+                )
+            else:
+                await BUS.publish(
+                    task_id,
+                    "chat_tts",
+                    "Acknowledged",
+                    task_acknowledgement(prompt),
+                    stage="understand",
+                )
+        await self._update(task_id, exposed_tools=_exposed_csv(working, extra_prompt or prompt))
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
         recommended_context = select_context_size(
@@ -694,7 +1007,15 @@ class AgentRuntime:
         metrics = LiveTaskMetrics()
         already_escalated = bool(getattr(working, "escalated", False))
         critic_rejected = False
-        exposed_tools = tools_for_task(working.task_class)
+        exposed_tools = set(
+            tool_names_for(
+                working.task_class,
+                working.requested_tools,
+                security_role=working.security_role,
+                prompt=extra_prompt or prompt,
+            )
+        )
+        exposed_tools.update({"request_tools", "request_capability"})
 
         if existing and continue_existing:
             messages = existing
@@ -734,11 +1055,14 @@ class AgentRuntime:
             if lessons:
                 system_prompt += "\n\n" + lessons
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
-            system_prompt += "\n\n" + describe_exposure(
-                working.task_class,
-                working.requested_tools,
+            turn_ws = await compose_turn_working_set(
+                prompt,
+                task_class=working.task_class,
+                extra_capabilities=working.requested_tools,
                 security_role=working.security_role,
+                agent_id="owner",
             )
+            system_prompt = apply_working_set_to_system(system_prompt, turn_ws)
             audit = professional_prompt_block(prompt)
             if audit:
                 # Append after tool exposure so context fitting keeps this block in the tail.
@@ -847,6 +1171,7 @@ class AgentRuntime:
             )
             tools_used = True
 
+        context_recovery_attempts = 0
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel or kill_switch_active():
@@ -867,7 +1192,7 @@ class AgentRuntime:
                     compact_memory=working.dumps(),
                     execution_mode=execution_mode,
                     task_class=working.task_class,
-                    exposed_tools=_exposed_csv(working),
+                    exposed_tools=_exposed_csv(working, _latest_user_text(messages, extra_prompt or prompt)),
                 )
                 think = should_enable_thinking(
                     profile,
@@ -905,22 +1230,30 @@ class AgentRuntime:
                     await MANAGER.ensure_vision(settings)
                     provider = MANAGER.provider or provider
                 try:
+                    turn_tools = (
+                        None
+                        if force_final
+                        else exposure_schemas_for(
+                            working.task_class,
+                            working.requested_tools,
+                            security_role=working.security_role,
+                            prompt=_latest_user_text(messages, working.goal or prompt),
+                        )
+                    )
+                    turn_max_tokens = 400 if force_final else 1024
+
                     async def _model_turn() -> ChatResult:
                         return await asyncio.wait_for(
                             MANAGER.chat(
                                 messages,
-                                tools=None
-                                if force_final
-                                else exposure_schemas_for(
-                                    working.task_class,
-                                    working.requested_tools,
-                                    security_role=working.security_role,
-                                ),
+                                tools=turn_tools,
                                 temperature=profile.temperature,
                                 top_p=profile.top_p,
                                 top_k=profile.top_k,
                                 thinking=think,
-                                max_tokens=400 if force_final else 1024,
+                                max_tokens=turn_max_tokens,
+                                settings=settings,
+                                working_state_block=working.as_prompt_block(),
                             ),
                             timeout=90 if force_final else 180,
                         )
@@ -935,8 +1268,74 @@ class AgentRuntime:
                         context=think_context,
                         operation=_model_turn,
                     )
+                except ModelCapacityExceeded as exc:
+                    await self._release_lazy_vision()
+                    if context_recovery_attempts < 2:
+                        messages, recovered = await self._recover_context_pressure(
+                            task_id,
+                            messages,
+                            working,
+                            profile,
+                            settings,
+                            tools=turn_tools,
+                            max_tokens=turn_max_tokens,
+                        )
+                        if recovered:
+                            context_recovery_attempts += 1
+                            continue
+                    err = context_capacity_error(exc.budget)
+                    await self._update(
+                        task_id,
+                        status="failed",
+                        stage="failed",
+                        result=err,
+                        error=err,
+                        current_action="Failed: model capacity exceeded",
+                        current_tool="",
+                        **metrics.as_fields(),
+                    )
+                    await record_trajectory(task_id, working, "failed")
+                    await complete_coding_route(task_id, "failed", err)
+                    await BUS.publish(task_id, "failed", "Inference failed", err, stage="failed")
+                    return
                 except (APIStatusError, APIConnectionError) as exc:
                     await self._release_lazy_vision()
+                    if isinstance(exc, APIStatusError) and is_context_overflow(exc):
+                        if context_recovery_attempts < 2:
+                            messages, recovered = await self._recover_context_pressure(
+                                task_id,
+                                messages,
+                                working,
+                                profile,
+                                settings,
+                                tools=turn_tools,
+                                max_tokens=turn_max_tokens,
+                            )
+                            if recovered:
+                                context_recovery_attempts += 1
+                                continue
+                        budget = calculate_prompt_budget(
+                            messages,
+                            turn_tools,
+                            profile=profile,
+                            max_tokens=turn_max_tokens,
+                            active_context=MANAGER.live_context_size(),
+                        )
+                        err = context_capacity_error(budget)
+                        await self._update(
+                            task_id,
+                            status="failed",
+                            stage="failed",
+                            result=err,
+                            error=err,
+                            current_action="Failed: context capacity exceeded",
+                            current_tool="",
+                            **metrics.as_fields(),
+                        )
+                        await record_trajectory(task_id, working, "failed")
+                        await complete_coding_route(task_id, "failed", err)
+                        await BUS.publish(task_id, "failed", "Context capacity exceeded", err, stage="failed")
+                        return
                     if isinstance(exc, APIStatusError):
                         detail = getattr(exc, "message", None) or str(exc)
                         err = f"Inference server error ({exc.status_code}): {detail}"
@@ -1108,6 +1507,13 @@ class AgentRuntime:
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
                         if name == "request_capability":
                             exposed_tools, _added, observation = apply_capability_request(exposed_tools, arguments)
+                            granted = grant_requested_tools(arguments)
+                            working.requested_tools = sorted(set(working.requested_tools) | set(granted))
+                            await self._update(
+                                task_id,
+                                exposed_tools=_exposed_csv(working, extra_prompt or prompt),
+                                compact_memory=working.dumps(),
+                            )
                             attach = None
                             failed = False
                         else:

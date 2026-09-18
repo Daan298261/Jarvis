@@ -16,6 +16,14 @@ def local_openai_model(settings: AppSettings | None = None) -> str:
     return os.environ.get("JARVIS_LLM_MODEL") or current.inference.profile or "qwen"
 
 
+def local_browser_use_model(settings: AppSettings | None = None) -> str:
+    current = settings or load_settings()
+    configured = (current.browser.browser_use_model or "").strip()
+    if configured:
+        return configured
+    return local_openai_model(current)
+
+
 def local_openai_env(settings: AppSettings | None = None) -> dict[str, str]:
     """Force optional workers onto Jarvis's local OpenAI-compatible server, never a cloud default."""
     current = settings or load_settings()
@@ -41,11 +49,11 @@ def merge_local_env(settings: AppSettings | None = None) -> dict[str, str]:
     return env
 
 
-def local_chat_openai(settings: AppSettings | None = None) -> Any:
+def local_chat_openai(settings: AppSettings | None = None, *, model: str | None = None) -> Any:
     """Build an OpenAI-compatible chat client for optional Python SDKs."""
     current = settings or load_settings()
     base = local_openai_base_url(current)
-    model = local_openai_model(current)
+    resolved_model = model or local_openai_model(current)
     key = os.environ.get("JARVIS_LLM_API_KEY") or "local"
     errors: list[str] = []
     for module_name, class_name in (
@@ -57,9 +65,14 @@ def local_chat_openai(settings: AppSettings | None = None) -> Any:
             module = __import__(module_name, fromlist=[class_name])
             cls = getattr(module, class_name)
             try:
-                return cls(model=model, base_url=base, api_key=key)
+                return cls(model=resolved_model, base_url=base, api_key=key)
             except TypeError:
-                return cls(model=model, openai_api_base=base, openai_api_key=key)
+                return cls(model=resolved_model, openai_api_base=base, openai_api_key=key)
         except Exception as exc:
             errors.append(f"{module_name}.{class_name}: {exc}")
     raise RuntimeError("No local ChatOpenAI wrapper is available. " + " | ".join(errors))
+
+
+def local_chat_openai_for_browser_use(settings: AppSettings | None = None) -> Any:
+    current = settings or load_settings()
+    return local_chat_openai(current, model=local_browser_use_model(current))

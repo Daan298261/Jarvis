@@ -7,7 +7,7 @@ import {
   type VoiceProfileCatalog,
   VOICE_PROFILE_CHANGED_EVENT,
 } from "../tts/voiceProfiles"
-import { settingsSubmenuPath } from "./settingsSubmenus"
+import { appearanceVoiceSettingsPath } from "./settingsSubmenus"
 
 export function VoiceHudCompact() {
   const [voiceCatalog, setVoiceCatalog] = useState<VoiceProfileCatalog | null>(null)
@@ -91,7 +91,7 @@ export function VoiceHudCompact() {
             return (
               <li key={profile.id} role="presentation">
                 <Link
-                  to={settingsSubmenuPath("voice")}
+                  to={appearanceVoiceSettingsPath("voice")}
                   className="jarvis-presence-voice-option unavailable"
                   role="option"
                   aria-selected={false}
@@ -123,7 +123,7 @@ export function VoiceHudCompact() {
         })}
       </ul>
       <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
-        <Link to={settingsSubmenuPath("voice")}>Open full Voice settings</Link>
+        <Link to={appearanceVoiceSettingsPath("voice")}>Open full Voice settings</Link>
       </p>
       {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
     </div>

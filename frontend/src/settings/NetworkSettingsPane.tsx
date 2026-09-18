@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { CompanionPairingPanel } from "../components/CompanionPairingPanel"
+import { settingsSubmenuPath } from "./settingsSubmenus"
 
 type NetworkSettingsPaneProps = {
   settings: Record<string, unknown>
@@ -90,14 +90,24 @@ export function NetworkSettingsPane({
       </div>
 
       <div className="card grid settings-pane-card">
-        <h2>Pair phone</h2>
+        <h2>Phone pairing</h2>
         <p className="lede" style={{ margin: "0 0 12px" }}>
-          Show a 6-digit code for the Android companion app. Regenerate anytime; the previous unclaimed code
-          stops working. The full pairing page includes the QR and spoken pair-vs-explore walkthrough.{" "}
-          <Link to="/companion-pairing">Open full pairing page</Link> ·{" "}
-          <Link to="/phone">Android companion home</Link> for offline generic APK pairing.
+          Pair the Android companion with a 6-digit code and QR. Pairing controls live under{" "}
+          <Link to={settingsSubmenuPath("phone-pairing")}>Phone Pairing</Link> in Settings.{" "}
+          <Link to="/phone">Android companion home</Link> covers offline generic APK pairing.
         </p>
-        <CompanionPairingPanel compact />
+      </div>
+
+      <div className="card grid settings-pane-card">
+        <h2>Swarm</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Manage multi-node swarm membership, heartbeats, and delegation — without leaving the admin rail.
+        </p>
+        <div className="row">
+          <Link className="btn" to="/swarm">
+            Open Swarm admin
+          </Link>
+        </div>
       </div>
 
       <div className="card grid settings-pane-card">

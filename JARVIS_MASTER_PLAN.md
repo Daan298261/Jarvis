@@ -2434,21 +2434,113 @@ Reason:
 
 Through 1.3.9 the spoken default is still robotic SAPI; catalog prefers and can migrate owners off Kokoro; `synthesize.py` swallows Kokoro errors into SAPI.
 
-Decision: RFC-0093 installer force-stop and prepare unstick (accepted)
+Decision: RFC-0093 installer force-stop and prepare unstick (implemented)
 
-CoS urgent 2026-09-16. Before Repair / Upgrade / Reinstall-keep / Semi-clean / Clean (and uninstall), Setup must force-stop all Jarvis lockers under the install tree — not only polite `stop-jarvis.ps1`. Kill failure aborts with a visible error; never hang. Post-copy bootstrap that shows “Preparing Jarvis, its AI model, Gmail and WhatsApp…” must timeout / be cancelable, skip heavy prepare when models are already present, and surface the real error plus killed-PID log. Specs-only; do not fold RFC-0092; implement follow-up. No new §58 backlog checkboxes.
-
-Reason:
-
-1.3.13 clean reinstall fails after `stop-jarvis.ps1`; upgrade freezes on the full-bar Preparing screen. Tip `StopJarvisProcesses` only launches the polite stop; `[Run]` `bootstrap.ps1` is `runhidden waituntilterminated` with no timeout.
-
-Decision: RFC-0094 settings menu information architecture (accepted)
-
-CoS 2026-09-16. Replace the flat Settings heap with six submenus (Voice, Appearance, Models / Inference, Network / Companion, Integrations, Advanced). **Voice** and **Appearance** are first-class groups on **both** the Daybreak left-bar **and** the main Settings screen — not a combined dump. Same organized IA on **Desktop HUD** (not portal-only). Every current Settings control maps to exactly one primary pane; prefer deep-links. Persist last submenu; deep-link `/settings/voice` (hash alias ok). Specs-only IA; do not fold RFC-0092 TTS engines. No new §58 backlog checkboxes.
+RFC-0093 is implemented on development via #264 (`9ecf9bd`): force-stop before Inno copy/uninstall, bounded bootstrap watchdog, skip-heavy prepare, durable PID/step logs, contract tests. Specs PR #262 (`96d3421`). Live JarvisSetup on a running Jarvis remains Windows desktop sign-off. RFC-0092 untouched. No new §58 backlog checkboxes.
 
 Reason:
 
-`Settings.tsx` is a stacked dump; Daybreak left-bar is one mixed Appearance & voice panel (`AppearancePresenceControls`, #263). Owners cannot find Voice vs inference vs pairing without scrolling.
+CoS assigned this ledger tick after #264 landed on development. 1.3.13 clean reinstall failed after polite `stop-jarvis.ps1`; upgrade froze on the full-bar Preparing screen.
+
+Decision: RFC-0094 settings menu information architecture (implemented)
+
+RFC-0094 is implemented on development via specs #265 (`01bd56e`) + implement #267 (`73d93d2`): six-group Settings IA (Voice, Appearance, Models / Inference, Network / Companion, Integrations, Advanced), Daybreak Voice/Appearance split, `/settings/:submenu` + last-submenu persistence. RFC-0092 not folded. Live Daybreak desktop HUD remains desktop sign-off. No new §58 backlog checkboxes.
+
+Reason:
+
+CoS assigned this ledger tick after #267 landed on development. `Settings.tsx` was a stacked dump; Daybreak left-bar was one mixed Appearance & voice panel (`AppearancePresenceControls`, #263).
+
+Decision: RFC-0095 Instagram jarvis collection module catalog + Download (accepted)
+
+Taco Instagram `@tacotcr` Saved→jarvis (~140) ingest is a four-step pipeline (Download → usefulness review → integrate decision → implement). Module Catalog/Packs **Download** clones or zips to Desktop/`projects` (library `projects/` on Architect’s box). Full-assistant repos tagged `persona_candidate` (no persona merge). Offensive/pentest (Strix, Pentagi, Claude-Red, Exploitarium, …) stay `le_gated` / archive-only — PolitieGPT/LE only. Black Grid media children reserved RFC-0096/0097. Specs-only; no new §58 checkbox.
+
+Reason:
+
+Owner saves UI/repo inspiration on Instagram with no path into Jarvis modules/skills/DLCs or a downloadable module pack.
+
+Decision: RFC-0096–0104 Instagram jarvis child integrations (accepted)
+
+Parent RFC-0095 ([#270](https://github.com/Daan298261/Jarvis/pull/270); umbrella on development — not rewritten here). Nine accepted children, four-step pipeline (Download already local under `/workspace/projects/{rfc|persona}/<name>` — do not commit clones → usefulness score → integrate decision → implement later): **0096** ComfyUI+SANA BlackGrid gen (`partial`); **0097** OpenCut/OpenMontage/Hyperframes stitch + optional Real-ESRGAN preprocess (`partial`); **0098** Browser-Use deepen (`partial`; Playwright default); **0099** OpenViking+RAGFlow memory (`partial`; OpenViking is not TTS); **0100** Firecrawl+Crawl4AI research (`partial`); **0101** Pipecat realtime voice (`partial`; do not rewrite RFC-0092); **0102** LocalSend LAN share (`partial`); **0103** RuView Wi‑Fi home presence (`partial`; not HexStrike, not RFC-0069 HUD); **0104** persona_candidate pack later (hermes-agent, openhuman, F.R.I.D.A.Y, deer-flow, openclaude, opencode, locally-uncensored — full assistants, no butler merge). Offensive (Strix/Pentagi/Claude-Red) stay LE-gated under 0095 — no child RFCs. Specs-only; no new §58 checkbox. Taco may override integrate decisions.
+
+Reason:
+
+Instagram Saved→jarvis high-value subset needs scored child tickets so implementers do not start from the umbrella alone or merge personas/offensive tools.
+
+Decision: RFC-0105 cybersecurity module (implemented)
+
+RFC-0105 is implemented on development via specs #272 (`8d607b5`) + Daybreak UI #274 (`ca5fac8`) + backend hooks #277 (`7e6338c`): one Module Catalog pack `cybersecurity` (six members, **partial** connectors), Daybreak left-bar panel (enable / status / path / open-folder / Download), catalog API + generic module-worker supervisor. HexStrike (RFC-0078/0086) stays beside it. RFC-0106 is implemented (sibling; not rewritten here). Gating/authorization still out of scope (owner). No new §58 checkbox. Live Daybreak HUD / Open folder / subprocess remains desktop sign-off.
+
+Reason:
+
+CoS assigned this ledger tick after #277 landed on development. Owner directed these former archive clones into a Jarvis cybersecurity module on Daybreak (surface + wiring), not six orphan tools, not a Settings dump, and not a HexStrike rewrite.
+
+Decision: RFC-0106 HexStrike Jarvis full operator control (implemented)
+
+RFC-0106 is implemented on development via specs #276 (`7c1be3f`) + backend #279 (`175b2dc`) + Daybreak UX #283 (`69eebd7`): Jarvis is the HexStrike operator (Daybreak HUD + owner chat). RFC-0106 **intent wins** over RFC-0086’s Blue-only enum / no-MCP / no-command-proxy product stance for this module; loopback bind and install pinning remain. Operator catalog / MCP / `/api/hexstrike` operate→jobs; Daybreak tabbed console (Runtime / Catalog / Operate / Jobs). No invented LE/Red/Purple/ATO gates (owner later). RFC-0105 cybersecurity module stays a sibling. No new §58 checkbox. Live pinned install / HUD+chat invoke remains desktop sign-off.
+
+Reason:
+
+CoS assigned this ledger tick after #283 landed on development. Taco: complete control over HexStrike and its toolchain; Jarvis is the “human” using it; do not ship stubs.
+
+Decision: INTEGRATION_SPECS.md + RFC-0107–0109 (accepted)
+
+Living architect priority list for third-party / reel-sourced integrations lives at repo-root [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) (not a master-plan rewrite). Taco ladder, quick/highest impact first: **0107** Obsidian linked memory/brain; **0108** phone companion on-device model (PC orchestrator when online); **0109** media/file/video upload on Android + Desktop/portal. Then reel children in impact order (0098 Browser-Use, 0101 Pipecat, 0096 ComfyUI, 0097 stitch, 0099 memory, 0100 research, 0103 RuView, 0102 LocalSend; 0104 persona later; 0105 cyber implemented; 0106 HexStrike operator implemented). RFC-0095 remains the umbrella + Module Catalog Download. Local clones stay under `C:\Users\daanv\projects\jarvis-ig\` and `/workspace/projects/` (not git). Specs-only; no new §58 checkbox; no invented LE gates.
+
+Reason:
+
+Taco: separate integration specs document; Instagram Saved→jarvis plus three new high-impact adds; do not merge product code in this pass.
+
+Decision: RFC-0107 durable-brain strengthen (accepted) + RFC-0110 approval popup (implemented)
+
+RFC-0107 end-state is an **external durable brain** (Obsidian linked vault/graph + Jarvis DB/cache, synced with RFC-0011) plus **per-turn internal search** over installed **or** installable tools — pull only what the ask needs; do **not** pre-stuff persona packs, full tool catalogs, or history dumps into every inference prompt. Immediate `n_keep ≥ n_ctx` 400 band-aids stay a separate inference ticket; this is not “compress forever.” RFC-0108 phone offline and RFC-0109 media upload stay on the same Taco ladder. RFC-0110 is implemented on development via specs #284 (`5b512d8`) + grants API #288 (`f43d797`) + UI #290 (`6a01f22`): ChatGPT-style modal (**Always allow** / **Allow this time** / **Deny**, optional free-text, persist Always allow per tool/action class) shown only when the model/tool flow actually needs a decision or typed input; ordinary owner chat stays ungated and streams — not the always-on “Review or approval is required” gate. `/api/approvals/pending*` park/decide. No new §58 checkbox; no invented LE/Red/Purple gates. Live HUD modal + spoken grants remain desktop sign-off.
+
+Reason:
+
+Taco: large durable context out of the prompt; search tools per ask; approval popup like ChatGPT only when needed. CoS assigned the RFC-0110 ledger tick after #290 landed on development.
+
+Decision: Jarvis 1.4.0 release scope lock (RFC-0112–0113, RFC-0115 accepted; RFC-0111 implemented; RFC-0114 implemented)
+
+Living spec [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md) is on `development` (copied from `main` @ `6f6a633`; light path note only). Implementable contracts:
+
+- **RFC-0111** Kokoro as real runtime — **implemented** on development via specs #286 (`1f8320d`) + implement #296 (`99a0463`): `TtsRuntimeState`, `KokoroAdapter`, pinned `kokoro==0.9.4` / `soundfile==0.14.0`, no pip during speak, no silent SAPI, synthesis health probe, requested-vs-actual engine. Deepens RFC-0070 / RFC-0092; does not change 0092 defaults. **RFC-0112** voice preview remains HOLD. Live A/B listen after Setup rebuild remains desktop sign-off.
+- **RFC-0112** Voice preview uses the exact selected profile (canonical route, error preservation, playback failure is failure). **HOLD** (Sol/Taco) — do not tick.
+- **RFC-0113** Admin > Settings 1.4 IA deltas (Appearance & Voice composed, Phone Pairing, Network & Swarm, redirects) — RFC-0094 remains implemented; HUD Voice/Appearance split stays.
+- **RFC-0114** Context overflow preflight + automatic recovery — **implemented** on development via specs #286 (`1f8320d`) + implement #293 (`265b758`): canonical `PromptBudget`, preflight, expand 8K→16K→32K, recoverable 400, compact/expand/retry ≤2. Identity-only `n_keep` + per-message tools preserved. **No** RFC-0115 escalate placeholder (same-model recovery only). RFC-0107 durable brain stays the non-compress-forever end-state. Live llama.cpp 400 remains desktop sign-off.
+- **RFC-0115** Ornith 9B orchestrator-router + complexity tiers + visible model handoff (gates before warm-score; no Continue button).
+
+**IN 1.4.0:** core packages above (**0111 implemented**, **0114 implemented**) **plus** already-filed interesting integrations **RFC-0107** Obsidian durable brain, **0108** phone offline, **0109** media upload, **0110** approval modal (**implemented**), **plus** HexStrike / Daybreak / cyber already in flight (**0105** implemented, **0106** implemented).
+
+**OUT of the 1.4 cut:** bulk Instagram / catalog RFCs **0095–0104** — they stay on [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) / later queue. Do **not** re-scope them into 1.4 RFCs or block the cut.
+
+Specs-only; no new §58 checkbox; no invented LE/Red/Purple/ATO gates; no exploit recipes.
+
+Reason:
+
+Taco 1.4.0 scope lock: split `JARVIS_1.4_SPECS.md` into RFC-0111–0115; keep interesting 0107–0110 and in-flight HexStrike/cyber; leave bulk reel catalog for later. CoS assigned the RFC-0114 ledger tick after #293 landed on development. CoS assigned the RFC-0111 ledger tick after #296 landed on development.
+
+Decision: RFC-0116 TypeSafe Jev optional decision tier (accepted; post-1.4)
+
+TypeSafe **Jev** (System One) is an **optional cloud decision accelerator** for Jarvis control-path classify/route/score/branch — not chat/TTS/coding, not a Kokoro/Ornith-generation replacement. Default remains local Ornith + heuristics (`decision_tier: local`). Owner may opt into `jev_optional` (BYO TypeSafe key) or `jev_plus` (paid monthly packaging when billing exists; until then a real `has_feature(..., "decision.jev_plus")` / `GET /api/license/entitlements` check, not `if True`). **Jev is early access / waitlist** as of 2026-09-17: specs land now; implement is gated on public/early-access API availability + owner opt-in. Settings show waitlist/status + “notify when ready”; **no fake-live stubs** (enabled but unavailable → error/CTA, never silent local-LLM-as-Jev). Wires RFC-0107 tool select, RFC-0075 speak class, RFC-0115 complexity/escalate, RFC-0110 approval-needed. **Not** in the 1.4.0 cut (optional / post-1.4 interesting). No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
+
+Reason:
+
+Taco 2026-09-17: IG TypeSafe Jev (@albert.olgaard) as optional Jarvis decision tier; free toggle + Plus packaging; waitlist-honest until the API is actually available.
+
+Decision: RFC-0107 amend — embed real Obsidian UI (accepted)
+
+Taco 2026-09-17: Obsidian is the **operational** durable brain (vault bind + agent read/write/wiki-link/graph + per-turn tool search — not décor). Owner surface is the **real Obsidian UI hosted inside Jarvis** (Desktop Tauri/WebView2 native host of official Obsidian; official embed if it exists; Electron BrowserView only if that is the shell). Do **not** ship a custom note browser, graph viewer, or “Jarvis brain” clone. Specs: RFC-0107 amend + [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) 0107 row. Backend bind/index/working-set already on development (#295); RFC stays **accepted** until UX embed lands. No new §58 checkbox; no invented LE gates.
+
+Reason:
+
+Taco: operational soon and actually used; embed Obsidian inside Jarvis; do not build a custom brain UI.
+
+Decision: RFC-0117 tiny front-chat responder (implemented; post-1.4)
+
+Tiny always-warm **front responder** lane for first visible/audible owner-chat replies while the larger router/worker continues on the same Jarvis turn. **Implemented** on development via specs #303 (`49f6af4`) + implement #305 (`4eb25d9`): `front_responder` role with tools/thinking disabled and 96–160 token cap; `final_basic` / `ack_continue` / `ask_clarification` / `handoff_notice`; one-transcript merge; immediate safe TTS (`speak_immediately`); diagnostics (`front_responder.last_turn`). **Not** in the 1.4.0 cut (optional / post-1.4 interesting, same class as RFC-0116). Duplicate-number [`docs/rfcs/0117-durable-state-journal-rollback.md`](docs/rfcs/0117-durable-state-journal-rollback.md) from #304 stays **accepted** (separate ticket; not ticked). Windows first-visible/first-audible across two larger models remains desktop sign-off. No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
+
+Reason:
+
+Taco via Codex: delay is systemic across models, not 27B-specific; tiny front-chat first, larger model continues. CoS assigned the RFC-0117 ledger tick after #305 landed on development.
 
 ---
 

@@ -8,6 +8,7 @@ import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 import { useTaskSpeech } from "../tts/useTaskSpeech"
 import { useVoiceProfileSwitching } from "../tts/voiceProfiles"
+import { usePendingApprovals } from "../chat/pendingApprovals"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 
 type HudChatProps = {
@@ -28,6 +29,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
+  const { ingestPayload } = usePendingApprovals()
   const voiceSwitching = useVoiceProfileSwitching()
   const composerLocked = busy || voiceSwitching
 
@@ -52,7 +54,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
       }
     }
     load()
-    timer = window.setInterval(() => load().catch(() => undefined), 2000)
+    timer = window.setInterval(() => load().catch(() => undefined), 400)
     return () => clearInterval(timer)
   }, [id])
 
@@ -77,6 +79,11 @@ export function HudChat({ onMoodChange }: HudChatProps) {
       }),
     )
   }, [task?.messages, task?.prompt, task?.result, task?.error])
+
+  useEffect(() => {
+    if (!task?.waiting_for_confirmation || !task.confirmation_payload) return
+    ingestPayload(task.confirmation_payload)
+  }, [task?.waiting_for_confirmation, task?.confirmation_payload, ingestPayload])
 
   async function submit() {
     const text = prompt.trim()

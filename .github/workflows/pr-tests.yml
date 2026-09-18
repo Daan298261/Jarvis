@@ -36,7 +36,9 @@ jobs:
             tests/test_profiles.py \
             tests/test_model_stack.py \
             tests/test_runtime_profiles.py \
-            tests/test_security_gates.py
+            tests/test_security_gates.py \
+            tests/test_nkeep_context.py \
+            tests/test_tool_exposure.py
 
       - name: Run full backend suite (baseline report)
         continue-on-error: true

@@ -7,7 +7,7 @@ from ..tools.registry import REGISTRY
 from ..inference.security_gates import gate_is_enabled
 
 # Task class → native tools Jarvis should send to the model.
-# Mixed / long-horizon tasks keep the full enabled set.
+# Mixed / long-horizon start small; prompt retrieval adds tools for this turn.
 CLASS_TOOLS: dict[str, tuple[str, ...]] = {
     "conversation": (),
     "filesystem": ("filesystem", "python"),
@@ -21,11 +21,10 @@ CLASS_TOOLS: dict[str, tuple[str, ...]] = {
     "document processing": ("office", "filesystem", "python", "web_fetch"),
     "data processing": ("filesystem", "python", "terminal"),
     "multimodal": ("screenshot", "desktop", "browser", "filesystem"),
+    "mixed": ("filesystem", "python"),
+    "long-horizon autonomous": ("filesystem", "python", "terminal"),
 }
 
-FULL_CLASSES = {"mixed", "long-horizon autonomous", ""}
-
-# Capability names the model may pass to request_tools.
 CAPABILITY_ALIASES: dict[str, str] = {
     "web": "web_fetch",
     "http": "web_fetch",
@@ -49,6 +48,8 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "interpreter": "open_interpreter",
     "open-interpreter": "open_interpreter",
     "ufo2": "ufo",
+    "hexstrike": "hexstrike_operator",
+    "daybreak": "hexstrike_operator",
 }
 
 ESCAPE_TOOL = "request_tools"
@@ -70,9 +71,7 @@ def _enabled_native(security_role: str = "") -> list[str]:
 
 def is_full_exposure(task_class: str, extra: Iterable[str] | None = None) -> bool:
     extras = {item.lower() for item in (extra or [])}
-    if "all" in extras:
-        return True
-    return (task_class or "").strip().lower() in FULL_CLASSES
+    return "all" in extras
 
 
 def normalize_capabilities(raw: Iterable[str] | str | None) -> list[str]:
@@ -100,11 +99,17 @@ def tool_names_for(
     extra: Iterable[str] | None = None,
     *,
     security_role: str = "",
+    prompt: str | None = None,
 ) -> list[str]:
     extras = normalize_capabilities(extra)
     if is_full_exposure(task_class, extras):
         return _enabled_native(security_role)
-    wanted = list(CLASS_TOOLS.get((task_class or "").strip().lower(), ()))
+    wanted = list(CLASS_TOOLS.get((task_class or "").strip().lower(), ("filesystem", "python")))
+    from .tool_retrieval import suggest_tools_for_prompt
+
+    for name in suggest_tools_for_prompt(prompt or "", security_role=security_role):
+        if name not in wanted:
+            wanted.append(name)
     for name in extras:
         if name == MCP_CAPABILITY:
             continue
@@ -112,6 +117,8 @@ def tool_names_for(
             wanted.append(name)
     if security_role == "blue-team" and "hexstrike_defensive" not in wanted:
         wanted.append("hexstrike_defensive")
+    if "hexstrike_operator" not in wanted and ("hexstrike_operator" in extras or "hexstrike" in {item.lower() for item in extras}):
+        wanted.append("hexstrike_operator")
     enabled = set(_enabled_native(security_role))
     names = [name for name in wanted if name in enabled]
     if "filesystem" not in names and "filesystem" in enabled:
@@ -124,16 +131,22 @@ def schemas_for(
     extra: Iterable[str] | None = None,
     *,
     security_role: str = "",
+    prompt: str | None = None,
 ) -> list[dict[str, Any]]:
     extras = normalize_capabilities(extra)
-    names = tool_names_for(task_class, extras, security_role=security_role)
-    schemas = [REGISTRY.tools[name].schema() for name in names if name in REGISTRY.tools]
+    names = tool_names_for(task_class, extras, security_role=security_role, prompt=prompt)
     full = is_full_exposure(task_class, extras)
+    schemas: list[dict[str, Any]] = []
     if not full:
         for escape in ESCAPE_TOOLS:
             if escape in REGISTRY.tools and REGISTRY.tools[escape].enabled:
-                if all(item.get("function", {}).get("name") != escape for item in schemas):
-                    schemas.append(REGISTRY.tools[escape].schema())
+                schemas.append(REGISTRY.tools[escape].schema())
+    for name in names:
+        if name not in REGISTRY.tools:
+            continue
+        if any(item.get("function", {}).get("name") == name for item in schemas):
+            continue
+        schemas.append(REGISTRY.tools[name].schema())
     if full or MCP_CAPABILITY in extras:
         schemas.extend(MCP.openai_tools())
     return schemas
@@ -144,20 +157,32 @@ def describe_exposure(
     extra: Iterable[str] | None = None,
     *,
     security_role: str = "",
+    prompt: str | None = None,
 ) -> str:
-    names = tool_names_for(task_class, extra, security_role=security_role)
+    names = tool_names_for(task_class, extra, security_role=security_role, prompt=prompt)
     full = is_full_exposure(task_class, extra)
     listed = ", ".join(names) or "(none)"
     if full:
         return (
-            "Tool exposure: this mixed/long-horizon task receives every enabled tool.\n"
+            "Tool exposure: the owner requested every enabled tool for this turn.\n"
             f"Currently enabled: {listed}."
         )
-    return (
-        f"Tool exposure: this {task_class or 'task'} is limited to: {listed}.\n"
-        "If you need another capability (browser, desktop, office, docker, git, screenshot, "
-        "terminal, python, web_fetch, mcp), call request_tools or request_capability with that name rather than inventing a tool."
-    )
+    from .tool_retrieval import suggest_installable_for_prompt
+
+    installable = suggest_installable_for_prompt(prompt or "")
+    lines = [
+        f"Tool exposure: retrieved for this turn ({task_class or 'task'}): {listed}.",
+        "The full tool catalog is not kept in context. If you need another capability "
+        "(browser, desktop, office, docker, git, screenshot, terminal, python, web_fetch, mcp), "
+        "call request_tools or request_capability with that name rather than inventing a tool.",
+    ]
+    if installable:
+        lines.append(
+            "Matching optional workers that are not loaded: "
+            + ", ".join(installable)
+            + ". Ask the owner to install them or call request_tools with the worker name; do not pretend they are present."
+        )
+    return "\n".join(lines)
 
 
 def grant_requested_tools(arguments: dict[str, Any]) -> list[str]:

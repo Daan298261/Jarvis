@@ -1,6 +1,6 @@
 # RFC-0093: Installer force-stop and prepare unstick
 
-**Status:** accepted
+**Status:** implemented
 **Queue item:** P0 — JarvisSetup 1.3.13 clean reinstall / upgrade freeze (Taco / CoS urgent)
 **Author:** Jarvis Architect
 **Date:** 2026-09-16
@@ -44,14 +44,14 @@ File replace against a still-running tree plus an unbounded hidden `[Run]` is th
 
 ## Acceptance criteria
 
-- [ ] Clean reinstall from a **running** Jarvis completes without the owner using Task Manager to kill Setup, backend, or python
-- [ ] Upgrade / Repair / Reinstall-keep / Semi-clean do **not** freeze on “Preparing Jarvis, its AI model, Gmail and WhatsApp…” (or the shorter Gmail/WhatsApp StatusMsg)
-- [ ] Force-stop runs **before** file replace on all five existing-install actions plus uninstall/Modify; kill failure aborts with a visible error (never hang)
-- [ ] Prepare/bootstrap has a finite timeout and surfaces the real error + log path instead of an infinite hidden wait
-- [ ] Heavy prepare is skipped when models/venv/portal are already present; first-install / empty Clean still prepares with timeouts
-- [ ] `installer-stop` / bootstrap log records which PIDs were killed (id + name)
-- [ ] Specs-only in this PR (no edits under `installer/windows/` product scripts, `stop-jarvis.ps1`, or `start-jarvis.ps1`)
-- [ ] Implement follow-up: `python3 -m pytest` (`tests/test_installer.py`, `tests/test_windows_shell.py`, new `tests/test_rfc0093_*.py` string/contract tests). Live JarvisSetup is Windows desktop sign-off.
+- [x] Clean reinstall from a **running** Jarvis completes without the owner using Task Manager to kill Setup, backend, or python — contracts in #264 (`force-stop-jarvis.ps1` before copy); live JarvisSetup remains Windows desktop sign-off
+- [x] Upgrade / Repair / Reinstall-keep / Semi-clean do **not** freeze on “Preparing Jarvis, its AI model, Gmail and WhatsApp…” (or the shorter Gmail/WhatsApp StatusMsg) — #264 watchdog + `SkipHeavyPrepare`; live remains desktop sign-off
+- [x] Force-stop runs **before** file replace on all five existing-install actions plus uninstall/Modify; kill failure aborts with a visible error (never hang)
+- [x] Prepare/bootstrap has a finite timeout and surfaces the real error + log path instead of an infinite hidden wait
+- [x] Heavy prepare is skipped when models/venv/portal are already present; first-install / empty Clean still prepares with timeouts
+- [x] `installer-stop` / bootstrap log records which PIDs were killed (id + name)
+- [x] Specs-only in this PR (no edits under `installer/windows/` product scripts, `stop-jarvis.ps1`, or `start-jarvis.ps1`) — specs PR #262
+- [x] Implement follow-up: `python3 -m pytest` (`tests/test_installer.py`, `tests/test_windows_shell.py`, new `tests/test_rfc0093_*.py` string/contract tests). Live JarvisSetup is Windows desktop sign-off.
 
 ## Likely files
 
@@ -72,3 +72,7 @@ Product implementation in this PR. Voice / TTS / RFC-0092. RFC-0059 Gmail/WhatsA
 - Evidence in tree (do not treat as already fixed): `CloseApplications=no`; `StopJarvisProcesses` → `stop-jarvis.ps1 -IncludeTray` only; `[Run]` `runhidden waituntilterminated` + freeze StatusMsg; `stop-jarvis.ps1` PID-file + uvicorn/llama/tray; `bootstrap.ps1` unbounded `npm ci` / pip / winget / HF.
 - Linux cloud VMs cannot sign off live Inno. Implement unit-tests the ISS/script contracts (force-stop call, timeout/skip switches, log path). Desktop: running Jarvis → Upgrade and Clean reinstall of the new Setup.exe.
 - Implement launch: implement this RFC only; branch from `development`; pytest; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via implement **#264** @ `9ecf9bd` (`force-stop-jarvis.ps1`, bounded `run-installer-bootstrap.ps1` watchdog, `SkipHeavyPrepare`, `installer-stop.log` / `bootstrap.log`, contract tests). Specs PR **#262** @ `96d3421`. Live JarvisSetup on a running Jarvis (upgrade + clean reinstall) remains Windows desktop sign-off. RFC-0092 untouched.

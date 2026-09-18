@@ -68,6 +68,26 @@ class InferenceSettings(BaseModel):
     lmstudio_models_root: str = ""
 
 
+class FrontResponderSettings(BaseModel):
+    """RFC-0117 tiny front-chat lane on the existing local / LM Studio endpoint.
+
+    ``model`` is an OpenAI-compatible model id advertised by that endpoint.
+    Empty means: use ``inference.remote_model`` or the currently loaded alias.
+    No vendor model name is hard-coded.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = True
+    model: str = ""
+    max_output_tokens: int = Field(default=128, ge=32, le=256)
+    temperature: float = Field(default=0.25, ge=0.0, le=1.0)
+    timeout_ms: int = Field(default=3000, ge=250, le=8000)
+    context_turns: int = Field(default=4, ge=0, le=8)
+    speak_immediately: bool = True
+    parallel_when_distinct_model: bool = True
+
+
 class BrowserSettings(BaseModel):
     backend: str = "playwright"
     headless: bool = False
@@ -184,6 +204,16 @@ class TtsSettings(BaseModel):
     prefer_cpu_fallback: bool = True
 
 
+class KnowledgeVaultSettings(BaseModel):
+    """RFC-0107 Obsidian-linked vault binding (path is write-only in API responses)."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    vault_path: str = ""
+    jarvis_managed_layout: bool = False
+    watch_enabled: bool = True
+
+
 class HexStrikeSettings(BaseModel):
     """Local HexStrike AI suite (RFC-0078). Loopback only; never a WAN listener."""
 
@@ -224,6 +254,7 @@ class AppSettings(BaseModel):
     auth_required: bool = False
     auth_token: str = ""
     inference: InferenceSettings = Field(default_factory=InferenceSettings)
+    front_responder: FrontResponderSettings = Field(default_factory=FrontResponderSettings)
     autonomy: str = "trusted"
     default_timeout_seconds: int = 1800
     retry_limit: int = 4
@@ -239,6 +270,7 @@ class AppSettings(BaseModel):
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
+    knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)

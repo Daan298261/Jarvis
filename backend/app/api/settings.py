@@ -92,11 +92,24 @@ class SettingsUpdate(BaseModel):
     tts_speed: float | None = Field(default=None, ge=0.5, le=2.0)
     tts_expressiveness: float | None = Field(default=None, ge=0.0, le=1.0)
     tts_prefer_cpu_fallback: bool | None = None
+    front_responder_enabled: bool | None = None
+    front_responder_model: str | None = Field(default=None, max_length=160)
+    front_responder_max_output_tokens: int | None = Field(default=None, ge=32, le=256)
+    front_responder_temperature: float | None = Field(default=None, ge=0.0, le=1.0)
+    front_responder_timeout_ms: int | None = Field(default=None, ge=250, le=8000)
+    front_responder_context_turns: int | None = Field(default=None, ge=0, le=8)
+    front_responder_speak_immediately: bool | None = None
 
 
 @router.get("")
 async def get_settings():
-    return load_settings().model_dump()
+    payload = load_settings().model_dump()
+    vault = payload.get("knowledge_vault")
+    if isinstance(vault, dict) and vault.get("vault_path"):
+        vault = dict(vault)
+        vault["vault_path"] = "[configured]"
+        payload["knowledge_vault"] = vault
+    return payload
 
 
 @router.put("")
@@ -258,6 +271,21 @@ async def update_settings(body: SettingsUpdate):
         if value is not None:
             tts_values[key] = value
     settings.tts = type(settings.tts).model_validate(tts_values)
+
+    front_values = settings.front_responder.model_dump()
+    front_updates = {
+        "enabled": body.front_responder_enabled,
+        "model": body.front_responder_model,
+        "max_output_tokens": body.front_responder_max_output_tokens,
+        "temperature": body.front_responder_temperature,
+        "timeout_ms": body.front_responder_timeout_ms,
+        "context_turns": body.front_responder_context_turns,
+        "speak_immediately": body.front_responder_speak_immediately,
+    }
+    for key, value in front_updates.items():
+        if value is not None:
+            front_values[key] = value
+    settings.front_responder = type(settings.front_responder).model_validate(front_values)
 
     save_settings(settings)
     REGISTRY.apply_settings(settings)

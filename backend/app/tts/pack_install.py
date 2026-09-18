@@ -22,11 +22,20 @@ from .engines import (
     kokoro_python_ready,
     kokoro_weights_ready,
 )
+from .kokoro_adapter import (
+    KOKORO_PACKAGE_VERSION,
+    SOUNDFILE_PACKAGE_VERSION,
+    reset_kokoro_runtime_state,
+    verify_kokoro_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
-KOKORO_PY_PACKAGES = ("kokoro>=0.9.2", "soundfile>=0.13.0")
-CHATTERBOX_PY_PACKAGES = ("chatterbox-tts",)
+KOKORO_PY_PACKAGES = (
+    f"kokoro=={KOKORO_PACKAGE_VERSION}",
+    f"soundfile=={SOUNDFILE_PACKAGE_VERSION}",
+)
+CHATTERBOX_PY_PACKAGES = ("setuptools==80.9.0", "chatterbox-tts==0.1.7")
 _ENSURE_LOCK = threading.Lock()
 KOKORO_RUNTIME_ERROR = (
     "The household voice could not be prepared. Check that this PC is online, then try "
@@ -158,6 +167,9 @@ def ensure_chatterbox_python(*, force: bool = False) -> None:
         logger.error("Chatterbox package install failed: %s", (completed.stderr or completed.stdout)[-2000:])
         raise RuntimeError(CHATTERBOX_RUNTIME_ERROR)
     importlib.invalidate_caches()
+    for module_name in tuple(sys.modules):
+        if module_name == "perth" or module_name.startswith("perth."):
+            sys.modules.pop(module_name, None)
     if not is_chatterbox_available():
         raise RuntimeError(CHATTERBOX_RUNTIME_ERROR)
 
@@ -181,7 +193,9 @@ def ensure_kokoro_runtime(*, force: bool = False) -> Path:
     """Make the default household voice usable: Python engine + bundled weights."""
     with _ENSURE_LOCK:
         ensure_kokoro_python(force=force)
-        return ensure_kokoro_weights(force=force)
+        model_dir = ensure_kokoro_weights(force=force)
+        reset_kokoro_runtime_state()
+        return model_dir
 
 
 def install_voice_pack(profile: VoiceProfile, *, force: bool = False) -> VoicePackInstallResult:
@@ -205,6 +219,9 @@ def install_voice_pack(profile: VoiceProfile, *, force: bool = False) -> VoicePa
 
     if merged.get("download_kokoro"):
         ensure_kokoro_runtime(force=force)
+        state = verify_kokoro_runtime(force=True)
+        if not state.ready:
+            raise RuntimeError(state.last_error or KOKORO_RUNTIME_ERROR)
     if merged.get("install_chatterbox"):
         ensure_chatterbox_python(force=force)
 

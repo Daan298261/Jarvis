@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { getAuthUrl } from "../api"
 
 export const SHOW_WORK_STORAGE_KEY = "jarvis.chat.showWork"
 
@@ -36,10 +37,23 @@ export function useShowWorkPreference(): [boolean, (showWork: boolean) => void] 
 }
 
 const HIDDEN_WORK_TITLES = new Set(["Model is thinking", "Reasoning complete", "Thinking"])
+const HIDDEN_WORK_KINDS = new Set(["assistant_delta", "chat_tts"])
+const DEEPER_RESULT_LABEL = "Deeper result"
+
+export function mergeAssistantTexts(front: string, worker: string): string {
+  const left = (front || "").trim()
+  const right = (worker || "").trim()
+  if (!left) return right
+  if (!right || left === right || right.startsWith(left) || left.includes(right)) return right || left
+  if (left.toLowerCase().includes(DEEPER_RESULT_LABEL.toLowerCase())) return `${left}\n\n${right}`
+  return `${left}\n\n${DEEPER_RESULT_LABEL}\n${right}`
+}
 
 /** Events suitable for the work / details panel (drops noisy model heartbeat). */
 export function filterWorkEvents(events: OwnerChatEvent[]): OwnerChatEvent[] {
-  return events.filter((event) => !HIDDEN_WORK_TITLES.has(event.title))
+  return events.filter(
+    (event) => !HIDDEN_WORK_TITLES.has(event.title) && !HIDDEN_WORK_KINDS.has(event.kind),
+  )
 }
 
 /** Heartbeat / reasoning lines — separate collapsible stream from tool work. */
@@ -104,6 +118,7 @@ export function visibleChatTurns(input: {
   error?: string | null
   messages?: { role: string; content: string }[] | null
   pending?: string[]
+  liveAssistant?: string | null
 }): ChatTurn[] {
   const turns: ChatTurn[] = []
   const fromApi = (input.messages || []).filter((item) => item.role === "user" || item.role === "assistant")
@@ -117,7 +132,13 @@ export function visibleChatTurns(input: {
         const split = splitAssistantContent(content)
         const publicText = split.public || (!split.internal ? content : "")
         if (!publicText && !split.internal) continue
-        if (last && last.role === role && last.content === publicText && last.internal === split.internal) continue
+        if (last && last.role === role) {
+          if (last.content === publicText && last.internal === split.internal) continue
+          last.content = mergeAssistantTexts(last.content, publicText)
+          last.public = last.content
+          last.internal = [last.internal, split.internal].filter(Boolean).join("\n") || undefined
+          continue
+        }
         turns.push({ role, content: publicText, public: publicText, internal: split.internal || undefined })
         continue
       }
@@ -134,6 +155,16 @@ export function visibleChatTurns(input: {
     }
     const reply = assistantReplyText(input.result, input.error)
     if (reply) turns.push({ role: "assistant", content: reply })
+  }
+  const live = (input.liveAssistant || "").trim()
+  if (live) {
+    const last = turns[turns.length - 1]
+    if (!last || last.role === "user") {
+      turns.push({ role: "assistant", content: live, public: live })
+    } else if (last.role === "assistant" && live.startsWith(last.content) && live !== last.content) {
+      last.content = live
+      last.public = live
+    }
   }
   const knownUsers = new Set(turns.filter((item) => item.role === "user").map((item) => item.content))
   for (const pending of input.pending || []) {
@@ -178,4 +209,48 @@ export function taskStatusLine(task: {
   if (task.stage) return task.stage
   if (isTaskRunning(task.status)) return "Working…"
   return ""
+}
+
+function frontEventText(event: { kind?: string; detail?: string }): string {
+  const kind = event.kind || ""
+  const detail = (event.detail || "").trim()
+  if (kind === "assistant_delta") return detail
+  if (kind === "front_response_completed" && detail) {
+    try {
+      const parsed = JSON.parse(detail) as { text?: string }
+      if (parsed && typeof parsed.text === "string") return parsed.text
+    } catch {
+      return detail
+    }
+  }
+  return ""
+}
+
+/** Live first-token preview from the task event stream (front lane + worker). */
+export function useLiveAssistantPreview(taskId: string, running: boolean): string {
+  const [text, setText] = useState("")
+  useEffect(() => {
+    if (!taskId || !running) {
+      return
+    }
+    let acc = ""
+    const stream = new EventSource(getAuthUrl(`/api/tasks/${encodeURIComponent(taskId)}/events`))
+    stream.onmessage = (message) => {
+      try {
+        const event = JSON.parse(message.data) as { kind?: string; detail?: string }
+        const chunk = frontEventText(event)
+        if (!chunk) return
+        if (event.kind === "front_response_completed") {
+          acc = chunk
+        } else {
+          acc += chunk
+        }
+        setText(acc)
+      } catch {
+        // Keep the last good preview.
+      }
+    }
+    return () => stream.close()
+  }, [taskId, running])
+  return running ? text : ""
 }

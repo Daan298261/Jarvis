@@ -47,7 +47,10 @@ class InstallAttempt:
 
 SPECS: dict[str, tuple[InstallAttempt, ...]] = {
     "browser-use": (
-        InstallAttempt(pip_packages=("browser-use[core]",), extra_modules=("playwright",)),
+        InstallAttempt(
+            pip_packages=("browser-use[core]",),
+            extra_modules=("playwright",),
+        ),
         InstallAttempt(pip_packages=("browser-use",), extra_modules=("playwright",)),
     ),
     "ufo": (
@@ -312,7 +315,10 @@ def _install_worker(worker_id: str) -> None:
             logger.warning("Optional worker %s attempt %s failed: %s", worker_id, index, exc)
             continue
         if backend.available():
-            _set_job(worker_id, status="ready", error="", detail="Installed")
+            detail = "Installed"
+            if worker_id == "browser-use":
+                detail = "Installed browser-use and Playwright Chromium for intelligent discovery."
+            _set_job(worker_id, status="ready", error="", detail=detail)
             return
         errors.append("Packages installed but the worker is still not detectable")
     raise RuntimeError(" | ".join(errors) or f"Could not install {worker_id}")

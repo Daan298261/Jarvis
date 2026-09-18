@@ -160,18 +160,33 @@ async def test_preview_available_profile(voice_profiles_env, monkeypatch):
 
     from app.workers.voice import SynthesizedSpeech
 
-    async def fake_synthesize(text: str, *, voice_profile_id: str | None = None) -> SynthesizedSpeech:
+    async def fake_synthesize(
+        text: str,
+        *,
+        voice_profile_id: str | None = None,
+        exact_profile: bool = False,
+    ) -> SynthesizedSpeech:
         assert voice_profile_id == DEFAULT_VOICE_PROFILE_ID
-        return SynthesizedSpeech(b"RIFF", "kokoro", DEFAULT_VOICE_PROFILE_ID)
+        assert exact_profile is True
+        return SynthesizedSpeech(
+            b"RIFF" + (b"\0" * 64),
+            "kokoro",
+            DEFAULT_VOICE_PROFILE_ID,
+            "kokoro-82m",
+            "bm_george",
+            "kokoro",
+        )
 
     monkeypatch.setattr("app.api.voice_profiles.synthesize_speech_result", fake_synthesize)
     monkeypatch.setattr("app.voice_profiles.catalog.is_engine_available", lambda _engine: True)
     reload_catalog()
     response = await preview_voice_profile(DEFAULT_VOICE_PROFILE_ID)
-    assert response.body == b"RIFF"
+    assert response.body == b"RIFF" + (b"\0" * 64)
     assert response.media_type == "audio/wav"
     assert response.headers["X-Jarvis-TTS-Engine"] == "kokoro"
     assert response.headers["X-Jarvis-Voice-Profile"] == DEFAULT_VOICE_PROFILE_ID
+    assert response.headers["X-Jarvis-TTS-Model"] == "kokoro-82m"
+    assert response.headers["X-Jarvis-TTS-Voice"] == "bm_george"
 
 
 def test_catalog_skips_forbidden_pack_on_load(tmp_path, monkeypatch):

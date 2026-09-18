@@ -48,6 +48,8 @@ DEFAULT_PORTS = {
 STOCK_PORTS = set(DEFAULT_PORTS.values())
 
 PROBE_PATHS = ("/health", "/v1/models", "/models", "/api/tags")
+# Live n_ctx lives here — not on the OpenAI /v1/models name listing.
+CONTEXT_PROBE_PATHS = ("/props", "/api/v0/models")
 
 
 def _message_text(content: str | list[dict[str, Any]]) -> str:
@@ -155,8 +157,10 @@ async def probe_remote_server(
     headers = inference_headers(api_key)
     health_path = None
     models: list[str] = []
+    payloads: list[Any] = []
     last_error = ""
     deadline = time.time() + timeout
+    n_ctx = 0
     async with httpx.AsyncClient(timeout=2, headers=headers) as client:
         while True:
             for path in PROBE_PATHS:
@@ -172,7 +176,9 @@ async def probe_remote_server(
                     health_path = path
                 if path in {"/v1/models", "/models", "/api/tags"}:
                     try:
-                        models = parse_models_payload(path, response.json()) or models
+                        body = response.json()
+                        payloads.append(body)
+                        models = parse_models_payload(path, body) or models
                     except Exception:
                         pass
                 if health_path == "/health" and not models:
@@ -182,6 +188,8 @@ async def probe_remote_server(
             if health_path or not retry or time.time() >= deadline:
                 break
             await asyncio.sleep(0.4)
+        if health_path:
+            n_ctx = await _probe_loaded_n_ctx(client, base, payloads)
     return {
         "ok": health_path is not None,
         "host": host,
@@ -189,8 +197,33 @@ async def probe_remote_server(
         "base_url": f"{base}/v1",
         "health_path": health_path,
         "models": models,
+        "n_ctx": n_ctx,
         "error": "" if health_path else (last_error or "no health endpoint answered"),
     }
+
+
+async def _probe_loaded_n_ctx(client: httpx.AsyncClient, base: str, payloads: list[Any]) -> int:
+    """Best-effort live window from llama.cpp /props or LM Studio catalog JSON."""
+    from .context_window import extract_loaded_n_ctx
+
+    for payload in payloads:
+        found = extract_loaded_n_ctx(payload)
+        if found:
+            return found
+    for path in CONTEXT_PROBE_PATHS:
+        try:
+            response = await client.get(base + path)
+        except Exception:
+            continue
+        if response.status_code >= 400:
+            continue
+        try:
+            found = extract_loaded_n_ctx(response.json())
+        except Exception:
+            continue
+        if found:
+            return found
+    return 0
 
 
 async def wait_for_health(url: str, timeout: float, process: Any | None = None) -> bool:
@@ -333,6 +366,8 @@ class LlamaCppBackend(InferenceBackend):
             str(inference.port),
             "--ctx-size",
             str(ctx),
+            "--keep",
+            "0",
             "--flash-attn",
             inference.flash_attn,
             "--jinja",
@@ -389,10 +424,12 @@ class LlamaCppBackend(InferenceBackend):
         )
         ready = await wait_for_health(self.health_url(), timeout, self._process)
         if ready:
+            ctx = int(context_size or profile.context_size or self.settings.inference.context_size or 0)
             self.last_probe = {
                 "ok": True,
                 "health_path": "/health",
                 "models": ["Qwen3.5-27B"],
+                "n_ctx": ctx,
             }
         return ready
 

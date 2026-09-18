@@ -55,17 +55,34 @@ function formatApiDetail(detail: unknown, fallback: string): string {
   return fallback
 }
 
+export class ApiError extends Error {
+  readonly status: number
+  readonly body: unknown
+
+  constructor(status: number, message: string, body: unknown = null) {
+    super(message)
+    this.name = "ApiError"
+    this.status = status
+    this.body = body
+  }
+}
+
+export function isApiError(err: unknown): err is ApiError {
+  return err instanceof ApiError
+}
+
 async function throwIfNotOk(response: Response): Promise<void> {
   if (response.ok) return
   const text = await response.text()
+  let parsed: unknown = null
   let errorDetail = text
   try {
-    const parsed = JSON.parse(text)
-    errorDetail = formatApiDetail(parsed.detail, text)
+    parsed = JSON.parse(text)
+    errorDetail = formatApiDetail((parsed as { detail?: unknown }).detail, text)
   } catch {
     // not JSON
   }
-  throw new Error(errorDetail || response.statusText)
+  throw new ApiError(response.status, errorDetail || response.statusText, parsed)
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -98,6 +115,8 @@ export type AudioResponse = {
   blob: Blob
   engineId: string | null
   profileId: string | null
+  modelId: string | null
+  voiceId: string | null
 }
 
 export async function fetchAudioWithMetadata(path: string, init?: RequestInit): Promise<AudioResponse> {
@@ -108,6 +127,8 @@ export async function fetchAudioWithMetadata(path: string, init?: RequestInit): 
     blob: await response.blob(),
     engineId: response.headers.get("X-Jarvis-TTS-Engine"),
     profileId: response.headers.get("X-Jarvis-Voice-Profile"),
+    modelId: response.headers.get("X-Jarvis-TTS-Model"),
+    voiceId: response.headers.get("X-Jarvis-TTS-Voice"),
   }
 }
 
@@ -835,6 +856,65 @@ export async function activateRuntimeProfile(profileId: string): Promise<Runtime
   })
 }
 
+export type HexStrikeOperatorReadiness = {
+  operator_ready?: boolean
+  catalog_count?: number
+  catalog_stale?: boolean
+  mcp?: { ok?: boolean; servers?: unknown; error?: string; transport?: string }
+  mcp_error?: string
+  reason?: string
+}
+
+export type HexStrikeCatalogItem = {
+  id: string
+  source: string
+  title: string
+  available?: boolean
+  missing_dependencies?: string[]
+  input_schema?: Record<string, unknown>
+  install_id?: string
+  install_method?: string
+  defensive_action?: string
+  upstream_path?: string
+  mcp_tool_key?: string
+  guidance?: string
+}
+
+export type HexStrikeOperatorJob = {
+  id: string
+  capability_id: string
+  source: string
+  status: string
+  started_at: string
+  finished_at?: string | null
+  upstream_pid?: number | null
+  log_tail?: string
+  artifact_paths?: string[]
+  result?: Record<string, unknown>
+  error?: string
+  artifacts?: { name: string; path: string; size: number }[]
+}
+
+export type HexStrikeDependencyInstallJob = {
+  id: string
+  dependency_id: string
+  status: string
+  ok: boolean
+  detail: string
+  started_at: string
+  finished_at?: string | null
+}
+
+export type HexStrikeToolsCatalogResponse = {
+  catalog: HexStrikeCatalogItem[]
+  count: number
+  catalog_stale: boolean
+  missing_host_tools: string[]
+  legacy_capabilities: HexStrikeCapability[]
+  mcp: Record<string, unknown>
+  mcp_error?: string
+}
+
 export type HexStrikeStatus = {
   suite: string
   shape_id: string
@@ -860,6 +940,15 @@ export type HexStrikeStatus = {
   dependencies: HexStrikeDependency[]
   missing_dependencies: string[]
   managed_jobs: HexStrikeJob[]
+  catalog?: HexStrikeCatalogItem[]
+  catalog_count?: number
+  catalog_stale?: boolean
+  operator?: HexStrikeOperatorReadiness
+  operator_jobs?: HexStrikeOperatorJob[]
+  dependency_install_jobs?: Record<string, HexStrikeDependencyInstallJob>
+  mcp?: Record<string, unknown>
+  mcp_error?: string
+  missing_host_tools?: string[]
 }
 
 export type HexStrikeInstallStatus = {
@@ -974,6 +1063,66 @@ export async function runHexStrikeAction(body: {
   return api<HexStrikeJob>("/api/hexstrike/actions", {
     method: "POST",
     body: JSON.stringify(body),
+  })
+}
+
+export async function getHexStrikeToolsCatalog(): Promise<HexStrikeToolsCatalogResponse> {
+  return api<HexStrikeToolsCatalogResponse>("/api/hexstrike/tools")
+}
+
+export async function refreshHexStrikeToolsCatalog(): Promise<{
+  catalog: HexStrikeCatalogItem[]
+  count: number
+  operator: HexStrikeOperatorReadiness
+}> {
+  return api("/api/hexstrike/tools/refresh", { method: "POST" })
+}
+
+export async function installHexStrikeTool(toolId: string): Promise<HexStrikeDependencyInstallJob> {
+  return api<HexStrikeDependencyInstallJob>(
+    `/api/hexstrike/tools/${encodeURIComponent(toolId)}/install`,
+    { method: "POST" },
+  )
+}
+
+export async function getHexStrikeToolInstallJob(
+  jobId: string,
+): Promise<HexStrikeDependencyInstallJob> {
+  return api<HexStrikeDependencyInstallJob>(
+    `/api/hexstrike/tools/install-jobs/${encodeURIComponent(jobId)}`,
+  )
+}
+
+export async function operateHexStrike(body: {
+  capability_id: string
+  arguments?: Record<string, unknown>
+}): Promise<HexStrikeOperatorJob> {
+  return api<HexStrikeOperatorJob>("/api/hexstrike/operate", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function listHexStrikeOperatorJobs(): Promise<{
+  jobs: HexStrikeOperatorJob[]
+  legacy_jobs: HexStrikeJob[]
+}> {
+  return api("/api/hexstrike/jobs")
+}
+
+export async function getHexStrikeOperatorJob(jobId: string): Promise<HexStrikeOperatorJob> {
+  return api<HexStrikeOperatorJob>(`/api/hexstrike/jobs/${encodeURIComponent(jobId)}`)
+}
+
+export async function getHexStrikeOperatorJobArtifacts(jobId: string): Promise<{
+  artifacts: { name: string; path: string; size: number }[]
+}> {
+  return api(`/api/hexstrike/jobs/${encodeURIComponent(jobId)}/artifacts`)
+}
+
+export async function stopHexStrikeOperatorJob(jobId: string): Promise<HexStrikeOperatorJob> {
+  return api<HexStrikeOperatorJob>(`/api/hexstrike/jobs/${encodeURIComponent(jobId)}/stop`, {
+    method: "POST",
   })
 }
 
@@ -4373,4 +4522,324 @@ export async function postHelpChat(message: string, conversationId?: string): Pr
     method: "POST",
     body: JSON.stringify({ message, conversation_id: conversationId || null }),
   })
+}
+
+/** RFC-0105 — Cybersecurity module catalog (Daybreak HUD). */
+export const CYBERSECURITY_MODULE_ID = "cybersecurity"
+
+export type CybersecurityToolStatus =
+  | "missing"
+  | "found"
+  | "starting"
+  | "running"
+  | "error"
+  | "disabled"
+
+export type CybersecurityToolMember = {
+  id: string
+  display_name: string
+  source_url: string
+  local_path: string | null
+  enabled: boolean
+  status: CybersecurityToolStatus
+  role: string
+}
+
+export type CybersecurityModule = {
+  id: string
+  display_name: string
+  enabled: boolean
+  members: CybersecurityToolMember[]
+}
+
+export type CybersecurityModuleCatalogResult =
+  | { ok: true; module: CybersecurityModule }
+  | { ok: false; message: string }
+
+export type CybersecurityActionResult = {
+  ok: boolean
+  message: string
+  job_id?: string
+}
+
+const CYBERSECURITY_MEMBER_META: Record<
+  string,
+  { display_name: string; source_url: string; role: string }
+> = {
+  strix: {
+    display_name: "Strix",
+    source_url: "https://github.com/usestrix/strix",
+    role: "harness",
+  },
+  "anthropic-cybersecurity-skills": {
+    display_name: "Anthropic Cybersecurity Skills",
+    source_url: "https://github.com/mukul975/Anthropic-Cybersecurity-Skills",
+    role: "skill_pack",
+  },
+  exploitarium: {
+    display_name: "Exploitarium",
+    source_url: "https://github.com/bikini/exploitarium",
+    role: "library_backend",
+  },
+  pentagi: {
+    display_name: "Pentagi",
+    source_url: "https://github.com/vxcontrol/pentagi",
+    role: "harness",
+  },
+  "claude-red": {
+    display_name: "Claude-Red",
+    source_url: "https://github.com/SnailSploit/Claude-Red",
+    role: "skill_pack",
+  },
+  flowsint: {
+    display_name: "Flowsint",
+    source_url: "https://github.com/reconurge/flowsint",
+    role: "graph_ui",
+  },
+}
+
+const CYBERSECURITY_MEMBER_ORDER = [
+  "strix",
+  "anthropic-cybersecurity-skills",
+  "exploitarium",
+  "pentagi",
+  "claude-red",
+  "flowsint",
+] as const
+
+function normalizeCybersecurityStatus(value: unknown): CybersecurityToolStatus {
+  const raw = String(value || "missing").toLowerCase()
+  if (
+    raw === "found" ||
+    raw === "starting" ||
+    raw === "running" ||
+    raw === "error" ||
+    raw === "disabled"
+  ) {
+    return raw
+  }
+  return "missing"
+}
+
+function normalizeCybersecurityMember(raw: Record<string, unknown>): CybersecurityToolMember | null {
+  const id = String(raw.id || raw.member_id || "").trim()
+  if (!id) return null
+  const meta = CYBERSECURITY_MEMBER_META[id]
+  const displayName =
+    (typeof raw.display_name === "string" && raw.display_name) ||
+    (typeof raw.name === "string" && raw.name) ||
+    meta?.display_name ||
+    id
+  const sourceUrl =
+    (typeof raw.source_url === "string" && raw.source_url) ||
+    (typeof raw.url === "string" && raw.url) ||
+    meta?.source_url ||
+    ""
+  const localPath =
+    typeof raw.local_path === "string"
+      ? raw.local_path
+      : typeof raw.path === "string"
+        ? raw.path
+        : null
+  const role =
+    (typeof raw.role === "string" && raw.role) ||
+    (typeof raw.connector === "string" && raw.connector) ||
+    meta?.role ||
+    "module"
+  return {
+    id,
+    display_name: displayName,
+    source_url: sourceUrl,
+    local_path: localPath,
+    enabled: raw.enabled === true || raw.enabled === "true",
+    status: normalizeCybersecurityStatus(raw.status),
+    role,
+  }
+}
+
+function parseCybersecurityModule(payload: Record<string, unknown>): CybersecurityModule {
+  const root = (payload.module as Record<string, unknown> | undefined) || payload
+  const enabled = root.enabled === true || root.enabled === "true"
+  const displayName =
+    (typeof root.display_name === "string" && root.display_name) ||
+    (typeof root.name === "string" && root.name) ||
+    "Cybersecurity"
+  const rawMembers = Array.isArray(root.members)
+    ? root.members
+    : Array.isArray(payload.members)
+      ? payload.members
+      : []
+  const byId = new Map<string, CybersecurityToolMember>()
+  for (const item of rawMembers) {
+    if (!item || typeof item !== "object") continue
+    const member = normalizeCybersecurityMember(item as Record<string, unknown>)
+    if (member) byId.set(member.id, member)
+  }
+  const ordered: CybersecurityToolMember[] = []
+  for (const id of CYBERSECURITY_MEMBER_ORDER) {
+    const member = byId.get(id)
+    if (member) ordered.push(member)
+  }
+  for (const [id, member] of byId) {
+    if (!(CYBERSECURITY_MEMBER_ORDER as readonly string[]).includes(id)) {
+      ordered.push(member)
+    }
+  }
+  return {
+    id: CYBERSECURITY_MODULE_ID,
+    display_name: displayName,
+    enabled,
+    members: ordered,
+  }
+}
+
+async function fetchCybersecurityJson<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
+  const headers = authHeaders({
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  })
+  try {
+    const response = await fetch(path, { ...init, headers })
+    if (!response.ok) {
+      const text = await response.text()
+      let message = text || response.statusText
+      try {
+        const parsed = JSON.parse(text)
+        message = formatApiDetail(parsed.detail, message)
+      } catch {
+        // not JSON
+      }
+      return { ok: false, message }
+    }
+    const data = (await response.json()) as T
+    return { ok: true, data }
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Cybersecurity catalog request failed.",
+    }
+  }
+}
+
+export async function loadCybersecurityModuleCatalog(): Promise<CybersecurityModuleCatalogResult> {
+  const result = await fetchCybersecurityJson<Record<string, unknown>>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}`,
+  )
+  if (!result.ok) {
+    return { ok: false, message: result.message }
+  }
+  const module = parseCybersecurityModule(result.data)
+  if (module.members.length === 0) {
+    return { ok: false, message: "Cybersecurity catalog returned no tools." }
+  }
+  return { ok: true, module }
+}
+
+export async function setCybersecurityModuleEnabled(enabled: boolean): Promise<CybersecurityActionResult> {
+  const result = await fetchCybersecurityJson<{ enabled?: boolean; detail?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/enable`,
+    { method: "POST", body: JSON.stringify({ enabled }) },
+  )
+  if (!result.ok) {
+    return { ok: false, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || (enabled ? "Cybersecurity module enabled." : "Cybersecurity module disabled."),
+  }
+}
+
+export async function setCybersecurityToolEnabled(
+  toolId: string,
+  enabled: boolean,
+): Promise<CybersecurityActionResult> {
+  const id = toolId.trim()
+  const result = await fetchCybersecurityJson<{ enabled?: boolean; detail?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/tools/${encodeURIComponent(id)}/enable`,
+    { method: "POST", body: JSON.stringify({ enabled }) },
+  )
+  if (!result.ok) {
+    return { ok: false, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || (enabled ? "Tool enabled." : "Tool disabled."),
+  }
+}
+
+export async function downloadModuleCatalogEntry(
+  entryId: string,
+  options?: { mode?: "clone" | "zip"; dest?: "desktop_projects" | "library" },
+): Promise<CybersecurityActionResult> {
+  const result = await fetchCybersecurityJson<{ job_id?: string; detail?: string; message?: string }>(
+    `/api/modules/catalog/${encodeURIComponent(entryId)}/download`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        mode: options?.mode ?? "clone",
+        dest: options?.dest ?? "library",
+      }),
+    },
+  )
+  if (!result.ok) {
+    return { ok: false, message: result.message }
+  }
+  return {
+    ok: true,
+    job_id: result.data.job_id,
+    message: result.data.detail || result.data.message || "Download started.",
+  }
+}
+
+export async function startCybersecurityTool(toolId: string): Promise<CybersecurityActionResult> {
+  const id = toolId.trim()
+  const result = await fetchCybersecurityJson<{ detail?: string; message?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/tools/${encodeURIComponent(id)}/start`,
+    { method: "POST", body: "{}" },
+  )
+  if (!result.ok) {
+    return { ok: false, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || result.data.message || "Start requested.",
+  }
+}
+
+export async function stopCybersecurityTool(toolId: string): Promise<CybersecurityActionResult> {
+  const id = toolId.trim()
+  const result = await fetchCybersecurityJson<{ detail?: string; message?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/tools/${encodeURIComponent(id)}/stop`,
+    { method: "POST", body: "{}" },
+  )
+  if (!result.ok) {
+    return { ok: false, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || result.data.message || "Stop requested.",
+  }
+}
+
+export async function openCybersecurityToolFolder(toolId: string): Promise<CybersecurityActionResult> {
+  const id = toolId.trim()
+  const result = await fetchCybersecurityJson<{ detail?: string; message?: string }>(
+    `/api/modules/catalog/${CYBERSECURITY_MODULE_ID}/tools/${encodeURIComponent(id)}/open-folder`,
+    { method: "POST", body: "{}" },
+  )
+  if (!result.ok) {
+    return { ok: false, message: result.message }
+  }
+  return {
+    ok: true,
+    message: result.data.detail || result.data.message || "Opened folder in the system file manager.",
+  }
+}
+
+export function cybersecurityToolSupportsProcessControl(role: string): boolean {
+  const normalized = role.toLowerCase().replace(/-/g, "_")
+  return normalized === "harness" || normalized === "graph_ui" || normalized === "graph/ui"
 }

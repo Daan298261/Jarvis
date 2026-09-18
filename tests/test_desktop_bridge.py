@@ -17,6 +17,7 @@ def test_desktop_bridge_file_exists_and_exports_fallback():
     assert "setAutostart" in text
     assert "quitJarvis" in text
     assert "browserBridgeFallback" in text
+    assert "obsidianEmbedStart" in text
     # Must not scatter invoke() outside the bridge for core commands — bridge is the adapter.
     assert "getInvoke()" in text
 

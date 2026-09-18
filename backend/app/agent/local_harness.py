@@ -198,6 +198,11 @@ def load_skill_blocks(policy: LocalHarnessPolicy, goal: str = "") -> list[str]:
     if goal and "test" in goal.lower() and "testing" not in seen:
         blocks.append("Run or extend tests after code changes.")
         seen.add("testing")
+    for key, hint in SKILL_HINTS.items():
+        if not key.startswith("module:cybersecurity:") or key in seen:
+            continue
+        blocks.append(hint)
+        seen.add(key)
     return blocks
 
 

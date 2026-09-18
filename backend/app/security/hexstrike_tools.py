@@ -1,21 +1,30 @@
-"""Install optional host binaries for Daybreak Blue defensive actions (Windows)."""
+"""Discover and install host / Python dependencies for HexStrike (RFC-0106)."""
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from .hexstrike import audit_hexstrike
+from ..config import repo_root
+from .hexstrike import audit_hexstrike, resolve_install, resolve_python
 
-# winget package ids verified for common defensive tooling
+# winget package ids for common tooling referenced by the pinned upstream tree
 WINGET_PACKAGES: dict[str, str] = {
     "nmap": "Insecure.Nmap",
     "trivy": "AquaSecurity.Trivy",
     "checkov": "Bridgecrew.Checkov",
     "docker": "Docker.DockerDesktop",
     "exiftool": "OliverBetz.ExifTool",
+    "git": "Git.Git",
+    "curl": "cURL.cURL",
+    "jq": "jqlang.jq",
+    "openssl": "ShiningLight.OpenSSL.Light",
+    "wireshark": "WiresharkFoundation.Wireshark",
+    "python": "Python.Python.3.11",
 }
 
 TOOL_LABELS: dict[str, str] = {
@@ -24,7 +33,65 @@ TOOL_LABELS: dict[str, str] = {
     "checkov": "Checkov",
     "docker": "Docker Desktop",
     "exiftool": "ExifTool",
+    "git": "Git",
+    "curl": "curl",
+    "jq": "jq",
+    "openssl": "OpenSSL",
+    "wireshark": "Wireshark",
+    "python": "Python 3.11",
 }
+
+PIP_NAME_OVERRIDES: dict[str, str] = {
+    "beautifulsoup4": "bs4",
+    "pyyaml": "yaml",
+}
+
+_INSTALL_LOCK = asyncio.Lock()
+_INSTALL_JOBS: dict[str, dict[str, Any]] = {}
+_INSTALL_TASKS: dict[str, asyncio.Task[None]] = {}
+
+
+def get_dependency_install_job(job_id: str) -> dict[str, Any]:
+    ident = (job_id or "").strip()
+    job = _INSTALL_JOBS.get(ident)
+    if job is None:
+        raise KeyError(job_id)
+    return dict(job)
+
+
+def start_dependency_install(dep_id: str, *, install_path: str = "") -> dict[str, Any]:
+    ident = (dep_id or "").strip()
+    _require_allowed_dependency(ident, install_path=install_path)
+    job_id = __import__("uuid").uuid4().hex
+    job = {
+        "id": job_id,
+        "dependency_id": ident,
+        "status": "queued",
+        "ok": False,
+        "detail": "",
+        "started_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "finished_at": None,
+    }
+    _INSTALL_JOBS[job_id] = job
+
+    async def _runner() -> None:
+        job["status"] = "installing"
+        result = await install_dependency_by_id(ident, install_path=install_path)
+        job["status"] = "ready" if result.ok else "error"
+        job["ok"] = result.ok
+        job["detail"] = result.detail[:1200]
+        job["finished_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        try:
+            from .hexstrike_operator import refresh_discovered_catalog
+
+            await refresh_discovered_catalog(force=True)
+        except Exception:
+            pass
+
+    task = asyncio.create_task(_runner())
+    _INSTALL_TASKS[job_id] = task
+    audit_hexstrike("dependency_install_queued", job_id=job_id, dependency=ident)
+    return dict(job)
 
 
 @dataclass(frozen=True)
@@ -45,17 +112,126 @@ def missing_host_tools() -> list[str]:
     return [name for name in WINGET_PACKAGES if shutil.which(name) is None]
 
 
-async def install_host_tool(command: str) -> ToolInstallResult:
+def _parse_requirements(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    names: list[str] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        cleaned = line.split("#", 1)[0].strip()
+        if not cleaned or cleaned.startswith("-"):
+            continue
+        token = re.split(r"[<>=!~\\[]", cleaned, maxsplit=1)[0].strip()
+        if token:
+            names.append(token.lower())
+    return names
+
+
+def _discover_pip_packages(install_path: str) -> list[str]:
+    root = Path(install_path) if install_path else resolve_install() or repo_root() / "runtime" / "hexstrike-ai"
+    candidates = [
+        root / "requirements.txt",
+        repo_root() / "config" / "hexstrike-defensive-requirements.txt",
+    ]
+    found: list[str] = []
+    seen: set[str] = set()
+    for path in candidates:
+        for name in _parse_requirements(path):
+            if name not in seen:
+                seen.add(name)
+                found.append(name)
+    return found
+
+
+def dependency_catalog_rows(install_path: str = "") -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for command, package in WINGET_PACKAGES.items():
+        rows.append(
+            {
+                "id": command,
+                "command": command,
+                "label": TOOL_LABELS.get(command, command),
+                "method": "winget",
+                "package": package,
+                "available": shutil.which(command) is not None,
+                "guidance": "" if shutil.which(command) else f"Install {TOOL_LABELS.get(command, command)} and ensure `{command}` is on PATH.",
+            }
+        )
+    for pip_name in _discover_pip_packages(install_path):
+        import_name = PIP_NAME_OVERRIDES.get(pip_name, pip_name.replace("-", "_"))
+        rows.append(
+            {
+                "id": f"pip:{pip_name}",
+                "command": pip_name,
+                "label": pip_name,
+                "method": "pip",
+                "package": pip_name,
+                "available": _pip_available(install_path, import_name),
+                "guidance": "" if _pip_available(install_path, import_name) else f"Install Python package `{pip_name}` into hexstrike-env.",
+            }
+        )
+    return rows
+
+
+def _hexstrike_python(install_path: str = "") -> str | None:
+    install = resolve_install(install_path)
+    if install is None:
+        return None
+    return resolve_python(install)
+
+
+def allowed_pip_package_names(install_path: str = "") -> frozenset[str]:
+    return frozenset(name.lower() for name in _discover_pip_packages(install_path))
+
+
+def is_allowed_dependency_id(dep_id: str, *, install_path: str = "") -> bool:
+    ident = (dep_id or "").strip().lower()
+    if ident.startswith("pip:"):
+        pip_name = ident.split(":", 1)[1].strip().lower()
+        return pip_name in allowed_pip_package_names(install_path)
+    return ident in WINGET_PACKAGES
+
+
+def _require_allowed_dependency(dep_id: str, *, install_path: str = "") -> None:
+    if not is_allowed_dependency_id(dep_id, install_path=install_path):
+        raise ValueError(
+            f"Dependency '{dep_id}' is not in the managed HexStrike allowlist. "
+            "Install only catalog dependencies from pinned requirements."
+        )
+
+
+def _pip_available(install_path: str, import_name: str) -> bool:
+    python = _hexstrike_python(install_path)
+    if not python:
+        return False
+    try:
+        proc = subprocess_run([python, "-c", f"import {import_name}"], timeout=15)
+    except OSError:
+        return False
+    return proc == 0
+
+
+def subprocess_run(cmd: list[str], *, timeout: float) -> int:
+    completed = __import__("subprocess").run(cmd, capture_output=True, timeout=timeout, check=False)
+    return completed.returncode
+
+
+async def install_host_tool(command: str, *, install_path: str = "") -> ToolInstallResult:
     key = (command or "").strip().lower()
+    if key.startswith("pip:"):
+        try:
+            _require_allowed_dependency(key, install_path=install_path)
+        except ValueError as exc:
+            return ToolInstallResult(command=key, ok=False, detail=str(exc))
+        return await install_pip_package(key.split(":", 1)[1], install_path=install_path)
     if key not in WINGET_PACKAGES:
-        return ToolInstallResult(command=key, ok=False, detail=f"Unknown tool: {command}")
+        return ToolInstallResult(command=key, ok=False, detail=f"Unknown tool id: {command}")
     if shutil.which(key):
         return ToolInstallResult(command=key, ok=True, detail=f"{TOOL_LABELS.get(key, key)} already on PATH.")
     if sys.platform != "win32":
         return ToolInstallResult(
             command=key,
             ok=False,
-            detail="Automatic install is supported on Windows only (winget). Install manually and ensure PATH.",
+            detail="Automatic winget install is supported on Windows only. Install manually and ensure PATH.",
         )
     winget = shutil.which("winget")
     if not winget:
@@ -66,23 +242,76 @@ async def install_host_tool(command: str) -> ToolInstallResult:
         )
     package = WINGET_PACKAGES[key]
     audit_hexstrike("dependency_install_start", command=key, package=package)
-    proc = await asyncio.create_subprocess_exec(
-        winget,
-        "install",
-        "--id",
-        package,
-        "-e",
-        "--accept-package-agreements",
-        "--accept-source-agreements",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
+    async with _INSTALL_LOCK:
+        _INSTALL_JOBS[key] = {"status": "installing", "command": key}
+        proc = await asyncio.create_subprocess_exec(
+            winget,
+            "install",
+            "--id",
+            package,
+            "-e",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
     combined = (stdout.decode("utf-8", errors="replace") + stderr.decode("utf-8", errors="replace")).strip()
     ok = proc.returncode == 0 or shutil.which(key) is not None
     detail = combined[-1200:] if combined else ("Installed." if ok else "Install failed.")
     audit_hexstrike("dependency_install_finish", command=key, ok=ok, detail=detail[:500])
+    _INSTALL_JOBS[key] = {"status": "ready" if ok else "error", "command": key, "detail": detail[:500]}
     return ToolInstallResult(command=key, ok=ok, detail=detail)
+
+
+async def install_pip_package(package: str, *, install_path: str = "") -> ToolInstallResult:
+    pip_name = (package or "").strip().lower()
+    if not pip_name or not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", pip_name):
+        return ToolInstallResult(command=pip_name, ok=False, detail="Invalid pip package name.")
+    if pip_name not in allowed_pip_package_names(install_path):
+        return ToolInstallResult(
+            command=pip_name,
+            ok=False,
+            detail=f"Package '{pip_name}' is not pinned in the managed HexStrike requirements allowlist.",
+        )
+    python = _hexstrike_python(install_path)
+    if not python:
+        return ToolInstallResult(
+            command=pip_name,
+            ok=False,
+            detail="HexStrike install path is not configured; pip installs require hexstrike-env.",
+        )
+    audit_hexstrike("pip_install_start", package=pip_name)
+    async with _INSTALL_LOCK:
+        _INSTALL_JOBS[f"pip:{pip_name}"] = {"status": "installing", "package": pip_name}
+        proc = await asyncio.create_subprocess_exec(
+            python,
+            "-m",
+            "pip",
+            "install",
+            pip_name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+    combined = (stdout.decode("utf-8", errors="replace") + stderr.decode("utf-8", errors="replace")).strip()
+    import_name = PIP_NAME_OVERRIDES.get(pip_name, pip_name.replace("-", "_"))
+    ok = proc.returncode == 0 or _pip_available(install_path, import_name)
+    detail = combined[-1200:] if combined else ("Installed." if ok else "pip install failed.")
+    audit_hexstrike("pip_install_finish", package=pip_name, ok=ok, detail=detail[:500])
+    _INSTALL_JOBS[f"pip:{pip_name}"] = {"status": "ready" if ok else "error", "package": pip_name, "detail": detail[:500]}
+    return ToolInstallResult(command=pip_name, ok=ok, detail=detail)
+
+
+async def install_dependency_by_id(dep_id: str, *, install_path: str = "") -> ToolInstallResult:
+    ident = (dep_id or "").strip().lower()
+    try:
+        _require_allowed_dependency(ident, install_path=install_path)
+    except ValueError as exc:
+        return ToolInstallResult(command=ident, ok=False, detail=str(exc))
+    if ident.startswith("pip:"):
+        return await install_pip_package(ident.split(":", 1)[1], install_path=install_path)
+    return await install_host_tool(ident, install_path=install_path)
 
 
 async def install_all_missing() -> list[ToolInstallResult]:
@@ -90,3 +319,7 @@ async def install_all_missing() -> list[ToolInstallResult]:
     for name in missing_host_tools():
         results.append(await install_host_tool(name))
     return results
+
+
+def install_job_overlay() -> dict[str, Any]:
+    return dict(_INSTALL_JOBS)

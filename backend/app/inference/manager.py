@@ -9,13 +9,33 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import psutil
+from openai import APIStatusError
 
-from ..config import AppSettings, logs_dir
-from ..persona.pack import inject_persona_messages
+from ..config import AppSettings, load_settings, logs_dir
+from ..persona.pack import compact_identity_instructions, inject_compact_identity_messages, persona_instructions
 from ..providers.base import ChatMessage
 from ..providers.openai_compat import OpenAICompatProvider
-from .backends import InferenceBackend, normalize_chat_messages, probe_remote_server, resolve_backend
+from .backends import (
+    InferenceBackend,
+    LLAMA_CPP_ALIASES,
+    LMSTUDIO_ALIASES,
+    normalize_chat_messages,
+    probe_remote_server,
+    resolve_backend,
+)
+from .context_window import (
+    clamp_n_keep,
+    n_keep_for_messages,
+    n_keep_overflow_message,
+    parse_n_keep_overflow,
+)
 from .profiles import ModelProfile, declared_profiles, profile_gguf, qwen38_9b_profile, resolve_mmproj, resolve_profile
+from .prompt_budget import (
+    ModelCapacityExceeded,
+    is_context_overflow,
+    prepare_inference,
+    recover_context_after_overflow,
+)
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
@@ -49,6 +69,7 @@ class InferenceState:
     host: str = "127.0.0.1"
     port: int = 8088
     context_size: int = 16384
+    server_n_ctx: int = 0
     gpu_layers: str = "fit"
     flash_attn: str = "auto"
     pid: int | None = None
@@ -135,6 +156,7 @@ def fit_messages_to_context(
     kept: list[ChatMessage] = []
     used = 0
     if system is not None:
+        # Prompt may still include this-turn guidance; n_keep pins identity only.
         system_limit = max(256, int(message_budget * 0.55))
         text = _trim_text(_message_text(system), system_limit)
         kept.append(_message_with_content(system, text))
@@ -231,14 +253,80 @@ class InferenceManager:
             message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
             for message in messages
         ]
-        with_persona = inject_persona_messages(typed)
+        with_persona = inject_compact_identity_messages(typed)
         normalized = normalize_chat_messages(with_persona)
         return fit_messages_to_context(
             normalized,
-            context_size=self.state.context_size,
+            context_size=self.live_context_size(),
             max_tokens=max_tokens,
             tool_schema_chars=tool_schema_chars,
         )
+
+    def live_context_size(self) -> int:
+        """The window the loaded server actually has, never an inflated profile cap."""
+        live = int(self.state.server_n_ctx or 0)
+        claimed = int(self.state.context_size or 0)
+        if live > 0 and claimed > 0:
+            return min(live, claimed)
+        return live or claimed
+
+    def adopt_server_n_ctx(self, n_ctx: int) -> int:
+        """Record the live slot size and drop any oversized Jarvis-side window."""
+        live = int(n_ctx or 0)
+        if live <= 0:
+            return self.live_context_size()
+        self.state.server_n_ctx = live
+        current = int(self.state.context_size or 0)
+        if current <= 0 or current > live:
+            self.state.context_size = live
+        return self.live_context_size()
+
+    def _supports_n_keep(self) -> bool:
+        name = (self.state.backend or "").strip().lower()
+        if name in LLAMA_CPP_ALIASES or name in LMSTUDIO_ALIASES:
+            return True
+        return (self.state.health_path or "") == "/health"
+
+    def _with_n_keep(
+        self,
+        extra: dict[str, Any] | None,
+        messages: list[ChatMessage],
+        max_tokens: int | None,
+    ) -> dict[str, Any]:
+        payload = dict(extra or {})
+        n_ctx = self.live_context_size()
+        if n_ctx <= 0:
+            return payload
+        requested = payload.get("n_keep")
+        if requested is None and not self._supports_n_keep():
+            return payload
+        identity = compact_identity_instructions()
+        if requested is None:
+            payload["n_keep"] = n_keep_for_messages(
+                messages,
+                n_ctx,
+                max_tokens=max_tokens,
+                identity_text=identity,
+            )
+        else:
+            raw = int(requested)
+            if raw < 0:
+                raw = n_keep_for_messages(
+                    messages,
+                    n_ctx,
+                    max_tokens=max_tokens,
+                    identity_text=identity,
+                )
+            payload["n_keep"] = clamp_n_keep(raw, n_ctx, max_tokens=max_tokens)
+        return payload
+
+    def _adopt_n_keep_overflow(self, exc: BaseException) -> bool:
+        parsed = parse_n_keep_overflow(getattr(exc, "body", None)) or parse_n_keep_overflow(exc)
+        if not parsed:
+            return False
+        _n_keep, n_ctx = parsed
+        self.adopt_server_n_ctx(n_ctx)
+        return True
 
     async def chat(
         self,
@@ -251,30 +339,102 @@ class InferenceManager:
         max_tokens: int | None = None,
         thinking: bool | None = None,
         extra: dict[str, Any] | None = None,
+        settings: AppSettings | None = None,
+        working_state_block: str | None = None,
     ):
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
-        fitted_tools = fit_tools_to_context(
-            tools,
-            context_size=self.state.context_size,
-            max_tokens=max_tokens,
-        )
-        tool_schema_chars = len(json.dumps(fitted_tools, ensure_ascii=False)) if fitted_tools else 0
-        prepared = self.prepare_chat_messages(
-            messages,
-            max_tokens=max_tokens,
-            tool_schema_chars=tool_schema_chars,
-        )
-        return await self.provider.chat(
-            prepared,
-            tools=fitted_tools,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            max_tokens=max_tokens,
-            thinking=thinking,
-            extra=extra,
-        )
+        app_settings = settings or load_settings()
+        profile = resolve_profile(self.state.profile or app_settings.inference.profile)
+        typed = [
+            message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
+            for message in messages
+        ]
+        overflow_retries = 0
+        while True:
+            fitted_tools = fit_tools_to_context(
+                tools,
+                context_size=self.live_context_size(),
+                max_tokens=max_tokens,
+            )
+            try:
+                preflight = await prepare_inference(
+                    typed,
+                    fitted_tools,
+                    profile,
+                    max_tokens,
+                    app_settings,
+                    manager=self,
+                    working_state_block=working_state_block,
+                )
+            except ModelCapacityExceeded:
+                raise
+            typed = preflight.messages
+            fitted_tools = fit_tools_to_context(
+                fitted_tools,
+                context_size=self.live_context_size(),
+                max_tokens=max_tokens,
+            )
+            tool_schema_chars = len(json.dumps(fitted_tools, ensure_ascii=False)) if fitted_tools else 0
+            prepared = self.prepare_chat_messages(
+                typed,
+                max_tokens=max_tokens,
+                tool_schema_chars=tool_schema_chars,
+            )
+            extra_payload = self._with_n_keep(extra, prepared, max_tokens)
+            try:
+                return await self.provider.chat(
+                    prepared,
+                    tools=fitted_tools,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra_payload,
+                )
+            except APIStatusError as exc:
+                if is_context_overflow(exc) and overflow_retries < 1:
+                    overflow_retries += 1
+                    typed, recovered = await recover_context_after_overflow(
+                        typed,
+                        fitted_tools,
+                        profile,
+                        max_tokens,
+                        app_settings,
+                        manager=self,
+                        working_state_block=working_state_block,
+                    )
+                    if recovered:
+                        continue
+                if not self._adopt_n_keep_overflow(exc):
+                    raise
+                fitted_tools = fit_tools_to_context(
+                    tools,
+                    context_size=self.live_context_size(),
+                    max_tokens=max_tokens,
+                )
+                tool_schema_chars = len(json.dumps(fitted_tools, ensure_ascii=False)) if fitted_tools else 0
+                prepared = self.prepare_chat_messages(
+                    typed,
+                    max_tokens=max_tokens,
+                    tool_schema_chars=tool_schema_chars,
+                )
+                extra_payload = self._with_n_keep(extra, prepared, max_tokens)
+                n_ctx = self.live_context_size()
+                keep = int(extra_payload.get("n_keep") or 0)
+                if n_ctx > 0 and keep >= n_ctx:
+                    raise RuntimeError(n_keep_overflow_message(keep, n_ctx)) from exc
+                return await self.provider.chat(
+                    prepared,
+                    tools=fitted_tools,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra_payload,
+                )
 
     async def chat_stream(
         self,
@@ -286,20 +446,77 @@ class InferenceManager:
         max_tokens: int | None = None,
         thinking: bool | None = False,
         extra: dict[str, Any] | None = None,
+        settings: AppSettings | None = None,
+        working_state_block: str | None = None,
     ) -> AsyncIterator[str]:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
-        prepared = self.prepare_chat_messages(messages, max_tokens=max_tokens)
-        async for delta in self.provider.chat_stream(
-            prepared,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            max_tokens=max_tokens,
-            thinking=thinking,
-            extra=extra,
-        ):
-            yield delta
+        app_settings = settings or load_settings()
+        profile = resolve_profile(self.state.profile or app_settings.inference.profile)
+        typed = [
+            message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
+            for message in messages
+        ]
+        overflow_retries = 0
+        while True:
+            fitted_tools: list[dict[str, Any]] | None = None
+            preflight = await prepare_inference(
+                typed,
+                fitted_tools,
+                profile,
+                max_tokens,
+                app_settings,
+                manager=self,
+                working_state_block=working_state_block,
+            )
+            typed = preflight.messages
+            prepared = self.prepare_chat_messages(typed, max_tokens=max_tokens)
+            extra_payload = self._with_n_keep(extra, prepared, max_tokens)
+            try:
+                async for delta in self.provider.chat_stream(
+                    prepared,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra_payload,
+                ):
+                    yield delta
+                return
+            except APIStatusError as exc:
+                if is_context_overflow(exc) and overflow_retries < 1:
+                    overflow_retries += 1
+                    typed, recovered = await recover_context_after_overflow(
+                        typed,
+                        fitted_tools,
+                        profile,
+                        max_tokens,
+                        app_settings,
+                        manager=self,
+                        working_state_block=working_state_block,
+                    )
+                    if recovered:
+                        continue
+                if not self._adopt_n_keep_overflow(exc):
+                    raise
+                prepared = self.prepare_chat_messages(typed, max_tokens=max_tokens)
+                extra_payload = self._with_n_keep(extra, prepared, max_tokens)
+                n_ctx = self.live_context_size()
+                keep = int(extra_payload.get("n_keep") or 0)
+                if n_ctx > 0 and keep >= n_ctx:
+                    raise RuntimeError(n_keep_overflow_message(keep, n_ctx)) from exc
+                async for delta in self.provider.chat_stream(
+                    prepared,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra_payload,
+                ):
+                    yield delta
+                return
 
     def _vision_requested(self, settings: AppSettings, vision: bool | None) -> bool:
         return resolve_vision(settings, vision)
@@ -558,6 +775,9 @@ class InferenceManager:
         self.state.advertised_models = list(probe.get("models") or [])
         self.state.health_path = str(probe.get("health_path") or "")
         self.state.remote_model = self.provider_model(settings, self.state.advertised_models)
+        live = int(probe.get("n_ctx") or probe.get("context_size") or 0)
+        if live > 0:
+            self.adopt_server_n_ctx(live)
 
     async def unload(self) -> InferenceState:
         async with self._lock:
@@ -572,11 +792,21 @@ class InferenceManager:
             return self.state
 
     async def apply_context(self, settings: AppSettings, context_size: int, *, allow_shrink: bool = False) -> int:
-        """Set the live context window. Mid-task callers pass allow_shrink=False so we only grow."""
+        """Set the live context window. Mid-task callers pass allow_shrink=False so we only grow.
+
+        External servers cannot grow past the loaded slot. Never inflate context_size
+        above server_n_ctx (the 4k LM Studio / llama.cpp case).
+        """
         target = int(context_size or 0)
         if target <= 0:
             return int(self.state.context_size or 0)
+        live_cap = int(self.state.server_n_ctx or 0)
+        if live_cap > 0:
+            target = min(target, live_cap)
         current = int(self.state.context_size or 0)
+        if live_cap > 0 and current > live_cap:
+            self.state.context_size = live_cap
+            current = live_cap
         if current == target:
             return current
         if not allow_shrink and current >= target and current > 0:
@@ -642,6 +872,7 @@ class InferenceManager:
             "quantization": self.state.quant or profile.quant,
             "profile": self.state.profile or profile.name,
             "context_size": self.state.context_size if self.state.loaded else _default_load_context(profile),
+            "server_n_ctx": self.state.server_n_ctx,
             "context_cap": profile.context_size,
             "inference_backend": self.state.backend,
             "manages_process": self.state.manages_process,
@@ -677,9 +908,10 @@ class InferenceManager:
                 for p in _snapshot_profiles()
             ],
             "context_policy": {
-                "live": self.state.context_size or profile.context_size,
+                "live": self.live_context_size() or profile.context_size,
                 "profile_cap": profile.context_size,
-                "note": "Tasks start at 8K or 16K and expand to the profile cap only when the live prompt is under pressure.",
+                "server_n_ctx": self.state.server_n_ctx,
+                "note": "Tasks start at 8K or 16K and expand to the profile cap only when the live prompt is under pressure. External servers stay at their loaded n_ctx.",
             },
         }
 

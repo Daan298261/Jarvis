@@ -53,29 +53,27 @@ async def run_self_check() -> dict[str, Any]:
     kokoro = bool(engines.get("kokoro"))
     weights = bool(engines.get("kokoro_weights"))
     system_tts = bool(engines.get("system")) or legacy_system_tts_available()
+    kokoro_runtime = engines.get("kokoro_runtime") or {}
     if kokoro and weights:
-        voice_item = _item("household_voice", "Household voice", "ready", "Natural local voice online")
+        voice_item = _item(
+            "household_voice",
+            "Household voice",
+            "ready",
+            f"Kokoro 82M · {kokoro_runtime.get('speaker_ref') or 'voice'} · READY",
+        )
     elif kokoro or weights:
-        if system_tts:
-            voice_item = _item(
-                "household_voice",
-                "Household voice",
-                "degraded",
-                "Household voice is still preparing. System voice is online until then.",
-            )
-        else:
-            voice_item = _item(
-                "household_voice",
-                "Household voice",
-                "starting",
-                "Preparing the household voice. This happens once.",
-            )
+        voice_item = _item(
+            "household_voice",
+            "Household voice",
+            "degraded",
+            f"Kokoro · FAILED TO LOAD · {kokoro_runtime.get('last_error') or 'Health verification pending'}",
+        )
     elif system_tts:
         voice_item = _item(
             "household_voice",
             "Household voice",
             "degraded",
-            "System voice is online until the household voice finishes installing.",
+            "Kokoro · FAILED TO LOAD. Windows SAPI is available only as an explicit system voice.",
         )
     else:
         voice_item = _item("household_voice", "Household voice", "missing", "No local speech engine is available.")

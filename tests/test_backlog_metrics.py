@@ -115,13 +115,14 @@ async def test_verify_code_rejects_outside_path(tmp_path):
 def test_live_metrics_and_schema_parse():
     metrics = LiveTaskMetrics()
     metrics.note_model({"prompt_ms": 10, "predicted_ms": 20})
+    metrics.note_model_elapsed(15)
     metrics.note_tool(5, schema_error=True)
     metrics.note_confirmation()
     fields = metrics.as_fields()
-    assert fields["model_calls"] == 1
+    assert fields["model_calls"] == 2
     assert fields["tool_call_count"] == 1
     assert fields["schema_errors"] == 1
-    assert fields["model_ms"] == 30
+    assert fields["model_ms"] == 45
     assert fields["human_interventions"] == 1
     assert tool_arguments_valid('{"action": "list"}') is True
     assert tool_arguments_valid("{not json") is False

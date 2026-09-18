@@ -4,6 +4,8 @@ Status: implementation specification for architect assignment
 Target release: 1.4  
 Scope: TTS/Kokoro reliability, voice preview, Settings information architecture, context overflow recovery, and model-role routing.
 
+**Path note (do not treat this file as the implement ticket):** living spec copied from `main` @ `6f6a633`. Implementable contracts are **RFC-0111–0115**. 1.4.0 also includes already-filed interesting integrations RFC-0107–0110 plus HexStrike/Daybreak/cyber in flight. Bulk Instagram/catalog RFCs **0095–0104** stay later — see [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md).
+
 ---
 
 ## 1. Release intent

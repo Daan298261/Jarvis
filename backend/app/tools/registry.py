@@ -27,6 +27,7 @@ from .internal_references import InternalReferencesTool
 from .web_fetch import WebFetchTool
 from .mobile_call import MobileCallTool
 from .hexstrike_defensive import HexStrikeDefensiveTool
+from .hexstrike_operator import HexStrikeOperatorTool
 
 
 class ToolRegistry:
@@ -61,6 +62,7 @@ class ToolRegistry:
             CuaTool(),
             MobileCallTool(),
             HexStrikeDefensiveTool(getter),
+            HexStrikeOperatorTool(getter),
         ]
         self.tools = {tool.name: tool for tool in items}
 

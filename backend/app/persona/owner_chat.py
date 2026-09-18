@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from typing import Any, AsyncIterator
+import time
 
 from ..config import load_settings
 from ..inference.manager import MANAGER
@@ -18,6 +19,12 @@ from .chat_delivery import (
 )
 from .weather import weather_system_message
 from ..events import BUS
+from ..agent.front_responder import (
+    is_safe_front_speech,
+    last_front_timing,
+    note_front_audio,
+    run_two_lane_chat,
+)
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
 Reply immediately, naturally, and briefly in a British-inspired operations-assistant register.
@@ -31,21 +38,12 @@ Never write a program, script, or file to answer a spoken factual question such 
 If a live briefing is attached, use those facts and do not invent numbers.
 Use internal reasoning when useful, but provide only the concise answer rather than hidden reasoning."""
 
-OWNER_CHAT_MAX_TOKENS = 1024
-OWNER_CHAT_REASONING_MAX_TOKENS = 2048
+OWNER_CHAT_MAX_TOKENS = 512
 
 
 def owner_chat_max_tokens(profile: Any | None = None) -> int:
-    """Reasoning models need headroom so hidden thinking does not consume the whole budget."""
-    if profile is None:
-        return OWNER_CHAT_MAX_TOKENS
-    mode = str(getattr(profile, "thinking_mode", "") or "").strip().lower()
-    family = str(getattr(profile, "family", "") or "").strip().lower()
-    thinking = bool(getattr(profile, "thinking", False))
-    if thinking or mode in {"on", "selective"}:
-        return OWNER_CHAT_REASONING_MAX_TOKENS
-    if "qwen3.8" in family or "qwen38" in family or "ornith" in family:
-        return OWNER_CHAT_REASONING_MAX_TOKENS
+    """Keep direct dialogue bounded; this path deliberately disables extended reasoning."""
+    del profile
     return OWNER_CHAT_MAX_TOKENS
 
 _conversations: dict[str, list[ChatMessage]] = defaultdict(list)
@@ -150,45 +148,103 @@ async def stream_owner_chat(
     settings = load_settings()
     profile = resolve_profile(settings.inference.profile)
     briefing = await weather_system_message(cleaned)
-    messages = _owner_messages(cid, cleaned, briefing)
+    history = list(_conversations[cid])
+    worker_messages = _owner_messages(cid, cleaned, briefing)
     parts: list[str] = []
     stream_key = f"owner:{cid}"
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
+    turn_started = time.perf_counter()
 
-    try:
+    async def worker_stream():
         async for delta in MANAGER.chat_stream(
-            messages,
+            worker_messages,
             temperature=profile.temperature,
             top_p=profile.top_p,
             top_k=profile.top_k,
             max_tokens=owner_chat_max_tokens(profile),
-            thinking=None,
+            thinking=False,
         ):
-            parts.append(delta)
-            accumulated = "".join(parts)
-            early_id = maybe_enqueue_streaming_social_tts(
-                accumulated,
-                source="owner_chat",
-                stream_key=stream_key,
-                user_prompt=cleaned,
+            yield delta
+
+    async def on_delta(lane: str, delta: str) -> None:
+        del lane
+        parts.append(delta)
+        accumulated = "".join(parts)
+        early_id = maybe_enqueue_streaming_social_tts(
+            accumulated,
+            source="owner_chat",
+            stream_key=stream_key,
+            user_prompt=cleaned,
+        )
+        if early_id:
+            early_tts_ids.append(early_id)
+            await BUS.publish_ephemeral(
+                OWNER_CHAT_CHANNEL,
+                "chat_tts",
+                "Speak reply",
+                accumulated[: stream_speak_offset(stream_key)],
+                stage="owner_chat",
             )
-            if early_id:
-                early_tts_ids.append(early_id)
-                await BUS.publish_ephemeral(
-                    OWNER_CHAT_CHANNEL,
-                    "chat_tts",
-                    "Speak reply",
-                    accumulated[: stream_speak_offset(stream_key)],
-                    stage="owner_chat",
-                )
-            yield {"type": "delta", "conversation_id": cid, "text": delta}
+            note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
+
+    try:
+        done: dict[str, Any] | None = None
+        async for event in run_two_lane_chat(
+            cleaned,
+            history=history,
+            settings=settings,
+            turn_started=turn_started,
+            worker_stream=worker_stream,
+            on_delta=on_delta,
+        ):
+            kind = event.get("type")
+            if kind == "delta":
+                yield {"type": "delta", "conversation_id": cid, "text": event.get("text") or "", "lane": event.get("lane")}
+            elif kind == "front_response_completed":
+                front = event.get("reply")
+                text = getattr(front, "text", "") or ""
+                if text and not parts:
+                    yield {"type": "delta", "conversation_id": cid, "text": text, "lane": "front"}
+                if (
+                    front
+                    and settings.front_responder.speak_immediately
+                    and is_safe_front_speech(front.action, front.text)
+                    and not early_tts_ids
+                ):
+                    early_id = maybe_enqueue_streaming_social_tts(
+                        front.text if front.text.endswith((".", "!", "?")) else f"{front.text}.",
+                        source="owner_chat",
+                        stream_key=stream_key,
+                        user_prompt=cleaned,
+                    )
+                    if not early_id:
+                        delivery = await publish_owner_text(
+                            front.text,
+                            source="owner_chat",
+                            speak=True,
+                            user_prompt=cleaned,
+                        )
+                        if delivery.get("tts_id"):
+                            early_tts_ids.append(str(delivery["tts_id"]))
+                    elif early_id:
+                        early_tts_ids.append(early_id)
+                        await BUS.publish_ephemeral(
+                            OWNER_CHAT_CHANNEL,
+                            "chat_tts",
+                            "Speak reply",
+                            front.text,
+                            stage="owner_chat",
+                        )
+                    note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
+            elif kind == "done":
+                done = event
     except Exception as exc:
         clear_stream_speak_state(stream_key)
         yield {"type": "error", "detail": str(exc)[:500]}
         return
 
-    reply = "".join(parts).strip()
+    reply = ((done or {}).get("text") or "".join(parts)).strip()
     if reply:
         _conversations[cid].append(ChatMessage(role="user", content=cleaned))
         _conversations[cid].append(ChatMessage(role="assistant", content=reply))
@@ -207,6 +263,8 @@ async def stream_owner_chat(
             "text": reply,
             "tts_id": tts_id,
             "early_tts_ids": early_tts_ids,
+            "front_action": (done or {}).get("front_action"),
+            "timing": (done or {}).get("timing") or last_front_timing(),
         }
     else:
         clear_stream_speak_state(stream_key)
