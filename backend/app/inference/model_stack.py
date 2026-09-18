@@ -377,7 +377,7 @@ def routing_preferences_for_role(
     normalized = normalize_role(role)
     if normalized == "red-team" and not allow_manual_gate:
         raise PermissionError(
-            "red-team runtime activation requires the persistent Red Team password gate "
+            "red-team runtime activation requires the Red team module on the installed license package "
             "plus explicit manual/case authorization"
         )
 

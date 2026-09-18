@@ -36,10 +36,10 @@ def test_red_team_recommendation_ships_disabled_and_manual_gated():
 
 
 def test_generic_red_team_role_routing_fails_closed():
-    with pytest.raises(PermissionError, match="password gate"):
+    with pytest.raises(PermissionError, match="license package"):
         routing_preferences_for_role("red-team")
 
-    with pytest.raises(PermissionError, match="password gate"):
+    with pytest.raises(PermissionError, match="license package"):
         routing_preferences_for_role("pentest")
 
 

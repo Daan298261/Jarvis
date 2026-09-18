@@ -386,7 +386,7 @@ export function PermissionPrompt({
                     <em>{item.detail}</em>
                     {item.offensive && <em className="permission-lock">Flag only. No payloads.</em>}
                     {item.gated && !item.gate_unlocked && (
-                      <em className="permission-lock">Locked until the {item.gated} password gate is unlocked.</em>
+                      <em className="permission-lock">Locked — the license package does not include {item.gated}.</em>
                     )}
                   </span>
                   <select

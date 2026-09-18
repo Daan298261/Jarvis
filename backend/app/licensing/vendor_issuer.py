@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 from .. import __version__ as JARVIS_VERSION
 from ..policy.cyber_ato import AtoError, issue_license
-from .modules import catalog_rows, normalize_module_id, requires_law_enforcement
+from .modules import catalog_rows, module_ids, normalize_module_id, requires_law_enforcement
 from .seal import product_seal_public_hex, seal_bytes
 
 SCHEMA_VERSION = 1
@@ -253,6 +253,7 @@ def issue_customer_license(
     output_dir: Path | None = None,
     licensee_id: str | None = None,
     max_expires_at: str | None = None,
+    package_class: str = "",
 ) -> dict[str, Any]:
     """Mint a sealed, signed license and record it in the vendor SQLite DB."""
     licensee = upsert_licensee(name=name, email=email, address=address, licensee_id=licensee_id)
@@ -282,6 +283,7 @@ def issue_customer_license(
         max_days=cap_days,
         max_expires_at=max_expires_at,
         private_key=private,
+        package_class=package_class,
     )
     payload = document["payload"]
     inner = json.dumps(document, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -329,6 +331,66 @@ def issue_customer_license(
     }
 
 
+OWNER_UNRESTRICTED_STABLE_NAME = "Jarvis-unrestricted.jarvis-license"
+OWNER_UNRESTRICTED_PACKAGE_CLASS = "owner_unrestricted"
+
+
+def validate_unrestricted_license_payload(payload: dict[str, Any]) -> list[str]:
+    """Return validation errors for a release-cut owner unrestricted license."""
+    errors: list[str] = []
+    required = set(module_ids())
+    modules = {normalize_module_id(str(item)) for item in (payload.get("modules") or [])}
+    missing = sorted(required - modules)
+    if missing:
+        errors.append(f"missing modules: {', '.join(missing)}")
+    if payload.get("package_class") != OWNER_UNRESTRICTED_PACKAGE_CLASS:
+        errors.append("package_class must be owner_unrestricted")
+    if not payload.get("law_enforcement"):
+        errors.append("law_enforcement must be true when red-team is listed")
+    if "red-team" in modules and not payload.get("law_enforcement"):
+        errors.append("red-team requires law_enforcement")
+    return errors
+
+
+def issue_release_unrestricted_license(*, output_dir: Path) -> dict[str, Any]:
+    """Mint the full owner/dev unrestricted package for release artifacts (RFC-0119)."""
+    owner_name = (os.environ.get("JARVIS_RELEASE_OWNER_NAME") or "Jarvis Owner (Release)").strip()
+    owner_email = (os.environ.get("JARVIS_RELEASE_OWNER_EMAIL") or "owner@jarvis.local").strip()
+    selected = module_ids()
+    result = issue_customer_license(
+        name=owner_name,
+        email=owner_email,
+        law_enforcement=True,
+        modules=selected,
+        term_days=3660,
+        max_days=3660,
+        auto_renew=False,
+        case_ref="owner-unrestricted-release",
+        output_dir=output_dir,
+        licensee_id="owner-unrestricted",
+        package_class=OWNER_UNRESTRICTED_PACKAGE_CLASS,
+    )
+    payload = result["license"]["payload"]
+    errors = validate_unrestricted_license_payload(payload)
+    if errors:
+        raise AtoError("; ".join(errors))
+    sealed_src = Path(str(result["sealed_path"]))
+    stable = output_dir / OWNER_UNRESTRICTED_STABLE_NAME
+    stable.write_bytes(sealed_src.read_bytes())
+    versioned = output_dir / f"Jarvis-unrestricted-{JARVIS_VERSION}.jarvis-license"
+    versioned.write_bytes(sealed_src.read_bytes())
+    result["stable_path"] = str(stable)
+    result["versioned_path"] = str(versioned)
+    return result
+
+
+def _cli_issue_unrestricted(out_dir: str) -> int:
+    dest = Path(out_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    issue_release_unrestricted_license(output_dir=dest)
+    return 0
+
+
 def renew_customer_license(license_id: str, *, output_dir: Path | None = None) -> dict[str, Any]:
     init_db()
     with connect() as conn:
@@ -366,12 +428,40 @@ def renew_customer_license(license_id: str, *, output_dir: Path | None = None) -
 __all__ = [
     "init_db",
     "issue_customer_license",
+    "issue_release_unrestricted_license",
     "issuer_data_dir",
     "list_licensees",
     "list_licenses",
     "list_modules",
     "load_or_create_vendor_keys",
+    "OWNER_UNRESTRICTED_STABLE_NAME",
+    "OWNER_UNRESTRICTED_PACKAGE_CLASS",
     "renew_customer_license",
     "upsert_licensee",
+    "validate_unrestricted_license_payload",
     "vendor_public_hex",
 ]
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Jarvis vendor license issuer CLI")
+    sub = parser.add_subparsers(dest="command", required=True)
+    unrestricted = sub.add_parser(
+        "issue-unrestricted",
+        help="Write Jarvis-unrestricted.jarvis-license into the release dist folder",
+    )
+    unrestricted.add_argument(
+        "--out-dir",
+        required=True,
+        help="Release artifacts directory (installer/windows/dist)",
+    )
+    args = parser.parse_args(argv)
+    if args.command == "issue-unrestricted":
+        return _cli_issue_unrestricted(args.out_dir)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -47,11 +47,13 @@ class GateStatus:
         from ..policy.cyber_ato import evaluate, role_allowed
 
         ato = evaluate()
+        entitled = bool(role_allowed(self.role))
         return {
             "role": self.role,
             "configured": self.configured,
-            "enabled": self.enabled,
-            "ops_allowed": bool(self.enabled and role_allowed(self.role)),
+            "enabled": entitled,
+            "password_unlocked": bool(self.enabled),
+            "ops_allowed": entitled,
             "ato": ato.as_dict(),
         }
 
@@ -211,12 +213,11 @@ def lock_gate(role: str) -> GateStatus:
 
 
 def gate_is_enabled(role: str) -> bool:
-    """Password unlocked AND a valid in-person ATO covers this role."""
-    if not get_gate_status(role).enabled:
-        return False
+    """True when the installed license package allows this security-role module."""
     from ..policy.cyber_ato import role_allowed
 
-    return role_allowed(role)
+    normalized = normalize_gate_role(role)
+    return role_allowed(normalized)
 
 
 def authorized_runtime_profiles(role: str) -> list[RuntimeProfile]:
@@ -229,11 +230,12 @@ def authorized_runtime_profiles(role: str) -> list[RuntimeProfile]:
     """
     normalized = normalize_gate_role(role)
     if not gate_is_enabled(normalized):
-        if get_gate_status(normalized).enabled:
-            raise PermissionError(
-                f"{normalized} in-person ATO license is missing, expired, or does not cover this role"
-            )
-        raise PermissionError(f"{normalized} password gate is locked")
+        from ..licensing.entitlements import module_entitlement_blocked_reason
+
+        reason = module_entitlement_blocked_reason(normalized) or (
+            f"{normalized} is not covered by the installed license package"
+        )
+        raise PermissionError(reason)
     allowed_names = set(ROLE_PROFILES[normalized])
     return [
         replace(profile, enabled=True) if profile.name in allowed_names else profile

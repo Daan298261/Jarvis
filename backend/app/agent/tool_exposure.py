@@ -4,6 +4,7 @@ from typing import Any, Iterable
 
 from ..tools.mcp_runtime import MCP
 from ..tools.registry import REGISTRY
+from ..policy.cyber_ato import licensed_module_allowed
 from ..inference.security_gates import gate_is_enabled
 
 # Task class → native tools Jarvis should send to the model.
@@ -60,13 +61,21 @@ RESTRICTED_TOOLS = frozenset({"hexstrike_defensive"})
 
 def _enabled_native(security_role: str = "") -> list[str]:
     blue = security_role == "blue-team" and gate_is_enabled("blue-team")
-    return [
-        name
-        for name, tool in REGISTRY.tools.items()
-        if tool.enabled
-        and name != ESCAPE_TOOL
-        and (name not in RESTRICTED_TOOLS or blue)
-    ]
+    hexstrike = licensed_module_allowed("hexstrike")
+    names: list[str] = []
+    for name, tool in REGISTRY.tools.items():
+        if not tool.enabled or name == ESCAPE_TOOL:
+            continue
+        if name in RESTRICTED_TOOLS:
+            if blue:
+                names.append(name)
+            continue
+        if name == "hexstrike_operator":
+            if hexstrike:
+                names.append(name)
+            continue
+        names.append(name)
+    return names
 
 
 def is_full_exposure(task_class: str, extra: Iterable[str] | None = None) -> bool:

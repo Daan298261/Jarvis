@@ -30,6 +30,16 @@ def hardened_env(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
     monkeypatch.setattr("app.security.hexstrike_operator.data_dir", lambda: tmp)
     monkeypatch.setattr("app.inference.security_gates.gate_is_enabled", lambda role: True)
+    from app.policy.cyber_ato import issue_license
+
+    issue_license(
+        law_enforcement=True,
+        blue_team=True,
+        red_team=True,
+        modules=["hexstrike", "blue-team", "red-team"],
+        valid_days=90,
+        install=True,
+    )
     reset_computer_permission_state()
     reset_pending_approval_state()
     return jarvis_env
