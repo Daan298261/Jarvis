@@ -10,6 +10,10 @@ WORKING_STATE_MARKER = "Compact working state:"
 
 
 def _text_of(message: ChatMessage) -> str:
+    from ..inference.inference_prompt import inference_message_text
+
+    if message.role == "assistant":
+        return inference_message_text(message)
     if isinstance(message.content, str):
         return message.content
     return json.dumps(message.content)

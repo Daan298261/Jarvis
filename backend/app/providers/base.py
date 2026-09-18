@@ -38,7 +38,11 @@ class ChatResult:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
-def to_openai_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
+def to_openai_messages(
+    messages: list[ChatMessage],
+    *,
+    for_inference: bool = True,
+) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for message in messages:
         item: dict[str, Any] = {"role": message.role, "content": message.content}
@@ -48,7 +52,7 @@ def to_openai_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
             item["tool_call_id"] = message.tool_call_id
         if message.tool_calls:
             item["tool_calls"] = message.tool_calls
-        if message.reasoning_content:
+        if not for_inference and message.reasoning_content:
             item["reasoning_content"] = message.reasoning_content
         out.append(item)
     return out
