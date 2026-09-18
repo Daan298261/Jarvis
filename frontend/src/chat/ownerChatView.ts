@@ -36,10 +36,13 @@ export function useShowWorkPreference(): [boolean, (showWork: boolean) => void] 
 }
 
 const HIDDEN_WORK_TITLES = new Set(["Model is thinking", "Reasoning complete", "Thinking"])
+const HIDDEN_WORK_KINDS = new Set(["assistant_delta", "chat_tts"])
 
 /** Events suitable for the work / details panel (drops noisy model heartbeat). */
 export function filterWorkEvents(events: OwnerChatEvent[]): OwnerChatEvent[] {
-  return events.filter((event) => !HIDDEN_WORK_TITLES.has(event.title))
+  return events.filter(
+    (event) => !HIDDEN_WORK_TITLES.has(event.title) && !HIDDEN_WORK_KINDS.has(event.kind),
+  )
 }
 
 /** Heartbeat / reasoning lines — separate collapsible stream from tool work. */

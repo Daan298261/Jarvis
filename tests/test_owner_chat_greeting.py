@@ -69,13 +69,13 @@ def test_is_plain_conversation_heuristic():
     assert not is_plain_conversation("Organize these files on my desktop and delete duplicates")
 
 
-def test_owner_chat_max_tokens_grows_for_reasoning_models():
+def test_owner_chat_max_tokens_stays_bounded_for_direct_replies():
     from app.inference.profiles import PROFILES
     from app.persona.owner_chat import OWNER_CHAT_MAX_TOKENS, owner_chat_max_tokens
 
-    assert owner_chat_max_tokens(PROFILES["bootstrap"]) == 2048
+    assert owner_chat_max_tokens(PROFILES["bootstrap"]) == OWNER_CHAT_MAX_TOKENS
     assert owner_chat_max_tokens(PROFILES["fast"]) == OWNER_CHAT_MAX_TOKENS
-    assert owner_chat_max_tokens(PROFILES["fast"]) >= 1024
+    assert owner_chat_max_tokens(PROFILES["fast"]) <= 512
 
 
 @pytest.mark.asyncio
@@ -195,7 +195,8 @@ async def test_owner_chat_streams_without_confirmation(jarvis_env, monkeypatch):
 
     class StreamProvider:
         async def chat_stream(self, messages, **kwargs):
-            assert kwargs["max_tokens"] >= 1024
+            assert kwargs["max_tokens"] <= 512
+            assert kwargs["thinking"] is False
             assert messages[0].role == "system"
             assert "useful answer in the first sentence" in messages[0].content
             yield "Certainly."
@@ -225,7 +226,9 @@ async def test_conversation_task_skips_tool_confirmation(jarvis_env, monkeypatch
 
     class StreamProvider:
         async def chat_stream(self, messages, **kwargs):
-            del messages, kwargs
+            del messages
+            assert kwargs["thinking"] is False
+            assert kwargs["max_tokens"] <= 512
             yield "All well here."
 
         async def chat(self, messages, **kwargs):
@@ -254,6 +257,20 @@ async def test_conversation_task_skips_tool_confirmation(jarvis_env, monkeypatch
         assert row.status == "completed"
         assert row.waiting_for_confirmation is False
         assert "well" in (row.result or "").lower()
+        assert row.first_response_ms > 0
+        assert row.model_calls == 1
+        assert row.model_ms > 0
+
+        from sqlalchemy import select
+        from app.db.models import TaskEvent
+
+        events = (
+            await session.execute(select(TaskEvent).where(TaskEvent.task_id == task.id))
+        ).scalars().all()
+        assert not any(item.kind == "assistant_delta" for item in events)
+        timing = [item for item in events if item.kind == "response_timing"]
+        assert len(timing) == 1
+        assert "First word" in timing[0].detail
 
     deltas = [item for item in pending_chat_tts() if item["source"] in {"owner_chat", "task_chat"}]
     assert deltas
