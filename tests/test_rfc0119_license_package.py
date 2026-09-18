@@ -160,3 +160,16 @@ def test_build_installer_invokes_unrestricted_issuer():
     )
     assert "issue-release-unrestricted-license.ps1" in script
     assert "Unrestricted license issuance failed" in script
+    issue = (Path(__file__).resolve().parents[1] / "installer" / "windows" / "issue-release-unrestricted-license.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "issuer.key" in issue
+    assert "Public tree will not mint licenses" in issue
+
+
+def test_cli_issue_unrestricted_requires_existing_vendor_key(license_env):
+    from app.licensing.vendor_issuer import load_existing_vendor_keys
+    from app.policy.cyber_ato import AtoError
+
+    with pytest.raises(AtoError, match="issuer.key is missing"):
+        load_existing_vendor_keys()
