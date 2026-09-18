@@ -126,9 +126,52 @@ def registered_owned_roots(
     return safe_roots
 
 
+def _label_for_owned_root(root: Path, install: Path) -> tuple[str, str]:
+    root_s = str(root.resolve())
+    install_s = str(install.resolve())
+    if root_s.lower() == install_s.lower():
+        return (
+            "install_root",
+            "Jarvis install folder — application, models, chats, logs, and other Jarvis-owned data",
+        )
+    data_default = install / "data"
+    if root.resolve() == data_default.resolve():
+        return (
+            "data_directory",
+            "Jarvis data directory (settings, chats DB, projects under install\\data)",
+        )
+    return (
+        "additional_owned_root",
+        "Additional Jarvis-owned directory recorded at install",
+    )
+
+
+def build_owned_root_entries(install: Path, roots: list[Path]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for root in roots:
+        entry_id, label = _label_for_owned_root(root, install)
+        entries.append({"id": entry_id, "path": str(root), "label": label})
+    return entries
+
+
+def log_paths_for_install(install: Path | None = None) -> dict[str, str]:
+    root = install or resolve_install_root()
+    temp = Path(os.environ.get("TEMP") or os.environ.get("TMP") or "/tmp")
+    return {
+        "durable": str(temp / "Jarvis-clean-reinstall.log"),
+        "install": str(root / "logs" / "clean-reinstall.log"),
+        "status": str(temp / "Jarvis-clean-reinstall.status.json"),
+    }
+
+
 def owned_paths_preview() -> dict[str, object]:
+    from .confirm_token import issue_confirm_token
+
     install = resolve_install_root()
     roots = registered_owned_roots(install_root=install)
+    entries = build_owned_root_entries(install, roots)
+    paths = [entry["path"] for entry in entries]
+    confirm_token, expires_at = issue_confirm_token(paths)
     script = repo_root() / "installer" / "windows" / "clean-reinstall-jarvis.ps1"
     force_stop = repo_root() / "installer" / "windows" / "force-stop-jarvis.ps1"
     setup_candidates = [
@@ -136,13 +179,27 @@ def owned_paths_preview() -> dict[str, object]:
         repo_root() / "installer" / "windows" / "dist" / "JarvisSetup.exe",
     ]
     setup_path = next((p for p in setup_candidates if p.is_file()), None)
+    safe = is_safe_jarvis_install_dir(install)
+    windows = sys.platform == "win32"
     return {
+        "action_available": bool(windows and safe and entries),
         "install_root": str(install),
-        "owned_roots": [str(p) for p in roots],
+        "confirm_token": confirm_token,
+        "confirm_token_expires_at": expires_at,
+        "owned_root_entries": entries,
+        "owned_roots": paths,
         "license_issuer_preserved": str(license_issuer_preserve_path(install)),
+        "preserved_note": "Vendor license-issuer folder is not deleted.",
         "setup_exe": str(setup_path) if setup_path else "",
         "helper_script": str(script),
         "force_stop_script": str(force_stop),
-        "windows_only": sys.platform == "win32",
-        "safe_install_dir": is_safe_jarvis_install_dir(install),
+        "log_paths": log_paths_for_install(install),
+        "windows_only": windows,
+        "safe_install_dir": safe,
+        "ux": {
+            "requires_two_step_confirm": True,
+            "post_start_poll_path": "/api/installer/clean-reinstall/status",
+            "never_show_success_on_http_400": True,
+            "post_start_means_helper_spawned_not_wipe_complete": True,
+        },
     }

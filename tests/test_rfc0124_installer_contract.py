@@ -25,6 +25,7 @@ def test_clean_script_sequence_and_logs():
     assert "force-stop-jarvis.ps1" in lower
     assert "missing" in lower or "abort" in lower
     assert "jarvis-clean-reinstall.log" in lower
+    assert "jarvis-clean-reinstall.status.json" in lower
     assert "clean-reinstall.log" in lower
     assert "license-issuer" in lower
     assert "setup-not-found" in lower or "setup path" in lower
@@ -65,10 +66,13 @@ def test_backend_api_wiring():
     main = _read(REPO_ROOT / "backend" / "app" / "main.py")
     assert "installer.router" in main
     api = _read(REPO_ROOT / "backend" / "app" / "api" / "installer.py")
+    assert "/clean-reinstall/owned-roots" in api
     assert "/clean-reinstall/preview" in api
+    assert "/clean-reinstall/status" in api
     assert "/clean-reinstall/start" in api
-    assert "UX contract" in api
-    assert "owned_roots" in api
+    assert "UX API contract" in api
+    assert "owned_root_entries" in api
+    assert "confirm_token" in api
     launch = _read(REPO_ROOT / "backend" / "app" / "installer" / "clean_reinstall.py")
     assert "force-stop-jarvis.ps1 is missing" in launch
     assert "DETACHED_PROCESS" in launch or "Popen" in launch

@@ -22,8 +22,40 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $scriptDir "owned-paths.ps1")
 
 $tempLog = Join-Path ([System.IO.Path]::GetTempPath()) "Jarvis-clean-reinstall.log"
+$statusPath = Join-Path ([System.IO.Path]::GetTempPath()) "Jarvis-clean-reinstall.status.json"
 $exitReason = "unknown"
 $setupLaunchPath = ""
+
+function Write-CleanStatus {
+    param(
+        [string]$Status,
+        [string]$ExitReason = ""
+    )
+    $payload = @{
+        status      = $Status
+        exit_reason = $ExitReason
+        log_path    = $tempLog
+        updated_at  = (Get-Date).ToUniversalTime().ToString("o")
+    }
+    try {
+        $payload | ConvertTo-Json -Compress | Set-Content -LiteralPath $statusPath -Encoding UTF8
+    } catch {
+        Write-Host "status write failed: $($_.Exception.Message)"
+    }
+}
+
+function Exit-CleanReinstall {
+    param(
+        [int]$Code,
+        [string]$Reason
+    )
+    if ($Reason -eq "ok") {
+        Write-CleanStatus -Status "succeeded" -ExitReason $Reason
+    } else {
+        Write-CleanStatus -Status "failed" -ExitReason $Reason
+    }
+    exit $Code
+}
 
 function Write-CleanLog {
     param([string]$Message)
@@ -246,18 +278,20 @@ try {
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
 } catch { }
 
+Write-CleanStatus -Status "running" -ExitReason ""
+
 $install = Resolve-InstallRootCandidate -InstallRoot $InstallRoot
 if (-not (Test-IsSafeJarvisInstallDir -Path $install)) {
     $exitReason = "unsafe-install-root"
     Write-CleanLog "abort: install root failed safety gate: $install"
-    exit 10
+    Exit-CleanReinstall -Code 10 -Reason $exitReason
 }
 
 $ownedRoots = @(Get-RegisteredOwnedJarvisRoots -InstallRoot $install)
 if ($ownedRoots.Count -eq 0) {
     $exitReason = "no-owned-roots"
     Write-CleanLog "abort: no registered owned roots"
-    exit 11
+    Exit-CleanReinstall -Code 11 -Reason $exitReason
 }
 
 foreach ($root in $ownedRoots) {
@@ -268,7 +302,7 @@ $setupResolved = Resolve-SetupExe -Requested $SetupExePath -OwnedRoots $ownedRoo
 if (-not $setupResolved -and $Mode -eq "Portal") {
     $exitReason = "setup-not-found"
     Write-CleanLog "abort: JarvisSetup.exe not found before wipe"
-    exit 3
+    Exit-CleanReinstall -Code 3 -Reason $exitReason
 }
 if ($setupResolved) {
     $setupLaunchPath = Stage-SetupOutsideOwnedRoots -SetupPath $setupResolved -OwnedRoots $ownedRoots
@@ -278,23 +312,23 @@ if ($setupResolved) {
 if (-not (Confirm-OwnerWipe -Roots $ownedRoots)) {
     $exitReason = "cancelled"
     Write-CleanLog "cancelled by owner"
-    exit 0
+    Exit-CleanReinstall -Code 0 -Reason $exitReason
 }
 
 if (-not (Invoke-ForceStopAllRoots -Roots $ownedRoots)) {
     $exitReason = "force-stop-failed"
-    exit 1
+    Exit-CleanReinstall -Code 1 -Reason $exitReason
 }
 if (Test-AnyLockersRemain -Roots $ownedRoots) {
     $exitReason = "force-stop-failed"
     Write-CleanLog "abort: lockers still hold owned roots"
-    exit 1
+    Exit-CleanReinstall -Code 1 -Reason $exitReason
 }
 
 foreach ($root in $ownedRoots) {
     if (-not (Remove-OwnedRootTree -Root $root -InstallRootForPreserve $install)) {
         $exitReason = "wipe-incomplete"
-        exit 2
+        Exit-CleanReinstall -Code 2 -Reason $exitReason
     }
 }
 
@@ -306,7 +340,7 @@ foreach ($root in $ownedRoots) {
         if ($filtered.Count -gt 0) {
             $exitReason = "wipe-incomplete"
             Write-CleanLog "abort: owned files remain under $root"
-            exit 2
+            Exit-CleanReinstall -Code 2 -Reason $exitReason
         }
     }
 }
@@ -314,13 +348,13 @@ foreach ($root in $ownedRoots) {
 if ($Mode -eq "Inno") {
     $exitReason = "ok"
     Write-CleanLog "ok: inno wipe complete (Setup continues)"
-    exit 0
+    Exit-CleanReinstall -Code 0 -Reason $exitReason
 }
 
 if (-not $setupLaunchPath -or -not (Test-Path -LiteralPath $setupLaunchPath)) {
     $exitReason = "setup-not-found"
     Write-CleanLog "abort: Setup missing after wipe"
-    exit 3
+    Exit-CleanReinstall -Code 3 -Reason $exitReason
 }
 
 try {
@@ -329,9 +363,9 @@ try {
 } catch {
     $exitReason = "setup-launch-failed"
     Write-CleanLog "setup launch failed: $($_.Exception.Message)"
-    exit 4
+    Exit-CleanReinstall -Code 4 -Reason $exitReason
 }
 
 $exitReason = "ok"
 Write-CleanLog "ok: clean reinstall helper finished"
-exit 0
+Exit-CleanReinstall -Code 0 -Reason $exitReason
