@@ -1,4 +1,4 @@
-# RFC-0120: Projects folder, chats in DB, media placement
+# RFC-0121: Projects folder, chats in DB, media placement
 
 **Status:** accepted  
 **Queue item:** Persistent project knowledge / reusable context (extends RFC-0020; no new §58 checkbox)  
@@ -75,7 +75,7 @@ If the storage node is unreachable, upload **fails with a clear error** or queue
 - [ ] RFC-0109 uploads use this placement; no second blob store; no media-in-SQLite as the file body
 - [ ] Phone uploads sync to Leader placement; phone cache is not canonical
 - [ ] RFC-0020 workspace sources may attach to the same `project_id`
-- [ ] Implement follow-up: `python3 -m pytest` (`tests/test_rfc0120_*.py`); `npm --prefix frontend run build` if portal rail switches to the API. Multi-node storage is swarm/desktop sign-off; single-PC colocation is the required v1 path
+- [ ] Implement follow-up: `python3 -m pytest` (`tests/test_rfc0121_*.py`); `npm --prefix frontend run build` if portal rail switches to the API. Multi-node storage is swarm/desktop sign-off; single-PC colocation is the required v1 path
 
 ## Likely files
 
@@ -83,7 +83,7 @@ If the storage node is unreachable, upload **fails with a clear error** or queue
 | --- | --- |
 | Backend | `backend/app/db/models.py` (project + conversation.project_id); new `backend/app/projects/`; media store used by RFC-0109 implement; companion sync |
 | Frontend | `frontend/src/projects.ts` + `App.tsx` rail → Leader API |
-| Tests | `tests/test_rfc0120_*.py` — DB membership, colocation path, storage-node pointer, no bytes-in-DB |
+| Tests | `tests/test_rfc0121_*.py` — DB membership, colocation path, storage-node pointer, no bytes-in-DB |
 | Docs | this RFC; RFC-0118; Architect later: `PORTAL_UX.md` storage sentence |
 
 ## Out of scope
@@ -94,3 +94,4 @@ Product implementation in this PR. RFC-0020 indexer internals. RFC-0109 analyze/
 
 - Implement after RFC-0109 for media paths; chat/folder rows may land in the same named ticket or immediately after.
 - `PORTAL_UX.md` “no new public REST resource” is **superseded for projects** by this RFC. Do not edit that Architect file in the implement PR unless CoS names an Architect follow-up.
+- Number **0121**. RFC-0119 is reserved (license-package entitlements). RFC-0120 is coding+3D, not this ticket.

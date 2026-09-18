@@ -7,7 +7,7 @@
 **Amended:** 2026-09-18 — Taco goal 3: analyze **must OCR** images/photos of text on phone **and** desktop ([RFC-0118](0118-taco-goals-highest-leverage.md) rank 1). Not a third media RFC.
 
 **Parent / index:** [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md) (Taco priority #3).  
-**Related (do not rewrite):** RFC-0021 artifact crafts. RFC-0020 project knowledge (attach sources to a workspace). [RFC-0120](0120-projects-folder-chats-db-media-placement.md) project folder + media placement (0109 ingest writes through that layout when 0120 has landed; until then Leader data-dir artifact store). RFC-0058 Apex media parity. RFC-0059 BlackGrid capability contract (`studio_capabilities()`). RFC-0096 ComfyUI/SANA gen. RFC-0097 stitch / Real-ESRGAN. RFC-0102 LocalSend (device-to-device share ≠ ingest into Jarvis). `JARVIS_2.0.md` §76 multimedia. Companion `POST /api/companion/attachments` (exists, 64 MiB). `frontend/src/pages/Chat.tsx` composer (text + Speak only today). [RFC-0118](0118-taco-goals-highest-leverage.md) rank 1.
+**Related (do not rewrite):** RFC-0021 artifact crafts. RFC-0020 project knowledge (attach sources to a workspace). [RFC-0121](0121-projects-folder-chats-db-media-placement.md) project folder + media placement (0109 ingest writes through that layout when 0121 has landed; until then Leader data-dir artifact store). RFC-0058 Apex media parity. RFC-0059 BlackGrid capability contract (`studio_capabilities()`). RFC-0096 ComfyUI/SANA gen. RFC-0097 stitch / Real-ESRGAN. RFC-0102 LocalSend (device-to-device share ≠ ingest into Jarvis). `JARVIS_2.0.md` §76 multimedia. Companion `POST /api/companion/attachments` (exists, 64 MiB). `frontend/src/pages/Chat.tsx` composer (text + Speak only today). [RFC-0118](0118-taco-goals-highest-leverage.md) rank 1.
 
 This PR is **specs-only**. Product code is a follow-up implement ticket.
 
@@ -101,7 +101,7 @@ GPU-heavy analyze-on-video follows §76 checkpoint/unload when it would fight th
 
 | Area | Paths |
 | --- | --- |
-| Backend (implement PR only) | new `backend/app/api/media.py` + `backend/app/media/` store; evolve `backend/app/api/companion.py` `POST /attachments` + `backend/app/mobile/service.py`; RFC-0021 artifact registry; analyze workers (vision / **OCR** / whisper / extract); studio attach hook next to `studio_capabilities()`; blob paths per RFC-0120 when that ticket has landed |
+| Backend (implement PR only) | new `backend/app/api/media.py` + `backend/app/media/` store; evolve `backend/app/api/companion.py` `POST /attachments` + `backend/app/mobile/service.py`; RFC-0021 artifact registry; analyze workers (vision / **OCR** / whisper / extract); studio attach hook next to `studio_capabilities()`; blob paths per RFC-0121 when that ticket has landed |
 | Frontend (implement PR only) | `frontend/src/pages/Chat.tsx` composer; Daybreak HUD composer (`HudChatHome` / chat dock); `frontend/src/api.ts`; optional studio page attach |
 | Android (implement PR only) | `CompanionModel.kt` `uploadNow`; `MainActivity.kt` picker (image/video/file), progress; share-sheet path |
 | Tests | `tests/test_rfc0109_*.py` — kinds, caps, chunk assemble, device isolation, analyze-without-studio; Android unit tests for progress/retry |
@@ -109,7 +109,7 @@ GPU-heavy analyze-on-video follows §76 checkpoint/unload when it would fight th
 
 ## Out of scope
 
-Product implementation in this PR. RFC-0096/0097 engine implement. RFC-0102 protocol. RFC-0108 on-device LLM (uploads may queue offline; analyze/OCR is Leader-side). RFC-0120 folder/chat topology (placement only, when that ticket lands). HexStrike. Persona merge. Instagram ingest of Saved media (Architect mines offline; this is owner-initiated upload). A third media RFC.
+Product implementation in this PR. RFC-0096/0097 engine implement. RFC-0102 protocol. RFC-0108 on-device LLM (uploads may queue offline; analyze/OCR is Leader-side). RFC-0121 folder/chat topology (placement only, when that ticket lands). HexStrike. Persona merge. Instagram ingest of Saved media (Architect mines offline; this is owner-initiated upload). A third media RFC.
 
 ## Notes
 

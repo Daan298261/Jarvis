@@ -1,4 +1,4 @@
-# RFC-0119: Coding and 3D modelling — real tool calls
+# RFC-0120: Coding and 3D modelling — real tool calls
 
 **Status:** accepted  
 **Queue item:** (none — no new §58 checkbox; implement is a named follow-up after CoS names it)  
@@ -51,7 +51,7 @@ Register at least one **real** 3D tool family, discovered by RFC-0107 search:
 
 Missing binary: **stated install CTA** (RFC-0090 / Module Catalog when a pack exists) — not a fake mesh, not “done” with a markdown cube, not a silent skip. Do not vendor Blender/OpenSCAD into git. GPU-heavy DCC follows existing unload/checkpoint rules when it would fight the resident chat model.
 
-3D outputs are RFC-0021 artifacts and, when a project is selected, live under RFC-0120 media/artifact placement — implement 0119 must not invent a second blob store.
+3D outputs are RFC-0021 artifacts and, when a project is selected, live under RFC-0121 media/artifact placement — implement 0120 must not invent a second blob store.
 
 ### 3. Approvals and policy
 
@@ -68,7 +68,7 @@ Side-effecting writes, shell, and DCC execution go through existing RFC-0002 / R
 - [ ] RFC-0107 search pulls coding/3D tools for matching asks; unused catalog is not stuffed
 - [ ] RFC-0110/policy still gate irreversible/shell/DCC as today; no new authorization theater
 - [ ] RFC-0005 isolation unchanged
-- [ ] Implement follow-up: `python3 -m pytest` (`tests/test_rfc0119_*.py`). Live Blender/OpenSCAD and Windows worktrees are desktop sign-off
+- [ ] Implement follow-up: `python3 -m pytest` (`tests/test_rfc0120_*.py`). Live Blender/OpenSCAD and Windows worktrees are desktop sign-off
 
 ## Likely files
 
@@ -76,7 +76,7 @@ Side-effecting writes, shell, and DCC execution go through existing RFC-0002 / R
 | --- | --- |
 | Backend | `backend/app/tools/` (new DCC tool + registry); `backend/app/agent/tool_exposure.py`; `backend/app/agent/coding_workers.py`; `backend/app/agent/loop.py` completion rules; `verify_code` wiring |
 | Frontend | `/coding` status only if needed; no fake 3D viewport required in v1 |
-| Tests | `tests/test_rfc0119_*.py` — coding loop required calls; missing-DCC CTA; search pulls blender/openscad |
+| Tests | `tests/test_rfc0120_*.py` — coding loop required calls; missing-DCC CTA; search pulls blender/openscad |
 | Docs | this RFC; RFC-0118 pointer |
 
 ## Out of scope
@@ -87,3 +87,4 @@ Product implementation in this PR. RFC-0108. BlackGrid image/video gen (0096/009
 
 - Implement after RFC-0115 so specialist/expert routing exists. Recommended strong coding model for the implement ticket; Composer 2.5 may write tests under review.
 - Linux cloud: unit-test the contract with fake CLIs on PATH. Live Blender/OpenSCAD is Windows/desktop sign-off.
+- Number **0120** (not 0119). RFC-0119 is reserved for license-package entitlements.

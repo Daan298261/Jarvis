@@ -2542,9 +2542,9 @@ Reason:
 
 Taco via Codex: delay is systemic across models, not 27B-specific; tiny front-chat first, larger model continues. CoS assigned the RFC-0117 ledger tick after #305 landed on development.
 
-Decision: RFC-0118 Taco goals highest-leverage memo (accepted) + RFC-0109 OCR amend + RFC-0119/0120
+Decision: RFC-0118 Taco goals highest-leverage memo (accepted) + RFC-0109 OCR amend + RFC-0120/0121
 
-Specs-only ranking for Taco’s four goals (speed; coding+3D real tools; OCR+media upload; projects folder / chats-in-DB / media placement). Memo: [`docs/rfcs/0118-taco-goals-highest-leverage.md`](docs/rfcs/0118-taco-goals-highest-leverage.md). Ranked reuse: **1** amend/implement **RFC-0109** (explicit OCR on phone+desktop — not a third media RFC); **2** implement **RFC-0115** Ornith router (0117 front responder already implemented; do not duplicate); **3** new **RFC-0119** coding+3D real tools; **4** new **RFC-0120** projects folder + chats-in-DB + media colocation vs storage node (extends RFC-0020); **5** residual **RFC-0107** hot-path use / desktop sign-off (embed landed in code; ledger stays **accepted** — do not tick implemented). **RFC-0108 continues**; 0109 after 0108. Bulk 0095–0104 later; HOLD 0092/0112; draft #282 out of scope. No new §58 checkbox; no §57 rewrite; no invented LE/Red/Purple/ATO gates.
+Specs-only ranking for Taco’s four goals (speed; coding+3D real tools; OCR+media upload; projects folder / chats-in-DB / media placement). Memo: [`docs/rfcs/0118-taco-goals-highest-leverage.md`](docs/rfcs/0118-taco-goals-highest-leverage.md). Ranked reuse: **1** amend/implement **RFC-0109** (explicit OCR on phone+desktop — not a third media RFC); **2** implement **RFC-0115** Ornith router (0117 front responder already implemented; do not duplicate); **3** new **RFC-0120** coding+3D real tools; **4** new **RFC-0121** projects folder + chats-in-DB + media colocation vs storage node (extends RFC-0020); **5** residual **RFC-0107** hot-path use / desktop sign-off (embed landed in code; ledger stays **accepted** — do not tick implemented). **RFC-0119 reserved** for a parallel license-package entitlements RFC — unused here. **RFC-0108 continues**; 0109 after 0108. Bulk 0095–0104 later; HOLD 0092/0112; draft #282 out of scope. No new §58 checkbox; no §57 rewrite; no invented LE/Red/Purple/ATO gates.
 
 Reason:
 
