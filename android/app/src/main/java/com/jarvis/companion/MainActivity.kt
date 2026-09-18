@@ -5,8 +5,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -71,7 +69,7 @@ class MainActivity : ComponentActivity() {
             var wasPaired by remember { mutableStateOf(model.api.deviceId.isNotEmpty()) }
             var showPostPairPackOffer by remember { mutableStateOf(false) }
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
-            var tab by remember { mutableStateOf(if (model.api.endpoint.isEmpty()) "More" else "Home") }
+            var tab by remember { mutableStateOf("Home") }
             var pairingScanRequest by remember { mutableStateOf(false) }
             var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
             var incomingCall by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
@@ -248,6 +246,7 @@ class MainActivity : ComponentActivity() {
                                 )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                                if (state.lanLabel.isNotEmpty()) Text(state.lanLabel, fontSize = 13.sp, color = Gold, modifier = Modifier.padding(bottom = 8.dp))
                                 if (!state.connected) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                                         Button(
@@ -263,8 +262,10 @@ class MainActivity : ComponentActivity() {
                                             Text("Enter code")
                                         }
                                     }
+                                    TextButton(onClick = { model.startLanScan() }, enabled = !state.busy && state.lanStatus != "scanning") {
+                                        Text(if (state.lanStatus == "scanning") "Scanning Wi‑Fi…" else "Scan this Wi‑Fi again")
+                                    }
                                 } else {
-                                    ConversationPickers(state, model::selectModel, model::selectVoice)
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
                                         Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
                                             Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else "Talk to Jarvis")
@@ -344,50 +345,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-}
-
-@Composable private fun PresenceHud(mode: String, connected: Boolean, phase: String) {
-    var web by remember { mutableStateOf<WebView?>(null) }
-    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    fun pushState(view: WebView?) {
-        val target = view ?: return
-        target.evaluateJavascript("window.setJarvisConnected && window.setJarvisConnected($connected)", null)
-        target.evaluateJavascript("window.setJarvisAppearance && window.setJarvisAppearance(${JSONObject.quote(mode)})", null)
-        target.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null)
-    }
-    DisposableEffect(owner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) web?.onPause()
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) web?.onResume()
-        }
-        owner.lifecycle.addObserver(observer)
-        onDispose { owner.lifecycle.removeObserver(observer); web?.destroy(); web = null }
-    }
-    LaunchedEffect(mode, connected, phase, web) { pushState(web) }
-    AndroidView(modifier = Modifier.fillMaxWidth().height(310.dp), factory = { context ->
-        WebView(context).apply {
-            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-            val loader = androidx.webkit.WebViewAssetLoader.Builder()
-                .addPathHandler("/assets/", androidx.webkit.WebViewAssetLoader.AssetsPathHandler(context)).build()
-            web = this
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            settings.javaScriptEnabled = true
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.domStorageEnabled = false
-            webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest) = true
-                override fun shouldInterceptRequest(view: WebView, request: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? {
-                    return loader.shouldInterceptRequest(request.url)
-                        ?: android.webkit.WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
-                }
-                override fun onPageFinished(view: WebView, url: String?) {
-                    pushState(view)
-                }
-            }
-            loadUrl("https://appassets.androidplatform.net/assets/orb/index.html")
-        }
-    }, update = { pushState(it) })
 }
 
 @Composable private fun ConversationPickers(
@@ -828,8 +785,6 @@ private fun formatStorageBytes(bytes: Long): String {
                 FilterChip(state.presenceMode == "orb", { model.selectPresence("orb") }, { Text("Glowing orb") })
                 FilterChip(state.presenceMode == "humanoid", { model.selectPresence("humanoid") }, { Text("Humanoid HUD") })
             }
-            Text("Conversation model", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-            ConversationPickers(state, model::selectModel, model::selectVoice)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(onClick = { model.previewVoice(state.selectedVoice) },

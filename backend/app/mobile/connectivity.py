@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from .companion_security import GUARD
 from .gateway import gateway_app, server_identity
+from .lan_beacon import LanBeaconServer, public_beacon_payload
 from .store import database, get, put
 
 PORT = 4781
@@ -91,6 +92,7 @@ class Connectivity:
             "activity": "Starting companion TLS gateway",
             "endpoints": [],
         }
+        self.lan_beacon = LanBeaconServer()
 
     def report(self, **changes):
         self.state.update(changes, updated_at=time.time())
@@ -102,7 +104,11 @@ class Connectivity:
 
     def config(self):
         with database() as db:
-            return get(db, "network", "config") or {"enabled": False, "remote": True, "marker": "Jarvis-" + str(uuid.uuid4())}
+            return get(db, "network", "config") or {
+                "enabled": True,
+                "remote": False,
+                "marker": "Jarvis-" + str(uuid.uuid4()),
+            }
 
     async def configure(self, enabled: bool, remote: bool):
         if self.lock.locked():
@@ -116,6 +122,7 @@ class Connectivity:
         return self.snapshot()
 
     async def stop_gateway(self):
+        await self.stop_lan_beacon()
         if self.server:
             self.server.should_exit = True
         if self.server_task:
@@ -125,6 +132,18 @@ class Connectivity:
                 self.server_task.cancel()
                 await asyncio.gather(self.server_task, return_exceptions=True)
         self.server = self.server_task = None
+
+    async def start_lan_beacon(self):
+        try:
+            await self.lan_beacon.start(lambda: public_beacon_payload(self.snapshot()))
+        except Exception:
+            pass
+
+    async def stop_lan_beacon(self):
+        try:
+            await self.lan_beacon.stop()
+        except Exception:
+            pass
 
     async def release_mapping(self):
         if self.router:
@@ -258,6 +277,7 @@ class Connectivity:
             relay_hostname = urlsplit(relay).hostname if relay else None
             endpoints = self._lan_endpoints([host for host in hosts if host != public_ip and host != relay_hostname])
             self.report(local_verified=True, server_pin=identity["server_pin"], endpoints=endpoints)
+            await self.start_lan_beacon()
             if router:
                 self.report(activity="Requesting a one-hour lease for the TLS gateway")
                 try:

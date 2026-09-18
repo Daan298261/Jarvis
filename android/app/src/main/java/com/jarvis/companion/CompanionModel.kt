@@ -51,6 +51,9 @@ data class CompanionState(
     val localPackError: String = "",
     val offlineQueueDepth: Int = 0,
     val offlineAnswering: Boolean = false,
+    val lanStatus: String = "idle",
+    val lanLabel: String = "",
+    val pendingApproval: Boolean = false,
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
@@ -126,16 +129,67 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (true) {
                 if (foreground && api.deviceId.isNotEmpty()) {
-                    runCatching { refresh() }.onFailure {
-                        mutable.value = mutable.value.copy(
-                            connected = false,
-                            leaderReachable = false,
-                            activity = "Offline",
-                            error = it.message,
-                        )
+                    if (mutable.value.pendingApproval) {
+                        runCatching {
+                            api.session()
+                            refresh()
+                            mutable.value = mutable.value.copy(pendingApproval = false, lanStatus = "idle", lanLabel = "")
+                        }
+                    } else {
+                        runCatching { refresh() }.onFailure {
+                            mutable.value = mutable.value.copy(
+                                connected = false,
+                                leaderReachable = false,
+                                activity = "Offline",
+                                error = it.message,
+                            )
+                        }
                     }
                 }
                 delay(4000)
+            }
+        }
+        if (api.deviceId.isEmpty()) startLanScan()
+    }
+
+    fun startLanScan() {
+        if (api.deviceId.isNotEmpty()) return
+        viewModelScope.launch {
+            mutable.value = mutable.value.copy(lanStatus = "scanning", lanLabel = "Scanning this Wi‑Fi for Jarvis…", error = null)
+            val host = runCatching { LanScanner.scan() }.getOrNull()
+            if (host == null) {
+                mutable.value = mutable.value.copy(lanStatus = "idle", lanLabel = "")
+                return@launch
+            }
+            mutable.value = mutable.value.copy(
+                lanStatus = "requesting",
+                lanLabel = "Found ${host.name} — asking your PC to approve this phone",
+            )
+            try {
+                api.configure(host.endpoint, host.serverPin)
+                api.lanEnroll()
+                try {
+                    api.session()
+                    jarvisApp.registerPush()
+                    refresh()
+                    mutable.value = mutable.value.copy(pendingApproval = false, lanStatus = "idle", lanLabel = "")
+                } catch (error: ApiException) {
+                    if (error.status != 403) throw error
+                    mutable.value = mutable.value.copy(
+                        pendingApproval = true,
+                        lanStatus = "waiting",
+                        lanLabel = "Waiting for approval on your Jarvis PC",
+                        activity = "Confirm this phone on the desktop",
+                    )
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutable.value = mutable.value.copy(
+                    lanStatus = "failed",
+                    lanLabel = "Found Jarvis but could not request pairing",
+                    error = error.message,
+                )
             }
         }
     }

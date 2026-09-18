@@ -95,6 +95,29 @@ def enroll(body: Enroll, request: Request):
     return identity.enroll(body.invitation, body.public_key, body.name, client_ip=client_ip)
 
 
+class LanEnroll(BaseModel):
+    public_key: str = Field(max_length=2000)
+    name: str = Field(min_length=1, max_length=100)
+
+
+@router.get("/lan-beacon")
+def lan_beacon(request: Request):
+    from ..mobile.connectivity import CONNECTIVITY
+    from ..mobile.lan_beacon import public_beacon_payload
+
+    host = request.url.hostname or (request.client.host if request.client else "")
+    payload = public_beacon_payload(CONNECTIVITY.snapshot(), prefer_host=host or "")
+    if not payload:
+        raise HTTPException(503, "Jarvis is not advertising a LAN companion endpoint yet.")
+    return payload
+
+
+@router.post("/lan-enroll")
+def lan_enroll(body: LanEnroll, request: Request):
+    client_ip = request.client.host if request.client else ""
+    return identity.enroll_lan(body.public_key, body.name, client_ip=client_ip)
+
+
 @router.get("/challenge/{device_id}")
 def challenge(device_id: uuid.UUID):
     return identity.challenge(str(device_id))

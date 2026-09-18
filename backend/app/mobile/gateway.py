@@ -93,7 +93,12 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
         # A path encoded to escape this prefix must never reach owner APIs.
         if not _companion_path_allowed(path):
             return JSONResponse({"detail": "Route unavailable on mobile gateway"}, 404)
-        if path.startswith(("api/companion/enroll", "api/companion/session", "api/companion/challenge/")):
+        if path.startswith((
+            "api/companion/enroll",
+            "api/companion/lan-enroll",
+            "api/companion/session",
+            "api/companion/challenge/",
+        )):
             key = request.client.host if request.client else "unknown"
             now = time.monotonic()
             if len(attempts) > 4096:

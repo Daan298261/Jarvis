@@ -54,11 +54,21 @@ def test_endpoint_rejects_insecure_or_credential_bearing_origins(value):
         connectivity.origin(value)
 
 
+def test_default_connectivity_config_listens_on_lan(network_env):
+    connection = connectivity.Connectivity()
+    config = connection.config()
+    assert config["enabled"] is True
+    assert config["remote"] is False
+
+
 class FakeConnection(connectivity.Connectivity):
     async def start_gateway(self, identity):
         self.opened = True
     async def stop_gateway(self):
         self.opened = False
+        await self.stop_lan_beacon()
+    async def start_lan_beacon(self):
+        return
     async def probe(self, endpoint, identity):
         if getattr(self, "probe_fails", False):
             raise RuntimeError("Device authentication unavailable")

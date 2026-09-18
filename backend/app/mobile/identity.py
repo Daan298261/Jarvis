@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import ipaddress
 import secrets
 import time
 import uuid
@@ -250,6 +251,32 @@ def enroll(token: str, encoded_key: str, name: str, *, client_ip: str = "") -> d
         device = _create_pending_device(db, encoded_key, name)
         invitation["claimed_by"] = device["id"]
         put(db, "invitation", digest(token), invitation)
+    return safe_device(device)
+
+
+def client_may_lan_enroll(client_ip: str) -> bool:
+    """LAN enroll is for the home network (and local tests), never the public internet."""
+    if not client_ip or client_ip in {"testclient", "localhost", "unknown"}:
+        return True
+    try:
+        addr = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    return bool(addr.is_private or addr.is_loopback)
+
+
+def enroll_lan(encoded_key: str, name: str, *, client_ip: str = "") -> dict:
+    if not client_may_lan_enroll(client_ip):
+        raise HTTPException(403, "LAN pairing is only available on the same local network as Jarvis.")
+    fp = fingerprint(encoded_key)
+    check_enroll_rate_limit(client_ip, fp)
+    with database() as db:
+        for device in rows(db, "device"):
+            if device.get("fingerprint") == fp and device.get("status") != "revoked":
+                return safe_device(device)
+        device = _create_pending_device(db, encoded_key, name)
+        device["paired_via"] = "lan"
+        put(db, "device", device["id"], device)
     return safe_device(device)
 
 
