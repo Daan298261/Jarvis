@@ -1,18 +1,10 @@
-package com.jarvis.companion.device
+package com.jarvis.companion
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class DeviceModelTypesTest {
-    @Test
-    fun useOnDeviceInferenceOnlyWhenLeaderDownAndPackReady() {
-        assertEquals(false, useOnDeviceInference(true, DevicePackStatus.READY))
-        assertEquals(false, useOnDeviceInference(false, DevicePackStatus.MISSING))
-        assertEquals(true, useOnDeviceInference(false, DevicePackStatus.READY))
-        assertEquals(true, useOnDeviceInference(false, DevicePackStatus.RUNNING))
-    }
-
+class CompanionDeviceModelChromeTest {
     @Test
     fun offlineBannerHiddenWhenConnectedOrUnpaired() {
         assertNull(offlineChatBanner(leaderConnected = true, paired = true, packStatus = DevicePackStatus.READY))
@@ -20,7 +12,7 @@ class DeviceModelTypesTest {
     }
 
     @Test
-    fun offlineBannerShowsOnDeviceMessageWhenPackReady() {
+    fun offlineBannerShowsOnDeviceWhenPackReady() {
         assertEquals(
             "Leader unreachable — answering on-device.",
             offlineChatBanner(leaderConnected = false, paired = true, packStatus = DevicePackStatus.READY),
