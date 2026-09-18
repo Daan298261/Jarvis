@@ -188,40 +188,26 @@ async def get_security_gate(role: str):
 
 @router.put("/security-gates/{role}/password")
 async def configure_security_gate_password(role: str, body: GatePasswordRequest):
-    try:
-        status = set_gate_password(
-            role,
-            new_password=body.new_password,
-            current_password=body.current_password,
-            enable=body.enable,
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    return status.as_dict()
+    raise HTTPException(
+        status_code=410,
+        detail="Password gates are retired. Install or renew a license package that includes the module.",
+    )
 
 
 @router.post("/security-gates/{role}/unlock")
 async def unlock_security_gate(role: str, body: GateUnlockRequest):
-    try:
-        return unlock_gate(role, body.password).as_dict()
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=410,
+        detail="Password unlock is retired. Capability follows the installed license package.",
+    )
 
 
 @router.post("/security-gates/{role}/lock")
 async def lock_security_gate(role: str):
-    try:
-        return lock_gate(role).as_dict()
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=410,
+        detail="Password lock is retired. Capability follows the installed license package.",
+    )
 
 
 @router.post("")
@@ -324,11 +310,16 @@ async def preview_role_route(body: RoleRouteRequest):
         security_gate_role = "red-team"
 
     if security_gate_role is not None and not gate_is_enabled(security_gate_role):
+        from ..licensing.entitlements import module_entitlement_blocked_reason
+
+        reason = module_entitlement_blocked_reason(security_gate_role) or (
+            f"The installed license package does not cover {security_gate_role}"
+        )
         raise HTTPException(
             status_code=403,
             detail={
-                "reason": f"{security_gate_role} password gate is locked or the in-person ATO license does not cover this role",
-                "code": "password_gate_locked",
+                "reason": reason,
+                "code": "license_package_denied",
             },
         )
 
@@ -337,7 +328,7 @@ async def preview_role_route(body: RoleRouteRequest):
             raise HTTPException(
                 status_code=403,
                 detail={
-                    "reason": "Red Team routing requires a case/authorization reference and explicit human confirmation in addition to the password gate",
+                    "reason": "Red Team routing requires a case/authorization reference and explicit human confirmation when the license package includes Red team",
                     "code": "red_authorization_required",
                 },
             )

@@ -2775,12 +2775,26 @@ export type LicenseCluster = {
   cluster_id: string
 }
 
+export type LicensePackageEntitlements = {
+  installed?: boolean
+  valid?: boolean
+  law_enforcement?: boolean
+  modules?: string[]
+  expires_at?: string
+  renew_by?: string
+  max_expires_at?: string
+  clock_rollback?: boolean
+  reason?: string
+}
+
 export type LicenseEntitlements = {
   tier: string | null
   features: string[]
   pack_entitlements: string[]
   cluster_wide?: boolean
   cluster_id?: string
+  package?: LicensePackageEntitlements
+  allowed_modules?: string[]
 }
 
 export type LicenseEntitlementsResponse = {
@@ -2933,6 +2947,8 @@ export async function getLicenseEntitlements(): Promise<LicenseEntitlementsRespo
       pack_entitlements: asStringList(entitlements.pack_entitlements),
       cluster_wide: entitlements.cluster_wide !== false,
       cluster_id: asOptionalString(entitlements.cluster_id),
+      package: entitlements.package,
+      allowed_modules: asStringList(entitlements.allowed_modules),
     },
   }
 }

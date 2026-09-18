@@ -263,6 +263,8 @@ export function LicenseSettings({ showPageChrome = false }: LicenseSettingsProps
   const packs = entitlements?.pack_entitlements || validation.pack_entitlements || []
   const features = entitlements?.features || validation.features || []
   const tier = entitlements?.tier || validation.tier || null
+  const packageInfo = entitlements?.package
+  const allowedModules = entitlements?.allowed_modules || []
 
   return (
     <div className={showPageChrome ? "license-page" : undefined}>
@@ -393,6 +395,47 @@ export function LicenseSettings({ showPageChrome = false }: LicenseSettingsProps
             </button>
           </div>
         </form>
+      </div>
+
+      <div className="card grid" style={{ marginTop: 16 }}>
+        <h2>License package (HexStrike / Blue / Red)</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Signed in-person packages gate HexStrike, Daybreak, Blue, Red, and module workers on this PC.
+        </p>
+        <div className="kv">
+          <b>Package</b>
+          <span>
+            {packageInfo?.valid
+              ? "Valid"
+              : packageInfo?.installed
+                ? "Installed · not valid"
+                : "Not installed"}
+          </span>
+        </div>
+        {packageInfo?.reason && (
+          <div className="kv">
+            <b>Detail</b>
+            <span>{packageInfo.reason}</span>
+          </div>
+        )}
+        {packageInfo?.expires_at && (
+          <div className="kv">
+            <b>Valid until</b>
+            <span>{formatWhen(packageInfo.expires_at)}</span>
+          </div>
+        )}
+        <h3 className="env-subhead">Entitled modules now</h3>
+        {allowedModules.length ? (
+          <div className="runtime-tags">
+            {allowedModules.map((moduleId) => (
+              <span key={moduleId}>{moduleId}</span>
+            ))}
+          </div>
+        ) : (
+          <p className="lede" style={{ margin: 0 }}>
+            No licensed modules are active. Install a signed package from License Manager or paste one below.
+          </p>
+        )}
       </div>
 
       <div className="card grid" style={{ marginTop: 16 }}>

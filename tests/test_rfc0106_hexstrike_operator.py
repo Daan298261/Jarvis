@@ -189,6 +189,7 @@ def test_hexstrike_operator_api_routes(jarvis_env, monkeypatch, operator_store):
 
 def test_hexstrike_operator_tool_exposed_via_capability_alias(monkeypatch):
     monkeypatch.setattr(tool_exposure, "gate_is_enabled", lambda role: True)
+    monkeypatch.setattr(tool_exposure, "licensed_module_allowed", lambda module_id: module_id == "hexstrike")
     names = tool_exposure.tool_names_for("filesystem", ["hexstrike"])
     assert "hexstrike_operator" in names
 

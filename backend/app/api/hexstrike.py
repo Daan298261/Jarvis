@@ -113,12 +113,21 @@ def _require_permissions_grant(
     raise HTTPException(status_code=428, detail=parked)
 
 
+def _require_hexstrike_module_entitlement() -> None:
+    from ..licensing.entitlements import module_entitlement_blocked_reason
+
+    reason = module_entitlement_blocked_reason("hexstrike")
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+
+
 def _require_operator_grant(
     permission_id: str,
     *,
     action_kind: str,
     context: dict[str, Any],
 ) -> None:
+    _require_hexstrike_module_entitlement()
     _require_permissions_grant(
         _permission_ids_to_check(permission_id),
         action_kind=action_kind,
@@ -362,6 +371,13 @@ async def hexstrike_actions():
 
 @router.post("/actions")
 async def hexstrike_action(body: HexStrikeActionIn):
+    _require_hexstrike_module_entitlement()
+    from ..inference.security_gates import gate_is_enabled
+    from ..licensing.entitlements import module_entitlement_blocked_reason
+
+    if not gate_is_enabled("blue-team"):
+        detail = module_entitlement_blocked_reason("blue-team") or "Blue team is not on the license package."
+        raise HTTPException(status_code=403, detail=detail)
     capability = CAPABILITY_BY_ID.get(body.action)
     if capability is None:
         raise HTTPException(status_code=422, detail="Unknown defensive action")

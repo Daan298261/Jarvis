@@ -264,7 +264,7 @@ def _validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if auto_renew and term_days < 1:
         raise AtoError("auto_renew requires term_days >= 1")
     jarvis_version = str(payload.get("jarvis_version") or JARVIS_VERSION).strip()
-    return {
+    cleaned: dict[str, Any] = {
         "v": 1,
         "kind": KIND,
         "license_id": str(payload["license_id"]).strip(),
@@ -289,6 +289,10 @@ def _validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "term_days": term_days if term_days > 0 else 0,
         "case_ref": str(payload.get("case_ref") or "").strip(),
     }
+    package_class = str(payload.get("package_class") or "").strip()
+    if package_class:
+        cleaned["package_class"] = package_class
+    return cleaned
 
 
 def sign_license(payload: dict[str, Any], private_key: Ed25519PrivateKey) -> dict[str, Any]:
@@ -363,6 +367,7 @@ def issue_license(
     max_days: int | None = None,
     max_expires_at: str | None = None,
     private_key: Ed25519PrivateKey | None = None,
+    package_class: str = "",
 ) -> dict[str, Any]:
     if valid_days < 1 or valid_days > 3660:
         raise AtoError("valid_days must be between 1 and 3660")
@@ -411,6 +416,9 @@ def issue_license(
         "term_days": term if auto_renew or term_days is not None else 0,
         "case_ref": (case_ref or "").strip(),
     }
+    package_tag = (package_class or "").strip()
+    if package_tag:
+        payload["package_class"] = package_tag
     with _LOCK:
         signing_key = private_key if private_key is not None else load_or_create_issuer()[0]
         document = sign_license(payload, signing_key)

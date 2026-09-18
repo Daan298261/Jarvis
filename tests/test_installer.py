@@ -120,6 +120,8 @@ def test_build_script_invokes_iscc():
     assert "localappdata" in lower or r"programs\inno setup 6" in lower
     assert "build-license-manager.ps1" in text
     assert "JarvisLicenseManager" in text
+    assert "issue-release-unrestricted-license.ps1" in text
+    assert "Unrestricted license issuance failed" in text
 
 
 def test_vendor_license_manager_is_excluded_from_inno_payload():
