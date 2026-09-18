@@ -8,8 +8,8 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Encrypts offline queue payloads at rest (RFC-0108). */
-internal interface OutboxQueueCrypto {
+/** Encrypts offline queue payloads at rest (RFC-0108). Test doubles may implement this on the JVM. */
+interface OutboxQueueCrypto {
     fun encrypt(plain: ByteArray): ByteArray
     fun decrypt(stored: ByteArray): ByteArray
 }
