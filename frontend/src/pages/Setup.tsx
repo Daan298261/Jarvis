@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { api } from "../api"
 import { IntegrationSetup } from "../components/IntegrationSetup"
-import { CleanReinstallCard } from "../settings/CleanReinstallCard"
 import "./setup-conversation.css"
 
 type SetupQuestion = {
@@ -224,12 +223,6 @@ export function SetupPage() {
           </button>
         </div>
         <p className="setup-advanced-note">Both connections are optional and can be changed later under Connections.</p>
-        {error ? (
-          <div style={{ marginTop: 24 }}>
-            <p className="lede">If first-run or integrations will not complete, you can run the same Clean Install / Reinstall helper as Settings → Advanced.</p>
-            <CleanReinstallCard />
-          </div>
-        ) : null}
       </div>
     )
   }

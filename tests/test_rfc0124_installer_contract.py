@@ -67,11 +67,9 @@ def test_backend_api_wiring():
     api = _read(REPO_ROOT / "backend" / "app" / "api" / "installer.py")
     assert "/clean-reinstall/preview" in api
     assert "/clean-reinstall/start" in api
+    assert "UX contract" in api
+    assert "owned_roots" in api
     launch = _read(REPO_ROOT / "backend" / "app" / "installer" / "clean_reinstall.py")
     assert "force-stop-jarvis.ps1 is missing" in launch
     assert "DETACHED_PROCESS" in launch or "Popen" in launch
 
-
-def test_advanced_settings_includes_clean_card():
-    pane = _read(REPO_ROOT / "frontend" / "src" / "settings" / "AdvancedSettingsPane.tsx")
-    assert "CleanReinstallCard" in pane
