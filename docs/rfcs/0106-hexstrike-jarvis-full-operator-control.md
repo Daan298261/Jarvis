@@ -60,7 +60,7 @@ Product surface (not a new ATO): HexStrike operator MCP/routes belong to **Daybr
 
 ### 4. Real, not stubs
 
-Half-shell health-only UI, mock MCP tools that never call the managed server, hardcoded five-enum-only invoke, or “TODO install later” for tools the pinned clone actually needs are **fails**. Taco’s bar is full implementation.
+Half-shell health-only UI, mock MCP tools that never call the managed server, hardcoded five-enum-only invoke, or leaving tools the pinned clone actually needs as an unimplemented later install are **fails**. Taco’s bar is full implementation.
 
 #### 4a. Managed HexStrike install / repair
 

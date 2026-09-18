@@ -40,6 +40,13 @@ def test_optional_classifier_hook_can_override():
     assert classify_reply_for_speech("Hi there.", user_prompt="hello") == "technical"
 
 
+def test_hard_technical_shapes_win_over_social_hook():
+    register_reply_classifier_hook(lambda _text, _user: "social")
+    body = "Traceback (most recent call last):\n  File \"x.py\", line 1\nValueError: no"
+    assert classify_reply_for_speech(body) == "technical"
+    assert classify_reply_for_speech("```python\nprint(1)\n```") == "technical"
+
+
 def test_social_weather_speaks_natural_prose_not_markup():
     raw = "Very well, sir. **18** to **11** degrees with light cloud."
     filtered = filter_text_for_speech(raw, source="owner_chat", user_prompt="weather today?")

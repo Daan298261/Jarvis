@@ -8,12 +8,27 @@ from .lease import SignedLease
 from .modules import module_ids, normalize_module_id
 
 _PACK_MODULE_IDS = frozenset({"specialist.security", "domain.finance"})
+FEATURE_JEV_PLUS = "decision.jev_plus"
+
+
+def _config_plus_features() -> list[str]:
+    """Owner-config Plus slots merged into the same features list `has_feature` reads (RFC-0116)."""
+    try:
+        from ..config import load_settings
+
+        extra = list(getattr(load_settings().decision, "plus_features", []) or [])
+    except Exception:
+        return []
+    out: list[str] = []
+    for item in extra:
+        name = str(item or "").strip()
+        if name and name not in out:
+            out.append(name)
+    return out
 
 
 def has_feature(lease: SignedLease | None, feature: str) -> bool:
-    if lease is None:
-        return False
-    return feature in lease.payload.features
+    return feature in evaluate_cluster_entitlements(lease).get("features", [])
 
 
 def has_pack_entitlement(lease: SignedLease | None, pack_id: str) -> bool:
@@ -59,9 +74,16 @@ def evaluate_cluster_entitlements(lease: SignedLease | None) -> dict[str, Any]:
         normalized = normalize_module_id(pack_id)
         if normalized not in allowed_modules and has_pack_entitlement(lease, pack_id):
             allowed_modules.append(normalized)
+    extras = _config_plus_features()
+    features: list[str] = []
+    if lease is not None:
+        features.extend(str(item) for item in lease.payload.features if str(item))
+    for extra in extras:
+        if extra not in features:
+            features.append(extra)
     base: dict[str, Any] = {
         "tier": None,
-        "features": [],
+        "features": features,
         "pack_entitlements": [],
         "cluster_wide": True,
         "package": ato.as_dict(),
@@ -72,7 +94,7 @@ def evaluate_cluster_entitlements(lease: SignedLease | None) -> dict[str, Any]:
     return {
         **base,
         "tier": lease.payload.tier,
-        "features": list(lease.payload.features),
+        "features": features,
         "pack_entitlements": list(lease.payload.pack_entitlements),
         "cluster_id": lease.payload.cluster_id,
     }

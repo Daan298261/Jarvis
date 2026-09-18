@@ -99,6 +99,7 @@ class SettingsUpdate(BaseModel):
     front_responder_timeout_ms: int | None = Field(default=None, ge=250, le=8000)
     front_responder_context_turns: int | None = Field(default=None, ge=0, le=8)
     front_responder_speak_immediately: bool | None = None
+    decision_tier: Literal["local", "jev_optional", "jev_plus"] | None = None
 
 
 @router.get("")
@@ -286,6 +287,11 @@ async def update_settings(body: SettingsUpdate):
         if value is not None:
             front_values[key] = value
     settings.front_responder = type(settings.front_responder).model_validate(front_values)
+
+    if body.decision_tier is not None:
+        decision_values = settings.decision.model_dump()
+        decision_values["tier"] = body.decision_tier
+        settings.decision = type(settings.decision).model_validate(decision_values)
 
     save_settings(settings)
     REGISTRY.apply_settings(settings)

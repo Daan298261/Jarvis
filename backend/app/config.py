@@ -247,6 +247,21 @@ class IdentityRecognitionSettings(BaseModel):
         return self
 
 
+class DecisionSettings(BaseModel):
+    """RFC-0116 optional TypeSafe Jev decision tier. Default is local-only."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    tier: Literal["local", "jev_optional", "jev_plus"] = "local"
+    notify_requested_at: str = ""
+    plus_features: list[str] = Field(default_factory=list)
+    last_availability: Literal["unavailable", "waitlisted", "connected", "error"] = "unavailable"
+    last_probe_error: str = ""
+    last_probe_at: str = ""
+    last_probe_latency_ms: float | None = None
+    last_model: str = ""
+
+
 class AppSettings(BaseModel):
     bind_host: str = "127.0.0.1"
     bind_port: int = 4780
@@ -271,6 +286,7 @@ class AppSettings(BaseModel):
     tts: TtsSettings = Field(default_factory=TtsSettings)
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
     knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
+    decision: DecisionSettings = Field(default_factory=DecisionSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
