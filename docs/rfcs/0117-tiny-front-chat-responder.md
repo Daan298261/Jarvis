@@ -184,6 +184,15 @@ Expose concise timing in diagnostics so the owner can see whether slowness is fr
 - [ ] `python -m pytest` passes for focused tests; `npm --prefix frontend run build` passes if transcript UI changes.
 - [ ] Windows desktop sign-off measures first visible and first audible response across at least two larger backend models, proving the fix is not 27B-specific.
 
+## Still missing to actually fix speed
+
+- [ ] Implement the tiny front responder lane.
+- [ ] Start it before or in parallel with normal routing.
+- [ ] Merge tiny reply + larger reply into one Jarvis turn.
+- [ ] Let safe acknowledgements speak immediately.
+- [ ] Add timing diagnostics for queue, front text/audio, router, worker text/complete, and TTS/audio.
+- [ ] Desktop-test first visible and first audible response across at least two larger models.
+
 ## Likely files
 
 | Area | Paths |
