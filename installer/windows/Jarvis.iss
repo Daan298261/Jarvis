@@ -185,8 +185,8 @@ end;
 
 procedure ExtractInstallerHelpers;
 begin
-  { Flags: dontcopy files are not placed in {tmp} unless extracted. PrepareToInstall }
-  { must use THIS Setup's scripts, not a leftover {app} copy from 1.4.4. }
+  // dontcopy files are not placed in Setup temp until ExtractTemporaryFile runs.
+  // PrepareToInstall must use this Setup's extracted scripts, not the old install tree.
   ExtractTemporaryFile('force-stop-jarvis.ps1');
   ExtractTemporaryFile('owned-paths.ps1');
   ExtractTemporaryFile('clean-reinstall-jarvis.ps1');
@@ -616,4 +616,4 @@ begin
   end;
 end;
 
-{ Normal upgrade/uninstall preserves generated custom data unless semi-clean or clean reinstall is selected. }
+{ Normal upgrade/uninstall preserves generated custom data except for semi-clean or clean reinstall. }
