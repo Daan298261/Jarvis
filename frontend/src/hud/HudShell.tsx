@@ -44,7 +44,7 @@ type HudTopChromeProps = {
   onModelMenuOpenChange?: (open: boolean) => void
   hexStrikeActive?: boolean
   hexSuiteExpanded?: boolean
-  onDaybreakFocus?: () => void
+  onDaybreakToggle?: () => void
   onAdminNav?: () => void
 }
 
@@ -66,7 +66,7 @@ export function HudTopChrome({
   onModelMenuOpenChange,
   hexStrikeActive = false,
   hexSuiteExpanded = false,
-  onDaybreakFocus,
+  onDaybreakToggle,
   onAdminNav,
 }: HudTopChromeProps) {
   return (
@@ -90,10 +90,11 @@ export function HudTopChrome({
           <button
             type="button"
             className={`hud-panel-toggle hud-daybreak-toggle${hexSuiteExpanded ? " active" : ""}`}
-            onClick={() => onDaybreakFocus?.()}
+            onClick={() => onDaybreakToggle?.()}
             aria-pressed={hexSuiteExpanded}
+            title={hexSuiteExpanded ? "Return to HUD presence" : "Open Daybreak operator console"}
           >
-            Daybreak
+            {hexSuiteExpanded ? "HUD" : "Daybreak"}
           </button>
         )}
         {showPanels && (
@@ -228,7 +229,7 @@ function HudShellInner({
   model,
 }: HudShellProps) {
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
-  const { hexSuiteExpanded, focusHexSuite, dismissHexSuiteForOverlay } = useHudOverlay()
+  const { hexSuiteExpanded, toggleHexSuite, dismissHexSuiteForOverlay } = useHudOverlay()
   const [adminOpen, setAdminOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [panel, setPanel] = useState<HudPanel>(null)
@@ -273,9 +274,9 @@ function HudShellInner({
     setHelpOpen(false)
   }
 
-  function onDaybreakFocus() {
+  function onDaybreakToggle() {
     closePanels()
-    focusHexSuite()
+    toggleHexSuite()
   }
 
   return (
@@ -297,7 +298,7 @@ function HudShellInner({
         model={model}
         hexStrikeActive={hexStrikeActive}
         hexSuiteExpanded={hexSuiteExpanded}
-        onDaybreakFocus={onDaybreakFocus}
+        onDaybreakToggle={onDaybreakToggle}
         onAdminNav={closeAdminDrawer}
         onModelMenuOpenChange={(open) => {
           if (open) {

@@ -85,6 +85,26 @@
   backdrop-filter: blur(14px);
 }
 
+.jarvis-presence-controls-body-voice {
+  width: min(420px, calc(100vw - 24px));
+}
+
+.jarvis-presence-controls-body-voice .voice-profile-picker,
+.jarvis-presence-controls-body-voice .axis-fieldset,
+.jarvis-presence-controls-body-voice .axis-options {
+  grid-column: 1 / -1;
+}
+
+.jarvis-presence-controls-body-voice .axis-options {
+  max-height: min(280px, 42dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.jarvis-presence-controls-body-voice .lede {
+  color: rgba(196, 228, 237, 0.72);
+}
+
 .jarvis-presence-mode-row {
   grid-column: 1 / -1;
   display: grid;
