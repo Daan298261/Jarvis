@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom"
+import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { HudCybersecurityModule } from "../hud/HudCybersecurityModule"
 import { AppearanceSettingsPane } from "../settings/AppearanceSettingsPane"
 import { appearanceVoiceSettingsPath } from "../settings/settingsSubmenus"
-import { VoiceHudCompact } from "../settings/VoiceHudCompact"
 import type { PresentationSettings } from "./presenceTypes"
 
 type AppearancePresenceControlsProps = {
@@ -14,8 +14,11 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
     <div className="jarvis-presence-controls-split">
       <details className="jarvis-presence-controls">
         <summary>Voice</summary>
-        <div className="jarvis-presence-controls-body">
-          <VoiceHudCompact />
+        <div className="jarvis-presence-controls-body jarvis-presence-controls-body-voice">
+          <VoiceProfilePicker />
+          <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
+            <Link to={appearanceVoiceSettingsPath("voice")}>Open full Voice settings</Link>
+          </p>
         </div>
       </details>
 

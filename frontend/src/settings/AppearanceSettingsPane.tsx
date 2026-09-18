@@ -1,4 +1,7 @@
 import { useState } from "react"
+import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
+import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
+import { useHudOverlayOptional } from "../hud/hudOverlayContext"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
 
@@ -9,6 +12,8 @@ type AppearanceSettingsPaneProps = {
 export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
+  const { active: hexStrikeActive, profile: hexstrikeProfile } = useHexStrikeSuiteActive()
+  const overlay = useHudOverlayOptional()
 
   async function apply(patch: Partial<PresentationSettings>, note = "") {
     setBusy(true)
@@ -23,7 +28,28 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
     }
   }
 
-  const selected = settings.shell === "classic" ? "classic" : settings.requestedPresence
+  async function activateHexStrike() {
+    if (!hexstrikeProfile || busy) return
+    setBusy(true)
+    setMessage("")
+    try {
+      await applyRuntimeProfile(hexstrikeProfile.id || hexstrikeProfile.name)
+      await updatePresentation({ shell: "hud", requestedPresence: "humanoid" })
+      overlay?.focusHexSuite()
+      setMessage("HexStrike · Daybreak suite active.")
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not activate HexStrike suite.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selected =
+    settings.shell === "classic"
+      ? "classic"
+      : hexStrikeActive
+        ? "hexstrike"
+        : settings.requestedPresence
 
   return (
     <div className="settings-appearance-pane">
@@ -69,6 +95,15 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           }
         >
           Particle bust · experimental
+        </button>
+        <button
+          type="button"
+          disabled={busy || !hexstrikeProfile}
+          className={selected === "hexstrike" ? "active" : ""}
+          title={hexstrikeProfile ? undefined : "HexStrike suite runtime is not installed"}
+          onClick={() => void activateHexStrike()}
+        >
+          HexStrike · Daybreak
         </button>
       </div>
 
