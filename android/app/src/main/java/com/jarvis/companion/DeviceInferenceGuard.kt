@@ -32,7 +32,12 @@ object DeviceInferenceGuard {
         if (power.isPowerSaveMode) {
             return "Power saver is on. Disable power saver to run the on-device model."
         }
-        if (power.isDeviceLightIdleMode || power.isDeviceIdleMode) {
+        val deepIdle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            power.isDeviceLightIdleMode || power.isDeviceIdleMode
+        } else {
+            power.isDeviceIdleMode
+        }
+        if (deepIdle) {
             return "Device is in deep idle. Wake the phone to load the on-device model."
         }
         return null
