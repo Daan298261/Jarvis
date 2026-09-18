@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -171,6 +172,14 @@ def check_enroll_rate_limit(client_ip: str, device_fingerprint: str = "") -> Non
         bucket = get(db, "rate_limit", key) or {"attempts": []}
         attempts = [stamp for stamp in bucket["attempts"] if stamp > now - ENROLL_RATE_WINDOW_SECONDS]
         if len(attempts) >= ENROLL_RATE_LIMIT:
+            from .companion_security import GUARD
+            import asyncio
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(GUARD.report_enroll_rate_limit(client_ip))
+            except RuntimeError:
+                pass
             raise HTTPException(429, "Too many pairing attempts. Wait and try again.")
         attempts.append(now)
         put(db, "rate_limit", key, {"attempts": attempts})

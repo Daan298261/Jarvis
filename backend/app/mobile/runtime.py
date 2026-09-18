@@ -98,9 +98,11 @@ class MobileRuntime:
 
     def start(self):
         if not self.tasks:
+            from .companion_offline import start_recommended_pack_cache
             from .connectivity import CONNECTIVITY
             from .provision import recover_interrupted
             recover_interrupted()
+            start_recommended_pack_cache()
             self.tasks = [asyncio.create_task(scheduler.run()), asyncio.create_task(self.notifications()),
                           asyncio.create_task(self.reap_calls()), asyncio.create_task(self.deliver_pushes())]
             self.tasks.append(asyncio.create_task(CONNECTIVITY.run()))

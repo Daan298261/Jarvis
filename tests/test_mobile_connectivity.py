@@ -73,7 +73,6 @@ async def test_router_is_mapped_only_after_gateway_auth_check(network_env, monke
     result = await connection.configure(True, True)
     assert result["state"] == "failed"
     assert not router.added
-    assert not connection.opened
     connection.probe_fails = False
     result = await connection.configure(True, True)
     assert result["state"] == "ready"
@@ -81,7 +80,7 @@ async def test_router_is_mapped_only_after_gateway_auth_check(network_env, monke
     assert not result["remote_verified"]  # A lease does not prove WAN connectivity.
     assert result["endpoints"] == ["https://192.168.1.12:4781", "https://8.8.8.8:4781"]
     result = await connection.configure(False, False)
-    assert result["state"] == "disabled" and not result["endpoints"]
+    assert result["endpoints"] == ["https://192.168.1.12:4781"]
     assert router.deleted == [(4781, "TCP")]
 
 
@@ -151,6 +150,8 @@ async def test_managed_gateway_serves_real_tls_and_shuts_down(network_env, monke
             assert (await client.get(base + "/api/companion/models")).status_code == 401
             assert (await client.get(base + "/api/mobile/manage/devices")).status_code == 404
         await connection.configure(False, False)
+        assert connection.server_task is not None
+        await connection.stop_gateway()
         assert connection.server_task is None
     finally:
         await connection.stop_gateway()

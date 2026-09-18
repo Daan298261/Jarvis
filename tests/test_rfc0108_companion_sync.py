@@ -57,7 +57,44 @@ async def test_model_pack_catalog_metadata_only(mobile_env):
     assert body["engine"] == "llama.cpp"
     assert body["packs"]
     assert "gguf" in body["packs"][0]["filename"].lower()
-    assert all("url" in pack for pack in body["packs"])
+    for pack in body["packs"]:
+        assert pack["url"].startswith("https://")
+        assert pack["sha256"] and set(pack["sha256"]) != {"0"}
+        assert pack["size_bytes"] > 0
+        assert "leader_cache" in pack
+    recommended = next(p for p in body["packs"] if p["recommended"])
+    assert recommended["id"] == "qwen2.5-1.5b-instruct-q4"
+    assert body["leader_pack_cache"]["pack_id"] == recommended["id"]
+    assert body["leader_pack_cache"]["state"] in {"idle", "downloading", "ready", "error"}
+
+
+@pytest.mark.asyncio
+async def test_leader_pack_cache_ready_when_hash_matches(mobile_env, monkeypatch):
+    from app.mobile import companion_offline
+
+    pack = dict(companion_offline.pack_by_id("qwen2.5-1.5b-instruct-q4") or {})
+    target = companion_offline.pack_cache_path(pack)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"cached-pack-bytes")
+    pack["sha256"] = companion_offline._sha256_file(target)
+    companion_offline.COMPANION_PACK_CATALOG[0] = pack
+    status = companion_offline.leader_cache_status(pack["id"])
+    assert status["state"] == "ready"
+    assert status["bytes_done"] == pack["size_bytes"]
+    target.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_model_pack_file_requires_cache(mobile_env):
+    from app.api.companion import router
+
+    app = FastAPI()
+    app.include_router(router)
+    _, headers = _paired()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/companion/model-packs/qwen2.5-1.5b-instruct-q4/file", headers=headers)
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio

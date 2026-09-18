@@ -124,8 +124,34 @@ def models(device=Device):
 
 @router.get("/model-packs")
 def companion_model_packs(device=Device):
-    """Pinned companion GGUF catalog (metadata only — no weights on Leader)."""
+    """Pinned companion GGUF catalog with Leader cache status."""
     return companion_offline.pack_catalog()
+
+
+@router.get("/model-packs/{pack_id}/file")
+def companion_model_pack_file(pack_id: str, device=Device):
+    path = companion_offline.resolve_pack_file(pack_id)
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=path.name,
+    )
+
+
+class PinMismatchReport(BaseModel):
+    observed_pin: str = Field(min_length=64, max_length=64)
+
+
+@router.post("/security/pin-mismatch")
+async def report_pin_mismatch(body: PinMismatchReport, request: Request, device=Device):
+    from ..mobile.companion_security import GUARD
+    from ..mobile.connectivity import CONNECTIVITY
+
+    expected = (CONNECTIVITY.snapshot().get("server_pin") or "").lower()
+    if body.observed_pin.lower() != expected:
+        client_host = request.client.host if request.client else ""
+        await GUARD.report_pin_mismatch(device["id"], client_host)
+    return {"ok": True}
 
 
 class OfflineTurn(BaseModel):

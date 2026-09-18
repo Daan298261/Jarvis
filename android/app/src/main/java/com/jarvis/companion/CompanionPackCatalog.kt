@@ -26,25 +26,30 @@ data class CompanionPack(
 
 object CompanionPackCatalog {
     /** Built-in allowlist; Leader catalog merges by id (URLs/hashes from host). */
+    private const val URL_15B =
+        "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+    private const val URL_3B =
+        "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+
     val builtIn: List<CompanionPack> = listOf(
         CompanionPack(
             id = "qwen2.5-1.5b-instruct-q4",
             label = "Qwen2.5 1.5B Instruct (Q4_K_M)",
             filename = "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
-            sizeBytes = 1_050_000_000L,
+            sizeBytes = 1_117_320_736L,
             minRamMb = 3072,
-            sha256 = "",
-            url = "",
+            sha256 = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+            url = URL_15B,
             recommended = true,
         ),
         CompanionPack(
             id = "qwen2.5-3b-instruct-q4",
             label = "Qwen2.5 3B Instruct (Q4_K_M)",
             filename = "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
-            sizeBytes = 2_100_000_000L,
+            sizeBytes = 2_104_932_768L,
             minRamMb = 5120,
-            sha256 = "",
-            url = "",
+            sha256 = "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
+            url = URL_3B,
             recommended = false,
         ),
     )
