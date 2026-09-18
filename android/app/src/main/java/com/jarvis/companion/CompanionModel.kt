@@ -97,9 +97,15 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var ttsJob: Job? = null
     init {
         deviceModelChrome.actions = object : DevicePackChromeActions {
-            override fun downloadSelectedPack() = downloadCompanionPack()
-            override fun deleteSelectedPack() = deleteCompanionPack()
-            override fun selectPack(packId: String) = selectCompanionPack(packId)
+            override fun downloadSelectedPack() {
+                downloadCompanionPack()
+            }
+            override fun deleteSelectedPack() {
+                deleteCompanionPack()
+            }
+            override fun selectPack(packId: String) {
+                selectCompanionPack(packId)
+            }
         }
         viewModelScope.launch {
             state.collect { companionState ->
