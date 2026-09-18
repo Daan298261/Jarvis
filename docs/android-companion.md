@@ -2,6 +2,8 @@
 
 **MVP LAN pairing (step-by-step):** [`ANDROID_MVP_LAN_CHECKLIST.md`](ANDROID_MVP_LAN_CHECKLIST.md) — preferred `JarvisCompanion-a1be0f1.apk` (1.2.0), `192.168.x.x:4781`, six-digit code, smoke tests, emulator vs phone gaps.
 
+**Reachability (LAN / port-forward TCP 4781 / mobile-relay) and anti-impersonation:** [`rfcs/0123-companion-reachability-and-anti-impersonation.md`](rfcs/0123-companion-reachability-and-anti-impersonation.md). Offline GGUF pack: [`rfcs/0108-phone-companion-offline-ai-model.md`](rfcs/0108-phone-companion-offline-ai-model.md).
+
 The native app lives in `android/`. Keep work on `cursor/android-companion-99ea`
 until the remaining release checks below are complete. This is an implementation
 preview, not a production remote-access release.

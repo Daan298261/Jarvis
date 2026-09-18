@@ -5,8 +5,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -63,8 +61,15 @@ class MainActivity : ComponentActivity() {
         setContent {
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
+            val app = application as JarvisApp
+            val deviceChrome = app.deviceModelChrome
+            val devicePack by deviceChrome.state.collectAsStateWithLifecycle()
+            val paired = model.api.deviceId.isNotEmpty()
+            val context = LocalContext.current
+            var wasPaired by remember { mutableStateOf(model.api.deviceId.isNotEmpty()) }
+            var showPostPairPackOffer by remember { mutableStateOf(false) }
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
-            var tab by remember { mutableStateOf(if (model.api.endpoint.isEmpty()) "More" else "Home") }
+            var tab by remember { mutableStateOf("Home") }
             var pairingScanRequest by remember { mutableStateOf(false) }
             var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
             var incomingCall by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
@@ -110,6 +115,18 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 if (android.os.Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
+            LaunchedEffect(paired, state.busy, state.error, devicePack.status) {
+                if (!wasPaired && paired && !state.busy && state.error == null) {
+                    if (PostPairPackOfferPrefs.shouldOffer(context, model.api.deviceId, devicePack.status)) {
+                        showPostPairPackOffer = true
+                    }
+                    wasPaired = true
+                } else if (paired) {
+                    wasPaired = true
+                }
+            }
+            val postPairPackOffer = remember(showPostPairPackOffer, devicePack) { recommendedPackOffer(model) }
+            val postPairSizeMb = postPairPackOffer?.sizeBytes?.let { formatPackCatalogSizeMb(it) }
             LaunchedEffect(latestIntent) {
                 val delivered = latestIntent ?: return@LaunchedEffect
                 delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
@@ -138,6 +155,23 @@ class MainActivity : ComponentActivity() {
                 delivered.clipData = null
             }
             MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel, onSurface = Color(0xFFE7EDF5), secondary = Color(0xFF74DCCD))) {
+                PostPairOfflinePackOfferDialog(
+                    visible = showPostPairPackOffer && postPairPackOffer != null,
+                    packLabel = postPairPackOffer?.label ?: "",
+                    sizeMbText = postPairSizeMb,
+                    onDownload = {
+                        val deviceId = model.api.deviceId
+                        val offer = postPairPackOffer
+                        showPostPairPackOffer = false
+                        PostPairPackOfferPrefs.markHandled(context, deviceId)
+                        offer?.id?.let { deviceChrome.selectPack(it) }
+                        deviceChrome.downloadSelectedPack()
+                    },
+                    onDismiss = {
+                        showPostPairPackOffer = false
+                        PostPairPackOfferPrefs.markHandled(context, model.api.deviceId)
+                    },
+                )
                 if (incomingCall != null) AlertDialog(onDismissRequest = { incomingCall = null }, title = { Text("Jarvis is calling") },
                     text = { Text("Answer to discuss the event. Your microphone stays off until you answer.") },
                     confirmButton = { TextButton(onClick = { callPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Answer") } },
@@ -212,6 +246,7 @@ class MainActivity : ComponentActivity() {
                                 )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                                if (state.lanLabel.isNotEmpty()) Text(state.lanLabel, fontSize = 13.sp, color = Gold, modifier = Modifier.padding(bottom = 8.dp))
                                 if (!state.connected) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                                         Button(
@@ -227,8 +262,10 @@ class MainActivity : ComponentActivity() {
                                             Text("Enter code")
                                         }
                                     }
+                                    TextButton(onClick = { model.startLanScan() }, enabled = !state.busy && state.lanStatus != "scanning") {
+                                        Text(if (state.lanStatus == "scanning") "Scanning Wi‑Fi…" else "Scan this Wi‑Fi again")
+                                    }
                                 } else {
-                                    ConversationPickers(state, model::selectModel, model::selectVoice)
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
                                         Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
                                             Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else "Talk to Jarvis")
@@ -241,6 +278,23 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "Chat" -> {
+                                offlineChatBanner(state.connected, paired, devicePack.status)?.let { bannerText ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2838)),
+                                    ) {
+                                        Column(Modifier.padding(12.dp)) {
+                                            Text("OFFLINE MODE", color = Gold, fontSize = 10.sp, letterSpacing = 1.sp)
+                                            Text(bannerText, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                                            if (devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null) {
+                                                LinearProgressIndicator(
+                                                    progress = { devicePack.downloadProgress!!.coerceIn(0f, 1f) },
+                                                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 ConversationPickers(state, model::selectModel, model::selectVoice)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     TextButton(onClick = { model.openConversation(null) }) { Text("New conversation") }
@@ -284,57 +338,13 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
-                            "More" -> MoreScreen(model, state, pairingScanRequest) { pairingScanRequest = false }
+                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, pairingScanRequest) { pairingScanRequest = false }
                         }
                     }
                 }
             }
         }
     }
-}
-
-@Composable private fun PresenceHud(mode: String, connected: Boolean, phase: String) {
-    var web by remember { mutableStateOf<WebView?>(null) }
-    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    fun pushState(view: WebView?) {
-        val target = view ?: return
-        target.evaluateJavascript("window.setJarvisConnected && window.setJarvisConnected($connected)", null)
-        target.evaluateJavascript("window.setJarvisAppearance && window.setJarvisAppearance(${JSONObject.quote(mode)})", null)
-        target.evaluateJavascript("window.setJarvisPhase && window.setJarvisPhase(${JSONObject.quote(phase)})", null)
-    }
-    DisposableEffect(owner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) web?.onPause()
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) web?.onResume()
-        }
-        owner.lifecycle.addObserver(observer)
-        onDispose { owner.lifecycle.removeObserver(observer); web?.destroy(); web = null }
-    }
-    LaunchedEffect(mode, connected, phase, web) { pushState(web) }
-    AndroidView(modifier = Modifier.fillMaxWidth().height(310.dp), factory = { context ->
-        WebView(context).apply {
-            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-            val loader = androidx.webkit.WebViewAssetLoader.Builder()
-                .addPathHandler("/assets/", androidx.webkit.WebViewAssetLoader.AssetsPathHandler(context)).build()
-            web = this
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            settings.javaScriptEnabled = true
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.domStorageEnabled = false
-            webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest) = true
-                override fun shouldInterceptRequest(view: WebView, request: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? {
-                    return loader.shouldInterceptRequest(request.url)
-                        ?: android.webkit.WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
-                }
-                override fun onPageFinished(view: WebView, url: String?) {
-                    pushState(view)
-                }
-            }
-            loadUrl("https://appassets.androidplatform.net/assets/orb/index.html")
-        }
-    }, update = { pushState(it) })
 }
 
 @Composable private fun ConversationPickers(
@@ -404,6 +414,95 @@ private fun inferenceStatus(state: CompanionState): String {
             }
         }
     }
+}
+
+@Composable private fun CompanionModelsSection(
+    chrome: CompanionDeviceModelChrome,
+    devicePack: DevicePackChromeState,
+    busy: Boolean,
+) {
+    Text("Models (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(
+        "When the Leader is unreachable, the companion can answer using a downloaded model pack (RFC-0108).",
+        color = Muted,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Status · ${devicePackStatusLabel(devicePack.status)}", color = Gold, fontSize = 11.sp, letterSpacing = 1.sp)
+            Text(devicePack.selectedPackLabel.ifBlank { "No pack selected" }, fontWeight = FontWeight.Medium)
+            Text(formatStorageBytes(devicePack.bytesOnDisk), color = Muted, fontSize = 12.sp)
+            devicePack.error?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
+            if (devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null) {
+                LinearProgressIndicator(
+                    progress = { devicePack.downloadProgress!!.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("${(devicePack.downloadProgress!! * 100).toInt()}%", color = Muted, fontSize = 11.sp)
+            }
+            if (devicePack.availablePacks.isNotEmpty()) {
+                var packMenu by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedButton(onClick = { packMenu = true }) {
+                        Text("Pack · ${devicePack.selectedPackLabel.take(28).ifBlank { "Select" }} ▾")
+                    }
+                    DropdownMenu(packMenu, { packMenu = false }) {
+                        devicePack.availablePacks.forEach { pack ->
+                            DropdownMenuItem(
+                                text = { Text(pack.label) },
+                                onClick = {
+                                    packMenu = false
+                                    chrome.selectPack(pack.id)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { chrome.downloadSelectedPack() },
+                    enabled = !busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        when (devicePack.status) {
+                            DevicePackStatus.MISSING, DevicePackStatus.ERROR -> "Download pack"
+                            DevicePackStatus.DOWNLOADING -> "Downloading…"
+                            else -> "Re-download pack"
+                        },
+                    )
+                }
+                OutlinedButton(
+                    onClick = { chrome.deleteSelectedPack() },
+                    enabled = !busy && devicePack.bytesOnDisk > 0 && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Delete pack") }
+            }
+            if (!devicePack.nativeRuntimeBundled) {
+                Text(
+                    "On-device runtime not reported yet. D1 binds pack download/generation to this surface.",
+                    color = Muted,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}
+
+private fun devicePackStatusLabel(status: DevicePackStatus): String = when (status) {
+    DevicePackStatus.MISSING -> "missing"
+    DevicePackStatus.DOWNLOADING -> "downloading"
+    DevicePackStatus.READY -> "ready"
+    DevicePackStatus.RUNNING -> "running"
+    DevicePackStatus.ERROR -> "error"
+}
+
+private fun formatStorageBytes(bytes: Long): String {
+    if (bytes <= 0) return "Storage used · 0 B"
+    val mb = bytes.toDouble() / (1024.0 * 1024.0)
+    return if (mb >= 1024) "Storage used · ${"%.2f".format(mb / 1024)} GiB" else "Storage used · ${"%.1f".format(mb)} MiB"
 }
 
 @Composable private fun InfoCard(title: String, text: String) {
@@ -566,6 +665,8 @@ private fun inferenceStatus(state: CompanionState): String {
 @Composable private fun MoreScreen(
     model: CompanionModel,
     state: CompanionState,
+    deviceChrome: CompanionDeviceModelChrome,
+    devicePack: DevicePackChromeState,
     openPairingScanner: Boolean = false,
     onPairingScannerConsumed: () -> Unit = {},
 ) {
@@ -676,6 +777,7 @@ private fun inferenceStatus(state: CompanionState): String {
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Calls for critical events", Modifier.weight(1f)); Switch(device?.optBoolean("critical_calls") == true, { model.preferences(device?.optBoolean("notifications") == true, it) }, enabled = state.connected) }
             if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text("Background push needs the Jarvis push service configured.", color = Muted, fontSize = 12.sp)
         }
+        item { CompanionModelsSection(deviceChrome, devicePack, state.busy) }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
@@ -683,8 +785,6 @@ private fun inferenceStatus(state: CompanionState): String {
                 FilterChip(state.presenceMode == "orb", { model.selectPresence("orb") }, { Text("Glowing orb") })
                 FilterChip(state.presenceMode == "humanoid", { model.selectPresence("humanoid") }, { Text("Humanoid HUD") })
             }
-            Text("Conversation model", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-            ConversationPickers(state, model::selectModel, model::selectVoice)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(onClick = { model.previewVoice(state.selectedVoice) },

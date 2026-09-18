@@ -9,7 +9,8 @@ from typing import Any, Awaitable, Callable, Iterable
 from ..agent.compaction import compact_history
 from ..agent.context_policy import CONTEXT_LONG, CONTEXT_NORMAL, CONTEXT_SIMPLE, profile_cap
 from ..config import AppSettings
-from .context_window import CHARS_PER_TOKEN
+from .context_window import CHARS_PER_TOKEN, is_n_keep_overflow
+from .inference_prompt import inference_message_text
 from ..providers.base import ChatMessage
 from .profiles import ModelProfile
 
@@ -77,6 +78,8 @@ _OVERFLOW_MARKERS = (
 
 
 def is_context_overflow(exc: BaseException) -> bool:
+    if is_n_keep_overflow(getattr(exc, "body", None)) or is_n_keep_overflow(exc):
+        return True
     text = str(exc).lower()
     body = getattr(exc, "body", None)
     if body is not None:
@@ -88,10 +91,7 @@ def is_context_overflow(exc: BaseException) -> bool:
 
 
 def _message_text(message: ChatMessage) -> str:
-    content = message.content
-    if isinstance(content, str):
-        return content
-    return json.dumps(content, ensure_ascii=False)
+    return inference_message_text(message)
 
 
 def estimate_text_tokens(text: str, *, chars_per_token: int = CHARS_PER_TOKEN) -> int:
@@ -252,7 +252,7 @@ async def recover_context_after_overflow(
     manager: Any,
     working_state_block: str | None = None,
     emit: ContextEventEmitter | None = None,
-) -> tuple[list[ChatMessage], bool]:
+) -> tuple[list[ChatMessage], list[dict[str, Any]] | None, bool]:
     """Compact and expand after a recoverable overflow error (same-model recovery only)."""
     budget = calculate_prompt_budget(
         messages,
@@ -266,7 +266,12 @@ async def recover_context_after_overflow(
 
     if emit:
         await emit("context_compaction_started", budget, "post-overflow compact")
-    messages = compact_history(messages, working_state_block=working_state_block)
+    messages = compact_history(
+        messages,
+        working_state_block=working_state_block,
+        drop_head_injections=True,
+    )
+    tools = None
 
     cap = profile_cap(profile)
     budget = calculate_prompt_budget(
@@ -300,11 +305,11 @@ async def recover_context_after_overflow(
         active_context=manager.live_context_size(),
     )
     if budget.pressure < PRESSURE_EXPAND_OK:
-        return messages, True
+        return messages, tools, True
 
     if emit:
         await emit("context_recovery_failed", budget, "recovery exhausted")
-    return messages, False
+    return messages, tools, False
 
 
 # Re-export for compaction module compatibility

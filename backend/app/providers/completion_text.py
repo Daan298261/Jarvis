@@ -85,9 +85,10 @@ def _stringify(value: Any, *, include_reasoning: bool) -> str:
     return str(value) if value else ""
 
 
-def strip_think_blocks(text: str) -> str:
+def strip_think_blocks(text: str, *, trim: bool = True) -> str:
     cleaned = _THINK_BLOCK_RE.sub("", text or "")
-    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip() if trim else cleaned
 
 
 def reasoning_text_from_payload(payload: dict[str, Any] | None) -> str:

@@ -5,7 +5,7 @@
 **Author:** Jarvis Architect
 **Date:** 2026-09-16
 
-**Related (do not rewrite):** RFC-0059 installer integration onboarding (**implemented**). This RFC does **not** fold voice / TTS / RFC-0092.
+**Related (do not rewrite):** RFC-0059 installer integration onboarding (**implemented**). This RFC does **not** fold voice / TTS / RFC-0092. [RFC-0124](0124-clean-install-reinstall-owned-path-wipe.md) is the owner-facing Clean Install / Reinstall button + owned-path registry wipe **on top of this RFC** — do not rewrite 0093 there.
 
 This PR is **specs-only**. Product code is a follow-up implement ticket. Do not edit `installer/windows/` in this PR.
 

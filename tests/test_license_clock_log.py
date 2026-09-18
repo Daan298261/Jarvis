@@ -15,9 +15,10 @@ def ato_store(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_utc_day_rollback_locks_licensed_modules(ato_store):
-    issue_license(law_enforcement=True, blue_team=True, red_team=True, install=True)
+def test_utc_day_rollback_locks_licensed_modules(ato_store, monkeypatch):
     trusted = datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr("app.policy.cyber_ato._utcnow", lambda: trusted)
+    issue_license(law_enforcement=True, blue_team=True, red_team=True, install=True)
     inspect_clock(now=trusted, local_offset=120, record=True)
     assert evaluate(now=trusted).valid is True
     assert role_allowed("blue-team", now=trusted) is True
@@ -38,9 +39,10 @@ def test_utc_day_rollback_locks_licensed_modules(ato_store):
     assert role_allowed("blue-team", now=trusted) is True
 
 
-def test_timezone_offset_only_does_not_lock(ato_store):
-    issue_license(law_enforcement=False, blue_team=True, install=True)
+def test_timezone_offset_only_does_not_lock(ato_store, monkeypatch):
     now = datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr("app.policy.cyber_ato._utcnow", lambda: now)
+    issue_license(law_enforcement=False, blue_team=True, install=True)
     first = inspect_clock(now=now, local_offset=120, record=True)
     assert first.locked is False
     second = inspect_clock(now=now, local_offset=-240, record=True)

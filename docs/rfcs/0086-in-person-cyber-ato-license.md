@@ -5,6 +5,8 @@
 **Author:** Taco (in-person verification) via Cursor  
 **Date:** 2026-09-14
 
+**Successor (capability unlock):** [RFC-0119](0119-license-package-entitlements-and-release-unrestricted.md) retires **password gates** for unlocking Blue/Red/HexStrike/modules. Keep this RFC’s signed ATO, `law_enforcement`, `modules[]`, expiry/renewal, and “cannot issue Red without LE.” Do not treat a password toggle as the product gate.
+
 ## Problem
 
 `SECURITY_AGENTS.md` §3.2 requires an authorization artifact Taco provides before Red runtime is allowed. Today only a password gate exists. That is not in-person verification, has no law-enforcement flag, and has no ATO expiry/renewal. Blue/Red specialist routing can be unlocked with a password alone.

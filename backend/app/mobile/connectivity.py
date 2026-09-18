@@ -16,7 +16,9 @@ import httpx
 import uvicorn
 from fastapi import HTTPException
 
+from .companion_security import GUARD
 from .gateway import gateway_app, server_identity
+from .lan_beacon import LanBeaconServer, public_beacon_payload
 from .store import database, get, put
 
 PORT = 4781
@@ -84,17 +86,29 @@ class Connectivity:
         self.marker = ""
         self.identity = None
         self.public_ip = None
-        self.state = {"state": "disabled", "activity": "Prepare a secure connection to get started", "endpoints": []}
+        self.remote_prepared = False
+        self.state = {
+            "state": "starting",
+            "activity": "Starting companion TLS gateway",
+            "endpoints": [],
+        }
+        self.lan_beacon = LanBeaconServer()
 
     def report(self, **changes):
         self.state.update(changes, updated_at=time.time())
 
     def snapshot(self):
-        return {**self.state, "heartbeat_at": time.time(), "worker": "Jarvis desktop"}
+        payload = {**self.state, "heartbeat_at": time.time(), "worker": "Jarvis desktop"}
+        payload.update(GUARD.snapshot())
+        return payload
 
     def config(self):
         with database() as db:
-            return get(db, "network", "config") or {"enabled": False, "remote": True, "marker": "Jarvis-" + str(uuid.uuid4())}
+            return get(db, "network", "config") or {
+                "enabled": True,
+                "remote": False,
+                "marker": "Jarvis-" + str(uuid.uuid4()),
+            }
 
     async def configure(self, enabled: bool, remote: bool):
         if self.lock.locked():
@@ -104,10 +118,11 @@ class Connectivity:
             config.update(enabled=enabled, remote=remote)
             with database() as db:
                 put(db, "network", "config", config)
-            await self.apply(config)
+            await self.apply_remote(config)
         return self.snapshot()
 
     async def stop_gateway(self):
+        await self.stop_lan_beacon()
         if self.server:
             self.server.should_exit = True
         if self.server_task:
@@ -118,6 +133,18 @@ class Connectivity:
                 await asyncio.gather(self.server_task, return_exceptions=True)
         self.server = self.server_task = None
 
+    async def start_lan_beacon(self):
+        try:
+            await self.lan_beacon.start(lambda: public_beacon_payload(self.snapshot()))
+        except Exception:
+            pass
+
+    async def stop_lan_beacon(self):
+        try:
+            await self.lan_beacon.stop()
+        except Exception:
+            pass
+
     async def release_mapping(self):
         if self.router:
             try:
@@ -125,6 +152,16 @@ class Connectivity:
             except Exception:
                 pass  # Finite lease expires if the router is unavailable during shutdown.
             self.router = None
+
+    async def on_security_cooldown(self):
+        await self.stop_gateway()
+        self.report(
+            state="cooldown",
+            activity="Companion gateway paused after a security alert",
+            endpoints=[],
+            local_verified=False,
+            remote_verified=False,
+        )
 
     async def start_gateway(self, identity):
         from ..config import load_settings
@@ -172,17 +209,54 @@ class Connectivity:
         if result.status_code != 401:
             raise RuntimeError("Mobile gateway is not enforcing device authentication or desktop API is unavailable")
 
-    async def apply(self, config):
-        await self.release_mapping()
-        if not config["enabled"]:
-            await self.stop_gateway()
-            self.report(state="disabled", activity="Mobile gateway stopped", endpoints=[], local_verified=False, remote_verified=False)
+    def _lan_endpoints(self, hosts: list[str]) -> list[str]:
+        return [f"https://{host}:{PORT}" for host in hosts]
+
+    async def ensure_gateway_listening(self):
+        if GUARD.cooldown_active():
             return
-        self.report(state="running", activity="Finding local connection addresses", started_at=time.time(),
-                    endpoints=[], local_verified=False, remote_verified=False, router="disabled", limitation="")
+        hosts = await asyncio.to_thread(lan_hosts)
+        relay = os.environ.get("JARVIS_RELAY_ENDPOINT", "")
+        relay_host = ""
+        if relay:
+            try:
+                relay_host = urlsplit(origin(relay)).hostname or ""
+                if relay_host:
+                    hosts.append(relay_host)
+            except ValueError:
+                relay_host = ""
+        identity = await asyncio.to_thread(server_identity, hosts)
+        self.identity = identity
+        await self.start_gateway(identity)
+        await self.probe(f"https://127.0.0.1:{PORT}", identity)
+        endpoints = self._lan_endpoints([host for host in hosts if host and host != self.public_ip and host != relay_host])
+        self.report(
+            state="listening",
+            activity="Companion TLS gateway listening on port 4781",
+            endpoints=endpoints,
+            local_verified=True,
+            server_pin=identity["server_pin"],
+        )
+
+    async def apply_remote(self, config):
+        """Prepare connection: port-forward lease and relay only (gateway already listens)."""
+        await self.release_mapping()
+        self.remote_prepared = False
+        if not config["enabled"]:
+            self.report(
+                limitation="",
+                router="disabled",
+                remote_verified=False,
+            )
+            if self.identity:
+                hosts = await asyncio.to_thread(lan_hosts)
+                self.report(endpoints=self._lan_endpoints(hosts))
+            return
+        self.report(activity="Finding phone-reachable addresses", router="disabled", limitation="", remote_verified=False)
         router, public_ip = None, None
         hosts = await asyncio.to_thread(lan_hosts)
         relay = os.environ.get("JARVIS_RELAY_ENDPOINT", "") if config["remote"] else ""
+        endpoints = self._lan_endpoints(hosts)
         try:
             relay = origin(relay) if relay else ""
             if relay:
@@ -194,20 +268,22 @@ class Connectivity:
                     hosts.append(public_ip)
                 except Exception as exc:
                     self.report(router="unavailable", limitation=str(exc)[:240])
-            self.report(activity="Starting and verifying the encrypted mobile gateway")
-            identity = await asyncio.to_thread(server_identity, hosts)
-            self.identity = identity
-            self.public_ip = public_ip
-            await self.start_gateway(identity)
+            if not self.identity or GUARD.cooldown_active():
+                await self.ensure_gateway_listening()
+            identity = self.identity
+            if not identity:
+                raise RuntimeError("Companion gateway is not listening")
             await self.probe(f"https://127.0.0.1:{PORT}", identity)
-            local = [f"https://{host}:{PORT}" for host in hosts if host != public_ip and host != urlsplit(relay).hostname]
-            endpoints = list(local)
+            relay_hostname = urlsplit(relay).hostname if relay else None
+            endpoints = self._lan_endpoints([host for host in hosts if host != public_ip and host != relay_hostname])
             self.report(local_verified=True, server_pin=identity["server_pin"], endpoints=endpoints)
+            await self.start_lan_beacon()
             if router:
                 self.report(activity="Requesting a one-hour lease for the TLS gateway")
                 try:
                     await asyncio.to_thread(map_router, router, config["marker"])
                     self.router, self.marker = router, config["marker"]
+                    self.public_ip = public_ip
                     endpoints.append(f"https://{public_ip}:{PORT}")
                     self.report(router="mapped", limitation="Router lease created; internet reachability still needs verification from outside this network")
                 except Exception as exc:
@@ -221,33 +297,58 @@ class Connectivity:
                 except Exception:
                     self.report(limitation="Configured relay did not reach this gateway; check relay service and credentials")
             if config["remote"] and not relay and not self.router:
-                self.report(limitation=self.state["limitation"] + ". Hosted relay is not configured on this installation.")
-            self.report(state="ready", activity="Secure connection prepared" if endpoints else "No phone-reachable address found; connect this desktop to a local network",
-                        endpoints=endpoints, next_renewal_at=time.time() + 1200)
+                prior = self.state.get("limitation") or ""
+                self.report(limitation=(prior + ". Hosted relay is not configured on this installation.").strip(". "))
+            self.remote_prepared = True
+            self.report(
+                state="ready",
+                activity="Secure connection prepared" if endpoints else "No phone-reachable address found; connect this desktop to a local network",
+                endpoints=endpoints,
+                next_renewal_at=time.time() + 1200,
+            )
         except Exception as exc:
             await self.release_mapping()
-            await self.stop_gateway()
-            self.report(state="failed", activity=str(exc)[:300], endpoints=[], local_verified=False)
+            self.report(state="failed", activity=str(exc)[:300], endpoints=endpoints, local_verified=bool(self.server_task))
+
+    async def apply(self, config):
+        """Backward-compatible entry: refresh remote access without stopping LAN listen."""
+        await self.apply_remote(config)
 
     async def run(self):
+        GUARD.bind_connectivity(self)
         try:
             while True:
                 async with self.lock:
-                    config = self.config()
-                    if config["enabled"]:
-                        if self.state["state"] != "ready":
-                            await self.apply(config)
-                        elif time.time() >= self.state.get("next_renewal_at", 0):
-                            # Renew without restarting the TLS listener or interrupting uploads/calls.
+                    if GUARD.cooldown_active():
+                        if self.server_task:
+                            await self.stop_gateway()
+                        self.report(
+                            state="cooldown",
+                            activity="Companion gateway paused after a security alert",
+                            cooldown_remaining_seconds=GUARD.cooldown_remaining_seconds(),
+                        )
+                    else:
+                        if not self.server_task or self.server_task.done():
                             try:
-                                await self.probe(f"https://127.0.0.1:{PORT}", self.identity)
-                                if self.router:
-                                    if await asyncio.to_thread(self.router.externalipaddress) != self.public_ip:
-                                        raise RuntimeError("Router address changed")
-                                    await asyncio.to_thread(map_router, self.router, self.marker)
-                                self.report(next_renewal_at=time.time() + 1200)
-                            except Exception:
-                                await self.apply(config)
+                                await self.ensure_gateway_listening()
+                            except Exception as exc:
+                                self.report(state="failed", activity=str(exc)[:300])
+                        config = self.config()
+                        if config["enabled"]:
+                            if self.state.get("state") == "cooldown":
+                                pass
+                            elif self.state.get("state") != "ready" or not self.remote_prepared:
+                                await self.apply_remote(config)
+                            elif time.time() >= self.state.get("next_renewal_at", 0):
+                                try:
+                                    await self.probe(f"https://127.0.0.1:{PORT}", self.identity)
+                                    if self.router:
+                                        if await asyncio.to_thread(self.router.externalipaddress) != self.public_ip:
+                                            raise RuntimeError("Router address changed")
+                                        await asyncio.to_thread(map_router, self.router, self.marker)
+                                    self.report(next_renewal_at=time.time() + 1200)
+                                except Exception:
+                                    await self.apply_remote(config)
                 await asyncio.sleep(30)
         finally:
             await self.release_mapping()

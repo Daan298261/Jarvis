@@ -4,6 +4,7 @@ from typing import Any, Iterable
 
 from ..tools.mcp_runtime import MCP
 from ..tools.registry import REGISTRY
+from ..policy.cyber_ato import licensed_module_allowed
 from ..inference.security_gates import gate_is_enabled
 
 # Task class → native tools Jarvis should send to the model.
@@ -60,13 +61,21 @@ RESTRICTED_TOOLS = frozenset({"hexstrike_defensive"})
 
 def _enabled_native(security_role: str = "") -> list[str]:
     blue = security_role == "blue-team" and gate_is_enabled("blue-team")
-    return [
-        name
-        for name, tool in REGISTRY.tools.items()
-        if tool.enabled
-        and name != ESCAPE_TOOL
-        and (name not in RESTRICTED_TOOLS or blue)
-    ]
+    hexstrike = licensed_module_allowed("hexstrike")
+    names: list[str] = []
+    for name, tool in REGISTRY.tools.items():
+        if not tool.enabled or name == ESCAPE_TOOL:
+            continue
+        if name in RESTRICTED_TOOLS:
+            if blue:
+                names.append(name)
+            continue
+        if name == "hexstrike_operator":
+            if hexstrike:
+                names.append(name)
+            continue
+        names.append(name)
+    return names
 
 
 def is_full_exposure(task_class: str, extra: Iterable[str] | None = None) -> bool:
@@ -94,14 +103,33 @@ def normalize_capabilities(raw: Iterable[str] | str | None) -> list[str]:
     return out
 
 
+def infer_needs_tools(task_class: str, prompt: str | None, *, explicit: bool | None = None) -> bool:
+    """RFC-0122: plain Q&A should not ship tool schemas."""
+    if explicit is not None:
+        return bool(explicit)
+    from .ingress_gate import heuristic_needs_tools
+
+    hint = heuristic_needs_tools(prompt or "", task_class)
+    if hint is not None:
+        return bool(hint)
+    if is_full_exposure(task_class, ()):
+        return True
+    if (task_class or "").strip().lower() == "conversation":
+        return False
+    return True
+
+
 def tool_names_for(
     task_class: str,
     extra: Iterable[str] | None = None,
     *,
     security_role: str = "",
     prompt: str | None = None,
+    needs_tools: bool | None = None,
 ) -> list[str]:
     extras = normalize_capabilities(extra)
+    if not infer_needs_tools(task_class, prompt, explicit=needs_tools):
+        return []
     if is_full_exposure(task_class, extras):
         return _enabled_native(security_role)
     wanted = list(CLASS_TOOLS.get((task_class or "").strip().lower(), ("filesystem", "python")))
@@ -121,8 +149,9 @@ def tool_names_for(
         wanted.append("hexstrike_operator")
     enabled = set(_enabled_native(security_role))
     names = [name for name in wanted if name in enabled]
-    if "filesystem" not in names and "filesystem" in enabled:
-        names.insert(0, "filesystem")
+    if (task_class or "").strip().lower() != "conversation":
+        if "filesystem" not in names and "filesystem" in enabled:
+            names.insert(0, "filesystem")
     return names
 
 
@@ -132,9 +161,21 @@ def schemas_for(
     *,
     security_role: str = "",
     prompt: str | None = None,
+    needs_tools: bool | None = None,
 ) -> list[dict[str, Any]]:
     extras = normalize_capabilities(extra)
-    names = tool_names_for(task_class, extras, security_role=security_role, prompt=prompt)
+    if not infer_needs_tools(task_class, prompt, explicit=needs_tools):
+        schemas: list[dict[str, Any]] = []
+        if "request_capability" in REGISTRY.tools and REGISTRY.tools["request_capability"].enabled:
+            schemas.append(REGISTRY.tools["request_capability"].schema())
+        return schemas
+    names = tool_names_for(
+        task_class,
+        extras,
+        security_role=security_role,
+        prompt=prompt,
+        needs_tools=needs_tools,
+    )
     full = is_full_exposure(task_class, extras)
     schemas: list[dict[str, Any]] = []
     if not full:
@@ -158,8 +199,17 @@ def describe_exposure(
     *,
     security_role: str = "",
     prompt: str | None = None,
+    needs_tools: bool | None = None,
 ) -> str:
-    names = tool_names_for(task_class, extra, security_role=security_role, prompt=prompt)
+    if not infer_needs_tools(task_class, prompt, explicit=needs_tools):
+        return "Tool exposure: none for this factual Q&A turn (RFC-0122). Call request_capability only if you must opt into tools."
+    names = tool_names_for(
+        task_class,
+        extra,
+        security_role=security_role,
+        prompt=prompt,
+        needs_tools=needs_tools,
+    )
     full = is_full_exposure(task_class, extra)
     listed = ", ".join(names) or "(none)"
     if full:

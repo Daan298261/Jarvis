@@ -40,7 +40,7 @@ class HexStrikeDefensiveTool(Tool):
         action = str(kwargs.get("action") or "")
         if role != "blue-team" or not gate_is_enabled("blue-team"):
             audit_hexstrike("defensive_tool_denied", role=role, capability=action)
-            return ToolResult(False, "", error="HexStrike defensive actions require an unlocked blue-team task.")
+            return ToolResult(False, "", error="HexStrike defensive actions require a blue-team task and Blue team on the license package.")
         capability = CAPABILITY_BY_ID.get(action)
         if capability is None:
             audit_hexstrike("defensive_tool_denied", role=role, capability=action, reason="unknown_action")

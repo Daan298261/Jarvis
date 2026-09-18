@@ -104,12 +104,13 @@ TOPICS: tuple[HelpTopic, ...] = (
         href="/hud?view=hexstrike",
         keywords=("hexstrike", "blue team", "defensive", "cve", "forensics", "container", "lan"),
         body=(
-            "Daybreak Blue installs the reviewed HexStrike commit into `runtime/hexstrike-ai` and "
-            "binds it to `127.0.0.1` only. Unlock the Blue gate, grant `cyber.hexstrike` and the "
-            "requested Blue permission, then attest an owned private-LAN, local path, container "
-            "image, or local-infrastructure scope. Only the listed typed defensive actions are "
-            "available. Public targets, arbitrary flags, commands, payloads, credential attacks, "
-            "exploit routes, and upstream MCP registration are always rejected."
+            "Daybreak Blue and HexStrike require the hexstrike and blue-team modules on your installed "
+            "license package (License page). When the suite is loaded, Jarvis explains what HexStrike "
+            "does on this PC: loopback-only operator jobs, install/repair, tool availability, and "
+            "bringing logs back into Daybreak and chat — not exploit walkthroughs. Grant cyber.hexstrike "
+            "and the requested Blue permission, then attest an owned private-LAN, local path, container "
+            "image, or local-infrastructure scope. Public targets, arbitrary flags, commands, credential "
+            "attacks, exploit routes, and upstream MCP registration are always rejected."
         ),
     ),
 )

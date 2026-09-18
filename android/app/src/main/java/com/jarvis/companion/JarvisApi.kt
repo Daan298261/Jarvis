@@ -103,6 +103,15 @@ class JarvisApi(context: Context) {
         return device
     }
 
+    suspend fun lanEnroll(): JSONObject {
+        val body = JSONObject().put("public_key", publicKey()).put("name", android.os.Build.MODEL)
+        val result = raw("/lan-enroll", "POST", body.toString().toByteArray(), false)
+        val device = JSONObject(result.toString(Charsets.UTF_8))
+        deviceId = device.getString("id")
+        prefs.edit().putString("device", deviceId).apply()
+        return device
+    }
+
     suspend fun session() = sessionLock.withLock {
         if (token.isNotEmpty() && System.currentTimeMillis() < expiresAt) return@withLock
         check(deviceId.isNotEmpty()) { "Pair this phone first" }

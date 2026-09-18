@@ -672,12 +672,14 @@
 
 /* Humanoid mode is a full-stage scene. HUD copy and chat float above it. */
 @media (min-width: 761px) {
-  .hud-center:has(.jarvis-presence-humanoid) {
+  .hud-center:has(.jarvis-presence-humanoid),
+  .hud-center:has(.jarvis-presence-neural) {
     align-items: stretch;
     overflow: hidden;
   }
 
-  .hud-home:has(.jarvis-presence-humanoid) {
+  .hud-home:has(.jarvis-presence-humanoid),
+  .hud-home:has(.jarvis-presence-neural) {
     position: relative;
     display: block;
     height: 100%;
@@ -686,7 +688,8 @@
     overflow: hidden;
   }
 
-  .hud-home:has(.jarvis-presence-humanoid) > .hud-orb-zone {
+  .hud-home:has(.jarvis-presence-humanoid) > .hud-orb-zone,
+  .hud-home:has(.jarvis-presence-neural) > .hud-orb-zone {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -695,7 +698,8 @@
     max-height: none;
   }
 
-  .hud-home:has(.jarvis-presence-humanoid) .hud-orb-caption {
+  .hud-home:has(.jarvis-presence-humanoid) .hud-orb-caption,
+  .hud-home:has(.jarvis-presence-neural) .hud-orb-caption {
     position: absolute;
     left: 50%;
     bottom: clamp(146px, 17dvh, 210px);
@@ -704,7 +708,8 @@
     transform: translateX(-50%);
   }
 
-  .hud-home:has(.jarvis-presence-humanoid) > .hud-chat {
+  .hud-home:has(.jarvis-presence-humanoid) > .hud-chat,
+  .hud-home:has(.jarvis-presence-neural) > .hud-chat {
     position: absolute;
     z-index: 8;
     left: 50%;
@@ -1418,7 +1423,8 @@
     max-height: min(54dvh, 40vw);
   }
 
-  .hud-orb-zone:has(.jarvis-presence-humanoid) {
+  .hud-orb-zone:has(.jarvis-presence-humanoid),
+  .hud-orb-zone:has(.jarvis-presence-neural) {
     flex: 1 1 auto;
     min-height: 0;
     max-height: none;

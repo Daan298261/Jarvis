@@ -384,12 +384,21 @@ class HexStrikeManager:
                     snapshot.last_error = self.last_error
                     log.exception("HexStrike MCP/catalog refresh after start failed")
                 audit_hexstrike("started", pid=snapshot.pid, port=snapshot.port)
+                try:
+                    from ..persona.hexstrike_overview import maybe_publish_hexstrike_load_overview
+
+                    await maybe_publish_hexstrike_load_overview(process_pid=snapshot.pid)
+                except Exception:
+                    log.debug("HexStrike load overview skipped", exc_info=True)
             else:
                 audit_hexstrike("start_failed", error=self.last_error)
             return snapshot
 
     async def stop(self) -> HexStrikeStatus:
         async with self._lock:
+            from ..persona.hexstrike_overview import reset_hexstrike_overview_state
+
+            reset_hexstrike_overview_state()
             await self._stop_unlocked()
             self.last_error = ""
             try:

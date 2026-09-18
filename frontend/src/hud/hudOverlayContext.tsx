@@ -12,6 +12,8 @@ type HudOverlayContextValue = {
   setHexSuiteExpanded: (expanded: boolean) => void
   /** Close other HUD chrome and show the Daybreak / HexStrike panel. */
   focusHexSuite: () => void
+  /** Expand or collapse the Daybreak / HexStrike operator panel. */
+  toggleHexSuite: () => void
   /** Call when Admin, Help, Activity, System, or model menu opens. */
   dismissHexSuiteForOverlay: () => void
 }
@@ -29,14 +31,19 @@ export function HudOverlayProvider({ children }: { children: ReactNode }) {
     setHexSuiteExpanded(true)
   }, [])
 
+  const toggleHexSuite = useCallback(() => {
+    setHexSuiteExpanded((expanded) => !expanded)
+  }, [])
+
   const value = useMemo(
     () => ({
       hexSuiteExpanded,
       setHexSuiteExpanded,
       focusHexSuite,
+      toggleHexSuite,
       dismissHexSuiteForOverlay,
     }),
-    [hexSuiteExpanded, dismissHexSuiteForOverlay, focusHexSuite],
+    [hexSuiteExpanded, dismissHexSuiteForOverlay, focusHexSuite, toggleHexSuite],
   )
 
   return <HudOverlayContext.Provider value={value}>{children}</HudOverlayContext.Provider>
@@ -48,4 +55,8 @@ export function useHudOverlay(): HudOverlayContextValue {
     throw new Error("useHudOverlay must be used within HudOverlayProvider")
   }
   return ctx
+}
+
+export function useHudOverlayOptional(): HudOverlayContextValue | null {
+  return useContext(HudOverlayContext)
 }

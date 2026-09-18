@@ -2542,6 +2542,54 @@ Reason:
 
 Taco via Codex: delay is systemic across models, not 27B-specific; tiny front-chat first, larger model continues. CoS assigned the RFC-0117 ledger tick after #305 landed on development.
 
+Decision: RFC-0118 Taco goals highest-leverage memo (accepted) + RFC-0109 OCR amend + RFC-0120/0121
+
+Specs-only ranking for Taco’s four goals (speed; coding+3D real tools; OCR+media upload; projects folder / chats-in-DB / media placement). Memo: [`docs/rfcs/0118-taco-goals-highest-leverage.md`](docs/rfcs/0118-taco-goals-highest-leverage.md). Ranked reuse: **1** amend/implement **RFC-0109** (explicit OCR on phone+desktop — not a third media RFC); **2** implement **RFC-0115** Ornith router (0117 front responder already implemented; do not duplicate); **3** new **RFC-0120** coding+3D real tools; **4** new **RFC-0121** projects folder + chats-in-DB + media colocation vs storage node (extends RFC-0020); **5** residual **RFC-0107** hot-path use / desktop sign-off (embed landed in code; ledger stays **accepted** — do not tick implemented). **RFC-0119 reserved** for a parallel license-package entitlements RFC — unused here. **RFC-0108 continues**; 0109 after 0108. Bulk 0095–0104 later; HOLD 0092/0112; draft #282 out of scope. No new §58 checkbox; no §57 rewrite; no invented LE/Red/Purple/ATO gates.
+
+Reason:
+
+Taco 2026-09-18: at most five highest-leverage next steps against those four goals; prefer amend/reuse; 0108 in flight; CoS 0109 after 0108.
+
+---
+
+Decision: RFC-0119 license-package entitlements + release unrestricted license + HexStrike overview (accepted)
+
+RFC-0119 ([`docs/rfcs/0119-license-package-entitlements-and-release-unrestricted.md`](docs/rfcs/0119-license-package-entitlements-and-release-unrestricted.md)): the **License Manager signed package** is the **sole capability gate** for modules, functionalities, and LE/red/blue packs (`has_feature` / pack entitlements / `modules[]`). **Password gates are retired** for unlocking HexStrike / Daybreak / cyber / modules (RFC-0086/0087 ATO+LE fields stay; no new officer/ATO policy). Each Windows Setup / release cut **must emit** a full **owner-unrestricted** `.jarvis-license` into `installer/windows/dist/` beside Setup (not the customer Inno payload). HexStrike select/load speaks/chats **one short product overview** only — no exploit recipes / PoCs / payloads / attack steps. Specs-only; no new §58 checkbox. Do not block RFC-0108. RFC-0118 is a parallel memo (do not take that number).
+
+Reason:
+
+Taco via CoS 2026-09-18: License Manager package is the central entitlement; Taco must not hand-regen unrestricted licenses; HexStrike load gets a product overview, not tradecraft.
+
+---
+
+Decision: RFC-0108 amend (offline GGUF pack path) + RFC-0123 companion reachability / anti-impersonation (accepted)
+
+Taco via CoS 2026-09-18 (HOLD lifted for this slice only). [RFC-0108](docs/rfcs/0108-phone-companion-offline-ai-model.md) keeps the #309 llama.cpp / routing / Outbox / sync contract and adds: pinned allowlisted phone GGUF URL (empty catalog URL is a fail), Leader `data/companion-packs/` cache with weights **gitignored**, first Leader-up **background** download (non-blocking, progress visible), post-pair **popup** offering phone download with **size in MB**. Fine-tune later. [RFC-0123](docs/rfcs/0123-companion-reachability-and-anti-impersonation.md): owner-facing LAN-only vs port-forward (**TCP 4781** only) vs mobile-relay; Leader **listens continuously** on the companion TLS port; accept **pairing keys** only (RFC-0074/0059); continuous impersonation/MITM watch; on suspicion emit **`detected-hack-attempt`** + **probability**, kill the connection, refuse `:4781` for **10 minutes**. No exploit recipes. No new §58 checkbox. Do not take RFC-0122. Do not invent LE/Red/Purple gates.
+
+Reason:
+
+Owner asked for a real offline pack download (not a catalog stub) and a clear companion-port / anti-impersonation product on the existing gateway — not a second blue-team bot.
+
+---
+
+Decision: RFC-0122 ingress size-gate + trajectory cap (accepted; Jarvis 1.4.1 priority bugfix)
+
+RFC-0122 ([`docs/rfcs/0122-ingress-size-gate-spill-and-trajectory-cap.md`](docs/rfcs/0122-ingress-size-gate-spill-and-trajectory-cap.md)): after HUD + model hotswap, ordinary owner Q&A must not die on `Context capacity exceeded after compact/expand recovery`. Reuse `front_responder` for a cheap size/complexity check (no third persona). Large payloads **spill to the internal DB first** (optional Obsidian durable mirror via RFC-0107 — **hybrid default**, DB authoritative for the turn blob). Trajectory “lessons” injection is quality-gated and budget-capped (never inject “last message → none”). Simple Q&A gets on-demand / empty tools, not a full catalog dump. RFC-0114 recovery **stays**; this ticket fixes **what enters** the budget. Specs-only; implement is a named follow-up. Do **not** block RFC-0108. No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
+
+Reason:
+
+Taco 2026-09-18: Jarvis 1.4.1 product priority is the context-overflow / junk-injection path after Neural HUD → Humanoid HUD → Qwen 27B; specs first.
+
+---
+
+Decision: RFC-0124 Clean Install / Reinstall owned-path wipe (accepted; P0)
+
+Taco via CoS 2026-09-18 (blocked on local install). [RFC-0124](docs/rfcs/0124-clean-install-reinstall-owned-path-wipe.md): owner **Clean Install / Reinstall** from Settings → Advanced (and Setup.exe Clean / optional `/setup` recovery — same helper). Reuse RFC-0093 `force-stop-jarvis.ps1` (not polite `stop-jarvis.ps1` alone). Wipe **only** an explicit Jarvis-owned path allowlist (default `%LOCALAPPDATA%\Jarvis` / `{app}` from `Jarvis.iss`; never Documents/Desktop/`allowed_directories` / vendor `license-issuer`). Leftover lockers or undeletable owned files **abort** with 0093-family log; then force-launch Setup. Specs-only; D1 implements after. No new §58 checkbox. Do not take ≤0123. Do not invent LE/Red/Purple gates.
+
+Reason:
+
+Taco needs a portal/Setup Clean Install that actually kills lockers, deletes only Jarvis-owned trees, and reinstalls — not a polite hang or a wipe of unrelated AppData.
+
 ---
 
 ## 60. Expected Example Behavior

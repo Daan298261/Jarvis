@@ -1,7 +1,7 @@
 """ChatGPT-style computer-use and cyber permission catalog (RFC-0079).
 
 Grant modes: ask | allow_once | allow_session | always | deny.
-Red flags are default-deny and still require the Red Team password gate.
+Red flags are default-deny and still require Red team on the license package with law enforcement.
 Blue isolate is a containment playbook, not a kick/deauth executor.
 """
 from __future__ import annotations
@@ -255,13 +255,13 @@ def apply_grant(permission_id: str, mode: str, *, persist: bool | None = None) -
     if spec.offensive and normalized in {"allow_once", "allow_session", "always"}:
         if not _gate_enabled(spec.gated):
             raise PermissionError(
-                f"{spec.title} stays denied until the Red Team password gate is unlocked and a valid in-person ATO with LE is installed. "
+                f"{spec.title} stays denied until the license package includes Red team with law enforcement. "
                 "This flag does not add offensive tools."
             )
     if spec.gated and spec.group == "blue" and normalized in {"allow_once", "allow_session", "always"}:
         if not _gate_enabled(spec.gated):
             raise PermissionError(
-                f"{spec.title} requires the Blue Team password gate to be unlocked."
+                f"{spec.title} requires the Blue team module on the installed license package."
             )
     if persist is None:
         persist = normalized in {"always", "deny", "ask"}
@@ -300,18 +300,23 @@ def consume_once_grants(permission_ids: list[str]) -> None:
 def evaluate_permission(permission_id: str) -> PermissionDecision:
     spec = get_spec(permission_id)
     if spec.gated and not _gate_enabled(spec.gated):
+        from ..licensing.entitlements import module_entitlement_blocked_reason
+
+        package_reason = module_entitlement_blocked_reason(spec.gated) or (
+            f"The installed license package does not include {spec.gated}."
+        )
         if spec.offensive or spec.default == "deny":
             return PermissionDecision(
                 permission_id,
                 "deny",
-                f"{spec.title} is locked. Unlock the {spec.gated} password gate and install a valid in-person ATO license first. "
+                f"{spec.title} is locked. {package_reason} "
                 + ("Offensive tools are not shipped with this flag." if spec.offensive else ""),
                 spec,
             )
         return PermissionDecision(
             permission_id,
             "deny",
-            f"{spec.title} requires the {spec.gated} password gate to be unlocked.",
+            f"{spec.title} requires {package_reason}",
             spec,
         )
     persisted = persisted_mode(permission_id)

@@ -71,6 +71,8 @@ def _companion_path_allowed(path: str) -> bool:
 
 
 def gateway_app(upstream: str = "http://127.0.0.1:4780"):
+    from .companion_security import GUARD
+
     parsed = urlsplit(upstream)
     if parsed.hostname not in {"127.0.0.1", "::1", "localhost"} or parsed.scheme != "http":
         raise ValueError("Gateway upstream must be the local Jarvis listener")
@@ -80,10 +82,23 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def proxy(path: str, request: Request):
+        if GUARD.cooldown_active():
+            return JSONResponse(
+                {
+                    "detail": "Companion gateway is temporarily unavailable after a security alert",
+                    "cooldown_remaining_seconds": GUARD.cooldown_remaining_seconds(),
+                },
+                503,
+            )
         # A path encoded to escape this prefix must never reach owner APIs.
         if not _companion_path_allowed(path):
             return JSONResponse({"detail": "Route unavailable on mobile gateway"}, 404)
-        if path.startswith(("api/companion/enroll", "api/companion/session", "api/companion/challenge/")):
+        if path.startswith((
+            "api/companion/enroll",
+            "api/companion/lan-enroll",
+            "api/companion/session",
+            "api/companion/challenge/",
+        )):
             key = request.client.host if request.client else "unknown"
             now = time.monotonic()
             if len(attempts) > 4096:
@@ -106,12 +121,19 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
                 response = await client.request(request.method, f"{upstream}/{path}", params=request.query_params, content=bytes(data), headers=headers)
             except httpx.HTTPError:
                 return JSONResponse({"detail": "Jarvis is offline. Start the desktop service."}, 503)
+        if response.status_code == 401 and headers.get("authorization"):
+            device_id = headers.get("x-jarvis-device", "")
+            client_host = request.client.host if request.client else ""
+            await GUARD.report_bad_session(device_id, client_host)
         return Response(response.content, status_code=response.status_code,
                         headers={name: response.headers[name] for name in ("content-type", "content-disposition") if name in response.headers})
 
     @app.websocket("/{path:path}")
     async def ws_proxy(websocket: WebSocket, path: str):
         """Proxy companion WebSockets (realtime voice). Auth headers only — never query tokens."""
+        if GUARD.cooldown_active():
+            await websocket.close(code=1013)
+            return
         if not _companion_path_allowed(path):
             await websocket.close(code=1008)
             return

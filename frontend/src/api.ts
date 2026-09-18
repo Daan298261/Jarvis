@@ -2775,12 +2775,26 @@ export type LicenseCluster = {
   cluster_id: string
 }
 
+export type LicensePackageEntitlements = {
+  installed?: boolean
+  valid?: boolean
+  law_enforcement?: boolean
+  modules?: string[]
+  expires_at?: string
+  renew_by?: string
+  max_expires_at?: string
+  clock_rollback?: boolean
+  reason?: string
+}
+
 export type LicenseEntitlements = {
   tier: string | null
   features: string[]
   pack_entitlements: string[]
   cluster_wide?: boolean
   cluster_id?: string
+  package?: LicensePackageEntitlements
+  allowed_modules?: string[]
 }
 
 export type LicenseEntitlementsResponse = {
@@ -2933,6 +2947,8 @@ export async function getLicenseEntitlements(): Promise<LicenseEntitlementsRespo
       pack_entitlements: asStringList(entitlements.pack_entitlements),
       cluster_wide: entitlements.cluster_wide !== false,
       cluster_id: asOptionalString(entitlements.cluster_id),
+      package: entitlements.package,
+      allowed_modules: asStringList(entitlements.allowed_modules),
     },
   }
 }
@@ -4842,4 +4858,205 @@ export async function openCybersecurityToolFolder(toolId: string): Promise<Cyber
 export function cybersecurityToolSupportsProcessControl(role: string): boolean {
   const normalized = role.toLowerCase().replace(/-/g, "_")
   return normalized === "harness" || normalized === "graph_ui" || normalized === "graph/ui"
+}
+
+// --- RFC-0124 Clean Install / Reinstall (Settings → Advanced) ---
+
+export type CleanReinstallLogPaths = {
+  durable?: string
+  install?: string
+  status?: string
+}
+
+export type CleanReinstallOwnedRootEntry = {
+  id: string
+  path: string
+  label: string
+}
+
+export type CleanReinstallPreview = {
+  action_available: boolean
+  confirm_token: string
+  confirm_token_expires_at: number
+  owned_root_entries: CleanReinstallOwnedRootEntry[]
+  owned_roots?: string[]
+  install_root?: string
+  license_issuer_preserved?: string
+  preserved_note?: string
+  log_paths: CleanReinstallLogPaths
+  windows_only?: boolean
+  safe_install_dir?: boolean
+  ux: {
+    requires_two_step_confirm: boolean
+    post_start_poll_path: string
+    never_show_success_on_http_400: boolean
+    post_start_means_helper_spawned_not_wipe_complete: boolean
+  }
+}
+
+export type CleanReinstallStartOk = {
+  status: "started"
+  message?: string
+  log_paths: CleanReinstallLogPaths
+  poll_path: string
+}
+
+export type CleanReinstallStartAborted = {
+  status: "aborted"
+  reason: string
+  log_paths: CleanReinstallLogPaths
+}
+
+export type CleanReinstallStatus = {
+  status: "idle" | "running" | "succeeded" | "failed" | "unknown"
+  exit_reason: string | null
+  log_paths: CleanReinstallLogPaths
+  log_tail?: string[]
+  updated_at?: string
+}
+
+export type CleanReinstallStartResult =
+  | { kind: "started"; data: CleanReinstallStartOk }
+  | { kind: "aborted"; data: CleanReinstallStartAborted }
+  | { kind: "error"; message: string }
+
+function parseCleanReinstallJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return null
+  }
+}
+
+function cleanReinstallMessageFromBody(parsed: unknown, fallback: string): string {
+  const aborted = extractCleanReinstallAborted(parsed)
+  if (aborted?.reason) return aborted.reason
+  if (parsed && typeof parsed === "object") {
+    const record = parsed as { reason?: unknown; message?: unknown; detail?: unknown }
+    if (typeof record.reason === "string" && record.reason) return record.reason
+    if (typeof record.message === "string" && record.message) return record.message
+    return formatApiDetail(record.detail, fallback)
+  }
+  return fallback
+}
+
+function extractCleanReinstallAborted(parsed: unknown): CleanReinstallStartAborted | null {
+  if (!parsed || typeof parsed !== "object") return null
+  const record = parsed as Record<string, unknown>
+  if (record.status === "aborted") {
+    return parsed as CleanReinstallStartAborted
+  }
+  const detail = record.detail
+  if (detail && typeof detail === "object" && (detail as Record<string, unknown>).status === "aborted") {
+    return detail as CleanReinstallStartAborted
+  }
+  return null
+}
+
+export function isCleanReinstallConfirmTokenExpired(preview: CleanReinstallPreview, nowMs = Date.now()): boolean {
+  const expiresAt = preview.confirm_token_expires_at
+  if (!Number.isFinite(expiresAt)) return false
+  return nowMs / 1000 >= expiresAt
+}
+
+export function cleanReinstallUnavailableMessage(preview: CleanReinstallPreview): string {
+  if (preview.windows_only === false) {
+    return "Clean Install / Reinstall is only available on Windows. Use JarvisSetup.exe Clean from the installer on this PC."
+  }
+  if (preview.safe_install_dir === false) {
+    return (
+      "Jarvis could not verify a safe install folder for a full wipe. "
+      + "Use JarvisSetup.exe from your existing install, or fix the install path before trying again."
+    )
+  }
+  if (!preview.owned_root_entries.length) {
+    return "No Jarvis-owned folders are registered for this install. Nothing can be removed from here."
+  }
+  return "Clean Install / Reinstall is not available right now."
+}
+
+async function fetchCleanReinstallStart(
+  body: {
+    confirm_token: string
+    acknowledged_roots: string[]
+    final_confirm: true
+    setup_exe?: null
+  },
+): Promise<CleanReinstallStartResult> {
+  const headers = authHeaders({ "Content-Type": "application/json" })
+  try {
+    const response = await fetch("/api/installer/clean-reinstall/start", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    })
+    const text = await response.text()
+    const parsed = parseCleanReinstallJson(text)
+
+    if (response.status === 400) {
+      const aborted = extractCleanReinstallAborted(parsed)
+      if (aborted) {
+        return { kind: "aborted", data: aborted }
+      }
+    }
+
+    if (!response.ok) {
+      return {
+        kind: "error",
+        message: cleanReinstallMessageFromBody(parsed, text || response.statusText),
+      }
+    }
+
+    const data = parsed as CleanReinstallStartOk
+    if (!data || data.status !== "started") {
+      return { kind: "error", message: "Unexpected response when starting clean reinstall." }
+    }
+    return { kind: "started", data }
+  } catch (err) {
+    return {
+      kind: "error",
+      message: err instanceof Error ? err.message : "Clean reinstall start request failed.",
+    }
+  }
+}
+
+export async function getCleanReinstallOwnedRoots(): Promise<CleanReinstallPreview> {
+  return api<CleanReinstallPreview>("/api/installer/clean-reinstall/owned-roots")
+}
+
+export async function getCleanReinstallPreview(): Promise<CleanReinstallPreview> {
+  return api<CleanReinstallPreview>("/api/installer/clean-reinstall/preview")
+}
+
+export async function startCleanReinstall(body: {
+  confirm_token: string
+  acknowledged_roots: string[]
+  final_confirm: true
+  setup_exe?: null
+}): Promise<CleanReinstallStartResult> {
+  return fetchCleanReinstallStart(body)
+}
+
+export async function getCleanReinstallStatus(): Promise<CleanReinstallStatus> {
+  return api<CleanReinstallStatus>("/api/installer/clean-reinstall/status")
+}
+
+export function isCleanReinstallSuccess(status: CleanReinstallStatus): boolean {
+  return status.status === "succeeded" && status.exit_reason === "ok"
+}
+
+export function formatCleanReinstallLogPaths(
+  logPaths: CleanReinstallLogPaths | null | undefined,
+): { label: string; path: string }[] {
+  if (!logPaths) return []
+  const out: { label: string; path: string }[] = []
+  if (logPaths.durable) out.push({ label: "Durable log", path: logPaths.durable })
+  if (logPaths.install) out.push({ label: "Install log", path: logPaths.install })
+  if (logPaths.status) out.push({ label: "Status file", path: logPaths.status })
+  return out
+}
+
+export function cleanReinstallDurableLogPath(logPaths: CleanReinstallLogPaths | null | undefined): string | null {
+  const path = logPaths?.durable?.trim()
+  return path || null
 }

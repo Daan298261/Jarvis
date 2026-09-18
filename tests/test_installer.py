@@ -88,7 +88,8 @@ def test_existing_install_upgrade_and_removal_choices_are_wired():
     assert "reset-user-data.ps1" in lower
     assert "removeexistingapplication" in lower
     assert "/verysilent /suppressmsgboxes /norestart" in lower
-    assert "deltree(existinginstalldir, true, true, true)" in lower
+    assert "clean-reinstall-jarvis.ps1" in lower
+    assert "runcleanreinstallownedwipe" in lower.replace("_", "")
     assert "this cannot be undone" in lower
     assert "issafejarvisinstalldir" in lower
 
@@ -120,6 +121,8 @@ def test_build_script_invokes_iscc():
     assert "localappdata" in lower or r"programs\inno setup 6" in lower
     assert "build-license-manager.ps1" in text
     assert "JarvisLicenseManager" in text
+    assert "issue-release-unrestricted-license.ps1" in text
+    assert "Unrestricted license issuance failed" in text
 
 
 def test_vendor_license_manager_is_excluded_from_inno_payload():

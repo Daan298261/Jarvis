@@ -16,7 +16,7 @@ from ..mobile.companion_onboarding import companion_onboarding_snapshot
 from ..mobile.pairing_payload import enrich_pairing_session
 from ..db.models import Task
 from ..db.session import SessionLocal
-from ..mobile import identity, realtime_voice, scheduler, service
+from ..mobile import companion_offline, identity, realtime_voice, scheduler, service
 from ..mobile.store import database, get, put, root, rows
 
 router = APIRouter(prefix="/api/companion", tags=["companion"])
@@ -95,6 +95,29 @@ def enroll(body: Enroll, request: Request):
     return identity.enroll(body.invitation, body.public_key, body.name, client_ip=client_ip)
 
 
+class LanEnroll(BaseModel):
+    public_key: str = Field(max_length=2000)
+    name: str = Field(min_length=1, max_length=100)
+
+
+@router.get("/lan-beacon")
+def lan_beacon(request: Request):
+    from ..mobile.connectivity import CONNECTIVITY
+    from ..mobile.lan_beacon import public_beacon_payload
+
+    host = request.url.hostname or (request.client.host if request.client else "")
+    payload = public_beacon_payload(CONNECTIVITY.snapshot(), prefer_host=host or "")
+    if not payload:
+        raise HTTPException(503, "Jarvis is not advertising a LAN companion endpoint yet.")
+    return payload
+
+
+@router.post("/lan-enroll")
+def lan_enroll(body: LanEnroll, request: Request):
+    client_ip = request.client.host if request.client else ""
+    return identity.enroll_lan(body.public_key, body.name, client_ip=client_ip)
+
+
 @router.get("/challenge/{device_id}")
 def challenge(device_id: uuid.UUID):
     return identity.challenge(str(device_id))
@@ -120,6 +143,60 @@ def capabilities(device=Device):
 @router.get("/models")
 def models(device=Device):
     return service.models()
+
+
+@router.get("/model-packs")
+def companion_model_packs(device=Device):
+    """Pinned companion GGUF catalog with Leader cache status."""
+    return companion_offline.pack_catalog()
+
+
+@router.get("/model-packs/{pack_id}/file")
+def companion_model_pack_file(pack_id: str, device=Device):
+    path = companion_offline.resolve_pack_file(pack_id)
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=path.name,
+    )
+
+
+class PinMismatchReport(BaseModel):
+    observed_pin: str = Field(min_length=64, max_length=64)
+
+
+@router.post("/security/pin-mismatch")
+async def report_pin_mismatch(body: PinMismatchReport, request: Request, device=Device):
+    from ..mobile.companion_security import GUARD
+    from ..mobile.connectivity import CONNECTIVITY
+
+    expected = (CONNECTIVITY.snapshot().get("server_pin") or "").lower()
+    if body.observed_pin.lower() != expected:
+        client_host = request.client.host if request.client else ""
+        await GUARD.report_pin_mismatch(device["id"], client_host)
+    return {"ok": True}
+
+
+class OfflineTurn(BaseModel):
+    request_id: uuid.UUID
+    client_message_id: uuid.UUID | None = None
+    role: Literal["user", "assistant"]
+    text: str = Field(min_length=1, max_length=32000)
+    origin: Literal["device_offline", "device_local_draft", "leader"] = "device_offline"
+
+
+class OfflineTurnSync(BaseModel):
+    conversation_id: uuid.UUID | None = None
+    turns: list[OfflineTurn] = Field(min_length=1, max_length=50)
+
+
+@router.post("/sync/offline-turns")
+async def sync_offline_turns(body: OfflineTurnSync, device=Device):
+    return await companion_offline.sync_offline_turns(
+        device["id"],
+        str(body.conversation_id) if body.conversation_id else None,
+        [turn.model_dump() for turn in body.turns],
+    )
 
 
 @router.get("/conversations")

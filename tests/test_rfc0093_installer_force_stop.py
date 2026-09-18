@@ -20,6 +20,7 @@ def test_force_stop_script_exists_and_logs_pids():
     assert "installer-stop.log" in text
     assert "force-kill PID=" in text
     assert "InstallRoot" in text
+    assert "InstallRoots" in text
     assert "MaxWaitSeconds" in text
     assert "stop-jarvis.ps1" in text
 
