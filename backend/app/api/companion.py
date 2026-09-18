@@ -16,7 +16,7 @@ from ..mobile.companion_onboarding import companion_onboarding_snapshot
 from ..mobile.pairing_payload import enrich_pairing_session
 from ..db.models import Task
 from ..db.session import SessionLocal
-from ..mobile import identity, realtime_voice, scheduler, service
+from ..mobile import companion_offline, identity, realtime_voice, scheduler, service
 from ..mobile.store import database, get, put, root, rows
 
 router = APIRouter(prefix="/api/companion", tags=["companion"])
@@ -120,6 +120,34 @@ def capabilities(device=Device):
 @router.get("/models")
 def models(device=Device):
     return service.models()
+
+
+@router.get("/model-packs")
+def companion_model_packs(device=Device):
+    """Pinned companion GGUF catalog (metadata only — no weights on Leader)."""
+    return companion_offline.pack_catalog()
+
+
+class OfflineTurn(BaseModel):
+    request_id: uuid.UUID
+    client_message_id: uuid.UUID | None = None
+    role: Literal["user", "assistant"]
+    text: str = Field(min_length=1, max_length=32000)
+    origin: Literal["device_offline", "device_local_draft", "leader"] = "device_offline"
+
+
+class OfflineTurnSync(BaseModel):
+    conversation_id: uuid.UUID | None = None
+    turns: list[OfflineTurn] = Field(min_length=1, max_length=50)
+
+
+@router.post("/sync/offline-turns")
+async def sync_offline_turns(body: OfflineTurnSync, device=Device):
+    return await companion_offline.sync_offline_turns(
+        device["id"],
+        str(body.conversation_id) if body.conversation_id else None,
+        [turn.model_dump() for turn in body.turns],
+    )
 
 
 @router.get("/conversations")

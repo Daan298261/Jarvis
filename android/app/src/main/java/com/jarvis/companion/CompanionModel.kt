@@ -45,6 +45,12 @@ data class CompanionState(
     val liveTranscript: String = "", val voiceMode: String = "clip",
     val inferenceLoaded: Boolean = false, val inferenceLoading: Boolean = false,
     val inferenceProfile: String = "", val inferenceFamily: String = "", val inferenceError: String = "",
+    val leaderReachable: Boolean = false,
+    val localPackStatus: String = "missing",
+    val localPackProgress: Int = 0,
+    val localPackError: String = "",
+    val offlineQueueDepth: Int = 0,
+    val offlineAnswering: Boolean = false,
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
@@ -64,7 +70,9 @@ private data class RefreshPayload(
 )
 
 class CompanionModel(app: Application) : AndroidViewModel(app) {
-    val api = (app as JarvisApp).api
+    private val jarvisApp = app as JarvisApp
+    val api = jarvisApp.api
+    private val deviceModelChrome = jarvisApp.deviceModelChrome
     private val companionPrefs = app.getSharedPreferences("companion_ui", Application.MODE_PRIVATE)
     private val mutable = MutableStateFlow(CompanionState(
         selectedModel = companionPrefs.getString("inference_profile", "auto") ?: "auto",
@@ -77,6 +85,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var player: MediaPlayer? = null
     private var playerFile: File? = null
     private val outbox = Outbox(app)
+    private val offlineQueue = OutboxQueue(app)
+    val packManager = CompanionPackManager(app)
     private var foreground = false
     private val sendLock = kotlinx.coroutines.sync.Mutex()
     private var audioRecord: AudioRecord? = null
@@ -86,11 +96,45 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val ttsQueue = LinkedBlockingQueue<ByteArray>()
     private var ttsJob: Job? = null
     init {
+        deviceModelChrome.actions = object : DevicePackChromeActions {
+            override fun downloadSelectedPack() {
+                downloadCompanionPack()
+            }
+            override fun deleteSelectedPack() {
+                deleteCompanionPack()
+            }
+            override fun selectPack(packId: String) {
+                selectCompanionPack(packId)
+            }
+        }
+        viewModelScope.launch {
+            state.collect { companionState ->
+                DevicePackChromePublisher.publish(this@CompanionModel, deviceModelChrome, companionState)
+            }
+        }
         runCatching { outbox.read() }.onSuccess { mutable.value = mutable.value.copy(pendingMessage = it != null) }
             .onFailure { mutable.value = mutable.value.copy(error = "Cannot recover pending message: ${it.message}") }
         viewModelScope.launch {
+            runCatching { packManager.refreshStatus() }
+            mutable.value = mutable.value.copy(
+                localPackStatus = packManager.status(),
+                localPackProgress = packManager.downloadProgress(),
+                localPackError = packManager.lastError(),
+                offlineQueueDepth = offlineQueue.pendingCount(),
+            )
+        }
+        viewModelScope.launch {
             while (true) {
-                if (foreground && api.deviceId.isNotEmpty()) runCatching { refresh() }.onFailure { mutable.value = mutable.value.copy(connected = false, activity = "Reconnecting", error = it.message) }
+                if (foreground && api.deviceId.isNotEmpty()) {
+                    runCatching { refresh() }.onFailure {
+                        mutable.value = mutable.value.copy(
+                            connected = false,
+                            leaderReachable = false,
+                            activity = "Offline",
+                            error = it.message,
+                        )
+                    }
+                }
                 delay(4000)
             }
         }
@@ -102,6 +146,42 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         catch (e: Exception) { mutable.value = mutable.value.copy(error = e.message) }
         finally { mutable.value = mutable.value.copy(busy = false) }
     }
+    fun offlineStatusJson(): JSONObject = CompanionOfflineHooks.statusSnapshot(this)
+
+    fun refreshCompanionPackStatus() = action {
+        packManager.refreshStatus()
+        mutable.value = mutable.value.copy(
+            localPackStatus = packManager.status(),
+            localPackProgress = packManager.downloadProgress(),
+            localPackError = packManager.lastError(),
+            offlineQueueDepth = offlineQueue.pendingCount(),
+        )
+    }
+
+    fun downloadCompanionPack() = action {
+        packManager.downloadSelected { progress ->
+            mutable.value = mutable.value.copy(localPackProgress = progress, localPackStatus = CompanionPackStatus.DOWNLOADING)
+        }
+        mutable.value = mutable.value.copy(
+            localPackStatus = packManager.status(),
+            localPackError = packManager.lastError(),
+            localPackProgress = packManager.downloadProgress(),
+        )
+    }
+
+    fun deleteCompanionPack() = action {
+        packManager.deleteSelected()
+        mutable.value = mutable.value.copy(
+            localPackStatus = packManager.status(),
+            localPackProgress = 0,
+            localPackError = "",
+        )
+    }
+
+    fun selectCompanionPack(id: String) {
+        packManager.selectPack(id)
+    }
+
     suspend fun refresh() {
         api.refreshEndpoints()
         val previous = mutable.value
@@ -113,6 +193,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             val capabilities = async { api.json("/capabilities") }
             val tasks = async { api.array("/tasks").objects() }
             val modelsBody = async { api.json("/models") }
+            val packCatalog = async { runCatching { api.json("/model-packs") }.getOrNull() }
             val conversations = async { api.array("/conversations").objects() }
             val schedules = async { api.array("/schedules").objects() }
             val calls = async { api.array("/calls").objects() }
@@ -123,6 +204,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             val coding = async { runCatching { api.json("/coding") }.getOrDefault(previousCoding) }
             val voices = async { runCatching { api.json("/voice/profiles") }.getOrDefault(previousVoices) }
             val modelsJson = modelsBody.await()
+            packCatalog.await()?.let { packManager.updateCatalog(it) }
+            runCatching { packManager.refreshStatus() }
             RefreshPayload(
                 capabilities.await(),
                 tasks.await(),
@@ -151,7 +234,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val inferenceProfile = inference.optString("profile")
         val inferenceLabel = payload.models.firstOrNull { it.optString("name") == inferenceProfile }?.optString("label")
             ?: inference.optString("family").ifBlank { inferenceProfile }
-        mutable.value = mutable.value.copy(connected = true, activity = active?.optString("activity") ?: "Ready when you are",
+        val wasOffline = !previous.leaderReachable
+        mutable.value = mutable.value.copy(connected = true, leaderReachable = true, activity = active?.optString("activity") ?: "Ready when you are",
             tasks = payload.tasks, models = payload.models, conversations = payload.conversations, schedules = payload.schedules,
             calls = payload.calls, messages = payload.messages, capabilities = payload.capabilities, swarm = payload.swarm,
             coding = payload.coding.optJSONObject("overview") ?: JSONObject(),
@@ -160,7 +244,16 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             inferenceLoaded = inference.optBoolean("loaded"), inferenceLoading = inference.optBoolean("loading"),
             inferenceProfile = inferenceProfile, inferenceFamily = inferenceLabel,
             inferenceError = inference.optString("last_error"),
-            pendingMessage = outbox.read() != null)
+            pendingMessage = outbox.read() != null,
+            localPackStatus = packManager.status(),
+            localPackProgress = packManager.downloadProgress(),
+            localPackError = packManager.lastError(),
+            offlineQueueDepth = offlineQueue.pendingCount(),
+        )
+        if (CompanionRouting.shouldSyncAfterLeaderReturn(wasOffline, true, offlineQueue.pendingCount())) {
+            syncOfflineTurns()
+        }
+        cacheConversationSnapshot(payload.messages)
     }
     fun pair(endpoint: String, pin: String, credential: String) = action {
         api.configure(endpoint, pin)
@@ -206,16 +299,111 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         if (text.isBlank()) return
         sendLock.lock()
         try {
-        check(outbox.read() == null) { "Resolve the pending message before sending another" }
         val state = mutable.value
-        val content = JSONObject().put("text", text).put("profile", state.selectedModel)
-            .put("attachments", JSONArray(state.attachmentIds))
-        state.conversationId?.let { content.put("conversation_id", it) }
-        content.put("request_id", UUID.randomUUID().toString())
-        outbox.save(JSONObject().put("device", api.deviceId).put("pin", api.pin).put("body", content))
-        mutable.value = mutable.value.copy(pendingMessage = true)
-        deliverPending()
+        val routing = CompanionRouting.decide(
+            leaderReachable = state.leaderReachable,
+            packStatus = state.localPackStatus,
+            resourceBlocked = DeviceInferenceGuard.blockReason(getApplication(), packManager.selectedPack() ?: CompanionPackCatalog.builtIn.first()),
+            hasStalePendingOnlineOutbox = state.pendingMessage,
+        )
+        when (routing.mode) {
+            RoutingMode.LEADER_ORCHESTRATED -> {
+                check(outbox.read() == null) { "Resolve the pending message before sending another" }
+                val content = JSONObject().put("text", text).put("profile", state.selectedModel)
+                    .put("attachments", JSONArray(state.attachmentIds))
+                state.conversationId?.let { content.put("conversation_id", it) }
+                content.put("request_id", UUID.randomUUID().toString())
+                outbox.save(JSONObject().put("device", api.deviceId).put("pin", api.pin).put("body", content))
+                mutable.value = mutable.value.copy(pendingMessage = true)
+                deliverPending()
+            }
+            RoutingMode.DEVICE_OFFLINE -> sendOffline(text)
+            RoutingMode.DEVICE_BLOCKED -> error(routing.reason)
+        }
         } finally { sendLock.unlock() }
+    }
+
+    private suspend fun sendOffline(text: String) {
+        val userId = UUID.randomUUID().toString()
+        val assistantId = UUID.randomUUID().toString()
+        val userMessage = JSONObject()
+            .put("id", userId)
+            .put("role", "user")
+            .put("text", text)
+            .put("origin", "device_offline")
+        val prior = mutable.value.messages + userMessage
+        mutable.value = mutable.value.copy(messages = prior, offlineAnswering = true, activity = "Thinking on-device…")
+        val prompt = buildOfflinePrompt(prior, text)
+        val assistantText = StringBuilder()
+        packManager.generate(prompt, 256) { chunk -> assistantText.append(chunk) }
+        val reply = assistantText.toString().ifBlank { error("On-device model returned no tokens") }
+        val assistantMessage = JSONObject()
+            .put("id", assistantId)
+            .put("role", "assistant")
+            .put("text", reply)
+            .put("origin", "device_local_draft")
+        offlineQueue.append(
+            JSONObject()
+                .put("request_id", userId)
+                .put("client_message_id", userId)
+                .put("role", "user")
+                .put("text", text)
+                .put("origin", "device_offline"),
+        )
+        offlineQueue.append(
+            JSONObject()
+                .put("request_id", assistantId)
+                .put("client_message_id", assistantId)
+                .put("role", "assistant")
+                .put("text", reply)
+                .put("origin", "device_local_draft"),
+        )
+        mutable.value = mutable.value.copy(
+            messages = prior + assistantMessage,
+            offlineAnswering = false,
+            offlineQueueDepth = offlineQueue.pendingCount(),
+            activity = "Answering on-device",
+            localPackStatus = packManager.status(),
+        )
+        packManager.unload()
+    }
+
+    private fun buildOfflinePrompt(history: List<JSONObject>, latest: String): String {
+        val lines = history.takeLast(12).map { "${it.optString("role")}: ${it.optString("text")}" }
+        val context = if (lines.isEmpty()) "" else lines.joinToString("\n") + "\n"
+        return """
+            You are Jarvis on a phone while the Windows Leader is unreachable.
+            Answer briefly using only the conversation below and general knowledge.
+            Do not claim to run tools, HexStrike, filesystem access, or swarm workers.
+            $context
+            user: $latest
+            assistant:
+        """.trimIndent()
+    }
+
+    private suspend fun syncOfflineTurns() {
+        val pending = offlineQueue.readAll().filter { !it.optBoolean("synced", false) }
+        if (pending.isEmpty()) return
+        val turns = JSONArray()
+        pending.forEach { turns.put(it) }
+        val body = JSONObject().put("turns", turns)
+        mutable.value.conversationId?.let { body.put("conversation_id", it) }
+        // conversation_id optional on first offline session
+        val result = api.json("/sync/offline-turns", "POST", body)
+        val syncedIds = pending.map { it.optString("client_message_id").ifBlank { it.optString("request_id") } }
+        offlineQueue.markSynced(syncedIds)
+        offlineQueue.pruneSynced()
+        mutable.value = mutable.value.copy(
+            conversationId = result.optString("conversation_id", mutable.value.conversationId),
+            offlineQueueDepth = offlineQueue.pendingCount(),
+        )
+    }
+
+    private fun cacheConversationSnapshot(messages: List<JSONObject>) {
+        if (messages.isEmpty()) return
+        val array = JSONArray()
+        messages.takeLast(40).forEach { array.put(it) }
+        companionPrefs.edit().putString("last_synced_messages", array.toString()).apply()
     }
     fun retryPending() = action {
         sendLock.lock()
@@ -512,6 +700,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         captureJob?.cancel(); listenJob?.cancel(); ttsJob?.cancel()
         runCatching { audioRecord?.stop() }; audioRecord?.release()
         realtime?.close()
-        recorder?.release(); recordingFile?.delete(); stopSpeaking(); super.onCleared()
+        recorder?.release(); recordingFile?.delete(); stopSpeaking()
+        packManager.unload()
+        super.onCleared()
     }
 }
