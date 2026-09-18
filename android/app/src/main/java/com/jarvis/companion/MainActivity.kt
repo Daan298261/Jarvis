@@ -67,6 +67,9 @@ class MainActivity : ComponentActivity() {
             val deviceChrome = app.deviceModelChrome
             val devicePack by deviceChrome.state.collectAsStateWithLifecycle()
             val paired = model.api.deviceId.isNotEmpty()
+            val context = LocalContext.current
+            var wasPaired by remember { mutableStateOf(model.api.deviceId.isNotEmpty()) }
+            var showPostPairPackOffer by remember { mutableStateOf(false) }
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
             var tab by remember { mutableStateOf(if (model.api.endpoint.isEmpty()) "More" else "Home") }
             var pairingScanRequest by remember { mutableStateOf(false) }
@@ -114,6 +117,18 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 if (android.os.Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
+            LaunchedEffect(paired, state.busy, state.error, devicePack.status) {
+                if (!wasPaired && paired && !state.busy && state.error == null) {
+                    if (PostPairPackOfferPrefs.shouldOffer(context, model.api.deviceId, devicePack.status)) {
+                        showPostPairPackOffer = true
+                    }
+                    wasPaired = true
+                } else if (paired) {
+                    wasPaired = true
+                }
+            }
+            val postPairPackOffer = remember(showPostPairPackOffer, devicePack) { recommendedPackOffer(model) }
+            val postPairSizeMb = postPairPackOffer?.sizeBytes?.let { formatPackCatalogSizeMb(it) }
             LaunchedEffect(latestIntent) {
                 val delivered = latestIntent ?: return@LaunchedEffect
                 delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
@@ -142,6 +157,23 @@ class MainActivity : ComponentActivity() {
                 delivered.clipData = null
             }
             MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel, onSurface = Color(0xFFE7EDF5), secondary = Color(0xFF74DCCD))) {
+                PostPairOfflinePackOfferDialog(
+                    visible = showPostPairPackOffer && postPairPackOffer != null,
+                    packLabel = postPairPackOffer?.label ?: "",
+                    sizeMbText = postPairSizeMb,
+                    onDownload = {
+                        val deviceId = model.api.deviceId
+                        val offer = postPairPackOffer
+                        showPostPairPackOffer = false
+                        PostPairPackOfferPrefs.markHandled(context, deviceId)
+                        offer?.id?.let { deviceChrome.selectPack(it) }
+                        deviceChrome.downloadSelectedPack()
+                    },
+                    onDismiss = {
+                        showPostPairPackOffer = false
+                        PostPairPackOfferPrefs.markHandled(context, model.api.deviceId)
+                    },
+                )
                 if (incomingCall != null) AlertDialog(onDismissRequest = { incomingCall = null }, title = { Text("Jarvis is calling") },
                     text = { Text("Answer to discuss the event. Your microphone stays off until you answer.") },
                     confirmButton = { TextButton(onClick = { callPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Answer") } },
