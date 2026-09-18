@@ -39,6 +39,20 @@ def test_owned_paths_blocks_appdata_whole_tree():
     assert "license-issuer" in text
 
 
+def test_jarvis_iss_code_comments_do_not_nest_inno_constants():
+    """Block comments must not contain {tmp}/{app}; the inner brace ends the comment early."""
+    text = _read(ISS)
+    code = text[text.index("[Code]") :]
+    for line in code.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{") or stripped.startswith("//"):
+            continue
+        if "{" in stripped[1:] and not stripped.startswith("{#"):
+            raise AssertionError(
+                f"Nested brace in Inno [Code] block comment (iscc parse error): {line!r}"
+            )
+
+
 def test_jarvis_iss_wires_clean_reinstall_helper():
     text = _read(ISS)
     lower = text.lower()
