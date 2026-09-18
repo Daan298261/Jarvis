@@ -14,7 +14,7 @@ class OutboxQueueTest {
     @Test
     fun queuePersistsAndMarksSynced() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val queue = OutboxQueue(context)
+        val queue = OutboxQueue(context, JvmAesOutboxQueueCrypto())
         queue.clear()
         val id = "11111111-1111-1111-1111-111111111111"
         queue.append(

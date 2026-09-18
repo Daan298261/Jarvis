@@ -42,7 +42,7 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeLoad(JNIEnv *env, jclass, 
 
     llama_backend_init();
     llama_model_params mparams = llama_model_default_params();
-    g_model = llama_load_model_from_file(path.c_str(), mparams);
+    g_model = llama_model_load_from_file(path.c_str(), mparams);
     if (!g_model) {
         return to_jstring(env, "error:Could not load GGUF model");
     }
