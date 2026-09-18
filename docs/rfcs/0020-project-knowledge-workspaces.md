@@ -5,6 +5,8 @@
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-31
 
+**Related:** [RFC-0120](0120-projects-folder-chats-db-media-placement.md) owns **folder layout, chats in the internal DB, and media placement** (DB-host colocation vs storage node). This RFC stays the knowledge/retrieval workspace contract. Do not duplicate 0120 here.
+
 ## Problem
 
 Jarvis can persist agents and memories, but reusable project-scoped knowledge needs a clearer product abstraction. Users should be able to attach files, URLs, notes, repositories, media transcripts, and generated artifacts to a project once and have relevant agents reuse that knowledge without repeatedly uploading or pasting the same sources.
