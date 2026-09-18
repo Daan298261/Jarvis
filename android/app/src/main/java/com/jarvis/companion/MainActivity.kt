@@ -63,6 +63,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
+            val app = application as JarvisApp
+            val deviceChrome = app.deviceModelChrome
+            val devicePack by deviceChrome.state.collectAsStateWithLifecycle()
+            val paired = model.api.deviceId.isNotEmpty()
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
             var tab by remember { mutableStateOf(if (model.api.endpoint.isEmpty()) "More" else "Home") }
             var pairingScanRequest by remember { mutableStateOf(false) }
@@ -241,6 +245,23 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "Chat" -> {
+                                offlineChatBanner(state.connected, paired, devicePack.status)?.let { bannerText ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2838)),
+                                    ) {
+                                        Column(Modifier.padding(12.dp)) {
+                                            Text("OFFLINE MODE", color = Gold, fontSize = 10.sp, letterSpacing = 1.sp)
+                                            Text(bannerText, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                                            if (devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null) {
+                                                LinearProgressIndicator(
+                                                    progress = { devicePack.downloadProgress!!.coerceIn(0f, 1f) },
+                                                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 ConversationPickers(state, model::selectModel, model::selectVoice)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     TextButton(onClick = { model.openConversation(null) }) { Text("New conversation") }
@@ -284,7 +305,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
-                            "More" -> MoreScreen(model, state, pairingScanRequest) { pairingScanRequest = false }
+                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, pairingScanRequest) { pairingScanRequest = false }
                         }
                     }
                 }
@@ -404,6 +425,95 @@ private fun inferenceStatus(state: CompanionState): String {
             }
         }
     }
+}
+
+@Composable private fun CompanionModelsSection(
+    chrome: CompanionDeviceModelChrome,
+    devicePack: DevicePackChromeState,
+    busy: Boolean,
+) {
+    Text("Models (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(
+        "When the Leader is unreachable, the companion can answer using a downloaded model pack (RFC-0108).",
+        color = Muted,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Status · ${devicePackStatusLabel(devicePack.status)}", color = Gold, fontSize = 11.sp, letterSpacing = 1.sp)
+            Text(devicePack.selectedPackLabel.ifBlank { "No pack selected" }, fontWeight = FontWeight.Medium)
+            Text(formatStorageBytes(devicePack.bytesOnDisk), color = Muted, fontSize = 12.sp)
+            devicePack.error?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
+            if (devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null) {
+                LinearProgressIndicator(
+                    progress = { devicePack.downloadProgress!!.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("${(devicePack.downloadProgress!! * 100).toInt()}%", color = Muted, fontSize = 11.sp)
+            }
+            if (devicePack.availablePacks.isNotEmpty()) {
+                var packMenu by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedButton(onClick = { packMenu = true }) {
+                        Text("Pack · ${devicePack.selectedPackLabel.take(28).ifBlank { "Select" }} ▾")
+                    }
+                    DropdownMenu(packMenu, { packMenu = false }) {
+                        devicePack.availablePacks.forEach { pack ->
+                            DropdownMenuItem(
+                                text = { Text(pack.label) },
+                                onClick = {
+                                    packMenu = false
+                                    chrome.selectPack(pack.id)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { chrome.downloadSelectedPack() },
+                    enabled = !busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        when (devicePack.status) {
+                            DevicePackStatus.MISSING, DevicePackStatus.ERROR -> "Download pack"
+                            DevicePackStatus.DOWNLOADING -> "Downloading…"
+                            else -> "Re-download pack"
+                        },
+                    )
+                }
+                OutlinedButton(
+                    onClick = { chrome.deleteSelectedPack() },
+                    enabled = !busy && devicePack.bytesOnDisk > 0 && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Delete pack") }
+            }
+            if (!devicePack.nativeRuntimeBundled) {
+                Text(
+                    "On-device runtime not reported yet. D1 binds pack download/generation to this surface.",
+                    color = Muted,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}
+
+private fun devicePackStatusLabel(status: DevicePackStatus): String = when (status) {
+    DevicePackStatus.MISSING -> "missing"
+    DevicePackStatus.DOWNLOADING -> "downloading"
+    DevicePackStatus.READY -> "ready"
+    DevicePackStatus.RUNNING -> "running"
+    DevicePackStatus.ERROR -> "error"
+}
+
+private fun formatStorageBytes(bytes: Long): String {
+    if (bytes <= 0) return "Storage used · 0 B"
+    val mb = bytes.toDouble() / (1024.0 * 1024.0)
+    return if (mb >= 1024) "Storage used · ${"%.2f".format(mb / 1024)} GiB" else "Storage used · ${"%.1f".format(mb)} MiB"
 }
 
 @Composable private fun InfoCard(title: String, text: String) {
@@ -566,6 +676,8 @@ private fun inferenceStatus(state: CompanionState): String {
 @Composable private fun MoreScreen(
     model: CompanionModel,
     state: CompanionState,
+    deviceChrome: CompanionDeviceModelChrome,
+    devicePack: DevicePackChromeState,
     openPairingScanner: Boolean = false,
     onPairingScannerConsumed: () -> Unit = {},
 ) {
@@ -676,6 +788,7 @@ private fun inferenceStatus(state: CompanionState): String {
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Calls for critical events", Modifier.weight(1f)); Switch(device?.optBoolean("critical_calls") == true, { model.preferences(device?.optBoolean("notifications") == true, it) }, enabled = state.connected) }
             if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text("Background push needs the Jarvis push service configured.", color = Muted, fontSize = 12.sp)
         }
+        item { CompanionModelsSection(deviceChrome, devicePack, state.busy) }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))

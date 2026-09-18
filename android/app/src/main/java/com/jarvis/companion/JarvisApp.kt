@@ -7,6 +7,7 @@ import kotlinx.coroutines.launch
 
 class JarvisApp : Application() {
     lateinit var api: JarvisApi
+    val deviceModelChrome = CompanionDeviceModelChrome()
     override fun onCreate() {
         super.onCreate()
         api = JarvisApi(this)
