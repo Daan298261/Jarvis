@@ -17,7 +17,21 @@ STOPWORDS = {
     "create", "write", "file", "files", "into", "from", "at", "as", "by", "not", "no", "if", "so", "up",
 }
 
-MAX_PROMPT_ENTRIES = 3
+MAX_PROMPT_ENTRIES = 2
+LESSONS_HEADER = (
+    "Lessons from similar earlier tasks on this machine. Reuse what worked and avoid repeating what failed:"
+)
+LESSONS_TOKEN_CAP = 200
+
+_DENYLIST_GOAL = re.compile(
+    r"(?i)\b("
+    r"what was my last message|what did i just say|what was my previous message|"
+    r"repeat what i said|what did you just say"
+    r")\b"
+)
+_SECRET_SHAPE = re.compile(
+    r"(?i)(api[_-]?key|password|secret|bearer\s+[a-z0-9._-]{8,}|sk-[a-z0-9]{8,})"
+)
 
 
 def keywords(text: str) -> set[str]:
@@ -25,15 +39,44 @@ def keywords(text: str) -> set[str]:
     return {word for word in words if word not in STOPWORDS}
 
 
+def _overlap_count(row: Trajectory, goal_keywords: set[str]) -> int:
+    return len(keywords(row.goal) & goal_keywords)
+
+
 def _score(row: Trajectory, task_class: str, goal_keywords: set[str]) -> float:
-    score = 0.0
+    overlap = float(_overlap_count(row, goal_keywords))
+    if overlap < 1.0:
+        return 0.0
+    score = overlap
     if row.task_class and row.task_class == task_class:
-        score += 2.0
-    overlap = keywords(row.goal) & goal_keywords
-    score += float(len(overlap))
+        score += 0.5
     if row.outcome == "completed":
-        score += 1.5
+        score += 1.0
+    if row.recovery:
+        score += 0.5
     return score
+
+
+def _tools_list(row: Trajectory) -> list[str]:
+    try:
+        return list(json.loads(row.tools_json or "[]"))
+    except json.JSONDecodeError:
+        return []
+
+
+def _denylist_reason(row: Trajectory) -> str | None:
+    goal = (row.goal or "").strip()
+    if not goal:
+        return "empty_goal"
+    if _DENYLIST_GOAL.search(goal):
+        return "last_message_loop"
+    if _SECRET_SHAPE.search(goal):
+        return "credential_shaped"
+    tools = _tools_list(row)
+    if not tools or tools == ["none"]:
+        if not (row.recovery or "").strip() and not (row.verification or "").strip():
+            return "tools_none_trivia"
+    return None
 
 
 async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -> Trajectory | None:
@@ -104,12 +147,32 @@ async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -
 
 async def relevant_trajectories(task_class: str, goal: str, limit: int = MAX_PROMPT_ENTRIES) -> list[Trajectory]:
     goal_keywords = keywords(goal)
+    if not goal_keywords:
+        return []
     async with SessionLocal() as session:
         rows = (
             await session.execute(select(Trajectory).order_by(Trajectory.created_at.desc()).limit(200))
         ).scalars().all()
-        scored = [(row, _score(row, task_class, goal_keywords)) for row in rows]
-        picked = [row for row, score in sorted(scored, key=lambda item: item[1], reverse=True) if score >= 2.0][:limit]
+        scored: list[tuple[Trajectory, float]] = []
+        for row in rows:
+            reason = _denylist_reason(row)
+            if reason:
+                continue
+            score = _score(row, task_class, goal_keywords)
+            if score < 2.0:
+                continue
+            scored.append((row, score))
+        scored.sort(key=lambda item: item[1], reverse=True)
+        seen_goals: set[str] = set()
+        picked: list[Trajectory] = []
+        for row, _ in scored:
+            key = (row.goal or "").strip().lower()
+            if key in seen_goals:
+                continue
+            seen_goals.add(key)
+            picked.append(row)
+            if len(picked) >= limit:
+                break
         for row in picked:
             row.reuse_count += 1
         if picked:
@@ -120,14 +183,86 @@ async def relevant_trajectories(task_class: str, goal: str, limit: int = MAX_PRO
 def as_prompt_block(rows: Iterable[Trajectory]) -> str:
     entries = []
     for row in rows:
-        tools = ", ".join(json.loads(row.tools_json or "[]")) or "none"
+        tools = ", ".join(_tools_list(row)) or "none"
         line = f"- {row.goal} -> {row.outcome} using {tools}"
         if row.recovery:
             line += f". Recovery: {row.recovery}"
         entries.append(line)
     if not entries:
         return ""
-    return (
-        "Lessons from similar earlier tasks on this machine. Reuse what worked and avoid repeating what failed:\n"
-        + "\n".join(entries)
-    )
+    block = LESSONS_HEADER + "\n" + "\n".join(entries)
+    from ..inference.prompt_budget import estimate_text_tokens
+
+    if estimate_text_tokens(block) > LESSONS_TOKEN_CAP:
+        trimmed: list[str] = []
+        for line in entries:
+            candidate = LESSONS_HEADER + "\n" + "\n".join(trimmed + [line])
+            if estimate_text_tokens(candidate) > LESSONS_TOKEN_CAP:
+                break
+            trimmed.append(line)
+        if not trimmed:
+            return ""
+        block = LESSONS_HEADER + "\n" + "\n".join(trimmed)
+    return block
+
+
+async def gated_trajectory_lessons(
+    task_class: str,
+    goal: str,
+    *,
+    remaining_token_budget: int | None = None,
+) -> tuple[str, list[Trajectory], list[str]]:
+    """Quality-gated lessons block; returns (block, injected rows, drop reasons)."""
+    dropped: list[str] = []
+    goal_keywords = keywords(goal)
+    if not goal_keywords:
+        return "", [], ["no_goal_keywords"]
+
+    async with SessionLocal() as session:
+        rows = (
+            await session.execute(select(Trajectory).order_by(Trajectory.created_at.desc()).limit(200))
+        ).scalars().all()
+        scored: list[tuple[Trajectory, float]] = []
+        for row in rows:
+            reason = _denylist_reason(row)
+            if reason:
+                dropped.append(f"{reason}:{row.goal[:60]}")
+                continue
+            score = _score(row, task_class, goal_keywords)
+            if score < 2.0:
+                dropped.append(f"low_overlap:{row.goal[:60]}")
+                continue
+            scored.append((row, score))
+        scored.sort(key=lambda item: item[1], reverse=True)
+        seen_goals: set[str] = set()
+        picked: list[Trajectory] = []
+        for row, _ in scored:
+            key = (row.goal or "").strip().lower()
+            if key in seen_goals:
+                dropped.append(f"duplicate:{row.goal[:60]}")
+                continue
+            seen_goals.add(key)
+            picked.append(row)
+            if len(picked) >= MAX_PROMPT_ENTRIES:
+                break
+
+    block = as_prompt_block(picked)
+    if not block:
+        return "", [], dropped
+
+    if remaining_token_budget is not None:
+        from ..inference.prompt_budget import estimate_text_tokens
+
+        if estimate_text_tokens(block) > remaining_token_budget:
+            dropped.append("budget_tight")
+            return "", [], dropped
+
+    if picked:
+        async with SessionLocal() as session:
+            for row in picked:
+                db_row = await session.get(Trajectory, row.id)
+                if db_row:
+                    db_row.reuse_count += 1
+            await session.commit()
+
+    return block, picked, dropped

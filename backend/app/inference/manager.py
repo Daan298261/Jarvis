@@ -434,7 +434,7 @@ class InferenceManager:
                     )
                 if is_context_overflow(exc) and overflow_retries < 1:
                     overflow_retries += 1
-                    typed, recovered = await recover_context_after_overflow(
+                    typed, fitted_tools, recovered = await recover_context_after_overflow(
                         typed,
                         fitted_tools,
                         profile,
@@ -519,7 +519,7 @@ class InferenceManager:
                     return
                 if is_context_overflow(exc) and overflow_retries < 1:
                     overflow_retries += 1
-                    typed, recovered = await recover_context_after_overflow(
+                    typed, fitted_tools, recovered = await recover_context_after_overflow(
                         typed,
                         fitted_tools,
                         profile,

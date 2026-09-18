@@ -252,7 +252,7 @@ async def recover_context_after_overflow(
     manager: Any,
     working_state_block: str | None = None,
     emit: ContextEventEmitter | None = None,
-) -> tuple[list[ChatMessage], bool]:
+) -> tuple[list[ChatMessage], list[dict[str, Any]] | None, bool]:
     """Compact and expand after a recoverable overflow error (same-model recovery only)."""
     budget = calculate_prompt_budget(
         messages,
@@ -266,7 +266,12 @@ async def recover_context_after_overflow(
 
     if emit:
         await emit("context_compaction_started", budget, "post-overflow compact")
-    messages = compact_history(messages, working_state_block=working_state_block)
+    messages = compact_history(
+        messages,
+        working_state_block=working_state_block,
+        drop_head_injections=True,
+    )
+    tools = None
 
     cap = profile_cap(profile)
     budget = calculate_prompt_budget(
@@ -300,11 +305,11 @@ async def recover_context_after_overflow(
         active_context=manager.live_context_size(),
     )
     if budget.pressure < PRESSURE_EXPAND_OK:
-        return messages, True
+        return messages, tools, True
 
     if emit:
         await emit("context_recovery_failed", budget, "recovery exhausted")
-    return messages, False
+    return messages, tools, False
 
 
 # Re-export for compaction module compatibility

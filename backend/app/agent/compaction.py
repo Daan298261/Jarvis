@@ -7,6 +7,11 @@ from ..providers.base import ChatMessage
 
 SUMMARY_MARKER = "Compacted earlier task memory:"
 WORKING_STATE_MARKER = "Compact working state:"
+LESSONS_MARKER = "Lessons from similar earlier tasks"
+SKILLS_MARKER = "Reusable skills already proven on this machine"
+TOOL_EXPOSURE_MARKER = "Tool exposure:"
+VAULT_MARKER = "Linked vault memory"
+MEMORY_MARKER = "Structured memory (RFC-0011)"
 
 
 def _text_of(message: ChatMessage) -> str:
@@ -55,12 +60,38 @@ def _summarize(middle: list[ChatMessage], max_entries: int, snippet: int) -> lis
     return bits[:head] + [f"- ...{len(bits) - max_entries} earlier steps omitted..."] + bits[head - max_entries :]
 
 
+def _strip_head_injections(content: str) -> str:
+    """RFC-0122 / RFC-0114: drop injectable blocks from the system head during recovery."""
+    if not content:
+        return content
+    parts = content.split("\n\n")
+    kept: list[str] = []
+    for part in parts:
+        stripped = part.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(
+            (
+                LESSONS_MARKER,
+                SKILLS_MARKER,
+                TOOL_EXPOSURE_MARKER,
+                VAULT_MARKER,
+                MEMORY_MARKER,
+                "Installable capabilities",
+            )
+        ):
+            continue
+        kept.append(part)
+    return "\n\n".join(kept).strip()
+
+
 def compact_history(
     messages: list[ChatMessage],
     keep_last: int = 8,
     working_state_block: str | None = None,
     max_summary_entries: int = 40,
     snippet: int = 400,
+    drop_head_injections: bool = False,
 ) -> list[ChatMessage]:
     """Keep the prompt small without dropping what the model needs to continue.
 
@@ -71,7 +102,11 @@ def compact_history(
     # Earlier passes injected their own summary and working-state blocks. Drop
     # them so they are rebuilt from current data instead of nesting.
     cleaned = [message for message in messages if not _is_generated(message)]
-    head = cleaned[:2]
+    head = list(cleaned[:2])
+    if drop_head_injections and head:
+        first = head[0]
+        if first.role == "system" and isinstance(first.content, str):
+            head[0] = ChatMessage(role="system", content=_strip_head_injections(first.content))
     extra: list[ChatMessage] = []
 
     start = _tail_start(cleaned, keep_last)
