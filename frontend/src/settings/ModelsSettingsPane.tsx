@@ -76,6 +76,52 @@ export function ModelsSettingsPane({
             }
           />
         </label>
+        <label>Front chat model (optional)
+          <input
+            value={String(
+              ((settings.front_responder && typeof settings.front_responder === "object"
+                ? settings.front_responder
+                : {}) as Record<string, unknown>).model || "",
+            )}
+            placeholder="Same host/port as above. Blank uses the loaded model id"
+            onBlur={(e) => save({ front_responder_model: e.target.value.trim() })}
+            onChange={(e) =>
+              setSettings({
+                ...settings,
+                front_responder: {
+                  ...((settings.front_responder && typeof settings.front_responder === "object"
+                    ? settings.front_responder
+                    : {}) as Record<string, unknown>),
+                  model: e.target.value,
+                },
+              })
+            }
+          />
+        </label>
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={
+              ((settings.front_responder && typeof settings.front_responder === "object"
+                ? settings.front_responder
+                : { enabled: true }) as Record<string, unknown>).enabled !== false
+            }
+            onChange={(e) => save({ front_responder_enabled: e.target.checked })}
+          />
+          Tiny front-chat responder (fast first reply while the larger model continues)
+        </label>
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={
+              ((settings.front_responder && typeof settings.front_responder === "object"
+                ? settings.front_responder
+                : { speak_immediately: true }) as Record<string, unknown>).speak_immediately !== false
+            }
+            onChange={(e) => save({ front_responder_speak_immediately: e.target.checked })}
+          />
+          Speak the front reply immediately (do not wait for the larger model)
+        </label>
         <label>Inference API key (optional)
           <input
             type="password"

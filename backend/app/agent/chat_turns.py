@@ -40,7 +40,9 @@ def _from_messages(raw: str) -> list[dict[str, str]]:
         if turns and turns[-1]["role"] == message.role and turns[-1]["content"] == content:
             continue
         turns.append({"role": message.role, "content": content})
-    return turns
+    from .front_responder import merge_consecutive_assistant_turns
+
+    return merge_consecutive_assistant_turns(turns)
 
 
 def _from_prompt(prompt: str, result: str = "", error: str = "") -> list[dict[str, str]]:

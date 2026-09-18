@@ -7,6 +7,7 @@ import {
   isTaskRunning,
   splitAssistantContent,
   taskStatusLine,
+  useLiveAssistantPreview,
   visibleChatTurns,
   writeShowWorkPreference,
   type OwnerChatEvent,
@@ -48,11 +49,14 @@ export function OwnerChatTranscript({
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [thoughtOpen, setThoughtOpen] = useState(false)
   const [internalOpen, setInternalOpen] = useState(false)
+  const running = isTaskRunning(status)
+  const liveAssistant = useLiveAssistantPreview(taskId, running)
+  const confirmation = useMemo(() => parseConfirmationPayload(confirmation_payload), [confirmation_payload])
   const workEvents = useMemo(() => filterWorkEvents(events), [events])
   const thoughtEvents = useMemo(() => filterThoughtEvents(events), [events])
   const turns = useMemo(
-    () => visibleChatTurns({ prompt, result, error, messages, pending }),
-    [prompt, result, error, messages, pending],
+    () => visibleChatTurns({ prompt, result, error, messages, pending, liveAssistant }),
+    [prompt, result, error, messages, pending, liveAssistant],
   )
   const internalBlocks = useMemo(() => {
     const blocks: string[] = []
@@ -61,8 +65,6 @@ export function OwnerChatTranscript({
     }
     return blocks
   }, [turns])
-  const running = isTaskRunning(status)
-  const confirmation = useMemo(() => parseConfirmationPayload(confirmation_payload), [confirmation_payload])
   const pendingCtx = useOptionalPendingApprovals()
   const showLegacyInlinePrompt =
     waiting_for_confirmation && !confirmation?.pending_id

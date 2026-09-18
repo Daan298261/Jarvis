@@ -59,7 +59,7 @@ export function ChatPage() {
       }
     }
     load()
-    timer = window.setInterval(() => load().catch(() => undefined), 2000)
+    timer = window.setInterval(() => load().catch(() => undefined), 400)
     return () => clearInterval(timer)
   }, [id])
 

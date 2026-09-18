@@ -68,6 +68,26 @@ class InferenceSettings(BaseModel):
     lmstudio_models_root: str = ""
 
 
+class FrontResponderSettings(BaseModel):
+    """RFC-0117 tiny front-chat lane on the existing local / LM Studio endpoint.
+
+    ``model`` is an OpenAI-compatible model id advertised by that endpoint.
+    Empty means: use ``inference.remote_model`` or the currently loaded alias.
+    No vendor model name is hard-coded.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = True
+    model: str = ""
+    max_output_tokens: int = Field(default=128, ge=32, le=256)
+    temperature: float = Field(default=0.25, ge=0.0, le=1.0)
+    timeout_ms: int = Field(default=3000, ge=250, le=8000)
+    context_turns: int = Field(default=4, ge=0, le=8)
+    speak_immediately: bool = True
+    parallel_when_distinct_model: bool = True
+
+
 class BrowserSettings(BaseModel):
     backend: str = "playwright"
     headless: bool = False
@@ -234,6 +254,7 @@ class AppSettings(BaseModel):
     auth_required: bool = False
     auth_token: str = ""
     inference: InferenceSettings = Field(default_factory=InferenceSettings)
+    front_responder: FrontResponderSettings = Field(default_factory=FrontResponderSettings)
     autonomy: str = "trusted"
     default_timeout_seconds: int = 1800
     retry_limit: int = 4
