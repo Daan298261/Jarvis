@@ -5,6 +5,8 @@
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-28
 
+**Related (do not rewrite):** [RFC-0122](0122-ingress-size-gate-spill-and-trajectory-cap.md) quality-gates and budget-caps **prompt injection** of stored lessons (e.g. drop “last message → none”); ingest/schema in this RFC stays.
+
 ## Problem
 
 Work performed through Cursor, Codex, Claude Code, OpenHands, or other harnesses is currently siloed. Jarvis cannot reliably learn reusable lessons from those sessions.

@@ -2572,6 +2572,16 @@ Owner asked for a real offline pack download (not a catalog stub) and a clear co
 
 ---
 
+Decision: RFC-0122 ingress size-gate + trajectory cap (accepted; Jarvis 1.4.1 priority bugfix)
+
+RFC-0122 ([`docs/rfcs/0122-ingress-size-gate-spill-and-trajectory-cap.md`](docs/rfcs/0122-ingress-size-gate-spill-and-trajectory-cap.md)): after HUD + model hotswap, ordinary owner Q&A must not die on `Context capacity exceeded after compact/expand recovery`. Reuse `front_responder` for a cheap size/complexity check (no third persona). Large payloads **spill to the internal DB first** (optional Obsidian durable mirror via RFC-0107 — **hybrid default**, DB authoritative for the turn blob). Trajectory “lessons” injection is quality-gated and budget-capped (never inject “last message → none”). Simple Q&A gets on-demand / empty tools, not a full catalog dump. RFC-0114 recovery **stays**; this ticket fixes **what enters** the budget. Specs-only; implement is a named follow-up. Do **not** block RFC-0108. No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
+
+Reason:
+
+Taco 2026-09-18: Jarvis 1.4.1 product priority is the context-overflow / junk-injection path after Neural HUD → Humanoid HUD → Qwen 27B; specs first.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:

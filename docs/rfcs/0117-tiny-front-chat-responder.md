@@ -5,7 +5,7 @@
 **Author:** Taco request via Codex  
 **Date:** 2026-09-18
 
-**Related:** [RFC-0085](0085-universal-task-fastpath.md) response-first routing, [RFC-0075](0075-natural-speak-path-and-reply-latency.md) natural speak path, [RFC-0083](0083-conversation-followup-no-reasoning-leak.md) no reasoning leak, [RFC-0115](0115-ornith-orchestrator-router-complexity.md) model tiers and visible handoff, [RFC-0116](0116-typesafe-jev-optional-decision-tier.md) optional decision tier.
+**Related:** [RFC-0085](0085-universal-task-fastpath.md) response-first routing, [RFC-0075](0075-natural-speak-path-and-reply-latency.md) natural speak path, [RFC-0083](0083-conversation-followup-no-reasoning-leak.md) no reasoning leak, [RFC-0115](0115-ornith-orchestrator-router-complexity.md) model tiers and visible handoff, [RFC-0116](0116-typesafe-jev-optional-decision-tier.md) optional decision tier. [RFC-0122](0122-ingress-size-gate-spill-and-trajectory-cap.md) reuses this lane for ingress size-check + spoken “processing” while a large payload spills to store — do not invent a third persona.
 
 ## Problem
 
