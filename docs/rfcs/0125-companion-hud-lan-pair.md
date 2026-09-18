@@ -1,4 +1,4 @@
-# RFC-0124: Companion HUD render + LAN pair request
+# RFC-0125: Companion HUD render + LAN pair request
 
 **Status:** implemented  
 **Queue item:** (none — Taco product ask 2026-09-18; no new §58 checkbox)  
@@ -37,7 +37,7 @@ Default connectivity when no stored config exists: LAN listen on **4781** (`enab
 | Android | `MainActivity.kt`, new `PresenceHud.kt`, `LanBeacon.kt`, `CompanionModel.kt`, `JarvisApi.kt`, `AndroidManifest.xml` |
 | Backend | `backend/app/mobile/lan_beacon.py`, `identity.py`, `connectivity.py`, `gateway.py`, `api/companion.py` |
 | Frontend | `CompanionPairingPanel.tsx` (pending LAN request copy) |
-| Tests | `tests/test_rfc0124_lan_pair.py`, Android `LanBeaconTest`, `PresenceParticlesTest` |
+| Tests | `tests/test_rfc0125_lan_pair.py`, Android `LanBeaconTest`, `PresenceParticlesTest` |
 
 ## Out of scope
 
