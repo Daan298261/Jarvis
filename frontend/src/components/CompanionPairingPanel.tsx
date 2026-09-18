@@ -328,15 +328,16 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
       {!compact && (
         <>
           <ol className="companion-pairing-steps">
-            <li>Open the Jarvis companion app on your phone.</li>
-            <li>Scan the QR code or enter this 6-digit code.</li>
-            <li>Compare and approve the fingerprint below.</li>
+            <li>Open the Jarvis companion on this Wi‑Fi. It scans for this PC and asks you to approve.</li>
+            <li>Or scan the QR code / enter the 6-digit code.</li>
+            <li>Approve the phone fingerprint below. Pairing stays pending until you confirm.</li>
           </ol>
           {devices
             .filter((device) => device.status === "pending")
             .map((device) => (
               <div key={device.id} className="card" style={{ marginTop: 12 }}>
-                <strong>{device.name} · awaiting approval</strong>
+                <strong>{device.name} · waiting for your approval</strong>
+                <p>A phone on your network asked to pair. Compare this fingerprint with the phone screen, then approve.</p>
                 <p style={{ overflowWrap: "anywhere", fontFamily: "monospace" }}>
                   {device.fingerprint.match(/.{1,8}/g)?.join(" ")}
                 </p>
