@@ -2552,6 +2552,16 @@ Taco 2026-09-18: at most five highest-leverage next steps against those four goa
 
 ---
 
+Decision: RFC-0119 license-package entitlements + release unrestricted license + HexStrike overview (accepted)
+
+RFC-0119 ([`docs/rfcs/0119-license-package-entitlements-and-release-unrestricted.md`](docs/rfcs/0119-license-package-entitlements-and-release-unrestricted.md)): the **License Manager signed package** is the **sole capability gate** for modules, functionalities, and LE/red/blue packs (`has_feature` / pack entitlements / `modules[]`). **Password gates are retired** for unlocking HexStrike / Daybreak / cyber / modules (RFC-0086/0087 ATO+LE fields stay; no new officer/ATO policy). Each Windows Setup / release cut **must emit** a full **owner-unrestricted** `.jarvis-license` into `installer/windows/dist/` beside Setup (not the customer Inno payload). HexStrike select/load speaks/chats **one short product overview** only — no exploit recipes / PoCs / payloads / attack steps. Specs-only; no new §58 checkbox. Do not block RFC-0108. RFC-0118 is a parallel memo (do not take that number).
+
+Reason:
+
+Taco via CoS 2026-09-18: License Manager package is the central entitlement; Taco must not hand-regen unrestricted licenses; HexStrike load gets a product overview, not tradecraft.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:

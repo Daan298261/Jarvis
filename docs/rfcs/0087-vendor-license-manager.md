@@ -5,6 +5,8 @@
 **Author:** Taco via Cursor  
 **Date:** 2026-09-14
 
+**Related:** [RFC-0119](0119-license-package-entitlements-and-release-unrestricted.md) makes this License Manager **package** the runtime capability gate (no password unlock) and requires each Setup/release cut to emit an owner-unrestricted file into `dist/` (still not in `Jarvis.iss`).
+
 ## Problem
 
 RFC-0086 mints cyber ATO files on the Leader with a per-machine issuer key. That is not a vendor tool: there is no licensee record, no module catalog, no sealed PII, and no honest offline autorenew cap. A hardcoded symmetric “mint key” in Jarvis would be extractable. Clock checks today only look at `last_validated_at` (five-minute jump); a calendar rollback (September → January) should suspend **licensed modules** without taking down household chat, local files, or models on disk.
