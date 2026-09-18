@@ -128,11 +128,21 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         catch (e: Exception) { mutable.value = mutable.value.copy(error = e.message) }
         finally { mutable.value = mutable.value.copy(busy = false) }
     }
-    fun offlineStatusJson(): JSONObject = CompanionOfflineStatus.snapshot(mutable.value, packManager)
+    fun offlineStatusJson(): JSONObject = CompanionOfflineHooks.statusSnapshot(this)
+
+    fun refreshCompanionPackStatus() = action {
+        packManager.refreshStatus()
+        mutable.value = mutable.value.copy(
+            localPackStatus = packManager.status(),
+            localPackProgress = packManager.downloadProgress(),
+            localPackError = packManager.lastError(),
+            offlineQueueDepth = offlineQueue.pendingCount(),
+        )
+    }
 
     fun downloadCompanionPack() = action {
         packManager.downloadSelected { progress ->
-            mutable.value = mutable.value.copy(localPackProgress = progress, localPackStatus = "downloading")
+            mutable.value = mutable.value.copy(localPackProgress = progress, localPackStatus = CompanionPackStatus.DOWNLOADING)
         }
         mutable.value = mutable.value.copy(
             localPackStatus = packManager.status(),

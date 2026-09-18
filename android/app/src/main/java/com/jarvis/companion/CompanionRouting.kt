@@ -32,16 +32,16 @@ object CompanionRouting {
             return RoutingDecision(RoutingMode.DEVICE_BLOCKED, it)
         }
         return when (packStatus) {
-            "ready", "running" -> RoutingDecision(RoutingMode.DEVICE_OFFLINE)
-            "missing" -> RoutingDecision(
+            CompanionPackStatus.READY, CompanionPackStatus.RUNNING -> RoutingDecision(RoutingMode.DEVICE_OFFLINE)
+            CompanionPackStatus.MISSING -> RoutingDecision(
                 RoutingMode.DEVICE_BLOCKED,
                 "Install a companion model pack in More → Models to chat while Jarvis is offline",
             )
-            "downloading" -> RoutingDecision(
+            CompanionPackStatus.DOWNLOADING -> RoutingDecision(
                 RoutingMode.DEVICE_BLOCKED,
                 "Model pack is still downloading",
             )
-            "error" -> RoutingDecision(
+            CompanionPackStatus.ERROR -> RoutingDecision(
                 RoutingMode.DEVICE_BLOCKED,
                 "Companion model failed — retry download or free storage",
             )

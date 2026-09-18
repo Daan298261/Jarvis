@@ -8,7 +8,7 @@ class CompanionRoutingTest {
     fun leaderReachableUsesOrchestrator() {
         val decision = CompanionRouting.decide(
             leaderReachable = true,
-            packStatus = "missing",
+            packStatus = CompanionPackStatus.MISSING,
             resourceBlocked = null,
             hasStalePendingOnlineOutbox = false,
         )
@@ -19,7 +19,7 @@ class CompanionRoutingTest {
     fun offlineRequiresReadyPack() {
         val blocked = CompanionRouting.decide(
             leaderReachable = false,
-            packStatus = "missing",
+            packStatus = CompanionPackStatus.MISSING,
             resourceBlocked = null,
             hasStalePendingOnlineOutbox = false,
         )
@@ -27,7 +27,7 @@ class CompanionRoutingTest {
 
         val offline = CompanionRouting.decide(
             leaderReachable = false,
-            packStatus = "ready",
+            packStatus = CompanionPackStatus.READY,
             resourceBlocked = null,
             hasStalePendingOnlineOutbox = false,
         )
@@ -38,7 +38,7 @@ class CompanionRoutingTest {
     fun pendingOnlineOutboxBlocksOffline() {
         val decision = CompanionRouting.decide(
             leaderReachable = false,
-            packStatus = "ready",
+            packStatus = CompanionPackStatus.READY,
             resourceBlocked = null,
             hasStalePendingOnlineOutbox = true,
         )

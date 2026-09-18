@@ -14,13 +14,13 @@ import java.util.concurrent.atomic.AtomicReference
 /** Pack lifecycle: missing / downloading / ready / running / error */
 class CompanionPackManager(
     context: Context,
-    private val engine: LocalInferenceEngine = LlamaCppInferenceEngine(),
+    val engine: LocalInferenceEngine = LlamaCppInferenceEngine(),
 ) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("companion_pack", Context.MODE_PRIVATE)
     private val packDir = File(app.filesDir, "model-packs").apply { mkdirs() }
     private val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
-    private val statusRef = AtomicReference("missing")
+    private val statusRef = AtomicReference(CompanionPackStatus.MISSING)
     private val progressRef = AtomicReference(0)
     private val errorRef = AtomicReference("")
     private var catalog: List<CompanionPack> = CompanionPackCatalog.builtIn
@@ -52,31 +52,31 @@ class CompanionPackManager(
     fun isPackReady(): Boolean {
         val pack = selectedPack() ?: return false
         val file = packFile(pack)
-        return file.isFile && file.length() > 0 && statusRef.get() in setOf("ready", "running")
+        return file.isFile && file.length() > 0 && statusRef.get() in setOf(CompanionPackStatus.READY, CompanionPackStatus.RUNNING)
     }
 
     suspend fun refreshStatus() = withContext(Dispatchers.IO) {
         val pack = selectedPack()
         if (pack == null) {
-            statusRef.set("error")
+            statusRef.set(CompanionPackStatus.ERROR)
             errorRef.set("No companion pack selected")
             return@withContext
         }
         val file = packFile(pack)
         if (!file.isFile || file.length() == 0L) {
-            statusRef.set("missing")
+            statusRef.set(CompanionPackStatus.MISSING)
             errorRef.set("")
             return@withContext
         }
         if (pack.sha256.isNotBlank()) {
             val digest = sha256(file)
             if (!digest.equals(pack.sha256, ignoreCase = true)) {
-                statusRef.set("error")
+                statusRef.set(CompanionPackStatus.ERROR)
                 errorRef.set("Pack checksum mismatch — delete and download again")
                 return@withContext
             }
         }
-        statusRef.set("ready")
+        statusRef.set(CompanionPackStatus.READY)
         errorRef.set("")
     }
 
@@ -84,7 +84,7 @@ class CompanionPackManager(
         val pack = selectedPack() ?: error("No pack selected")
         require(pack.url.isNotBlank()) { "Leader has not published a download URL for this pack yet" }
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
-        statusRef.set("downloading")
+        statusRef.set(CompanionPackStatus.DOWNLOADING)
         progressRef.set(0)
         errorRef.set("")
         val target = packFile(pack)
@@ -115,13 +115,13 @@ class CompanionPackManager(
             val digest = sha256(partial)
             if (!digest.equals(pack.sha256, ignoreCase = true)) {
                 partial.delete()
-                statusRef.set("error")
+                statusRef.set(CompanionPackStatus.ERROR)
                 errorRef.set("Download checksum mismatch")
                 error("Download checksum mismatch")
             }
         }
         partial.renameTo(target)
-        statusRef.set("ready")
+        statusRef.set(CompanionPackStatus.READY)
         progressRef.set(100)
     }
 
@@ -129,7 +129,7 @@ class CompanionPackManager(
         val pack = selectedPack()
         engine.unload()
         if (pack != null) packFile(pack).delete()
-        statusRef.set("missing")
+        statusRef.set(CompanionPackStatus.MISSING)
         errorRef.set("")
         progressRef.set(0)
     }
@@ -139,17 +139,17 @@ class CompanionPackManager(
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
         val path = packFile(pack)
         if (!path.isFile) error("Install the companion model pack first")
-        statusRef.set("running")
+        statusRef.set(CompanionPackStatus.RUNNING)
         val loadError = engine.load(path.absolutePath, 2048)
         if (loadError != null) {
-            statusRef.set("error")
+            statusRef.set(CompanionPackStatus.ERROR)
             errorRef.set(loadError)
             error(loadError)
         }
         val genError = engine.generate(prompt, maxTokens, onToken)
-        statusRef.set("ready")
+        statusRef.set(CompanionPackStatus.READY)
         if (genError != null) {
-            statusRef.set("error")
+            statusRef.set(CompanionPackStatus.ERROR)
             errorRef.set(genError)
             error(genError)
         }
@@ -158,7 +158,7 @@ class CompanionPackManager(
 
     fun unload() {
         engine.unload()
-        if (statusRef.get() == "running") statusRef.set("ready")
+        if (statusRef.get() == CompanionPackStatus.RUNNING) statusRef.set(CompanionPackStatus.READY)
     }
 
     private fun sha256(file: File): String {
