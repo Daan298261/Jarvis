@@ -1,5 +1,8 @@
 # Models and runtime binaries
 models/
+*.gguf
+*.gguf.partial
+data/companion-packs/
 runtime/llama.cpp/
 runtime/*.zip
 runtime/llama-server-help.txt

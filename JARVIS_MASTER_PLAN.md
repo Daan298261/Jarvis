@@ -2562,6 +2562,16 @@ Taco via CoS 2026-09-18: License Manager package is the central entitlement; Tac
 
 ---
 
+Decision: RFC-0108 amend (offline GGUF pack path) + RFC-0123 companion reachability / anti-impersonation (accepted)
+
+Taco via CoS 2026-09-18 (HOLD lifted for this slice only). [RFC-0108](docs/rfcs/0108-phone-companion-offline-ai-model.md) keeps the #309 llama.cpp / routing / Outbox / sync contract and adds: pinned allowlisted phone GGUF URL (empty catalog URL is a fail), Leader `data/companion-packs/` cache with weights **gitignored**, first Leader-up **background** download (non-blocking, progress visible), post-pair **popup** offering phone download with **size in MB**. Fine-tune later. [RFC-0123](docs/rfcs/0123-companion-reachability-and-anti-impersonation.md): owner-facing LAN-only vs port-forward (**TCP 4781** only) vs mobile-relay; Leader **listens continuously** on the companion TLS port; accept **pairing keys** only (RFC-0074/0059); continuous impersonation/MITM watch; on suspicion emit **`detected-hack-attempt`** + **probability**, kill the connection, refuse `:4781` for **10 minutes**. No exploit recipes. No new §58 checkbox. Do not take RFC-0122. Do not invent LE/Red/Purple gates.
+
+Reason:
+
+Owner asked for a real offline pack download (not a catalog stub) and a clear companion-port / anti-impersonation product on the existing gateway — not a second blue-team bot.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
