@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import {
+  cleanReinstallDurableLogPath,
+  cleanReinstallUnavailableMessage,
   formatCleanReinstallLogPaths,
   getCleanReinstallOwnedRoots,
   getCleanReinstallStatus,
+  isCleanReinstallConfirmTokenExpired,
   isCleanReinstallSuccess,
   startCleanReinstall,
   type CleanReinstallLogPaths,
@@ -13,6 +16,16 @@ import {
 const POLL_MS = 2000
 
 type Phase = "idle" | "step1" | "step2" | "running" | "succeeded" | "failed"
+
+function DurableLogCallout({ logPaths }: { logPaths: CleanReinstallLogPaths | null | undefined }) {
+  const durable = cleanReinstallDurableLogPath(logPaths)
+  if (!durable) return null
+  return (
+    <p className="lede" style={{ margin: "10px 0 0" }}>
+      Check the durable log on this PC: <code>{durable}</code>
+    </p>
+  )
+}
 
 function LogPathsBlock({ logPaths, title }: { logPaths: CleanReinstallLogPaths | null | undefined; title?: string }) {
   if (!logPaths) return null
@@ -74,15 +87,10 @@ export function CleanInstallReinstallCard() {
       if (!data.action_available) {
         setPhase("failed")
         setError(
-          "Clean Install / Reinstall is not available on this PC right now. "
+          `${cleanReinstallUnavailableMessage(data)} `
             + (data.preserved_note ? `${data.preserved_note} ` : "")
-            + "Use JarvisSetup.exe Clean from Windows if you are reinstalling manually.",
+            + "You can still use JarvisSetup.exe Clean from the Windows installer.",
         )
-        return
-      }
-      if (!data.owned_root_entries.length) {
-        setPhase("failed")
-        setError("No Jarvis-owned folders were returned. Nothing can be removed safely from here.")
         return
       }
       setPhase("step1")
@@ -96,6 +104,11 @@ export function CleanInstallReinstallCard() {
 
   async function onFinalConfirm() {
     if (!preview || !allAcknowledged) return
+    if (isCleanReinstallConfirmTokenExpired(preview)) {
+      setPhase("failed")
+      setError("The confirmation expired. Start over to load a fresh folder list and token.")
+      return
+    }
     setBusy(true)
     setError("")
     setStatusMessage("")
@@ -211,6 +224,7 @@ export function CleanInstallReinstallCard() {
       {error && (
         <div className="card" style={{ marginBottom: 12, padding: "10px 14px" }}>
           {error}
+          <DurableLogCallout logPaths={logPaths} />
           <LogPathsBlock logPaths={logPaths} title="Logs" />
           {logTail.length > 0 && (
             <details style={{ marginTop: 10 }}>
@@ -268,7 +282,11 @@ export function CleanInstallReinstallCard() {
             <button
               className="btn"
               type="button"
-              disabled={busy || !allAcknowledged}
+              disabled={
+                busy
+                || !allAcknowledged
+                || (preview ? isCleanReinstallConfirmTokenExpired(preview) : false)
+              }
               onClick={() => setPhase("step2")}
             >
               Continue to final confirmation
@@ -282,6 +300,11 @@ export function CleanInstallReinstallCard() {
 
       {phase === "step2" && preview && (
         <div style={{ marginBottom: 12 }}>
+          {isCleanReinstallConfirmTokenExpired(preview) && (
+            <p className="lede" style={{ margin: "0 0 12px", color: "var(--bad)" }}>
+              Confirmation expired. Go back and cancel, then start over to fetch a new token.
+            </p>
+          )}
           <p className="lede" style={{ margin: "0 0 12px" }}>
             Step 2 of 2 — <strong>This cannot be undone.</strong> Jarvis will force-stop, delete only the folders you
             acknowledged, and launch Setup for a clean install. Default is to cancel.
@@ -300,7 +323,12 @@ export function CleanInstallReinstallCard() {
             <button className="btn secondary" type="button" disabled={busy} onClick={resetFlow}>
               No, cancel
             </button>
-            <button className="btn danger" type="button" disabled={busy} onClick={() => void onFinalConfirm()}>
+            <button
+              className="btn danger"
+              type="button"
+              disabled={busy || isCleanReinstallConfirmTokenExpired(preview)}
+              onClick={() => void onFinalConfirm()}
+            >
               Yes, clean install — cannot be undone
             </button>
           </div>

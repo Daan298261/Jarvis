@@ -4880,9 +4880,12 @@ export type CleanReinstallPreview = {
   confirm_token_expires_at: number
   owned_root_entries: CleanReinstallOwnedRootEntry[]
   owned_roots?: string[]
+  install_root?: string
   license_issuer_preserved?: string
   preserved_note?: string
   log_paths: CleanReinstallLogPaths
+  windows_only?: boolean
+  safe_install_dir?: boolean
   ux: {
     requires_two_step_confirm: boolean
     post_start_poll_path: string
@@ -4926,6 +4929,8 @@ function parseCleanReinstallJson(text: string): unknown {
 }
 
 function cleanReinstallMessageFromBody(parsed: unknown, fallback: string): string {
+  const aborted = extractCleanReinstallAborted(parsed)
+  if (aborted?.reason) return aborted.reason
   if (parsed && typeof parsed === "object") {
     const record = parsed as { reason?: unknown; message?: unknown; detail?: unknown }
     if (typeof record.reason === "string" && record.reason) return record.reason
@@ -4933,6 +4938,41 @@ function cleanReinstallMessageFromBody(parsed: unknown, fallback: string): strin
     return formatApiDetail(record.detail, fallback)
   }
   return fallback
+}
+
+function extractCleanReinstallAborted(parsed: unknown): CleanReinstallStartAborted | null {
+  if (!parsed || typeof parsed !== "object") return null
+  const record = parsed as Record<string, unknown>
+  if (record.status === "aborted") {
+    return parsed as CleanReinstallStartAborted
+  }
+  const detail = record.detail
+  if (detail && typeof detail === "object" && (detail as Record<string, unknown>).status === "aborted") {
+    return detail as CleanReinstallStartAborted
+  }
+  return null
+}
+
+export function isCleanReinstallConfirmTokenExpired(preview: CleanReinstallPreview, nowMs = Date.now()): boolean {
+  const expiresAt = preview.confirm_token_expires_at
+  if (!Number.isFinite(expiresAt)) return false
+  return nowMs / 1000 >= expiresAt
+}
+
+export function cleanReinstallUnavailableMessage(preview: CleanReinstallPreview): string {
+  if (preview.windows_only === false) {
+    return "Clean Install / Reinstall is only available on Windows. Use JarvisSetup.exe Clean from the installer on this PC."
+  }
+  if (preview.safe_install_dir === false) {
+    return (
+      "Jarvis could not verify a safe install folder for a full wipe. "
+      + "Use JarvisSetup.exe from your existing install, or fix the install path before trying again."
+    )
+  }
+  if (!preview.owned_root_entries.length) {
+    return "No Jarvis-owned folders are registered for this install. Nothing can be removed from here."
+  }
+  return "Clean Install / Reinstall is not available right now."
 }
 
 async function fetchCleanReinstallStart(
@@ -4953,8 +4993,11 @@ async function fetchCleanReinstallStart(
     const text = await response.text()
     const parsed = parseCleanReinstallJson(text)
 
-    if (response.status === 400 && parsed && typeof parsed === "object" && (parsed as CleanReinstallStartAborted).status === "aborted") {
-      return { kind: "aborted", data: parsed as CleanReinstallStartAborted }
+    if (response.status === 400) {
+      const aborted = extractCleanReinstallAborted(parsed)
+      if (aborted) {
+        return { kind: "aborted", data: aborted }
+      }
     }
 
     if (!response.ok) {
@@ -5011,4 +5054,9 @@ export function formatCleanReinstallLogPaths(
   if (logPaths.install) out.push({ label: "Install log", path: logPaths.install })
   if (logPaths.status) out.push({ label: "Status file", path: logPaths.status })
   return out
+}
+
+export function cleanReinstallDurableLogPath(logPaths: CleanReinstallLogPaths | null | undefined): string | null {
+  const path = logPaths?.durable?.trim()
+  return path || null
 }
