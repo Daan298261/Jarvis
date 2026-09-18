@@ -172,17 +172,23 @@ Expose concise timing in diagnostics so the owner can see whether slowness is fr
 
 ## Acceptance criteria
 
-- [x] A configured tiny front responder lane exists with tools disabled, thinking disabled, and a small token cap.
-- [x] Owner chat starts the front responder before or in parallel with the normal router/worker path.
-- [x] Trivial greetings and basic chat can complete through `final_basic` without invoking a larger worker.
-- [x] Non-trivial requests emit a safe `ack_continue` or `handoff_notice` quickly while the larger model/tool path continues.
-- [x] The front responder cannot make unverified success claims, perform tools, expose hidden reasoning, or answer tier-2+ requests as final.
-- [x] Transcript rendering treats the front and worker output as one Jarvis turn, without duplicate reply cards.
-- [x] Speech can begin from a safe front response without waiting for the larger model.
-- [x] Diagnostics record queue, front first text, front first audio, router, worker first text, worker completion, and TTS/audio timings.
-- [x] Unit tests cover `final_basic`, `ack_continue`, `ask_clarification`, safety rejection, no-tools/no-thinking config, and transcript merge behavior.
-- [x] `python -m pytest` passes for focused tests; `npm --prefix frontend run build` passes if transcript UI changes.
-- [ ] Windows desktop sign-off measures first visible and first audible response across at least two larger backend models, proving the fix is not 27B-specific.
+Specs-only in **#303**:
+
+- [x] RFC accepted on development — specs PR #303 @ `49f6af4` (`docs/rfcs/0117-tiny-front-chat-responder.md` + README pointer). No product code in that PR.
+
+Implement follow-up (landed):
+
+- [x] A configured tiny front responder lane exists with tools disabled, thinking disabled, and a small token cap — #305 `backend/app/agent/front_responder.py` (`runtime_role = front_responder`, tools/thinking off, 96–160 token cap; configurable `front_responder.model`, no vendor name hard-coded)
+- [x] Owner chat starts the front responder before or in parallel with the normal router/worker path — #305 two-lane owner chat (`test_two_lane_skips_worker_for_final_basic` / `test_two_lane_runs_worker_for_ack_continue`)
+- [x] Trivial greetings and basic chat can complete through `final_basic` without invoking a larger worker — #305 `classify_front_action` + `test_two_lane_skips_worker_for_final_basic`
+- [x] Non-trivial requests emit a safe `ack_continue` or `handoff_notice` quickly while the larger model/tool path continues — #305 `ack_continue` / `handoff_notice` / `ask_clarification` while the conversation worker or managed loop continues
+- [x] The front responder cannot make unverified success claims, perform tools, expose hidden reasoning, or answer tier-2+ requests as final — #305 `is_safe_front_speech` rejects “Done, I fixed it.”; tools/thinking disabled in the front envelope
+- [x] Transcript rendering treats the front and worker output as one Jarvis turn, without duplicate reply cards — #305 `merge_front_and_worker` + `test_merge_front_and_worker_is_one_turn`; portal poll 400ms + live SSE preview
+- [x] Speech can begin from a safe front response without waiting for the larger model — #305 `front_responder.speak_immediately`
+- [x] Diagnostics record queue, front first text, front first audio, router, worker first text, worker completion, and TTS/audio timings — #305 `GET /api/diagnostics` → `front_responder.last_turn`
+- [x] Unit tests cover `final_basic`, `ack_continue`, `ask_clarification`, safety rejection, no-tools/no-thinking config, and transcript merge behavior — #305 `tests/test_front_responder.py` (+ `tests/test_owner_chat_greeting.py` / `tests/test_chat_turns.py`)
+- [x] `python -m pytest` passes for focused tests; `npm --prefix frontend run build` passes if transcript UI changes — #305 focused pytest + frontend build
+- [ ] Windows desktop sign-off measures first visible and first audible response across at least two larger backend models, proving the fix is not 27B-specific. Cloud VMs cannot sign this off.
 
 ## Still missing to actually fix speed
 
@@ -210,3 +216,7 @@ Choosing a permanent bundled small model, downloading model weights, changing Ko
 ## Notes
 
 The owner explicitly reported that the delay occurs across models, not only with the 27B model. The implementation must measure perceived response latency and must not treat model tok/s alone as proof. A tiny model that answers quickly while a bigger model thinks is the desired owner experience.
+
+## Implementation note
+
+Landed on `development` via specs **#303** @ `49f6af4` (tiny front-chat responder RFC + README pointer) + implement **#305** @ `4eb25d9` (`front_responder` lane; tools/thinking disabled; 96–160 token cap; two-lane owner chat; one-transcript merge; immediate safe TTS; `front_responder.last_turn` diagnostics). **#304** is a **different** colliding RFC number (`docs/rfcs/0117-durable-state-journal-rollback.md`) and stays **accepted** — not this ticket. Post-1.4 optional accelerator; does **not** block 1.4.0. Windows first-visible / first-audible measurement across two larger models remains desktop sign-off. No new §58 checkbox.
