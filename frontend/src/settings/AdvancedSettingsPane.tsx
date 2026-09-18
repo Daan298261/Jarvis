@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom"
 import { AutonomySection } from "../pages/Autonomy"
 import { ComputerUsePermissions } from "../pages/ComputerUsePermissions"
+import { CleanReinstallCard } from "./CleanReinstallCard"
 
 type AdvancedSettingsPaneProps = {
   settings: Record<string, unknown>
@@ -200,6 +201,8 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
           />
         </label>
       </div>
+
+      <CleanReinstallCard />
 
       {queueStatus && (
         <div className="card grid settings-pane-card">

@@ -48,6 +48,10 @@ Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createa
 Source: "bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "force-stop-jarvis.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "force-stop-jarvis.ps1"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "owned-paths.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
+Source: "clean-reinstall-jarvis.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
+Source: "clean-reinstall-jarvis.ps1"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "owned-paths.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "run-installer-bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "run-installer-bootstrap.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 #ifndef SkipBootstrapModel
@@ -84,6 +88,7 @@ Filename: "powershell.exe"; Parameters: "{code:GetUninstallForceStopParameters}"
 [Code]
 const
   JarvisUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{A7B3C4D5-E6F7-4890-ABCD-EF1234567890}_is1';
+  JarvisOwnedPathsKey = 'Software\Jarvis\OwnedPaths';
 
 var
   ExistingInstallPage: TInputOptionWizardPage;
@@ -278,19 +283,8 @@ begin
   ForceScript := ResolveForceStopScript(AppDir);
   if ForceScript = '' then
   begin
-    Log('force-stop-jarvis.ps1 not found; falling back to stop-jarvis.ps1 -IncludeTray');
-    if FileExists(AppDir + '\stop-jarvis.ps1') then
-    begin
-      if not Exec('powershell.exe',
-        '-NoProfile -ExecutionPolicy Bypass -File "' + AppDir + '\stop-jarvis.ps1" -IncludeTray',
-        AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      begin
-        Log('Failed to launch stop-jarvis.ps1 -IncludeTray');
-        Result := False;
-      end
-      else
-        Log('stop-jarvis.ps1 -IncludeTray finished with code ' + IntToStr(ResultCode));
-    end;
+    Log('force-stop-jarvis.ps1 not found; aborting (no polite fallback)');
+    Result := False;
     Exit;
   end;
 
@@ -334,8 +328,62 @@ function GetUninstallForceStopParameters(Param: String): String;
 begin
   Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\installer\windows\force-stop-jarvis.ps1') +
     '" -InstallRoot "' + ExpandConstant('{app}') + '" -IncludeTray -MaxWaitSeconds 90';
-  if not FileExists(ExpandConstant('{app}\installer\windows\force-stop-jarvis.ps1')) then
-    Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\stop-jarvis.ps1') + '" -IncludeTray';
+end;
+
+procedure RecordOwnedPathsRegistry(const InstallDir, SetupExe: String);
+begin
+  if not RegKeyExists(HKEY_CURRENT_USER, 'Software\Jarvis') then
+    RegCreateKey(HKEY_CURRENT_USER, 'Software\Jarvis');
+  if not RegKeyExists(HKEY_CURRENT_USER, JarvisOwnedPathsKey) then
+    RegCreateKey(HKEY_CURRENT_USER, JarvisOwnedPathsKey);
+  RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'InstallLocation', InstallDir);
+  RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'DataDirectory', AddBackslash(InstallDir) + 'data');
+  if SetupExe <> '' then
+    RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'SetupExe', SetupExe);
+end;
+
+function ResolveCleanReinstallScript(const AppDir: String): String;
+begin
+  Result := AppDir + '\installer\windows\clean-reinstall-jarvis.ps1';
+  if FileExists(Result) then
+    Exit;
+  Result := ExpandConstant('{tmp}\clean-reinstall-jarvis.ps1');
+  if FileExists(Result) then
+    Exit;
+  Result := '';
+end;
+
+function RunCleanReinstallOwnedWipe(const AppDir: String): Boolean;
+var
+  ResultCode: Integer;
+  CleanScript: String;
+  Params: String;
+begin
+  Result := False;
+  if AppDir = '' then
+    Exit;
+  CleanScript := ResolveCleanReinstallScript(AppDir);
+  if CleanScript = '' then
+  begin
+    Log('clean-reinstall-jarvis.ps1 not found; clean reinstall aborted');
+    Exit;
+  end;
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + CleanScript + '" -InstallRoot "' + AppDir +
+    '" -SetupExePath "' + ExpandConstant('{srcexe}') + '" -Mode Inno -SkipConfirm -MaxWaitSeconds 90';
+  Log('RFC-0124 clean reinstall helper: ' + CleanScript);
+  if Exec('powershell.exe', Params, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('clean-reinstall-jarvis.ps1 finished with code ' + IntToStr(ResultCode));
+    Result := (ResultCode = 0);
+  end
+  else
+    Log('Failed to launch clean-reinstall-jarvis.ps1');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    RecordOwnedPathsRegistry(ExpandConstant('{app}'), ExpandConstant('{srcexe}'));
 end;
 
 function ShouldRunInstallerBootstrap: Boolean;
@@ -474,14 +522,12 @@ begin
 
   if SelectedAction = 3 then
   begin
-    if not RemoveExistingApplication then
+    if not RunCleanReinstallOwnedWipe(ExistingInstallDir) then
     begin
-      Result := 'Setup could not remove the existing Jarvis application. Close Jarvis and try again.';
+      Result := 'Clean reinstall could not remove all Jarvis-owned files. Close Jarvis and try again.' + #13#10 +
+        'See logs\clean-reinstall.log and %TEMP%\Jarvis-clean-reinstall.log for details.';
       Exit;
     end;
-    if DirExists(ExistingInstallDir) and
-       (not DelTree(ExistingInstallDir, True, True, True)) then
-      Result := 'Setup removed Jarvis but could not remove all custom files. Check the installation folder and try again.';
   end;
 end;
 

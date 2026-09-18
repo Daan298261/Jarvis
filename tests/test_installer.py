@@ -88,7 +88,8 @@ def test_existing_install_upgrade_and_removal_choices_are_wired():
     assert "reset-user-data.ps1" in lower
     assert "removeexistingapplication" in lower
     assert "/verysilent /suppressmsgboxes /norestart" in lower
-    assert "deltree(existinginstalldir, true, true, true)" in lower
+    assert "clean-reinstall-jarvis.ps1" in lower
+    assert "runcleanreinstallownedwipe" in lower.replace("_", "")
     assert "this cannot be undone" in lower
     assert "issafejarvisinstalldir" in lower
 
