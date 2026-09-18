@@ -25,6 +25,23 @@ def test_force_stop_script_exists_and_logs_pids():
     assert "stop-jarvis.ps1" in text
 
 
+def test_force_stop_binds_ciminstance_not_managementobject():
+    """Get-CimInstance returns CimInstance; a ManagementObject param fails every bind."""
+    text = _read(FORCE_STOP)
+    assert "[System.Management.ManagementObject]$Proc" not in text.replace(" ", "")
+    assert "Get-CimInstance" in text
+    assert "$procId =" in text
+    assert "Stop-Process -Id $procId" in text
+    assert "$pid =" not in text.lower()
+    assert "CheckOnly" in text
+    assert "ProtectedPids" in text
+    assert "jarvissetup" in text.lower()
+    assert "force-stop-jarvis" in text
+    assert "Jarvis-installer-stop.log" in text
+    assert "python|pythonw" in text
+    assert "node|npm|java" in text
+
+
 def test_jarvis_iss_wires_force_stop_before_prepare():
     text = _read(ISS)
     lower = text.lower()
