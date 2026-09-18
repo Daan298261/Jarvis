@@ -702,6 +702,26 @@ class ContextMutation(Base):
     repository: Mapped[ContextRepository] = relationship(back_populates="mutations")
 
 
+class IngressBlob(Base):
+    """RFC-0122: oversized owner ingress stored outside the model window."""
+
+    __tablename__ = "ingress_blobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    root_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    conversation_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    byte_size: Mapped[int] = mapped_column(Integer, default=0)
+    token_estimate: Mapped[int] = mapped_column(Integer, default=0)
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
+    mime: Mapped[str] = mapped_column(String(64), default="text/plain")
+    body: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="stored")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ContextFactConflict(Base):
     """Flagged conflicting evidence between curated facts (never silently merged)."""
 

@@ -440,6 +440,10 @@ class WorkingState:
     recommended_context: int = 0
     vision_requested: bool = False
     escalated: bool = False
+    ingress_blob_id: str = ""
+    ingress_size_class: str = "small"
+    ingress_needs_tools: bool | None = None
+    ingress_complexity_hint: int = 1
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"

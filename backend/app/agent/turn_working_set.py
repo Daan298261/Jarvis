@@ -147,6 +147,7 @@ async def compose_turn_working_set(
     recent_messages: list[ChatMessage] | None = None,
     include_vault: bool = True,
     include_memory: bool = True,
+    needs_tools: bool | None = None,
 ) -> TurnWorkingSet:
     prompt = (user_message or "").strip()
     names = tool_names_for(
@@ -154,12 +155,14 @@ async def compose_turn_working_set(
         extra_capabilities,
         security_role=security_role,
         prompt=prompt,
+        needs_tools=needs_tools,
     )
     schemas = schemas_for(
         task_class,
         extra_capabilities,
         security_role=security_role,
         prompt=prompt,
+        needs_tools=needs_tools,
     )
     offers = _installable_offers(prompt)
     exposure = describe_exposure(
@@ -167,6 +170,7 @@ async def compose_turn_working_set(
         extra_capabilities,
         security_role=security_role,
         prompt=prompt,
+        needs_tools=needs_tools,
     )
     install_lines = _installable_lines(offers)
     if install_lines:

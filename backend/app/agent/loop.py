@@ -115,7 +115,9 @@ from .skills import (
     steps_are_executable,
 )
 from .tooling import apply_capability_request, expose_called_tool, should_enable_thinking
-from .trajectory import as_prompt_block, record_trajectory, relevant_trajectories
+from .ingress_gate import SAFE_LARGE_PASTE_SPEECH, run_ingress_gate
+from .trajectory import gated_trajectory_lessons, record_trajectory
+from ..memory.ingress_spill import ingress_prompt_segment
 from .policy import policy_guidance
 from .prompts import (
     CONTINUE_PROMPT,
@@ -172,6 +174,7 @@ def _exposed_csv(working: WorkingState, prompt: str | None = None) -> str:
             working.requested_tools,
             security_role=working.security_role,
             prompt=prompt or working.goal,
+            needs_tools=working.ingress_needs_tools,
         )
     )
 
@@ -514,12 +517,12 @@ class AgentRuntime:
         *,
         tools: list[dict[str, Any]] | None,
         max_tokens: int | None,
-    ) -> tuple[list[ChatMessage], bool]:
+    ) -> tuple[list[ChatMessage], list[dict[str, Any]] | None, bool]:
         async def _emit(kind: str, budget: PromptBudget, detail: str) -> None:
             payload = json.dumps({**budget.as_dict(), "detail": detail})
             await BUS.publish(task_id, kind, kind.replace("_", " ").title(), payload[:4000], stage="act")
 
-        updated, recovered = await recover_context_after_overflow(
+        updated, recovered_tools, recovered = await recover_context_after_overflow(
             messages,
             tools,
             profile,
@@ -529,7 +532,7 @@ class AgentRuntime:
             working_state_block=working.as_prompt_block(),
             emit=_emit,
         )
-        return updated, recovered
+        return updated, recovered_tools, recovered
 
     async def _publish_front_events(self, task_id: str, kind: str, title: str, detail: str = "", *, persist: bool = True) -> None:
         await BUS.publish(task_id, kind, title, detail, stage="chat", persist=persist)
@@ -905,6 +908,64 @@ class AgentRuntime:
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
             working.security_role = getattr(task, "security_role", "") or ""
+        gate_text = (extra_prompt or prompt).strip()
+        active_prompt = gate_text or prompt
+        if gate_text and not continue_existing:
+            ingress_gate = await run_ingress_gate(
+                user_text=gate_text,
+                task_class=working.task_class or classify_task(gate_text),
+                task_id=task_id,
+                conversation_id=task_id,
+                settings=settings,
+            )
+            working.ingress_blob_id = ingress_gate.blob_id or ""
+            working.ingress_size_class = ingress_gate.size_class
+            working.ingress_needs_tools = ingress_gate.needs_tools
+            working.ingress_complexity_hint = ingress_gate.complexity_hint
+            await self._update(task_id, compact_memory=working.dumps())
+            await BUS.publish(
+                task_id,
+                "ingress_size_classified",
+                "Ingress size classified",
+                json.dumps(ingress_gate.as_dict(), ensure_ascii=False)[:4000],
+                stage="understand",
+            )
+            if ingress_gate.blob_id:
+                await BUS.publish(
+                    task_id,
+                    "ingress_spill_stored",
+                    "Ingress spill stored",
+                    json.dumps(
+                        {
+                            "blob_id": ingress_gate.blob_id,
+                            "byte_size": ingress_gate.byte_size,
+                            "token_estimate": ingress_gate.token_estimate,
+                        },
+                        ensure_ascii=False,
+                    )[:2000],
+                    stage="understand",
+                )
+            if ingress_gate.vault_mirrored:
+                await BUS.publish(
+                    task_id,
+                    "ingress_spill_vault_optional",
+                    "Ingress spill mirrored to vault",
+                    json.dumps({"blob_id": ingress_gate.blob_id}, ensure_ascii=False)[:500],
+                    stage="understand",
+                )
+            if ingress_gate.size_class == "big":
+                if settings.front_responder.enabled:
+                    await BUS.publish(
+                        task_id,
+                        "chat_tts",
+                        "Processing large paste",
+                        SAFE_LARGE_PASTE_SPEECH,
+                        stage="understand",
+                    )
+        if working.ingress_blob_id and working.ingress_size_class == "big":
+            spill = await ingress_prompt_segment(working.ingress_blob_id, working.goal or active_prompt)
+            if spill:
+                active_prompt = f"{gate_text[:1200]}\n\n{spill}"
         metrics = LiveTaskMetrics()
         follow_route = route_request(extra_prompt or prompt) if extra_prompt else None
         if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
@@ -1012,10 +1073,14 @@ class AgentRuntime:
                 working.task_class,
                 working.requested_tools,
                 security_role=working.security_role,
-                prompt=extra_prompt or prompt,
+                prompt=active_prompt,
+                needs_tools=working.ingress_needs_tools,
             )
         )
-        exposed_tools.update({"request_tools", "request_capability"})
+        if working.ingress_needs_tools is False:
+            exposed_tools.update({"request_capability"})
+        else:
+            exposed_tools.update({"request_tools", "request_capability"})
 
         if existing and continue_existing:
             messages = existing
@@ -1033,8 +1098,8 @@ class AgentRuntime:
             else:
                 messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
         else:
-            system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(prompt) + _environment_block(settings)
-            grounding = maybe_docs_first(DocsFirstContext(user_message=prompt))
+            system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(active_prompt) + _environment_block(settings)
+            grounding = maybe_docs_first(DocsFirstContext(user_message=active_prompt))
             if grounding and grounding.prompt_block():
                 system_prompt += "\n\n" + grounding.prompt_block()
             matched_skills = await relevant_skills(working.task_class, working.goal)
@@ -1051,17 +1116,56 @@ class AgentRuntime:
                 working.coding_complexity = int(decision.score or routing.get("complexity") or 0)
                 system_prompt += "\n\n" + format_routing_block(routing)
                 await BUS.publish(task_id, "progress", "Coding worker selected", format_routing_block(routing)[:1500], stage="understand")
-            lessons = as_prompt_block(await relevant_trajectories(working.task_class, working.goal))
+            budget_headroom = None
+            try:
+                budget_headroom = max(
+                    0,
+                    profile.context_size
+                    - estimate_prompt_tokens(
+                        [ChatMessage(role="system", content=system_prompt), ChatMessage(role="user", content=active_prompt)]
+                    ),
+                )
+            except Exception:
+                budget_headroom = None
+            lessons, injected_rows, dropped = await gated_trajectory_lessons(
+                working.task_class,
+                working.goal or active_prompt,
+                remaining_token_budget=budget_headroom,
+            )
+            if dropped:
+                await BUS.publish(
+                    task_id,
+                    "trajectory_lessons_dropped",
+                    "Trajectory lessons dropped",
+                    json.dumps({"reasons": dropped[:20]}, ensure_ascii=False)[:2000],
+                    stage="understand",
+                )
             if lessons:
                 system_prompt += "\n\n" + lessons
+                await BUS.publish(
+                    task_id,
+                    "trajectory_lessons_injected",
+                    "Trajectory lessons injected",
+                    json.dumps({"rows": len(injected_rows)}, ensure_ascii=False)[:500],
+                    stage="understand",
+                )
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
             turn_ws = await compose_turn_working_set(
-                prompt,
+                active_prompt,
                 task_class=working.task_class,
                 extra_capabilities=working.requested_tools,
                 security_role=working.security_role,
                 agent_id="owner",
+                needs_tools=working.ingress_needs_tools,
             )
+            if working.ingress_needs_tools is False and not turn_ws.tool_schemas:
+                await BUS.publish(
+                    task_id,
+                    "tool_schemas_empty_qa",
+                    "Tool schemas empty for Q&A",
+                    json.dumps({"tool_count": 0}, ensure_ascii=False)[:500],
+                    stage="understand",
+                )
             system_prompt = apply_working_set_to_system(system_prompt, turn_ws)
             audit = professional_prompt_block(prompt)
             if audit:
@@ -1069,7 +1173,7 @@ class AgentRuntime:
                 system_prompt += "\n\n" + audit
             messages = [
                 ChatMessage(role="system", content=system_prompt),
-                ChatMessage(role="user", content=prompt + "\n\n" + plan_prompt),
+                ChatMessage(role="user", content=active_prompt + "\n\n" + plan_prompt),
             ]
             for skill in matched_skills:
                 if has_secret_parameters(skill):
@@ -1237,7 +1341,8 @@ class AgentRuntime:
                             working.task_class,
                             working.requested_tools,
                             security_role=working.security_role,
-                            prompt=_latest_user_text(messages, working.goal or prompt),
+                            prompt=_latest_user_text(messages, working.goal or active_prompt),
+                            needs_tools=working.ingress_needs_tools,
                         )
                     )
                     turn_max_tokens = 400 if force_final else 1024
@@ -1271,7 +1376,7 @@ class AgentRuntime:
                 except ModelCapacityExceeded as exc:
                     await self._release_lazy_vision()
                     if context_recovery_attempts < 2:
-                        messages, recovered = await self._recover_context_pressure(
+                        messages, turn_tools, recovered = await self._recover_context_pressure(
                             task_id,
                             messages,
                             working,
@@ -1302,7 +1407,7 @@ class AgentRuntime:
                     await self._release_lazy_vision()
                     if isinstance(exc, APIStatusError) and is_context_overflow(exc):
                         if context_recovery_attempts < 2:
-                            messages, recovered = await self._recover_context_pressure(
+                            messages, turn_tools, recovered = await self._recover_context_pressure(
                                 task_id,
                                 messages,
                                 working,
