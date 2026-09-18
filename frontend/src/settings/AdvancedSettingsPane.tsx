@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom"
 import { AutonomySection } from "../pages/Autonomy"
 import { ComputerUsePermissions } from "../pages/ComputerUsePermissions"
+import { CleanInstallReinstallCard } from "./CleanInstallReinstallCard"
 
 type AdvancedSettingsPaneProps = {
   settings: Record<string, unknown>
@@ -157,6 +158,8 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
       </div>
 
       <ComputerUsePermissions />
+
+      <CleanInstallReinstallCard />
 
       <div className="card grid settings-pane-card">
         <h2>Self-development trial budget</h2>
