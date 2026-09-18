@@ -75,67 +75,100 @@ function Write-CleanLog {
 
 function Resolve-ForceStopScript {
     param([string]$AppDir)
-    $candidate = Join-Path $AppDir "installer\windows\force-stop-jarvis.ps1"
-    if (Test-Path -LiteralPath $candidate) { return $candidate }
+    # Prefer the copy beside this helper (Inno extracts both to {tmp}) so a hotfix
+    # Setup does not run the already-installed buggy force-stop from {app}.
     $repoCandidate = Join-Path $scriptDir "force-stop-jarvis.ps1"
     if (Test-Path -LiteralPath $repoCandidate) { return $repoCandidate }
+    $candidate = Join-Path $AppDir "installer\windows\force-stop-jarvis.ps1"
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
     return ""
 }
 
-function Test-LockersUnderRoot {
-    param([string]$Root)
-    $forceScript = Resolve-ForceStopScript -AppDir $Root
-    if (-not $forceScript) { return $true }
-    $null = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $forceScript `
-        -InstallRoot $Root -IncludeTray -MaxWaitSeconds 1 `
-        -LogPath (Join-Path $Root "logs\installer-stop.log") 2>&1
-    $forceText = Get-Content -LiteralPath (Join-Path $Root "logs\installer-stop.log") -Tail 5 -ErrorAction SilentlyContinue
-    if ($forceText -match "still hold") { return $true }
-    return $false
-}
-
 function Invoke-ForceStopAllRoots {
-    param([string[]]$Roots)
+    param(
+        [string[]]$Roots,
+        [switch]$CheckOnly
+    )
     foreach ($root in $Roots) {
         $forceScript = Resolve-ForceStopScript -AppDir $root
         if (-not $forceScript) {
             Write-CleanLog "abort: force-stop-jarvis.ps1 missing under $root"
             return $false
         }
-        $logPath = Join-Path $root "logs\installer-stop.log"
-        $args = @(
+        $logPath = Join-Path ([System.IO.Path]::GetTempPath()) "Jarvis-installer-stop.log"
+        $rootLogDir = Join-Path $root "logs"
+        if (Test-Path -LiteralPath $root) {
+            if (-not (Test-Path -LiteralPath $rootLogDir)) {
+                New-Item -ItemType Directory -Force -Path $rootLogDir | Out-Null
+            }
+            $logPath = Join-Path $rootLogDir "installer-stop.log"
+        }
+        $argList = @(
             "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $forceScript,
-            "-InstallRoot", $root, "-IncludeTray", "-MaxWaitSeconds", $MaxWaitSeconds,
+            "-InstallRoot", $root, "-IncludeTray",
+            "-MaxWaitSeconds", $(if ($CheckOnly) { "8" } else { "$MaxWaitSeconds" }),
             "-LogPath", $logPath
         )
-        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $args -WorkingDirectory $root -PassThru -WindowStyle Hidden -Wait
+        if ($CheckOnly) { $argList += "-CheckOnly" }
+        $workDir = $scriptDir
+        if (Test-Path -LiteralPath $root) { $workDir = $root }
+        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -WorkingDirectory $workDir -PassThru -WindowStyle Hidden -Wait
         if ($proc.ExitCode -ne 0) {
-            Write-CleanLog "force-stop failed for root=$root exit=$($proc.ExitCode)"
+            if ($CheckOnly) {
+                Write-CleanLog "locker recheck failed root=$root exit=$($proc.ExitCode)"
+            } else {
+                Write-CleanLog "force-stop failed for root=$root exit=$($proc.ExitCode)"
+            }
             return $false
         }
-        Write-CleanLog "force-stop ok root=$root"
+        if (-not $CheckOnly) {
+            Write-CleanLog "force-stop ok root=$root"
+        }
     }
     return $true
 }
 
 function Test-AnyLockersRemain {
     param([string[]]$Roots)
-    foreach ($root in $Roots) {
-        $forceScript = Resolve-ForceStopScript -AppDir $root
-        if (-not $forceScript) { return $true }
-        $checkLog = Join-Path $root "logs\clean-reinstall-lockcheck.log"
-        $args = @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $forceScript,
-            "-InstallRoot", $root, "-IncludeTray", "-MaxWaitSeconds", "3",
-            "-LogPath", $checkLog
-        )
-        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $args -WorkingDirectory $root -PassThru -WindowStyle Hidden -Wait
-        if ($proc.ExitCode -ne 0) {
-            Write-CleanLog "locker recheck failed root=$root"
-            return $true
+    return -not (Invoke-ForceStopAllRoots -Roots $Roots -CheckOnly)
+}
+
+function Clear-ReadOnlyTree {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    try {
+        cmd.exe /c "attrib -R -S -H `"$Path`" /S /D" | Out-Null
+    } catch { }
+}
+
+function Remove-PathWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$Attempts = 6
+    )
+    for ($i = 1; $i -le $Attempts; $i++) {
+        if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        try {
+            Clear-ReadOnlyTree -Path $Path
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+        } catch {
+            Write-CleanLog "wipe retry $i/$Attempts path=$Path error=$($_.Exception.Message)"
+            Start-Sleep -Milliseconds (250 * $i)
         }
     }
-    return $false
+    return -not (Test-Path -LiteralPath $Path)
+}
+
+function Get-OwnedLeftovers {
+    param(
+        [string]$Root,
+        [string]$PreservePath
+    )
+    if (-not (Test-Path -LiteralPath $Root)) { return @() }
+    return @(Get-ChildItem -LiteralPath $Root -Force -ErrorAction SilentlyContinue | Where-Object {
+        -not ($PreservePath -and $_.FullName.Equals($PreservePath, [StringComparison]::OrdinalIgnoreCase))
+    })
 }
 
 function Remove-OwnedRootTree {
@@ -161,33 +194,43 @@ function Remove-OwnedRootTree {
         if (Test-Path -LiteralPath $unins) {
             Write-CleanLog "running silent uninstall $unins"
             $proc = Start-Process -FilePath $unins -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -WorkingDirectory $Root -PassThru -WindowStyle Hidden -Wait
-            if ($proc.ExitCode -ne 0) {
-                Write-CleanLog "uninstall exit code=$($proc.ExitCode) (continuing wipe)"
-            }
+            Write-CleanLog "uninstall exit code=$($proc.ExitCode) (exit 0 is not wipe success; leftover files are still deleted)"
+        } else {
+            Write-CleanLog "uninstall skip: unins000.exe missing (broken leftover tree); continuing owned wipe"
         }
     }
 
-    try {
-        Get-ChildItem -LiteralPath $Root -Force -ErrorAction Stop | ForEach-Object {
-            if ($preserveExists -and $_.FullName.Equals($preserve, [StringComparison]::OrdinalIgnoreCase)) {
+    $round = 0
+    $maxRounds = 4
+    while ($round -lt $maxRounds) {
+        $round++
+        if (-not (Test-Path -LiteralPath $Root)) { break }
+        $children = Get-OwnedLeftovers -Root $Root -PreservePath $(if ($preserveExists) { $preserve } else { "" })
+        if ($children.Count -eq 0) { break }
+        foreach ($item in $children) {
+            if ($preserveExists -and $item.FullName.Equals($preserve, [StringComparison]::OrdinalIgnoreCase)) {
                 Write-CleanLog "wipe skip preserved path=$preserve"
-                return
+                continue
             }
-            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
-            Write-CleanLog "deleted $($_.FullName)"
+            if (Remove-PathWithRetry -Path $item.FullName) {
+                Write-CleanLog "deleted $($item.FullName)"
+            } else {
+                Write-CleanLog "wipe still locked path=$($item.FullName)"
+            }
         }
-    } catch {
-        Write-CleanLog "wipe error root=$Root error=$($_.Exception.Message)"
-        return $false
+        $left = Get-OwnedLeftovers -Root $Root -PreservePath $(if ($preserveExists) { $preserve } else { "" })
+        if ($left.Count -eq 0) { break }
+        Write-CleanLog "wipe round $round leftover count=$($left.Count); re-running force-stop"
+        [void](Invoke-ForceStopAllRoots -Roots @($Root))
+        Start-Sleep -Milliseconds 400
     }
 
-    $left = @(Get-ChildItem -LiteralPath $Root -Force -ErrorAction SilentlyContinue | Where-Object {
-        -not ($preserveExists -and $_.FullName.Equals($preserve, [StringComparison]::OrdinalIgnoreCase))
-    })
+    $left = Get-OwnedLeftovers -Root $Root -PreservePath $(if ($preserveExists) { $preserve } else { "" })
     if ($left.Count -gt 0) {
         foreach ($item in $left) {
             Write-CleanLog "leftover path=$($item.FullName)"
         }
+        Write-CleanLog "wipe error root=$Root leftover=$($left.Count)"
         return $false
     }
 
@@ -332,11 +375,16 @@ foreach ($root in $ownedRoots) {
     }
 }
 
+if (Test-AnyLockersRemain -Roots $ownedRoots) {
+    $exitReason = "wipe-incomplete"
+    Write-CleanLog "abort: lockers still hold owned roots after wipe"
+    Exit-CleanReinstall -Code 2 -Reason $exitReason
+}
+
 foreach ($root in $ownedRoots) {
     if (Test-Path -LiteralPath $root) {
-        $remain = Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue
         $issuer = Get-LicenseIssuerPreservePath -InstallRoot $install
-        $filtered = @($remain | Where-Object { -not $_.FullName.Equals($issuer, [StringComparison]::OrdinalIgnoreCase) })
+        $filtered = Get-OwnedLeftovers -Root $root -PreservePath $issuer
         if ($filtered.Count -gt 0) {
             $exitReason = "wipe-incomplete"
             Write-CleanLog "abort: owned files remain under $root"

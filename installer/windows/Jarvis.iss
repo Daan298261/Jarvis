@@ -52,6 +52,8 @@ Source: "owned-paths.ps1"; DestDir: "{app}\installer\windows"; Flags: ignorevers
 Source: "clean-reinstall-jarvis.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "clean-reinstall-jarvis.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "owned-paths.ps1"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "reset-user-data.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
+Source: "reset-user-data.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "run-installer-bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "run-installer-bootstrap.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 #ifndef SkipBootstrapModel
@@ -144,6 +146,18 @@ begin
     ExistingInstallDir := ExpandConstant('{localappdata}\Jarvis');
   if (not Result) and FileExists(AddBackslash(ExistingInstallDir) + 'unins000.exe') then
     Result := True;
+  { Half-dead leftover tree: unins000.exe /VERYSILENT can exit 0 after deleting }
+  { the uninstaller + ARP key while leaving %LOCALAPPDATA%\Jarvis partially present. }
+  if (not Result) and DirExists(ExistingInstallDir) then
+  begin
+    if FileExists(AddBackslash(ExistingInstallDir) + 'start-jarvis.ps1') or
+       DirExists(AddBackslash(ExistingInstallDir) + 'data') or
+       DirExists(AddBackslash(ExistingInstallDir) + 'models') or
+       DirExists(AddBackslash(ExistingInstallDir) + 'runtime') or
+       DirExists(AddBackslash(ExistingInstallDir) + 'logs') or
+       DirExists(AddBackslash(ExistingInstallDir) + '.venv') then
+      Result := True;
+  end;
   if ExistingVersion = '' then
     ExistingVersion := 'unknown';
 
@@ -169,6 +183,17 @@ begin
       FileExists(Candidate + 'installer\windows\Jarvis.iss');
 end;
 
+procedure ExtractInstallerHelpers;
+begin
+  { Flags: dontcopy files are not placed in {tmp} unless extracted. PrepareToInstall }
+  { must use THIS Setup's scripts, not a leftover {app} copy from 1.4.4. }
+  ExtractTemporaryFile('force-stop-jarvis.ps1');
+  ExtractTemporaryFile('owned-paths.ps1');
+  ExtractTemporaryFile('clean-reinstall-jarvis.ps1');
+  ExtractTemporaryFile('reset-user-data.ps1');
+  ExtractTemporaryFile('run-installer-bootstrap.ps1');
+end;
+
 function InitializeSetup: Boolean;
 begin
   BootstrapSkipHeavy := False;
@@ -177,6 +202,7 @@ begin
 #else
   BootstrapSkipModelDownload := True;
 #endif
+  ExtractInstallerHelpers;
   DetectExistingInstallation;
   Result := True;
   if ExistingInstallDetected and (ExistingVersionRelation < 0) then
@@ -262,10 +288,10 @@ end;
 
 function ResolveForceStopScript(const AppDir: String): String;
 begin
-  Result := AppDir + '\installer\windows\force-stop-jarvis.ps1';
+  Result := ExpandConstant('{tmp}\force-stop-jarvis.ps1');
   if FileExists(Result) then
     Exit;
-  Result := ExpandConstant('{tmp}\force-stop-jarvis.ps1');
+  Result := AppDir + '\installer\windows\force-stop-jarvis.ps1';
   if FileExists(Result) then
     Exit;
   Result := '';
@@ -276,6 +302,7 @@ var
   ResultCode: Integer;
   ForceScript: String;
   Params: String;
+  WorkDir: String;
 begin
   Result := True;
   if AppDir = '' then
@@ -288,8 +315,11 @@ begin
     Exit;
   end;
 
-  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ForceScript + '" -InstallRoot "' + AppDir + '" -IncludeTray -MaxWaitSeconds 90';
-  if Exec('powershell.exe', Params, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  WorkDir := ExpandConstant('{tmp}');
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ForceScript +
+    '" -InstallRoot "' + AppDir + '" -IncludeTray -MaxWaitSeconds 90 -LogPath "' +
+    ExpandConstant('{tmp}\installer-stop.log') + '"';
+  if Exec('powershell.exe', Params, WorkDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
     Log('force-stop-jarvis.ps1 finished with code ' + IntToStr(ResultCode));
     Result := (ResultCode = 0);
@@ -344,10 +374,10 @@ end;
 
 function ResolveCleanReinstallScript(const AppDir: String): String;
 begin
-  Result := AppDir + '\installer\windows\clean-reinstall-jarvis.ps1';
+  Result := ExpandConstant('{tmp}\clean-reinstall-jarvis.ps1');
   if FileExists(Result) then
     Exit;
-  Result := ExpandConstant('{tmp}\clean-reinstall-jarvis.ps1');
+  Result := AppDir + '\installer\windows\clean-reinstall-jarvis.ps1';
   if FileExists(Result) then
     Exit;
   Result := '';
@@ -358,6 +388,7 @@ var
   ResultCode: Integer;
   CleanScript: String;
   Params: String;
+  WorkDir: String;
 begin
   Result := False;
   if AppDir = '' then
@@ -368,10 +399,11 @@ begin
     Log('clean-reinstall-jarvis.ps1 not found; clean reinstall aborted');
     Exit;
   end;
+  WorkDir := ExpandConstant('{tmp}');
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + CleanScript + '" -InstallRoot "' + AppDir +
     '" -SetupExePath "' + ExpandConstant('{srcexe}') + '" -Mode Inno -SkipConfirm -MaxWaitSeconds 90';
   Log('RFC-0124 clean reinstall helper: ' + CleanScript);
-  if Exec('powershell.exe', Params, AppDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  if Exec('powershell.exe', Params, WorkDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
     Log('clean-reinstall-jarvis.ps1 finished with code ' + IntToStr(ResultCode));
     Result := (ResultCode = 0);
@@ -416,8 +448,9 @@ begin
   Uninstaller := AddBackslash(ExistingInstallDir) + 'unins000.exe';
   if not FileExists(Uninstaller) then
   begin
-    Log('Existing Jarvis uninstaller was not found: ' + Uninstaller);
-    Result := False;
+    Log('Existing Jarvis uninstaller was not found (broken leftover tree): ' + Uninstaller);
+    Log('Continuing after force-stop so Setup can overwrite remaining files.');
+    Result := True;
     Exit;
   end;
 
@@ -429,8 +462,59 @@ begin
     SW_HIDE,
     ewWaitUntilTerminated,
     ResultCode) and (ResultCode = 0);
-  if not Result then
-    Log('Existing Jarvis uninstaller failed with code ' + IntToStr(ResultCode));
+  if Result then
+  begin
+    Log('Existing Jarvis uninstaller exited 0; leftover files may still remain and will be overwritten.');
+    if not ForceStopJarvisUnder(ExistingInstallDir) then
+    begin
+      Log('Lockers still hold the install tree after uninstall exit 0.');
+      Result := False;
+    end;
+    Exit;
+  end;
+
+  Log('Existing Jarvis uninstaller failed with code ' + IntToStr(ResultCode));
+  if not FileExists(Uninstaller) then
+  begin
+    Log('Uninstaller removed itself despite non-zero code; continuing.');
+    Result := True;
+    Exit;
+  end;
+  { Uninstall can fail on lockers even after a previous force-stop. Try once more. }
+  if ForceStopJarvisUnder(ExistingInstallDir) then
+  begin
+    ResultCode := -1;
+    Result := Exec(
+      Uninstaller,
+      '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART',
+      ExistingInstallDir,
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ResultCode) and (ResultCode = 0);
+    if Result or (not FileExists(Uninstaller)) then
+    begin
+      Log('Retry uninstall finished with code ' + IntToStr(ResultCode) + '; continuing recopy.');
+      Result := True;
+      Exit;
+    end;
+    { Lockers are gone; Inno ignoreversion can overwrite remaining application files. }
+    Log('Uninstall still reported failure but lockers are clear; Setup will overwrite remaining files.');
+    Result := True;
+    Exit;
+  end;
+  Log('Retry force-stop still found lockers under ' + ExistingInstallDir);
+  Result := False;
+end;
+
+function ResolveResetUserDataScript(const AppDir: String): String;
+begin
+  Result := ExpandConstant('{tmp}\reset-user-data.ps1');
+  if FileExists(Result) then
+    Exit;
+  Result := AddBackslash(AppDir) + 'installer\windows\reset-user-data.ps1';
+  if FileExists(Result) then
+    Exit;
+  Result := '';
 end;
 
 function ResetJarvisUserData(const AppRoot: String): Boolean;
@@ -438,10 +522,10 @@ var
   ResultCode: Integer;
   ResetScript: String;
 begin
-  ResetScript := AddBackslash(AppRoot) + 'installer\windows\reset-user-data.ps1';
-  if not FileExists(ResetScript) then
+  ResetScript := ResolveResetUserDataScript(AppRoot);
+  if ResetScript = '' then
   begin
-    Log('reset-user-data.ps1 was not found: ' + ResetScript);
+    Log('reset-user-data.ps1 was not found');
     Result := False;
     Exit;
   end;
@@ -450,7 +534,7 @@ begin
   Result := Exec(
     'powershell.exe',
     '-NoProfile -ExecutionPolicy Bypass -File "' + ResetScript + '" -InstallRoot "' + AppRoot + '"',
-    AppRoot,
+    ExpandConstant('{tmp}'),
     SW_HIDE,
     ewWaitUntilTerminated,
     ResultCode) and (ResultCode = 0);
@@ -469,6 +553,7 @@ begin
 #else
   BootstrapSkipModelDownload := True;
 #endif
+  ExtractInstallerHelpers;
   { Windows Settings -> Apps -> Modify and direct setup launches use this same safe path. }
   if not StopJarvisProcessesForPrepare then
   begin

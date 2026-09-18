@@ -17,14 +17,40 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Remove-TreeIfExists([string]$Path) {
+function Clear-ReadOnlyTree([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
-    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+    try { cmd.exe /c "attrib -R -S -H `"$Path`" /S /D" | Out-Null } catch { }
+}
+
+function Remove-PathRetry([string]$Path, [switch]$Recurse) {
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $attempts = 6
+    for ($i = 1; $i -le $attempts; $i++) {
+        if (-not (Test-Path -LiteralPath $Path)) { return }
+        try {
+            Clear-ReadOnlyTree $Path
+            if ($Recurse) {
+                Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            } else {
+                Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            }
+            if (-not (Test-Path -LiteralPath $Path)) { return }
+        } catch {
+            if ($i -eq $attempts) { throw }
+            Start-Sleep -Milliseconds (250 * $i)
+        }
+    }
+    if (Test-Path -LiteralPath $Path) {
+        throw "Could not delete $Path after $attempts attempts"
+    }
+}
+
+function Remove-TreeIfExists([string]$Path) {
+    Remove-PathRetry $Path -Recurse
 }
 
 function Remove-FileIfExists([string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path)) { return }
-    Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+    Remove-PathRetry $Path
 }
 
 $root = (Resolve-Path -LiteralPath $InstallRoot).Path
