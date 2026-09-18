@@ -115,6 +115,8 @@ export type AudioResponse = {
   blob: Blob
   engineId: string | null
   profileId: string | null
+  modelId: string | null
+  voiceId: string | null
 }
 
 export async function fetchAudioWithMetadata(path: string, init?: RequestInit): Promise<AudioResponse> {
@@ -125,6 +127,8 @@ export async function fetchAudioWithMetadata(path: string, init?: RequestInit): 
     blob: await response.blob(),
     engineId: response.headers.get("X-Jarvis-TTS-Engine"),
     profileId: response.headers.get("X-Jarvis-Voice-Profile"),
+    modelId: response.headers.get("X-Jarvis-TTS-Model"),
+    voiceId: response.headers.get("X-Jarvis-TTS-Voice"),
   }
 }
 

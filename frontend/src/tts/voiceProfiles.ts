@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { api, fetchAudioWithMetadata } from "../api"
+import { api, fetchAudioWithMetadata, isApiError, type AudioResponse } from "../api"
 import { stopChatTts } from "./chatTtsPlayer"
 
 export const WINDOWS_NATURAL_VOICE_PROFILE_ID = "windows_natural_en_v1"
@@ -259,9 +259,13 @@ export type VoicePreviewResult = {
   ok: boolean
   engineId?: string
   profileId?: string
+  modelId?: string
+  voiceId?: string
+  error?: string
+  status?: number
 }
 
-async function requestPreviewAudio(profileId: string): Promise<{ blob: Blob; engineId: string | null; profileId: string | null } | null> {
+async function requestPreviewAudio(profileId: string): Promise<AudioResponse> {
   const encoded = encodeURIComponent(profileId)
   const attempts = [
     { path: `/api/voice-profiles/${encoded}/preview`, body: undefined },
@@ -274,37 +278,46 @@ async function requestPreviewAudio(profileId: string): Promise<{ blob: Blob; eng
         method: "POST",
         body: attempt.body,
       })
-    } catch {
-      // Try the next preview endpoint shape.
+    } catch (err: unknown) {
+      if (!isApiError(err) || (err.status !== 404 && err.status !== 405)) throw err
     }
   }
-  return null
+  throw new Error("No compatible voice preview endpoint is available.")
 }
 
 export async function previewVoiceProfile(profile: VoiceProfile): Promise<VoicePreviewResult> {
-  if (!profile.available) return { ok: false }
+  if (!profile.available) {
+    return {
+      ok: false,
+      error: profile.install_hint || profile.unavailable_reason || "This voice is not available.",
+    }
+  }
 
+  let url: string | null = null
   try {
     const result = await requestPreviewAudio(profile.id)
-    if (!result) return { ok: false }
-    const url = URL.createObjectURL(result.blob)
+    url = URL.createObjectURL(result.blob)
     const audio = new Audio(url)
-    await new Promise<void>((resolve) => {
-      const finish = () => {
-        URL.revokeObjectURL(url)
-        resolve()
-      }
-      audio.onended = finish
-      audio.onerror = finish
-      void audio.play().catch(finish)
+    await new Promise<void>((resolve, reject) => {
+      audio.onended = () => resolve()
+      audio.onerror = () => reject(new Error("Preview audio was generated, but this client could not play the WAV."))
+      void audio.play().catch(() => reject(new Error("Preview audio was generated, but this client could not play the WAV.")))
     })
     return {
       ok: true,
       engineId: result.engineId || undefined,
       profileId: result.profileId || undefined,
+      modelId: result.modelId || undefined,
+      voiceId: result.voiceId || undefined,
     }
-  } catch {
-    return { ok: false }
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Voice preview failed.",
+      status: isApiError(err) ? err.status : undefined,
+    }
+  } finally {
+    if (url) URL.revokeObjectURL(url)
   }
 }
 

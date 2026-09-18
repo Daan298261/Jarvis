@@ -94,9 +94,14 @@ export function VoiceProfilePicker() {
     setMsg("")
     const result = await previewVoiceProfile(profile)
     if (!result.ok) {
-      setMsg("Preview is not available for this voice yet.")
+      const engine = profile.id.includes("chatterbox") ? "Chatterbox" : "Kokoro"
+      setMsg(result.error?.startsWith("Preview audio was generated")
+        ? result.error
+        : `${engine} preview failed: ${result.error || "The selected voice could not generate audio."}`)
     } else {
-      setMsg(`Preview: ${result.engineId || "unknown engine"} · ${result.profileId || profile.id}`)
+      const model = result.modelId || result.engineId || "unknown engine"
+      const voice = result.voiceId || result.profileId || profile.id
+      setMsg(`Preview: ${model} · ${voice}`)
     }
     setPreviewingId(null)
   }

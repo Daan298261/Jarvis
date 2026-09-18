@@ -46,6 +46,9 @@ class SynthesizedSpeech:
     audio: bytes
     engine_id: str
     profile_id: str
+    model_id: str = ""
+    speaker_ref: str = ""
+    requested_engine_id: str = ""
 
 
 def _module_available(name: str) -> bool:
@@ -479,7 +482,12 @@ def active_voice_profile_id() -> str:
         return FALLBACK_VOICE_PROFILE_ID
 
 
-async def synthesize_speech_result(text: str, *, voice_profile_id: str | None = None) -> SynthesizedSpeech:
+async def synthesize_speech_result(
+    text: str,
+    *,
+    voice_profile_id: str | None = None,
+    exact_profile: bool = False,
+) -> SynthesizedSpeech:
     cleaned = (text or "").strip()
     if not cleaned:
         raise RuntimeError("text is required")
@@ -500,7 +508,8 @@ async def synthesize_speech_result(text: str, *, voice_profile_id: str | None = 
         except Exception:
             profile = None
 
-    engine_id = pick_engine_for_profile(profile) if profile else tts_backend()
+    requested_engine = resolve_engine_id(profile.tts) if profile else ""
+    engine_id = requested_engine if profile and exact_profile else (pick_engine_for_profile(profile) if profile else tts_backend())
     if profile and not engine_id:
         primary = resolve_engine_id(profile.tts)
         if primary in {"kokoro", "chatterbox", "piper"}:
@@ -516,7 +525,7 @@ async def synthesize_speech_result(text: str, *, voice_profile_id: str | None = 
         )
     speaker_ref = (profile.tts.speaker_ref if profile else "").strip()
     candidates = [engine_id]
-    if profile:
+    if profile and not exact_profile:
         candidates.extend(
             candidate
             for candidate in engine_chain_for_profile(profile)
@@ -526,32 +535,44 @@ async def synthesize_speech_result(text: str, *, voice_profile_id: str | None = 
     for candidate in candidates:
         started = time.perf_counter()
         try:
+            candidate_matches_profile = profile is not None and candidate == requested_engine
+            candidate_profile = profile if candidate_matches_profile else None
+            candidate_speaker = speaker_ref if candidate_matches_profile else ""
             audio = await synthesize_with_engine(
                 cleaned,
                 engine_id=candidate,
-                profile=profile if candidate == engine_id else None,
-                speaker_ref=speaker_ref if candidate == engine_id else "",
+                profile=candidate_profile,
+                speaker_ref=candidate_speaker,
             )
+            actual_model = (
+                getattr(profile.tts, "model_id", "")
+                if candidate_matches_profile and profile
+                else "kokoro-82m" if candidate == "kokoro" else "windows-sapi" if candidate in {"system", "sapi"} else candidate
+            )
+            actual_speaker = candidate_speaker or ("bm_daniel" if candidate == "kokoro" else "")
             logger.info(
                 "tts_synthesis %s",
                 json.dumps(
                     {
                         "profile_id": selected_profile_id,
-                        "requested_engine": resolve_engine_id(profile.tts) if profile else engine_id,
+                        "requested_engine": requested_engine or engine_id,
                         "actual_engine": candidate,
-                        "model_id": (
-                            getattr(profile.tts, "model_id", "")
-                            if profile
-                            else "kokoro-82m" if candidate == "kokoro" else ""
-                        ),
-                        "speaker_ref": speaker_ref,
+                        "model_id": actual_model,
+                        "speaker_ref": actual_speaker,
                         "verified": kokoro_runtime_state().ready if candidate == "kokoro" else True,
                         "latency_ms": round((time.perf_counter() - started) * 1000, 1),
                     },
                     sort_keys=True,
                 ),
             )
-            return SynthesizedSpeech(audio=audio, engine_id=candidate, profile_id=selected_profile_id)
+            return SynthesizedSpeech(
+                audio=audio,
+                engine_id=candidate,
+                profile_id=selected_profile_id,
+                model_id=actual_model,
+                speaker_ref=actual_speaker,
+                requested_engine_id=requested_engine or engine_id,
+            )
         except RuntimeError as exc:
             last_error = exc
     assert last_error is not None
