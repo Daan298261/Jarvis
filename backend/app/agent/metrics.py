@@ -22,6 +22,11 @@ class LiveTaskMetrics:
         predicted_ms = float(payload.get("predicted_ms") or 0)
         self.model_ms += prompt_ms + predicted_ms
 
+    def note_model_elapsed(self, duration_ms: float) -> None:
+        """Record a streamed model call when the provider exposes no timing payload."""
+        self.model_calls += 1
+        self.model_ms += max(0.0, float(duration_ms or 0))
+
     def note_tool(self, duration_ms: float, schema_error: bool = False) -> None:
         self.tool_calls += 1
         self.tool_ms += max(0.0, float(duration_ms or 0))

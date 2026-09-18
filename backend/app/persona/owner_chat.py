@@ -31,21 +31,12 @@ Never write a program, script, or file to answer a spoken factual question such 
 If a live briefing is attached, use those facts and do not invent numbers.
 Use internal reasoning when useful, but provide only the concise answer rather than hidden reasoning."""
 
-OWNER_CHAT_MAX_TOKENS = 1024
-OWNER_CHAT_REASONING_MAX_TOKENS = 2048
+OWNER_CHAT_MAX_TOKENS = 512
 
 
 def owner_chat_max_tokens(profile: Any | None = None) -> int:
-    """Reasoning models need headroom so hidden thinking does not consume the whole budget."""
-    if profile is None:
-        return OWNER_CHAT_MAX_TOKENS
-    mode = str(getattr(profile, "thinking_mode", "") or "").strip().lower()
-    family = str(getattr(profile, "family", "") or "").strip().lower()
-    thinking = bool(getattr(profile, "thinking", False))
-    if thinking or mode in {"on", "selective"}:
-        return OWNER_CHAT_REASONING_MAX_TOKENS
-    if "qwen3.8" in family or "qwen38" in family or "ornith" in family:
-        return OWNER_CHAT_REASONING_MAX_TOKENS
+    """Keep direct dialogue bounded; this path deliberately disables extended reasoning."""
+    del profile
     return OWNER_CHAT_MAX_TOKENS
 
 _conversations: dict[str, list[ChatMessage]] = defaultdict(list)
@@ -163,7 +154,7 @@ async def stream_owner_chat(
             top_p=profile.top_p,
             top_k=profile.top_k,
             max_tokens=owner_chat_max_tokens(profile),
-            thinking=None,
+            thinking=False,
         ):
             parts.append(delta)
             accumulated = "".join(parts)

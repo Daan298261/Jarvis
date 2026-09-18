@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -534,6 +535,7 @@ class AgentRuntime:
         *,
         history: list[ChatMessage] | None = None,
         extra_prompt: str | None = None,
+        turn_started: float | None = None,
     ) -> None:
         """Plain owner dialogue: stream text, no tools, no confirmation gates."""
         profile = resolve_profile(profile_name)
@@ -556,6 +558,8 @@ class AgentRuntime:
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             messages.append(ChatMessage(role="user", content=user_text))
         parts: list[str] = []
+        first_response_ms = 0.0
+        model_started = time.perf_counter()
         stream_key = f"task:{task_id}"
         clear_stream_speak_state(stream_key)
         try:
@@ -565,8 +569,14 @@ class AgentRuntime:
                 top_p=profile.top_p,
                 top_k=profile.top_k,
                 max_tokens=owner_chat_max_tokens(profile),
-                thinking=None,
+                thinking=False,
             ):
+                if not parts and delta:
+                    first_response_ms = max(
+                        0.0,
+                        (time.perf_counter() - (turn_started or model_started)) * 1000,
+                    )
+                    await self._update(task_id, first_response_ms=round(first_response_ms, 1))
                 parts.append(delta)
                 accumulated = "".join(parts)
                 early_id = maybe_enqueue_streaming_social_tts(
@@ -577,7 +587,14 @@ class AgentRuntime:
                 )
                 if early_id:
                     await BUS.publish(task_id, "chat_tts", "Speak reply", accumulated[: stream_speak_offset(stream_key)], stage="chat")
-                await BUS.publish(task_id, "assistant_delta", "Reply", delta, stage="chat")
+                await BUS.publish(
+                    task_id,
+                    "assistant_delta",
+                    "Reply",
+                    delta,
+                    stage="chat",
+                    persist=False,
+                )
         except Exception as exc:
             clear_stream_speak_state(stream_key)
             err = str(exc)
@@ -592,6 +609,8 @@ class AgentRuntime:
             await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
             return
         content = "".join(parts).strip()
+        model_ms = max(0.0, (time.perf_counter() - model_started) * 1000)
+        metrics.note_model_elapsed(model_ms)
         if not content:
             err = empty_generation_error()
             await self._update(
@@ -612,6 +631,13 @@ class AgentRuntime:
             tts_char_offset=stream_speak_offset(stream_key),
         )
         clear_stream_speak_state(stream_key)
+        await BUS.publish(
+            task_id,
+            "response_timing",
+            "Response timing",
+            f"First word {first_response_ms / 1000:.2f}s · completed {model_ms / 1000:.2f}s",
+            stage="chat",
+        )
         messages.append(ChatMessage(role="assistant", content=content))
         working.verified = True
         await self._complete(task_id, messages, content, content, working, metrics)
@@ -623,6 +649,7 @@ class AgentRuntime:
         extra_prompt: str | None = None,
         pending_tool: dict[str, Any] | None = None,
     ) -> None:
+        turn_started = time.perf_counter()
         settings = load_settings()
         REGISTRY.apply_settings(settings)
         exposure = ToolExposure("mixed")
@@ -632,6 +659,7 @@ class AgentRuntime:
             "stage": "understand",
             "current_action": "Understanding the request",
             "waiting_for_confirmation": False,
+            "first_response_ms": 0.0,
         }
         if not continue_existing:
             fields["started_at"] = utcnow()
@@ -665,6 +693,7 @@ class AgentRuntime:
                     metrics,
                     history=existing,
                     extra_prompt=extra_prompt,
+                    turn_started=turn_started,
                 )
                 return
             working.task_class = (follow_route.task_class if follow_route else classify_task(extra_prompt or prompt))
