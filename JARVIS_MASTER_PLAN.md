@@ -2534,6 +2534,14 @@ Reason:
 
 Taco: operational soon and actually used; embed Obsidian inside Jarvis; do not build a custom brain UI.
 
+Decision: RFC-0117 tiny front-chat responder (implemented; post-1.4)
+
+Tiny always-warm **front responder** lane for first visible/audible owner-chat replies while the larger router/worker continues on the same Jarvis turn. **Implemented** on development via specs #303 (`49f6af4`) + implement #305 (`4eb25d9`): `front_responder` role with tools/thinking disabled and 96–160 token cap; `final_basic` / `ack_continue` / `ask_clarification` / `handoff_notice`; one-transcript merge; immediate safe TTS (`speak_immediately`); diagnostics (`front_responder.last_turn`). **Not** in the 1.4.0 cut (optional / post-1.4 interesting, same class as RFC-0116). Duplicate-number [`docs/rfcs/0117-durable-state-journal-rollback.md`](docs/rfcs/0117-durable-state-journal-rollback.md) from #304 stays **accepted** (separate ticket; not ticked). Windows first-visible/first-audible across two larger models remains desktop sign-off. No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
+
+Reason:
+
+Taco via Codex: delay is systemic across models, not 27B-specific; tiny front-chat first, larger model continues. CoS assigned the RFC-0117 ledger tick after #305 landed on development.
+
 ---
 
 ## 60. Expected Example Behavior
