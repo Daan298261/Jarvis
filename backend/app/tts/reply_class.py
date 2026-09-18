@@ -40,6 +40,17 @@ def register_reply_classifier_hook(
     _CLASSIFIER_HOOK = hook
 
 
+def _hard_technical(cleaned: str) -> bool:
+    return bool(
+        _TRACEBACK_RE.search(cleaned)
+        or _FILE_LINE_TRACE_RE.search(cleaned)
+        or _FENCED_CODE_RE.search(cleaned)
+        or _PLAN_SHAPE_RE.search(cleaned)
+        or _TOOL_DUMP_SHAPE_RE.search(cleaned)
+        or _TECHNICAL_BODY_HINTS.search(cleaned)
+    )
+
+
 def classify_reply_for_speech(
     text: str,
     *,
@@ -50,6 +61,9 @@ def classify_reply_for_speech(
     if not cleaned:
         return "social"
 
+    if _hard_technical(cleaned):
+        return "technical"
+
     if _CLASSIFIER_HOOK is not None:
         try:
             hooked = _CLASSIFIER_HOOK(cleaned, user_prompt)
@@ -57,16 +71,6 @@ def classify_reply_for_speech(
             hooked = None
         if hooked in {"social", "technical"}:
             return hooked
-
-    if (
-        _TRACEBACK_RE.search(cleaned)
-        or _FILE_LINE_TRACE_RE.search(cleaned)
-        or _FENCED_CODE_RE.search(cleaned)
-        or _PLAN_SHAPE_RE.search(cleaned)
-        or _TOOL_DUMP_SHAPE_RE.search(cleaned)
-        or _TECHNICAL_BODY_HINTS.search(cleaned)
-    ):
-        return "technical"
 
     if len(cleaned) > 1400:
         return "technical"

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, memory, mobile, model, modules, owner_chat, packs, perception, perception_identity, permissions, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, memory, mobile, model, modules, owner_chat, packs, perception, perception_identity, permissions, queue, runtime_profiles, self_dev, settings, setup, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -94,6 +94,7 @@ app.include_router(agent_portability.router)
 app.include_router(guest_portals.owner_router)
 app.include_router(guest_portals.guest_router)
 app.include_router(license.router)
+app.include_router(decision.router)
 app.include_router(cyber_ato.router)
 app.include_router(autonomy.router)
 app.include_router(agent_policy.router)
@@ -153,6 +154,12 @@ async def startup() -> None:
         current.allowed_directories = default_allowed_directories()
         save_settings(current)
     REGISTRY.apply_settings(current)
+    try:
+        from .decision.hooks import register_decision_hooks
+
+        register_decision_hooks()
+    except Exception:
+        logging.debug("Decision-tier hook registration skipped", exc_info=True)
     logs_dir().mkdir(exist_ok=True)
     Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
     try:

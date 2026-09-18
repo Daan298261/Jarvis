@@ -51,7 +51,7 @@ Living spec: [`JARVIS_1.4_SPECS.md`](../../JARVIS_1.4_SPECS.md). Implement ticke
 | [0114](0114-context-overflow-preflight-recovery.md) | Context overflow preflight + recovery (D) |
 | [0115](0115-ornith-orchestrator-router-complexity.md) | Ornith orchestrator-router + complexity tiers + visible handoff (E+F) |
 
-Interesting integrations **in** 1.4: [0107](0107-obsidian-linked-memory-brain.md)–[0110](0110-chatgpt-style-approval-popup.md). Bulk catalog **0095–0104** stays later ([`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md)). Post-1.4 optional accelerators (do **not** block 1.4.0): [0116](0116-typesafe-jev-optional-decision-tier.md) TypeSafe Jev decision tier (waitlist-gated), [0117](0117-tiny-front-chat-responder.md) tiny front-chat responder for first visible/audible replies.
+Interesting integrations **in** 1.4: [0107](0107-obsidian-linked-memory-brain.md)–[0110](0110-chatgpt-style-approval-popup.md). Bulk catalog **0095–0104** stays later ([`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md)). Post-1.4 optional accelerators: [0116](0116-typesafe-jev-optional-decision-tier.md) TypeSafe Jev decision tier (**implemented**: waitlist Settings + `has_feature` Plus + real probe; live TypeSafe account is desktop sign-off), [0117](0117-tiny-front-chat-responder.md) tiny front-chat responder for first visible/audible replies.
 
 **Numbering:** two files share **0117** — [tiny front-chat responder](0117-tiny-front-chat-responder.md) (**implemented**) and [durable-state journal](0117-durable-state-journal-rollback.md) (**accepted**). Do not reuse 0117. **0119 is reserved** for a parallel license-package entitlements RFC — do not take it from this pack.
 

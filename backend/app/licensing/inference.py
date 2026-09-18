@@ -108,6 +108,21 @@ def get_inference_credential(credential_id: str, *, include_secret: bool = False
     return None
 
 
+def get_secret_by_provider(provider: str) -> str:
+    wanted = str(provider or "").strip().lower()
+    if not wanted:
+        return ""
+    for item in load_inference_credentials().get("credentials", []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("provider") or "").strip().lower() != wanted:
+            continue
+        secret = str(item.get("secret") or "").strip()
+        if secret:
+            return secret
+    return ""
+
+
 def _public_view(record: dict[str, Any]) -> dict[str, Any]:
     view = dict(record)
     if "secret" in view:

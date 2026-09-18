@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom"
+import { DecisionTierSettings } from "./DecisionTierSettings"
 
 type ModelsSettingsPaneProps = {
   settings: Record<string, unknown>
@@ -140,6 +141,8 @@ export function ModelsSettingsPane({
           />
         </label>
       </div>
+
+      <DecisionTierSettings save={save} setMsg={setMsg} />
 
       <div className="card grid settings-pane-card">
         <h2>Model profile &amp; vision</h2>
