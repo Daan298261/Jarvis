@@ -2953,6 +2953,67 @@ export async function getLicenseEntitlements(): Promise<LicenseEntitlementsRespo
   }
 }
 
+export type JevAvailability = "unavailable" | "waitlisted" | "connected" | "error"
+export type DecisionTier = "local" | "jev_optional" | "jev_plus"
+
+export type JevDecisionStatus = {
+  decision_tier: DecisionTier
+  jev_availability: JevAvailability
+  plus_entitled: boolean
+  plus_feature: string
+  entitlements_features: string[]
+  key_bound: boolean
+  notify_requested_at: string
+  waitlist_url: string
+  last_probe_at: string
+  last_probe_latency_ms: number | null
+  last_probe_error: string
+  last_model: string
+  owner_error: string
+  fixture: boolean
+  cta: string
+}
+
+export type JevAuditEvent = {
+  kind?: string
+  created_at?: string
+  source?: string
+  fallback_used?: boolean
+  fallback_reason?: string
+  model?: string
+  latency_ms?: number | null
+}
+
+export async function getJevDecisionStatus(): Promise<JevDecisionStatus> {
+  return api<JevDecisionStatus>("/api/decision/jev")
+}
+
+export async function setJevDecisionTier(tier: DecisionTier): Promise<JevDecisionStatus> {
+  return api<JevDecisionStatus>("/api/decision/jev", {
+    method: "PUT",
+    body: JSON.stringify({ tier }),
+  })
+}
+
+export async function notifyJevWhenReady(): Promise<JevDecisionStatus> {
+  return api<JevDecisionStatus>("/api/decision/jev/notify", { method: "POST" })
+}
+
+export async function probeJevDecision(): Promise<JevDecisionStatus> {
+  return api<JevDecisionStatus>("/api/decision/jev/probe", { method: "POST" })
+}
+
+export async function bindJevApiKey(secret: string): Promise<{ status: JevDecisionStatus }> {
+  return api<{ status: JevDecisionStatus }>("/api/decision/jev/credentials", {
+    method: "POST",
+    body: JSON.stringify({ secret, label: "TypeSafe Jev" }),
+  })
+}
+
+export async function getJevDecisionAudit(): Promise<{ events: JevAuditEvent[] }> {
+  return api<{ events: JevAuditEvent[] }>("/api/decision/jev/audit")
+}
+
 export async function listInferenceCredentials(): Promise<{ credentials: InferenceCredentialPublic[] }> {
   const data = await api<{ credentials?: unknown }>("/api/license/inference-credentials")
   return { credentials: publicInferenceCredentials(data.credentials) }

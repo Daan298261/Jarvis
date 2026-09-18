@@ -1,6 +1,6 @@
 # RFC-0116: TypeSafe Jev as an optional Jarvis decision tier
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; **not** in the Jarvis 1.4.0 cut. Implement is a named follow-up after CoS names it **and** TypeSafe public/early-access API is actually available + owner opt-in)  
 **Author:** Jarvis Architect (Taco product intent 2026-09-17)  
 **Date:** 2026-09-17
@@ -8,7 +8,7 @@
 **Parent / index:** light pointer in [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md) as a **post-1.4 optional accelerator** (does **not** reorder Taco ladder 0107–0109, does **not** join RFC-0111–0115 core, does **not** block 1.4.0). Architect ledger: [`JARVIS_MASTER_PLAN.md`](../../JARVIS_MASTER_PLAN.md) **§59 Decision Log** only.  
 **Related (do not rewrite):** [RFC-0107](0107-obsidian-linked-memory-brain.md) per-turn search over installed/installable tools (backend landed `#295`; this RFC **ranks/selects** that working set when Jev is live). [RFC-0110](0110-chatgpt-style-approval-popup.md) Always/once/Deny modal — this RFC decides **whether** the popup is needed, not the chrome. [RFC-0115](0115-ornith-orchestrator-router-complexity.md) Ornith orchestrator-router + complexity tiers — local default; Jev may accelerate classify/escalate. [RFC-0075](0075-natural-speak-path-and-reply-latency.md) social vs technical speak class (`reply_class.py` hook). [RFC-0003](0003-runtime-model-profiles-routing.md) / [RFC-0048](0048-specialist-model-stack-routing.md) routing. [RFC-0012](0012-local-license-byo-inference.md) lease `features` + `/api/license/entitlements`. [RFC-0027](0027-semantic-action-firewall.md) / [RFC-0031](0031-reversibility-first-action-gates.md) / [RFC-0002](0002-agent-policy-interviews-autonomy.md) policy still owns execution. [RFC-0067](0067-owner-chat-hide-plan-chrome-and-launch-greeting.md) no PLAN chrome in ordinary chat. [RFC-0094](0094-settings-menu-information-architecture.md) / [RFC-0113](0113-admin-settings-submenu-1-4.md) Settings IA. [RFC-0079](0079-computer-use-permission-selector.md) existing network/computer-use catalog — reuse, do not invent LE/Red/Purple/ATO gates.
 
-This PR is **specs-only**. Product code is a follow-up implement ticket. Full intent; **no stubs / soft-fail** (a Settings chip that claims Jev is connected, a local LLM JSON parse labeled as Jev, `if True` Plus checks, or silent fallback that pretends TypeSafe answered, is a fail).
+This PR is **the implement ticket**. Waitlist Settings, real TypeSafe probe, `has_feature(..., "decision.jev_plus")`, and named local fallback ship here. Live Jev account accuracy remains desktop sign-off. Do not ship a fake connected client.
 
 ## Problem
 
@@ -78,7 +78,7 @@ plus_ok = has_feature(lease, "decision.jev_plus")
 # equivalent HTTP: GET /api/license/entitlements → entitlements.features
 ```
 
-Forbidden: `plus_ok = True`, skipping `has_feature`, a comment `# TODO billing`, or a Settings checkbox that enables Plus **without** going through `has_feature` / `evaluate_cluster_entitlements`. A manual config flag is allowed **only** if it is merged into the object those functions read (so tests can assert `has_feature` is False without the flag and True with it).
+Forbidden: `plus_ok = True`, skipping `has_feature`, a comment that billing is unfinished, or a Settings checkbox that enables Plus **without** going through `has_feature` / `evaluate_cluster_entitlements`. A manual config flag is allowed **only** if it is merged into the object those functions read (so tests can assert `has_feature` is False without the flag and True with it).
 
 `jev_plus` selected without the feature → Settings error/CTA (“Plus entitlement required”); control path does **not** call Jev; explicit local fallback + audit. Do not silently treat it as `jev_optional`.
 
@@ -188,14 +188,14 @@ Specs-only in **this** PR:
 - [x] Cross-links + INTEGRATION_SPECS optional row + light §59 pointer; **not** in 1.4.0 cut
 - [x] No invented LE/Red/Purple/ATO gates; no exploit recipes
 
-Implement follow-up (later named ticket; gated on API availability + owner opt-in):
+Implement follow-up (this ticket; live account remains owner/desktop sign-off):
 
-- [ ] Probe is a real HTTP call to TypeSafe; 401/timeout → `error`
-- [ ] `decision_tier == local` never opens a TypeSafe socket
-- [ ] Enabled + not `connected` → owner-visible error/CTA; audit `fallback_used: true`; `source != "jev"`
-- [ ] `jev_plus` without `decision.jev_plus` on the evaluated entitlements object → no TypeSafe call
-- [ ] Tests: local default; waitlist UI not connected; probe failure; fixture vs live labeled; Plus false/true via `has_feature`; Jev rank does not dump full catalog; speak-class hook defers to hard technical heuristics; RFC-0115 hard tier not lowered; approval noul cannot skip required popup or weaken deny
-- [ ] `python3 -m pytest` (`tests/test_rfc0116_*.py`); `npm --prefix frontend run build` if Settings touched
+- [x] Probe is a real HTTP call to TypeSafe; 401/timeout → `error`
+- [x] `decision_tier == local` never opens a TypeSafe socket
+- [x] Enabled + not `connected` → owner-visible error/CTA; audit `fallback_used: true`; `source != "jev"`
+- [x] `jev_plus` without `decision.jev_plus` on the evaluated entitlements object → no TypeSafe call
+- [x] Tests: local default; waitlist UI not connected; probe failure; fixture vs live labeled; Plus false/true via `has_feature`; Jev rank does not dump full catalog; speak-class hook defers to hard technical heuristics; RFC-0115 hard tier not lowered; approval noul cannot skip required popup or weaken deny
+- [x] `python3 -m pytest` (`tests/test_rfc0116_*.py`); `npm --prefix frontend run build` if Settings touched
 - [ ] Live TypeSafe latency/accuracy is **desktop/owner sign-off** (cloud VM may use fixtures). Linux cloud cannot sign off a real Jev account.
 
 ## Likely files

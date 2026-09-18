@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { getJevDecisionAudit, type JevAuditEvent } from "../api"
 import { AutonomySection } from "../pages/Autonomy"
 import { ComputerUsePermissions } from "../pages/ComputerUsePermissions"
 import { CleanInstallReinstallCard } from "./CleanInstallReinstallCard"
@@ -17,6 +19,13 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
     ? settings.browser
     : {}) as Record<string, unknown>
   const allowedDirs = Array.isArray(settings.allowed_directories) ? settings.allowed_directories : []
+  const [jevAudit, setJevAudit] = useState<JevAuditEvent[]>([])
+
+  useEffect(() => {
+    void getJevDecisionAudit()
+      .then((payload) => setJevAudit(payload.events || []))
+      .catch(() => setJevAudit([]))
+  }, [])
 
   return (
     <>
@@ -218,6 +227,26 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
           </div>
         </div>
       )}
+
+      <div className="card grid settings-pane-card">
+        <h2>Decision audit</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Last control-path decisions from the Jev accelerator. This is inspection, not chat PLAN chrome.
+        </p>
+        {jevAudit.length === 0 ? (
+          <p className="lede" style={{ margin: 0 }}>No decision events yet.</p>
+        ) : (
+          <div className="kv">
+            {jevAudit.slice(0, 12).map((event, index) => (
+              <span key={`${event.created_at || "evt"}-${index}`} style={{ gridColumn: "1 / -1" }}>
+                {event.kind || "event"} · {event.source || "heuristics"}
+                {event.fallback_used ? ` · fallback ${event.fallback_reason || ""}` : ""}
+                {event.model ? ` · ${event.model}` : ""}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </>
   )
 }

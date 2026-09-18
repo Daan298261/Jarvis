@@ -141,7 +141,13 @@ def suggest_tools_for_prompt(
         ranked.append((score, name))
     ranked.sort(key=lambda item: (-item[0], item[1]))
     cap = max(1, int(limit or MAX_RETRIEVED_TOOLS))
-    return [name for _score, name in ranked[:cap]]
+    names = [name for _score, name in ranked[:cap]]
+    try:
+        from ..decision.policy import rerank_tools
+
+        return rerank_tools(prompt, names)
+    except Exception:
+        return names
 
 
 # Installable module catalog entries (RFC-0095) — searchable, not pre-stuffed in prompts.
