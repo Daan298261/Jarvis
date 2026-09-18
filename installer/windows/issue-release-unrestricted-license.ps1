@@ -4,9 +4,10 @@
   Emit Jarvis-unrestricted.jarvis-license beside JarvisSetup.exe (RFC-0119).
 
 .DESCRIPTION
-  Non-interactive vendor issuer output for owner/dev release cuts.
-  Uses the vendor signing key under JARVIS_LICENSE_ISSUER_DIR / LOCALAPPDATA.
-  Hard-fails when the artifact is missing, incomplete, or unsigned.
+  Non-interactive vendor issuer for owner/dev release cuts.
+  Requires an existing vendor signing key under JARVIS_LICENSE_ISSUER_DIR /
+  LOCALAPPDATA\Jarvis\license-issuer. Does not create keys. Does not run on the
+  public clone unless that key is already present, or JARVIS_VENDOR_RELEASE=1.
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -18,6 +19,25 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
 $Backend = Join-Path $RepoRoot "backend"
+
+$issuerDir = [string]$env:JARVIS_LICENSE_ISSUER_DIR
+if (-not $issuerDir) {
+    if ($env:LOCALAPPDATA) {
+        $issuerDir = Join-Path $env:LOCALAPPDATA "Jarvis\license-issuer"
+    } else {
+        $issuerDir = Join-Path $HOME ".jarvis\license-issuer"
+    }
+}
+$keyPath = Join-Path $issuerDir "issuer.key"
+$vendorRelease = [string]$env:JARVIS_VENDOR_RELEASE
+
+if (-not (Test-Path $keyPath)) {
+    if ($vendorRelease -eq "1") {
+        throw "JARVIS_VENDOR_RELEASE=1 but vendor issuer.key is missing at $keyPath"
+    }
+    Write-Host "Skipping unrestricted license (no vendor issuer.key). Public tree will not mint licenses." -ForegroundColor Yellow
+    exit 0
+}
 
 $py = Get-Command python -ErrorAction SilentlyContinue
 if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }

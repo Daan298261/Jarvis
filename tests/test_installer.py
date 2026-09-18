@@ -129,6 +129,7 @@ def test_vendor_license_manager_is_excluded_from_inno_payload():
     iss = _read(ISS)
     assert "tools\\license_manager" in iss
     assert "JarvisLicenseManager.exe" in iss
+    assert "manager_app.py" in iss
     for line in iss.splitlines():
         stripped = line.strip()
         if stripped.startswith("Source:") and "JarvisLicenseManager" in stripped and "Excludes:" not in stripped:
@@ -137,8 +138,10 @@ def test_vendor_license_manager_is_excluded_from_inno_payload():
     assert manager.is_file()
     manager_text = _read(manager)
     assert "JarvisLicenseManager" in manager_text
-    assert "tools\\license_manager\\__main__.py" in manager_text
-    assert "vendor-only" in manager_text.lower() or "not in jarvis.iss" in manager_text.lower()
+    assert "JARVIS_VENDOR_RELEASE" in manager_text
+    assert "not in the public tree" in manager_text.lower() or "vendor-only" in manager_text.lower()
+    assert not (REPO_ROOT / "tools" / "license_manager" / "__main__.py").is_file()
+    assert not (REPO_ROOT / "backend" / "app" / "licensing" / "manager_app.py").is_file()
 
 
 def test_readme_documents_build_oneliner():

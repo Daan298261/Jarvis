@@ -61,7 +61,7 @@ or:
 - Replacing §57 Current State with a full re-audit
 - Editing `JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, or `PORTAL_UX.md` (Architect-only)
 - Adding Jarvis 2.0 / swarm / Browser Use / model-stack work unless that is the named ticket
-- Shipping `JarvisLicenseManager` (RFC-0087) inside the customer Inno payload, or committing the vendor signing private key. The manager belongs in `installer/windows/dist/` beside `JarvisSetup.exe` only.
+- Shipping `JarvisLicenseManager` (RFC-0087) inside the customer Inno payload, committing License Manager source (`tools/license_manager/`, `manager_app.py`) to this public repo, or committing the vendor signing private key. The manager belongs in `installer/windows/dist/` beside `JarvisSetup.exe` only, on the vendor machine.
 - Overwriting `installer/windows/` files unless that is the named installer **implementation** ticket. Architect specs are `INSTALLER.md` / `WINDOWS_SHELL.md` (outcomes only).
 - Editing voice backend files unless that is the named voice ticket (D1 owns the listen/system-message crash fix). or unless taco/daan asks this.
 
