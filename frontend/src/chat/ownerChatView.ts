@@ -231,7 +231,6 @@ export function useLiveAssistantPreview(taskId: string, running: boolean): strin
   const [text, setText] = useState("")
   useEffect(() => {
     if (!taskId || !running) {
-      setText("")
       return
     }
     let acc = ""
