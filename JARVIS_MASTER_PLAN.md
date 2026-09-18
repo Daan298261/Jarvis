@@ -2582,6 +2582,16 @@ Taco 2026-09-18: Jarvis 1.4.1 product priority is the context-overflow / junk-in
 
 ---
 
+Decision: RFC-0124 Clean Install / Reinstall owned-path wipe (accepted; P0)
+
+Taco via CoS 2026-09-18 (blocked on local install). [RFC-0124](docs/rfcs/0124-clean-install-reinstall-owned-path-wipe.md): owner **Clean Install / Reinstall** from Settings → Advanced (and Setup.exe Clean / optional `/setup` recovery — same helper). Reuse RFC-0093 `force-stop-jarvis.ps1` (not polite `stop-jarvis.ps1` alone). Wipe **only** an explicit Jarvis-owned path allowlist (default `%LOCALAPPDATA%\Jarvis` / `{app}` from `Jarvis.iss`; never Documents/Desktop/`allowed_directories` / vendor `license-issuer`). Leftover lockers or undeletable owned files **abort** with 0093-family log; then force-launch Setup. Specs-only; D1 implements after. No new §58 checkbox. Do not take ≤0123. Do not invent LE/Red/Purple gates.
+
+Reason:
+
+Taco needs a portal/Setup Clean Install that actually kills lockers, deletes only Jarvis-owned trees, and reinstalls — not a polite hang or a wipe of unrelated AppData.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
