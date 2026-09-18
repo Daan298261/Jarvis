@@ -1,6 +1,6 @@
 # RFC-0117: Tiny front-chat responder
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Universal low-latency reply while larger model/tool work continues  
 **Author:** Taco request via Codex  
 **Date:** 2026-09-18
@@ -172,25 +172,25 @@ Expose concise timing in diagnostics so the owner can see whether slowness is fr
 
 ## Acceptance criteria
 
-- [ ] A configured tiny front responder lane exists with tools disabled, thinking disabled, and a small token cap.
-- [ ] Owner chat starts the front responder before or in parallel with the normal router/worker path.
-- [ ] Trivial greetings and basic chat can complete through `final_basic` without invoking a larger worker.
-- [ ] Non-trivial requests emit a safe `ack_continue` or `handoff_notice` quickly while the larger model/tool path continues.
-- [ ] The front responder cannot make unverified success claims, perform tools, expose hidden reasoning, or answer tier-2+ requests as final.
-- [ ] Transcript rendering treats the front and worker output as one Jarvis turn, without duplicate reply cards.
-- [ ] Speech can begin from a safe front response without waiting for the larger model.
-- [ ] Diagnostics record queue, front first text, front first audio, router, worker first text, worker completion, and TTS/audio timings.
-- [ ] Unit tests cover `final_basic`, `ack_continue`, `ask_clarification`, safety rejection, no-tools/no-thinking config, and transcript merge behavior.
-- [ ] `python -m pytest` passes for focused tests; `npm --prefix frontend run build` passes if transcript UI changes.
+- [x] A configured tiny front responder lane exists with tools disabled, thinking disabled, and a small token cap.
+- [x] Owner chat starts the front responder before or in parallel with the normal router/worker path.
+- [x] Trivial greetings and basic chat can complete through `final_basic` without invoking a larger worker.
+- [x] Non-trivial requests emit a safe `ack_continue` or `handoff_notice` quickly while the larger model/tool path continues.
+- [x] The front responder cannot make unverified success claims, perform tools, expose hidden reasoning, or answer tier-2+ requests as final.
+- [x] Transcript rendering treats the front and worker output as one Jarvis turn, without duplicate reply cards.
+- [x] Speech can begin from a safe front response without waiting for the larger model.
+- [x] Diagnostics record queue, front first text, front first audio, router, worker first text, worker completion, and TTS/audio timings.
+- [x] Unit tests cover `final_basic`, `ack_continue`, `ask_clarification`, safety rejection, no-tools/no-thinking config, and transcript merge behavior.
+- [x] `python -m pytest` passes for focused tests; `npm --prefix frontend run build` passes if transcript UI changes.
 - [ ] Windows desktop sign-off measures first visible and first audible response across at least two larger backend models, proving the fix is not 27B-specific.
 
 ## Still missing to actually fix speed
 
-- [ ] Implement the tiny front responder lane.
-- [ ] Start it before or in parallel with normal routing.
-- [ ] Merge tiny reply + larger reply into one Jarvis turn.
-- [ ] Let safe acknowledgements speak immediately.
-- [ ] Add timing diagnostics for queue, front text/audio, router, worker text/complete, and TTS/audio.
+- [x] Implement the tiny front responder lane.
+- [x] Start it before or in parallel with normal routing.
+- [x] Merge tiny reply + larger reply into one Jarvis turn.
+- [x] Let safe acknowledgements speak immediately.
+- [x] Add timing diagnostics for queue, front text/audio, router, worker text/complete, and TTS/audio.
 - [ ] Desktop-test first visible and first audible response across at least two larger models.
 
 ## Likely files

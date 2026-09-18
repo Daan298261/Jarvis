@@ -21,6 +21,16 @@
     "api_key": "",
     "remote_model": ""
   },
+  "front_responder": {
+    "enabled": true,
+    "model": "",
+    "max_output_tokens": 128,
+    "temperature": 0.25,
+    "timeout_ms": 3000,
+    "context_turns": 4,
+    "speak_immediately": true,
+    "parallel_when_distinct_model": true
+  },
   "autonomy": "trusted",
   "professional_mode": false,
   "default_timeout_seconds": 1800,

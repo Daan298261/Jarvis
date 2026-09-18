@@ -304,6 +304,12 @@ ROLE_SPECS: dict[str, RoleRoutingSpec] = {
         required_capabilities=("llm_inference", "text"),
         specialization="cheap-frontier",
     ),
+    "front-responder": RoleRoutingSpec(
+        role="front-responder",
+        preferred_profiles=("fast", "bootstrap", "balanced"),
+        required_capabilities=("llm_inference", "text"),
+        specialization="low-latency",
+    ),
 }
 
 ROLE_ALIASES = {
@@ -321,6 +327,9 @@ ROLE_ALIASES = {
     "incident-response": "dfir",
     "red": "red-team",
     "pentest": "red-team",
+    "front": "front-responder",
+    "front-chat": "front-responder",
+    "front-responder": "front-responder",
 }
 
 

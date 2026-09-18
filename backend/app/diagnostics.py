@@ -128,6 +128,7 @@ def build_diagnostics(
         "vram_total_mib": hw.vram_total_mib,
         "disk_free_gb": hw.disk_free_gb,
         "log_files": _list_log_files(),
+        "front_responder": _front_responder_diagnostics(settings),
     }
     return redact_mapping(payload)
 
@@ -136,6 +137,20 @@ def diagnostics_text(payload: dict[str, Any] | None = None) -> str:
     data = payload or build_diagnostics()
     lines = [f"{key}: {value}" for key, value in data.items()]
     return "\n".join(lines) + "\n"
+
+
+def _front_responder_diagnostics(settings) -> dict[str, Any]:
+    from .agent.front_responder import last_front_timing
+
+    cfg = settings.front_responder
+    timing = last_front_timing()
+    return {
+        "enabled": bool(cfg.enabled),
+        "model": (cfg.model or "").strip() or (timing.get("front_model") or ""),
+        "max_output_tokens": int(cfg.max_output_tokens),
+        "speak_immediately": bool(cfg.speak_immediately),
+        "last_turn": timing,
+    }
 
 
 def _list_log_files() -> list[str]:
