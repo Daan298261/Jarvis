@@ -70,7 +70,9 @@ private data class RefreshPayload(
 )
 
 class CompanionModel(app: Application) : AndroidViewModel(app) {
-    val api = (app as JarvisApp).api
+    private val jarvisApp = app as JarvisApp
+    val api = jarvisApp.api
+    private val deviceModelChrome = jarvisApp.deviceModelChrome
     private val companionPrefs = app.getSharedPreferences("companion_ui", Application.MODE_PRIVATE)
     private val mutable = MutableStateFlow(CompanionState(
         selectedModel = companionPrefs.getString("inference_profile", "auto") ?: "auto",
@@ -94,6 +96,16 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val ttsQueue = LinkedBlockingQueue<ByteArray>()
     private var ttsJob: Job? = null
     init {
+        deviceModelChrome.actions = object : DevicePackChromeActions {
+            override fun downloadSelectedPack() = downloadCompanionPack()
+            override fun deleteSelectedPack() = deleteCompanionPack()
+            override fun selectPack(packId: String) = selectCompanionPack(packId)
+        }
+        viewModelScope.launch {
+            state.collect { companionState ->
+                DevicePackChromePublisher.publish(this@CompanionModel, deviceModelChrome, companionState)
+            }
+        }
         runCatching { outbox.read() }.onSuccess { mutable.value = mutable.value.copy(pendingMessage = it != null) }
             .onFailure { mutable.value = mutable.value.copy(error = "Cannot recover pending message: ${it.message}") }
         viewModelScope.launch {

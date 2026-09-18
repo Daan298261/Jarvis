@@ -4,8 +4,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * UX wiring surface for RFC-0108 (D1). Jarvis UX owns MainActivity Models chrome and the offline
- * chat banner; call these hooks from Compose without editing inference routing or Outbox sync.
+ * UX wiring surface for RFC-0108 (D1). Prefer [JarvisApp.deviceModelChrome] +
+ * [DevicePackChromeState] for Models UI + offline banner (PR #308). JSON helpers remain for
+ * diagnostics; do not edit MainActivity chrome in the D1 PR.
  */
 object CompanionOfflineHooks {
     /**
