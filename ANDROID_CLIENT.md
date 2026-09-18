@@ -34,7 +34,7 @@ The phone talks to the **Leader** over the existing API:
 
 Auth is the **existing private key / pairing** (`X-Jarvis-Key`, `Authorization: Bearer`, or `?key=`). Do not invent a new auth stack.
 
-Default Leader port is whatever the Leader actually uses (`settings.bind_port`, default **4780**). Forward only that port.
+Default Leader port is whatever the Leader actually uses (`settings.bind_port`, default **4780**). Forward only that port. Native companion TLS gateway is **TCP 4781** (LAN / port-forward / mobile-relay + anti-impersonation: [`docs/rfcs/0123-companion-reachability-and-anti-impersonation.md`](docs/rfcs/0123-companion-reachability-and-anti-impersonation.md)) — do not forward `:4780` owner APIs for the companion.
 
 `GET /api/mobile` remains public enough to show LAN URLs and install hints. It must never leak the private key.
 
