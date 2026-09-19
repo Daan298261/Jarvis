@@ -5,7 +5,7 @@ import pytest
 from openai import APIStatusError
 
 from app.agent.compaction import compact_history, estimate_prompt_tokens
-from app.agent.context_policy import CONTEXT_LONG, CONTEXT_NORMAL
+from app.agent.context_policy import CONTEXT_LONG, CONTEXT_NORMAL, profile_cap
 from app.inference.manager import MANAGER
 from app.inference.prompt_budget import (
     ModelCapacityExceeded,
@@ -108,5 +108,5 @@ def test_model_capacity_exceeded_carries_budget_snapshot():
         active_context=8192,
     )
     exc = ModelCapacityExceeded(budget)
-    assert exc.budget.profile_cap == PROFILES["fast"].context_size
+    assert exc.budget.profile_cap == profile_cap(PROFILES["fast"])
     assert "capacity exceeded" in str(exc).lower()
