@@ -38,6 +38,36 @@ export function useShowWorkPreference(): [boolean, (showWork: boolean) => void] 
 
 const HIDDEN_WORK_TITLES = new Set(["Model is thinking", "Reasoning complete", "Thinking"])
 const HIDDEN_WORK_KINDS = new Set(["assistant_delta", "chat_tts"])
+
+export type ModelLaneLine = {
+  lane: string
+  model: string
+  text: string
+}
+
+export function parseModelLaneDetail(detail: string): ModelLaneLine | null {
+  try {
+    const parsed = JSON.parse(detail || "{}") as { lane?: string; model?: string; text?: string }
+    if (!parsed.lane) return null
+    return {
+      lane: String(parsed.lane),
+      model: String(parsed.model || ""),
+      text: String(parsed.text || ""),
+    }
+  } catch {
+    return null
+  }
+}
+
+export function filterModelLaneEvents(events: OwnerChatEvent[]): ModelLaneLine[] {
+  const lines: ModelLaneLine[] = []
+  for (const event of events) {
+    if (event.kind !== "model_lane") continue
+    const row = parseModelLaneDetail(event.detail)
+    if (row) lines.push(row)
+  }
+  return lines
+}
 const DEEPER_RESULT_LABEL = "Deeper result"
 
 export function mergeAssistantTexts(front: string, worker: string): string {

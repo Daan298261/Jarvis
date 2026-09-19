@@ -705,6 +705,44 @@ class AgentRuntime:
         worker_started = False
         spoken_parts: list[str] = []
 
+        from ..persona.inference_context import ensure_context_for_messages, model_lane_event_payload
+        from ..agent.front_responder import generate_front_reply, resolve_front_model_id
+
+        async def _expand_notice(before: int, after: int) -> None:
+            front = await generate_front_reply(
+                user_text,
+                history=prior,
+                settings=settings,
+                turn_started=turn_started or model_started,
+            )
+            if front.text:
+                await self._speak_front_reply(
+                    task_id,
+                    front,
+                    prompt=prompt,
+                    stream_key=stream_key,
+                    turn_started=turn_started or model_started,
+                )
+            await BUS.publish(
+                task_id,
+                "model_lane",
+                "Context resize",
+                model_lane_event_payload(
+                    lane="system",
+                    model=resolve_front_model_id(settings),
+                    text=f"Expanding context {before} → {after}",
+                ),
+                stage="model",
+                persist=False,
+            )
+
+        await ensure_context_for_messages(
+            messages,
+            settings=settings,
+            profile_name=profile.name,
+            on_expanding=_expand_notice,
+        )
+
         async def worker_stream():
             async for delta in MANAGER.chat_stream(
                 messages,
@@ -741,6 +779,12 @@ class AgentRuntime:
                     stage="chat",
                 )
                 note_front_audio(None, elapsed)
+            from ..persona.inference_context import model_lane_event_payload
+            from ..agent.front_responder import resolve_front_model_id
+
+            lane_model = resolve_front_model_id(settings) if lane == "front" else str(
+                getattr(MANAGER.provider, "model", "") or profile.name
+            )
             await BUS.publish(
                 task_id,
                 "assistant_delta",
@@ -749,7 +793,19 @@ class AgentRuntime:
                 stage="chat",
                 persist=False,
             )
+            await BUS.publish(
+                task_id,
+                "model_lane",
+                f"{lane} output",
+                model_lane_event_payload(lane=lane, model=lane_model, text=delta[:240]),
+                stage="chat",
+                persist=False,
+            )
 
+        from ..persona.slow_turn_feedback import SlowTurnNudger
+
+        nudger = SlowTurnNudger(user_text, started=turn_started or model_started, source="task_chat")
+        nudger.start()
         try:
             done: dict[str, Any] | None = None
             async for event in run_two_lane_chat(
@@ -799,6 +855,7 @@ class AgentRuntime:
                 elif kind == "done":
                     done = event
         except Exception as exc:
+            await nudger.stop()
             clear_stream_speak_state(stream_key)
             err = str(exc)
             await self._update(
@@ -811,6 +868,8 @@ class AgentRuntime:
             )
             await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
             return
+        finally:
+            await nudger.stop()
 
         content = ((done or {}).get("text") or front_text or "").strip()
         timing = (done or {}).get("timing") or last_front_timing()

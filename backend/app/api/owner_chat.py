@@ -9,7 +9,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..persona.chat_delivery import OWNER_CHAT_CHANNEL, pending_chat_tts, pop_chat_tts
 from ..persona.greeting import maybe_send_launch_greeting
-from ..persona.owner_chat import complete_owner_chat, get_conversation, stream_owner_chat
+from ..persona.owner_chat import complete_owner_chat, get_conversation, hydrate_conversation, stream_owner_chat
+from ..projects import portal_store
 
 router = APIRouter(prefix="/api/owner/chat", tags=["owner-chat"])
 
@@ -41,9 +42,16 @@ async def post_owner_message_stream(body: OwnerMessageIn):
     return EventSourceResponse(event_generator())
 
 
+@router.get("/conversations")
+async def list_owner_conversations(limit: int = 40) -> dict[str, Any]:
+    return {"conversations": await portal_store.list_owner_conversations(limit=limit)}
+
+
 @router.get("/conversations/{conversation_id}")
 async def get_owner_conversation(conversation_id: str) -> dict[str, Any]:
-    messages = get_conversation(conversation_id)
+    messages = await hydrate_conversation(conversation_id)
+    if not messages:
+        messages = get_conversation(conversation_id)
     return {
         "conversation_id": conversation_id,
         "messages": [

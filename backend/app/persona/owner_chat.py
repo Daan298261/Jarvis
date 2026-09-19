@@ -21,11 +21,16 @@ from .session_personality import maybe_apply_owner_switch_intent, session_person
 from .weather import weather_system_message
 from ..events import BUS
 from ..agent.front_responder import (
+    generate_front_reply,
     is_safe_front_speech,
     last_front_timing,
     note_front_audio,
+    resolve_front_model_id,
     run_two_lane_chat,
 )
+from .inference_context import ensure_context_for_messages, model_lane_event_payload
+from .reply_verifier import schedule_background_verification
+from .slow_turn_feedback import SlowTurnNudger
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
 Reply immediately, naturally, and briefly in a British-inspired operations-assistant register.
@@ -55,6 +60,15 @@ def reset_owner_conversations() -> None:
 
 
 def get_conversation(conversation_id: str) -> list[ChatMessage]:
+    return list(_conversations.get(conversation_id, []))
+
+
+async def hydrate_conversation(conversation_id: str) -> list[ChatMessage]:
+    from ..projects.portal_store import load_owner_conversation
+
+    loaded = await load_owner_conversation(conversation_id)
+    if loaded:
+        _conversations[conversation_id] = list(loaded)
     return list(_conversations.get(conversation_id, []))
 
 
@@ -172,13 +186,60 @@ async def stream_owner_chat(
     settings = load_settings()
     profile = resolve_profile(settings.inference.profile)
     briefing = await weather_system_message(cleaned)
-    history = list(_conversations[cid])
+    history = await hydrate_conversation(cid)
     worker_messages = _owner_messages(cid, cleaned, briefing)
     parts: list[str] = []
     stream_key = f"owner:{cid}"
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
     turn_started = time.perf_counter()
+    worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
+
+    async def _speak_context_expand(before: int, after: int) -> None:
+        front = await generate_front_reply(
+            cleaned,
+            history=history,
+            settings=settings,
+            turn_started=turn_started,
+        )
+        if front.text and is_safe_front_speech(front.action, front.text):
+            await publish_owner_text(
+                front.text,
+                source="owner_chat",
+                speak=True,
+                user_prompt=cleaned,
+            )
+        detail = model_lane_event_payload(
+            lane="system",
+            model=resolve_front_model_id(settings),
+            text=f"Expanding context {before} → {after}",
+        )
+        await BUS.publish_ephemeral(
+            OWNER_CHAT_CHANNEL,
+            "model_lane",
+            "Context resize",
+            detail,
+            stage="model",
+        )
+
+    ctx_meta = await ensure_context_for_messages(
+        worker_messages,
+        settings=settings,
+        profile_name=profile.name,
+        on_expanding=_speak_context_expand,
+    )
+    worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
+    await BUS.publish_ephemeral(
+        OWNER_CHAT_CHANNEL,
+        "model_lane",
+        "Worker context",
+        model_lane_event_payload(
+            lane="worker",
+            model=worker_model,
+            extra=ctx_meta,
+        ),
+        stage="model",
+    )
 
     async def worker_stream():
         async for delta in MANAGER.chat_stream(
@@ -192,8 +253,15 @@ async def stream_owner_chat(
             yield delta
 
     async def on_delta(lane: str, delta: str) -> None:
-        del lane
         parts.append(delta)
+        model_id = resolve_front_model_id(settings) if lane == "front" else worker_model
+        await BUS.publish_ephemeral(
+            OWNER_CHAT_CHANNEL,
+            "model_lane",
+            f"{lane} output",
+            model_lane_event_payload(lane=lane, model=model_id, text=delta[:240]),
+            stage="owner_chat",
+        )
         accumulated = "".join(parts)
         early_id = maybe_enqueue_streaming_social_tts(
             accumulated,
@@ -212,6 +280,8 @@ async def stream_owner_chat(
             )
             note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
 
+    nudger = SlowTurnNudger(cleaned, started=turn_started, source="owner_chat")
+    nudger.start()
     try:
         done: dict[str, Any] | None = None
         async for event in run_two_lane_chat(
@@ -264,14 +334,24 @@ async def stream_owner_chat(
             elif kind == "done":
                 done = event
     except Exception as exc:
+        await nudger.stop()
         clear_stream_speak_state(stream_key)
         yield {"type": "error", "detail": str(exc)[:500]}
         return
+    finally:
+        nudge_meta = await nudger.stop()
 
     reply = ((done or {}).get("text") or "".join(parts)).strip()
     if reply:
         _conversations[cid].append(ChatMessage(role="user", content=cleaned))
         _conversations[cid].append(ChatMessage(role="assistant", content=reply))
+        from ..projects.portal_store import save_owner_conversation
+
+        await save_owner_conversation(
+            cid,
+            _conversations[cid],
+            title=cleaned[:120],
+        )
         delivery = await publish_owner_text(
             reply,
             source="owner_chat",
@@ -281,6 +361,14 @@ async def stream_owner_chat(
         )
         clear_stream_speak_state(stream_key)
         tts_id = early_tts_ids[0] if early_tts_ids and not delivery.get("tts_id") else delivery.get("tts_id")
+        if len(reply) >= 40:
+            await publish_owner_text(
+                "I'll run a quick background verification and speak up if anything material changes.",
+                source="owner_chat",
+                speak=True,
+                user_prompt=cleaned,
+            )
+        schedule_background_verification(cleaned, reply, source="owner_chat", speak=True)
         yield {
             "type": "done",
             "conversation_id": cid,
@@ -289,6 +377,8 @@ async def stream_owner_chat(
             "early_tts_ids": early_tts_ids,
             "front_action": (done or {}).get("front_action"),
             "timing": (done or {}).get("timing") or last_front_timing(),
+            "slow_nudges": nudge_meta.get("nudges", 0),
+            "background_verify": True,
         }
     else:
         clear_stream_speak_state(stream_key)
