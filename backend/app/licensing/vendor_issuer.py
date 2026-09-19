@@ -59,6 +59,19 @@ def _iso(value: datetime) -> str:
     return text.replace("+00:00", "Z")
 
 
+def load_existing_vendor_keys() -> tuple[Ed25519PrivateKey, Ed25519PublicKey]:
+    private_path = vendor_private_path()
+    public_path = vendor_public_path()
+    if not private_path.is_file() or not public_path.is_file():
+        raise AtoError(
+            "Vendor issuer.key is missing. The public repo will not mint licenses. "
+            "Put the vendor signing key in JARVIS_LICENSE_ISSUER_DIR on the issuer machine."
+        )
+    private = Ed25519PrivateKey.from_private_bytes(private_path.read_bytes())
+    public = Ed25519PublicKey.from_public_bytes(public_path.read_bytes())
+    return private, public
+
+
 def load_or_create_vendor_keys() -> tuple[Ed25519PrivateKey, Ed25519PublicKey]:
     private_path = vendor_private_path()
     public_path = vendor_public_path()
@@ -387,6 +400,7 @@ def issue_release_unrestricted_license(*, output_dir: Path) -> dict[str, Any]:
 def _cli_issue_unrestricted(out_dir: str) -> int:
     dest = Path(out_dir)
     dest.mkdir(parents=True, exist_ok=True)
+    load_existing_vendor_keys()
     issue_release_unrestricted_license(output_dir=dest)
     return 0
 
@@ -433,6 +447,7 @@ __all__ = [
     "list_licensees",
     "list_licenses",
     "list_modules",
+    "load_existing_vendor_keys",
     "load_or_create_vendor_keys",
     "OWNER_UNRESTRICTED_STABLE_NAME",
     "OWNER_UNRESTRICTED_PACKAGE_CLASS",

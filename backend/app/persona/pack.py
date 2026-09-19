@@ -46,11 +46,16 @@ def reload_persona_pack() -> PersonaPack:
 
 
 def build_persona_instructions(pack: PersonaPack | None = None) -> str:
+    from .session_personality import session_personality_system_addendum
+
     chosen = pack or load_persona_pack()
     parts: list[str] = []
     prefix = (chosen.system_prefix or "").strip()
     if prefix:
         parts.append(prefix)
+    session_addendum = session_personality_system_addendum()
+    if session_addendum:
+        parts.append(session_addendum)
     if chosen.traits:
         trait_lines = [f"- {key}: {value}" for key, value in chosen.traits.items()]
         parts.append("Personality traits:\n" + "\n".join(trait_lines))

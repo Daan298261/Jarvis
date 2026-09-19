@@ -43,11 +43,16 @@ import { phaseLabel } from "./taskStatus"
 import {
   assignTask,
   createProject,
+  createProjectRemote,
   deleteProject,
-  loadProjects,
+  deleteProjectRemote,
+  fetchProjects,
+  linkProjectMember,
+  persistProjects,
   projectForTask,
   renameProject,
-  saveProjects,
+  renameProjectRemote,
+  unlinkProjectMember,
   unassignTask,
   type PortalProject,
 } from "./projects"
@@ -126,7 +131,8 @@ function OwnerPortal() {
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
   const [shellStatus, setShellStatus] = useState<BackendLifecycleStatus>("unknown")
   const [recents, setRecents] = useState<Task[]>([])
-  const [projects, setProjects] = useState<PortalProject[]>(() => loadProjects())
+  const [projects, setProjects] = useState<PortalProject[]>([])
+  const [ownerChats, setOwnerChats] = useState<{ conversation_id: string; title: string; project_id?: string }[]>([])
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState("")
@@ -171,8 +177,25 @@ function OwnerPortal() {
   }, [location.pathname])
 
   useEffect(() => {
-    saveProjects(projects)
+    fetchProjects().then(setProjects).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (projects.length === 0) return
+    persistProjects(projects).catch(() => undefined)
   }, [projects])
+
+  useEffect(() => {
+    const tick = () =>
+      api<{ conversations: { conversation_id: string; title: string; project_id?: string }[] }>(
+        "/api/owner/chat/conversations",
+      )
+        .then((payload) => setOwnerChats(payload.conversations || []))
+        .catch(() => undefined)
+    tick()
+    const id = window.setInterval(tick, 8000)
+    return () => window.clearInterval(id)
+  }, [location.pathname])
 
   useEffect(() => {
     getSetupStatus()
@@ -226,28 +249,45 @@ function OwnerPortal() {
 
   function updateProjects(next: PortalProject[]) {
     setProjects(next)
-    saveProjects(next)
+    persistProjects(next).catch(() => undefined)
   }
 
-  function handleCreateProject(event: FormEvent) {
+  async function handleCreateProject(event: FormEvent) {
     event.preventDefault()
-    const next = createProject(newProjectName, projects)
-    if (next !== projects) {
-      const created = next[next.length - 1]
-      updateProjects(next)
+    const remote = await createProjectRemote(newProjectName)
+    const created = remote || createProject(newProjectName, projects).slice(-1)[0]
+    if (created) {
+      updateProjects([...projects.filter((p) => p.id !== created.id), created])
       setExpanded((prev) => ({ ...prev, [created.id]: true }))
     }
     setNewProjectName("")
     setNewProjectOpen(false)
   }
 
-  function commitRename(event?: FormEvent) {
+  async function commitRename(event?: FormEvent) {
     event?.preventDefault()
     if (!renamingId) return
+    await renameProjectRemote(renamingId, renameValue).catch(() => undefined)
     updateProjects(renameProject(renamingId, renameValue, projects))
     setRenamingId(null)
     setRenameValue("")
   }
+
+  const chatsById = useMemo(() => {
+    const map = new Map<string, { conversation_id: string; title: string }>()
+    for (const chatRow of ownerChats) map.set(chatRow.conversation_id, chatRow)
+    return map
+  }, [ownerChats])
+
+  const ungroupedOwnerChats = useMemo(
+    () =>
+      ownerChats.filter(
+        (row) =>
+          !row.project_id &&
+          !projects.some((project) => (project.conversationIds || []).includes(row.conversation_id)),
+      ),
+    [ownerChats, projects],
+  )
 
   function modelStatus(): { label: string; tone: string } {
     if (model?.loaded) return { label: "Ready", tone: "on" }
@@ -442,7 +482,10 @@ function OwnerPortal() {
                       type="button"
                       className="rail-icon-btn"
                       title="Add this task"
-                      onClick={() => updateProjects(assignTask(project.id, currentTaskId, projects))}
+                      onClick={() => {
+                        updateProjects(assignTask(project.id, currentTaskId, projects))
+                        linkProjectMember(project.id, "task", currentTaskId).catch(() => undefined)
+                      }}
                     >
                       Add
                     </button>
@@ -462,13 +505,27 @@ function OwnerPortal() {
                     type="button"
                     className="rail-icon-btn"
                     title="Remove project"
-                    onClick={() => updateProjects(deleteProject(project.id, projects))}
+                    onClick={() => {
+                      deleteProjectRemote(project.id).catch(() => undefined)
+                      updateProjects(deleteProject(project.id, projects))
+                    }}
                   >
                     ×
                   </button>
                 </div>
                 {open && (
                   <div className="rail-project-tasks">
+                    {(project.conversationIds || []).map((conversationId) => {
+                      const chatRow = chatsById.get(conversationId)
+                      return (
+                        <div key={`chat-${conversationId}`} className="rail-item-row">
+                          <NavLink to="/" className="rail-item" onClick={closeNav}>
+                            <span className="rail-item-title">{chatRow?.title || "Chat"}</span>
+                            <span className="rail-item-meta">Chat</span>
+                          </NavLink>
+                        </div>
+                      )
+                    })}
                     {project.taskIds.length === 0 && (
                       <p className="rail-empty">No tasks in this project yet.</p>
                     )}
@@ -490,19 +547,40 @@ function OwnerPortal() {
                             type="button"
                             className="rail-icon-btn"
                             title="Remove from project"
-                            onClick={() => updateProjects(unassignTask(taskId, projects))}
+                            onClick={() => {
+                              unlinkProjectMember("task", taskId).catch(() => undefined)
+                              updateProjects(unassignTask(taskId, projects))
+                            }}
                           >
                             ×
                           </button>
                         </div>
                       )
                     })}
+                    {project.taskIds.length === 0 && (project.conversationIds || []).length === 0 && (
+                      <p className="rail-empty">No tasks or chats in this project yet.</p>
+                    )}
                   </div>
                 )}
               </div>
             )
           })}
         </section>
+
+        {ungroupedOwnerChats.length > 0 && (
+          <section className="rail-section">
+            <div className="rail-heading">
+              <span>Saved chats</span>
+            </div>
+            {ungroupedOwnerChats.slice(0, 16).map((chatRow) => (
+              <div key={chatRow.conversation_id} className="rail-item-row">
+                <span className="rail-item rail-item-static">
+                  <span className="rail-item-title">{chatRow.title || "Chat"}</span>
+                </span>
+              </div>
+            ))}
+          </section>
+        )}
 
         <section className="rail-section">
           <div className="rail-heading">

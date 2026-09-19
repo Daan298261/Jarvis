@@ -1,7 +1,10 @@
+import { api } from "./api"
+
 export type PortalProject = {
   id: string
   name: string
   taskIds: string[]
+  conversationIds?: string[]
 }
 
 type PortalProjectStore = {
@@ -27,10 +30,13 @@ function asProject(value: unknown): PortalProject | null {
   const taskIds = Array.isArray(row.taskIds)
     ? row.taskIds.filter((id): id is string => typeof id === "string" && id.length > 0)
     : []
-  return { id: row.id, name: row.name.trim(), taskIds }
+  const conversationIds = Array.isArray(row.conversationIds)
+    ? row.conversationIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : []
+  return { id: row.id, name: row.name.trim(), taskIds, conversationIds }
 }
 
-export function loadProjects(): PortalProject[] {
+export function loadProjectsLocal(): PortalProject[] {
   const store = storage()
   if (!store) return []
   try {
@@ -44,7 +50,7 @@ export function loadProjects(): PortalProject[] {
   }
 }
 
-export function saveProjects(projects: PortalProject[]): void {
+export function saveProjectsLocal(projects: PortalProject[]): void {
   const store = storage()
   if (!store) return
   try {
@@ -55,6 +61,72 @@ export function saveProjects(projects: PortalProject[]): void {
   }
 }
 
+/** Leader DB is canonical; localStorage is a one-time migration source. */
+export async function fetchProjects(): Promise<PortalProject[]> {
+  try {
+    const payload = await api<{ projects: PortalProject[] }>("/api/projects")
+    const remote = (payload.projects || []).map(asProject).filter((row): row is PortalProject => row !== null)
+    if (remote.length > 0) {
+      saveProjectsLocal(remote)
+      return remote
+    }
+    const local = loadProjectsLocal()
+    if (local.length > 0) {
+      const imported = await api<{ projects: PortalProject[] }>("/api/projects/import-local", {
+        method: "POST",
+        body: JSON.stringify({ projects: local }),
+      })
+      return (imported.projects || []).map(asProject).filter((row): row is PortalProject => row !== null)
+    }
+    return []
+  } catch {
+    return loadProjectsLocal()
+  }
+}
+
+export async function persistProjects(projects: PortalProject[]): Promise<void> {
+  saveProjectsLocal(projects)
+}
+
+export async function createProjectRemote(name: string): Promise<PortalProject | null> {
+  try {
+    return await api<PortalProject>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    })
+  } catch {
+    return null
+  }
+}
+
+export async function renameProjectRemote(projectId: string, name: string): Promise<void> {
+  await api(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function deleteProjectRemote(projectId: string): Promise<void> {
+  await api(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" })
+}
+
+export async function linkProjectMember(
+  projectId: string,
+  linkType: "task" | "owner_chat",
+  linkId: string,
+): Promise<void> {
+  await api(`/api/projects/${encodeURIComponent(projectId)}/links`, {
+    method: "POST",
+    body: JSON.stringify({ link_type: linkType, link_id: linkId }),
+  })
+}
+
+export async function unlinkProjectMember(linkType: "task" | "owner_chat", linkId: string): Promise<void> {
+  await api(`/api/projects/links/${encodeURIComponent(linkType)}/${encodeURIComponent(linkId)}`, {
+    method: "DELETE",
+  })
+}
+
 export function createProject(name: string, projects: PortalProject[]): PortalProject[] {
   const trimmed = name.trim()
   if (!trimmed) return projects
@@ -62,6 +134,7 @@ export function createProject(name: string, projects: PortalProject[]): PortalPr
     id: crypto.randomUUID(),
     name: trimmed,
     taskIds: [],
+    conversationIds: [],
   }
   return [...projects, next]
 }
@@ -80,7 +153,7 @@ export function assignTask(projectId: string, taskId: string, projects: PortalPr
   return projects.map((project) => {
     const without = project.taskIds.filter((id) => id !== taskId)
     if (project.id === projectId) {
-        return { ...project, taskIds: [...without, taskId] }
+      return { ...project, taskIds: [...without, taskId] }
     }
     return { ...project, taskIds: without }
   })
@@ -95,4 +168,14 @@ export function unassignTask(taskId: string, projects: PortalProject[]): PortalP
 
 export function projectForTask(taskId: string, projects: PortalProject[]): PortalProject | undefined {
   return projects.find((project) => project.taskIds.includes(taskId))
+}
+
+/** @deprecated use fetchProjects */
+export function loadProjects(): PortalProject[] {
+  return loadProjectsLocal()
+}
+
+/** @deprecated use persistProjects */
+export function saveProjects(projects: PortalProject[]): void {
+  saveProjectsLocal(projects)
 }

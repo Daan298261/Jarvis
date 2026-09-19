@@ -39,6 +39,28 @@ MAX_SEARCH_RESULTS = 12
 MAX_EXCERPT_CHARS = 900
 WATCH_POLL_SECONDS = 1.5
 
+_VAULT_RELEVANCE_TERMS = frozenset(
+    {
+        "project",
+        "projects",
+        "decision",
+        "decisions",
+        "note",
+        "notes",
+        "vault",
+        "obsidian",
+        "wiki",
+        "wikilink",
+        "documented",
+        "remember",
+        "brain",
+        "router",
+        "taxonomy",
+        "manual",
+        "runbook",
+    }
+)
+
 _lock = threading.RLock()
 _watch_stop = threading.Event()
 _watch_thread: threading.Thread | None = None
@@ -786,9 +808,147 @@ async def write_decision_to_vault(
     return create_note(rel, text, jarvis_managed=True, memory_pointer=pointer or None)
 
 
+def query_looks_vault_relevant(query: str) -> bool:
+    tokens = set(_tokenize_query(query))
+    return bool(tokens & _VAULT_RELEVANCE_TERMS)
+
+
+def _router_orientation_excerpt() -> VaultHit | None:
+    root = vault_root()
+    if root is None:
+        return None
+    router = root / "_Config" / "router.md"
+    if not router.is_file():
+        return None
+    text = router.read_text(encoding="utf-8", errors="replace")
+    _fm, body = _parse_frontmatter(text)
+    excerpt = re.sub(r"\s+", " ", body.strip())[:400]
+    if not excerpt:
+        return None
+    rel = "_Config/router.md"
+    return VaultHit(
+        rel_path=rel,
+        title="Vault router",
+        heading=None,
+        excerpt=excerpt,
+        content_hash=content_hash(text),
+        score=0.5,
+        provenance="vault_router",
+    )
+
+
+def vault_turn_hits(query: str, *, limit: int = 6) -> list[VaultHit]:
+    """Lexical search with vault-relevant fallbacks (router orientation, token retry)."""
+    cleaned = (query or "").strip()
+    hits = search_vault(cleaned, limit=limit)
+    if hits:
+        return hits
+    tokens = _tokenize_query(cleaned)
+    if len(tokens) > 1:
+        for tok in sorted(tokens, key=len, reverse=True):
+            if tok in _VAULT_RELEVANCE_TERMS:
+                continue
+            hits = search_vault(tok, limit=limit)
+            if hits:
+                return hits
+    if not query_looks_vault_relevant(cleaned):
+        return []
+    router = _router_orientation_excerpt()
+    if router:
+        return [router]
+    notes = _load_index()
+    if not notes:
+        return []
+    fallback: list[VaultHit] = []
+    for rel, entry in sorted(notes.items(), key=lambda item: item[1].indexed_at or "", reverse=True)[:3]:
+        fallback.append(
+            VaultHit(
+                rel_path=rel,
+                title=entry.title,
+                heading=entry.headings[0] if entry.headings else None,
+                excerpt=entry.body_excerpt[:320],
+                content_hash=entry.content_hash,
+                score=0.25,
+                provenance="vault_recent",
+            )
+        )
+    return fallback[:limit]
+
+
+def session_note_rel_path(conversation_id: str) -> str:
+    safe = re.sub(r"[^\w-]", "", (conversation_id or "session"))[:48] or "session"
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"_Temporal/Sessions/{day}-{safe}.md"
+
+
+def mirror_owner_chat_turn(
+    *,
+    conversation_id: str,
+    user_text: str,
+    assistant_text: str,
+) -> dict[str, Any] | None:
+    """Append this owner-chat exchange to a jarvis_managed session note (durable mirror)."""
+    if vault_root() is None:
+        return None
+    rel = session_note_rel_path(conversation_id)
+    root = vault_root()
+    assert root is not None
+    path = root / rel
+    block = (
+        f"\n\n## Turn {_utc_now()}\n\n"
+        f"**Owner:** {user_text.strip()[:2000]}\n\n"
+        f"**Jarvis:** {assistant_text.strip()[:4000]}\n"
+    )
+    try:
+        if path.is_file():
+            result = append_note(rel, block)
+            if not result.get("ok"):
+                return result
+            return {"rel_path": rel, "appended": True}
+        header = (
+            f"# Owner chat session\n\n"
+            f"conversation_id: `{conversation_id}`\n\n"
+            f"Jarvis-managed mirror of portal owner dialogue (RFC-0107).\n"
+        )
+        return create_note(rel, header + block, jarvis_managed=True)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:400]}
+
+
+def persist_verified_correction(
+    *,
+    user_prompt: str,
+    initial_answer: str,
+    correction: str,
+    conversation_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Write a background-verification correction into Decisions/ when vault is bound."""
+    if vault_root() is None:
+        return None
+    title = re.sub(r"\s+", " ", user_prompt.strip())[:80] or "Verified correction"
+    body = (
+        f"Owner question:\n{user_prompt.strip()[:1500]}\n\n"
+        f"Initial answer:\n{initial_answer.strip()[:1500]}\n\n"
+        f"Corrected answer:\n{correction.strip()[:2000]}\n"
+    )
+    if conversation_id:
+        body += f"\nconversation_id: `{conversation_id}`\n"
+    safe = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "-")[:80] or "correction"
+    rel = f"Decisions/{safe}-{uuid.uuid4().hex[:8]}.md"
+    try:
+        return create_note(
+            rel,
+            f"# {title}\n\n{body.strip()}\n",
+            jarvis_managed=True,
+            memory_pointer=conversation_id,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:400]}
+
+
 def vault_prompt_block(query: str, *, hop_cap: int = MAX_NEIGHBOR_HOPS) -> str:
     """Compact vault hits for the turn working set — never the full vault."""
-    hits = search_vault(query, limit=6)
+    hits = vault_turn_hits(query, limit=6)
     if not hits:
         return ""
     lines = [

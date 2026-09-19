@@ -56,7 +56,7 @@ Implement and unit-test; leave P0 live-model items as `TODO` / desktop sign-off 
 - Edit spec docs (`JARVIS_MASTER_PLAN.md`, `SWARM_ARCHITECTURE.md`, `ADAPTIVE_DOMAIN_ARCHITECTURE.md`, `ANDROID_CLIENT.md`, `JARVIS_2.0.md`, `HOME_IOT.md`, `SECURITY_AGENTS.md`, `BLUE_TEAM.md`, `INSTALLER.md`, `WINDOWS_SHELL.md`, `PORTAL_UX.md`) — Jarvis Architect is the sole editor; spec-change requests come from Taco or Chief of Staff
 - Rewrite `JARVIS_MASTER_PLAN.md` wholesale or paste large design specs into it
 - Start swarm // P4–P5 / model-stack work unless that is the named ticket.
-- **License issuer** (`JarvisLicenseManager`) is vendor-only: build it into `installer/windows/dist/` beside `JarvisSetup.exe`. Do not add it to the Inno customer payload and do not commit issuer private keys.
+- **License issuer** (`JarvisLicenseManager`) is vendor-only and **must not be in this public git tree**. Do not commit `tools/license_manager/`, `manager_app.py`, issuer private keys, or `*.jarvis-license`. Build the manager only on a vendor machine (`JARVIS_VENDOR_RELEASE=1`) into `installer/windows/dist/` beside `JarvisSetup.exe`. Do not add it to the Inno customer payload.
 
 
 DO

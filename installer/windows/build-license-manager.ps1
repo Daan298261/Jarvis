@@ -4,8 +4,9 @@
   Build JarvisLicenseManager.exe into installer/windows/dist (vendor-only).
 
 .DESCRIPTION
-  PyInstaller onefile when available. Otherwise writes a .cmd launcher next to
-  JarvisSetup.exe. This output must NOT be added to Jarvis.iss [Files].
+  The License Manager GUI is not in this public repo. Vendor machines keep a
+  private overlay (tools/license_manager or JARVIS_LICENSE_MANAGER_SRC) and set
+  JARVIS_VENDOR_RELEASE=1. This output must NOT be added to Jarvis.iss [Files].
 #>
 param(
     [string]$OutDir = ""
@@ -18,6 +19,31 @@ $RepoRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
 if (-not $OutDir) {
     $OutDir = Join-Path $ScriptDir "dist"
 }
+
+$overlay = [string]$env:JARVIS_LICENSE_MANAGER_SRC
+$entry = ""
+if ($overlay -and (Test-Path $overlay)) {
+    if ((Get-Item $overlay).PSIsContainer) {
+        $candidate = Join-Path $overlay "__main__.py"
+        if (Test-Path $candidate) { $entry = $candidate }
+    } else {
+        $entry = $overlay
+    }
+}
+if (-not $entry) {
+    $inTree = Join-Path $RepoRoot "tools\license_manager\__main__.py"
+    if (Test-Path $inTree) { $entry = $inTree }
+}
+
+$vendorRelease = [string]$env:JARVIS_VENDOR_RELEASE
+if (-not $entry) {
+    if ($vendorRelease -eq "1") {
+        throw "JARVIS_VENDOR_RELEASE=1 but License Manager source is missing. Set JARVIS_LICENSE_MANAGER_SRC or keep a private tools/license_manager overlay."
+    }
+    Write-Host "Skipping JarvisLicenseManager (not in the public tree). Vendor machine: JARVIS_VENDOR_RELEASE=1 + private overlay." -ForegroundColor Yellow
+    return
+}
+
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 $py = Get-Command python -ErrorAction SilentlyContinue
@@ -38,9 +64,15 @@ if (-not $pyinstaller) {
     $useModule = $false
 }
 
-# Run as a package entry so manager_app relative imports resolve (not as a loose script).
-$entry = Join-Path $RepoRoot "tools\license_manager\__main__.py"
 $backend = Join-Path $RepoRoot "backend"
+$managerApp = Join-Path $RepoRoot "backend\app\licensing\manager_app.py"
+if (-not (Test-Path $managerApp)) {
+    if ($vendorRelease -eq "1") {
+        throw "backend/app/licensing/manager_app.py is missing. Restore the private vendor GUI overlay."
+    }
+    Write-Host "Skipping JarvisLicenseManager (manager_app.py not in the public tree)." -ForegroundColor Yellow
+    return
+}
 
 if ($pyinstaller -or $useModule) {
     Write-Host "==> Building JarvisLicenseManager.exe (PyInstaller onefile)" -ForegroundColor Cyan

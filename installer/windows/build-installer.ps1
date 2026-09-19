@@ -96,13 +96,13 @@ if (-not $SkipVoicePack) {
     Write-Host "Includes: Kokoro-82M default household butler voice" -ForegroundColor Green
 }
 
-Write-Host "==> Vendor license manager JarvisLicenseManager (release folder only; not in Jarvis.iss)" -ForegroundColor Cyan
+Write-Host "==> Vendor license manager JarvisLicenseManager (vendor machine only; skipped on the public tree)" -ForegroundColor Cyan
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "build-license-manager.ps1") -OutDir $OutDir
 if ($LASTEXITCODE -ne 0) {
     throw "License manager build failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "==> Owner unrestricted license (vendor-only; not in Jarvis.iss)" -ForegroundColor Cyan
+Write-Host "==> Owner unrestricted license (vendor-only; skipped without issuer.key)" -ForegroundColor Cyan
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "issue-release-unrestricted-license.ps1") -OutDir $OutDir
 if ($LASTEXITCODE -ne 0) {
     throw "Unrestricted license issuance failed with exit code $LASTEXITCODE"

@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
+import { refreshSessionPersonality } from "./sessionPersonality"
 import { Link, NavLink } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode, Task } from "../api"
 import { HelpPanel, HelpTrigger } from "../help/HelpPanel"
@@ -233,6 +234,12 @@ function HudShellInner({
   const [adminOpen, setAdminOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [panel, setPanel] = useState<HudPanel>(null)
+
+  useEffect(() => {
+    refreshSessionPersonality().catch(() => undefined)
+    const id = window.setInterval(() => refreshSessionPersonality().catch(() => undefined), 12000)
+    return () => window.clearInterval(id)
+  }, [])
 
   const runningCount = tasks.filter((task) => ["running", "queued", "waiting"].includes(task.status)).length
   const attentionCount = decisionInboxCount + (systemDegraded ? 1 : 0)

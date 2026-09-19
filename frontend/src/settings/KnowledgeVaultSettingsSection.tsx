@@ -2,20 +2,25 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
   bindVault,
+  fetchVaultHealth,
   fetchVaultStatus,
   unbindVault,
+  type VaultHealthResponse,
   type VaultPublicStatus,
 } from "../vault/vaultApi"
 
 export function KnowledgeVaultSettingsSection() {
   const [status, setStatus] = useState<VaultPublicStatus | null>(null)
+  const [health, setHealth] = useState<VaultHealthResponse | null>(null)
   const [vaultPath, setVaultPath] = useState("")
   const [initLayout, setInitLayout] = useState(false)
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
 
   async function refresh() {
-    setStatus(await fetchVaultStatus())
+    const [st, h] = await Promise.all([fetchVaultStatus(), fetchVaultHealth()])
+    setStatus(st)
+    setHealth(h)
   }
 
   useEffect(() => {
@@ -65,6 +70,10 @@ export function KnowledgeVaultSettingsSection() {
         <p className="muted">
           Status: {status.bound ? "bound" : "not bound"}
           {status.bound && status.note_count > 0 ? ` · ${status.note_count} notes indexed` : ""}
+          {status.bound && health?.missing_router ? " · router.md missing" : ""}
+          {health && health.broken_links.length > 0
+            ? ` · ${health.broken_links.length} broken wiki-link(s)`
+            : ""}
         </p>
       )}
       <form className="grid" onSubmit={(e) => void handleBind(e)}>
