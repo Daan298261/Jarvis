@@ -121,6 +121,6 @@ def test_lazy_vision_only_for_gui_or_screenshot_tasks():
 def test_context_pressure_and_tier_bump():
     assert bump_context_tier(8192) == 16384
     assert bump_context_tier(16384) == 32768
-    assert bump_context_tier(32768) == 32768
+    assert bump_context_tier(32768) == 65536
     assert context_under_pressure(25_000, 8192) is True
     assert context_under_pressure(100, 16384) is False
