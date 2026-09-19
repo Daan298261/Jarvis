@@ -7,7 +7,10 @@ from app.persona.owner_chat import _owner_messages
 
 
 @pytest.fixture
-def bound_vault(tmp_path):
+def bound_vault(tmp_path, monkeypatch):
+    data_root = tmp_path / "obsidian-meta"
+    data_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: data_root)
     reset_vault_store()
     bind_vault(str(tmp_path), init_layout=True)
     (tmp_path / "Projects" / "jarvis.md").write_text(
