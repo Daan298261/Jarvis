@@ -2,6 +2,7 @@ import { useState } from "react"
 import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
 import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
+import { SessionPersonalityControls } from "../personality/SessionPersonalityControls"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
 
@@ -106,6 +107,8 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           HexStrike · Daybreak
         </button>
       </div>
+
+      <SessionPersonalityControls />
 
       <label>
         Rendering
