@@ -145,6 +145,12 @@ def _owner_messages(conversation_id: str, user_text: str, briefing: str | None =
     ]
     if briefing:
         messages.append(ChatMessage(role="system", content=briefing))
+    from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
+
+    if public_binding_status().get("bound"):
+        vault_block = vault_prompt_block(user_text.strip())
+        if vault_block:
+            messages.append(ChatMessage(role="system", content=vault_block))
     messages.extend(history)
     messages.append(ChatMessage(role="user", content=user_text.strip()))
     return messages

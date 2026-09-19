@@ -700,6 +700,12 @@ class AgentRuntime:
         briefing = await weather_system_message(user_text)
         if briefing:
             messages.insert(1, ChatMessage(role="system", content=briefing))
+        from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
+
+        if public_binding_status().get("bound"):
+            vault_block = vault_prompt_block(user_text)
+            if vault_block:
+                messages.insert(1, ChatMessage(role="system", content=vault_block))
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             messages.append(ChatMessage(role="user", content=user_text))
