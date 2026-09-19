@@ -394,7 +394,10 @@ class LlamaCppBackend(InferenceBackend):
             "--metrics",
         ]
         if inference.fit:
-            args.extend(["--fit", "on", "--fit-target", str(inference.fit_target_mib)])
+            from .ram_policy import effective_fit_target_mib
+
+            fit_target = effective_fit_target_mib(self.settings)
+            args.extend(["--fit", "on", "--fit-target", str(fit_target)])
         else:
             args.extend(["--n-gpu-layers", "99"])
         # P0.5: do not reserve VRAM for the projector unless this start is a vision request.
