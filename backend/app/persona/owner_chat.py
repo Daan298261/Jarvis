@@ -155,6 +155,16 @@ async def stream_owner_chat(
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
 
+    from .session_personality import maybe_switch_from_owner_message
+
+    switched = maybe_switch_from_owner_message(cleaned)
+    if switched:
+        yield {
+            "type": "session_mode",
+            "conversation_id": cid,
+            "mode": switched.as_dict(),
+        }
+
     if not MANAGER.provider:
         yield {"type": "error", "detail": "Inference model is not loaded"}
         return
