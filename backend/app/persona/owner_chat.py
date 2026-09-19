@@ -28,6 +28,7 @@ from ..agent.front_responder import (
     run_two_lane_chat,
 )
 from .inference_context import ensure_context_for_messages, model_lane_event_payload
+from .slow_turn_feedback import SlowTurnNudger
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
 Reply immediately, naturally, and briefly in a British-inspired operations-assistant register.
@@ -245,6 +246,8 @@ async def stream_owner_chat(
             )
             note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
 
+    nudger = SlowTurnNudger(cleaned, started=turn_started, source="owner_chat")
+    nudger.start()
     try:
         done: dict[str, Any] | None = None
         async for event in run_two_lane_chat(
@@ -297,9 +300,12 @@ async def stream_owner_chat(
             elif kind == "done":
                 done = event
     except Exception as exc:
+        await nudger.stop()
         clear_stream_speak_state(stream_key)
         yield {"type": "error", "detail": str(exc)[:500]}
         return
+    finally:
+        nudge_meta = await nudger.stop()
 
     reply = ((done or {}).get("text") or "".join(parts)).strip()
     if reply:
@@ -322,6 +328,7 @@ async def stream_owner_chat(
             "early_tts_ids": early_tts_ids,
             "front_action": (done or {}).get("front_action"),
             "timing": (done or {}).get("timing") or last_front_timing(),
+            "slow_nudges": nudge_meta.get("nudges", 0),
         }
     else:
         clear_stream_speak_state(stream_key)
