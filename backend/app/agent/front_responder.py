@@ -387,6 +387,19 @@ def merge_consecutive_assistant_turns(turns: list[dict[str, Any]]) -> list[dict[
     return merged
 
 
+def front_system_prompt() -> str:
+    """FRONT_SYSTEM plus active session personality addendum (RFC-0130)."""
+    try:
+        from ..persona.session_personality import session_personality_system_addendum
+
+        addendum = session_personality_system_addendum()
+    except Exception:
+        addendum = ""
+    if addendum:
+        return f"{FRONT_SYSTEM}\n\n{addendum}"
+    return FRONT_SYSTEM
+
+
 def small_context_envelope(
     user_text: str,
     history: list[ChatMessage] | None = None,
@@ -396,7 +409,7 @@ def small_context_envelope(
 ) -> list[ChatMessage]:
     hint = action_hint if action_hint in FRONT_ACTIONS else "ack_continue"
     messages = [
-        ChatMessage(role="system", content=FRONT_SYSTEM),
+        ChatMessage(role="system", content=front_system_prompt()),
         ChatMessage(role="system", content=f"Hint front_action: {hint}. Keep the reply spoken-ready."),
     ]
     keep = max(0, int(context_turns or 0))

@@ -21,6 +21,47 @@ html[data-session-mode="coding"] .hud-top::after {
   pointer-events: none;
 }
 
+html[data-session-mode="research"] .hud-app {
+  --hud-cyan: #7dd3fc;
+  --hud-cyan-dim: #38bdf8;
+  --hud-gold: #cbd5e1;
+  --hud-line: rgba(125, 211, 252, 0.22);
+}
+
+html[data-session-mode="research"] .hud-top::after {
+  content: "Research session";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 2px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--hud-cyan-dim);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+html[data-session-mode="concise"] .hud-app {
+  --hud-cyan: #fdba74;
+  --hud-cyan-dim: #fb923c;
+  --hud-line: rgba(251, 146, 60, 0.22);
+}
+
+html[data-session-mode="concise"] .hud-top::after {
+  content: "Concise mode";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 2px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--hud-cyan-dim);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
 .hud-app {
   --hud-bg: #0b0d10;
   --hud-cyan: #3ecfff;
