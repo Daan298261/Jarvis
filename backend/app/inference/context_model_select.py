@@ -1,8 +1,8 @@
 """RFC-0126: context-size model autoselect."""
 from __future__ import annotations
 from typing import Any, Iterable, TypeVar
-from ..profiles import ModelProfile
-from ..runtime_profiles import RuntimeProfile
+from .profiles import ModelProfile
+from .runtime_profiles import RuntimeProfile
 ProfileT = TypeVar("ProfileT", RuntimeProfile, ModelProfile, Any)
 
 def profile_context_limit(profile: ProfileT | None) -> int:
