@@ -62,6 +62,15 @@ def get_conversation(conversation_id: str) -> list[ChatMessage]:
     return list(_conversations.get(conversation_id, []))
 
 
+async def hydrate_conversation(conversation_id: str) -> list[ChatMessage]:
+    from ..projects.portal_store import load_owner_conversation
+
+    loaded = await load_owner_conversation(conversation_id)
+    if loaded:
+        _conversations[conversation_id] = list(loaded)
+    return list(_conversations.get(conversation_id, []))
+
+
 def conversation_ids() -> list[str]:
     return list(_conversations.keys())
 
@@ -153,7 +162,7 @@ async def stream_owner_chat(
     settings = load_settings()
     profile = resolve_profile(settings.inference.profile)
     briefing = await weather_system_message(cleaned)
-    history = list(_conversations[cid])
+    history = await hydrate_conversation(cid)
     worker_messages = _owner_messages(cid, cleaned, briefing)
     parts: list[str] = []
     stream_key = f"owner:{cid}"
@@ -312,6 +321,13 @@ async def stream_owner_chat(
     if reply:
         _conversations[cid].append(ChatMessage(role="user", content=cleaned))
         _conversations[cid].append(ChatMessage(role="assistant", content=reply))
+        from ..projects.portal_store import save_owner_conversation
+
+        await save_owner_conversation(
+            cid,
+            _conversations[cid],
+            title=cleaned[:120],
+        )
         delivery = await publish_owner_text(
             reply,
             source="owner_chat",
