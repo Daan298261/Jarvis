@@ -1065,11 +1065,14 @@ class AgentRuntime:
         await self._update(task_id, exposed_tools=_exposed_csv(working, extra_prompt or prompt))
         policy = resolve_execution_policy(execution_mode)
         profile = resolve_profile(profile_name)
+        from ..inference.ram_policy import hardware_context_ceiling
+
+        effective_cap = hardware_context_ceiling(profile, settings)
         recommended_context = select_context_size(
             task_class=working.task_class,
             execution_mode=execution_mode,
             profile_name=profile_name,
-            profile_cap=profile.context_size,
+            profile_cap=effective_cap,
             prompt=prompt,
         )
         need_vision = should_load_vision(working.task_class)
@@ -1082,7 +1085,7 @@ class AgentRuntime:
             task_class=working.task_class,
             execution_mode=execution_mode,
             profile_name=profile.name,
-            profile_cap=profile.context_size,
+            profile_cap=effective_cap,
             prompt=prompt,
             current=MANAGER.state.context_size if MANAGER.state.loaded else None,
         )
@@ -1091,11 +1094,11 @@ class AgentRuntime:
             await MANAGER.load(settings, profile_name)
         target_ctx = initial_context_size(working.task_class, profile)
         live_ctx = await MANAGER.apply_context(settings, target_ctx, allow_shrink=True)
-        if live_ctx != profile.context_size:
+        if live_ctx != effective_cap:
             await BUS.publish(
                 task_id,
                 "progress",
-                f"Using {live_ctx} context (profile cap {profile.context_size})",
+                f"Using {live_ctx} context (RAM-aware cap {effective_cap})",
                 stage="model",
             )
         provider = MANAGER.provider
