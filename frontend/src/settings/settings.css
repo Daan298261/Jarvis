@@ -84,3 +84,32 @@
 .hud-admin-main .settings-shell {
   grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
 }
+
+@media (max-width: 720px) {
+  .hud-admin-main .settings-shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .settings-content {
+    min-width: 0;
+  }
+
+  .settings-nav {
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .settings-nav::-webkit-scrollbar { display: none; }
+
+  .settings-nav ul {
+    flex-flow: row nowrap;
+    width: max-content;
+  }
+
+  .settings-nav a {
+    white-space: nowrap;
+  }
+}

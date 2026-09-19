@@ -18,6 +18,7 @@ from app.mobile import identity, store
 @pytest.fixture
 def companion_env(tmp_path, monkeypatch):
     monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.auth.data_dir", lambda: tmp_path)
     monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     settings = AppSettings(
         allowed_directories=[str(tmp_path)],
@@ -26,6 +27,7 @@ def companion_env(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("app.main.load_settings", lambda: settings)
     monkeypatch.setattr("app.auth.load_settings", lambda: settings)
+    monkeypatch.setattr("app.auth.save_settings", lambda _settings: None)
     monkeypatch.setattr("app.mobile.identity.load_settings", lambda: settings)
     return {
         "tmp": tmp_path,
@@ -58,6 +60,18 @@ def stored_pairing_payloads(tmp_path) -> list[dict]:
     return [json.loads(row[0]) for row in rows]
 
 
+def stored_mobile_payloads(tmp_path) -> list[dict]:
+    db_path = tmp_path / "mobile" / "companion.db"
+    if not db_path.exists():
+        return []
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT payload FROM records").fetchall()
+    conn.close()
+    return [json.loads(row[0]) for row in rows]
+
+
 def test_generate_pairing_code_returns_six_digits(companion_env):
     result = identity.generate_pairing_code()
     assert len(result["code"]) == 6
@@ -74,9 +88,10 @@ def test_generate_rejects_obvious_codes(companion_env):
 
 def test_pairing_code_hashed_at_rest(companion_env):
     result = identity.generate_pairing_code()
-    blob = json.dumps(stored_pairing_payloads(companion_env["tmp"]))
+    blob = json.dumps(stored_mobile_payloads(companion_env["tmp"]))
     assert result["code"] not in blob
     assert identity.hash_pairing_code(result["code"]) in blob
+    assert identity.pairing_code_status()["code"] == result["code"]
 
 
 def test_regenerate_invalidates_prior_unclaimed_code(companion_env):
@@ -125,6 +140,19 @@ def test_enroll_rate_limit_per_ip(companion_env):
     assert error.value.status_code == 429
 
 
+def test_enroll_rate_limit_cannot_be_bypassed_by_rotating_phone_keys(companion_env):
+    client_ip = "192.168.1.51"
+    for _ in range(identity.ENROLL_RATE_LIMIT):
+        _, public = phone_keypair()
+        with pytest.raises(HTTPException) as error:
+            identity.enroll_pairing_code("000001", public, "Try", client_ip=client_ip)
+        assert error.value.status_code == 401
+    _, public = phone_keypair()
+    with pytest.raises(HTTPException) as error:
+        identity.enroll_pairing_code("000001", public, "Blocked", client_ip=client_ip)
+    assert error.value.status_code == 429
+
+
 def test_legacy_long_invitation_still_works(companion_env):
     _, public = phone_keypair()
     invitation = identity.invite()
@@ -164,6 +192,7 @@ def test_companion_enroll_accepts_code_without_owner_key(companion_env):
 @pytest.fixture
 def companion_env_no_owner_key(tmp_path, monkeypatch):
     monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.auth.data_dir", lambda: tmp_path)
     monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     settings = AppSettings(
         allowed_directories=[str(tmp_path)],
@@ -172,6 +201,7 @@ def companion_env_no_owner_key(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("app.main.load_settings", lambda: settings)
     monkeypatch.setattr("app.auth.load_settings", lambda: settings)
+    monkeypatch.setattr("app.auth.save_settings", lambda _settings: None)
     monkeypatch.setattr("app.mobile.identity.load_settings", lambda: settings)
     return {
         "tmp": tmp_path,
@@ -195,6 +225,49 @@ def test_pairing_codes_auto_mint_owner_key_without_prior_key(companion_env_no_ow
     assert status.status_code == 200
     assert status.json()["active"] is True
     assert status.json()["code"] == body["code"]
+
+
+def test_first_pair_green_path_accepts_stale_local_browser_key(companion_env_no_owner_key):
+    client = companion_env_no_owner_key["client"]
+    stale = {"X-Jarvis-Key": "jarvis_pk_stale_browser_value"}
+    generated = client.post("/api/mobile/manage/pairing-codes", headers=stale, json={})
+    assert generated.status_code == 200
+
+    key, public = phone_keypair()
+    enrolled = client.post(
+        "/api/companion/enroll",
+        headers={"X-Jarvis-Gateway-Client": "8.8.4.4"},
+        json={"code": generated.json()["code"], "public_key": public, "name": "First phone"},
+    )
+    assert enrolled.status_code == 200
+    device = enrolled.json()
+    listed = client.get("/api/mobile/manage/devices", headers=stale)
+    assert listed.status_code == 200
+    assert any(item["id"] == device["id"] for item in listed.json())
+    confirmed = client.post(
+        f"/api/mobile/manage/devices/{device['id']}/confirm",
+        headers=stale,
+        json={"fingerprint": device["fingerprint"]},
+    )
+    assert confirmed.status_code == 200
+    assert identity.exchange(device["id"], _signature_for_test(key, device))["access_token"]
+
+
+def _signature_for_test(key, device: dict) -> str:
+    from cryptography.hazmat.primitives import hashes
+
+    challenge = identity.challenge(device["id"])
+    message = f'jarvis-mobile-v1\n{device["id"]}\n{challenge["challenge"]}'.encode()
+    return base64.b64encode(key.sign(message, ec.ECDSA(hashes.SHA256()))).decode()
+
+
+def test_remote_pairing_request_cannot_mint_first_owner_key(companion_env_no_owner_key):
+    remote = TestClient(app, client=("8.8.8.8", 47881))
+    response = remote.post("/api/mobile/manage/pairing-codes", json={})
+    assert response.status_code in (401, 403)
+    from app.auth import get_effective_private_key
+
+    assert get_effective_private_key() == ""
 
 
 def test_pairing_status_includes_qr_fields_when_connection_ready(companion_env, monkeypatch):

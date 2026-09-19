@@ -19,7 +19,7 @@ def companion_onboarding_snapshot() -> dict[str, Any]:
         device_count = len(rows(db, "device"))
         pending = sum(1 for device in rows(db, "device") if device.get("status") == "pending")
     has_key = bool(get_effective_private_key(settings))
-    connection_ready = connection.get("state") == "ready" and bool(connection.get("endpoints"))
+    connection_ready = connection.get("state") in {"listening", "ready"} and bool(connection.get("endpoints"))
     offers: list[dict[str, Any]] = []
 
     pair_prompt = (

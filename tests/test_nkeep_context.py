@@ -187,7 +187,11 @@ async def test_chat_retries_after_n_keep_overflow_and_refits_to_live_n_ctx():
 
     mgr.provider = OverflowThenOk()
     messages = [
-        ChatMessage(role="system", content="recovered conversation and persona " * 2500),
+        # Stay below the 16K preflight threshold so this test reaches the
+        # simulated server-side n_keep overflow it is specifically exercising.
+        # The old 2,500-repeat fixture now exceeds every 32K profile cap and is
+        # correctly rejected by RFC-0114 before the provider is called.
+        ChatMessage(role="system", content="recovered conversation and persona " * 600),
         ChatMessage(role="user", content="do a voice check"),
     ]
     result = await mgr.chat(messages, max_tokens=256)
