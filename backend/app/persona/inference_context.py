@@ -25,7 +25,7 @@ def required_context_size(
     """Minimum loaded n_ctx for this message list (never below current if already loaded)."""
     app = settings or load_settings()
     profile = resolve_profile(profile_name or app.inference.profile)
-    cap = profile_cap(profile)
+    cap = profile_cap(profile, app)
     estimated = estimate_messages_tokens(messages)
     current = int(MANAGER.state.context_size or 0) if MANAGER.state.loaded else 0
     if current <= 0:
@@ -70,13 +70,34 @@ async def ensure_context_for_messages(
                 await maybe
         await MANAGER.ensure_runtime(app, profile.name, context_size=wanted)
     after = int(MANAGER.state.context_size or wanted)
-    return {
+    from ..inference.ram_policy import offload_summary
+
+    meta = {
         "action": "expanded" if after > before else "unchanged",
         "context_before": before,
         "context_after": after,
         "wanted": wanted,
         "estimated_tokens": estimate_messages_tokens(messages),
+        "offload": offload_summary(app),
     }
+    if after > before:
+        from ..events import BUS
+        from .chat_delivery import OWNER_CHAT_CHANNEL
+
+        detail = (
+            f"Context {before} → {after} tokens. "
+            f"Ceiling {meta['offload'].get('ram_context_ceiling')} · "
+            f"fit-target {meta['offload'].get('fit_target_mib')} MiB · "
+            "KV may use system RAM when VRAM is tight."
+        )
+        await BUS.publish_ephemeral(
+            OWNER_CHAT_CHANNEL,
+            "progress",
+            "Expanding context",
+            detail,
+            stage="model",
+        )
+    return meta
 
 
 def model_lane_event_payload(*, lane: str, model: str, text: str = "", extra: dict[str, Any] | None = None) -> str:
