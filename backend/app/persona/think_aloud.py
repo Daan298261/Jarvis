@@ -19,6 +19,21 @@ logger = logging.getLogger(__name__)
 THINK_ALOUD_DELAY_SECONDS = 2.5
 THINK_ALOUD_COOLDOWN_SECONDS = 90.0
 
+PROGRESS_TEMPLATE_LINES = (
+    "Still on it, sir — the main model is waking up.",
+    "Tools and checks are taking a moment longer than usual.",
+    "I am still working through this; thank you for your patience.",
+)
+
+
+def progress_think_aloud_line(context: str) -> str:
+    lowered = (context or "").lower()
+    if "model" in lowered or "load" in lowered or "context" in lowered:
+        return PROGRESS_TEMPLATE_LINES[0]
+    if "tool" in lowered or "verif" in lowered:
+        return PROGRESS_TEMPLATE_LINES[1]
+    return PROGRESS_TEMPLATE_LINES[2]
+
 THINK_ALOUD_SYSTEM = """You are Jarvis speaking one brief status line aloud while work continues in the background.
 Use the persona register below. One short sentence only (at most 18 words).
 Dry, understated British-inspired butler tone; light humour is optional.

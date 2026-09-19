@@ -42,6 +42,16 @@ SAFE_CLARIFY = "Could you clarify what you need?"
 SAFE_HELLO = "Hello, sir."
 CONTEXT_SWITCH_KEEP_BUSY = "Switching to a larger context model…"
 
+SAFE_PROGRESS_MODEL = "The main model is still loading; I shall update you shortly."
+SAFE_PROGRESS_TOOLS = "I am still working through tools and verification."
+SAFE_PROGRESS_GENERIC = "This is taking longer than usual; I am still on it."
+
+PROGRESS_SYSTEM = """You are Jarvis giving the owner one brief progress update while deeper work continues.
+Use a dry, understated British-inspired register. One or two short sentences only.
+Explain why things are slow using only the situation hint (model load, tools, verification, context, hotswap).
+Do not claim success, completion, or invented facts. Do not mention internal model names or routing scores.
+Output only the spoken reply text."""
+
 FRONT_SYSTEM = """You are Jarvis speaking with the owner. Runtime role: front_responder. Answer tier: 1.
 Reply immediately, naturally, and briefly in a British-inspired operations-assistant register.
 Put the useful answer in the first sentence, ideally no more than twelve words.
@@ -55,6 +65,16 @@ If the hint action is ask_clarification, ask one short clarifying question.
 If the hint action is handoff_notice, say a stronger model is taking over.
 Never say the work is done. Never describe tool execution.
 Return only the spoken reply text, not JSON and not a plan."""
+
+
+def front_system_prompt() -> str:
+    from ..persona.session_personality import session_personality_system_addendum
+
+    addendum = session_personality_system_addendum()
+    if not addendum:
+        return FRONT_SYSTEM
+    return f"{FRONT_SYSTEM}\n\n{addendum}"
+
 
 _FAKE_DONE = re.compile(
     r"(?i)\b("
@@ -467,9 +487,18 @@ async def generate_front_reply(
     chat = provider or front_provider(app)
     if chat is None or not hasattr(chat, "chat_stream"):
         action, text, rejected = enforce_front_safety(heuristic, fallback_text_for_action(heuristic), user_text=user_text, heuristic=heuristic)
+        if heuristic == "silent_skip":
+            return FrontReply(
+                action="silent_skip",
+                text="",
+                model=model_id,
+                skipped=True,
+                safety_rejected=rejected,
+                max_tokens=cfg.max_tokens,
+            )
         return FrontReply(
-            action="silent_skip" if heuristic == "silent_skip" else action,
-            text="" if heuristic == "silent_skip" else text,
+            action=action,
+            text=text,
             model=model_id,
             skipped=True,
             safety_rejected=rejected,
@@ -510,10 +539,21 @@ async def generate_front_reply(
 
     raw = "".join(parts).strip()
     if not raw:
-        action = "silent_skip" if worker_required(heuristic) else heuristic
         complete_ms = max(0.0, (time.perf_counter() - started) * 1000)
+        if worker_required(heuristic):
+            fb = fallback_text_for_action(heuristic)
+            action, text, rejected = enforce_front_safety(heuristic, fb, user_text=user_text, heuristic=heuristic)
+            return FrontReply(
+                action=action,
+                text=text,
+                model=model_id,
+                complete_ms=complete_ms,
+                skipped=True,
+                safety_rejected=rejected,
+                max_tokens=cfg.max_tokens,
+            )
         return FrontReply(
-            action=action if action in FRONT_ACTIONS else "silent_skip",
+            action=heuristic if heuristic in FRONT_ACTIONS else "silent_skip",
             text="",
             model=model_id,
             complete_ms=complete_ms,
@@ -546,6 +586,58 @@ async def generate_front_reply(
     )
 
 
+def progress_template_for_context(context: str) -> str:
+    lowered = (context or "").lower()
+    if "model" in lowered or "context" in lowered or "load" in lowered:
+        return SAFE_PROGRESS_MODEL
+    if "tool" in lowered or "verif" in lowered or "pytest" in lowered:
+        return SAFE_PROGRESS_TOOLS
+    return SAFE_PROGRESS_GENERIC
+
+
+async def generate_progress_update(
+    context: str,
+    *,
+    settings: AppSettings | None = None,
+    provider: Any | None = None,
+) -> str:
+    app = settings or load_settings()
+    situation = (context or "").strip() or "Work is taking longer than usual."
+    if not app.front_responder.enabled:
+        return progress_template_for_context(situation)
+    cfg = front_lane_config(app)
+    chat = provider or front_provider(app)
+    if chat is None or not hasattr(chat, "chat_stream"):
+        return progress_template_for_context(situation)
+    messages = [
+        ChatMessage(role="system", content=PROGRESS_SYSTEM),
+        ChatMessage(
+            role="user",
+            content=f"Situation: {situation}\nGive one brief progress line for the owner.",
+        ),
+    ]
+    parts: list[str] = []
+    deadline = time.perf_counter() + max(1.0, cfg.timeout_ms / 1000.0)
+    try:
+        async for delta in _iter_chat_stream(
+            chat,
+            messages,
+            temperature=cfg.temperature,
+            max_tokens=min(cfg.max_tokens, 96),
+            thinking=False,
+        ):
+            if time.perf_counter() > deadline:
+                break
+            if delta:
+                parts.append(delta)
+    except Exception:
+        parts = parts or []
+    line = "".join(parts).strip().splitlines()[0].strip() if parts else ""
+    if not line or is_unsafe_front_claim(line):
+        return progress_template_for_context(situation)
+    return line
+
+
 async def run_two_lane_chat(
     user_text: str,
     *,
@@ -555,6 +647,7 @@ async def run_two_lane_chat(
     turn_started: float | None = None,
     worker_stream: WorkerStream | None = None,
     on_delta: Callable[[str, str], Awaitable[None] | None] | None = None,
+    prefetched_front: FrontReply | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield front deltas first (or in parallel), then worker deltas, as one turn."""
     app = settings or load_settings()
@@ -587,18 +680,21 @@ async def run_two_lane_chat(
         worker_task = asyncio.create_task(_collect_worker_stream(worker_stream, started, _emit))
 
     yield {"type": "front_response_started", "front_model": model_id, "front_action": heuristic}
-    front = await generate_front_reply(
-        user_text,
-        history=history,
-        settings=app,
-        route=resolved_route,
-        turn_started=started,
-    )
+    if prefetched_front is not None:
+        front = prefetched_front
+    else:
+        front = await generate_front_reply(
+            user_text,
+            history=history,
+            settings=app,
+            route=resolved_route,
+            turn_started=started,
+        )
     timing.front_model = front.model or model_id
     timing.front_action = front.action
     timing.front_first_text_ms = front.first_text_ms
     timing.front_complete_ms = front.complete_ms
-    if front.skipped or front.action == "silent_skip":
+    if front.action == "silent_skip" or (not front.text and front.skipped):
         yield {"type": "front_response_skipped", "front_action": front.action, "reply": front}
     else:
         raw_front = "".join(front.chunks).strip()
@@ -743,15 +839,25 @@ async def _iter_chat_stream(provider: Any, messages: list[ChatMessage], **kwargs
         yield streamed.content
 
 
-
 SpokenCallback = Callable[[str], Awaitable[None] | None]
 
-async def emit_context_switch_keep_busy(*, settings: AppSettings | None = None, user_text: str = "", on_spoken: SpokenCallback | None = None) -> str:
+
+async def emit_context_switch_keep_busy(
+    *,
+    settings: AppSettings | None = None,
+    user_text: str = "",
+    on_spoken: SpokenCallback | None = None,
+) -> str:
+    """Owner-facing keep-busy while the worker model hotswaps (dedicated front lane)."""
     app = settings or load_settings()
     text = CONTEXT_SWITCH_KEEP_BUSY
     if app.front_responder.enabled:
         try:
-            front = await generate_front_reply(user_text or "Please wait while I switch models.", settings=app, turn_started=time.perf_counter())
+            front = await generate_front_reply(
+                user_text or "Please wait while I switch models.",
+                settings=app,
+                turn_started=time.perf_counter(),
+            )
             if front.text and is_safe_front_speech(front.action, front.text):
                 text = front.text
         except Exception:
@@ -762,13 +868,27 @@ async def emit_context_switch_keep_busy(*, settings: AppSettings | None = None, 
             await maybe
     return text
 
-def spawn_context_switch_keep_busy(*, settings: AppSettings | None = None, user_text: str = "", on_spoken: SpokenCallback | None = None) -> asyncio.Task[str]:
+
+def spawn_context_switch_keep_busy(
+    *,
+    settings: AppSettings | None = None,
+    user_text: str = "",
+    on_spoken: SpokenCallback | None = None,
+) -> asyncio.Task[str]:
+    """Fire-and-forget keep-busy on the front lane so worker hotswap does not block it."""
+
     async def _runner() -> str:
-        return await emit_context_switch_keep_busy(settings=settings, user_text=user_text, on_spoken=on_spoken)
+        return await emit_context_switch_keep_busy(
+            settings=settings,
+            user_text=user_text,
+            on_spoken=on_spoken,
+        )
+
     task = asyncio.create_task(_runner())
     _front_lane_tasks.add(task)
     task.add_done_callback(_front_lane_tasks.discard)
     return task
+
 
 async def _collect_worker_stream(
     worker_stream: WorkerStream,
