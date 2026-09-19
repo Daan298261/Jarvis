@@ -913,6 +913,14 @@ class AgentRuntime:
             user_prompt=prompt,
             tts_char_offset=stream_speak_offset(stream_key),
         )
+        from .background_verify import schedule_background_verification
+
+        schedule_background_verification(
+            user_text,
+            content,
+            source="task_chat",
+            task_id=task_id,
+        )
         clear_stream_speak_state(stream_key)
         await BUS.publish(
             task_id,
