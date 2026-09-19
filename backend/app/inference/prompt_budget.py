@@ -239,6 +239,17 @@ async def prepare_inference(
             if budget.pressure < PRESSURE_EXPAND_OK:
                 return PreparedInference(messages, tools, profile, budget)
 
+    if budget.pressure >= PRESSURE_EXPAND_OK or budget.required_context > cap:
+        from ..persona.inference_context import maybe_autoselect_runtime_for_budget
+        switched = await maybe_autoselect_runtime_for_budget(budget, profile, settings)
+        if switched:
+            profile = switched
+            budget = calculate_prompt_budget(messages, tools, profile=profile, max_tokens=max_tokens, active_context=manager.live_context_size())
+            if budget.pressure < PRESSURE_EXPAND_OK:
+                return PreparedInference(messages, tools, profile, budget)
+        if budget.required_context > profile_cap(profile) and budget.pressure >= PRESSURE_EXPAND_OK:
+            raise ModelCapacityExceeded(budget)
+
     return PreparedInference(messages, tools, profile, budget)
 
 
