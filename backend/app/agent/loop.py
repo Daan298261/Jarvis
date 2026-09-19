@@ -802,6 +802,10 @@ class AgentRuntime:
                 persist=False,
             )
 
+        from ..persona.slow_turn_feedback import SlowTurnNudger
+
+        nudger = SlowTurnNudger(user_text, started=turn_started or model_started, source="task_chat")
+        nudger.start()
         try:
             done: dict[str, Any] | None = None
             async for event in run_two_lane_chat(
@@ -851,6 +855,7 @@ class AgentRuntime:
                 elif kind == "done":
                     done = event
         except Exception as exc:
+            await nudger.stop()
             clear_stream_speak_state(stream_key)
             err = str(exc)
             await self._update(
@@ -863,6 +868,8 @@ class AgentRuntime:
             )
             await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
             return
+        finally:
+            await nudger.stop()
 
         content = ((done or {}).get("text") or front_text or "").strip()
         timing = (done or {}).get("timing") or last_front_timing()
