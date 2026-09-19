@@ -29,6 +29,7 @@ from .mobile_call import MobileCallTool
 from .hexstrike_defensive import HexStrikeDefensiveTool
 from .hexstrike_operator import HexStrikeOperatorTool
 from .chat_projects import ChatProjectsTool
+from .vault_memory import VaultMemoryTool
 
 
 class ToolRegistry:
@@ -65,6 +66,7 @@ class ToolRegistry:
             HexStrikeDefensiveTool(getter),
             HexStrikeOperatorTool(getter),
             ChatProjectsTool(),
+            VaultMemoryTool(),
         ]
         self.tools = {tool.name: tool for tool in items}
 
