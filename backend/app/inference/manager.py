@@ -862,6 +862,17 @@ class InferenceManager:
         except Exception:
             pass
 
+    @staticmethod
+    def _ram_policy_snapshot(settings: AppSettings, profile: Any) -> dict[str, Any]:
+        from .ram_policy import hardware_context_ceiling, offload_summary
+
+        offload = offload_summary(settings)
+        effective = hardware_context_ceiling(profile, settings)
+        return {
+            "context_effective_cap": effective,
+            "ram_offload": offload,
+        }
+
     async def snapshot(self, settings: AppSettings) -> dict[str, Any]:
         await self.refresh_resources()
         healthy = False
@@ -891,6 +902,7 @@ class InferenceManager:
             "inference_backend": self.state.backend,
             "manages_process": self.state.manages_process,
             "gpu_layers": "auto (--fit on)" if settings.inference.fit else "99",
+            **self._ram_policy_snapshot(settings, profile),
             "flash_attn": settings.inference.flash_attn,
             "host": settings.inference.host,
             "port": settings.inference.port,
@@ -924,8 +936,9 @@ class InferenceManager:
             "context_policy": {
                 "live": self.live_context_size() or profile.context_size,
                 "profile_cap": profile.context_size,
+                "effective_cap": self._ram_policy_snapshot(settings, profile)["context_effective_cap"],
                 "server_n_ctx": self.state.server_n_ctx,
-                "note": "Tasks start at 8K or 16K and expand to the profile cap only when the live prompt is under pressure. External servers stay at their loaded n_ctx.",
+                "note": "Tasks start at 8K or 16K and expand toward the RAM-aware cap when the live prompt is under pressure.",
             },
         }
 
