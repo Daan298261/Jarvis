@@ -5,6 +5,7 @@ from typing import Any
 CONTEXT_SIMPLE = 8192
 CONTEXT_NORMAL = 16384
 CONTEXT_LONG = 32768
+CONTEXT_XL = 65536
 
 # Start these classes at 8K. Grow to 16K/32K only if the live prompt is under pressure.
 SIMPLE_CLASSES = {
@@ -24,14 +25,18 @@ LONG_CLASSES = {
 }
 
 
-def profile_cap(profile: Any) -> int:
+def profile_cap(profile: Any, settings: Any | None = None) -> int:
+    from ..inference.ram_policy import hardware_context_ceiling
+
+    if getattr(profile, "name", None):
+        return hardware_context_ceiling(profile, settings)
     size = int(getattr(profile, "context_size", 0) or 0)
     return size if size > 0 else CONTEXT_LONG
 
 
 def initial_context_size(task_class: str | None, profile: Any) -> int:
     """Pick a starting window from the task class. Never exceed the profile cap."""
-    cap = profile_cap(profile)
+    cap = profile_cap(profile, None)
     klass = (task_class or "").strip().lower()
     if klass in SIMPLE_CLASSES:
         return min(CONTEXT_SIMPLE, cap)
@@ -66,4 +71,6 @@ def next_context_size(
         return min(CONTEXT_NORMAL, cap)
     if current < CONTEXT_LONG:
         return min(CONTEXT_LONG, cap)
+    if current < CONTEXT_XL and cap >= CONTEXT_XL:
+        return min(CONTEXT_XL, cap)
     return None
