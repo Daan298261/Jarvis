@@ -105,6 +105,7 @@ from .front_responder import (
     last_front_timing,
     note_front_audio,
     run_two_lane_chat,
+    worker_required,
 )
 from .worker_progress import (
     clear_worker_progress_for_task,
@@ -796,7 +797,7 @@ class AgentRuntime:
         spoken_parts: list[str] = []
 
         from ..persona.inference_context import ensure_context_for_messages, model_lane_event_payload
-        from ..agent.front_responder import generate_front_reply, resolve_front_model_id
+        from ..agent.front_responder import resolve_front_model_id
 
         async def _expand_notice(before: int, after: int) -> None:
             front = await generate_front_reply(
@@ -965,8 +966,15 @@ class AgentRuntime:
             except asyncio.CancelledError:
                 pass
 
-        content = ((done or {}).get("text") or front_text or "").strip()
         timing = (done or {}).get("timing") or last_front_timing()
+        done_worker = str((done or {}).get("worker_text") or "").strip()
+        merged = str((done or {}).get("text") or "").strip()
+        front_action_resolved = front_action or str((done or {}).get("front_action") or "")
+        if worker_required(front_action_resolved) and not done_worker:
+            content = ""
+        else:
+            content = merged or front_text or ""
+        content = content.strip()
         front_obj = (done or {}).get("front")
         model_ms = max(0.0, (time.perf_counter() - model_started) * 1000)
         if front_obj and not getattr(front_obj, "skipped", False):

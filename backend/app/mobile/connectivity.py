@@ -123,15 +123,21 @@ class Connectivity:
 
     async def stop_gateway(self):
         await self.stop_lan_beacon()
-        if self.server:
+        external = bool(getattr(self, "_uses_external_listener", False))
+        if self.server and not external:
             self.server.should_exit = True
         if self.server_task:
-            try:
-                await asyncio.wait_for(asyncio.shield(self.server_task), 5)
-            except TimeoutError:
+            if external:
                 self.server_task.cancel()
                 await asyncio.gather(self.server_task, return_exceptions=True)
+            else:
+                try:
+                    await asyncio.wait_for(asyncio.shield(self.server_task), 5)
+                except TimeoutError:
+                    self.server_task.cancel()
+                    await asyncio.gather(self.server_task, return_exceptions=True)
         self.server = self.server_task = None
+        self._uses_external_listener = False
 
     async def start_lan_beacon(self):
         try:
@@ -162,6 +168,22 @@ class Connectivity:
             local_verified=False,
             remote_verified=False,
         )
+
+    async def _attach_external_gateway(self) -> None:
+        """Port 4781 is already serving the companion TLS gateway on this machine."""
+        self._uses_external_listener = True
+        self.server = None
+        if self.server_task and not self.server_task.done():
+            return
+
+        async def _hold() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                raise
+
+        self.server_task = asyncio.create_task(_hold(), name="jarvis-companion-gateway-external")
 
     async def start_gateway(self, identity):
         from ..config import load_settings
@@ -194,6 +216,7 @@ class Connectivity:
             if exc.errno in (errno.EADDRINUSE, addr_in_use):
                 try:
                     await self.probe(f"https://127.0.0.1:{PORT}", identity)
+                    await self._attach_external_gateway()
                     return
                 except Exception:
                     pass
