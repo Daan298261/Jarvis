@@ -244,6 +244,17 @@ async def execute_background_verification(
                 conversation_id=conversation_id,
                 speak=speak,
             )
+            try:
+                from ..memory.obsidian_vault import persist_verified_correction
+
+                persist_verified_correction(
+                    user_prompt=user_prompt,
+                    initial_answer=answer,
+                    correction=correction,
+                    conversation_id=conversation_id,
+                )
+            except Exception:
+                pass
         elif task_id:
             await publish_task_correction(task_id, correction, user_prompt=user_prompt)
         return {"corrected": True, "text": correction}

@@ -355,6 +355,16 @@ async def stream_owner_chat(
             _conversations[cid],
             title=cleaned[:120],
         )
+        try:
+            from ..memory.obsidian_vault import mirror_owner_chat_turn
+
+            mirror_owner_chat_turn(
+                conversation_id=cid,
+                user_text=cleaned,
+                assistant_text=reply,
+            )
+        except Exception:
+            pass
         delivery = await publish_owner_text(
             reply,
             source="owner_chat",
