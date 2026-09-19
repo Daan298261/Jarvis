@@ -28,6 +28,7 @@ from ..agent.front_responder import (
     run_two_lane_chat,
 )
 from .inference_context import ensure_context_for_messages, model_lane_event_payload
+from .reply_verifier import schedule_background_verification
 from .slow_turn_feedback import SlowTurnNudger
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
@@ -320,6 +321,14 @@ async def stream_owner_chat(
         )
         clear_stream_speak_state(stream_key)
         tts_id = early_tts_ids[0] if early_tts_ids and not delivery.get("tts_id") else delivery.get("tts_id")
+        if len(reply) >= 40:
+            await publish_owner_text(
+                "I'll run a quick background verification and speak up if anything material changes.",
+                source="owner_chat",
+                speak=True,
+                user_prompt=cleaned,
+            )
+        schedule_background_verification(cleaned, reply, source="owner_chat", speak=True)
         yield {
             "type": "done",
             "conversation_id": cid,
@@ -329,6 +338,7 @@ async def stream_owner_chat(
             "front_action": (done or {}).get("front_action"),
             "timing": (done or {}).get("timing") or last_front_timing(),
             "slow_nudges": nudge_meta.get("nudges", 0),
+            "background_verify": True,
         }
     else:
         clear_stream_speak_state(stream_key)
