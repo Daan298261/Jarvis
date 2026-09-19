@@ -362,10 +362,6 @@ end;
 
 procedure RecordOwnedPathsRegistry(const InstallDir, SetupExe: String);
 begin
-  if not RegKeyExists(HKEY_CURRENT_USER, 'Software\Jarvis') then
-    RegCreateKey(HKEY_CURRENT_USER, 'Software\Jarvis');
-  if not RegKeyExists(HKEY_CURRENT_USER, JarvisOwnedPathsKey) then
-    RegCreateKey(HKEY_CURRENT_USER, JarvisOwnedPathsKey);
   RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'InstallLocation', InstallDir);
   RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'DataDirectory', AddBackslash(InstallDir) + 'data');
   if SetupExe <> '' then
