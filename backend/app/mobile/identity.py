@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import ipaddress
 import secrets
+import threading
 import time
 import uuid
 
@@ -24,6 +25,8 @@ MIN_PAIRING_TTL_MINUTES = 5
 MAX_PAIRING_TTL_MINUTES = 60
 ENROLL_RATE_LIMIT = 5
 ENROLL_RATE_WINDOW_SECONDS = 15 * 60
+_PAIRING_LOCK = threading.Lock()
+_DISPLAY_CODES: dict[str, str] = {}
 
 OBVIOUS_PAIRING_CODES = frozenset(
     {
@@ -100,6 +103,7 @@ def _invalidate_unclaimed_pairing_codes(db) -> None:
     for record in rows(db, "pairing_code"):
         if not record.get("claimed_by"):
             delete(db, "pairing_code", record["hash"])
+            _DISPLAY_CODES.pop(record["hash"], None)
 
 
 def generate_pairing_code(ttl_minutes: int = DEFAULT_PAIRING_TTL_MINUTES) -> dict:
@@ -116,20 +120,24 @@ def generate_pairing_code(ttl_minutes: int = DEFAULT_PAIRING_TTL_MINUTES) -> dic
         "created_at": now,
         "ttl_minutes": ttl_minutes,
     }
-    with database() as db:
-        _invalidate_unclaimed_pairing_codes(db)
-        put(db, "pairing_code", code_hash, record)
-        put(
-            db,
-            "pairing_session",
-            PAIRING_OWNER,
-            {
-                "active_hash": code_hash,
-                "expires_at": expires_at,
-                "updated_at": now,
-                "display_code": code,
-            },
-        )
+    with _PAIRING_LOCK:
+        with database() as db:
+            _invalidate_unclaimed_pairing_codes(db)
+            put(db, "pairing_code", code_hash, record)
+            put(
+                db,
+                "pairing_session",
+                PAIRING_OWNER,
+                {
+                    "active_hash": code_hash,
+                    "expires_at": expires_at,
+                    "updated_at": now,
+                },
+            )
+        # Keep the display copy in process memory only. A restart intentionally
+        # requires a new code rather than persisting the six-digit secret.
+        _DISPLAY_CODES.clear()
+        _DISPLAY_CODES[code_hash] = code
     return {
         "code": code,
         "expires_at": expires_at,
@@ -144,37 +152,47 @@ def regenerate_pairing_code(ttl_minutes: int = DEFAULT_PAIRING_TTL_MINUTES) -> d
 
 def pairing_code_status() -> dict:
     now = time.time()
-    with database() as db:
-        session = get(db, "pairing_session", PAIRING_OWNER)
-        if not session:
-            return {"active": False, "claimed": False, "ttl_remaining_seconds": 0}
-        record = get(db, "pairing_code", session["active_hash"])
-        if not record:
-            return {"active": False, "claimed": False, "ttl_remaining_seconds": 0}
-        remaining = max(0, int(record["expires_at"] - now))
-        claimed = bool(record.get("claimed_by"))
-        active = remaining > 0 and not claimed
-        result = {
-            "active": active,
-            "claimed": claimed,
-            "expires_at": record["expires_at"],
-            "ttl_remaining_seconds": remaining,
-            "id": record["id"],
-        }
-        if active and session.get("display_code"):
-            result["code"] = session["display_code"]
-        return result
+    with _PAIRING_LOCK:
+        with database() as db:
+            session = get(db, "pairing_session", PAIRING_OWNER)
+            if not session:
+                return {"active": False, "claimed": False, "ttl_remaining_seconds": 0}
+            record = get(db, "pairing_code", session["active_hash"])
+            if not record:
+                return {"active": False, "claimed": False, "ttl_remaining_seconds": 0}
+            remaining = max(0, int(record["expires_at"] - now))
+            claimed = bool(record.get("claimed_by"))
+            active = remaining > 0 and not claimed
+            result = {
+                "active": active,
+                "claimed": claimed,
+                "expires_at": record["expires_at"],
+                "ttl_remaining_seconds": remaining,
+                "id": record["id"],
+            }
+            display_code = _DISPLAY_CODES.get(session["active_hash"])
+            if active and display_code:
+                result["code"] = display_code
+            elif not active:
+                _DISPLAY_CODES.pop(session["active_hash"], None)
+            return result
 
 
 def check_enroll_rate_limit(client_ip: str, device_fingerprint: str = "") -> None:
-    key = f"enroll:{client_ip or 'unknown'}:{device_fingerprint[:16]}"
     now = time.time()
     with database() as db:
-        bucket = get(db, "rate_limit", key) or {"attempts": []}
-        attempts = [stamp for stamp in bucket["attempts"] if stamp > now - ENROLL_RATE_WINDOW_SECONDS]
-        if len(attempts) >= ENROLL_RATE_LIMIT:
+        keys = [f"enroll:ip:{client_ip or 'unknown'}"]
+        if device_fingerprint:
+            keys.append(f"enroll:device:{device_fingerprint}")
+        buckets = []
+        blocked = False
+        for key in keys:
+            bucket = get(db, "rate_limit", key) or {"attempts": []}
+            attempts = [stamp for stamp in bucket["attempts"] if stamp > now - ENROLL_RATE_WINDOW_SECONDS]
+            buckets.append((key, attempts))
+            blocked = blocked or len(attempts) >= ENROLL_RATE_LIMIT
+        if blocked:
             from .companion_security import GUARD
-            import asyncio
 
             try:
                 loop = asyncio.get_running_loop()
@@ -182,8 +200,9 @@ def check_enroll_rate_limit(client_ip: str, device_fingerprint: str = "") -> Non
             except RuntimeError:
                 pass
             raise HTTPException(429, "Too many pairing attempts. Wait and try again.")
-        attempts.append(now)
-        put(db, "rate_limit", key, {"attempts": attempts})
+        for key, attempts in buckets:
+            attempts.append(now)
+            put(db, "rate_limit", key, {"attempts": attempts})
 
 
 def _create_pending_device(db, encoded_key: str, name: str) -> dict:
@@ -210,21 +229,23 @@ def enroll_pairing_code(code: str, encoded_key: str, name: str, *, client_ip: st
     code_hash = hash_pairing_code(code)
     fp = fingerprint(encoded_key)
     check_enroll_rate_limit(client_ip, fp)
-    with database() as db:
-        record = get(db, "pairing_code", code_hash)
-        session = get(db, "pairing_session", PAIRING_OWNER)
-        if not record or record["expires_at"] < time.time():
-            raise HTTPException(401, "Pairing code expired or invalid. Generate a new code on Jarvis.")
-        if not session or session.get("active_hash") != code_hash:
-            raise HTTPException(401, "Pairing code expired or invalid. Generate a new code on Jarvis.")
-        if record["claimed_by"]:
-            device = get(db, "device", record["claimed_by"])
-            if device and device["fingerprint"] == fp and device["status"] != "revoked":
-                return safe_device(device)
-            raise HTTPException(409, "Pairing code already claimed")
-        device = _create_pending_device(db, encoded_key, name)
-        record["claimed_by"] = device["id"]
-        put(db, "pairing_code", code_hash, record)
+    with _PAIRING_LOCK:
+        with database() as db:
+            record = get(db, "pairing_code", code_hash)
+            session = get(db, "pairing_session", PAIRING_OWNER)
+            if not record or record["expires_at"] < time.time():
+                raise HTTPException(401, "Pairing code expired or invalid. Generate a new code on Jarvis.")
+            if not session or session.get("active_hash") != code_hash:
+                raise HTTPException(401, "Pairing code expired or invalid. Generate a new code on Jarvis.")
+            if record["claimed_by"]:
+                device = get(db, "device", record["claimed_by"])
+                if device and device["fingerprint"] == fp and device["status"] != "revoked":
+                    return safe_device(device)
+                raise HTTPException(409, "Pairing code already claimed")
+            device = _create_pending_device(db, encoded_key, name)
+            record["claimed_by"] = device["id"]
+            put(db, "pairing_code", code_hash, record)
+        _DISPLAY_CODES.pop(code_hash, None)
     return safe_device(device)
 
 

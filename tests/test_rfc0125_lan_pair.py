@@ -106,6 +106,33 @@ async def test_gateway_allows_lan_pair_routes():
     import httpx
     from app.mobile.gateway import gateway_app
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway_app()), base_url="https://jarvis") as client:
+    transport = httpx.ASGITransport(app=gateway_app(), client=("192.168.1.40", 41000))
+    async with httpx.AsyncClient(transport=transport, base_url="https://jarvis") as client:
         assert (await client.get("/api/companion/lan-beacon")).status_code != 404
         assert (await client.post("/api/auth/generate-key")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_gateway_refuses_lan_pair_routes_from_public_clients():
+    import httpx
+    from app.mobile.gateway import gateway_app
+
+    transport = httpx.ASGITransport(app=gateway_app(), client=("8.8.8.8", 41000))
+    async with httpx.AsyncClient(transport=transport, base_url="https://jarvis") as client:
+        beacon = await client.get("/api/companion/lan-beacon")
+        enroll = await client.post("/api/companion/lan-enroll", json={})
+    assert beacon.status_code == 403
+    assert enroll.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_gateway_refuses_lan_pair_routes_from_loopback_relay_hop():
+    import httpx
+    from app.mobile.gateway import gateway_app
+
+    transport = httpx.ASGITransport(app=gateway_app(), client=("127.0.0.1", 41000))
+    async with httpx.AsyncClient(transport=transport, base_url="https://jarvis") as client:
+        beacon = await client.get("/api/companion/lan-beacon")
+        enroll = await client.post("/api/companion/lan-enroll", json={})
+    assert beacon.status_code == 403
+    assert enroll.status_code == 403

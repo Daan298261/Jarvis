@@ -123,16 +123,24 @@ def require_owner_private_key_for_pairing(request: Request) -> None:
     Localhost portal sessions may omit the client key until Settings syncs it;
     remote callers must still present the owner key.
     """
-    ensure_owner_private_key()
+    host = request.client.host if request.client else ""
     current = load_settings()
     expected = get_effective_private_key(current)
+    if not expected and not is_local_owner_host(host):
+        raise HTTPException(status_code=403, detail="Owner private key is not configured")
+    if not expected:
+        ensure_owner_private_key()
+        current = load_settings()
+        expected = get_effective_private_key(current)
     if not expected:
         raise HTTPException(status_code=503, detail="Could not prepare owner identity for pairing")
+    # The desktop portal can retain an old browser key after a first-run key is
+    # minted. Pairing remains localhost-only in that case; remote callers still
+    # have to prove the current owner key.
+    if is_local_owner_host(host):
+        return
     provided = extract_key_from_request(request)
     if verify_key(provided, expected):
-        return
-    host = request.client.host if request.client else ""
-    if is_local_owner_host(host) and not provided:
         return
     raise HTTPException(status_code=401, detail="Valid owner private key required")
 
@@ -142,6 +150,7 @@ def is_owner_pairing_manage_path(path: str) -> bool:
         "/api/mobile/manage/pairing-codes",
         "/api/mobile/manage/pairing-codes/regenerate",
         "/api/mobile/manage/pairing-codes/status",
+        "/api/mobile/manage/devices",
     }:
         return True
     return path.startswith("/api/mobile/manage/devices/") and path.endswith("/confirm")

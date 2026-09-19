@@ -1694,6 +1694,27 @@ label { display: block; color: var(--muted); font-size: 13px; }
   font-size: 13px;
   line-height: 1.7;
 }
+@media (max-width: 520px) {
+  .companion-pairing-code {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 5px;
+    width: 100%;
+  }
+  .companion-pairing-digit {
+    min-width: 0;
+    height: 54px;
+    padding: 0;
+    border-radius: 9px;
+    font-size: clamp(23px, 8vw, 30px);
+  }
+  .companion-pairing-qr-block { justify-items: center; }
+  .companion-pairing-qr {
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .companion-pairing-actions .btn { flex: 1 1 140px; }
+}
 /* RFC-0076 — companion APK build / delivery */
 .companion-apk-build {
   margin-top: 16px;

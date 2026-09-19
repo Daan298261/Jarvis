@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import time
 import uuid
 from typing import Literal
@@ -22,6 +23,22 @@ from ..mobile.store import database, get, put, root, rows
 router = APIRouter(prefix="/api/companion", tags=["companion"])
 owner_router = APIRouter(prefix="/api/mobile/manage", tags=["mobile management"])
 Device = Depends(identity.require_device)
+
+
+def _client_ip(request: Request) -> str:
+    """Use gateway-provided client identity only across the loopback hop."""
+    peer = request.client.host if request.client else ""
+    forwarded = request.headers.get("x-jarvis-gateway-client", "").strip()
+    try:
+        loopback_peer = ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        loopback_peer = peer == "localhost"
+    if forwarded and loopback_peer:
+        try:
+            return str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            pass
+    return peer
 
 
 class Enroll(BaseModel):
@@ -89,7 +106,7 @@ class Preferences(BaseModel):
 
 @router.post("/enroll")
 def enroll(body: Enroll, request: Request):
-    client_ip = request.client.host if request.client else ""
+    client_ip = _client_ip(request)
     if body.code:
         return identity.enroll_pairing_code(body.code, body.public_key, body.name, client_ip=client_ip)
     return identity.enroll(body.invitation, body.public_key, body.name, client_ip=client_ip)
@@ -114,7 +131,7 @@ def lan_beacon(request: Request):
 
 @router.post("/lan-enroll")
 def lan_enroll(body: LanEnroll, request: Request):
-    client_ip = request.client.host if request.client else ""
+    client_ip = _client_ip(request)
     return identity.enroll_lan(body.public_key, body.name, client_ip=client_ip)
 
 
@@ -474,7 +491,7 @@ def pairing_code_status():
     return enrich_pairing_session(identity.pairing_code_status())
 
 
-@owner_router.get("/devices", dependencies=[Depends(require_owner_private_key)])
+@owner_router.get("/devices", dependencies=[Depends(require_owner_private_key_for_pairing)])
 def devices():
     with database() as db:
         return [identity.safe_device(d) for d in rows(db, "device")]

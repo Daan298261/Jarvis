@@ -70,6 +70,16 @@ def _companion_path_allowed(path: str) -> bool:
     )
 
 
+def _private_client(host: str) -> bool:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    # Relay tunnels terminate on this process over loopback, so loopback is
+    # deliberately not proof that the phone is on the desktop's LAN.
+    return bool(address.is_private and not address.is_loopback)
+
+
 def gateway_app(upstream: str = "http://127.0.0.1:4780"):
     from .companion_security import GUARD
 
@@ -93,6 +103,9 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
         # A path encoded to escape this prefix must never reach owner APIs.
         if not _companion_path_allowed(path):
             return JSONResponse({"detail": "Route unavailable on mobile gateway"}, 404)
+        client_host = request.client.host if request.client else ""
+        if path in {"api/companion/lan-beacon", "api/companion/lan-enroll"} and not _private_client(client_host):
+            return JSONResponse({"detail": "LAN pairing is only available on the same local network as Jarvis."}, 403)
         if path.startswith((
             "api/companion/enroll",
             "api/companion/lan-enroll",
@@ -115,6 +128,9 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
             if len(data) > 64 * 1024 * 1024:
                 return JSONResponse({"detail": "Request exceeds 64 MiB"}, 413)
         headers = {name: request.headers[name] for name in ("authorization", "x-jarvis-device", "content-type", "x-filename") if name in request.headers}
+        if client_host:
+            # The upstream accepts this only from its loopback gateway hop.
+            headers["x-jarvis-gateway-client"] = client_host
         # Never forward cookies, owner keys, forwarding identity or arbitrary headers.
         async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
             try:
