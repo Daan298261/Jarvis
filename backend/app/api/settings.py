@@ -100,6 +100,7 @@ class SettingsUpdate(BaseModel):
     front_responder_context_turns: int | None = Field(default=None, ge=0, le=8)
     front_responder_speak_immediately: bool | None = None
     decision_tier: Literal["local", "jev_optional", "jev_plus"] | None = None
+    session_personality_active_id: Literal["default", "coding", "research", "concise"] | None = None
 
 
 @router.get("")
@@ -292,6 +293,11 @@ async def update_settings(body: SettingsUpdate):
         decision_values = settings.decision.model_dump()
         decision_values["tier"] = body.decision_tier
         settings.decision = type(settings.decision).model_validate(decision_values)
+
+    if body.session_personality_active_id is not None:
+        from ..persona.session_personality import SessionPersonalityState
+
+        settings.session_personality = SessionPersonalityState(active_id=body.session_personality_active_id)
 
     save_settings(settings)
     REGISTRY.apply_settings(settings)

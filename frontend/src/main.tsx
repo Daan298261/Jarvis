@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import App from "./App"
 import { PresentationBootstrap } from "./presence/PresentationBootstrap"
+import { SessionPersonalityProvider } from "./personality/SessionPersonalityProvider"
 import "./index.css"
 import "./presence/presence.css"
 
@@ -10,7 +11,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
       <PresentationBootstrap>
-        <App />
+        <SessionPersonalityProvider>
+          <App />
+        </SessionPersonalityProvider>
       </PresentationBootstrap>
     </BrowserRouter>
   </StrictMode>,

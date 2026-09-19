@@ -523,3 +523,43 @@
 .hud-catalog-panel .grade-hover-card.hud-grade-card .grade-card-overall strong { color: var(--hud-cyan); }
 .hud-catalog-panel .grade-hover-card.hud-grade-card .grade-axis-bar { color: var(--hud-cyan-dim); }
 .hud-catalog-panel .hud-rail-right { overflow: hidden; }
+
+/* RFC-0130 session personality — light HUD accent shifts (Daybreak palette) */
+.hud-app[data-personality="coding"] {
+  --hud-cyan: #5ce0a8;
+  --hud-cyan-dim: #3db88a;
+  --hud-gold: #ffb347;
+  --hud-line: rgba(92, 224, 168, 0.2);
+}
+.hud-app[data-personality="research"] {
+  --hud-cyan: #7eb8ff;
+  --hud-cyan-dim: #5a94d8;
+  --hud-gold: #c9b4ff;
+  --hud-line: rgba(126, 184, 255, 0.22);
+}
+.hud-app[data-personality="concise"] {
+  --hud-cyan: #9aa8b8;
+  --hud-cyan-dim: #7a8898;
+  --hud-gold: #b8a060;
+  --hud-line: rgba(154, 168, 184, 0.18);
+}
+.hud-personality-cue {
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-gold);
+  border: 1px solid var(--hud-line);
+  background: rgba(8, 14, 22, 0.55);
+}
+.settings-session-personality {
+  margin: 16px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.settings-session-personality .settings-subheading {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}

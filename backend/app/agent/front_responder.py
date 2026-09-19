@@ -40,6 +40,7 @@ SAFE_ACK = "I can start with the short version while I check the details."
 SAFE_HANDOFF = "A stronger model is taking this from here."
 SAFE_CLARIFY = "Could you clarify what you need?"
 SAFE_HELLO = "Hello, sir."
+CONTEXT_SWITCH_KEEP_BUSY = "Switching to a larger context model…"
 
 FRONT_SYSTEM = """You are Jarvis speaking with the owner. Runtime role: front_responder. Answer tier: 1.
 Reply immediately, naturally, and briefly in a British-inspired operations-assistant register.
@@ -54,6 +55,16 @@ If the hint action is ask_clarification, ask one short clarifying question.
 If the hint action is handoff_notice, say a stronger model is taking over.
 Never say the work is done. Never describe tool execution.
 Return only the spoken reply text, not JSON and not a plan."""
+
+
+def front_system_prompt() -> str:
+    from ..persona.session_personality import session_personality_system_addendum
+
+    addendum = session_personality_system_addendum()
+    if not addendum:
+        return FRONT_SYSTEM
+    return f"{FRONT_SYSTEM}\n\n{addendum}"
+
 
 _FAKE_DONE = re.compile(
     r"(?i)\b("
@@ -103,6 +114,7 @@ DeltaCallback = Callable[[str, str], Awaitable[None] | None]
 
 _last_timing: dict[str, Any] = {}
 _timings: list[dict[str, Any]] = []
+_front_lane_tasks: set[asyncio.Task[Any]] = set()
 
 
 @dataclass
@@ -394,7 +406,7 @@ def small_context_envelope(
 ) -> list[ChatMessage]:
     hint = action_hint if action_hint in FRONT_ACTIONS else "ack_continue"
     messages = [
-        ChatMessage(role="system", content=FRONT_SYSTEM),
+        ChatMessage(role="system", content=front_system_prompt()),
         ChatMessage(role="system", content=f"Hint front_action: {hint}. Keep the reply spoken-ready."),
     ]
     keep = max(0, int(context_turns or 0))
@@ -726,6 +738,57 @@ async def _iter_chat_stream(provider: Any, messages: list[ChatMessage], **kwargs
         return
     if isinstance(streamed, ChatResult) and streamed.content:
         yield streamed.content
+
+
+SpokenCallback = Callable[[str], Awaitable[None] | None]
+
+
+async def emit_context_switch_keep_busy(
+    *,
+    settings: AppSettings | None = None,
+    user_text: str = "",
+    on_spoken: SpokenCallback | None = None,
+) -> str:
+    """Owner-facing keep-busy while the worker model hotswaps (dedicated front lane)."""
+    app = settings or load_settings()
+    text = CONTEXT_SWITCH_KEEP_BUSY
+    if app.front_responder.enabled:
+        try:
+            front = await generate_front_reply(
+                user_text or "Please wait while I switch models.",
+                settings=app,
+                turn_started=time.perf_counter(),
+            )
+            if front.text and is_safe_front_speech(front.action, front.text):
+                text = front.text
+        except Exception:
+            pass
+    if on_spoken:
+        maybe = on_spoken(text)
+        if asyncio.iscoroutine(maybe):
+            await maybe
+    return text
+
+
+def spawn_context_switch_keep_busy(
+    *,
+    settings: AppSettings | None = None,
+    user_text: str = "",
+    on_spoken: SpokenCallback | None = None,
+) -> asyncio.Task[str]:
+    """Fire-and-forget keep-busy on the front lane so worker hotswap does not block it."""
+
+    async def _runner() -> str:
+        return await emit_context_switch_keep_busy(
+            settings=settings,
+            user_text=user_text,
+            on_spoken=on_spoken,
+        )
+
+    task = asyncio.create_task(_runner())
+    _front_lane_tasks.add(task)
+    task.add_done_callback(_front_lane_tasks.discard)
+    return task
 
 
 async def _collect_worker_stream(

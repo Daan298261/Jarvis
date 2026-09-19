@@ -9,6 +9,8 @@ import { HudOpsRail } from "./HudOpsRail"
 import type { UiMode } from "./uiMode"
 import { HudOverlayProvider, useHudOverlay } from "./hudOverlayContext"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
+import { HudPersonalityCue } from "../personality/SessionPersonalityControls"
+import { useSessionPersonalityOptional } from "../personality/SessionPersonalityProvider"
 import "./hud.css"
 import "./hud-v2.css"
 
@@ -83,6 +85,7 @@ export function HudTopChrome({
           LOCAL · {statusOnline ? "ONLINE" : "DEGRADED"}
         </span>
         <span className="hud-top-meta">v{version}</span>
+        <HudPersonalityCue />
       </div>
 
       <div className="hud-top-center">
@@ -229,6 +232,9 @@ function HudShellInner({
   model,
 }: HudShellProps) {
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
+  const sessionPersonality = useSessionPersonalityOptional()
+  const personalityTheme =
+    sessionPersonality?.state?.hud_theme || sessionPersonality?.state?.active_id || "default"
   const { hexSuiteExpanded, toggleHexSuite, dismissHexSuiteForOverlay } = useHudOverlay()
   const [adminOpen, setAdminOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -280,7 +286,7 @@ function HudShellInner({
   }
 
   return (
-    <div className="hud-app">
+    <div className="hud-app" data-personality={personalityTheme}>
       <HudTopChrome
         version={version}
         statusOnline={statusOnline}

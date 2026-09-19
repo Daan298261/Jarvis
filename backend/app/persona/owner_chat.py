@@ -17,6 +17,7 @@ from .chat_delivery import (
     publish_owner_text,
     stream_speak_offset,
 )
+from .session_personality import maybe_apply_owner_switch_intent, session_personality_system_addendum
 from .weather import weather_system_message
 from ..events import BUS
 from ..agent.front_responder import (
@@ -117,8 +118,12 @@ def _ensure_conversation(conversation_id: str | None) -> str:
 
 def _owner_messages(conversation_id: str, user_text: str, briefing: str | None = None) -> list[ChatMessage]:
     history = _conversations[conversation_id]
+    system = OWNER_CHAT_SYSTEM
+    addendum = session_personality_system_addendum()
+    if addendum:
+        system = f"{system}\n\n{addendum}"
     messages = [
-        ChatMessage(role="system", content=OWNER_CHAT_SYSTEM),
+        ChatMessage(role="system", content=system),
     ]
     if briefing:
         messages.append(ChatMessage(role="system", content=briefing))
@@ -140,6 +145,25 @@ async def stream_owner_chat(
 
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
+
+    switch = maybe_apply_owner_switch_intent(cleaned)
+    if switch:
+        ack = str(switch.get("acknowledgement") or "").strip()
+        _conversations[cid].append(ChatMessage(role="user", content=cleaned))
+        _conversations[cid].append(ChatMessage(role="assistant", content=ack))
+        yield {"type": "delta", "conversation_id": cid, "text": ack, "lane": "personality"}
+        yield {
+            "type": "done",
+            "conversation_id": cid,
+            "text": ack,
+            "personality": {
+                "id": switch.get("personality_id"),
+                "display_name": switch.get("display_name"),
+                "hud_theme": switch.get("hud_theme"),
+                "changed": switch.get("changed"),
+            },
+        }
+        return
 
     if not MANAGER.provider:
         yield {"type": "error", "detail": "Inference model is not loaded"}

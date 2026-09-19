@@ -247,6 +247,14 @@ class IdentityRecognitionSettings(BaseModel):
         return self
 
 
+class SessionPersonalitySettings(BaseModel):
+    """RFC-0130 active session personality (HUD theme + prompt addendum)."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    active_id: Literal["default", "coding", "research", "concise"] = "default"
+
+
 class DecisionSettings(BaseModel):
     """RFC-0116 optional TypeSafe Jev decision tier. Default is local-only."""
 
@@ -286,6 +294,7 @@ class AppSettings(BaseModel):
     tts: TtsSettings = Field(default_factory=TtsSettings)
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
     knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
+    session_personality: SessionPersonalitySettings = Field(default_factory=SessionPersonalitySettings)
     decision: DecisionSettings = Field(default_factory=DecisionSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
