@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-CONTEXT_TIERS = (8192, 16384, 32768)
+CONTEXT_TIERS = (8192, 16384, 32768, 65536)
 
 SIMPLE_CLASSES = {
     "filesystem",
