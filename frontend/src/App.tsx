@@ -273,6 +273,22 @@ function OwnerPortal() {
     setRenameValue("")
   }
 
+  const chatsById = useMemo(() => {
+    const map = new Map<string, { conversation_id: string; title: string }>()
+    for (const chatRow of ownerChats) map.set(chatRow.conversation_id, chatRow)
+    return map
+  }, [ownerChats])
+
+  const ungroupedOwnerChats = useMemo(
+    () =>
+      ownerChats.filter(
+        (row) =>
+          !row.project_id &&
+          !projects.some((project) => (project.conversationIds || []).includes(row.conversation_id)),
+      ),
+    [ownerChats, projects],
+  )
+
   function modelStatus(): { label: string; tone: string } {
     if (model?.loaded) return { label: "Ready", tone: "on" }
     if (model?.loading) return { label: "Starting", tone: "load" }
@@ -499,6 +515,17 @@ function OwnerPortal() {
                 </div>
                 {open && (
                   <div className="rail-project-tasks">
+                    {(project.conversationIds || []).map((conversationId) => {
+                      const chatRow = chatsById.get(conversationId)
+                      return (
+                        <div key={`chat-${conversationId}`} className="rail-item-row">
+                          <NavLink to="/" className="rail-item" onClick={closeNav}>
+                            <span className="rail-item-title">{chatRow?.title || "Chat"}</span>
+                            <span className="rail-item-meta">Chat</span>
+                          </NavLink>
+                        </div>
+                      )
+                    })}
                     {project.taskIds.length === 0 && (
                       <p className="rail-empty">No tasks in this project yet.</p>
                     )}
@@ -530,6 +557,9 @@ function OwnerPortal() {
                         </div>
                       )
                     })}
+                    {project.taskIds.length === 0 && (project.conversationIds || []).length === 0 && (
+                      <p className="rail-empty">No tasks or chats in this project yet.</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -537,12 +567,12 @@ function OwnerPortal() {
           })}
         </section>
 
-        {ownerChats.length > 0 && (
+        {ungroupedOwnerChats.length > 0 && (
           <section className="rail-section">
             <div className="rail-heading">
               <span>Saved chats</span>
             </div>
-            {ownerChats.slice(0, 16).map((chatRow) => (
+            {ungroupedOwnerChats.slice(0, 16).map((chatRow) => (
               <div key={chatRow.conversation_id} className="rail-item-row">
                 <span className="rail-item rail-item-static">
                   <span className="rail-item-title">{chatRow.title || "Chat"}</span>

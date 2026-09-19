@@ -10,6 +10,7 @@ from ..agent.compaction import serialize_messages
 from ..db.models import Conversation, PortalProject, PortalProjectLink
 from ..db.session import SessionLocal
 from ..providers.base import ChatMessage
+from .paths import project_media_dir
 
 
 def _messages_from_json(raw: str) -> list[ChatMessage]:
@@ -58,6 +59,7 @@ async def create_project(name: str) -> dict[str, Any]:
     async with SessionLocal() as session:
         session.add(PortalProject(id=pid, name=name.strip()))
         await session.commit()
+    project_media_dir(pid)
     return {"id": pid, "name": name.strip(), "taskIds": [], "conversationIds": []}
 
 
@@ -116,6 +118,7 @@ async def import_local_projects(payload: list[dict[str, Any]]) -> int:
             existing = await session.get(PortalProject, pid)
             if existing is None:
                 session.add(PortalProject(id=pid, name=name))
+                project_media_dir(pid)
                 imported += 1
             for task_id in row.get("taskIds") or []:
                 if isinstance(task_id, str) and task_id:
@@ -153,6 +156,22 @@ async def save_owner_conversation(
         if project_id:
             row.project_id = project_id
         await session.commit()
+
+
+async def open_conversation(conversation_id: str) -> dict[str, Any]:
+    async with SessionLocal() as session:
+        row = await session.get(Conversation, conversation_id)
+        if row is None:
+            return {}
+        messages = _messages_from_json(row.messages_json)
+        return {
+            "id": row.id,
+            "title": row.title or "Chat",
+            "task_id": row.task_id or "",
+            "project_id": row.project_id or "",
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+        }
 
 
 async def list_owner_conversations(limit: int = 40) -> list[dict[str, Any]]:
