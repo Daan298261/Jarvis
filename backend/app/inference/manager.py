@@ -377,6 +377,29 @@ class InferenceManager:
                     working_state_block=working_state_block,
                 )
             except ModelCapacityExceeded:
+                if overflow_retries >= 2:
+                    raise
+                overflow_retries += 1
+                tool_schema_chars = len(json.dumps(fitted_tools, ensure_ascii=False)) if fitted_tools else 0
+                shrunk = self.prepare_chat_messages(
+                    typed,
+                    max_tokens=max_tokens,
+                    tool_schema_chars=tool_schema_chars,
+                )
+                if shrunk is not typed:
+                    typed = shrunk
+                    continue
+                typed, fitted_tools, recovered = await recover_context_after_overflow(
+                    typed,
+                    fitted_tools,
+                    profile,
+                    max_tokens,
+                    app_settings,
+                    manager=self,
+                    working_state_block=working_state_block,
+                )
+                if recovered:
+                    continue
                 raise
             typed = preflight.messages
             fitted_tools = fit_tools_to_context(

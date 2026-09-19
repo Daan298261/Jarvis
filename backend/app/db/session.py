@@ -9,7 +9,12 @@ from ..config import data_dir
 from .models import Base
 
 DB_PATH = data_dir() / "jarvis.db"
-ENGINE: AsyncEngine = create_async_engine(f"sqlite+aiosqlite:///{DB_PATH.as_posix()}", echo=False, future=True)
+ENGINE: AsyncEngine = create_async_engine(
+    f"sqlite+aiosqlite:///{DB_PATH.as_posix()}",
+    echo=False,
+    future=True,
+    connect_args={"timeout": 30},
+)
 _sessionmaker: async_sessionmaker[AsyncSession] = async_sessionmaker(ENGINE, expire_on_commit=False, class_=AsyncSession)
 
 
@@ -33,7 +38,7 @@ def configure_database(url: str | None = None, path: Path | None = None) -> None
         url = f"sqlite+aiosqlite:///{DB_PATH.as_posix()}"
     if not url:
         url = f"sqlite+aiosqlite:///{data_dir().joinpath('jarvis.db').as_posix()}"
-    ENGINE = create_async_engine(url, echo=False, future=True)
+    ENGINE = create_async_engine(url, echo=False, future=True, connect_args={"timeout": 30})
     _sessionmaker = async_sessionmaker(ENGINE, expire_on_commit=False, class_=AsyncSession)
 
 
@@ -87,6 +92,8 @@ async def init_db() -> None:
     async with ENGINE.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_add_missing_columns)
+        await conn.execute(text("PRAGMA journal_mode=WAL"))
+        await conn.execute(text("PRAGMA busy_timeout=30000"))
 
 
 async def get_session() -> AsyncSession:
