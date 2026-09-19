@@ -1,4 +1,4 @@
-# RFC-0126: Context-size model autoselect
+# RFC-0131: Context-size model autoselect
 
 **Status:** accepted
 

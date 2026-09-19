@@ -1,4 +1,4 @@
-"""RFC-0126: context-size model autoselect."""
+"""RFC-0131: context-size model autoselect."""
 from __future__ import annotations
 from typing import Any, Iterable, TypeVar
 from .profiles import ModelProfile
