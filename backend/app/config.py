@@ -168,6 +168,7 @@ class DialogueSettings(BaseModel):
     dryness: float = Field(default=0.35, ge=0.0, le=1.0)
     directness: float = Field(default=0.90, ge=0.0, le=1.0)
     preserve_structured_content: bool = True
+    background_verify: bool = True
 
 
 class SocialPerceptionSettings(BaseModel):

@@ -28,7 +28,7 @@ from ..agent.front_responder import (
     run_two_lane_chat,
 )
 from .inference_context import ensure_context_for_messages, model_lane_event_payload
-from .reply_verifier import schedule_background_verification
+from ..agent.background_verify import schedule_background_verification
 from .slow_turn_feedback import SlowTurnNudger
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
@@ -60,6 +60,15 @@ def reset_owner_conversations() -> None:
 
 def get_conversation(conversation_id: str) -> list[ChatMessage]:
     return list(_conversations.get(conversation_id, []))
+
+
+def append_owner_assistant_message(conversation_id: str | None, content: str) -> None:
+    cid = (conversation_id or "").strip()
+    cleaned = (content or "").strip()
+    if not cid or not cleaned:
+        return
+    _conversations.setdefault(cid, [])
+    _conversations[cid].append(ChatMessage(role="assistant", content=cleaned))
 
 
 async def hydrate_conversation(conversation_id: str) -> list[ChatMessage]:
@@ -347,14 +356,13 @@ async def stream_owner_chat(
         )
         clear_stream_speak_state(stream_key)
         tts_id = early_tts_ids[0] if early_tts_ids and not delivery.get("tts_id") else delivery.get("tts_id")
-        if len(reply) >= 40:
-            await publish_owner_text(
-                "I'll run a quick background verification and speak up if anything material changes.",
-                source="owner_chat",
-                speak=True,
-                user_prompt=cleaned,
-            )
-        schedule_background_verification(cleaned, reply, source="owner_chat", speak=True)
+        schedule_background_verification(
+            cleaned,
+            reply,
+            source="owner_chat",
+            speak=True,
+            conversation_id=cid,
+        )
         yield {
             "type": "done",
             "conversation_id": cid,
