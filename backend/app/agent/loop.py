@@ -97,11 +97,20 @@ from ..persona.think_aloud import run_with_think_aloud
 from ..persona.weather import weather_system_message
 from ..providers.completion_text import empty_generation_error
 from .front_responder import (
+    classify_front_action,
+    enforce_front_safety,
+    fallback_text_for_action,
     generate_front_reply,
     is_safe_front_speech,
     last_front_timing,
     note_front_audio,
     run_two_lane_chat,
+)
+from .worker_progress import (
+    clear_worker_progress_for_task,
+    mark_worker_useful_owner_text,
+    run_worker_progress_watchdog,
+    task_still_running,
 )
 from .recovery import recovery_hint
 from .tool_exposure import grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
@@ -620,15 +629,41 @@ class AgentRuntime:
                 settings=settings,
                 turn_started=turn_started,
             )
-            if front.skipped or front.action == "silent_skip" or not front.text:
+            if front.action == "silent_skip" or not front.text:
                 await self._publish_front_events(task_id, "front_response_skipped", "Front response skipped")
+                heuristic = classify_front_action(prompt)
+                _action, ack_text, _rejected = enforce_front_safety(
+                    heuristic,
+                    fallback_text_for_action(heuristic),
+                    user_text=prompt,
+                    heuristic=heuristic,
+                )
+                if not ack_text:
+                    ack_text = task_acknowledgement(prompt)
                 await BUS.publish(
                     task_id,
                     "chat_tts",
                     "Acknowledged",
-                    task_acknowledgement(prompt),
+                    ack_text,
                     stage="understand",
                 )
+                delivery = await publish_owner_text(
+                    ack_text,
+                    source="task_chat",
+                    speak=True,
+                    user_prompt=prompt,
+                )
+                if delivery.get("tts_id"):
+                    note_front_audio(None, max(0.0, (time.perf_counter() - turn_started) * 1000))
+                async with SessionLocal() as session:
+                    task = await session.get(Task, task_id)
+                    if task and task.status in {"queued", "running", "waiting"} and not (task.result or "").strip():
+                        await self._update(
+                            task_id,
+                            result=ack_text,
+                            first_response_ms=round((time.perf_counter() - turn_started) * 1000, 1),
+                            current_action=ack_text[:120],
+                        )
                 return
             await self._publish_front_events(
                 task_id,
@@ -678,9 +713,7 @@ class AgentRuntime:
     ) -> None:
         """Plain owner dialogue: front responder first, then worker if needed."""
         profile = resolve_profile(profile_name)
-        if not MANAGER.provider or not MANAGER.state.loaded:
-            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-            await MANAGER.load(settings, profile_name)
+        turn_started = turn_started if turn_started is not None else time.perf_counter()
         await self._update(task_id, stage="act", current_action="Replying", task_class=CONVERSATION_CLASS)
         working.task_class = CONVERSATION_CLASS
         prior = [
@@ -696,12 +729,56 @@ class AgentRuntime:
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             messages.append(ChatMessage(role="user", content=user_text))
-        first_response_ms = 0.0
-        model_started = time.perf_counter()
+
+        prefetched_front = await generate_front_reply(
+            user_text,
+            history=prior,
+            settings=settings,
+            turn_started=turn_started,
+        )
         stream_key = f"task:{task_id}"
         clear_stream_speak_state(stream_key)
-        front_text = ""
-        front_action = ""
+        if prefetched_front.text and prefetched_front.action != "silent_skip":
+            await self._publish_front_events(task_id, "front_response_started", "Front response started")
+            await self._publish_front_events(
+                task_id,
+                "front_response_completed",
+                "Front response",
+                json.dumps(prefetched_front.as_dict(), ensure_ascii=False)[:4000],
+            )
+            await self._speak_front_reply(
+                task_id,
+                prefetched_front,
+                prompt=prompt,
+                stream_key=stream_key,
+                turn_started=turn_started,
+            )
+            await self._persist_front_partial(
+                task_id,
+                messages,
+                prefetched_front.text,
+                first_response_ms=prefetched_front.first_text_ms or 0.0,
+                current_action="Checking details…"
+                if prefetched_front.action in {"ack_continue", "handoff_notice"}
+                else "Replying",
+            )
+
+        progress_watch = asyncio.create_task(
+            run_worker_progress_watchdog(
+                task_id,
+                turn_started=turn_started,
+                settings=settings,
+                should_continue=lambda: task_still_running(task_id),
+            )
+        )
+
+        if not MANAGER.provider or not MANAGER.state.loaded:
+            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
+            await MANAGER.load(settings, profile_name)
+        first_response_ms = prefetched_front.first_text_ms or 0.0
+        model_started = time.perf_counter()
+        front_text = prefetched_front.text or ""
+        front_action = prefetched_front.action or ""
         worker_started = False
         spoken_parts: list[str] = []
 
@@ -758,6 +835,8 @@ class AgentRuntime:
             nonlocal first_response_ms
             if not delta:
                 return
+            if lane == "worker":
+                mark_worker_useful_owner_text(task_id)
             spoken_parts.append(delta)
             elapsed = max(0.0, (time.perf_counter() - (turn_started or model_started)) * 1000)
             if not first_response_ms:
@@ -802,10 +881,6 @@ class AgentRuntime:
                 persist=False,
             )
 
-        from ..persona.slow_turn_feedback import SlowTurnNudger
-
-        nudger = SlowTurnNudger(user_text, started=turn_started or model_started, source="task_chat")
-        nudger.start()
         try:
             done: dict[str, Any] | None = None
             async for event in run_two_lane_chat(
@@ -815,6 +890,7 @@ class AgentRuntime:
                 turn_started=turn_started or model_started,
                 worker_stream=worker_stream,
                 on_delta=on_delta,
+                prefetched_front=prefetched_front if prefetched_front.text else None,
             ):
                 kind = event.get("type")
                 if kind == "front_response_started":
@@ -855,7 +931,6 @@ class AgentRuntime:
                 elif kind == "done":
                     done = event
         except Exception as exc:
-            await nudger.stop()
             clear_stream_speak_state(stream_key)
             err = str(exc)
             await self._update(
@@ -869,7 +944,11 @@ class AgentRuntime:
             await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
             return
         finally:
-            await nudger.stop()
+            progress_watch.cancel()
+            try:
+                await progress_watch
+            except asyncio.CancelledError:
+                pass
 
         content = ((done or {}).get("text") or front_text or "").strip()
         timing = (done or {}).get("timing") or last_front_timing()
@@ -1044,6 +1123,14 @@ class AgentRuntime:
                 return
             working.task_class = (follow_route.task_class if follow_route else classify_task(extra_prompt or prompt))
         if not continue_existing and not pending_tool and not extra_prompt:
+            progress_watch = asyncio.create_task(
+                run_worker_progress_watchdog(
+                    task_id,
+                    turn_started=turn_started,
+                    settings=settings,
+                    should_continue=lambda: task_still_running(task_id),
+                )
+            )
             if settings.front_responder.enabled:
                 asyncio.create_task(
                     self._run_managed_front_lane(
@@ -1847,6 +1934,13 @@ class AgentRuntime:
             await complete_coding_route(task_id, "failed", str(exc))
             await self._release_lazy_vision()
             await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
+        finally:
+            if progress_watch is not None:
+                progress_watch.cancel()
+                try:
+                    await progress_watch
+                except asyncio.CancelledError:
+                    pass
 
     async def _execute_tool(
         self,
