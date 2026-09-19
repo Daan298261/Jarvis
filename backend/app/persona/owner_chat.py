@@ -20,11 +20,14 @@ from .chat_delivery import (
 from .weather import weather_system_message
 from ..events import BUS
 from ..agent.front_responder import (
+    generate_front_reply,
     is_safe_front_speech,
     last_front_timing,
     note_front_audio,
+    resolve_front_model_id,
     run_two_lane_chat,
 )
+from .inference_context import ensure_context_for_messages, model_lane_event_payload
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
 Reply immediately, naturally, and briefly in a British-inspired operations-assistant register.
@@ -155,6 +158,53 @@ async def stream_owner_chat(
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
     turn_started = time.perf_counter()
+    worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
+
+    async def _speak_context_expand(before: int, after: int) -> None:
+        front = await generate_front_reply(
+            cleaned,
+            history=history,
+            settings=settings,
+            turn_started=turn_started,
+        )
+        if front.text and is_safe_front_speech(front.action, front.text):
+            await publish_owner_text(
+                front.text,
+                source="owner_chat",
+                speak=True,
+                user_prompt=cleaned,
+            )
+        detail = model_lane_event_payload(
+            lane="system",
+            model=resolve_front_model_id(settings),
+            text=f"Expanding context {before} → {after}",
+        )
+        await BUS.publish_ephemeral(
+            OWNER_CHAT_CHANNEL,
+            "model_lane",
+            "Context resize",
+            detail,
+            stage="model",
+        )
+
+    ctx_meta = await ensure_context_for_messages(
+        worker_messages,
+        settings=settings,
+        profile_name=profile.name,
+        on_expanding=_speak_context_expand,
+    )
+    worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
+    await BUS.publish_ephemeral(
+        OWNER_CHAT_CHANNEL,
+        "model_lane",
+        "Worker context",
+        model_lane_event_payload(
+            lane="worker",
+            model=worker_model,
+            extra=ctx_meta,
+        ),
+        stage="model",
+    )
 
     async def worker_stream():
         async for delta in MANAGER.chat_stream(
@@ -168,8 +218,15 @@ async def stream_owner_chat(
             yield delta
 
     async def on_delta(lane: str, delta: str) -> None:
-        del lane
         parts.append(delta)
+        model_id = resolve_front_model_id(settings) if lane == "front" else worker_model
+        await BUS.publish_ephemeral(
+            OWNER_CHAT_CHANNEL,
+            "model_lane",
+            f"{lane} output",
+            model_lane_event_payload(lane=lane, model=model_id, text=delta[:240]),
+            stage="owner_chat",
+        )
         accumulated = "".join(parts)
         early_id = maybe_enqueue_streaming_social_tts(
             accumulated,
