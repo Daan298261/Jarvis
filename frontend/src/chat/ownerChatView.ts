@@ -43,16 +43,20 @@ export type ModelLaneLine = {
   lane: string
   model: string
   text: string
+  runtime_role?: string
+  source_model?: string
 }
 
 export function parseModelLaneDetail(detail: string): ModelLaneLine | null {
   try {
-    const parsed = JSON.parse(detail || "{}") as { lane?: string; model?: string; text?: string }
+    const parsed = JSON.parse(detail || "{}") as { lane?: string; model?: string; text?: string; runtime_role?: string; source_model?: string }
     if (!parsed.lane) return null
     return {
       lane: String(parsed.lane),
       model: String(parsed.model || ""),
       text: String(parsed.text || ""),
+      runtime_role: parsed.runtime_role ? String(parsed.runtime_role) : undefined,
+      source_model: parsed.source_model ? String(parsed.source_model) : undefined,
     }
   } catch {
     return null
@@ -87,8 +91,22 @@ export function filterWorkEvents(events: OwnerChatEvent[]): OwnerChatEvent[] {
 }
 
 /** Heartbeat / reasoning lines — separate collapsible stream from tool work. */
+export function formatModelAttribution(line: ModelLaneLine): string {
+  const role = (line.runtime_role || line.lane || "model").trim()
+  const model = (line.source_model || line.model || "").trim()
+  return model ? `${role} · ${model}` : role
+}
+
 export function filterThoughtEvents(events: OwnerChatEvent[]): OwnerChatEvent[] {
-  return events.filter((event) => HIDDEN_WORK_TITLES.has(event.title))
+  return events.filter((event) => HIDDEN_WORK_TITLES.has(event.title) || event.kind === "model_lane")
+}
+
+export function thoughtEventLabel(event: OwnerChatEvent): string {
+  if (event.kind === "model_lane") {
+    const row = parseModelLaneDetail(event.detail)
+    if (row) return formatModelAttribution(row)
+  }
+  return event.title
 }
 
 const INTERNAL_LINE = /^(?:\*\*)?(?:VERIFICATION|PLAN|END STATE|ACCEPTANCE CRITERIA|DIAGNOSIS|OBSERVATION)\b/i

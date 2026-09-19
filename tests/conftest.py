@@ -44,3 +44,11 @@ async def jarvis_env(tmp_path, monkeypatch):
     MANAGER.provider = None
     MANAGER.state.loaded = False
     REGISTRY.bind_exposure(None)
+
+
+@pytest.fixture(autouse=True)
+def _disable_background_verify_by_default(request, monkeypatch):
+    """RFC-0128 schedules async verify tasks; disable unless testing that module."""
+    if "rfc0128" in request.node.nodeid:
+        return
+    monkeypatch.setenv("JARVIS_BACKGROUND_VERIFY", "0")

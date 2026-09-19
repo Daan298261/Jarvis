@@ -22,7 +22,7 @@ CLASS_TOOLS: dict[str, tuple[str, ...]] = {
     "document processing": ("office", "filesystem", "python", "web_fetch"),
     "data processing": ("filesystem", "python", "terminal"),
     "multimodal": ("screenshot", "desktop", "browser", "filesystem"),
-    "mixed": ("filesystem", "python"),
+    "mixed": ("filesystem", "python", "chat_projects"),
     "long-horizon autonomous": ("filesystem", "python", "terminal"),
 }
 
