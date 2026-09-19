@@ -213,7 +213,9 @@ async def stream_owner_chat(
         settings=settings,
         profile_name=profile.name,
         on_expanding=_speak_context_expand,
+        bus_channel=OWNER_CHAT_CHANNEL,
     )
+    profile = resolve_profile(settings.inference.profile)
     worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
     await BUS.publish_ephemeral(
         OWNER_CHAT_CHANNEL,

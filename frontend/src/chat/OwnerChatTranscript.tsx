@@ -5,6 +5,9 @@ import {
   filterModelLaneEvents,
   filterThoughtEvents,
   filterWorkEvents,
+  formatModelAttribution,
+  parseModelLaneDetail,
+  thoughtEventLabel,
   isTaskRunning,
   splitAssistantContent,
   taskStatusLine,
@@ -163,8 +166,15 @@ export function OwnerChatTranscript({
             <div className={isHud ? "hud-chat-details-panel" : "chat-work-details-panel"}>
               {thoughtEvents.slice(-8).map((event, index) => (
                 <div className="hud-bubble hud-bubble-thought" key={`thought-${event.created_at}-${index}`}>
-                  <span className="hud-bubble-label">{event.title}</span>
-                  {event.detail && <p>{event.detail.slice(0, 400)}</p>}
+                  <span className="hud-bubble-label">{thoughtEventLabel(event)}</span>
+                  {event.kind === "model_lane" ? (
+                    (() => {
+                      const row = parseModelLaneDetail(event.detail)
+                      return row?.text ? <p>{row.text.slice(0, 400)}</p> : null
+                    })()
+                  ) : (
+                    event.detail && <p>{event.detail.slice(0, 400)}</p>
+                  )}
                 </div>
               ))}
             </div>
@@ -192,8 +202,7 @@ export function OwnerChatTranscript({
                   {modelLaneLines.slice(-16).map((line, index) => (
                     <li key={`lane-${index}-${line.lane}`}>
                       <span>
-                        {line.lane}
-                        {line.model ? ` · ${line.model}` : ""}
+                        {formatModelAttribution(line)}
                       </span>
                       {line.text ? <code>{line.text.slice(0, 160)}</code> : null}
                     </li>

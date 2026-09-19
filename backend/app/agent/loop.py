@@ -517,7 +517,7 @@ class AgentRuntime:
         *,
         tools: list[dict[str, Any]] | None,
         max_tokens: int | None,
-    ) -> tuple[list[ChatMessage], list[dict[str, Any]] | None, bool]:
+    ) -> tuple[list[ChatMessage], list[dict[str, Any]] | None, bool, ModelProfile]:
         async def _emit(kind: str, budget: PromptBudget, detail: str) -> None:
             payload = json.dumps({**budget.as_dict(), "detail": detail})
             await BUS.publish(task_id, kind, kind.replace("_", " ").title(), payload[:4000], stage="act")
@@ -532,7 +532,14 @@ class AgentRuntime:
             working_state_block=working.as_prompt_block(),
             emit=_emit,
         )
-        return updated, recovered_tools, recovered
+        if not recovered:
+            from ..persona.inference_context import maybe_autoselect_runtime_for_budget
+            budget = calculate_prompt_budget(messages, tools, profile=profile, max_tokens=max_tokens, active_context=MANAGER.live_context_size())
+            switched = await maybe_autoselect_runtime_for_budget(budget, profile, settings, user_prompt=working.goal or "", task_id=task_id)
+            if switched:
+                profile = switched
+                updated, recovered_tools, recovered = await recover_context_after_overflow(messages, tools, profile, max_tokens, settings, manager=MANAGER, working_state_block=working.as_prompt_block(), emit=_emit)
+        return updated, recovered_tools, recovered, profile
 
     async def _publish_front_events(self, task_id: str, kind: str, title: str, detail: str = "", *, persist: bool = True) -> None:
         await BUS.publish(task_id, kind, title, detail, stage="chat", persist=persist)
@@ -741,7 +748,9 @@ class AgentRuntime:
             settings=settings,
             profile_name=profile.name,
             on_expanding=_expand_notice,
+            task_id=task_id,
         )
+        profile = resolve_profile(MANAGER.state.profile or profile.name)
 
         async def worker_stream():
             async for delta in MANAGER.chat_stream(
@@ -1438,7 +1447,7 @@ class AgentRuntime:
                 except ModelCapacityExceeded as exc:
                     await self._release_lazy_vision()
                     if context_recovery_attempts < 2:
-                        messages, turn_tools, recovered = await self._recover_context_pressure(
+                        messages, turn_tools, recovered, profile = await self._recover_context_pressure(
                             task_id,
                             messages,
                             working,
@@ -1469,7 +1478,7 @@ class AgentRuntime:
                     await self._release_lazy_vision()
                     if isinstance(exc, APIStatusError) and is_context_overflow(exc):
                         if context_recovery_attempts < 2:
-                            messages, turn_tools, recovered = await self._recover_context_pressure(
+                            messages, turn_tools, recovered, profile = await self._recover_context_pressure(
                                 task_id,
                                 messages,
                                 working,

@@ -40,6 +40,7 @@ SAFE_ACK = "I can start with the short version while I check the details."
 SAFE_HANDOFF = "A stronger model is taking this from here."
 SAFE_CLARIFY = "Could you clarify what you need?"
 SAFE_HELLO = "Hello, sir."
+CONTEXT_SWITCH_KEEP_BUSY = "Switching to a larger context model…"
 
 FRONT_SYSTEM = """You are Jarvis speaking with the owner. Runtime role: front_responder. Answer tier: 1.
 Reply immediately, naturally, and briefly in a British-inspired operations-assistant register.
@@ -103,6 +104,7 @@ DeltaCallback = Callable[[str, str], Awaitable[None] | None]
 
 _last_timing: dict[str, Any] = {}
 _timings: list[dict[str, Any]] = []
+_front_lane_tasks: set[asyncio.Task[Any]] = set()
 
 
 @dataclass
@@ -727,6 +729,33 @@ async def _iter_chat_stream(provider: Any, messages: list[ChatMessage], **kwargs
     if isinstance(streamed, ChatResult) and streamed.content:
         yield streamed.content
 
+
+
+SpokenCallback = Callable[[str], Awaitable[None] | None]
+
+async def emit_context_switch_keep_busy(*, settings: AppSettings | None = None, user_text: str = "", on_spoken: SpokenCallback | None = None) -> str:
+    app = settings or load_settings()
+    text = CONTEXT_SWITCH_KEEP_BUSY
+    if app.front_responder.enabled:
+        try:
+            front = await generate_front_reply(user_text or "Please wait while I switch models.", settings=app, turn_started=time.perf_counter())
+            if front.text and is_safe_front_speech(front.action, front.text):
+                text = front.text
+        except Exception:
+            pass
+    if on_spoken:
+        maybe = on_spoken(text)
+        if asyncio.iscoroutine(maybe):
+            await maybe
+    return text
+
+def spawn_context_switch_keep_busy(*, settings: AppSettings | None = None, user_text: str = "", on_spoken: SpokenCallback | None = None) -> asyncio.Task[str]:
+    async def _runner() -> str:
+        return await emit_context_switch_keep_busy(settings=settings, user_text=user_text, on_spoken=on_spoken)
+    task = asyncio.create_task(_runner())
+    _front_lane_tasks.add(task)
+    task.add_done_callback(_front_lane_tasks.discard)
+    return task
 
 async def _collect_worker_stream(
     worker_stream: WorkerStream,
