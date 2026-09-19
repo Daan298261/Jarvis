@@ -312,8 +312,22 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     fun pair(endpoint: String, pin: String, credential: String) = action {
         api.configure(endpoint, pin)
         if (api.deviceId.isEmpty()) api.pair(credential.trim())
-        api.session()
+        try {
+            api.session()
+        } catch (error: ApiException) {
+            if (error.status != 403) throw error
+            mutable.value = mutable.value.copy(
+                connected = false,
+                pendingApproval = true,
+                lanStatus = "waiting",
+                lanLabel = "Waiting for approval on your Jarvis PC",
+                activity = "Confirm this phone on the desktop",
+                error = null,
+            )
+            return@action
+        }
         (getApplication<Application>() as JarvisApp).registerPush()
+        mutable.value = mutable.value.copy(pendingApproval = false, lanStatus = "idle", lanLabel = "")
         refresh()
     }
 

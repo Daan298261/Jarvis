@@ -154,6 +154,17 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
   }, [onboarding?.connection.ready, applyResult])
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      getActiveCompanionPairingCode()
+        .then((result) => {
+          if (result.available) applyResult(result)
+        })
+        .catch(() => undefined)
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [applyResult])
+
+  useEffect(() => {
     if (compact) return
     refreshDevices().catch(() => undefined)
     const timer = window.setInterval(() => refreshDevices().catch(() => undefined), 3000)
