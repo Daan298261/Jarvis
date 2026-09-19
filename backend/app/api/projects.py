@@ -68,3 +68,11 @@ async def remove_link(link_type: str, link_id: str) -> dict[str, Any]:
 async def import_local(body: LocalImportIn) -> dict[str, Any]:
     count = await portal_store.import_local_projects(body.projects)
     return {"imported": count, "projects": await portal_store.list_projects()}
+
+
+@router.get("/conversations/{conversation_id}")
+async def open_conversation(conversation_id: str) -> dict[str, Any]:
+    detail = await portal_store.open_conversation(conversation_id)
+    if not detail:
+        raise HTTPException(404, "Conversation not found")
+    return detail
