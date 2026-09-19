@@ -75,6 +75,10 @@ def _add_missing_columns(sync_conn) -> None:
         bench_cols = {col["name"] for col in inspector.get_columns("benchmark_samples")}
         if "metrics_json" not in bench_cols:
             statements.append("ALTER TABLE benchmark_samples ADD COLUMN metrics_json TEXT DEFAULT '{}'")
+    if "conversations" in inspector.get_table_names():
+        conv_cols = {col["name"] for col in inspector.get_columns("conversations")}
+        if "project_id" not in conv_cols:
+            statements.append("ALTER TABLE conversations ADD COLUMN project_id VARCHAR(36) DEFAULT ''")
     for statement in statements:
         sync_conn.execute(text(statement))
 
