@@ -4,6 +4,12 @@ Jarvis can use the self-hosted [Supermemory](https://github.com/supermemoryai/su
 
 ## Install on Windows
 
+Open **Memory → Semantic memory module** and choose **Install locally**. Jarvis downloads the pinned official Windows binary, verifies its SHA-256, starts it with the active local OpenAI-compatible model endpoint, discovers the generated loopback API key from the Jarvis-owned data directory, and enables auto-start. Start, stop, enable, disable, health, and the local console remain available from the same card.
+
+The local console URL is also exposed to Jarvis, so a computer-use task can open and operate the console when the owner asks. Installation and service lifecycle use the backend-native module manager rather than fragile screen automation.
+
+For manual or recovery installation:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\bootstrap-supermemory.ps1
 ```
@@ -23,7 +29,7 @@ $env:SUPERMEMORY_DISABLE_TELEMETRY = "1"
 & .\runtime\supermemory\supermemory-server.exe
 ```
 
-Keep the generated `sm_...` API key private. Bind it through `POST /api/supermemory/credentials`, then enable the sidecar through `PUT /api/supermemory`:
+Keep the generated `sm_...` API key private. Jarvis discovers the key automatically for its managed loopback data directory without returning it from an API. For an externally managed or remote server, bind it through `POST /api/supermemory/credentials`, then enable the sidecar through `PUT /api/supermemory`:
 
 ```json
 {"enabled": true, "base_url": "http://127.0.0.1:6767"}

@@ -39,7 +39,24 @@ class SemanticMemoryHit:
 
 
 def _api_key() -> str:
-    return (os.environ.get("JARVIS_SUPERMEMORY_API_KEY") or get_secret_by_provider(SUPERMEMORY_PROVIDER)).strip()
+    configured = (os.environ.get("JARVIS_SUPERMEMORY_API_KEY") or get_secret_by_provider(SUPERMEMORY_PROVIDER)).strip()
+    if configured:
+        return configured
+    # The self-hosted server writes its generated bearer token inside its
+    # Jarvis-owned data directory. Read it only for a loopback endpoint and
+    # never return it from status/configuration APIs.
+    settings = app_config.load_settings().supermemory
+    try:
+        endpoint = validate_base_url(settings.base_url, allow_remote=settings.allow_remote)
+    except ValueError:
+        return ""
+    if not _is_loopback_host(urlparse(endpoint).hostname):
+        return ""
+    key_file = app_config.data_dir() / "supermemory" / "api-key"
+    try:
+        return key_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -91,6 +108,7 @@ def resolve_status() -> dict[str, Any]:
     binary = Path(app_config.repo_root()) / "runtime" / "supermemory" / "supermemory-server.exe"
     return {
         "enabled": settings.enabled,
+        "auto_start": settings.auto_start,
         "configured": configured,
         "base_url": endpoint or settings.base_url,
         "endpoint_error": endpoint_error,
@@ -129,7 +147,8 @@ async def _request_json(method: str, path: str, *, payload: dict[str, Any] | Non
             response.raise_for_status()
             data = {"ok": True} if response.status_code == 204 or not response.content else response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise SupermemoryError(f"Supermemory request failed: {exc}") from exc
+        detail = str(exc).strip() or type(exc).__name__
+        raise SupermemoryError(f"Supermemory request failed: {detail}") from exc
     if not isinstance(data, dict):
         raise SupermemoryError("Supermemory returned a non-object response")
     return data

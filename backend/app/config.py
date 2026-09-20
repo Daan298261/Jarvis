@@ -225,6 +225,7 @@ class SupermemorySettings(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     enabled: bool = False
+    auto_start: bool = True
     base_url: str = "http://127.0.0.1:6767"
     container_prefix: str = Field(default="jarvis", min_length=1, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
     timeout_ms: int = Field(default=1200, ge=100, le=10000)

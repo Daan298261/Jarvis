@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/supermemory", tags=["supermemory"])
 
 class SupermemoryConfigIn(BaseModel):
     enabled: bool | None = None
+    auto_start: bool | None = None
     base_url: str | None = Field(default=None, max_length=500)
     container_prefix: str | None = Field(default=None, min_length=1, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
     timeout_ms: int | None = Field(default=None, ge=100, le=10000)

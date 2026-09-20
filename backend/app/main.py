@@ -184,6 +184,12 @@ async def startup() -> None:
             bind_vault(kv.vault_path.strip(), init_layout=kv.jarvis_managed_layout)
     except Exception:
         logging.debug("Vault bind on startup skipped", exc_info=True)
+    try:
+        from .modules.supermemory_runtime import auto_start as auto_start_supermemory
+
+        asyncio.create_task(auto_start_supermemory())
+    except Exception:
+        logging.debug("Supermemory auto-start scheduling skipped", exc_info=True)
     if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
         asyncio.create_task(_autoload_model(current))
 
@@ -231,6 +237,12 @@ async def shutdown() -> None:
         await HEXSTRIKE.stop()
     except Exception:
         logging.debug("HexStrike shutdown skipped", exc_info=True)
+    try:
+        from .modules.supermemory_runtime import shutdown as shutdown_supermemory
+
+        await shutdown_supermemory()
+    except Exception:
+        logging.debug("Supermemory shutdown skipped", exc_info=True)
 
 
 async def _autoload_model(current) -> None:

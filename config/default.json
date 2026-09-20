@@ -81,6 +81,7 @@
   },
   "supermemory": {
     "enabled": false,
+    "auto_start": true,
     "base_url": "http://127.0.0.1:6767",
     "container_prefix": "jarvis",
     "timeout_ms": 1200,

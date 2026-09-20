@@ -7,7 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ..modules import catalog_download, cybersecurity
+from ..modules import catalog_download, cybersecurity, supermemory_runtime
 
 router = APIRouter(prefix="/api/modules", tags=["modules"])
 
@@ -23,13 +23,16 @@ class DownloadBody(BaseModel):
 
 @router.get("/catalog")
 async def list_catalog() -> dict[str, Any]:
-    return {"entries": [cybersecurity.catalog_list_row()]}
+    return {"entries": [cybersecurity.catalog_list_row(), supermemory_runtime.catalog_list_row()]}
 
 
 @router.get("/catalog/{entry_id}")
 async def get_catalog_entry(entry_id: str) -> dict[str, Any]:
     if entry_id == cybersecurity.MODULE_ID:
         module = cybersecurity.build_module_payload()
+        return {"module": module, **module}
+    if entry_id == supermemory_runtime.MODULE_ID:
+        module = await supermemory_runtime.module_status()
         return {"module": module, **module}
     source = catalog_download.allowlisted_source(entry_id)
     if source is None:
@@ -56,6 +59,32 @@ async def enable_cybersecurity_tool(tool_id: str, body: EnableBody) -> dict[str,
     except KeyError:
         raise HTTPException(status_code=404, detail="Unknown cybersecurity tool") from None
     return {"enabled": body.enabled, "module": module, "detail": "Tool enablement updated."}
+
+
+@router.post("/catalog/supermemory/enable")
+async def enable_supermemory_module(body: EnableBody) -> dict[str, Any]:
+    module = await supermemory_runtime.set_enabled(body.enabled)
+    return {"enabled": module["enabled"], "module": module, "detail": "Supermemory module updated."}
+
+
+@router.post("/catalog/supermemory/install")
+async def install_supermemory_module() -> dict[str, Any]:
+    module = await supermemory_runtime.install_and_start()
+    return {"module": module, **module, "detail": "Supermemory installation started."}
+
+
+@router.post("/catalog/supermemory/start")
+async def start_supermemory_module() -> dict[str, Any]:
+    result = await supermemory_runtime.start()
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("detail") or "Start failed")
+    return {"module": result, **result}
+
+
+@router.post("/catalog/supermemory/stop")
+async def stop_supermemory_module() -> dict[str, Any]:
+    result = await supermemory_runtime.stop()
+    return {"module": result, **result}
 
 
 @router.post("/catalog/{entry_id}/download")
