@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.3.10"
+#define MyAppVersion "1.4.5"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -362,10 +362,13 @@ end;
 
 procedure RecordOwnedPathsRegistry(const InstallDir, SetupExe: String);
 begin
-  RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'InstallLocation', InstallDir);
-  RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'DataDirectory', AddBackslash(InstallDir) + 'data');
+  if not RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'InstallLocation', InstallDir) then
+    Log('Warning: failed to write OwnedPaths InstallLocation');
+  if not RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'DataDirectory', AddBackslash(InstallDir) + 'data') then
+    Log('Warning: failed to write OwnedPaths DataDirectory');
   if SetupExe <> '' then
-    RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'SetupExe', SetupExe);
+    if not RegWriteStringValue(HKEY_CURRENT_USER, JarvisOwnedPathsKey, 'SetupExe', SetupExe) then
+      Log('Warning: failed to write OwnedPaths SetupExe');
 end;
 
 function ResolveCleanReinstallScript(const AppDir: String): String;

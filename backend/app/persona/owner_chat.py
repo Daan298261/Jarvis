@@ -180,20 +180,80 @@ async def stream_owner_chat(
             "mode": switched.as_dict(),
         }
 
-    if not MANAGER.provider:
-        yield {"type": "error", "detail": "Inference model is not loaded"}
-        return
-
     settings = load_settings()
     profile = resolve_profile(settings.inference.profile)
     briefing = await weather_system_message(cleaned)
     history = await hydrate_conversation(cid)
-    worker_messages = _owner_messages(cid, cleaned, briefing)
-    parts: list[str] = []
+    turn_started = time.perf_counter()
     stream_key = f"owner:{cid}"
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
-    turn_started = time.perf_counter()
+    front_spoken_early = False
+
+    prefetched_front = await generate_front_reply(
+        cleaned,
+        history=history,
+        settings=settings,
+        turn_started=turn_started,
+    )
+    if (
+        prefetched_front.text
+        and prefetched_front.action != "silent_skip"
+        and settings.front_responder.speak_immediately
+        and is_safe_front_speech(prefetched_front.action, prefetched_front.text)
+    ):
+        spoken = (
+            prefetched_front.text
+            if prefetched_front.text.endswith((".", "!", "?"))
+            else f"{prefetched_front.text}."
+        )
+        early_id = maybe_enqueue_streaming_social_tts(
+            spoken,
+            source="owner_chat",
+            stream_key=stream_key,
+            user_prompt=cleaned,
+        )
+        if not early_id:
+            delivery = await publish_owner_text(
+                prefetched_front.text,
+                source="owner_chat",
+                speak=True,
+                user_prompt=cleaned,
+            )
+            if delivery.get("tts_id"):
+                early_tts_ids.append(str(delivery["tts_id"]))
+        else:
+            early_tts_ids.append(early_id)
+            await BUS.publish_ephemeral(
+                OWNER_CHAT_CHANNEL,
+                "chat_tts",
+                "Speak reply",
+                prefetched_front.text,
+                stage="owner_chat",
+            )
+        note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
+        front_spoken_early = True
+
+    if not MANAGER.provider or not MANAGER.state.loaded:
+        try:
+            await BUS.publish_ephemeral(
+                OWNER_CHAT_CHANNEL,
+                "stage",
+                "Loading local model",
+                "",
+                stage="model",
+            )
+            await MANAGER.load(settings, profile.name)
+        except Exception as exc:
+            yield {"type": "error", "detail": f"Inference model is not loaded: {exc}"[:500]}
+            return
+
+    if not MANAGER.provider:
+        yield {"type": "error", "detail": "Inference model is not loaded"}
+        return
+
+    worker_messages = _owner_messages(cid, cleaned, briefing)
+    parts: list[str] = []
     worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
 
     async def _speak_context_expand(before: int, after: int) -> None:
@@ -294,6 +354,7 @@ async def stream_owner_chat(
             turn_started=turn_started,
             worker_stream=worker_stream,
             on_delta=on_delta,
+            prefetched_front=prefetched_front if prefetched_front.text else None,
         ):
             kind = event.get("type")
             if kind == "delta":
@@ -305,6 +366,7 @@ async def stream_owner_chat(
                     yield {"type": "delta", "conversation_id": cid, "text": text, "lane": "front"}
                 if (
                     front
+                    and not front_spoken_early
                     and settings.front_responder.speak_immediately
                     and is_safe_front_speech(front.action, front.text)
                     and not early_tts_ids

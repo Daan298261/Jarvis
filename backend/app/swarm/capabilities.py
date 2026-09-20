@@ -151,6 +151,17 @@ def detect_localhost_capabilities() -> list[dict[str, Any]]:
         }
     )
 
+    semantic_memory = workers.get("supermemory", {})
+    if semantic_memory.get("status") == "ready":
+        detected.append(
+            {
+                "id": "semantic_memory",
+                "name": "Semantic Memory",
+                "status": "ready",
+                "detail": "Jarvis-mediated semantic recall on this node; sidecar remains private.",
+            }
+        )
+
     for item in detected:
         cap_id = str(item["id"])
         if cap_id in ROLE_NAMES:

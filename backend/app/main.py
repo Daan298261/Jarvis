@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, memory, mobile, model, modules, owner_chat, packs, perception, perception_identity, permissions, projects, queue, runtime_profiles, self_dev, session_personality, settings, setup, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, memory, mobile, model, modules, owner_chat, packs, perception, perception_identity, permissions, projects, queue, runtime_profiles, self_dev, session_personality, settings, setup, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -29,6 +29,7 @@ from .integrations.setup import WHATSAPP_PAIRING
 from .swarm.capabilities import register_localhost_capabilities
 from .swarm.nodes import register_localhost_node
 from .swarm.workers import bind_workers_to_node
+from .observability.rolling_log import install_rolling_log, record_event
 from .tools.mcp_runtime import MCP
 from .tools.registry import REGISTRY
 from .mobile.calls import router as companion_calls_router
@@ -91,6 +92,7 @@ app.include_router(packs.router)
 app.include_router(modules.router)
 app.include_router(trajectories.router)
 app.include_router(context_repo.router)
+app.include_router(supermemory.router)
 app.include_router(vault.router)
 app.include_router(agent_portability.router)
 app.include_router(guest_portals.owner_router)
@@ -112,6 +114,30 @@ app.include_router(companion_calls_router)
 mobile_runtime = MobileRuntime()
 
 frontend_dist = repo_root() / "frontend" / "dist"
+
+
+@app.middleware("http")
+async def rolling_log_http_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        if response.status_code >= 500:
+            record_event(
+                "http_error",
+                message=f"HTTP {response.status_code}",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+            )
+        return response
+    except Exception as exc:
+        record_event(
+            "exception",
+            message=str(exc),
+            source="http",
+            method=request.method,
+            path=request.url.path,
+        )
+        raise
 
 
 @app.middleware("http")
@@ -163,6 +189,8 @@ async def startup() -> None:
     except Exception:
         logging.debug("Decision-tier hook registration skipped", exc_info=True)
     logs_dir().mkdir(exist_ok=True)
+    install_rolling_log(loop=asyncio.get_running_loop())
+    record_event("startup", message="Jarvis backend started", startup_id=app.state.startup_id)
     Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
     try:
         from .licensing.clock_log import record_clock_sample
@@ -183,6 +211,10 @@ async def startup() -> None:
             bind_vault(kv.vault_path.strip(), init_layout=kv.jarvis_managed_layout)
     except Exception:
         logging.debug("Vault bind on startup skipped", exc_info=True)
+    try:
+        asyncio.create_task(_auto_start_supermemory_and_refresh_node(node.id))
+    except Exception:
+        logging.debug("Supermemory auto-start scheduling skipped", exc_info=True)
     if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
         asyncio.create_task(_autoload_model(current))
 
@@ -219,6 +251,22 @@ async def _maybe_launch_greeting(startup_id: str) -> None:
         logging.exception("Launch greeting failed")
 
 
+async def _auto_start_supermemory_and_refresh_node(node_id: str) -> None:
+    """Start the private sidecar after Jarvis starts, then refresh node inventory."""
+    try:
+        from .modules.supermemory_runtime import auto_start as auto_start_supermemory
+
+        await auto_start_supermemory()
+    except Exception:
+        logging.exception("Supermemory auto-start failed")
+    finally:
+        try:
+            await bind_workers_to_node(node_id)
+            await register_localhost_capabilities(node_id)
+        except Exception:
+            logging.debug("Supermemory node registration refresh skipped", exc_info=True)
+
+
 @app.on_event("shutdown")
 async def shutdown() -> None:
     QUEUE_WATCHER.stop()
@@ -230,6 +278,12 @@ async def shutdown() -> None:
         await HEXSTRIKE.stop()
     except Exception:
         logging.debug("HexStrike shutdown skipped", exc_info=True)
+    try:
+        from .modules.supermemory_runtime import shutdown as shutdown_supermemory
+
+        await shutdown_supermemory()
+    except Exception:
+        logging.debug("Supermemory shutdown skipped", exc_info=True)
 
 
 async def _autoload_model(current) -> None:

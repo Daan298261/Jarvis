@@ -24,6 +24,7 @@ def worker_catalog() -> list[dict[str, Any]]:
     from ..workers.computer import CuaBackend, NativeWindowsBackend, UFOBackend
     from ..workers.interpreter import OpenInterpreterBackend
     from ..workers.voice import voice_status
+    from ..modules.supermemory_runtime import worker_probe as supermemory_worker_probe
 
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -69,6 +70,7 @@ def worker_catalog() -> list[dict[str, Any]]:
     )
 
     add(voice_status())
+    add(supermemory_worker_probe(), kind="memory")
 
     llm_status = "ready" if MANAGER.state.loaded else "not_loaded"
     if MANAGER.state.last_error and not MANAGER.state.loaded:

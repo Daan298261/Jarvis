@@ -5,13 +5,17 @@ import pytest
 
 from app.agent.tool_retrieval import suggest_installable_catalog, suggest_tools_for_prompt
 from app.agent.turn_working_set import compose_turn_working_set
-from app.memory.obsidian_vault import bind_vault, reset_vault_store, unbind_vault
+from app.memory.obsidian_vault import bind_vault, reset_vault_store, stop_watch, unbind_vault
 from app.persona.pack import build_persona_instructions, compact_identity_instructions
 from app.tools.registry import REGISTRY
 
 
 @pytest.fixture
-def vault_with_decoy(tmp_path):
+def vault_with_decoy(tmp_path, monkeypatch):
+    data_root = tmp_path / "obsidian-meta"
+    data_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: data_root)
+    stop_watch()
     reset_vault_store()
     bind_vault(str(tmp_path), init_layout=True)
     (tmp_path / "Decoy.md").write_text(

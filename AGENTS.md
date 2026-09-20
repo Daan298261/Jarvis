@@ -84,6 +84,9 @@ Jarvis is a Windows-tuned local desktop agent (FastAPI backend + React/Vite port
 - Frontend (dev): `npm --prefix frontend run dev` → Vite on `http://localhost:5173`. Vite binds to `localhost` (IPv6 `::1`); use `localhost`, not `127.0.0.1`. Its `/api` proxy targets the backend on `:4780`.
 - Single-URL portal: after `npm --prefix frontend run build`, the backend serves the built SPA at `http://127.0.0.1:4780`. The build step is intentionally NOT in the startup script.
 - Tests: `python3 -m pytest` (see `pytest.ini`; `pythonpath=backend`). These use an in-process scripted model provider, so no real model is needed.
+- **Obsidian vault (RFC-0107) in tests:** `tests/conftest.py` autouse calls `stop_watch()` + `unbind_vault()` after every test so vault meta does not leak across files. RFC-0107 fixtures patch `app.memory.obsidian_vault.data_dir` to the test temp dir. If vault working-set tests flake in a **subset** run, re-run the full suite or the whole `tests/test_rfc0107_*.py` file — do not disable the hygiene fixture.
+- **Operational vault (owner desktop):** bind a folder in Settings → Integrations; keep durable notes under `Projects/`, `Decisions/`, and `_Config/router.md` so lexical retrieval and router fallbacks return excerpts (an empty or unbound vault does not improve prompt speed or accuracy).
+- **64 GB+ RAM:** `backend/app/inference/ram_policy.py` raises the context ceiling (up to 65536 on 48 GB+ hosts). Portal **Model** page shows **RAM-aware cap**, system RAM, fit target, and KV-in-RAM hints from `/api/model` — vault retrieval reduces prompt stuffing; it does not replace loading the GGUF.
 - Frontend lint: `npm --prefix frontend run lint` (oxlint; it emits warnings but exits 0).
 
 ### Running the full agent loop without the 27B model

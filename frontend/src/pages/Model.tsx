@@ -122,6 +122,7 @@ export function ModelPage() {
             <b>Context</b><span>{model?.context_size}</span>
             <b>Context cap</b><span>{model?.context_cap ?? "n/a"}</span>
             <b>RAM-aware cap</b><span>{model?.context_effective_cap ?? model?.context_policy?.effective_cap ?? "n/a"}</span>
+            <b>RAM context ceiling</b><span>{model?.ram_offload?.ram_context_ceiling ?? "n/a"}</span>
             <b>System RAM</b><span>{model?.ram_offload?.ram_total_gb ? `${model.ram_offload.ram_total_gb} GB` : "n/a"}</span>
             <b>KV in RAM</b><span>{model?.ram_offload?.kv_in_ram_likely ? "likely (fit on)" : "n/a"}</span>
             <b>Fit target</b><span>{model?.ram_offload?.fit_target_mib ? `${model.ram_offload.fit_target_mib} MiB` : "n/a"}</span>

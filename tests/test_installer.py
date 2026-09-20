@@ -75,6 +75,16 @@ def test_jarvis_iss_wiring():
     assert "runhidden" in lower
 
 
+def test_jarvis_iss_code_uses_supported_registry_apis_only():
+    """Inno [Code] has RegWriteStringValue but not Win32-style RegCreateKey (iscc fails)."""
+    text = _read(ISS)
+    lower = text.lower()
+    assert "regcreatekey" not in lower
+    assert "recordownedpathsregistry" in lower.replace("_", "")
+    assert "jarvisownedpathskey" in lower.replace("_", "")
+    assert "regwritestringvalue" in lower
+
+
 def test_existing_install_upgrade_and_removal_choices_are_wired():
     text = _read(ISS)
     lower = text.lower()
@@ -99,7 +109,7 @@ def test_installer_and_desktop_versions_match():
     installer_version = re.search(r'#define MyAppVersion "([^"]+)"', iss_text).group(1)
     cargo = tomllib.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "Cargo.toml"))
     tauri = json.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "tauri.conf.json"))
-    assert installer_version == "1.3.10"
+    assert installer_version == "1.4.5"
     assert cargo["package"]["version"] == installer_version
     assert tauri["version"] == installer_version
 

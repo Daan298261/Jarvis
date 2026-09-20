@@ -47,6 +47,18 @@ async def jarvis_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _obsidian_vault_hygiene_after_test():
+    yield
+    try:
+        from app.memory.obsidian_vault import stop_watch, unbind_vault
+
+        stop_watch()
+        unbind_vault()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _disable_background_verify_by_default(request, monkeypatch):
     """RFC-0128 schedules async verify tasks; disable unless testing that module."""
     if "rfc0128" in request.node.nodeid:

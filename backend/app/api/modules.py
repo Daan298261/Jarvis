@@ -1,15 +1,36 @@
 """Module catalog API (RFC-0095 + RFC-0105 cybersecurity grouping)."""
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ..modules import catalog_download, cybersecurity
+from ..modules import catalog_download, cybersecurity, supermemory_runtime
+from ..swarm.capabilities import register_localhost_capabilities
+from ..swarm.nodes import register_localhost_node
+from ..swarm.workers import bind_workers_to_node
 
 router = APIRouter(prefix="/api/modules", tags=["modules"])
+
+
+async def _refresh_local_supermemory_registration() -> None:
+    """Keep node inventory accurate after a local module lifecycle change."""
+    node = await register_localhost_node()
+    await bind_workers_to_node(node.id)
+    await register_localhost_capabilities(node.id)
+
+
+async def _refresh_after_supermemory_install() -> None:
+    try:
+        await supermemory_runtime.wait_for_install()
+        await _refresh_local_supermemory_registration()
+    except Exception:
+        # The install result is retained in module status; an inventory refresh
+        # must never turn a successful local install into an API failure.
+        pass
 
 
 class EnableBody(BaseModel):
@@ -23,13 +44,16 @@ class DownloadBody(BaseModel):
 
 @router.get("/catalog")
 async def list_catalog() -> dict[str, Any]:
-    return {"entries": [cybersecurity.catalog_list_row()]}
+    return {"entries": [cybersecurity.catalog_list_row(), supermemory_runtime.catalog_list_row()]}
 
 
 @router.get("/catalog/{entry_id}")
 async def get_catalog_entry(entry_id: str) -> dict[str, Any]:
     if entry_id == cybersecurity.MODULE_ID:
         module = cybersecurity.build_module_payload()
+        return {"module": module, **module}
+    if entry_id == supermemory_runtime.MODULE_ID:
+        module = await supermemory_runtime.module_status()
         return {"module": module, **module}
     source = catalog_download.allowlisted_source(entry_id)
     if source is None:
@@ -56,6 +80,36 @@ async def enable_cybersecurity_tool(tool_id: str, body: EnableBody) -> dict[str,
     except KeyError:
         raise HTTPException(status_code=404, detail="Unknown cybersecurity tool") from None
     return {"enabled": body.enabled, "module": module, "detail": "Tool enablement updated."}
+
+
+@router.post("/catalog/supermemory/enable")
+async def enable_supermemory_module(body: EnableBody) -> dict[str, Any]:
+    module = await supermemory_runtime.set_enabled(body.enabled)
+    await _refresh_local_supermemory_registration()
+    return {"enabled": module["enabled"], "module": module, "detail": "Supermemory module updated."}
+
+
+@router.post("/catalog/supermemory/install")
+async def install_supermemory_module() -> dict[str, Any]:
+    module = await supermemory_runtime.install_and_start()
+    asyncio.create_task(_refresh_after_supermemory_install())
+    return {"module": module, **module, "detail": "Supermemory installation started."}
+
+
+@router.post("/catalog/supermemory/start")
+async def start_supermemory_module() -> dict[str, Any]:
+    result = await supermemory_runtime.start()
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("detail") or "Start failed")
+    await _refresh_local_supermemory_registration()
+    return {"module": result, **result}
+
+
+@router.post("/catalog/supermemory/stop")
+async def stop_supermemory_module() -> dict[str, Any]:
+    result = await supermemory_runtime.stop()
+    await _refresh_local_supermemory_registration()
+    return {"module": result, **result}
 
 
 @router.post("/catalog/{entry_id}/download")

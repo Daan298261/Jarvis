@@ -8,6 +8,7 @@ runtime/*.zip
 runtime/llama-server-help.txt
 runtime/hexstrike-ai/
 runtime/hexstrike-ai.staging-*/
+runtime/supermemory/
 
 # Installer-staged multi-GB model payloads
 installer/windows/payload/models/
