@@ -16,7 +16,12 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>,
 )
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+if (
+  import.meta.env.PROD &&
+  "serviceWorker" in navigator &&
+  (window.location.protocol === "http:" || window.location.protocol === "https:") &&
+  (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost")
+) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => undefined)
   })

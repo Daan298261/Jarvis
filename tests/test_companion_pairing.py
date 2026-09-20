@@ -355,3 +355,28 @@ def test_companion_enroll_legacy_invitation_without_owner_key(companion_env):
     )
     assert response.status_code == 200
     assert response.json()["status"] == "pending"
+
+
+def test_localhost_connection_setup_without_browser_key(companion_env_no_owner_key, monkeypatch):
+    from app.mobile import connectivity
+
+    async def fake_configure(enabled, remote):
+        return {
+            "state": "ready",
+            "enabled": enabled,
+            "remote": remote,
+            "endpoints": ["https://10.0.0.8:4781"],
+        }
+
+    monkeypatch.setattr(connectivity.CONNECTIVITY, "configure", fake_configure)
+    monkeypatch.setattr(
+        connectivity.CONNECTIVITY,
+        "snapshot",
+        lambda: {"state": "listening", "endpoints": [], "activity": "Companion TLS gateway listening"},
+    )
+    client = companion_env_no_owner_key["client"]
+    status = client.get("/api/mobile/manage/connection")
+    assert status.status_code == 200
+    setup = client.post("/api/mobile/manage/connection", json={"enabled": True, "remote": False})
+    assert setup.status_code == 200
+    assert setup.json()["state"] == "ready"

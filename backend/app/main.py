@@ -47,6 +47,10 @@ origins = [
     f"http://localhost:{settings_obj.bind_port}",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
+    "https://tauri.localhost",
+    "http://tauri.localhost",
+    "https://asset.localhost",
+    "http://asset.localhost",
     "*",
 ]
 app.add_middleware(

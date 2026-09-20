@@ -1,3 +1,5 @@
+import { jarvisApiUrl } from "./apiOrigin"
+
 export function getPrivateKey(): string {
   try {
     return localStorage.getItem("jarvis_private_key") || ""
@@ -19,10 +21,11 @@ export function setPrivateKey(key: string): void {
 }
 
 export function getAuthUrl(path: string): string {
+  const resolved = jarvisApiUrl(path)
   const key = getPrivateKey()
-  if (!key) return path
-  const sep = path.includes("?") ? "&" : "?"
-  return `${path}${sep}key=${encodeURIComponent(key)}`
+  if (!key) return resolved
+  const sep = resolved.includes("?") ? "&" : "?"
+  return `${resolved}${sep}key=${encodeURIComponent(key)}`
 }
 
 function authHeaders(extra?: HeadersInit): Record<string, string> {
@@ -87,7 +90,7 @@ async function throwIfNotOk(response: Response): Promise<void> {
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
-  const response = await fetch(path, {
+  const response = await fetch(jarvisApiUrl(path), {
     ...init,
     headers,
   })
@@ -97,7 +100,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function apiForm<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
   const headers = authHeaders(init?.headers)
-  const response = await fetch(path, {
+  const response = await fetch(jarvisApiUrl(path), {
     method: "POST",
     ...init,
     headers,
@@ -121,7 +124,7 @@ export type AudioResponse = {
 
 export async function fetchAudioWithMetadata(path: string, init?: RequestInit): Promise<AudioResponse> {
   const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(jarvisApiUrl(path), { ...init, headers })
   await throwIfNotOk(response)
   return {
     blob: await response.blob(),
@@ -467,7 +470,7 @@ export type SwarmPlacementResult = SwarmPlacementAccepted | SwarmPlacementReject
 
 export async function postSwarmPlacement(body: SwarmPlacementRequest): Promise<SwarmPlacementResult> {
   const headers = authHeaders({ "Content-Type": "application/json" })
-  const response = await fetch("/api/swarm/placement", {
+  const response = await fetch(jarvisApiUrl("/api/swarm/placement"), {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -518,7 +521,7 @@ export type SwarmDispatchResult = {
 
 export async function postSwarmDispatch(body: SwarmDispatchRequest): Promise<SwarmDispatchResult> {
   const headers = authHeaders({ "Content-Type": "application/json" })
-  const response = await fetch("/api/swarm/dispatch", {
+  const response = await fetch(jarvisApiUrl("/api/swarm/dispatch"), {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -1614,7 +1617,7 @@ async function guestApi<T>(path: string, init?: RequestInit): Promise<T> {
     "Content-Type": "application/json",
     ...(init?.headers as Record<string, string> || {}),
   })
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(jarvisApiUrl(path), { ...init, headers })
   await throwIfNotOk(response)
   return response.json() as Promise<T>
 }
@@ -1812,7 +1815,7 @@ async function packApi<T>(path: string, init?: RequestInit): Promise<T> {
     "Content-Type": "application/json",
     ...((init?.headers as Record<string, string>) || {}),
   })
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(jarvisApiUrl(path), { ...init, headers })
   if (!response.ok) {
     const text = await response.text()
     let message = text || response.statusText
@@ -2622,7 +2625,7 @@ async function delegationApi<T>(path: string, init?: RequestInit): Promise<T> {
     "Content-Type": "application/json",
     ...((init?.headers as Record<string, string>) || {}),
   })
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(jarvisApiUrl(path), { ...init, headers })
   if (!response.ok) {
     const text = await response.text()
     let message = text || response.statusText
@@ -3145,7 +3148,7 @@ async function advisorApi<T>(path: string, init?: RequestInit): Promise<T> {
     "Content-Type": "application/json",
     ...((init?.headers as Record<string, string>) || {}),
   })
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(jarvisApiUrl(path), { ...init, headers })
   if (!response.ok) {
     const text = await response.text()
     let message = text || response.statusText
@@ -3376,7 +3379,7 @@ async function contextRepoApi<T>(path: string, init?: RequestInit): Promise<T> {
     "Content-Type": "application/json",
     ...((init?.headers as Record<string, string>) || {}),
   })
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(jarvisApiUrl(path), { ...init, headers })
   if (!response.ok) {
     const text = await response.text()
     let message = text || response.statusText
@@ -3631,7 +3634,7 @@ async function trajectoryApi<T>(path: string, init?: RequestInit): Promise<T> {
     "Content-Type": "application/json",
     ...((init?.headers as Record<string, string>) || {}),
   })
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(jarvisApiUrl(path), { ...init, headers })
   if (!response.ok) {
     const text = await response.text()
     let message = text || response.statusText
@@ -3842,7 +3845,7 @@ async function portabilityApi<T>(path: string, init?: RequestInit): Promise<T> {
     "Content-Type": "application/json",
     ...((init?.headers as Record<string, string>) || {}),
   })
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(jarvisApiUrl(path), { ...init, headers })
   if (!response.ok) {
     const text = await response.text()
     let message = text || response.statusText
@@ -4396,7 +4399,7 @@ async function companionPairingRequest(
 ): Promise<CompanionPairingApiResult> {
   try {
     const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
-    const response = await fetch(path, { ...init, headers })
+    const response = await fetch(jarvisApiUrl(path), { ...init, headers })
     if (response.status === 404) {
       return { available: false, reason: "not_found" }
     }
@@ -4503,7 +4506,7 @@ export async function startCompanionBuild(options?: {
 }
 
 export async function downloadCompanionApkBlob(buildId: string): Promise<Blob> {
-  const response = await fetch(`/api/mobile/manage/builds/${buildId}/apk`, { headers: authHeaders() })
+  const response = await fetch(jarvisApiUrl(`/api/mobile/manage/builds/${buildId}/apk`), { headers: authHeaders() })
   if (!response.ok) {
     const text = await response.text()
     throw new Error(text || "Unable to download APK")
@@ -4518,7 +4521,7 @@ export type CompanionApkSendResult =
 async function sendCompanionApk(buildId: string, channel: "email" | "whatsapp"): Promise<CompanionApkSendResult> {
   const label = channel === "email" ? "email" : "WhatsApp"
   try {
-    const response = await fetch(`/api/mobile/manage/builds/${buildId}/send/${channel}`, {
+    const response = await fetch(jarvisApiUrl(`/api/mobile/manage/builds/${buildId}/send/${channel}`), {
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
       body: "{}",
@@ -4779,7 +4782,7 @@ async function fetchCybersecurityJson<T>(
     ...(init?.headers as Record<string, string> | undefined),
   })
   try {
-    const response = await fetch(path, { ...init, headers })
+    const response = await fetch(jarvisApiUrl(path), { ...init, headers })
     if (!response.ok) {
       const text = await response.text()
       let message = text || response.statusText
@@ -5046,7 +5049,7 @@ async function fetchCleanReinstallStart(
 ): Promise<CleanReinstallStartResult> {
   const headers = authHeaders({ "Content-Type": "application/json" })
   try {
-    const response = await fetch("/api/installer/clean-reinstall/start", {
+    const response = await fetch(jarvisApiUrl("/api/installer/clean-reinstall/start"), {
       method: "POST",
       headers,
       body: JSON.stringify(body),
