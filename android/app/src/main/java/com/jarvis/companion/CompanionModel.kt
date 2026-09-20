@@ -156,9 +156,17 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         if (api.deviceId.isNotEmpty()) return
         viewModelScope.launch {
             mutable.value = mutable.value.copy(lanStatus = "scanning", lanLabel = "Scanning this Wi‑Fi for Jarvis…", error = null)
-            val host = runCatching { LanScanner.scan() }.getOrNull()
+            var host = runCatching { LanScanner.scan() }.getOrNull()
             if (host == null) {
-                mutable.value = mutable.value.copy(lanStatus = "idle", lanLabel = "")
+                delay(900)
+                host = runCatching { LanScanner.scan(timeoutMs = 4000) }.getOrNull()
+            }
+            if (host == null) {
+                mutable.value = mutable.value.copy(
+                    lanStatus = "idle",
+                    lanLabel = "",
+                    error = "No Jarvis desktop found on this Wi-Fi. On the PC open Settings → Phone Pairing and tap Prepare connection, then try again.",
+                )
                 return@launch
             }
             mutable.value = mutable.value.copy(

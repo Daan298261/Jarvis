@@ -151,6 +151,7 @@ def is_owner_pairing_manage_path(path: str) -> bool:
         "/api/mobile/manage/pairing-codes/regenerate",
         "/api/mobile/manage/pairing-codes/status",
         "/api/mobile/manage/devices",
+        "/api/mobile/manage/connection",
     }:
         return True
     return path.startswith("/api/mobile/manage/devices/") and path.endswith("/confirm")
