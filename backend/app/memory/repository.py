@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .db_layer import (
@@ -67,6 +68,18 @@ async def _snapshot_version(agent_id: str, repo: ContextRepoVersion, mutation: M
         save_meta(meta.model_copy(update={"current_version": repo.version, "updated_at": repo.created_at}))
     await bump_repository_version(agent_id, repo.version)
     await persist_mutation(mutation)
+    try:
+        from .supermemory import mirror_mutation
+
+        await mirror_mutation(
+            agent_id,
+            action=mutation.action,
+            before=mutation.before,
+            after=mutation.after,
+        )
+    except Exception:
+        # Mirroring can never roll back or fail an authoritative native write.
+        logging.debug("Supermemory mutation mirror skipped", exc_info=True)
     return repo
 
 
