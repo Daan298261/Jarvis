@@ -752,6 +752,7 @@ class AgentRuntime:
         )
         stream_key = f"task:{task_id}"
         clear_stream_speak_state(stream_key)
+        front_spoken_early = False
         if prefetched_front.text and prefetched_front.action != "silent_skip":
             await self._publish_front_events(task_id, "front_response_started", "Front response started")
             await self._publish_front_events(
@@ -767,6 +768,7 @@ class AgentRuntime:
                 stream_key=stream_key,
                 turn_started=turn_started,
             )
+            front_spoken_early = True
             await self._persist_front_partial(
                 task_id,
                 messages,
@@ -924,7 +926,7 @@ class AgentRuntime:
                             "Front response",
                             json.dumps(front.as_dict(), ensure_ascii=False)[:4000],
                         )
-                        if front_text:
+                        if front_text and not front_spoken_early:
                             await self._persist_front_partial(
                                 task_id,
                                 messages,
@@ -932,13 +934,14 @@ class AgentRuntime:
                                 first_response_ms=front.first_text_ms or first_response_ms,
                                 current_action="Checking details…" if front.action in {"ack_continue", "handoff_notice"} else "Replying",
                             )
-                        await self._speak_front_reply(
-                            task_id,
-                            front,
-                            prompt=prompt,
-                            stream_key=stream_key,
-                            turn_started=turn_started or model_started,
-                        )
+                        if not front_spoken_early:
+                            await self._speak_front_reply(
+                                task_id,
+                                front,
+                                prompt=prompt,
+                                stream_key=stream_key,
+                                turn_started=turn_started or model_started,
+                            )
                 elif kind == "worker_response_started":
                     worker_started = True
                     await self._publish_front_events(task_id, "worker_response_started", "Worker response started")
@@ -965,6 +968,7 @@ class AgentRuntime:
                 await progress_watch
             except asyncio.CancelledError:
                 pass
+            clear_worker_progress_for_task(task_id)
 
         timing = (done or {}).get("timing") or last_front_timing()
         done_worker = str((done or {}).get("worker_text") or "").strip()
@@ -1048,6 +1052,7 @@ class AgentRuntime:
         pending_tool: dict[str, Any] | None = None,
     ) -> None:
         turn_started = time.perf_counter()
+        progress_watch: asyncio.Task | None = None
         settings = load_settings()
         REGISTRY.apply_settings(settings)
         exposure = ToolExposure("mixed")
@@ -1671,6 +1676,8 @@ class AgentRuntime:
                 await MANAGER.record_timings(result.timings)
                 metrics.note_model(result.timings)
                 await self._update(task_id, **metrics.as_fields())
+                if (result.content or "").strip():
+                    mark_worker_useful_owner_text(task_id)
 
                 if force_final:
                     content = (result.content or "").strip() or (
@@ -1975,6 +1982,7 @@ class AgentRuntime:
                     await progress_watch
                 except asyncio.CancelledError:
                     pass
+            clear_worker_progress_for_task(task_id)
 
     async def _execute_tool(
         self,

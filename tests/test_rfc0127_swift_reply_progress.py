@@ -14,7 +14,7 @@ from app.agent.worker_progress import (
     WORKER_PROGRESS_FIRST_DELAY_SECONDS,
     clear_worker_progress_for_task,
     emit_worker_progress_update,
-    progress_cooldown_elapsed,
+    mark_worker_useful_owner_text,
     reset_worker_progress_state,
     run_worker_progress_watchdog,
     worker_useful_text_seen,
@@ -34,6 +34,18 @@ async def test_generate_front_reply_fallback_ack_when_no_provider():
         reply = await generate_front_reply("Please refactor the auth module and run pytest.", settings=settings)
     assert reply.action in {"ack_continue", "handoff_notice"}
     assert reply.text
+    assert (reply.first_text_ms or 0) >= 0
+    assert (reply.complete_ms or 0) >= 0
+
+
+def test_mark_worker_useful_records_task():
+    task_id = "task-useful-text"
+    clear_worker_progress_for_task(task_id)
+    assert not worker_useful_text_seen(task_id)
+    mark_worker_useful_owner_text(task_id)
+    assert worker_useful_text_seen(task_id)
+    clear_worker_progress_for_task(task_id)
+    assert not worker_useful_text_seen(task_id)
 
 @pytest.mark.asyncio
 async def test_prefetched_front_not_regenerated_in_two_lane():
