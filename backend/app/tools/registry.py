@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Callable
 
 from ..config import AppSettings, default_allowed_directories
@@ -132,14 +133,39 @@ class ToolRegistry:
                 exposure.grant("mcp")
             elif name in self.tools:
                 exposure.ensure_named_tool(name)
-        if name.startswith("mcp_"):
-            return await MCP.call(name, arguments)
-        tool = self.tools.get(name)
-        if not tool:
-            return ToolResult(False, "", error=f"Unknown tool {name}")
-        if not tool.enabled:
-            return ToolResult(False, "", error=f"Tool {name} is disabled")
-        return await tool.execute(**arguments)
+        from ..observability.rolling_log import record_tool_call
+
+        started = time.perf_counter()
+        try:
+            if name.startswith("mcp_"):
+                result = await MCP.call(name, arguments)
+            else:
+                tool = self.tools.get(name)
+                if not tool:
+                    result = ToolResult(False, "", error=f"Unknown tool {name}")
+                elif not tool.enabled:
+                    result = ToolResult(False, "", error=f"Tool {name} is disabled")
+                else:
+                    result = await tool.execute(**arguments)
+        except Exception as exc:
+            duration_ms = (time.perf_counter() - started) * 1000.0
+            record_tool_call(
+                name=name,
+                arguments=arguments,
+                success=False,
+                error=str(exc),
+                duration_ms=duration_ms,
+            )
+            raise
+        duration_ms = (time.perf_counter() - started) * 1000.0
+        record_tool_call(
+            name=name,
+            arguments=arguments,
+            success=result.success,
+            error=result.error,
+            duration_ms=duration_ms,
+        )
+        return result
 
 
 REGISTRY = ToolRegistry()
