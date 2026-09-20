@@ -496,6 +496,7 @@ async def generate_front_reply(
                 safety_rejected=rejected,
                 max_tokens=cfg.max_tokens,
             )
+        elapsed_ms = max(0.0, (time.perf_counter() - started) * 1000)
         return FrontReply(
             action=action,
             text=text,
@@ -503,6 +504,8 @@ async def generate_front_reply(
             skipped=True,
             safety_rejected=rejected,
             max_tokens=cfg.max_tokens,
+            first_text_ms=elapsed_ms,
+            complete_ms=elapsed_ms,
         )
 
     messages = small_context_envelope(
