@@ -519,7 +519,7 @@ class ConnectionSetup(BaseModel):
     remote: bool = True
 
 
-@owner_router.get("/connection", dependencies=[Depends(require_owner_private_key)])
+@owner_router.get("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
 def connection_status():
     from ..mobile.connectivity import CONNECTIVITY
     return CONNECTIVITY.snapshot()
@@ -531,7 +531,7 @@ def infrastructure_status():
     return infrastructure_readiness()
 
 
-@owner_router.post("/connection", dependencies=[Depends(require_owner_private_key)])
+@owner_router.post("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
 async def connection_setup(body: ConnectionSetup):
     from ..mobile.connectivity import CONNECTIVITY
     return await CONNECTIVITY.configure(body.enabled, body.remote)

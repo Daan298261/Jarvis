@@ -50,7 +50,7 @@ export function MobileCompanionSetup() {
   const [devices, setDevices] = useState<Device[]>([])
   const [endpoint, setEndpoint] = useState("")
   const [connection, setConnection] = useState<Connection | null>(null)
-  const [remote, setRemote] = useState(true)
+  const [remote, setRemote] = useState(false)
   const [build, setBuild] = useState<CompanionBuildJob | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)

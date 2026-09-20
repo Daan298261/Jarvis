@@ -3,6 +3,9 @@
   "identifier": "default",
   "description": "Default Jarvis desktop capabilities",
   "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:4780/*", "http://localhost:4780/*"]
+  },
   "permissions": [
     "core:default",
     "shell:allow-open",

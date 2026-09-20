@@ -11,6 +11,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -22,6 +23,7 @@ use tauri::{
 use tauri_plugin_autostart::MacosLauncher;
 
 const HEALTH_URL: &str = "http://127.0.0.1:4780/api/health";
+const PORTAL_URL: &str = "http://127.0.0.1:4780/";
 const MAX_START_ATTEMPTS: u32 = 3;
 const HEALTH_TIMEOUT_SECS: u64 = 90;
 const RESTART_BACKOFF_MS: u64 = 1500;
@@ -73,6 +75,8 @@ static HTTP: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
         .expect("http client")
 });
 
+static PORTAL_ATTACHED: AtomicBool = AtomicBool::new(false);
+
 fn jarvis_root() -> PathBuf {
     if let Ok(p) = std::env::var("JARVIS_ROOT") {
         return PathBuf::from(p);
@@ -112,6 +116,27 @@ fn health_ok() -> bool {
     match HTTP.get(HEALTH_URL).send() {
         Ok(resp) => resp.status().is_success(),
         Err(_) => false,
+    }
+}
+
+/// Tauri 2 loads dist from https://tauri.localhost. Relative `/api` fetch never
+/// reaches FastAPI (Failed to fetch on every menu). Attach the webview to the
+/// same origin the backend serves.
+fn attach_portal(app: &AppHandle) {
+    if !health_ok() {
+        return;
+    }
+    if PORTAL_ATTACHED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let Some(window) = app.get_webview_window("main") else {
+        PORTAL_ATTACHED.store(false, Ordering::SeqCst);
+        return;
+    };
+    if let Ok(url) = tauri::Url::parse(PORTAL_URL) {
+        if window.navigate(url).is_err() {
+            let _ = window.eval(&format!("window.location.replace('{PORTAL_URL}')"));
+        }
     }
 }
 
@@ -531,6 +556,7 @@ pub fn run() {
                 ensure_backend(&mut guard);
                 let start_minimized = guard.start_minimized;
                 drop(guard);
+                attach_portal(app.handle());
                 if start_minimized {
                     hide_main(app.handle());
                 }
@@ -608,6 +634,8 @@ pub fn run() {
                 if !guard.owned {
                     if health_ok() {
                         guard.status = BackendLifecycleStatus::Ready;
+                        drop(guard);
+                        attach_portal(&handle);
                     }
                     continue;
                 }
@@ -633,6 +661,9 @@ pub fn run() {
                     guard.status = BackendLifecycleStatus::Degraded;
                 } else if health_ok() {
                     guard.status = BackendLifecycleStatus::Ready;
+                    drop(guard);
+                    attach_portal(&handle);
+                    continue;
                 }
             });
 
