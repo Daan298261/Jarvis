@@ -29,6 +29,7 @@ from .integrations.setup import WHATSAPP_PAIRING
 from .swarm.capabilities import register_localhost_capabilities
 from .swarm.nodes import register_localhost_node
 from .swarm.workers import bind_workers_to_node
+from .observability.rolling_log import install_rolling_log, record_event
 from .tools.mcp_runtime import MCP
 from .tools.registry import REGISTRY
 from .mobile.calls import router as companion_calls_router
@@ -115,6 +116,30 @@ frontend_dist = repo_root() / "frontend" / "dist"
 
 
 @app.middleware("http")
+async def rolling_log_http_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        if response.status_code >= 500:
+            record_event(
+                "http_error",
+                message=f"HTTP {response.status_code}",
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+            )
+        return response
+    except Exception as exc:
+        record_event(
+            "exception",
+            message=str(exc),
+            source="http",
+            method=request.method,
+            path=request.url.path,
+        )
+        raise
+
+
+@app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     # Companion routes enforce device proof/session auth even on localhost.
     # They never inherit the owner's key or the desktop convenience exemption.
@@ -163,6 +188,8 @@ async def startup() -> None:
     except Exception:
         logging.debug("Decision-tier hook registration skipped", exc_info=True)
     logs_dir().mkdir(exist_ok=True)
+    install_rolling_log(loop=asyncio.get_running_loop())
+    record_event("startup", message="Jarvis backend started", startup_id=app.state.startup_id)
     Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
     try:
         from .licensing.clock_log import record_clock_sample
