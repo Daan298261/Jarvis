@@ -205,6 +205,18 @@ def test_module_catalog_api_lists_supermemory():
     assert any(row["id"] == "supermemory" and row["kind"] == "local_sidecar" for row in entries)
 
 
+def test_service_contract_keeps_sidecar_private_to_its_node():
+    response = TestClient(app).get("/api/supermemory/service")
+
+    assert response.status_code == 200
+    contract = response.json()
+    assert contract["protocol"] == "jarvis.supermemory.v1"
+    assert contract["sidecar_endpoint_exposed"] is False
+    assert contract["delegation"]["mode"] == "leader_mediated"
+    assert contract["delegation"]["forward_sidecar_credentials"] is False
+    assert contract["recall_endpoint"] == "/api/supermemory/search"
+
+
 def test_managed_runtime_uses_jarvis_local_inference_and_disables_telemetry(monkeypatch, tmp_path):
     settings = AppSettings()
     settings.inference.host = "127.0.0.1"
@@ -220,3 +232,38 @@ def test_managed_runtime_uses_jarvis_local_inference_and_disables_telemetry(monk
     assert env["SUPERMEMORY_DISABLE_TELEMETRY"] == "1"
     assert env["OPENAI_BASE_URL"] == "http://127.0.0.1:8088/v1"
     assert env["OPENAI_MODEL"] == "qwen-local"
+
+
+@pytest.mark.asyncio
+async def test_enabled_installed_sidecar_auto_starts_with_jarvis(monkeypatch, tmp_path):
+    settings = AppSettings()
+    settings.supermemory.enabled = True
+    settings.supermemory.auto_start = True
+    calls = []
+
+    async def fake_start():
+        calls.append("start")
+        return {"ok": True}
+
+    monkeypatch.setattr(supermemory_runtime.app_config, "load_settings", lambda: settings)
+    monkeypatch.setattr(supermemory_runtime, "binary_path", lambda: tmp_path / "supermemory-server.exe")
+    (tmp_path / "supermemory-server.exe").write_bytes(b"test")
+    monkeypatch.setattr(supermemory_runtime, "start", fake_start)
+
+    await supermemory_runtime.auto_start()
+
+    assert calls == ["start"]
+
+
+def test_worker_probe_advertises_private_node_local_memory(monkeypatch, tmp_path):
+    settings = AppSettings()
+    settings.supermemory.enabled = True
+    monkeypatch.setattr(supermemory_runtime.app_config, "load_settings", lambda: settings)
+    monkeypatch.setattr(supermemory_runtime, "binary_path", lambda: tmp_path / "supermemory-server.exe")
+
+    probe = supermemory_runtime.worker_probe()
+
+    assert probe["id"] == "supermemory"
+    assert probe["kind"] == "memory"
+    assert probe["status"] == "missing"
+    assert "mediated" in probe["detail"]

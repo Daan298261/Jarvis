@@ -66,6 +66,33 @@ def _runtime_env(port: int) -> dict[str, str]:
     }
 
 
+def worker_probe() -> dict[str, Any]:
+    """Synchronous service inventory for the node/delegation control plane.
+
+    Supermemory's own port is never advertised as a cross-device endpoint.
+    Other devices must use Jarvis's authenticated API layer, which owns
+    authorization and gives delegated tasks bounded context rather than keys.
+    """
+    settings = app_config.load_settings().supermemory
+    installed = binary_path().is_file()
+    running = get_supervisor(MODULE_ID).is_running
+    if not settings.enabled:
+        status = "disabled"
+    elif running:
+        status = "ready"
+    elif installed:
+        status = "not_loaded"
+    else:
+        status = "missing"
+    return {
+        "id": MODULE_ID,
+        "name": MODULE_NAME,
+        "kind": "memory",
+        "status": status,
+        "detail": "Node-local semantic recall; delegated access is mediated by Jarvis API.",
+    }
+
+
 async def module_status() -> dict[str, Any]:
     global _INSTALL_STATUS
     supervisor = get_supervisor(MODULE_ID)
@@ -197,6 +224,13 @@ async def install_and_start() -> dict[str, Any]:
             _INSTALL_ERROR = ""
             _INSTALL_TASK = asyncio.create_task(_install_then_start())
     return await module_status()
+
+
+async def wait_for_install() -> None:
+    """Wait for the current install/start task without exposing its internals."""
+    task = _INSTALL_TASK
+    if task is not None:
+        await asyncio.shield(task)
 
 
 async def start() -> dict[str, Any]:

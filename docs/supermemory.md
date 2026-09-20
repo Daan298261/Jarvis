@@ -8,6 +8,12 @@ Open **Memory → Semantic memory module** and choose **Install locally**. Jarvi
 
 The local console URL is also exposed to Jarvis, so a computer-use task can open and operate the console when the owner asks. Installation and service lifecycle use the backend-native module manager rather than fragile screen automation.
 
+## Device and delegation boundary
+
+Supermemory runs as a separate Jarvis-managed process on the device that owns its memory data. Its port and generated API key remain private to that device. Jarvis exposes the stable, authenticated wrapper contract at `GET /api/supermemory/service`; control remains under `/api/modules/catalog/supermemory`, while recall and sync are `/api/supermemory/search` and `/api/supermemory/sync/{agent_id}`.
+
+This is the required API layer for future multi-device Jarvis: a delegated device calls Jarvis, not the Supermemory sidecar. Jarvis can then enforce policy, select the owning node, and send only bounded recalled facts to the delegated task. Do not expose port 6767 or copy the sidecar key to another device.
+
 For manual or recovery installation:
 
 ```powershell

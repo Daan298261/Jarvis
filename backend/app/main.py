@@ -185,9 +185,7 @@ async def startup() -> None:
     except Exception:
         logging.debug("Vault bind on startup skipped", exc_info=True)
     try:
-        from .modules.supermemory_runtime import auto_start as auto_start_supermemory
-
-        asyncio.create_task(auto_start_supermemory())
+        asyncio.create_task(_auto_start_supermemory_and_refresh_node(node.id))
     except Exception:
         logging.debug("Supermemory auto-start scheduling skipped", exc_info=True)
     if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
@@ -224,6 +222,22 @@ async def _maybe_launch_greeting(startup_id: str) -> None:
         await maybe_send_launch_greeting(startup_id)
     except Exception:
         logging.exception("Launch greeting failed")
+
+
+async def _auto_start_supermemory_and_refresh_node(node_id: str) -> None:
+    """Start the private sidecar after Jarvis starts, then refresh node inventory."""
+    try:
+        from .modules.supermemory_runtime import auto_start as auto_start_supermemory
+
+        await auto_start_supermemory()
+    except Exception:
+        logging.exception("Supermemory auto-start failed")
+    finally:
+        try:
+            await bind_workers_to_node(node_id)
+            await register_localhost_capabilities(node_id)
+        except Exception:
+            logging.debug("Supermemory node registration refresh skipped", exc_info=True)
 
 
 @app.on_event("shutdown")

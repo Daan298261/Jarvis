@@ -51,6 +51,32 @@ async def supermemory_status() -> dict[str, Any]:
     return resolve_status()
 
 
+@router.get("/service")
+async def supermemory_service_contract() -> dict[str, Any]:
+    """Stable Jarvis-facing contract for local and future delegated callers.
+
+    The Supermemory server stays private to its host. Jarvis is the API layer
+    that authenticates callers, scopes agent/container access, and keeps
+    sidecar credentials on the owning device.
+    """
+    return {
+        "protocol": "jarvis.supermemory.v1",
+        "service_scope": "node_local_sidecar",
+        "sidecar_endpoint_exposed": False,
+        "control_endpoint": "/api/modules/catalog/supermemory",
+        "recall_endpoint": "/api/supermemory/search",
+        "sync_endpoint": "/api/supermemory/sync/{agent_id}",
+        "health_endpoint": "/api/supermemory/probe",
+        "delegation": {
+            "mode": "leader_mediated",
+            "forward_sidecar_credentials": False,
+            "forward_sidecar_port": False,
+            "context_delivery": "bounded_recalled_facts",
+        },
+        "status": resolve_status(),
+    }
+
+
 @router.put("")
 async def configure_supermemory(body: SupermemoryConfigIn) -> dict[str, Any]:
     settings = app_config.load_settings()
