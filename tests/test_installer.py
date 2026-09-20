@@ -109,7 +109,7 @@ def test_installer_and_desktop_versions_match():
     installer_version = re.search(r'#define MyAppVersion "([^"]+)"', iss_text).group(1)
     cargo = tomllib.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "Cargo.toml"))
     tauri = json.loads(_read(REPO_ROOT / "frontend" / "src-tauri" / "tauri.conf.json"))
-    assert installer_version == "1.3.10"
+    assert installer_version == "1.4.5"
     assert cargo["package"]["version"] == installer_version
     assert tauri["version"] == installer_version
 
