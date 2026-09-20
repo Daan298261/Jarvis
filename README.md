@@ -1,49 +1,45 @@
-# Jarvis
+<div align="center">
 
-Self-hosted local desktop agent. The default model is **Qwen3.5-9B Abliterated** running on this computer through llama.cpp. If a **Qwen3.8-9B uncensored** GGUF is already installed under `models/` or the current user’s LM Studio folder, Jarvis prefers that as the everyday autoload default. Qwen3.5-27B remains the Expert escalation model, or you can point at any OpenAI-compatible server. The HUD **Help** icon answers product questions from local docs first (then the public web) and lists guides for phone pairing, custom models, swarms, and autonomy. The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
+# JARVIS
 
-**Development process:** [`docs/PROCESS.md`](docs/PROCESS.md) — one RFC or one queue item per worker; branch from `development` and open PRs against `development`. `main` is the stable release branch (GitHub default); promote only on an explicit cut. Design specs go in [`docs/rfcs/`](docs/rfcs/), not wholesale edits to the master plan.
+### Your AI. Your hardware. Your rules.
 
-Cursor and future development sessions must read [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) for architecture context and the Development Queue (§58). Jarvis 1.x is sections 1–63. Jarvis 2.0 (Autonomous Operator / Away Mode, including novel/marketing/SEO/multimedia) lives in [`JARVIS_2.0.md`](JARVIS_2.0.md) and is not current-session P0 unless the queue promotes it.
+**A self-hosted AI assistant and agent platform built for local-first work, extensible tools, and a future multi-device swarm.**
 
-Detailed P2+ swarm role, node placement, resource-control, and universal-UI requirements are maintained separately in [`SWARM_ARCHITECTURE.md`](SWARM_ARCHITECTURE.md). The master plan remains authoritative for priority and implementation status.
+[Getting started](#getting-started) · [Features](#what-jarvis-does) · [Architecture](#how-it-works) · [Documentation](#documentation) · [Contributing](#development--contributing)
 
-## Documentation
+![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square) ![Deployment](https://img.shields.io/badge/deployment-self--hosted-202C3A?style=flat-square) ![Inference](https://img.shields.io/badge/inference-local--first-16A34A?style=flat-square) ![Status](https://img.shields.io/badge/status-active%20development-F59E0B?style=flat-square)
 
-| Document | Contents |
-| --- | --- |
-| **[docs/PROCESS.md](docs/PROCESS.md)** | RFC workflow, one-ticket Cursor loop, cloud vs desktop sign-off |
-| **[docs/rfcs/](docs/rfcs/)** | Design RFCs (template + index) |
-| **[docs/INSTALL.md](docs/INSTALL.md)** | Full Windows install: Python, Node, llama.cpp, GGUFs, start options, LAN auth, updates |
-| **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** | Repo map, dev servers, API, agent loop, adding tools, tests |
-| **[docs/ANDROID_MVP_LAN_CHECKLIST.md](docs/ANDROID_MVP_LAN_CHECKLIST.md)** | LAN-first Android companion MVP: APK, gateway `:4781`, pairing, smoke tests |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Control plane, compaction, memory, autonomy |
-| [docs/TASK_STATUS_AND_APPROVALS.md](docs/TASK_STATUS_AND_APPROVALS.md) | Routine auto-approval, destructive-delete gates, task phases and heartbeat UI |
-| [SWARM_ARCHITECTURE.md](SWARM_ARCHITECTURE.md) | P2–P4 node roles, placement, resources, swarm UI, multi-node and resilience requirements |
-| [ADAPTIVE_DOMAIN_ARCHITECTURE.md](ADAPTIVE_DOMAIN_ARCHITECTURE.md) | P4/P5 adaptive intelligence and domain packs |
-| [ANDROID_CLIENT.md](ANDROID_CLIENT.md) | Android client to the Leader; AI-guided WAN reachability |
-| [JARVIS_2.0.md](JARVIS_2.0.md) | Approved Away Mode / novel / marketing / SEO / multimedia (sections 64–85) |
-| [HOME_IOT.md](HOME_IOT.md) | Home IoT / mansion house control |
-| [SECURITY_AGENTS.md](SECURITY_AGENTS.md) | Blue / Purple / Red-gated security workers (canonical). `BLUE_TEAM.md` is a pointer |
-| [BLUE_TEAM.md](BLUE_TEAM.md) | Pointer to `SECURITY_AGENTS.md` |
-| [INSTALLER.md](INSTALLER.md) | Windows 11 consumer `.exe` onboarding (smoke PR #51; wizard/GPU/WAN still open) |
-| [WINDOWS_SHELL.md](WINDOWS_SHELL.md) | Tray / Stop / Uninstall (not Start Menu only) |
-| [PORTAL_UX.md](PORTAL_UX.md) | ChatGPT-style portal shell (PR #53); orange/black; Swarm/Phone kept |
-| [TOOLS.md](TOOLS.md) | Native tools, MCP, trajectories, skills |
-| [SECURITY.md](SECURITY.md) | Bind address, private keys, filesystem policy |
-| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Unloaded model, CUDA, Playwright, Office, Docker |
+</div>
 
-## Hardware this install was tuned for
+---
 
-- Windows 11 Pro
-- Intel Core i7-14700KF
-- 64 GB RAM
-- NVIDIA GeForce RTX 5070 Ti (16 GB VRAM, CUDA 13.0)
-- llama.cpp b10516, Windows CUDA 13.3 build
+## An assistant that works on your terms
 
-The default 9B Q8_0 profile is meant to stay on the GPU. Expert 27B Q4_K_M (~16.7 GB) still uses llama.cpp `--fit on`. The vision projector is off unless you enable it.
+Jarvis brings local language models, tool execution, task management, and an approachable control interface together in one self-hosted system. Run inference on your own machine, connect an OpenAI-compatible inference server when needed, and build workflows around the tools you actually use.
 
-## Quick start (already cloned on this machine)
+The project is being developed toward a larger vision: a coordinated network of devices with specialized agents, persistent services, and configurable autonomy. **The current Windows desktop agent is the foundation; the full swarm and autonomous-operator vision are ongoing development, not features promised in this release.**
+
+## What Jarvis does
+
+| Capability | Description |
+| :--- | :--- |
+| **Local-first AI** | Run GGUF models with llama.cpp, switch model profiles, or use a compatible remote inference endpoint. |
+| **Agent workflows** | Submit tasks, use integrated tools, and track execution through the portal and task queue. |
+| **Unified control portal** | Access chat, model controls, settings, help, and workflows from a local web interface. |
+| **Extensible tools** | Work with native tools and MCP integrations; see the tool catalog for available integrations and requirements. |
+| **Configurable access** | Keep the service on localhost by default or explicitly enable authenticated LAN access. |
+| **Developer-friendly** | Work with documented architecture, RFCs, tests, and a defined contribution process. |
+
+**On the roadmap:** a universal desktop experience, richer voice and vision, Android companionship, agent teams, multi-node scheduling, role-based device placement, security workers, and autonomous operator workflows. These are tracked in the design documents below; individual components may be experimental or incomplete.
+
+## Getting started
+
+**Target platform:** Windows 11. The repository's startup scripts and some desktop integrations are Windows-specific. A GPU-capable NVIDIA setup is used for the documented local inference configuration.
+
+For a new machine, start with the **[complete installation guide](docs/INSTALL.md)**. A Windows installer is also under development; see [installer status](INSTALLER.md) before assuming one-click setup is complete.
+
+If you have **already cloned the repository and installed the required model weights and llama.cpp runtime**, run the following in PowerShell from the repository root:
 
 ```powershell
 python -m pip install -r backend\requirements.txt
@@ -55,71 +51,120 @@ cd ..
 .\start-jarvis.ps1
 ```
 
-New machine, missing GGUFs, or llama.cpp not extracted: follow **[docs/INSTALL.md](docs/INSTALL.md)** instead of this block.
+Open **http://127.0.0.1:4780** if the portal does not open automatically.
 
-llama.cpp CUDA binaries live in `runtime/llama.cpp`. Primary weights live in `models/Qwen3.5-9B-abliterated-GGUF`. Expert 27B weights live in `models/Qwen3.5-27B-GGUF`. A locally installed Qwen3.8-9B uncensored GGUF (Jarvis `models/` or `~/.lmstudio/models`) wins as the everyday default when present.
-
-## Daily use
+To stop Jarvis:
 
 ```powershell
-.\start-jarvis.ps1
 .\stop-jarvis.ps1
 ```
 
-`start-jarvis.ps1` verifies dependencies, builds the frontend if needed, starts the API, loads the model, and opens the portal.
+> **Important:** Model weights, llama.cpp binaries, and local runtime data are not included in Git. Follow [INSTALL.md](docs/INSTALL.md) for prerequisites, downloads, and initial configuration. Do not expose the portal or API to the public internet without reviewing [SECURITY.md](SECURITY.md).
+
+### Everyday workflows
+
+Start Jarvis with a task and wait for completion:
 
 ```powershell
-# One prompt on launch, wait until the task finishes
 .\start-jarvis.ps1 -Prompt "Inspect directory and generate project report" -Wait
+```
 
-# From a JSON or text file
+Or submit a task file:
+
+```powershell
 .\start-jarvis.ps1 -PromptFile .\tasks\sample_task.json -Wait
-
-# LAN bind + private key on every API request
-.\start-jarvis.ps1 -LanAccess -PrivateKey "jarvis_pk_secret123"
-
-.\start-jarvis.ps1 -NoBrowser
 ```
 
-Drop `.json` or `.prompt` files into `data/queue/pending/` at any time; Jarvis processes them automatically. Remote clients must send `X-Jarvis-Key`, `Authorization: Bearer <key>`, or `?key=<key>`.
+The portal also includes **Guide & Workflows** for operating instructions and task templates. For advanced startup flags, LAN authentication, and model configuration, use the [installation guide](docs/INSTALL.md).
 
-## Model profiles
+## How it works
 
-Portal: **Model → Fast / Balanced / Quality**, or:
-
-```powershell
-Invoke-RestMethod -Method POST http://127.0.0.1:4780/api/model/load `
-  -ContentType application/json -Body '{"profile":"quality"}'
+```text
+                 ┌─────────────────────────────┐
+                 │  Portal / client interfaces │
+                 └──────────────┬──────────────┘
+                                │
+                 ┌──────────────▼──────────────┐
+                 │      FastAPI control plane  │
+                 │ Tasks · tools · settings    │
+                 └───────┬─────────────┬───────┘
+                         │             │
+               ┌─────────▼──────┐  ┌───▼──────────────────┐
+               │ Agent + tools  │  │ Inference backend   │
+               │ Native / MCP   │  │ llama.cpp / remote  │
+               └────────────────┘  └──────────────────────┘
 ```
 
-- **Fast**: Q4_K_M, thinking off, 16K context
-- **Balanced**: Q4_K_M, thinking on, 32K context
-- **Quality**: Q5_K_M, thinking on, more CPU offload
+The current application combines a **FastAPI backend** with a **React control portal**. Local inference uses **llama.cpp**; an OpenAI-compatible server can be configured as an alternative. A REST API provides the interface for clients and integrations. See [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for implementation details.
 
-Agent execution modes (Fast / Balanced / Reliable) are separate — they change planning and verification, not the GGUF.
+The planned swarm architecture separates orchestration, leadership, and worker responsibilities, with configurable placement and host-resource limits. Its design is documented in [SWARM_ARCHITECTURE.md](SWARM_ARCHITECTURE.md); do not treat that document as a description of fully shipped functionality.
 
-## Move inference off this PC
+## Models and hardware
 
-```powershell
-Invoke-RestMethod -Method PUT http://127.0.0.1:4780/api/settings `
-  -ContentType application/json `
-  -Body '{"inference_backend":"remote","inference_host":"192.168.1.50","inference_port":8088}'
-```
+The documented reference installation uses **Windows 11 Pro, an Intel Core i7-14700KF, 64 GB RAM, and an NVIDIA RTX 5070 Ti with 16 GB VRAM**. This is the development configuration, **not a universal minimum system requirement**.
 
-No agent, tool, or portal code changes. Set the backend back to `llama.cpp` to run locally again.
+- **Everyday inference:** Qwen3.5-9B Abliterated via llama.cpp; a locally available Qwen3.8-9B uncensored GGUF is preferred by the current autoload logic when found.
+- **Expert escalation:** Qwen3.5-27B, with fitting/offloading as needed.
+- **Other backends:** a configurable OpenAI-compatible inference server.
 
-## Tests
+The portal exposes **Fast / Balanced / Quality** model profiles. Agent execution modes are separate from model profiles. See [INSTALL.md](docs/INSTALL.md) for exact model paths and setup, and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for CUDA or model-loading issues.
 
-Unit tests (no GPU):
+## Project direction
+
+| Area | Direction | Reference |
+| :--- | :--- | :--- |
+| **Multi-device intelligence** | Orchestrator, leader, senior/junior workers, node roles, and resource controls | [Swarm architecture](SWARM_ARCHITECTURE.md) |
+| **Autonomous operations** | Away Mode, delegated workflows, publishing, research, and marketing | [Jarvis 2.0](JARVIS_2.0.md) |
+| **Specialized intelligence** | Adaptive domain packs and specialized workers | [Adaptive domain architecture](ADAPTIVE_DOMAIN_ARCHITECTURE.md) |
+| **Security** | Defensive monitoring and gated security-agent design | [Security agents](SECURITY_AGENTS.md) |
+| **Additional interfaces** | Windows desktop shell, phone companion, voice, and home integration | [Windows shell](WINDOWS_SHELL.md) · [Android client](ANDROID_CLIENT.md) · [Home IoT](HOME_IOT.md) |
+
+These documents contain a mixture of designs, implementation work, and future goals. **[JARVIS_MASTER_PLAN.md](JARVIS_MASTER_PLAN.md) is authoritative for priorities and implementation status.**
+
+## Documentation
+
+| Start here | What you will find |
+| :--- | :--- |
+| [Installation](docs/INSTALL.md) | Prerequisites, models, Windows setup, startup, and authentication |
+| [Development guide](docs/DEVELOPMENT.md) | Repository map, local development, APIs, tools, and tests |
+| [Architecture](ARCHITECTURE.md) | Control plane, memory, compaction, and autonomy |
+| [Tools](TOOLS.md) | Native integrations, MCP, skills, and trajectories |
+| [Security](SECURITY.md) | Network binding, keys, and filesystem policy |
+| [Troubleshooting](TROUBLESHOOTING.md) | Common model, CUDA, browser, Office, and Docker issues |
+| [Task status and approvals](docs/TASK_STATUS_AND_APPROVALS.md) | Approval gates, task phases, and progress feedback |
+| [Development process](docs/PROCESS.md) | RFCs, branches, review, and release workflow |
+| [RFC index](docs/rfcs/) | Proposals and detailed technical specifications |
+
+For the wider roadmap, see [Jarvis master plan](JARVIS_MASTER_PLAN.md) and [Jarvis 2.0](JARVIS_2.0.md).
+
+## Development & contributing
+
+Jarvis is under active development. Start with [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), then read the [development process](docs/PROCESS.md) and relevant [RFCs](docs/rfcs/) before making architectural changes.
+
+- **`main`** is the stable release branch; development work branches from **`development`** and targets it with pull requests.
+- Keep changes scoped to one RFC or development-queue item per worker.
+- Consult [JARVIS_MASTER_PLAN.md](JARVIS_MASTER_PLAN.md) for the current priorities and development queue.
+
+Run unit tests without a GPU:
 
 ```powershell
 python -m pytest tests -q
 ```
 
-Live desktop suite (Jarvis running with the model loaded):
+For the live desktop end-to-end suite, start Jarvis with a model loaded, then run:
 
 ```powershell
 python tests\run_e2e.py
 ```
 
-Contributor workflow: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Test commands are provided for contributors; this README does not assert that every test currently passes.
+
+---
+
+<div align="center">
+
+**Built for an AI assistant you can run, extend, and control yourself.**
+
+[Explore the documentation](docs/INSTALL.md) · [View the roadmap](JARVIS_MASTER_PLAN.md) · [Browse the code](https://github.com/Daan298261/Jarvis)
+
+</div>
