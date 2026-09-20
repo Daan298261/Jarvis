@@ -75,6 +75,16 @@ def test_jarvis_iss_wiring():
     assert "runhidden" in lower
 
 
+def test_jarvis_iss_code_uses_supported_registry_apis_only():
+    """Inno [Code] has RegWriteStringValue but not Win32-style RegCreateKey (iscc fails)."""
+    text = _read(ISS)
+    lower = text.lower()
+    assert "regcreatekey" not in lower
+    assert "recordownedpathsregistry" in lower.replace("_", "")
+    assert "jarvisownedpathskey" in lower.replace("_", "")
+    assert "regwritestringvalue" in lower
+
+
 def test_existing_install_upgrade_and_removal_choices_are_wired():
     text = _read(ISS)
     lower = text.lower()
