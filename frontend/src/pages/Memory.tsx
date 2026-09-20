@@ -32,6 +32,28 @@ type Trajectory = {
   duration_seconds: number
 }
 
+type SupermemoryModule = {
+  id: "supermemory"
+  name: string
+  description: string
+  enabled: boolean
+  auto_start: boolean
+  installed: boolean
+  install_status: "idle" | "installing" | "ready" | "error"
+  install_detail: string
+  install_error: string
+  running: boolean
+  managed: boolean
+  starting: boolean
+  healthy: boolean
+  base_url: string
+  console_url: string
+  platform_supported: boolean
+  native_fallback: boolean
+  authoritative_store: string
+  owner_vault: string
+}
+
 function stepLabel(step: Skill["steps"][number]) {
   if (typeof step === "string") return step
   const tool = step.tool || "tool"
@@ -46,6 +68,15 @@ export function MemoryPage() {
   const [busy, setBusy] = useState(false)
   const [paramValues, setParamValues] = useState<Record<string, Record<string, string>>>({})
   const [runLog, setRunLog] = useState<Record<string, string>>({})
+  const [supermemory, setSupermemory] = useState<SupermemoryModule | null>(null)
+  const [moduleBusy, setModuleBusy] = useState(false)
+  const [moduleMessage, setModuleMessage] = useState("")
+  const [moduleError, setModuleError] = useState("")
+
+  async function refreshSupermemory() {
+    const result = await api<{ module?: SupermemoryModule } & SupermemoryModule>("/api/modules/catalog/supermemory")
+    setSupermemory(result.module || result)
+  }
 
   async function refresh() {
     const [s, t] = await Promise.all([
@@ -55,7 +86,54 @@ export function MemoryPage() {
     setSkills(s)
     setTrajectories(t)
   }
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    refresh()
+    refreshSupermemory().catch((err: unknown) => setModuleError(err instanceof Error ? err.message : String(err)))
+  }, [])
+
+  useEffect(() => {
+    if (supermemory?.install_status !== "installing" && !supermemory?.starting) return
+    const timer = window.setInterval(() => {
+      refreshSupermemory().catch(() => undefined)
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [supermemory?.install_status, supermemory?.starting])
+
+  async function moduleAction(action: "install" | "start" | "stop") {
+    setModuleBusy(true)
+    setModuleError("")
+    setModuleMessage("")
+    try {
+      const result = await api<{ module?: SupermemoryModule; detail?: string } & Partial<SupermemoryModule>>(
+        `/api/modules/catalog/supermemory/${action}`,
+        { method: "POST" },
+      )
+      setSupermemory((result.module || result) as SupermemoryModule)
+      setModuleMessage(result.detail || (action === "install" ? "Installation started." : `Supermemory ${action}ed.`))
+    } catch (err: unknown) {
+      setModuleError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setModuleBusy(false)
+    }
+  }
+
+  async function toggleSupermemory() {
+    if (!supermemory) return
+    setModuleBusy(true)
+    setModuleError("")
+    try {
+      const result = await api<{ module: SupermemoryModule }>("/api/modules/catalog/supermemory/enable", {
+        method: "POST",
+        body: JSON.stringify({ enabled: !supermemory.enabled }),
+      })
+      setSupermemory(result.module)
+      setModuleMessage(result.module.enabled ? "Supermemory recall enabled." : "Supermemory recall disabled; native memory remains active.")
+    } catch (err: unknown) {
+      setModuleError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setModuleBusy(false)
+    }
+  }
 
   async function promote() {
     setBusy(true)
@@ -93,6 +171,56 @@ export function MemoryPage() {
       <p className="lede" style={{ marginTop: -12 }}>
         Identity, projects, lessons, and other saved notes live on <Link to="/context">Context</Link>.
       </p>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <h2 style={{ margin: 0 }}>Semantic memory module</h2>
+            <p className="lede" style={{ marginBottom: 8 }}>
+              Supermemory runs locally for semantic recall. ContextRepo stays authoritative and is always the fallback;
+              Obsidian stays your editable knowledge vault.
+            </p>
+            {supermemory && (
+              <div className="lede" style={{ margin: 0 }}>
+                <span className={`badge ${supermemory.healthy ? "completed" : supermemory.install_status === "error" ? "failed" : "queued"}`}>
+                  {supermemory.healthy ? "healthy" : supermemory.install_status === "installing" ? "installing" : supermemory.installed ? "stopped" : "not installed"}
+                </span>
+                {supermemory.installed ? " · installed" : ""}
+                {supermemory.managed ? " · Jarvis managed" : ""}
+                {supermemory.auto_start ? " · auto-start" : ""}
+                {supermemory.enabled ? " · recall enabled" : " · native memory only"}
+              </div>
+            )}
+          </div>
+          <div className="row" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {supermemory && !supermemory.installed && (
+              <button className="btn" disabled={moduleBusy || supermemory.install_status === "installing" || !supermemory.platform_supported} onClick={() => moduleAction("install")}>
+                {supermemory.install_status === "installing" ? "Installing…" : "Install locally"}
+              </button>
+            )}
+            {supermemory?.installed && !supermemory.running && (
+              <button className="btn" disabled={moduleBusy || supermemory.starting} onClick={() => moduleAction("start")}>
+                {supermemory.starting ? "Starting…" : "Start"}
+              </button>
+            )}
+            {supermemory?.running && supermemory.managed && (
+              <button className="btn secondary" disabled={moduleBusy} onClick={() => moduleAction("stop")}>Stop</button>
+            )}
+            {supermemory?.installed && (
+              <button className={supermemory.enabled ? "btn" : "btn secondary"} disabled={moduleBusy} onClick={toggleSupermemory}>
+                {supermemory.enabled ? "Enabled" : "Disabled"}
+              </button>
+            )}
+            {supermemory?.running && (
+              <a className="btn secondary" href={supermemory.console_url} target="_blank" rel="noreferrer">Open local console</a>
+            )}
+          </div>
+        </div>
+        {supermemory?.install_detail && <p className="lede" style={{ marginBottom: 0 }}>{supermemory.install_detail}</p>}
+        {(moduleError || supermemory?.install_error) && (
+          <p className="lede" style={{ color: "var(--danger, #ff6b6b)", marginBottom: 0 }}>{moduleError || supermemory?.install_error}</p>
+        )}
+        {moduleMessage && <p className="lede" style={{ color: "var(--ok)", marginBottom: 0 }}>{moduleMessage}</p>}
+      </div>
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2 style={{ margin: 0 }}>Skills</h2>

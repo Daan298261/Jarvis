@@ -215,6 +215,26 @@ class KnowledgeVaultSettings(BaseModel):
     watch_enabled: bool = True
 
 
+class SupermemorySettings(BaseModel):
+    """RFC-0132 optional semantic-recall sidecar.
+
+    The API key is deliberately not part of settings. It comes from
+    ``JARVIS_SUPERMEMORY_API_KEY`` or the existing credential store.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = False
+    auto_start: bool = True
+    base_url: str = "http://127.0.0.1:6767"
+    container_prefix: str = Field(default="jarvis", min_length=1, max_length=48, pattern=r"^[A-Za-z0-9_-]+$")
+    timeout_ms: int = Field(default=1200, ge=100, le=10000)
+    max_results: int = Field(default=5, ge=1, le=10)
+    minimum_similarity: float = Field(default=0.45, ge=0.0, le=1.0)
+    mirror_writes: bool = True
+    allow_remote: bool = False
+
+
 class HexStrikeSettings(BaseModel):
     """Local HexStrike AI suite (RFC-0078). Loopback only; never a WAN listener."""
 
@@ -287,6 +307,7 @@ class AppSettings(BaseModel):
     tts: TtsSettings = Field(default_factory=TtsSettings)
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
     knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
+    supermemory: SupermemorySettings = Field(default_factory=SupermemorySettings)
     decision: DecisionSettings = Field(default_factory=DecisionSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)

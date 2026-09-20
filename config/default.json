@@ -79,6 +79,17 @@
     "expressiveness": 0.5,
     "prefer_cpu_fallback": true
   },
+  "supermemory": {
+    "enabled": false,
+    "auto_start": true,
+    "base_url": "http://127.0.0.1:6767",
+    "container_prefix": "jarvis",
+    "timeout_ms": 1200,
+    "max_results": 5,
+    "minimum_similarity": 0.45,
+    "mirror_writes": true,
+    "allow_remote": false
+  },
   "allowed_directories": [],
   "mcp_servers": []
 }
