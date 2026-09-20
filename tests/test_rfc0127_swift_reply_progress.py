@@ -1,7 +1,11 @@
 """RFC-0127: swift front ack and slow-worker progress feedback."""
 from __future__ import annotations
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LOOP = REPO_ROOT / "backend" / "app" / "agent" / "loop.py"
 from app.agent.front_responder import (
     SAFE_ACK,
     FrontReply,
@@ -36,6 +40,13 @@ async def test_generate_front_reply_fallback_ack_when_no_provider():
     assert reply.text
     assert (reply.first_text_ms or 0) >= 0
     assert (reply.complete_ms or 0) >= 0
+
+
+def test_managed_follow_up_turn_starts_swift_lane_and_progress():
+    """Task follow-ups use continue_existing=True with extra_prompt; must still ack."""
+    text = LOOP.read_text(encoding="utf-8")
+    assert 'user_turn = (extra_prompt or "").strip()' in text
+    assert "not pending_tool and (not continue_existing or user_turn)" in text
 
 
 def test_mark_worker_useful_records_task():

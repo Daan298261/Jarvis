@@ -1158,7 +1158,8 @@ class AgentRuntime:
                 )
                 return
             working.task_class = (follow_route.task_class if follow_route else classify_task(extra_prompt or prompt))
-        if not continue_existing and not pending_tool and not extra_prompt:
+        user_turn = (extra_prompt or "").strip()
+        if not pending_tool and (not continue_existing or user_turn):
             progress_watch = asyncio.create_task(
                 run_worker_progress_watchdog(
                     task_id,
@@ -1177,12 +1178,12 @@ class AgentRuntime:
                         history=existing,
                     )
                 )
-            else:
+            elif not continue_existing:
                 await BUS.publish(
                     task_id,
                     "chat_tts",
                     "Acknowledged",
-                    task_acknowledgement(prompt),
+                    task_acknowledgement(extra_prompt or prompt),
                     stage="understand",
                 )
         await self._update(task_id, exposed_tools=_exposed_csv(working, extra_prompt or prompt))
