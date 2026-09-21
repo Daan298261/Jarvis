@@ -1,4 +1,5 @@
 import { jarvisApiUrl } from "./apiOrigin"
+import { ownerFacingApiMessage } from "./setup/ownerFacing"
 
 export function getPrivateKey(): string {
   try {
@@ -85,12 +86,44 @@ async function throwIfNotOk(response: Response): Promise<void> {
   } catch {
     // not JSON
   }
-  throw new ApiError(response.status, errorDetail || response.statusText, parsed)
+  throw new ApiError(response.status, ownerFacingApiMessage(errorDetail || response.statusText), parsed)
+}
+
+let desktopSessionPromise: Promise<boolean> | null = null
+
+export async function ensureDesktopSession(): Promise<boolean> {
+  if (!desktopSessionPromise) {
+    desktopSessionPromise = (async () => {
+      try {
+        const response = await fetch(jarvisApiUrl("/api/auth/desktop-session"), { method: "POST" })
+        if (!response.ok) return false
+        const data = (await response.json()) as { ok?: boolean; private_key?: string }
+        if (typeof data.private_key === "string" && data.private_key.trim()) {
+          setPrivateKey(data.private_key)
+        }
+        return Boolean(data.ok)
+      } catch {
+        return false
+      }
+    })()
+  }
+  const ok = await desktopSessionPromise
+  if (!ok) desktopSessionPromise = null
+  return ok
+}
+
+async function fetchWithDesktopRecovery(path: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(jarvisApiUrl(path), init)
+  if (response.status !== 401) return response
+  const recovered = await ensureDesktopSession()
+  if (!recovered) return response
+  const headers = authHeaders(init?.headers)
+  return fetch(jarvisApiUrl(path), { ...init, headers })
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
-  const response = await fetch(jarvisApiUrl(path), {
+  const response = await fetchWithDesktopRecovery(path, {
     ...init,
     headers,
   })
@@ -100,7 +133,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function apiForm<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
   const headers = authHeaders(init?.headers)
-  const response = await fetch(jarvisApiUrl(path), {
+  const response = await fetchWithDesktopRecovery(path, {
     method: "POST",
     ...init,
     headers,
@@ -4783,7 +4816,7 @@ async function fetchCybersecurityJson<T>(
     ...(init?.headers as Record<string, string> | undefined),
   })
   try {
-    const response = await fetch(jarvisApiUrl(path), { ...init, headers })
+    const response = await fetchWithDesktopRecovery(path, { ...init, headers })
     if (!response.ok) {
       const text = await response.text()
       let message = text || response.statusText

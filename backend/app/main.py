@@ -187,6 +187,12 @@ async def startup() -> None:
         save_settings(current)
     REGISTRY.apply_settings(current)
     try:
+        from .auth import ensure_owner_private_key
+
+        ensure_owner_private_key()
+    except Exception:
+        logging.debug("Owner private key ensure on startup skipped", exc_info=True)
+    try:
         from .decision.hooks import register_decision_hooks
 
         register_decision_hooks()

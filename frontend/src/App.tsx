@@ -27,7 +27,8 @@ import { ContextRepoPage } from "./pages/ContextRepo"
 import { TrajectoriesPage } from "./pages/Trajectories"
 import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
-import { api, getAwayMode, getDiagnostics, getLicenseStatus, getSetupStatus, listCodingDecisionInbox, listSwarmNodes, type AwayModeState, type LicenseStatus, type SwarmNode, type Task } from "./api"
+import { api, ensureDesktopSession, getAwayMode, getDiagnostics, getLicenseStatus, getSetupStatus, isApiError, listCodingDecisionInbox, listSwarmNodes, type AwayModeState, type LicenseStatus, type SwarmNode, type Task } from "./api"
+import { collectHealthIssues, type SelfCheckSnapshot } from "./hud/systemHealth"
 import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
 import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
 import { PortalNav } from "./components/PortalNav"
@@ -144,6 +145,8 @@ function OwnerPortal() {
   const [swarmNodes, setSwarmNodes] = useState<SwarmNode[]>([])
   const [decisionInboxCount, setDecisionInboxCount] = useState(0)
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null)
+  const [selfCheck, setSelfCheck] = useState<SelfCheckSnapshot | null>(null)
+  const [portalApiError, setPortalApiError] = useState<string | null>(null)
 
   const setUiMode = useCallback((mode: UiMode) => {
     setUiModeState(mode)
@@ -156,7 +159,25 @@ function OwnerPortal() {
   const isSetup = location.pathname.startsWith("/setup")
 
   useEffect(() => {
-    const tick = () => api<any>("/api/model").then(setModel).catch(() => undefined)
+    void ensureDesktopSession()
+  }, [])
+
+  useEffect(() => {
+    const tick = () =>
+      api<any>("/api/model")
+        .then((snap) => {
+          setModel(snap)
+          setPortalApiError(null)
+        })
+        .catch((err: unknown) => {
+          if (isApiError(err) && err.status === 401) {
+            setPortalApiError(
+              "Authentication required. On this PC the HUD should be allowed without a key; remote LAN clients still need the owner key.",
+            )
+          } else if (err instanceof Error && err.message) {
+            setPortalApiError(err.message)
+          }
+        })
     tick()
     const id = window.setInterval(tick, 8000)
     return () => window.clearInterval(id)
@@ -231,6 +252,7 @@ function OwnerPortal() {
         .then((res) => setDecisionInboxCount(res.items?.length || 0))
         .catch(() => undefined)
       getDiagnostics().then(setDiagnostics).catch(() => undefined)
+      api<SelfCheckSnapshot>("/api/system/self-check").then(setSelfCheck).catch(() => undefined)
     }
     tick()
     const id = window.setInterval(tick, 8000)
@@ -297,12 +319,11 @@ function OwnerPortal() {
 
   const status = modelStatus()
 
-  const licenseBad = useMemo(() => {
-    const code = String(license?.validation?.status || license?.last_status || "").toLowerCase()
-    return ["tamper_detected", "invalid_signature", "expired", "cluster_mismatch"].includes(code)
-  }, [license])
-
-  const systemDegraded = ((!model?.loaded && !model?.loading && !!model?.last_error) || licenseBad)
+  const healthIssues = useMemo(
+    () => collectHealthIssues({ model, license, selfCheck, apiError: portalApiError }),
+    [model, license, selfCheck, portalApiError],
+  )
+  const systemDegraded = healthIssues.length > 0
   const statusOnline = !systemDegraded
 
   const appVersion = String(diagnostics?.application_version || "0.0.0")
@@ -388,6 +409,7 @@ function OwnerPortal() {
         swarmNodes={swarmNodes}
         decisionInboxCount={decisionInboxCount}
         systemDegraded={systemDegraded}
+        healthIssues={healthIssues}
       >
         {routes}
       </HudShell>

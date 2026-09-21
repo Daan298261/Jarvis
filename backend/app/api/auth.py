@@ -4,9 +4,11 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from ..auth import (
+    ensure_owner_private_key,
     extract_key_from_request,
     generate_private_key,
     get_effective_private_key,
+    is_local_owner_host,
     private_key_file_path,
     verify_key,
 )
@@ -55,6 +57,19 @@ async def verify_auth(request: Request, body: AuthVerifyIn | None = None):
     if not valid:
         raise HTTPException(status_code=401, detail="Invalid private key")
     return {"valid": True, "auth_required": True}
+
+
+@router.post("/desktop-session")
+async def desktop_session(request: Request):
+    """Silently prepare the owner console session on this PC. Never for LAN/remote."""
+    host = request.client.host if request.client else ""
+    if not is_local_owner_host(host):
+        raise HTTPException(status_code=403, detail="Desktop session is only available on this PC")
+    ensure_owner_private_key()
+    key = get_effective_private_key()
+    if not key:
+        raise HTTPException(status_code=503, detail="Could not prepare this PC's session")
+    return {"ok": True, "private_key": key}
 
 
 @router.post("/generate-key")

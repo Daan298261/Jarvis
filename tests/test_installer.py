@@ -137,6 +137,8 @@ def test_build_script_invokes_iscc():
     assert "JarvisLicenseManager" in text
     assert "issue-release-unrestricted-license.ps1" in text
     assert "Unrestricted license issuance failed" in text
+    assert "$Release" in text
+    assert "Jarvis-unrestricted.jarvis-license" in text
 
 
 def test_vendor_license_manager_is_excluded_from_inno_payload():
@@ -162,6 +164,9 @@ def test_readme_documents_build_oneliner():
     text = _read(README)
     assert "build-installer.ps1" in text
     assert "JarvisSetup.exe" in text
+    assert "Jarvis-unrestricted.jarvis-license" in text
+    assert "$Release" in text or "-Release" in text
+    assert "1.4.6" in text
 
 
 def test_optional_tauri_shell_sources():

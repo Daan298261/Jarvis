@@ -1,15 +1,18 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { refreshSessionPersonality } from "./sessionPersonality"
-import { Link, NavLink } from "react-router-dom"
+import { Link, NavLink, useLocation } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode, Task } from "../api"
 import { HelpPanel, HelpTrigger } from "../help/HelpPanel"
 import { PortalNav } from "../components/PortalNav"
 import { HudHealthRail } from "./HudHealthRail"
+import { HudLocalStatus } from "./HudLocalStatus"
 import { HudModelSelector } from "./HudModelSelector"
 import { HudOpsRail } from "./HudOpsRail"
 import type { UiMode } from "./uiMode"
 import { HudOverlayProvider, useHudOverlay } from "./hudOverlayContext"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
+import type { HealthIssue } from "./systemHealth"
+import { HudStarfield } from "./HudStarfield"
 import "./hud.css"
 import "./hud-v2.css"
 
@@ -47,6 +50,7 @@ type HudTopChromeProps = {
   hexSuiteExpanded?: boolean
   onDaybreakToggle?: () => void
   onAdminNav?: () => void
+  healthIssues?: HealthIssue[]
 }
 
 export function HudTopChrome({
@@ -69,6 +73,7 @@ export function HudTopChrome({
   hexSuiteExpanded = false,
   onDaybreakToggle,
   onAdminNav,
+  healthIssues = [],
 }: HudTopChromeProps) {
   return (
     <header className="hud-top">
@@ -80,9 +85,7 @@ export function HudTopChrome({
             <strong>JARVIS</strong>
           </Link>
         </div>
-        <span className={`hud-local-state${statusOnline ? "" : " degraded"}`}>
-          LOCAL · {statusOnline ? "ONLINE" : "DEGRADED"}
-        </span>
+        <HudLocalStatus statusOnline={statusOnline} issues={healthIssues} />
         <span className="hud-top-meta">v{version}</span>
       </div>
 
@@ -199,6 +202,7 @@ export type HudShellProps = {
   swarmNodes: SwarmNode[]
   decisionInboxCount: number
   systemDegraded: boolean
+  healthIssues?: HealthIssue[]
 }
 
 export function HudShell(props: HudShellProps) {
@@ -227,13 +231,16 @@ function HudShellInner({
   swarmNodes,
   decisionInboxCount,
   systemDegraded,
+  healthIssues = [],
   model,
 }: HudShellProps) {
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
   const { hexSuiteExpanded, toggleHexSuite, dismissHexSuiteForOverlay } = useHudOverlay()
+  const location = useLocation()
   const [adminOpen, setAdminOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [panel, setPanel] = useState<HudPanel>(null)
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
 
   useEffect(() => {
     refreshSessionPersonality().catch(() => undefined)
@@ -286,8 +293,12 @@ function HudShellInner({
     toggleHexSuite()
   }
 
+  const skyOpen = !isChat || adminOpen || helpOpen || panel !== null || modelMenuOpen
+  const pulseKey = `${location.pathname}|${skyOpen ? "sky" : "cluster"}|${panel ?? ""}|${adminOpen}|${helpOpen}`
+
   return (
-    <div className="hud-app">
+    <div className={`hud-app${skyOpen ? " hud-sky" : ""}`}>
+      <HudStarfield mode={skyOpen ? "sky" : "cluster"} pulseKey={pulseKey} />
       <HudTopChrome
         version={version}
         statusOnline={statusOnline}
@@ -307,7 +318,9 @@ function HudShellInner({
         hexSuiteExpanded={hexSuiteExpanded}
         onDaybreakToggle={onDaybreakToggle}
         onAdminNav={closeAdminDrawer}
+        healthIssues={healthIssues}
         onModelMenuOpenChange={(open) => {
+          setModelMenuOpen(open)
           if (open) {
             setAdminOpen(false)
             setHelpOpen(false)
@@ -326,7 +339,7 @@ function HudShellInner({
           <div className="hud-admin-nav">
             <PortalNav variant="hud" />
           </div>
-          <main className="hud-admin-main">{children}</main>
+          <main className="hud-admin-main" key={location.pathname}>{children}</main>
         </>
       )}
 
@@ -349,6 +362,7 @@ function HudShellInner({
                 swarmNodes={swarmNodes}
                 decisionInboxCount={decisionInboxCount}
                 systemDegraded={systemDegraded}
+                healthIssues={healthIssues}
               />
             </aside>
           )}

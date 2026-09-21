@@ -35,6 +35,23 @@ From the repository root:
 
 Output: `installer\windows\dist\JarvisSetup.exe`
 
+## Release cuts (required)
+
+Every **shipped** `JarvisSetup.exe` must also emit an owner unrestricted license beside Setup (not inside the Inno payload):
+
+- `installer\windows\dist\Jarvis-unrestricted.jarvis-license`
+
+Jarvis **1.4.6** was cut without this file. Following releases must generate it as part of the installer build.
+
+From the repository root, on the **vendor machine** that already has `issuer.key` (`JARVIS_LICENSE_ISSUER_DIR` or `%LOCALAPPDATA%\Jarvis\license-issuer\`):
+
+```powershell
+$env:JARVIS_VENDOR_RELEASE = "1"
+.\installer\windows\build-installer.ps1 -Release
+```
+
+The `-Release` switch **fails the cut** if the license file is missing, unsigned, or could not be issued. Public clones without the vendor key may still run `build-installer.ps1` without `-Release` (the license step is skipped). Do not ship a GitHub/stable build that way.
+
 Release builds run `stage-voice-default.ps1` to bundle **Kokoro-82M** under `models/tts/kokoro-82m` so the default household butler speaks out of the box (RFC-0070). Developer escape hatch:
 
 ```powershell

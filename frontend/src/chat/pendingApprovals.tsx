@@ -8,7 +8,6 @@ import {
   useState,
   type ReactNode,
 } from "react"
-import { getPrivateKey } from "../api"
 import {
   decidePendingApproval,
   getPendingApproval,
@@ -82,12 +81,6 @@ export function PendingApprovalsProvider({ children }: { children: ReactNode }) 
   }, [])
 
   const refresh = useCallback(async () => {
-    if (!getPrivateKey()) {
-      setPending([])
-      setActive(null)
-      setSyncError(null)
-      return
-    }
     setLoading(true)
     try {
       const remote = await listPendingApprovals()
