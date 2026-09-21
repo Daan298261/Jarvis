@@ -317,8 +317,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
         cacheConversationSnapshot(payload.messages)
     }
-    fun pair(endpoint: String, pin: String, credential: String) = action {
-        api.configure(endpoint, pin)
+    fun pair(endpoint: String, pin: String, credential: String, candidates: List<String> = emptyList()) = action {
+        api.configure(endpoint, pin, candidates)
         if (api.deviceId.isEmpty()) api.pair(credential.trim())
         try {
             api.session()

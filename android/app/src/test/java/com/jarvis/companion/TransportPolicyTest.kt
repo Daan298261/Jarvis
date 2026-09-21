@@ -18,4 +18,23 @@ class TransportPolicyTest {
             assertFalse(TransportPolicy.replayable("POST", path, "not-a-message"))
         }
     }
+
+    @Test fun pairingFailoverIncludesEnrollAndChallenge() {
+        assertTrue(TransportPolicy.pairingFailover("/enroll"))
+        assertTrue(TransportPolicy.pairingFailover("/challenge/device-1"))
+        assertFalse(TransportPolicy.pairingFailover("/messages"))
+    }
+
+    @Test fun ordersPublicAndRelayBeforePrivateLan() {
+        val ordered = TransportPolicy.orderedForReachability(
+            listOf(
+                "https://10.2.0.2:4781",
+                "https://relay.example.test:4781",
+                "https://203.0.113.4:4781",
+            ),
+        )
+        assertEquals("https://relay.example.test:4781", ordered[0])
+        assertEquals("https://203.0.113.4:4781", ordered[1])
+        assertEquals("https://10.2.0.2:4781", ordered.last())
+    }
 }
