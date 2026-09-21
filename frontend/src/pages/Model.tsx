@@ -116,7 +116,8 @@ export function ModelPage() {
       <div className="grid two">
         <div className="card">
           <div className="kv">
-            <b>Active</b><span>{model?.active_model || "unloaded"}</span>
+            <b>Loaded now</b>
+            <span>{model?.loaded ? (model.active_model || (model.advertised_models || []).join(", ") || "runtime ready") : model?.loading ? "loading…" : "unloaded"}</span>
             <b>Family</b><span>{model?.family || "—"}</span>
             <b>Quantization</b><span>{model?.quantization}</span>
             <b>Context</b><span>{model?.context_size}</span>
