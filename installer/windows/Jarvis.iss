@@ -573,7 +573,7 @@ begin
     { Upgrades used to skip llama.cpp prepare even when llama-server.exe was absent,
       which made Start Jarvis throw and the shortcut window close immediately. }
     BootstrapSkipHeavy := FileExists(AddBackslash(ExistingInstallDir) + 'runtime\llama.cpp\llama-server.exe');
-  end
+  end;
   if SelectedAction = 0 then
   begin
     if ExistingVersionRelation > 0 then
