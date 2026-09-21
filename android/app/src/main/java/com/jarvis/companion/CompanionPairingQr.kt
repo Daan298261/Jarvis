@@ -1,10 +1,16 @@
 package com.jarvis.companion
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-data class CompanionPairingQr(val endpoint: String, val serverPin: String, val code: String)
+data class CompanionPairingQr(
+    val endpoint: String,
+    val serverPin: String,
+    val code: String,
+    val endpoints: List<String> = emptyList(),
+)
 
 object CompanionPairingQrParser {
     fun parse(raw: String): CompanionPairingQr {
@@ -22,6 +28,10 @@ object CompanionPairingQrParser {
             is CompanionCodeValidation.Valid -> validation.code
             else -> throw IllegalArgumentException("The pairing QR code needs a valid 6-digit code.")
         }
-        return CompanionPairingQr(endpoint, pin, code)
+        val endpoints = payload["endpoints"]?.jsonArray?.mapNotNull { element ->
+            runCatching { TransportPolicy.origin(element.jsonPrimitive.content) }.getOrNull()
+        }.orEmpty()
+        val ordered = TransportPolicy.orderedForReachability(endpoints + endpoint)
+        return CompanionPairingQr(ordered.firstOrNull() ?: endpoint, pin, code, ordered)
     }
 }

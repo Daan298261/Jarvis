@@ -60,15 +60,16 @@ class JarvisApi(context: Context) {
         }
     }
 
-    fun configure(url: String, publicPin: String) {
-        val address = TransportPolicy.origin(url)
+    fun configure(url: String, publicPin: String, candidates: List<String> = emptyList()) {
         require(publicPin.matches(Regex("[a-fA-F0-9]{64}"))) { "Server fingerprint must contain 64 hexadecimal characters" }
+        val ordered = TransportPolicy.orderedForReachability(candidates + url).take(8)
+        val address = ordered.firstOrNull() ?: TransportPolicy.origin(url)
         val changed = pin != publicPin.lowercase()
         endpoint = address
         pin = publicPin.lowercase()
         if (changed) { deviceId = ""; token = ""; expiresAt = 0; endpoints = emptyList(); cachedClient = null }
         preferred = ""; preferredAt = 0
-        endpoints = (listOf(endpoint) + endpoints).distinct().take(8)
+        endpoints = ordered.ifEmpty { listOf(endpoint) }
         prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).putString("endpoints", JSONArray(endpoints).toString()).apply()
     }
 
@@ -160,8 +161,11 @@ class JarvisApi(context: Context) {
         val client = pinnedClient()
         val requestId = if (path == "/messages" && body != null) runCatching { JSONObject(body.toString(Charsets.UTF_8)).optString("request_id") }.getOrNull() else null
         val retry = TransportPolicy.replayable(method, path, requestId)
+        val failover = retry || TransportPolicy.pairingFailover(path)
         val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }
-        val addresses = (listOfNotNull(recent) + endpoints + endpoint).filter { it.isNotBlank() }.distinct().let { if (retry) it else it.take(1) }
+        val addresses = TransportPolicy.orderedForReachability(
+            listOfNotNull(recent) + endpoints + endpoint,
+        ).let { if (failover) it else it.take(1) }
         var failure: java.io.IOException? = null
         for (address in addresses) {
         val request = Request.Builder().url("${TransportPolicy.origin(address)}/api/companion$path")
