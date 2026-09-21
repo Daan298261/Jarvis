@@ -29,19 +29,24 @@ $llama = Join-Path $Root "runtime\llama.cpp\llama-server.exe"
 $q8 = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF\Qwen3.5-9B-abliterated-Q8_0.gguf"
 $q6 = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF\Qwen3.5-9B-abliterated-Q6_K.gguf"
 $q4 = Join-Path $Root "models\Qwen3.5-27B-GGUF\Qwen3.5-27B-Q4_K_M.gguf"
+$bootstrapGguf = Join-Path $Root "models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"
 
-if (-not (Test-Path $llama)) { throw "llama-server.exe missing at $llama" }
 $model = $null
 if (Test-Path $q8) { $model = $q8 }
 elseif (Test-Path $q6) { $model = $q6 }
 elseif (Test-Path $q4) { $model = $q4 }
-if (-not $model) {
-    throw "No GGUF found. Download Qwen3.5-9B Abliterated Q8_0 (preferred) or keep Qwen3.5-27B Q4_K_M as Expert. See docs/INSTALL.md."
+elseif (Test-Path $bootstrapGguf) { $model = $bootstrapGguf }
+$voiceOnly = -not $model
+if ($voiceOnly) {
+    Write-Host "No local GGUF found. Starting as a household voice chatbot (Kokoro). Desktop/LLM tools stay off until you add a model or re-run bootstrap.ps1 -InstallLocalLLM." -ForegroundColor Yellow
+    $SkipModelLoad = $true
+} elseif (-not (Test-Path $llama)) {
+    throw "llama-server.exe missing at $llama"
 }
 Write-Host "Python: $python"
 Write-Host "Node: $node"
-Write-Host "llama-server: $llama"
-Write-Host "Model: $model"
+if (Test-Path $llama) { Write-Host "llama-server: $llama" } else { Write-Host "llama-server: (not installed; voice chatbot only)" }
+if ($model) { Write-Host "Model: $model" } else { Write-Host "Model: (none; JARVIS_SKIP_MODEL=1)" }
 
 Write-Step "Building web portal if needed"
 $dist = Join-Path $Root "frontend\dist\index.html"

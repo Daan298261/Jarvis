@@ -82,10 +82,13 @@ android/*.keystore
 android/app/src/main/assets/orb/
 
 # Vendor license issuer (RFC-0087) — private keys and the License Manager GUI
-# never belong in this public repo. Keep a private overlay on the vendor machine.
+# never belong in this public repo. Generate locally via ensure-vendor-issuer.ps1.
+.vendor/*
+!.vendor/README.md
 tools/license_manager/
 backend/app/licensing/manager_app.py
 **/issuer.key
+**/issuer.pub
 **/issuer.sqlite
 **/*.jarvis-license
 JarvisLicenseManager.exe

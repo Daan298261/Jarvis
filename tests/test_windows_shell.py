@@ -34,6 +34,13 @@ def test_start_jarvis_launches_tray_helper():
     assert "Start-TrayHelper" in text
 
 
+def test_start_jarvis_allows_voice_only_without_gguf():
+    text = _read(START_SCRIPT)
+    assert "JARVIS_SKIP_MODEL" in text
+    assert "voice chatbot" in text.lower()
+    assert "throw \"No GGUF found" not in text
+
+
 def test_stop_jarvis_still_mentions_llama_server():
     text = _read(STOP_SCRIPT)
     assert "llama-server" in text.lower()

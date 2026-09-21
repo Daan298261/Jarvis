@@ -43,14 +43,15 @@ Every **shipped** `JarvisSetup.exe` must also emit an owner unrestricted license
 
 Jarvis **1.4.6** was cut without this file. Following releases must generate it as part of the installer build.
 
-From the repository root, on the **vendor machine** that already has `issuer.key` (`JARVIS_LICENSE_ISSUER_DIR` or `%LOCALAPPDATA%\Jarvis\license-issuer\`):
+Signing keys are created once under gitignored `.vendor/license-issuer/` (or `JARVIS_LICENSE_ISSUER_DIR`). They are not stored under `%LOCALAPPDATA%\Jarvis` (that folder is the Inno `{app}` and was wiping keys on upgrade).
 
 ```powershell
+.\installer\windows\ensure-vendor-issuer.ps1
 $env:JARVIS_VENDOR_RELEASE = "1"
 .\installer\windows\build-installer.ps1 -Release
 ```
 
-The `-Release` switch **fails the cut** if the license file is missing, unsigned, or could not be issued. Public clones without the vendor key may still run `build-installer.ps1` without `-Release` (the license step is skipped). Do not ship a GitHub/stable build that way.
+The `-Release` switch **fails the cut** if the license file is missing, unsigned, or could not be issued. Do not ship a GitHub/stable build without that file.
 
 Release builds run `stage-voice-default.ps1` to bundle **Kokoro-82M** under `models/tts/kokoro-82m` so the default household butler speaks out of the box (RFC-0070). Developer escape hatch:
 
@@ -76,6 +77,8 @@ Optional Expert 27B (large download):
 ```powershell
 .\installer\windows\bootstrap.ps1 -InstallExpert27B
 ```
+
+A public git clone without GGUFs starts as a **household voice chatbot** (Kokoro only). Pass `-InstallLocalLLM` to download llama.cpp + 9B.
 
 ## Desktop sign-off
 

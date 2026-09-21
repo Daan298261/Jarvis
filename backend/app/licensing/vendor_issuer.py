@@ -24,18 +24,49 @@ from .seal import product_seal_public_hex, seal_bytes
 SCHEMA_VERSION = 1
 
 
+def repo_vendor_issuer_dir() -> Path:
+    from ..config import repo_root
+
+    return repo_root() / ".vendor" / "license-issuer"
+
+
+def home_vendor_issuer_dir() -> Path:
+    return Path.home() / ".jarvis" / "license-issuer"
+
+
+def _inno_install_dir() -> Path | None:
+    local = (os.environ.get("LOCALAPPDATA") or "").strip()
+    if not local:
+        return None
+    return Path(local) / "Jarvis"
+
+
 def issuer_data_dir() -> Path:
+    """Gitignored overlay in the git checkout, else ~/.jarvis — never {app}.
+
+    Inno installs into %LOCALAPPDATA%\\Jarvis, so keys stored there were wiped
+    on upgrade. The checkout `.vendor/license-issuer/` (gitignored) is durable.
+    """
     override = (os.environ.get("JARVIS_LICENSE_ISSUER_DIR") or "").strip()
     if override:
         path = Path(override)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    from ..config import repo_root
+
+    repo_vendor = repo_vendor_issuer_dir()
+    home_vendor = home_vendor_issuer_dir()
+    for path in (repo_vendor, home_vendor):
+        if (path / "issuer.key").is_file() and (path / "issuer.pub").is_file():
+            return path
+    install = _inno_install_dir()
+    if install is not None and repo_root().resolve() == install.resolve():
+        chosen = home_vendor
     else:
-        local = (os.environ.get("LOCALAPPDATA") or "").strip()
-        if local:
-            path = Path(local) / "Jarvis" / "license-issuer"
-        else:
-            path = Path.home() / ".jarvis" / "license-issuer"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+        chosen = repo_vendor
+    chosen.mkdir(parents=True, exist_ok=True)
+    return chosen
+
 
 
 def issuer_db_path() -> Path:
@@ -400,7 +431,10 @@ def issue_release_unrestricted_license(*, output_dir: Path) -> dict[str, Any]:
 def _cli_issue_unrestricted(out_dir: str) -> int:
     dest = Path(out_dir)
     dest.mkdir(parents=True, exist_ok=True)
-    load_existing_vendor_keys()
+    created = not vendor_private_path().is_file()
+    load_or_create_vendor_keys()
+    if created:
+        print(f"Created vendor issuer keys in {issuer_data_dir()} (gitignored; never commit issuer.key).", flush=True)
     issue_release_unrestricted_license(output_dir=dest)
     return 0
 
@@ -443,12 +477,14 @@ __all__ = [
     "init_db",
     "issue_customer_license",
     "issue_release_unrestricted_license",
+    "home_vendor_issuer_dir",
     "issuer_data_dir",
     "list_licensees",
     "list_licenses",
     "list_modules",
     "load_existing_vendor_keys",
     "load_or_create_vendor_keys",
+    "repo_vendor_issuer_dir",
     "OWNER_UNRESTRICTED_STABLE_NAME",
     "OWNER_UNRESTRICTED_PACKAGE_CLASS",
     "renew_customer_license",
