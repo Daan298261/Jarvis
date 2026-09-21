@@ -17,14 +17,37 @@ Set-Location $Root
 
 function Write-Step($message) { Write-Host "`n==> $message" -ForegroundColor Cyan }
 
+function Show-StartupFailure {
+    param($ErrorRecord)
+    Write-Host ""
+    Write-Host "Jarvis did not start." -ForegroundColor Red
+    if ($ErrorRecord) {
+        Write-Host ($ErrorRecord | Out-String)
+    }
+    Write-Host "This window stays open so the error is readable." -ForegroundColor Yellow
+    Write-Host "Press Enter to close."
+    try {
+        if ([Console]::IsInputRedirected) {
+            Start-Sleep -Seconds 30
+            return
+        }
+    } catch { }
+    [void](Read-Host)
+}
+
+try {
+
 Write-Step "Verifying dependencies"
 $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
 if (Test-Path $venvPython) {
     $python = $venvPython
 } else {
-    $python = (Get-Command python).Source
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pythonCmd) {
+        throw "Python was not found on PATH. Re-run installer\windows\bootstrap.ps1 or install Python 3, then start Jarvis again."
+    }
+    $python = $pythonCmd.Source
 }
-$node = (Get-Command node).Source
 $llama = Join-Path $Root "runtime\llama.cpp\llama-server.exe"
 $q8 = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF\Qwen3.5-9B-abliterated-Q8_0.gguf"
 $q6 = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF\Qwen3.5-9B-abliterated-Q6_K.gguf"
@@ -41,16 +64,23 @@ if ($voiceOnly) {
     Write-Host "No local GGUF found. Starting as a household voice chatbot (Kokoro). Desktop/LLM tools stay off until you add a model or re-run bootstrap.ps1 -InstallLocalLLM." -ForegroundColor Yellow
     $SkipModelLoad = $true
 } elseif (-not (Test-Path $llama)) {
-    throw "llama-server.exe missing at $llama"
+    Write-Host "llama-server.exe is missing at $llama" -ForegroundColor Yellow
+    Write-Host "The installer upgrade skipped llama.cpp prepare. Starting as a household voice chatbot until you re-run installer\windows\bootstrap.ps1." -ForegroundColor Yellow
+    $SkipModelLoad = $true
+    $voiceOnly = $true
 }
 Write-Host "Python: $python"
-Write-Host "Node: $node"
+$dist = Join-Path $Root "frontend\dist\index.html"
 if (Test-Path $llama) { Write-Host "llama-server: $llama" } else { Write-Host "llama-server: (not installed; voice chatbot only)" }
-if ($model) { Write-Host "Model: $model" } else { Write-Host "Model: (none; JARVIS_SKIP_MODEL=1)" }
+if ($model -and -not $voiceOnly) { Write-Host "Model: $model" } else { Write-Host "Model: (none; JARVIS_SKIP_MODEL=1)" }
 
 Write-Step "Building web portal if needed"
-$dist = Join-Path $Root "frontend\dist\index.html"
 if (-not (Test-Path $dist)) {
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCmd) {
+        throw "The web portal is not built and Node.js was not found on PATH. Re-run installer\windows\bootstrap.ps1."
+    }
+    Write-Host "Node: $($nodeCmd.Source)"
     Push-Location (Join-Path $Root "frontend")
     if (-not (Test-Path "node_modules")) { npm install }
     npm run build
@@ -178,3 +208,8 @@ elseif (-not $NoBrowser) {
 }
 
 Write-Host "Stop with .\stop-jarvis.ps1 or use the system tray icon (Stop / Quit)."
+
+} catch {
+    Show-StartupFailure $_
+    exit 1
+}

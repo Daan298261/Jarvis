@@ -38,6 +38,7 @@ def test_bootstrap_covers_required_steps():
         "mcp\\package-lock.json",
         "ensure-mcpconnectors",
         "llama-server",
+        "downloading and installing llama.cpp",
         "qwen3.5-9b",
         "start-jarvis",
         "winget",

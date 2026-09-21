@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.4.8"
+#define MyAppVersion "1.4.9"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -569,7 +569,11 @@ begin
   else
     SelectedAction := 0;
   if SelectedAction <= 2 then
-    BootstrapSkipHeavy := True;
+  begin
+    { Upgrades used to skip llama.cpp prepare even when llama-server.exe was absent,
+      which made Start Jarvis throw and the shortcut window close immediately. }
+    BootstrapSkipHeavy := FileExists(AddBackslash(ExistingInstallDir) + 'runtime\llama.cpp\llama-server.exe');
+  end
   if SelectedAction = 0 then
   begin
     if ExistingVersionRelation > 0 then

@@ -39,6 +39,9 @@ def test_start_jarvis_allows_voice_only_without_gguf():
     assert "JARVIS_SKIP_MODEL" in text
     assert "voice chatbot" in text.lower()
     assert "throw \"No GGUF found" not in text
+    assert "throw \"llama-server.exe missing" not in text
+    assert "Show-StartupFailure" in text
+    assert "Press Enter to close" in text
 
 
 def test_stop_jarvis_still_mentions_llama_server():

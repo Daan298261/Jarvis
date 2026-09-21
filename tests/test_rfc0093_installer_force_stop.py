@@ -74,6 +74,8 @@ def test_bootstrap_skip_heavy_and_step_timeout():
     assert "Invoke-ProcessWithTimeout" in text
     assert "bootstrap.log" in text
     assert "Test-HeavyPrepareSkippable" in text
+    assert "still install any missing" in text
+    assert "Setup complete (heavy prepare skipped)." not in text
 
 
 def test_stop_jarvis_force_kill_lockers_switch():

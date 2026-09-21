@@ -5,22 +5,26 @@
 
 .DESCRIPTION
   Installs or verifies Python, Node.js, llama.cpp CUDA binaries, Python packages,
-  Playwright Chromium, the portal build, and default Qwen3.5-9B GGUF weights.
-  Safe to re-run; skips work when files already exist.
+  Playwright Chromium, the portal build, bootstrap GGUF, and household voice.
+  Safe to re-run: present files are skipped; anything missing is downloaded and installed.
+  -SkipHeavyPrepare no longer bails out of setup.
 
 .PARAMETER InstallLocalLLM
-  Also download llama.cpp and Qwen3.5-9B GGUF weights. Public clones skip this
-  and run as a household voice chatbot until a model is added.
+  Also download Qwen3.5-9B GGUF weights. llama.cpp is installed whenever llama-server.exe is missing.
 
 .PARAMETER InstallExpert27B
   Also download the optional Expert 27B Q4_K_M model (large; not required).
   Implies -InstallLocalLLM.
 
 .PARAMETER SkipModelDownload
-  Skip Hugging Face GGUF downloads (useful when models are copied manually).
+  Skip extra Qwen GGUF downloads when those files already exist. Missing bootstrap
+  or Kokoro weights are still downloaded.
 
 .PARAMETER SkipLlamaDownload
-  Skip llama.cpp binary download (useful when runtime is already present).
+  Ignored when llama-server.exe is missing; the runtime is downloaded and installed.
+
+.PARAMETER SkipHeavyPrepare
+  Upgrade/repair hint only. Missing runtimes, packages, llama.cpp, and models are still installed.
 #>
 param(
     [switch]$InstallLocalLLM,
@@ -55,6 +59,20 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+function ConvertTo-ProcessArgumentString([string[]]$Arguments) {
+    $parts = @()
+    foreach ($arg in $Arguments) {
+        if ($null -eq $arg) { continue }
+        $text = [string]$arg
+        if ($text -match '[ \t"]') {
+            $parts += '"' + ($text -replace '"', '\"') + '"'
+        } else {
+            $parts += $text
+        }
+    }
+    return ($parts -join " ")
+}
+
 function Invoke-ProcessWithTimeout {
     param(
         [string]$Label,
@@ -64,24 +82,34 @@ function Invoke-ProcessWithTimeout {
         [int]$TimeoutMinutes = $StepTimeoutMinutes
     )
     Write-BootstrapLog "start step=$Label timeout=${TimeoutMinutes}m"
-    $proc = Start-Process -FilePath $FilePath -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory -PassThru -NoNewWindow
-    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    while (-not $proc.HasExited) {
-        if ((Get-Date) -ge $deadline) {
-            try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { }
-            Write-BootstrapLog "timeout step=$Label after ${TimeoutMinutes}m"
-            throw "${Label} timed out after $TimeoutMinutes minutes (see logs\bootstrap.log)."
-        }
-        Start-Sleep -Seconds 2
+    $argString = ConvertTo-ProcessArgumentString $Arguments
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = $argString
+    $psi.WorkingDirectory = $WorkingDirectory
+    $psi.UseShellExecute = $false
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    if (-not $proc.Start()) {
+        throw "${Label} failed to start ($FilePath)."
     }
-    if ($proc.ExitCode -ne 0) {
-        Write-BootstrapLog "failed step=$Label exit=$($proc.ExitCode)"
-        throw "${Label} failed with exit code $($proc.ExitCode) (see logs\bootstrap.log)."
+    $timeoutMs = [Math]::Max(1000, $TimeoutMinutes * 60 * 1000)
+    if (-not $proc.WaitForExit($timeoutMs)) {
+        try { $proc.Kill() } catch { }
+        Write-BootstrapLog "timeout step=$Label after ${TimeoutMinutes}m"
+        throw "${Label} timed out after $TimeoutMinutes minutes (see logs\bootstrap.log)."
+    }
+    $code = $proc.ExitCode
+    if ($code -ne 0) {
+        Write-BootstrapLog "failed step=$Label exit=$code"
+        throw "${Label} failed with exit code $code (see logs\bootstrap.log)."
     }
     Write-BootstrapLog "done step=$Label"
 }
 
 function Test-HeavyPrepareSkippable {
+    # Kept for RFC-0093 contract tests. Install never uses this as a full bail-out:
+    # each Ensure-* step downloads and installs whatever is still missing.
     $venv = Join-Path $Root ".venv\Scripts\python.exe"
     $dist = Join-Path $Root "frontend\dist\index.html"
     $llama = Join-Path $Root "runtime\llama.cpp\llama-server.exe"
@@ -90,8 +118,7 @@ function Test-HeavyPrepareSkippable {
     $hasModels = (Test-Path $voiceMarker) -or (
         (Test-Path $modelsDir) -and ((Get-ChildItem -Path $modelsDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1))
     )
-    $llamaOk = (Test-Path $llama) -or (-not $InstallLocalLLM)
-    return (Test-Path $venv) -and (Test-Path $dist) -and $llamaOk -and $hasModels
+    return (Test-Path $venv) -and (Test-Path $dist) -and (Test-Path $llama) -and $hasModels
 }
 
 function Write-Ok([string]$Message) {
@@ -104,6 +131,21 @@ function Write-Skip([string]$Message) {
 
 function Test-Command([string]$Name) {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Test-PythonImport {
+    param(
+        [string]$VenvPython,
+        [string]$Code
+    )
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $VenvPython -c $Code 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        $ErrorActionPreference = $prev
+    }
 }
 
 function Ensure-WingetPackage {
@@ -189,11 +231,25 @@ function Ensure-McpConnectors {
     if (-not (Test-Path $packageFile) -or -not (Test-Path $lockFile)) {
         throw "Jarvis connector package files are missing. Re-download the installer."
     }
+    $mcpDir = Join-Path $Root "mcp"
+    $modules = Join-Path $mcpDir "node_modules"
+    if (Test-Path $modules) {
+        Write-Skip "Gmail and WhatsApp connectors (mcp\\node_modules)"
+        return
+    }
     Write-Host "    Installing Gmail and WhatsApp connectors..."
     $env:PUPPETEER_SKIP_DOWNLOAD = "true"
-    $mcpDir = Join-Path $Root "mcp"
-    Invoke-ProcessWithTimeout -Label "mcp npm ci" -FilePath "npm" -Arguments @("ci", "--prefix", $mcpDir) -TimeoutMinutes $StepTimeoutMinutes
-    Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
+    try {
+        Invoke-ProcessWithTimeout -Label "mcp npm ci" -FilePath "npm" -Arguments @("ci", "--prefix", $mcpDir) -TimeoutMinutes $StepTimeoutMinutes
+    } catch {
+        Write-Host "    npm ci failed; downloading with npm install instead..."
+        Invoke-ProcessWithTimeout -Label "mcp npm install" -FilePath "npm" -Arguments @("install", "--prefix", $mcpDir) -TimeoutMinutes $StepTimeoutMinutes
+    } finally {
+        Remove-Item Env:PUPPETEER_SKIP_DOWNLOAD -ErrorAction SilentlyContinue
+    }
+    if (-not (Test-Path $modules)) {
+        throw "Gmail and WhatsApp connectors are still missing after npm install."
+    }
     Write-Ok "Gmail and WhatsApp connectors installed."
 }
 
@@ -213,9 +269,16 @@ function Ensure-Venv([string]$PythonExe) {
 function Ensure-PipPackages([string]$VenvPython) {
     $req = Join-Path $Root "backend\requirements.txt"
     if (-not (Test-Path $req)) { throw "Missing $req" }
+    if (Test-PythonImport -VenvPython $VenvPython -Code "import uvicorn, fastapi") {
+        Write-Skip "Python packages (uvicorn/fastapi present)"
+        return
+    }
     Write-Host "    Installing Python packages (this may take several minutes)..."
     Invoke-ProcessWithTimeout -Label "pip upgrade" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
     Invoke-ProcessWithTimeout -Label "pip requirements" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "-r", $req) -TimeoutMinutes $StepTimeoutMinutes
+    if (-not (Test-PythonImport -VenvPython $VenvPython -Code "import uvicorn, fastapi")) {
+        throw "Python packages are still missing after pip install."
+    }
     Write-Ok "Python packages from requirements.txt installed."
 }
 
@@ -236,8 +299,7 @@ for name, expected in required.items():
 if wrong:
     raise SystemExit('; '.join(wrong))
 "@
-    & $VenvPython -c $check 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    if (Test-PythonImport -VenvPython $VenvPython -Code $check) {
         if (-not (Test-Path $marker)) {
             New-Item -ItemType File -Force -Path $marker | Out-Null
         }
@@ -268,12 +330,20 @@ function Ensure-Playwright([string]$VenvPython) {
 
 function Ensure-FrontendBuild {
     $dist = Join-Path $Root "frontend\dist\index.html"
-    Push-Location (Join-Path $Root "frontend")
+    if (Test-Path $dist) {
+        Write-Skip "Portal build (frontend\\dist)"
+        return
+    }
+    $frontend = Join-Path $Root "frontend"
     Write-Host "    Installing frontend packages..."
-    Invoke-ProcessWithTimeout -Label "frontend npm ci" -FilePath "npm" -Arguments @("ci") -WorkingDirectory (Join-Path $Root "frontend") -TimeoutMinutes $StepTimeoutMinutes
+    try {
+        Invoke-ProcessWithTimeout -Label "frontend npm ci" -FilePath "npm" -Arguments @("ci") -WorkingDirectory $frontend -TimeoutMinutes $StepTimeoutMinutes
+    } catch {
+        Write-Host "    npm ci failed; downloading with npm install instead..."
+        Invoke-ProcessWithTimeout -Label "frontend npm install" -FilePath "npm" -Arguments @("install") -WorkingDirectory $frontend -TimeoutMinutes $StepTimeoutMinutes
+    }
     Write-Host "    Building portal (npm run build)..."
-    Invoke-ProcessWithTimeout -Label "frontend npm run build" -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory (Join-Path $Root "frontend") -TimeoutMinutes $StepTimeoutMinutes
-    Pop-Location
+    Invoke-ProcessWithTimeout -Label "frontend npm run build" -FilePath "npm" -Arguments @("run", "build") -WorkingDirectory $frontend -TimeoutMinutes $StepTimeoutMinutes
     if (-not (Test-Path $dist)) { throw "frontend build failed; dist/index.html missing" }
     Write-Ok "Portal built."
 }
@@ -306,13 +376,7 @@ function Ensure-LlamaCpp {
         Write-Skip "llama-server.exe"
         return
     }
-    if (-not $InstallLocalLLM) {
-        Write-Host "    Skipping llama.cpp (voice chatbot only). Re-run with -InstallLocalLLM to fetch a local GGUF runtime."
-        return
-    }
-    if ($SkipLlamaDownload) {
-        throw "llama-server.exe is missing and -SkipLlamaDownload was set."
-    }
+    Write-Host "    llama-server.exe is missing; downloading and installing llama.cpp..."
 
     $runtimeDir = Join-Path $Root "runtime\llama.cpp"
     $tempDir = Join-Path $env:TEMP "jarvis-llama-setup"
@@ -354,13 +418,37 @@ function Invoke-HfDownload {
     Invoke-ProcessWithTimeout -Label "huggingface download $RepoId" -FilePath $VenvPython -Arguments $hfArgs -TimeoutMinutes ($StepTimeoutMinutes * 2)
 }
 
-function Ensure-DefaultModels([string]$VenvPython) {
-    if ($SkipModelDownload) {
-        Write-Host "    Skipping model download (-SkipModelDownload)."
+function Ensure-BootstrapGguf([string]$VenvPython) {
+    $dir = Join-Path $Root "models\bootstrap"
+    $gguf = Join-Path $dir "Ornith-1.5-9B-Q4_K_M.gguf"
+    if ((Test-Path $gguf) -and ((Get-Item $gguf).Length -gt 0)) {
+        Write-Skip "Ornith bootstrap GGUF"
         return
     }
+    Write-Host "    Bootstrap GGUF is missing; downloading Ornith 1.5 9B Q4_K_M..."
+    Invoke-HfDownload -VenvPython $VenvPython `
+        -RepoId "ornith-ai/Ornith-1.5-9B-GGUF" `
+        -Includes @("*Q4_K_M*.gguf") `
+        -LocalDir $dir
+    if (-not (Test-Path $gguf)) {
+        $found = Get-ChildItem -Path $dir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*Q4_K_M*.gguf" } |
+            Select-Object -First 1
+        if ($found -and $found.FullName -ne $gguf) {
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Copy-Item -Force $found.FullName $gguf
+        }
+    }
+    if (-not (Test-Path $gguf) -or ((Get-Item $gguf).Length -le 0)) {
+        throw "Ornith bootstrap GGUF is still missing after download."
+    }
+    Write-Ok "Ornith bootstrap GGUF ready."
+}
+
+function Ensure-DefaultModels([string]$VenvPython) {
+    Ensure-BootstrapGguf -VenvPython $VenvPython
     if (-not $InstallLocalLLM) {
-        Write-Host "    Skipping Qwen GGUF download (voice chatbot only). Re-run with -InstallLocalLLM to fetch 9B."
+        Write-Host "    Skipping extra Qwen GGUF download (bootstrap model is enough). Re-run with -InstallLocalLLM to fetch 9B."
         return
     }
 
@@ -400,10 +488,6 @@ function Ensure-DefaultModels([string]$VenvPython) {
 }
 
 function Ensure-KokoroVoice([string]$VenvPython) {
-    if ($SkipModelDownload) {
-        Write-Host "    Skipping household voice download (-SkipModelDownload)."
-        return
-    }
     $dir = Join-Path $Root "models\tts\kokoro-82m"
     $marker = Join-Path $dir ".jarvis_staged_ok"
     $existing = Get-ChildItem -Path $dir -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -439,20 +523,9 @@ Write-Host "This window prepares Jarvis on your PC. You can close it when you se
 Write-Host "Install folder: $Root" -ForegroundColor DarkGray
 Write-Host "Log: $BootstrapLogPath" -ForegroundColor DarkGray
 
-if ($SkipHeavyPrepare -or (Test-HeavyPrepareSkippable)) {
-    Write-BootstrapLog "skip-heavy-prepare: repair/upgrade path or artifacts already present"
-    Write-Host ""
-    Write-Host "Skipping heavy prepare (connectors, pip, models, portal rebuild already present or not required)." -ForegroundColor DarkGray
-    Write-Step "Finishing"
-    New-Item -ItemType Directory -Force -Path `
-        (Join-Path $Root "data"), `
-        (Join-Path $Root "logs"), `
-        (Join-Path $Root "data\queue\pending"), `
-        (Join-Path $Root "data\queue\processed"), `
-        (Join-Path $Root "data\queue\failed") | Out-Null
-    Write-Host ""
-    Write-Host "Setup complete (heavy prepare skipped)." -ForegroundColor Green
-    exit 0
+if ($SkipHeavyPrepare) {
+    Write-BootstrapLog "SkipHeavyPrepare: still install any missing runtime, packages, llama.cpp, and models"
+    Write-Host "Upgrade/repair: installing anything that is missing (already-present files are skipped)." -ForegroundColor DarkGray
 }
 
 Write-Step "Checking NVIDIA driver (recommended)"
