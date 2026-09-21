@@ -8,8 +8,13 @@
   Playwright Chromium, the portal build, and default Qwen3.5-9B GGUF weights.
   Safe to re-run; skips work when files already exist.
 
+.PARAMETER InstallLocalLLM
+  Also download llama.cpp and Qwen3.5-9B GGUF weights. Public clones skip this
+  and run as a household voice chatbot until a model is added.
+
 .PARAMETER InstallExpert27B
   Also download the optional Expert 27B Q4_K_M model (large; not required).
+  Implies -InstallLocalLLM.
 
 .PARAMETER SkipModelDownload
   Skip Hugging Face GGUF downloads (useful when models are copied manually).
@@ -18,6 +23,7 @@
   Skip llama.cpp binary download (useful when runtime is already present).
 #>
 param(
+    [switch]$InstallLocalLLM,
     [switch]$InstallExpert27B,
     [switch]$SkipModelDownload,
     [switch]$SkipLlamaDownload,
@@ -79,9 +85,13 @@ function Test-HeavyPrepareSkippable {
     $venv = Join-Path $Root ".venv\Scripts\python.exe"
     $dist = Join-Path $Root "frontend\dist\index.html"
     $llama = Join-Path $Root "runtime\llama.cpp\llama-server.exe"
+    $voiceMarker = Join-Path $Root "models\tts\kokoro-82m\.jarvis_staged_ok"
     $modelsDir = Join-Path $Root "models"
-    $hasModels = (Test-Path $modelsDir) -and ((Get-ChildItem -Path $modelsDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1))
-    return (Test-Path $venv) -and (Test-Path $dist) -and (Test-Path $llama) -and $hasModels
+    $hasModels = (Test-Path $voiceMarker) -or (
+        (Test-Path $modelsDir) -and ((Get-ChildItem -Path $modelsDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1))
+    )
+    $llamaOk = (Test-Path $llama) -or (-not $InstallLocalLLM)
+    return (Test-Path $venv) -and (Test-Path $dist) -and $llamaOk -and $hasModels
 }
 
 function Write-Ok([string]$Message) {
@@ -296,6 +306,10 @@ function Ensure-LlamaCpp {
         Write-Skip "llama-server.exe"
         return
     }
+    if (-not $InstallLocalLLM) {
+        Write-Host "    Skipping llama.cpp (voice chatbot only). Re-run with -InstallLocalLLM to fetch a local GGUF runtime."
+        return
+    }
     if ($SkipLlamaDownload) {
         throw "llama-server.exe is missing and -SkipLlamaDownload was set."
     }
@@ -343,6 +357,10 @@ function Invoke-HfDownload {
 function Ensure-DefaultModels([string]$VenvPython) {
     if ($SkipModelDownload) {
         Write-Host "    Skipping model download (-SkipModelDownload)."
+        return
+    }
+    if (-not $InstallLocalLLM) {
+        Write-Host "    Skipping Qwen GGUF download (voice chatbot only). Re-run with -InstallLocalLLM to fetch 9B."
         return
     }
 
@@ -413,7 +431,8 @@ function Test-NvidiaDriver {
 }
 
 # --- main ---
-Write-BootstrapLog "bootstrap start SkipHeavyPrepare=$SkipHeavyPrepare SkipModelDownload=$SkipModelDownload"
+if ($InstallExpert27B) { $InstallLocalLLM = $true }
+Write-BootstrapLog "bootstrap start SkipHeavyPrepare=$SkipHeavyPrepare SkipModelDownload=$SkipModelDownload InstallLocalLLM=$InstallLocalLLM"
 Write-Host ""
 Write-Host "Jarvis setup" -ForegroundColor White
 Write-Host "This window prepares Jarvis on your PC. You can close it when you see 'Setup complete'." -ForegroundColor DarkGray

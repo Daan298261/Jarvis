@@ -19,9 +19,9 @@
   Skip bundling the default Kokoro-82M household butler voice weights.
 
 .PARAMETER Release
-  Product release cut. Requires vendor issuer.key and writes
-  Jarvis-unrestricted.jarvis-license beside JarvisSetup.exe. 1.4.6 shipped
-  without this file; later releases must not.
+  Product release cut. Creates gitignored `.vendor/license-issuer` keys if
+  needed and writes Jarvis-unrestricted.jarvis-license beside JarvisSetup.exe.
+  1.4.6 shipped without this file; later releases must not.
 #>
 param(
     [switch]$SkipBootstrapModel,

@@ -5,9 +5,10 @@
 
 .DESCRIPTION
   Non-interactive vendor issuer for owner/dev release cuts.
-  Requires an existing vendor signing key under JARVIS_LICENSE_ISSUER_DIR /
-  LOCALAPPDATA\Jarvis\license-issuer. Does not create keys. Does not run on the
-  public clone unless that key is already present, or JARVIS_VENDOR_RELEASE=1.
+  Keys live in the gitignored checkout overlay `.vendor/license-issuer/`
+  (or JARVIS_LICENSE_ISSUER_DIR). Missing keys are created once and reused.
+  Never commit issuer.key. The license file is also gitignored and is not
+  copied into the Inno customer payload.
 #>
 param(
     [Parameter(Mandatory = $true)]
@@ -20,30 +21,25 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
 $Backend = Join-Path $RepoRoot "backend"
-
-$issuerDir = [string]$env:JARVIS_LICENSE_ISSUER_DIR
-if (-not $issuerDir) {
-    if ($env:LOCALAPPDATA) {
-        $issuerDir = Join-Path $env:LOCALAPPDATA "Jarvis\license-issuer"
-    } else {
-        $issuerDir = Join-Path $HOME ".jarvis\license-issuer"
-    }
-}
-$keyPath = Join-Path $issuerDir "issuer.key"
-$vendorRelease = [string]$env:JARVIS_VENDOR_RELEASE
-
-if (-not (Test-Path $keyPath)) {
-    if ($vendorRelease -eq "1" -or $Require) {
-        throw "Release cuts require vendor issuer.key at $keyPath so Jarvis-unrestricted.jarvis-license can be issued. 1.4.6 shipped without this file; following releases must not skip this step."
-    }
-    Write-Host "Skipping unrestricted license (no vendor issuer.key). Public tree will not mint licenses." -ForegroundColor Yellow
-    exit 0
-}
+$ensure = Join-Path $ScriptDir "ensure-vendor-issuer.ps1"
 
 $py = Get-Command python -ErrorAction SilentlyContinue
 if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
 if (-not $py) {
-    throw "python not found; cannot issue unrestricted license"
+    if ($Require) {
+        throw "python not found; cannot issue unrestricted license"
+    }
+    Write-Host "Skipping unrestricted license (python not found)." -ForegroundColor Yellow
+    exit 0
+}
+
+if (Test-Path $ensure) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $ensure
+    if ($LASTEXITCODE -ne 0) {
+        if ($Require) { throw "ensure-vendor-issuer failed with exit code $LASTEXITCODE" }
+        Write-Host "Skipping unrestricted license (could not create issuer keys)." -ForegroundColor Yellow
+        exit 0
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null

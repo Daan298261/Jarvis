@@ -1,6 +1,33 @@
 # Jarvis
 
-Self-hosted local desktop agent. The default model is **Qwen3.5-9B Abliterated** running on this computer through llama.cpp. If a **Qwen3.8-9B uncensored** GGUF is already installed under `models/` or the current user’s LM Studio folder, Jarvis prefers that as the everyday autoload default. Qwen3.5-27B remains the Expert escalation model, or you can point at any OpenAI-compatible server. The HUD **Help** icon answers product questions from local docs first (then the public web) and lists guides for phone pairing, custom models, swarms, and autonomy. The web portal at [http://127.0.0.1:4780](http://127.0.0.1:4780) is the control surface; the same REST API can later drive voice, Android, or automations. Use **Guide & Workflows** for operating instructions and one-click templates (debug a project, research to spreadsheet, organize files, and others).
+Jarvis is a **local-first Windows desktop agent**. It lives on your PC: FastAPI backend, React HUD/portal at [http://127.0.0.1:4780](http://127.0.0.1:4780), optional llama.cpp GGUF on an NVIDIA GPU. A public clone starts as a **household voice chatbot** (Kokoro) without downloading a 9B/27B model. Drop in a GGUF or run `bootstrap.ps1 -InstallLocalLLM` when you want full local inference.
+
+Default LLM when present: **Qwen3.5-9B Abliterated** (Qwen3.8-9B uncensored wins if already on disk / LM Studio). **Qwen3.5-27B** is Expert escalation. You can also point at any OpenAI-compatible server.
+
+## What it can do now
+
+- **Talk and listen** — Kokoro household TTS, local STT when installed, HUD voice picker
+- **Owner HUD** — status, chat, appearance, cybersecurity module, expandable health
+- **Work on this PC** — files, terminal, Python, git, Playwright browser, Windows UI Automation, Office COM, screenshots
+- **Remember** — SQLite tasks, Obsidian-linked vault, skills, trajectories, context repos
+- **Phone** — Android companion APK, LAN pairing, 4G/WAN endpoint failover when prepared
+- **Ship** — `JarvisSetup.exe` installer, Start/Stop scripts, tray helper; owner license issued beside Setup (not inside the payload)
+- **One-node swarm foundation** — localhost Node, placement, budgets, Swarm portal page
+- **Guides** — HUD Help (local docs first), Guide & Workflows templates
+
+## Planned (specified, not the current default)
+
+Tracked in [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) §58 and the linked specs. Not started unless the queue promotes it:
+
+- **Multi-node swarm** — second machines, discovery, secure pairing (`SWARM_ARCHITECTURE.md`)
+- **Away Mode / Jarvis 2.0** — event-driven operators, marketing, SEO, NovelProject, multimedia (`JARVIS_2.0.md`)
+- **Home IoT** — HA/Matter/local device control (`HOME_IOT.md`)
+- **Blue / Purple / Red security lanes** — household SIEM; owned-net simulation; LE-gated red stub (`SECURITY_AGENTS.md`)
+- **Adaptive intelligence and domain packs** — P4/P5 business workflows (`ADAPTIVE_DOMAIN_ARCHITECTURE.md`)
+- **Installable Android + WAN walkthrough** beyond current pairing (`ANDROID_CLIENT.md`)
+- **Agent profiles / specialist packs** (`JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`)
+
+Live 27B e2e and some Windows desktop sign-offs remain owner-machine checks.
 
 **Development process:** [`docs/PROCESS.md`](docs/PROCESS.md) — one RFC or one queue item per worker; branch from `development` and open PRs against `development`. `main` is the stable release branch (GitHub default); promote only on an explicit cut. Design specs go in [`docs/rfcs/`](docs/rfcs/), not wholesale edits to the master plan.
 

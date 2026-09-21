@@ -24,7 +24,7 @@ from app.licensing.vendor_issuer import (
     validate_unrestricted_license_payload,
 )
 from app.persona.hexstrike_overview import HEXSTRIKE_LOAD_OVERVIEW
-from app.policy.cyber_ato import issue_license, verify_license
+from app.policy.cyber_ato import AtoError, issue_license, verify_license
 
 
 @pytest.fixture
@@ -163,20 +163,27 @@ def test_build_installer_invokes_unrestricted_issuer():
     issue = (Path(__file__).resolve().parents[1] / "installer" / "windows" / "issue-release-unrestricted-license.ps1").read_text(
         encoding="utf-8"
     )
-    assert "issuer.key" in issue
-    assert "Public tree will not mint licenses" in issue
+    assert "ensure-vendor-issuer.ps1" in issue
     assert "$Require" in issue
-    assert "1.4.6" in issue
+    assert "gitignored" in issue.lower() or ".vendor" in issue
     build = (Path(__file__).resolve().parents[1] / "installer" / "windows" / "build-installer.ps1").read_text(
         encoding="utf-8"
     )
     assert "$Release" in build
     assert "Jarvis-unrestricted.jarvis-license" in build
+    assert "1.4.6" in build
 
 
-def test_cli_issue_unrestricted_requires_existing_vendor_key(license_env):
-    from app.licensing.vendor_issuer import load_existing_vendor_keys
-    from app.policy.cyber_ato import AtoError
+def test_cli_issue_unrestricted_creates_vendor_key_when_missing(license_env, tmp_path):
+    from app.licensing.vendor_issuer import load_existing_vendor_keys, load_or_create_vendor_keys, vendor_private_path
 
+    assert not vendor_private_path().is_file()
     with pytest.raises(AtoError, match="issuer.key is missing"):
         load_existing_vendor_keys()
+    load_or_create_vendor_keys()
+    assert vendor_private_path().is_file()
+    load_existing_vendor_keys()  # reuse, do not rotate
+    out = tmp_path / "dist"
+    result = issue_release_unrestricted_license(output_dir=out)
+    assert (out / OWNER_UNRESTRICTED_STABLE_NAME).is_file()
+    assert result["stable_path"].endswith(OWNER_UNRESTRICTED_STABLE_NAME)
