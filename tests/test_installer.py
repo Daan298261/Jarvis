@@ -69,6 +69,7 @@ def test_jarvis_iss_wiring():
     lower = text.lower()
     assert "models" in lower and "excludes" in lower
     assert "release\\" in lower or "release\\*" in lower
+    assert "releases\\" in lower or "releases\\*" in lower
     assert "_release_upload" in lower
     assert ".vendor" in lower
     assert "installer-build" in lower
