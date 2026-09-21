@@ -365,20 +365,76 @@ def index_all_vault() -> int:
     return len(notes)
 
 
+def _init_managed_layout(root: Path) -> None:
+    for sub in DEFAULT_LAYOUT_DIRS:
+        (root / sub).mkdir(parents=True, exist_ok=True)
+    router = root / "_Config" / "router.md"
+    if not router.exists():
+        router.write_text(
+            "# Jarvis vault router\n\n"
+            "Compact orientation for linked memory. Edit freely; Jarvis indexes this folder.\n\n"
+            "- Projects live in [[Projects/Welcome]]\n"
+            "- Home notes live in [[Home/Jarvis]]\n",
+            encoding="utf-8",
+        )
+    welcome = root / "Projects" / "Welcome.md"
+    if not welcome.exists():
+        welcome.write_text(
+            "---\nid: jarvis-welcome\ntype: project\njarvis_managed: true\n---\n\n"
+            "# Welcome\n\n"
+            "This is the default Jarvis-managed Obsidian vault. "
+            "Bind a different folder in Settings → Integrations if you already have a vault.\n",
+            encoding="utf-8",
+        )
+    home = root / "Home" / "Jarvis.md"
+    if not home.exists():
+        home.write_text(
+            "---\nid: jarvis-home\ntype: home\njarvis_managed: true\n---\n\n"
+            "# Jarvis\n\nLocal durable notes for this PC. Wiki-link freely; Jarvis retrieves excerpts per turn.\n",
+            encoding="utf-8",
+        )
+
+
+def default_vault_path() -> Path:
+    return data_dir() / "vault"
+
+
+def ensure_default_vault(*, configured_path: str = "", init_layout: bool = True) -> dict[str, Any]:
+    """Bind the configured vault, or create and bind ``data/vault`` with the managed layout."""
+    if public_binding_status().get("bound"):
+        meta = _load_meta()
+        return {
+            "bound": True,
+            "created": False,
+            "vault_path": meta.vault_path,
+            "note_count": meta.note_count,
+            "init_layout": meta.jarvis_managed_layout,
+        }
+    candidate: Path
+    use_layout = init_layout
+    raw = (configured_path or "").strip()
+    if raw:
+        candidate = Path(raw).expanduser()
+        if candidate.exists() and not candidate.is_dir():
+            candidate = default_vault_path()
+            use_layout = True
+        elif not candidate.exists():
+            candidate.mkdir(parents=True, exist_ok=True)
+            use_layout = True
+    else:
+        candidate = default_vault_path()
+        candidate.mkdir(parents=True, exist_ok=True)
+        use_layout = True
+    result = bind_vault(str(candidate), init_layout=use_layout)
+    return {**result, "created": True, "vault_path": str(Path(candidate).expanduser().resolve())}
+
+
 def bind_vault(vault_path: str, *, init_layout: bool = False) -> dict[str, Any]:
     resolved = Path(vault_path).expanduser().resolve()
     if not resolved.is_dir():
         raise ValueError(f"Vault path is not a directory: {vault_path}")
     if init_layout:
-        for sub in DEFAULT_LAYOUT_DIRS:
-            (resolved / sub).mkdir(parents=True, exist_ok=True)
-        router = resolved / "_Config" / "router.md"
-        if not router.exists():
-            router.write_text(
-                "# Jarvis vault router\n\n"
-                "Compact orientation for linked memory. Edit freely; Jarvis indexes this folder.\n",
-                encoding="utf-8",
-            )
+        _init_managed_layout(resolved)
     state = VaultBindingState(
         bound=True,
         vault_path=str(resolved),
@@ -397,10 +453,11 @@ def unbind_vault() -> dict[str, Any]:
     stop_watch()
     with _lock:
         _save_meta(VaultBindingState())
-        if _index_path().exists():
-            _index_path().unlink()
-        if _managed_state_path().exists():
-            _managed_state_path().unlink()
+        for path in (_index_path(), _managed_state_path()):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
     return {"bound": False}
 
 

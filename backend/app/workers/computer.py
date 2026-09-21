@@ -166,14 +166,16 @@ class NativeWindowsBackend(ComputerUseBackend):
                 ),
             )
         del timeout_seconds
-        from ..tools.desktop import DesktopTool
+        from ..tools.desktop import DesktopTool, parse_desktop_goal
 
         tool = DesktopTool()
-        data: dict[str, Any] = {"backend": self.id, "goal": goal, "app": app}
+        data: dict[str, Any] = {"backend": self.id, "goal": goal, "app": app, "actions": []}
         parts: list[str] = []
+        executed = False
         if app:
             focused = await tool.execute(action="focus", title=app)
             data["focus_ok"] = focused.success
+            data["actions"].append({"action": "focus", "ok": focused.success, "output": focused.output or focused.error})
             if not focused.success:
                 windows = await tool.execute(action="windows")
                 data["windows"] = windows.output
@@ -184,21 +186,50 @@ class NativeWindowsBackend(ComputerUseBackend):
                     data=data,
                 )
             parts.append(focused.output)
+
         inspected = await tool.execute(action="inspect", title=app or "")
         data["inspect_ok"] = inspected.success
+        controls = []
         if inspected.data:
-            data["controls"] = inspected.data.get("controls")
+            controls = inspected.data.get("controls") or []
+            data["controls"] = controls
         if inspected.success:
             parts.append(inspected.output)
-        elif not parts:
-            windows = await tool.execute(action="windows")
-            parts.append(windows.output or inspected.error or "")
-        reminder = (
-            f"Native UI Automation is ready for: {goal}. "
-            "Use named desktop controls (name / automation_id) for remaining clicks. "
-            "Do not start with coordinates."
-        )
-        return ToolResult(True, "\n\n".join([part for part in parts if part] + [reminder]), data=data)
+
+        planned = parse_desktop_goal(goal, app=app, controls=controls)
+        if not planned:
+            return ToolResult(
+                False,
+                "\n\n".join(part for part in parts if part),
+                error=(
+                    f"Could not map {goal!r} onto a named desktop action. "
+                    "Inspect the UI and retry with click/type and a visible control name."
+                ),
+                data=data,
+            )
+        for step in planned:
+            result = await tool.execute(**step)
+            data["actions"].append(
+                {"action": step.get("action"), "ok": result.success, "output": result.output or result.error}
+            )
+            if result.success:
+                executed = True
+                parts.append(result.output)
+            else:
+                return ToolResult(
+                    False,
+                    "\n\n".join(part for part in parts if part),
+                    error=result.error or f"Desktop {step.get('action')} failed",
+                    data=data,
+                )
+        if not executed:
+            return ToolResult(
+                False,
+                "\n\n".join(part for part in parts if part),
+                error="Native UI Automation did not complete the goal.",
+                data=data,
+            )
+        return ToolResult(True, "\n\n".join(part for part in parts if part), data=data)
 
 
 class UFOBackend(ComputerUseBackend):
