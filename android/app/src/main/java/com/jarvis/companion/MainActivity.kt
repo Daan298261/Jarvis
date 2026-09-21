@@ -736,7 +736,12 @@ private fun formatStorageBytes(bytes: Long): String {
                                     pin = invitation.serverPin
                                     pairingCode = invitation.code
                                     scannerOpen = false
-                                    model.pair(invitation.endpoint, invitation.serverPin, invitation.code)
+                                    model.pair(
+                                        invitation.endpoint,
+                                        invitation.serverPin,
+                                        invitation.code,
+                                        invitation.endpoints,
+                                    )
                                 }
                                 .onFailure { error -> scanError = error.message ?: "That QR code is not a valid Jarvis pairing invitation." }
                         },

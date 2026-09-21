@@ -4341,6 +4341,7 @@ export type CompanionPairingQr = {
   endpoint: string
   server_pin: string
   code: string
+  endpoints?: string[]
 }
 
 export type CompanionPairingCode = {
