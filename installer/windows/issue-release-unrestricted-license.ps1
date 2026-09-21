@@ -11,7 +11,8 @@
 #>
 param(
     [Parameter(Mandatory = $true)]
-    [string]$OutDir
+    [string]$OutDir,
+    [switch]$Require
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,8 +33,8 @@ $keyPath = Join-Path $issuerDir "issuer.key"
 $vendorRelease = [string]$env:JARVIS_VENDOR_RELEASE
 
 if (-not (Test-Path $keyPath)) {
-    if ($vendorRelease -eq "1") {
-        throw "JARVIS_VENDOR_RELEASE=1 but vendor issuer.key is missing at $keyPath"
+    if ($vendorRelease -eq "1" -or $Require) {
+        throw "Release cuts require vendor issuer.key at $keyPath so Jarvis-unrestricted.jarvis-license can be issued. 1.4.6 shipped without this file; following releases must not skip this step."
     }
     Write-Host "Skipping unrestricted license (no vendor issuer.key). Public tree will not mint licenses." -ForegroundColor Yellow
     exit 0

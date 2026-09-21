@@ -165,6 +165,13 @@ def test_build_installer_invokes_unrestricted_issuer():
     )
     assert "issuer.key" in issue
     assert "Public tree will not mint licenses" in issue
+    assert "$Require" in issue
+    assert "1.4.6" in issue
+    build = (Path(__file__).resolve().parents[1] / "installer" / "windows" / "build-installer.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "$Release" in build
+    assert "Jarvis-unrestricted.jarvis-license" in build
 
 
 def test_cli_issue_unrestricted_requires_existing_vendor_key(license_env):
