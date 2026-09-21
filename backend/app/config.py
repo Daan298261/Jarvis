@@ -359,12 +359,15 @@ def load_settings() -> AppSettings:
         payload["bind_host"] = host
     if port:
         payload["bind_port"] = int(port)
+    payload["allowed_directories"] = sanitize_allowed_directories(payload.get("allowed_directories"))
     return AppSettings.model_validate(payload)
 
 
 def save_settings(settings: AppSettings) -> None:
     dump = settings.model_dump()
     dump.pop("auth_token", None)
+    dump["allowed_directories"] = sanitize_allowed_directories(dump.get("allowed_directories"))
+    settings.allowed_directories = list(dump["allowed_directories"])
     settings_path().write_text(json.dumps(dump, indent=2), encoding="utf-8")
 
 
@@ -378,3 +381,37 @@ def default_allowed_directories() -> list[str]:
         data_dir(),
     ]
     return [str(path) for path in candidates if path.exists()]
+
+
+def is_ephemeral_workspace_path(path: str) -> bool:
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    normalized = str(path or "").replace("/", "\\").lower()
+    return "\\pytest-of-" in normalized or "\\pytest\\" in normalized
+
+
+def sanitize_allowed_directories(existing: list[str] | None) -> list[str]:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    testing = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    for raw in existing or []:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        if not testing and is_ephemeral_workspace_path(text):
+            continue
+        key = text.replace("/", "\\").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+    if testing:
+        return cleaned
+    if not cleaned:
+        return default_allowed_directories()
+    for item in default_allowed_directories():
+        key = item.replace("/", "\\").lower()
+        if key not in seen:
+            seen.add(key)
+            cleaned.append(item)
+    return cleaned

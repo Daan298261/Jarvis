@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import platform
 from typing import Any, Literal
 
 from ..config import load_settings
@@ -88,12 +89,48 @@ async def run_self_check() -> dict[str, Any]:
             "Typed chat works. Voice replies need local speech recognition.",
         )
 
+    from ..config import is_ephemeral_workspace_path, sanitize_allowed_directories
+
+    durable = [path for path in (settings.allowed_directories or []) if not is_ephemeral_workspace_path(path)]
+    if durable:
+        workspace_item = _item(
+            "workspace",
+            "Owner workspace",
+            "ready",
+            f"Jarvis can use {len(durable)} folders on this PC",
+        )
+    else:
+        restored = sanitize_allowed_directories(settings.allowed_directories)
+        workspace_item = _item(
+            "workspace",
+            "Owner workspace",
+            "degraded",
+            "Allowed folders were test leftovers. Restored Documents/Desktop/Downloads for this PC."
+            if restored
+            else "No owner folders are configured, so files and desktop work are blocked.",
+        )
+
     checks = [
         _item("core", "Core systems", "ready", "Jarvis API is online"),
         model_item,
         voice_item,
         listen_item,
+        workspace_item,
     ]
+    if platform.system() == "Windows":
+        from ..tools.desktop import desktop_automation_available
+
+        if desktop_automation_available():
+            checks.append(_item("desktop", "This PC", "ready", "Windows UI Automation can drive apps on this desktop"))
+        else:
+            checks.append(
+                _item(
+                    "desktop",
+                    "This PC",
+                    "degraded",
+                    "Windows UI Automation is missing. Install pywinauto so Jarvis can click and type.",
+                )
+            )
     overall = _overall(checks)
     working_order = overall in {"ready", "degraded"}
     return {

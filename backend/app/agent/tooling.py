@@ -28,7 +28,7 @@ ALL_NATIVE = frozenset(
 TOOL_SETS: dict[str, frozenset[str]] = {
     "filesystem": frozenset({"filesystem", "python", "request_capability"}),
     "shell": frozenset({"filesystem", "terminal", "python", "request_capability"}),
-    "system administration": frozenset({"filesystem", "terminal", "python", "request_capability"}),
+    "system administration": frozenset({"filesystem", "terminal", "python", "desktop", "screenshot", "request_capability"}),
     "software engineering": frozenset(
         {"filesystem", "terminal", "python", "git", "request_capability", "mcp"}
     ),
