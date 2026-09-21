@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom"
 import { api } from "../api"
 import { IntegrationSetup } from "../components/IntegrationSetup"
 import "./setup-conversation.css"
+import "./setup-plan-extras.css"
 
 type SetupQuestion = {
   id: string
@@ -20,8 +21,42 @@ type PlannedModel = {
   bundled: boolean
   installed: boolean
   downloadable: boolean
+  estimated_disk_gb?: number
   why: string
   limitations: string
+  reason: string
+}
+
+type DiskPlan = {
+  free_gb: number
+  required_download_gb: number
+  jarvis_runtime_gb: number
+  lm_studio_gb: number
+  safety_reserve_gb: number
+  required_with_reserve_gb: number
+  free_after_gb: number
+  enough: boolean
+  shortfall_gb: number
+  message: string
+}
+
+type LmStudioPlan = {
+  required: boolean
+  installed: boolean
+  path?: string
+  reason: string
+  install_script: string
+}
+
+type MobilePlan = {
+  client: string
+  pairing_path?: string
+  apk_supported: boolean
+  pairing_script: string
+  same_lan: string
+  remote_access: string
+  router_forwarding_required: boolean
+  router_forwarding: string
   reason: string
 }
 
@@ -33,6 +68,9 @@ type InterviewPlan = {
   download_models: PlannedModel[]
   keep_loaded: string[]
   routing_policy: string
+  disk: DiskPlan
+  lm_studio: LmStudioPlan
+  mobile: MobilePlan
   reasoning: string[]
 }
 
@@ -72,6 +110,10 @@ function shortHardware(hw: Record<string, unknown>): string {
   if (ram) bits.push(`${Math.round(ram)} GB RAM`)
   if (vram) bits.push(`${vram.toFixed(0)} GB VRAM`)
   return bits.join(" · ") || "Hardware detected"
+}
+
+function fmtGb(value: number): string {
+  return `${Math.round(value)} GB`
 }
 
 export function SetupPage() {
@@ -185,6 +227,10 @@ export function SetupPage() {
   }
 
   async function apply() {
+    if (plan && !plan.disk.enough) {
+      setError(`Free about ${fmtGb(plan.disk.shortfall_gb)} first, or change the setup choices.`)
+      return
+    }
     setBusy(true)
     setError("")
     try {
@@ -307,6 +353,20 @@ export function SetupPage() {
             <strong>{shortHardware(plan.hardware)}</strong>
           </div>
 
+          <div className={`setup-space-verdict ${plan.disk.enough ? "ok" : "bad"}`}>
+            <div>
+              <small>Disk</small>
+              <strong>{plan.disk.enough ? "Enough space" : "Not enough space"}</strong>
+              <p>{plan.disk.message}</p>
+            </div>
+            <dl>
+              <dt>Free now</dt><dd>{fmtGb(plan.disk.free_gb)}</dd>
+              <dt>Selected downloads</dt><dd>{fmtGb(plan.disk.required_download_gb)}</dd>
+              <dt>Reserved after setup</dt><dd>{fmtGb(plan.disk.safety_reserve_gb)}</dd>
+              {!plan.disk.enough && <><dt>Free this much more</dt><dd>{fmtGb(plan.disk.shortfall_gb)}</dd></>}
+            </dl>
+          </div>
+
           <div className="setup-plan-grid">
             <div>
               <h3>Configuration</h3>
@@ -315,6 +375,9 @@ export function SetupPage() {
                 <dt>Resource use</dt><dd>{String(plan.answers.resources || "Balanced")}</dd>
                 <dt>Voice</dt><dd>{plan.answers.voice_enabled ? "enabled" : "off for now"}</dd>
                 <dt>Bootstrap</dt><dd>Ornith 1.5 9B · local</dd>
+                <dt>LM Studio</dt><dd>{plan.lm_studio.required ? (plan.lm_studio.installed ? "required · installed" : "required · optional install") : "not required"}</dd>
+                <dt>Phone</dt><dd>LAN + {plan.mobile.remote_access}</dd>
+                <dt>Router port</dt><dd>{plan.mobile.router_forwarding_required ? "required" : "not required"}</dd>
               </dl>
             </div>
             <div>
@@ -334,6 +397,7 @@ export function SetupPage() {
                 <p>{model.reason}</p>
                 <span className="setup-model-status">
                   {model.installed ? "Installed" : model.bundled ? "Included" : model.status}
+                  {model.estimated_disk_gb ? ` · ~${model.estimated_disk_gb} GB` : ""}
                 </span>
               </article>
             ))}
@@ -347,9 +411,21 @@ export function SetupPage() {
             <p className="setup-download-note">No additional model download is required to start using Jarvis.</p>
           )}
 
+          <div className="setup-zero-config">
+            <h3>What Jarvis will write</h3>
+            <ul>
+              <li><code>data/setup/download-models.ps1</code> — selected models only, with a disk-space check before download.</li>
+              <li><code>data/setup/install-lm-studio.ps1</code> — no-op unless a future plan requires LM Studio.</li>
+              <li><code>data/setup/configure-mobile-access.ps1</code> — private firewall + Tailscale path; public forwarding only when requested.</li>
+            </ul>
+            <p className="lede" style={{ marginTop: 10 }}>{plan.lm_studio.reason}</p>
+          </div>
+
           <div className="setup-plan-actions">
             <button type="button" className="btn secondary" onClick={restartInterview} disabled={busy}>Change answers</button>
-            <button type="button" className="btn" onClick={apply} disabled={busy}>{busy ? "Configuring…" : "Configure Jarvis"}</button>
+            <button type="button" className="btn" onClick={apply} disabled={busy || !plan.disk.enough}>
+              {busy ? "Configuring…" : plan.disk.enough ? "Configure Jarvis" : `Free ${fmtGb(plan.disk.shortfall_gb)} first`}
+            </button>
           </div>
           <p className="setup-advanced-note">
             Advanced controls remain available after setup under Model, Swarm, Settings and System. Security passwords are configured separately.

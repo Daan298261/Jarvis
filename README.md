@@ -18,6 +18,8 @@
 
 Jarvis brings local language models, tool execution, task management, and an approachable control interface together in one self-hosted system. Run inference on your own machine, connect an OpenAI-compatible inference server when needed, and build workflows around the tools you actually use.
 
+A public clone can start as a **household voice chatbot** (Kokoro) without a 9B/27B GGUF. Add a local model, run `bootstrap.ps1 -InstallLocalLLM`, or point at any OpenAI-compatible server when you want full agent work. The default local LLM when present is **Qwen3.5-9B Abliterated**; **Qwen3.5-27B** is Expert escalation.
+
 The project is being developed toward a larger vision: a coordinated network of devices with specialized agents, persistent services, and configurable autonomy. **The current Windows desktop agent is the foundation; the full swarm and autonomous-operator vision are ongoing development, not features promised in this release.**
 
 ## What Jarvis does
@@ -25,11 +27,13 @@ The project is being developed toward a larger vision: a coordinated network of 
 | Capability | Description |
 | :--- | :--- |
 | **Local-first AI** | Run GGUF models with llama.cpp, switch model profiles, or use a compatible remote inference endpoint. |
-| **Agent workflows** | Submit tasks, use integrated tools, and track execution through the portal and task queue. |
-| **Unified control portal** | Access chat, model controls, settings, help, and workflows from a local web interface. |
-| **Extensible tools** | Work with native tools and MCP integrations; see the tool catalog for available integrations and requirements. |
+| **Owner HUD** | Chat, voice, appearance, cybersecurity controls, and expandable local health on the desktop portal. |
+| **This PC** | Files, terminal, Python, git, Playwright, Windows UI Automation, Office COM, and screenshots. |
+| **Memory** | SQLite tasks, Obsidian-linked vault, skills, trajectories, and context repos. |
+| **Phone companion** | Android APK with LAN pairing; WAN/4G failover when prepared. |
+| **Windows installer** | `JarvisSetup.exe` plus Start/Stop scripts; owner license is issued beside Setup, not inside the payload. |
+| **Extensible tools** | Native tools and MCP integrations; see the tool catalog for available integrations and requirements. |
 | **Configurable access** | Keep the service on localhost by default or explicitly enable authenticated LAN access. |
-| **Developer-friendly** | Work with documented architecture, RFCs, tests, and a defined contribution process. |
 
 **On the roadmap:** a universal desktop experience, richer voice and vision, Android companionship, agent teams, multi-node scheduling, role-based device placement, security workers, and autonomous operator workflows. These are tracked in the design documents below; individual components may be experimental or incomplete.
 
@@ -39,7 +43,7 @@ The project is being developed toward a larger vision: a coordinated network of 
 
 For a new machine, start with the **[complete installation guide](docs/INSTALL.md)**. A Windows installer is also under development; see [installer status](INSTALLER.md) before assuming one-click setup is complete.
 
-If you have **already cloned the repository and installed the required model weights and llama.cpp runtime**, run the following in PowerShell from the repository root:
+If you have **already cloned the repository**, you can start without a GGUF as a voice chatbot (`.\start-jarvis.ps1`). For full local inference, install model weights and llama.cpp (see [INSTALL.md](docs/INSTALL.md)), then:
 
 ```powershell
 python -m pip install -r backend\requirements.txt

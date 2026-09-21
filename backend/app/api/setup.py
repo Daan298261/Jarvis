@@ -16,7 +16,13 @@ from ..runtime_install import (
     start_component_install,
     start_selected_installs,
 )
-from ..setup_interview import interview_questions, plan_interview, render_download_script, save_download_script
+from ..setup_interview import (
+    ONBOARDING_VERSION,
+    interview_questions,
+    plan_interview,
+    render_download_script,
+    save_download_script,
+)
 from ..setup_recommend import recommend_from_hardware
 from ..setup_state import (
     WIZARD_STEPS,
@@ -100,7 +106,7 @@ async def setup_hardware():
 async def setup_interview():
     state = load_setup_state()
     return {
-        "version": 1,
+        "version": ONBOARDING_VERSION,
         "questions": interview_questions(),
         "answers": state.get("interview_answers") or {},
         "plan": state.get("interview_plan") or {},
@@ -250,6 +256,9 @@ async def setup_interview_apply(body: InterviewBody | None = None):
         plan = plan_interview(body.answers)
     else:
         plan = state.get("interview_plan") or plan_interview(state.get("interview_answers") or {})
+    disk = plan.get("disk") or {}
+    if disk.get("enough") is False:
+        raise HTTPException(409, str(disk.get("message") or "Not enough disk space for this setup plan."))
     save_setup_state({**plan["setup_state_patch"], "interview_plan": plan})
     applied = await apply_setup()
     script_path = save_download_script(plan)

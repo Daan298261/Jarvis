@@ -48,12 +48,14 @@ def test_bootstrap_covers_required_steps():
 def test_bootstrap_27b_is_optional_switch_only():
     text = _read(BOOTSTRAP)
     assert "InstallExpert27B" in text
+    assert "InstallLocalLLM" in text
     # Default path must not always download 27B.
     assert "if ($InstallExpert27B)" in text
     lower = text.lower()
     assert "install by default" not in lower
     # 27B download should be gated behind the switch.
     assert text.index("if ($InstallExpert27B)") < text.index("Qwen3.5-27B")
+    assert "if (-not $InstallLocalLLM)" in text
 
 
 def test_jarvis_iss_wiring():
@@ -67,6 +69,7 @@ def test_jarvis_iss_wiring():
     assert "models" in lower and "excludes" in lower
     assert "release\\" in lower or "release\\*" in lower
     assert "_release_upload" in lower
+    assert ".vendor" in lower
     assert "installer-build" in lower
     assert "runtime" in lower
     assert "start-jarvis.ps1" in lower
@@ -164,6 +167,7 @@ def test_readme_documents_build_oneliner():
     text = _read(README)
     assert "build-installer.ps1" in text
     assert "JarvisSetup.exe" in text
+    assert "ensure-vendor-issuer.ps1" in text
     assert "Jarvis-unrestricted.jarvis-license" in text
     assert "$Release" in text or "-Release" in text
     assert "1.4.6" in text
