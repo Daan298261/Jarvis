@@ -13,7 +13,7 @@ export function KnowledgeVaultSettingsSection() {
   const [status, setStatus] = useState<VaultPublicStatus | null>(null)
   const [health, setHealth] = useState<VaultHealthResponse | null>(null)
   const [vaultPath, setVaultPath] = useState("")
-  const [initLayout, setInitLayout] = useState(false)
+  const [initLayout, setInitLayout] = useState(true)
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
 
@@ -63,12 +63,14 @@ export function KnowledgeVaultSettingsSection() {
     <section id="knowledge-vault" className="settings-section card grid">
       <h3>Linked Obsidian vault (RFC-0107)</h3>
       <p className="lede">
-        Bind a local folder (existing Obsidian vault or Jarvis-managed layout). Edit notes in the{" "}
+        A Jarvis-managed vault under this PC’s data folder is bound on first start. Bind a different
+        local folder here if you already use Obsidian. Edit notes in the{" "}
         <Link to="/obsidian">Obsidian pane</Link> — the real Obsidian UI inside Jarvis Desktop.
       </p>
       {status && (
         <p className="muted">
           Status: {status.bound ? "bound" : "not bound"}
+          {status.bound && status.jarvis_managed_layout ? " · Jarvis-managed default layout" : ""}
           {status.bound && status.note_count > 0 ? ` · ${status.note_count} notes indexed` : ""}
           {status.bound && health?.missing_router ? " · router.md missing" : ""}
           {health && health.broken_links.length > 0
@@ -94,7 +96,7 @@ export function KnowledgeVaultSettingsSection() {
             checked={initLayout}
             onChange={(e) => setInitLayout(e.target.checked)}
           />
-          Initialize Jarvis-managed folders (_Config, Projects, …)
+          Initialize Jarvis-managed folders (_Config, Projects, …) — on by default for a new vault
         </label>
         <div className="row">
           <button type="submit" className="btn" disabled={busy || !vaultPath.trim()}>

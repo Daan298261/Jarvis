@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import time
 from typing import Any
 
@@ -74,6 +75,71 @@ UNAVAILABLE = (
     "Windows UI Automation is unavailable on this machine. "
     "Use the screenshot tool and vision, or the browser tool for web apps."
 )
+
+
+def parse_desktop_goal(
+    goal: str,
+    *,
+    app: str | None = None,
+    controls: list[Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Turn a computer-use goal into concrete desktop tool calls (no inspect-only stub)."""
+    text = str(goal or "").strip()
+    if not text:
+        return []
+    steps: list[dict[str, Any]] = []
+    title = str(app or "").strip()
+
+    click_match = re.search(
+        r"\b(?:click|press|tap|select)\s+(?:the\s+)?(?:button\s+)?[\"']?([^\"'\n,]+?)[\"']?(?:\s+button)?\b",
+        text,
+        re.I,
+    )
+    type_match = re.search(
+        r"\b(?:type|enter|write)\s+[\"']([^\"']+)[\"'](?:\s+into\s+[\"']?([^\"'\n]+?)[\"']?)?",
+        text,
+        re.I,
+    )
+    keys_match = re.search(r"\b(?:hotkey|keys?|send)\s+[\"']([^\"']+)[\"']", text, re.I)
+
+    if type_match:
+        payload = {"action": "type", "text": type_match.group(1)}
+        if title:
+            payload["title"] = title
+        target = (type_match.group(2) or "").strip()
+        if target:
+            payload["name"] = target.rstrip(".")
+        steps.append(payload)
+    if click_match:
+        name = click_match.group(1).strip().rstrip(".")
+        if name.lower() not in {"it", "this", "that"}:
+            payload = {"action": "click", "name": name}
+            if title:
+                payload["title"] = title
+            steps.append(payload)
+    if keys_match:
+        payload = {"action": "keys", "text": keys_match.group(1)}
+        if title:
+            payload["title"] = title
+        steps.append(payload)
+
+    if not steps and controls:
+        lowered = text.lower()
+        names: list[str] = []
+        for control in controls:
+            if isinstance(control, dict):
+                raw_name = str(control.get("name") or control.get("automation_id") or "").strip()
+            else:
+                raw_name = str(getattr(control, "name", "") or "").strip()
+            if raw_name and raw_name.lower() in lowered:
+                names.append(raw_name)
+        names.sort(key=len, reverse=True)
+        if names:
+            payload = {"action": "click", "name": names[0]}
+            if title:
+                payload["title"] = title
+            steps.append(payload)
+    return steps
 
 
 def windows_ui_available() -> bool:

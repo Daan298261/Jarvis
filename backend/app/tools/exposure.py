@@ -12,7 +12,7 @@ CORE_TOOLS = frozenset({"filesystem", REQUEST_CAPABILITY})
 TASK_TOOL_SETS: dict[str, frozenset[str]] = {
     "filesystem": frozenset({"filesystem", "python"}),
     "shell": frozenset({"filesystem", "terminal", "python"}),
-    "system administration": frozenset({"filesystem", "terminal", "python"}),
+    "system administration": frozenset({"filesystem", "terminal", "python", "desktop", "screenshot"}),
     "software engineering": frozenset({"filesystem", "terminal", "python", "git"}),
     "research": frozenset({"filesystem", "web_fetch", "browser", "python"}),
     "browser automation": frozenset({"filesystem", "browser", "web_fetch"}),
@@ -21,9 +21,19 @@ TASK_TOOL_SETS: dict[str, frozenset[str]] = {
     "document processing": frozenset({"filesystem", "office", "python"}),
     "data processing": frozenset({"filesystem", "python", "terminal"}),
     "multimodal": frozenset({"filesystem", "screenshot", "desktop", "browser"}),
-    "mixed": frozenset({"filesystem", "terminal", "python", "git", "web_fetch"}),
+    "mixed": frozenset({"filesystem", "terminal", "python", "git", "web_fetch", "browser", "desktop", "screenshot"}),
     "long-horizon autonomous": frozenset(
-        {"filesystem", "terminal", "python", "git", "web_fetch", "browser"}
+        {
+            "filesystem",
+            "terminal",
+            "python",
+            "git",
+            "web_fetch",
+            "browser",
+            "desktop",
+            "screenshot",
+            "office",
+        }
     ),
 }
 

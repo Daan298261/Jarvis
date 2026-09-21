@@ -13,7 +13,8 @@ def test_self_check_endpoint_reports_core_and_voice(jarvis_env):
     assert body["ok"] is True
     assert body["overall"] in {"ready", "initializing", "degraded", "blocked"}
     ids = [item["id"] for item in body["checks"]]
-    assert ids == ["core", "inference", "household_voice", "speech_recognition"]
+    assert ids[:4] == ["core", "inference", "household_voice", "speech_recognition"]
+    assert "workspace" in ids
     assert body["checks"][0]["status"] == "ready"
     assert "working_order" in body
     assert "headline" in body

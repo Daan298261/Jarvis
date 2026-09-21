@@ -31,7 +31,10 @@ def get_effective_private_key(settings: AppSettings | None = None) -> str:
 
 
 def is_local_owner_host(host: str) -> bool:
-    return host in {"127.0.0.1", "::1", "localhost"}
+    value = (host or "").strip().lower()
+    if value.startswith("::ffff:"):
+        value = value.rsplit(":", 1)[-1]
+    return value in {"127.0.0.1", "::1", "localhost"}
 
 
 def ensure_owner_private_key() -> bool:
@@ -164,13 +167,16 @@ def is_auth_required_for_request(request: Request, settings: AppSettings) -> boo
     # Skip health check & auth status check
     path = request.url.path
     host = request.client.host if request.client else ""
-    if is_owner_pairing_manage_path(path) and is_local_owner_host(host):
+    # The desktop HUD and local browser are the owner console. LAN/companion
+    # clients still need the private key; loopback must not 401 catalog/model.
+    if is_local_owner_host(host):
         return False
     if path in {
         "/api/health",
         "/api/system/self-check",
         "/api/auth/status",
         "/api/auth/verify",
+        "/api/auth/desktop-session",
         "/api/mobile",
         "/api/mobile/onboarding/companion",
         "/api/companion/enroll",
@@ -181,12 +187,6 @@ def is_auth_required_for_request(request: Request, settings: AppSettings) -> boo
     # Only protect /api routes
     if not path.startswith("/api"):
         return False
-
-    # If LAN access is required, local connections can be exempted only if auth_required is false
-    if settings.lan_access and not settings.auth_required:
-        host = request.client.host if request.client else ""
-        if host in {"127.0.0.1", "::1", "localhost"}:
-            return False
 
     return True
 
@@ -210,10 +210,9 @@ def authenticate_websocket(websocket: WebSocket, settings: AppSettings | None = 
     if not (current.auth_required or current.lan_access):
         return True
 
-    if current.lan_access and not current.auth_required:
-        host = websocket.client.host if websocket.client else ""
-        if host in {"127.0.0.1", "::1", "localhost"}:
-            return True
+    host = websocket.client.host if websocket.client else ""
+    if is_local_owner_host(host):
+        return True
 
     expected = get_effective_private_key(current)
     if not expected:

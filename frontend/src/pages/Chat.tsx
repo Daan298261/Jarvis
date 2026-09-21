@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { api, apiForm, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { api, apiForm, ensureDesktopSession, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { prunePendingUserTexts } from "../chat/ownerChatView"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
@@ -10,6 +10,7 @@ import { useTaskSpeech } from "../tts/useTaskSpeech"
 import { TaskActivityPanel } from "../components/TaskActivity"
 import { DelegationPanel } from "./Delegation"
 import { usePendingApprovals } from "../chat/pendingApprovals"
+import { SETUP_PROBLEM_WORKING, isAuthFailureMessage } from "../setup/ownerFacing"
 
 type VoiceStatus = {
   stt_ready?: boolean
@@ -25,8 +26,7 @@ export function ChatPage() {
   const [pending, setPending] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
-  const [keyInput, setKeyInput] = useState<string>(getPrivateKey())
-  const [showAuthModal, setShowAuthModal] = useState<boolean>(false)
+  const [showSetupProblem, setShowSetupProblem] = useState<boolean>(false)
   const [voice, setVoice] = useState<VoiceStatus | null>(null)
   const [recording, setRecording] = useState(false)
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
@@ -53,8 +53,13 @@ export function ChatPage() {
         const data = await api<Task>(`/api/tasks/${id}`)
         setTask(data)
       } catch (err: any) {
-        if (err.message && err.message.toLowerCase().includes("authentication required")) {
-          setShowAuthModal(true)
+        if (err.message && isAuthFailureMessage(err.message)) {
+          setShowSetupProblem(true)
+          const recovered = await ensureDesktopSession()
+          if (recovered) {
+            setShowSetupProblem(false)
+            api<Task>(`/api/tasks/${id}`).then(setTask).catch(() => undefined)
+          }
         }
       }
     }
@@ -120,8 +125,12 @@ export function ChatPage() {
         navigate(`/tasks/${created.id}`)
       }
     } catch (err: any) {
-      if (err.message && err.message.toLowerCase().includes("authentication required")) {
-        setShowAuthModal(true)
+      if (err.message && isAuthFailureMessage(err.message)) {
+        setShowSetupProblem(true)
+        const recovered = await ensureDesktopSession()
+        if (recovered) {
+          setShowSetupProblem(false)
+        }
       } else {
         alert(err.message)
       }
@@ -159,8 +168,10 @@ export function ChatPage() {
           if (created.transcript) setPrompt(created.transcript)
           if (taskId) navigate(`/tasks/${taskId}`)
         } catch (err: any) {
-          if (err.message && err.message.toLowerCase().includes("authentication required")) {
-            setShowAuthModal(true)
+          if (err.message && isAuthFailureMessage(err.message)) {
+            setShowSetupProblem(true)
+            const recovered = await ensureDesktopSession()
+            if (recovered) setShowSetupProblem(false)
           } else {
             alert(err.message)
           }
@@ -173,14 +184,6 @@ export function ChatPage() {
       setRecording(true)
     } catch (err: any) {
       alert(err?.message || "Microphone permission was denied.")
-    }
-  }
-
-  function handleSaveKey() {
-    setPrivateKey(keyInput)
-    setShowAuthModal(false)
-    if (id) {
-      api<Task>(`/api/tasks/${id}`).then(setTask).catch(() => undefined)
     }
   }
 
@@ -241,20 +244,10 @@ export function ChatPage() {
         </div>
       )}
 
-      {showAuthModal && (
-        <div className="card auth-card">
-          <h2>Private key needed</h2>
-          <p className="lede">This Jarvis asks for a key before running work. You can also save it under Settings.</p>
-          <div className="row" style={{ gap: 8, marginTop: 10 }}>
-            <input
-              type="password"
-              placeholder="jarvis_pk_..."
-              value={keyInput}
-              style={{ fontFamily: "monospace", flex: 1 }}
-              onChange={(e) => setKeyInput(e.target.value)}
-            />
-            <button className="btn" onClick={handleSaveKey}>Save</button>
-          </div>
+      {showSetupProblem && (
+        <div className="card auth-card" role="status">
+          <h2>Setup problem</h2>
+          <p className="lede">{SETUP_PROBLEM_WORKING}</p>
         </div>
       )}
 

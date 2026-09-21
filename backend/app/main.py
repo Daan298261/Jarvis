@@ -182,10 +182,29 @@ async def startup() -> None:
     await bind_workers_to_node(node.id)
     await register_localhost_capabilities(node.id)
     current = load_settings()
+    persist_dirs = False
+    try:
+        from .config import is_ephemeral_workspace_path, settings_path
+
+        raw_path = settings_path()
+        if raw_path.exists():
+            raw_dirs = json.loads(raw_path.read_text(encoding="utf-8")).get("allowed_directories") or []
+            if any(is_ephemeral_workspace_path(str(item)) for item in raw_dirs):
+                persist_dirs = True
+    except Exception:
+        persist_dirs = False
     if not current.allowed_directories:
         current.allowed_directories = default_allowed_directories()
+        persist_dirs = True
+    if persist_dirs:
         save_settings(current)
     REGISTRY.apply_settings(current)
+    try:
+        from .auth import ensure_owner_private_key
+
+        ensure_owner_private_key()
+    except Exception:
+        logging.debug("Owner private key ensure on startup skipped", exc_info=True)
     try:
         from .decision.hooks import register_decision_hooks
 
@@ -208,11 +227,30 @@ async def startup() -> None:
         except Exception:
             logging.exception("MCP refresh failed")
     try:
-        from .memory.obsidian_vault import bind_vault, public_binding_status
+        from .memory.obsidian_vault import bind_vault, ensure_default_vault, public_binding_status
 
         kv = current.knowledge_vault
-        if kv.vault_path.strip() and not public_binding_status().get("bound"):
-            bind_vault(kv.vault_path.strip(), init_layout=kv.jarvis_managed_layout)
+        skip_default = os.environ.get("JARVIS_SKIP_DEFAULT_VAULT") == "1" or bool(
+            os.environ.get("PYTEST_CURRENT_TEST")
+        )
+        if skip_default:
+            if kv.vault_path.strip() and not public_binding_status().get("bound"):
+                bind_vault(kv.vault_path.strip(), init_layout=kv.jarvis_managed_layout)
+        else:
+            result = ensure_default_vault(
+                configured_path=kv.vault_path.strip(),
+                init_layout=kv.jarvis_managed_layout or not kv.vault_path.strip(),
+            )
+            bound_path = str(result.get("vault_path") or "").strip()
+            if bound_path and (
+                current.knowledge_vault.vault_path != bound_path
+                or not current.knowledge_vault.jarvis_managed_layout
+            ):
+                current.knowledge_vault.vault_path = bound_path
+                current.knowledge_vault.jarvis_managed_layout = True
+                if bound_path not in current.allowed_directories:
+                    current.allowed_directories.append(bound_path)
+                save_settings(current)
     except Exception:
         logging.debug("Vault bind on startup skipped", exc_info=True)
     try:
@@ -244,6 +282,16 @@ async def startup() -> None:
     except Exception:
         logging.debug("TTS warm-start scheduling skipped", exc_info=True)
     asyncio.create_task(_maybe_launch_greeting(app.state.startup_id))
+    asyncio.create_task(_maybe_notify_health())
+
+
+async def _maybe_notify_health() -> None:
+    try:
+        from .systems.health_notify import maybe_notify_health
+
+        await maybe_notify_health()
+    except Exception:
+        logging.exception("Health notify failed")
 
 
 async def _maybe_launch_greeting(startup_id: str) -> None:

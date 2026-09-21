@@ -73,6 +73,8 @@ desktop.ini
 # Android generated artifacts and per-swarm credentials
 android/.gradle/
 android/**/build/
+android/app/.cxx/
+android/**/.cxx/
 android/local.properties
 android/bootstrap.json
 android/*.jks

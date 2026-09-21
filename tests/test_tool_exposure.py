@@ -25,6 +25,12 @@ def test_software_engineering_includes_git_and_terminal():
     names = tool_names_for("software engineering")
     assert names == ["filesystem", "terminal", "python", "git"]
     assert "request_tools" in [item["function"]["name"] for item in schemas_for("software engineering")]
+    assert "desktop" not in names
+
+
+def test_long_horizon_includes_desktop():
+    names = set(tool_names_for("long-horizon autonomous"))
+    assert {"filesystem", "terminal", "desktop", "screenshot"} <= names
 
 
 def test_browser_research_does_not_include_office_by_default():
@@ -108,7 +114,7 @@ def test_request_capability_grant_appears_in_next_turn_without_full_catalog():
     names = tool_names_for("mixed", ["docker"])
     assert "docker" in names
     assert "office" not in names
-    assert "desktop" not in names
+    assert "desktop" in names
 
 
 def test_file_task_prompt_does_not_retrieve_unrelated_tools():

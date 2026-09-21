@@ -17,10 +17,16 @@
 
 .PARAMETER SkipVoicePack
   Skip bundling the default Kokoro-82M household butler voice weights.
+
+.PARAMETER Release
+  Product release cut. Requires vendor issuer.key and writes
+  Jarvis-unrestricted.jarvis-license beside JarvisSetup.exe. 1.4.6 shipped
+  without this file; later releases must not.
 #>
 param(
     [switch]$SkipBootstrapModel,
-    [switch]$SkipVoicePack
+    [switch]$SkipVoicePack,
+    [switch]$Release
 )
 
 $ErrorActionPreference = "Stop"
@@ -102,8 +108,19 @@ if ($LASTEXITCODE -ne 0) {
     throw "License manager build failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "==> Owner unrestricted license (vendor-only; skipped without issuer.key)" -ForegroundColor Cyan
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "issue-release-unrestricted-license.ps1") -OutDir $OutDir
+$licenseArgs = @("-OutDir", $OutDir)
+if ($Release) {
+    $env:JARVIS_VENDOR_RELEASE = "1"
+    $licenseArgs += "-Require"
+    Write-Host "==> Release cut: owner unrestricted license is a required build step" -ForegroundColor Cyan
+} else {
+    Write-Host "==> Owner unrestricted license (vendor-only; public clones skip without issuer.key)" -ForegroundColor Cyan
+}
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "issue-release-unrestricted-license.ps1") @licenseArgs
 if ($LASTEXITCODE -ne 0) {
     throw "Unrestricted license issuance failed with exit code $LASTEXITCODE"
+}
+$unrestricted = Join-Path $OutDir "Jarvis-unrestricted.jarvis-license"
+if ($Release -and (-not (Test-Path $unrestricted) -or (Get-Item $unrestricted).Length -le 0)) {
+    throw "Release cut must write $unrestricted. 1.4.6 shipped without a generated license file; following releases must issue it as a build step."
 }

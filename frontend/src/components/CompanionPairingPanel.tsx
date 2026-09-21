@@ -44,14 +44,20 @@ function formatCountdown(seconds: number): string {
 }
 
 function qrPayload(pairing: CompanionPairingCode): string | null {
+  const endpointList =
+    pairing.endpoints?.length ? pairing.endpoints : pairing.qr?.endpoints?.length ? pairing.qr.endpoints : undefined
   if (pairing.qr?.endpoint && pairing.qr.server_pin && pairing.qr.code) {
-    return JSON.stringify(pairing.qr)
+    return JSON.stringify({
+      ...pairing.qr,
+      ...(endpointList?.length ? { endpoints: endpointList } : {}),
+    })
   }
   if (pairing.endpoint && pairing.server_pin && pairing.code) {
     return JSON.stringify({
       endpoint: pairing.endpoint,
       server_pin: pairing.server_pin,
       code: formatDigits(pairing.code),
+      ...(endpointList?.length ? { endpoints: endpointList } : {}),
     })
   }
   return null

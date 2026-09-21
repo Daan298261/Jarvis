@@ -1,6 +1,16 @@
 import { Link } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode } from "../api"
 import { HudLmStudioCatalog } from "../lmstudio/HudLmStudioCatalog"
+import { SETUP_PROBLEM_WORKING } from "../setup/ownerFacing"
+import type { HealthIssue } from "./systemHealth"
+
+const LICENSE_SETUP_FAIL = new Set([
+  "tamper_detected",
+  "invalid_signature",
+  "expired",
+  "cluster_mismatch",
+  "unlicensed",
+])
 
 type HudHealthRailProps = {
   model: { loaded?: boolean; loading?: boolean; active_model?: string; last_error?: string } | null
@@ -9,6 +19,7 @@ type HudHealthRailProps = {
   swarmNodes: SwarmNode[]
   decisionInboxCount: number
   systemDegraded: boolean
+  healthIssues?: HealthIssue[]
 }
 
 function licenseTone(status: LicenseStatus | null): "ok" | "warn" | "bad" {
@@ -16,7 +27,7 @@ function licenseTone(status: LicenseStatus | null): "ok" | "warn" | "bad" {
   const code = String(validation?.status || status?.last_status || "").toLowerCase()
   if (["active", "valid", "grace"].includes(code)) return code === "grace" ? "warn" : "ok"
   if (!status?.lease_present && code === "unlicensed") return "warn"
-  if (["tamper_detected", "invalid_signature", "expired", "cluster_mismatch"].includes(code)) return "bad"
+  if (LICENSE_SETUP_FAIL.has(code) && code !== "unlicensed") return "bad"
   return "warn"
 }
 
@@ -27,10 +38,13 @@ export function HudHealthRail({
   swarmNodes,
   decisionInboxCount,
   systemDegraded,
+  healthIssues = [],
 }: HudHealthRailProps) {
   const onlineNodes = swarmNodes.filter((n) => String(n.status).toLowerCase() === "online").length
   const licTone = licenseTone(license)
   const modelTone = model?.loaded ? "ok" : model?.loading ? "warn" : model?.last_error ? "bad" : "warn"
+  const licenseCode = String(license?.validation?.status || license?.last_status || "").toLowerCase()
+  const licenseSetupFail = LICENSE_SETUP_FAIL.has(licenseCode)
 
   return (
     <aside className="hud-rail hud-rail-right" aria-label="System health">
@@ -46,8 +60,12 @@ export function HudHealthRail({
         <HealthCard
           title="License"
           tone={licTone}
-          value={license?.validation?.status || license?.last_status || "Unknown"}
-          detail={license?.validation?.message || license?.last_message || "Local-first entitlement check"}
+          value={licenseSetupFail ? "Setup problem" : license?.validation?.status || license?.last_status || "Unknown"}
+          detail={
+            licenseSetupFail
+              ? SETUP_PROBLEM_WORKING
+              : license?.validation?.message || license?.last_message || "Local-first entitlement check"
+          }
           href="/license"
         />
         <HealthCard
@@ -82,8 +100,8 @@ export function HudHealthRail({
             title="Status"
             tone="bad"
             value="Degraded"
-            detail="One or more fail-closed signals are active"
-            href="/system"
+            detail={healthIssues[0]?.detail || SETUP_PROBLEM_WORKING}
+            href={healthIssues[0]?.href || "/system"}
           />
         )}
       </div>

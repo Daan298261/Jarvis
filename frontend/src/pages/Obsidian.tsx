@@ -212,9 +212,12 @@ export function ObsidianPage() {
       <section className="obsidian-embed-region" aria-label="Obsidian application host">
         {!status?.bound && (
           <div className="obsidian-embed-placeholder card">
-            <p>Bind your Obsidian vault to use this surface.</p>
+            <p>
+              Jarvis binds a managed vault on first start. If you still see this, bind a folder in
+              Settings → Integrations.
+            </p>
             <Link className="btn" to={settingsSubmenuPath("integrations", "#knowledge-vault")}>
-              Bind vault
+              Vault settings
             </Link>
           </div>
         )}

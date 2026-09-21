@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { api, getPrivateKey, setPrivateKey, type Task } from "../api"
+import { api, ensureDesktopSession, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { prunePendingUserTexts } from "../chat/ownerChatView"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
@@ -10,6 +10,7 @@ import { useTaskSpeech } from "../tts/useTaskSpeech"
 import { useVoiceProfileSwitching } from "../tts/voiceProfiles"
 import { usePendingApprovals } from "../chat/pendingApprovals"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
+import { SETUP_PROBLEM_WORKING, isAuthFailureMessage } from "../setup/ownerFacing"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null }) => void
@@ -22,8 +23,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [task, setTask] = useState<Task | null>(null)
   const [pending, setPending] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
-  const [keyInput, setKeyInput] = useState<string>(getPrivateKey())
-  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [showSetupProblem, setShowSetupProblem] = useState(false)
   const [recording] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
@@ -48,8 +48,13 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         setTask(data)
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
-        if (message.toLowerCase().includes("authentication required")) {
-          setShowAuthModal(true)
+        if (isAuthFailureMessage(message)) {
+          setShowSetupProblem(true)
+          const recovered = await ensureDesktopSession()
+          if (recovered) {
+            setShowSetupProblem(false)
+            api<Task>(`/api/tasks/${id}`).then(setTask).catch(() => undefined)
+          }
         }
       }
     }
@@ -111,21 +116,15 @@ export function HudChat({ onMoodChange }: HudChatProps) {
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      if (message.toLowerCase().includes("authentication required")) {
-        setShowAuthModal(true)
+      if (isAuthFailureMessage(message)) {
+        setShowSetupProblem(true)
+        const recovered = await ensureDesktopSession()
+        if (recovered) setShowSetupProblem(false)
       } else {
         alert(message)
       }
     } finally {
       setBusy(false)
-    }
-  }
-
-  function handleSaveKey() {
-    setPrivateKey(keyInput)
-    setShowAuthModal(false)
-    if (id) {
-      api<Task>(`/api/tasks/${id}`).then(setTask).catch(() => undefined)
     }
   }
 
@@ -142,19 +141,10 @@ export function HudChat({ onMoodChange }: HudChatProps) {
 
   return (
     <div className="hud-chat">
-      {showAuthModal && (
-        <div className="hud-auth-card">
-          <strong>Private key needed</strong>
-          <div className="row" style={{ gap: 8, marginTop: 8 }}>
-            <input
-              type="password"
-              placeholder="jarvis_pk_..."
-              value={keyInput}
-              style={{ fontFamily: "monospace", flex: 1 }}
-              onChange={(e) => setKeyInput(e.target.value)}
-            />
-            <button className="btn hud-admin-btn" type="button" onClick={handleSaveKey}>Save</button>
-          </div>
+      {showSetupProblem && (
+        <div className="hud-auth-card" role="status">
+          <strong>Setup problem</strong>
+          <p className="lede" style={{ marginTop: 8 }}>{SETUP_PROBLEM_WORKING}</p>
         </div>
       )}
 

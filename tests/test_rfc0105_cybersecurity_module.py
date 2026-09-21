@@ -122,7 +122,9 @@ def test_download_allowlist_accepts_member():
     assert "github.com/usestrix/strix" in source.source_url
 
 
-def test_catalog_api_available(client=None):
+def test_catalog_api_available(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.main.load_settings", lambda: jarvis_env["settings"])
+    monkeypatch.setattr("app.auth.load_settings", lambda: jarvis_env["settings"])
     client = TestClient(app)
     response = client.get("/api/modules/catalog/cybersecurity")
     assert response.status_code == 200
@@ -132,7 +134,9 @@ def test_catalog_api_available(client=None):
     assert len(module["members"]) == 6
 
 
-def test_enable_endpoints(client=None):
+def test_enable_endpoints(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.main.load_settings", lambda: jarvis_env["settings"])
+    monkeypatch.setattr("app.auth.load_settings", lambda: jarvis_env["settings"])
     client = TestClient(app)
     off = client.post("/api/modules/catalog/cybersecurity/enable", json={"enabled": True})
     assert off.status_code == 200
