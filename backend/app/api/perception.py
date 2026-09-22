@@ -6,6 +6,7 @@ from ..config import load_settings
 from ..perception.models import PolicyResult, StructuredObservation
 from ..perception.policy import PerceptionPolicy
 from ..perception.store import PerceptionStateStore
+from .perception_commentary import process_candidates
 
 router = APIRouter(prefix="/api/perception", tags=["perception"])
 STORE = PerceptionStateStore()
@@ -27,7 +28,14 @@ async def perception_status():
 async def ingest_observation(observation: StructuredObservation) -> PolicyResult:
     """Evaluate structured local observations only; this endpoint never accepts image bytes."""
     settings = load_settings().social_perception
-    return PerceptionPolicy(settings, STORE).evaluate(observation)
+    result = PerceptionPolicy(settings, STORE).evaluate(observation)
+    if result.candidates:
+        await process_candidates(
+            result.candidates,
+            person_count=observation.person_count,
+            person_present=observation.person_present,
+        )
+    return result
 
 
 @router.post("/baseline/reset")

@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from ..config import load_settings, save_settings
+from ..config import CommentAddressStyle, CommentFrequency, CommentSarcasm, PersonalObservations, load_settings, save_settings
 from ..inference.backends import suggested_port
 from ..tools.registry import REGISTRY
 
@@ -73,6 +73,17 @@ class SettingsUpdate(BaseModel):
     social_perception_baseline_enabled: bool | None = None
     social_perception_retain_observation_summaries: bool | None = None
     social_perception_max_summary_retention_hours: int | None = Field(default=None, ge=1, le=168)
+    social_commentary_enabled: bool | None = None
+    social_commentary_comment_frequency: CommentFrequency | None = None
+    social_commentary_sarcasm: CommentSarcasm | None = None
+    social_commentary_personal_observations: PersonalObservations | None = None
+    social_commentary_address_style: CommentAddressStyle | None = None
+    social_commentary_configured_address_name: str | None = Field(default=None, max_length=80)
+    social_commentary_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    social_commentary_min_novelty: float | None = Field(default=None, ge=0.0, le=1.0)
+    social_commentary_do_not_disturb: bool | None = None
+    social_commentary_focus_mode: bool | None = None
+    social_commentary_allow_personal_with_guests: bool | None = None
     identity_recognition_enabled: bool | None = None
     identity_recognition_backend: str | None = Field(default=None, min_length=1, max_length=64)
     identity_recognition_match_threshold: float | None = Field(default=None, ge=-1.0, le=1.0)
@@ -237,6 +248,25 @@ async def update_settings(body: SettingsUpdate):
         perception.retain_observation_summaries = body.social_perception_retain_observation_summaries
     if body.social_perception_max_summary_retention_hours is not None:
         perception.max_summary_retention_hours = body.social_perception_max_summary_retention_hours
+
+    commentary_values = settings.social_commentary.model_dump()
+    commentary_updates = {
+        "enabled": body.social_commentary_enabled,
+        "comment_frequency": body.social_commentary_comment_frequency,
+        "sarcasm": body.social_commentary_sarcasm,
+        "personal_observations": body.social_commentary_personal_observations,
+        "address_style": body.social_commentary_address_style,
+        "configured_address_name": body.social_commentary_configured_address_name,
+        "min_confidence": body.social_commentary_min_confidence,
+        "min_novelty": body.social_commentary_min_novelty,
+        "do_not_disturb": body.social_commentary_do_not_disturb,
+        "focus_mode": body.social_commentary_focus_mode,
+        "allow_personal_with_guests": body.social_commentary_allow_personal_with_guests,
+    }
+    for key, value in commentary_updates.items():
+        if value is not None:
+            commentary_values[key] = value
+    settings.social_commentary = type(settings.social_commentary).model_validate(commentary_values)
 
     recognition_values = settings.identity_recognition.model_dump()
     recognition_updates = {
