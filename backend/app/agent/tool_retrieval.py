@@ -87,6 +87,7 @@ _SEARCH_TERMS: dict[str, tuple[str, ...]] = {
     "ufo": ("ufo2",),
     "cua": ("computer use",),
     "hexstrike_operator": ("hexstrike", "daybreak"),
+    "mcp_call": ("mcp", "gmail", "email", "whatsapp", "imap", "smtp", "wappmcp"),
     "vault_memory": ("obsidian", "vault", "wiki", "wikilink", "backlink", "brain", "router"),
     "search_internal_references": ("jarvis", "install", "settings", "portal"),
 }

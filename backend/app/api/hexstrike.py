@@ -113,12 +113,34 @@ def _require_permissions_grant(
     raise HTTPException(status_code=428, detail=parked)
 
 
-def _require_hexstrike_module_entitlement() -> None:
-    from ..licensing.entitlements import module_entitlement_blocked_reason
+def _require_hexstrike_access(*allowed: str) -> str:
+    from ..licensing.entitlements import (
+        HEXSTRIKE_ACCESS_BLUE,
+        HEXSTRIKE_ACCESS_FULL,
+        HEXSTRIKE_ACCESS_LOCKED,
+        HEXSTRIKE_OPERATOR_LICENSE_MESSAGE,
+        HEXSTRIKE_PRO_MESSAGE,
+        hexstrike_access_mode,
+    )
 
-    reason = module_entitlement_blocked_reason("hexstrike")
-    if reason:
-        raise HTTPException(status_code=403, detail=reason)
+    mode = hexstrike_access_mode()
+    if mode == HEXSTRIKE_ACCESS_LOCKED:
+        raise HTTPException(status_code=403, detail=HEXSTRIKE_PRO_MESSAGE)
+    if allowed and mode not in allowed:
+        raise HTTPException(status_code=403, detail=HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
+    return mode
+
+
+def _require_hexstrike_module_entitlement() -> None:
+    from ..licensing.entitlements import HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL
+
+    _require_hexstrike_access(HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL)
+
+
+def _require_full_operator() -> None:
+    from ..licensing.entitlements import HEXSTRIKE_ACCESS_FULL
+
+    _require_hexstrike_access(HEXSTRIKE_ACCESS_FULL)
 
 
 def _require_operator_grant(
@@ -150,6 +172,26 @@ async def _status_payload() -> dict[str, Any]:
     payload["dependency_install_jobs"] = install_job_overlay()
     payload["managed_jobs"] = list_defensive_jobs()
     payload["operator_jobs"] = list_operator_jobs()
+    from ..licensing.entitlements import (
+        HEXSTRIKE_ACCESS_BLUE,
+        HEXSTRIKE_ACCESS_LOCKED,
+        hexstrike_access_payload,
+    )
+
+    access = hexstrike_access_payload()
+    payload.update(access)
+    if access["access_mode"] == HEXSTRIKE_ACCESS_LOCKED:
+        payload["catalog"] = []
+        payload["catalog_count"] = 0
+        payload["capabilities"] = []
+        payload["operator"] = {"operator_ready": False, "reason": "pro_feature"}
+        payload["operator_jobs"] = []
+        payload["managed_jobs"] = []
+    elif access["access_mode"] == HEXSTRIKE_ACCESS_BLUE:
+        defensive = [row for row in (payload.get("catalog") or []) if row.get("source") == "defensive"]
+        payload["catalog"] = defensive
+        payload["catalog_count"] = len(defensive)
+        payload["operator"] = {**operator_surface, "operator_ready": False, "reason": "blue_license"}
     return payload
 
 
@@ -166,6 +208,7 @@ async def hexstrike_start():
 
 @router.post("/stop")
 async def hexstrike_stop():
+    _require_hexstrike_module_entitlement()
     return (await HEXSTRIKE.stop()).as_dict()
 
 
@@ -210,6 +253,7 @@ async def hexstrike_install_cancel():
 
 @router.put("/config")
 async def hexstrike_config(body: HexStrikeConfigIn):
+    _require_hexstrike_module_entitlement()
     status = await HEXSTRIKE.configure(
         install_path=body.install_path,
         python_executable=body.python_executable,
@@ -230,7 +274,7 @@ async def hexstrike_tools_catalog():
 
 @router.post("/tools/refresh")
 async def hexstrike_tools_refresh():
-    _require_operator_grant("cyber.hexstrike", action_kind="hexstrike.tools.refresh", context={})
+    _require_full_operator()
     surface = await sync_operator_surface(register_mcp=True)
     if not surface.get("operator_ready"):
         raise HTTPException(
@@ -265,6 +309,11 @@ async def hexstrike_tool_install_job(job_id: str):
 
 @router.post("/operate")
 async def hexstrike_operate(body: HexStrikeOperateIn):
+    from ..licensing.entitlements import HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL
+
+    mode = _require_hexstrike_access(HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL)
+    if mode == HEXSTRIKE_ACCESS_BLUE and not str(body.capability_id).startswith("defensive:"):
+        _require_full_operator()
     _require_operator_grant(
         "cyber.hexstrike",
         action_kind="hexstrike.operate",
@@ -290,6 +339,10 @@ async def hexstrike_operate(body: HexStrikeOperateIn):
 
 @router.get("/jobs")
 async def hexstrike_jobs():
+    from ..licensing.entitlements import HEXSTRIKE_ACCESS_LOCKED, hexstrike_access_mode
+
+    if hexstrike_access_mode() == HEXSTRIKE_ACCESS_LOCKED:
+        return {"jobs": [], "legacy_jobs": []}
     return {"jobs": list_operator_jobs(), "legacy_jobs": list_defensive_jobs()}
 
 
@@ -372,12 +425,6 @@ async def hexstrike_actions():
 @router.post("/actions")
 async def hexstrike_action(body: HexStrikeActionIn):
     _require_hexstrike_module_entitlement()
-    from ..inference.security_gates import gate_is_enabled
-    from ..licensing.entitlements import module_entitlement_blocked_reason
-
-    if not gate_is_enabled("blue-team"):
-        detail = module_entitlement_blocked_reason("blue-team") or "Blue team is not on the license package."
-        raise HTTPException(status_code=403, detail=detail)
     capability = CAPABILITY_BY_ID.get(body.action)
     if capability is None:
         raise HTTPException(status_code=422, detail="Unknown defensive action")

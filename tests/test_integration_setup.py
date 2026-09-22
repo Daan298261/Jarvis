@@ -179,8 +179,9 @@ async def test_whatsapp_pairing_state_and_marker(tmp_path, monkeypatch):
     assert enabled == ["whatsapp"]
 
 
-async def test_whatsapp_cancel_terminates_process():
+async def test_whatsapp_cancel_terminates_process(tmp_path, monkeypatch):
     manager = integration.WhatsAppPairingManager()
+    monkeypatch.setattr(manager, "_paired_marker", lambda: tmp_path / "jarvis-paired.json")
     process = FakeProcess([])
     process.returncode = None  # type: ignore[assignment]
     manager._process = process  # type: ignore[assignment]

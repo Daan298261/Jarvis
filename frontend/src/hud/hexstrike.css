@@ -127,6 +127,24 @@
   color: #ff9b7a;
 }
 
+.hex-pro-lock {
+  width: min(560px, 100%);
+  margin: 0 0 0 auto;
+}
+
+.hex-pro-lock h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--hex-gold, #f0c36b);
+}
+
+.hex-pro-lock p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(230, 240, 245, 0.86);
+}
+
 .hex-suite-grid {
   position: relative;
   display: grid;

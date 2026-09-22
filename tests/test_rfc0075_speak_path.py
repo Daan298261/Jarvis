@@ -114,7 +114,49 @@ def test_streaming_social_tts_enqueues_first_sentence_only():
     assert third is None
 
 
-def test_early_social_blocked_when_awaiting_tool_unless_ack():
+def test_speak_filter_strips_tool_xml_and_does_not_pronounce_code():
+    raw = (
+        "<tool_call>\n"
+        "<function=python>\n"
+        "<parameter=command>\n"
+        "git status && pytest\n"
+        "</parameter>\n"
+        "</function>\n"
+        "</tool_call>\n"
+        "The repo is up. I ran the tests to verify it.\n"
+        "```python\nprint('secret')\n```\n"
+    )
+    filtered = filter_text_for_speech(raw, source="owner_chat")
+    assert "tool call" not in filtered.lower()
+    assert "function=" not in filtered.lower()
+    assert "parameter=" not in filtered.lower()
+    assert "python equals" not in filtered.lower()
+    assert "print" not in filtered
+    assert "git status" not in filtered.lower()
+    assert "repo is up" in filtered.lower()
+    assert "tests" in filtered.lower()
+
+
+def test_speak_filter_silences_tool_xml_only_turns():
+    raw = (
+        "tool_call function=python parameter=command "
+        "<tool_call><function=python><parameter=action>run</parameter></function></tool_call>"
+    )
+    assert filter_text_for_speech(raw, source="task_chat") == ""
+
+
+def test_early_social_blocked_on_tool_xml():
+    stream_key = "test:xml"
+    clear_stream_speak_state(stream_key)
+    assert (
+        maybe_enqueue_streaming_social_tts(
+            "<tool_call><function=python><parameter=command>ls.</parameter>",
+            source="owner_chat",
+            stream_key=stream_key,
+            user_prompt="set up the repo",
+        )
+        is None
+    )
     stream_key = "test:tool"
     clear_stream_speak_state(stream_key)
     assert (

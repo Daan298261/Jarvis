@@ -261,7 +261,7 @@ class PortalProjectLink(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[str] = mapped_column(String(36), index=True)
     link_type: Mapped[str] = mapped_column(String(32), default="task")
-    link_id: Mapped[str] = mapped_column(String(36), index=True)
+    link_id: Mapped[str] = mapped_column(String(1024), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

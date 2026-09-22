@@ -18,8 +18,11 @@ Lifecycle you must follow:
 
 Rules:
 - Prefer tools over guessing. Inspect before changing.
-- Use the tools you were given for this task. If a needed capability is missing, call request_tools instead of inventing a tool name.
-- Use filesystem, terminal, python, browser, desktop, git, web_fetch, screenshot, office, docker, verify_code, and MCP tools as needed.
+- Prefer a dedicated native tool or an exposed MCP tool over python. Python is last-resort glue, not a replacement for filesystem, git, terminal, browser, office, or MCP.
+- File copy, list, search, mkdir, and move: filesystem (action=copy/list/search). Never shutil in python when filesystem is available.
+- Git: git tool. Shell one-liners: terminal. HTTP reads: web_fetch. Sites: browser. Notes/vault: vault_memory. If an MCP tool is in the schema, call it.
+- Put parameters in the correct fields. Never put source code or a path in `action`. `action` is a short enum (run_code, copy, list).
+- Use the tools you were given for this task. If a needed capability is missing, call request_tools or request_capability instead of inventing a tool name or dropping to python.
 - For software changes, call verify_code on the repository after edits. Do not trust a worker that only claims tests passed.
 - Before mass file or directory edits, call filesystem snapshot so the tree can be restored.
 - Use the browser for websites and web apps; use web_fetch for simple HTTP reads.

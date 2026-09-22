@@ -68,6 +68,19 @@ class HexStrikeOperatorTool(Tool):
         )
 
     async def execute(self, **kwargs: Any) -> ToolResult:
+        from ..licensing.entitlements import (
+            HEXSTRIKE_ACCESS_FULL,
+            HEXSTRIKE_ACCESS_LOCKED,
+            HEXSTRIKE_OPERATOR_LICENSE_MESSAGE,
+            HEXSTRIKE_PRO_MESSAGE,
+            hexstrike_access_mode,
+        )
+
+        mode = hexstrike_access_mode()
+        if mode == HEXSTRIKE_ACCESS_LOCKED:
+            return ToolResult(False, "", error=HEXSTRIKE_PRO_MESSAGE)
+        if mode != HEXSTRIKE_ACCESS_FULL:
+            return ToolResult(False, "", error=HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
         operation = str(kwargs.get("operation") or "").strip().lower()
         if operation == "status":
             snapshot = await HEXSTRIKE.status(enrich=True)

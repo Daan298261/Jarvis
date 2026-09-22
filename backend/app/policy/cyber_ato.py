@@ -569,6 +569,7 @@ class AtoStatus:
     auto_renew: bool = False
     max_expires_at: str = ""
     modules: list[str] = field(default_factory=list)
+    package_class: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -590,6 +591,7 @@ class AtoStatus:
             "auto_renew": self.auto_renew,
             "max_expires_at": self.max_expires_at,
             "modules": list(self.modules),
+            "package_class": self.package_class,
         }
 
 
@@ -681,6 +683,7 @@ def evaluate(*, now: datetime | None = None) -> AtoStatus:
         auto_renew=bool(payload.get("auto_renew")),
         max_expires_at=_iso(max_expires),
         modules=modules,
+        package_class=str(payload.get("package_class") or ""),
     )
 
 

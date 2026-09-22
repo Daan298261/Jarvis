@@ -124,22 +124,32 @@ async def test_operator_proxy_blocks_command_routes_but_allows_discovered_tools(
 
 def test_role_limited_tool_exposure(monkeypatch):
     from app.agent import tool_exposure
+    from app.licensing.entitlements import HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL, HEXSTRIKE_ACCESS_LOCKED
 
-    monkeypatch.setattr(tool_exposure, "gate_is_enabled", lambda role: role == "blue-team")
+    monkeypatch.setattr(tool_exposure, "hexstrike_access_mode", lambda: HEXSTRIKE_ACCESS_LOCKED)
     assert "hexstrike_defensive" not in tool_exposure.tool_names_for("mixed")
     assert "hexstrike_defensive" not in tool_exposure.tool_names_for("mixed", ["hexstrike_defensive"])
+    assert "hexstrike_operator" not in tool_exposure.tool_names_for("mixed", ["hexstrike"])
+
+    monkeypatch.setattr(tool_exposure, "hexstrike_access_mode", lambda: HEXSTRIKE_ACCESS_BLUE)
+    assert "hexstrike_defensive" in tool_exposure.tool_names_for("mixed", ["hexstrike_defensive"])
     assert "hexstrike_defensive" in tool_exposure.tool_names_for("mixed", security_role="blue-team")
+    assert "hexstrike_operator" not in tool_exposure.tool_names_for("mixed", ["hexstrike"])
+
+    monkeypatch.setattr(tool_exposure, "hexstrike_access_mode", lambda: HEXSTRIKE_ACCESS_FULL)
+    assert "hexstrike_operator" in tool_exposure.tool_names_for("mixed", ["hexstrike"])
 
 
 @pytest.mark.asyncio
 async def test_defensive_tool_rechecks_role_gate_and_permissions(monkeypatch):
     context = {"security_role": ""}
     tool = HexStrikeDefensiveTool(lambda: context)
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "locked")
     denied = await tool.execute(action="host_baseline", scope_id="host")
     assert denied.success is False
+    assert "Pro feature" in (denied.error or "")
 
-    context["security_role"] = "blue-team"
-    monkeypatch.setattr("app.tools.hexstrike_defensive.gate_is_enabled", lambda role: True)
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "blue")
     monkeypatch.setattr(
         "app.tools.hexstrike_defensive.evaluate_permission",
         lambda permission: SimpleNamespace(status="allow"),
@@ -187,7 +197,7 @@ async def test_security_role_persists_and_is_returned(jarvis_env, monkeypatch):
     async with session_module.ENGINE.connect() as connection:
         columns = await connection.run_sync(lambda conn: {col["name"] for col in inspect(conn).get_columns("tasks")})
     assert "security_role" in columns
-    monkeypatch.setattr("app.agent.tool_exposure.gate_is_enabled", lambda role: True)
+    monkeypatch.setattr("app.agent.tool_exposure.hexstrike_access_mode", lambda: "blue")
     payload = _task_dict(task)
     assert payload["security_role"] == "blue-team"
     assert "hexstrike_defensive" in payload["allowed_tools"]
@@ -234,7 +244,7 @@ def test_launcher_disables_unshipped_proxy_dependency():
     assert "/tmp/hexstrike_envs" in launcher
 
 
-def test_action_api_rejects_unknown_fields_before_execution(jarvis_env):
+def test_action_api_rejects_unknown_fields_before_execution(jarvis_env, allow_loopback_api):
     client = TestClient(app)
     response = client.post(
         "/api/hexstrike/actions",
@@ -243,10 +253,17 @@ def test_action_api_rejects_unknown_fields_before_execution(jarvis_env):
     assert response.status_code == 422
 
 
-def test_status_api_includes_install_capabilities_dependencies_and_jobs(jarvis_env, monkeypatch):
+def test_status_api_includes_install_capabilities_dependencies_and_jobs(jarvis_env, monkeypatch, allow_loopback_api):
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
     monkeypatch.setattr("app.security.hexstrike_defensive.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_payload", lambda now=None: {
+        "access_mode": "full",
+        "access_message": "",
+        "operator_allowed": True,
+        "blue_allowed": True,
+    })
     client = TestClient(app)
     body = client.get("/api/hexstrike").json()
     assert body["install"]["approved_commit"] == APPROVED_HEXSTRIKE_COMMIT

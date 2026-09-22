@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from ..licensing.entitlements import HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL, hexstrike_access_mode
 from ..tools.mcp_runtime import MCP
 from ..tools.registry import REGISTRY
-from ..policy.cyber_ato import licensed_module_allowed
-from ..inference.security_gates import gate_is_enabled
 
 # Task class → native tools Jarvis should send to the model.
 # Mixed / long-horizon start small; prompt retrieval adds tools for this turn.
@@ -15,14 +14,14 @@ CLASS_TOOLS: dict[str, tuple[str, ...]] = {
     "shell": ("filesystem", "terminal", "python"),
     "system administration": ("filesystem", "terminal", "python", "desktop", "screenshot", "docker"),
     "software engineering": ("filesystem", "terminal", "python", "git"),
-    "research": ("web_fetch", "browser", "filesystem", "python"),
+    "research": ("web_fetch", "browser", "filesystem", "python", "mcp_call"),
     "browser automation": ("browser", "web_fetch", "filesystem", "screenshot"),
     "windows gui": ("desktop", "screenshot", "filesystem", "terminal"),
     "office": ("office", "filesystem", "python"),
     "document processing": ("office", "filesystem", "python", "web_fetch"),
     "data processing": ("filesystem", "python", "terminal"),
     "multimodal": ("screenshot", "desktop", "browser", "filesystem"),
-    "mixed": ("filesystem", "python", "terminal", "desktop", "screenshot", "chat_projects"),
+    "mixed": ("filesystem", "python", "terminal", "desktop", "screenshot", "chat_projects", "mcp_call"),
     "long-horizon autonomous": (
         "filesystem",
         "python",
@@ -33,6 +32,8 @@ CLASS_TOOLS: dict[str, tuple[str, ...]] = {
         "browser",
         "web_fetch",
         "office",
+        "mcp_call",
+        "vault_memory",
     ),
 }
 
@@ -61,27 +62,31 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "ufo2": "ufo",
     "hexstrike": "hexstrike_operator",
     "daybreak": "hexstrike_operator",
+    "gmail": "mcp_call",
+    "email": "mcp_call",
+    "whatsapp": "mcp_call",
+    "imap": "mcp_call",
+    "smtp": "mcp_call",
 }
 
 ESCAPE_TOOL = "request_tools"
 ESCAPE_TOOLS = ("request_tools", "request_capability")
 MCP_CAPABILITY = "mcp"
-RESTRICTED_TOOLS = frozenset({"hexstrike_defensive"})
+RESTRICTED_TOOLS = frozenset({"hexstrike_defensive", "hexstrike_operator"})
 
 
 def _enabled_native(security_role: str = "") -> list[str]:
-    blue = security_role == "blue-team" and gate_is_enabled("blue-team")
-    hexstrike = licensed_module_allowed("hexstrike")
+    mode = hexstrike_access_mode()
     names: list[str] = []
     for name, tool in REGISTRY.tools.items():
         if not tool.enabled or name == ESCAPE_TOOL:
             continue
-        if name in RESTRICTED_TOOLS:
-            if blue:
+        if name == "hexstrike_defensive":
+            if mode in {HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL}:
                 names.append(name)
             continue
         if name == "hexstrike_operator":
-            if hexstrike:
+            if mode == HEXSTRIKE_ACCESS_FULL:
                 names.append(name)
             continue
         names.append(name)
@@ -155,10 +160,12 @@ def tool_names_for(
             wanted.append(name)
     if security_role == "blue-team" and "hexstrike_defensive" not in wanted:
         wanted.append("hexstrike_defensive")
-    if "hexstrike_operator" not in wanted and ("hexstrike_operator" in extras or "hexstrike" in {item.lower() for item in extras}):
-        wanted.append("hexstrike_operator")
     enabled = set(_enabled_native(security_role))
     names = [name for name in wanted if name in enabled]
+    if MCP_CAPABILITY in extras and "mcp_call" in enabled and "mcp_call" not in names:
+        names.append("mcp_call")
+    if MCP.has_tools() and "mcp_call" in enabled and "mcp_call" not in names:
+        names.append("mcp_call")
     if (task_class or "").strip().lower() != "conversation":
         if "filesystem" not in names and "filesystem" in enabled:
             names.insert(0, "filesystem")
@@ -198,8 +205,17 @@ def schemas_for(
         if any(item.get("function", {}).get("name") == name for item in schemas):
             continue
         schemas.append(REGISTRY.tools[name].schema())
-    if full or MCP_CAPABILITY in extras:
-        schemas.extend(MCP.openai_tools())
+    attach_mcp = full or MCP_CAPABILITY in extras or MCP.has_tools()
+    if attach_mcp:
+        seen = {item.get("function", {}).get("name") for item in schemas}
+        for item in MCP.openai_tools():
+            fname = item.get("function", {}).get("name")
+            if fname in seen:
+                continue
+            schemas.append(item)
+            seen.add(fname)
+        if "mcp_call" not in seen and "mcp_call" in REGISTRY.tools and REGISTRY.tools["mcp_call"].enabled:
+            schemas.append(REGISTRY.tools["mcp_call"].schema())
     return schemas
 
 
@@ -242,6 +258,9 @@ def describe_exposure(
             + ", ".join(installable)
             + ". Ask the owner to install them or call request_tools with the worker name; do not pretend they are present."
         )
+    if MCP.has_tools():
+        keys = ", ".join(MCP.connected_keys()[:24])
+        lines.append(f"Connected MCP tools are attached and must be used when they match the job: {keys}.")
     return "\n".join(lines)
 
 

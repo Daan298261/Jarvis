@@ -20,7 +20,7 @@ ALL_NATIVE = frozenset(
         "web_fetch",
         "screenshot",
         "request_capability",
-        "mcp",
+        "mcp_call",
     }
 )
 
@@ -30,7 +30,7 @@ TOOL_SETS: dict[str, frozenset[str]] = {
     "shell": frozenset({"filesystem", "terminal", "python", "request_capability"}),
     "system administration": frozenset({"filesystem", "terminal", "python", "desktop", "screenshot", "request_capability"}),
     "software engineering": frozenset(
-        {"filesystem", "terminal", "python", "git", "request_capability", "mcp"}
+        {"filesystem", "terminal", "python", "git", "request_capability", "mcp_call"}
     ),
     "research": frozenset({"web_fetch", "browser", "filesystem", "request_capability"}),
     "browser automation": frozenset(
@@ -50,7 +50,7 @@ def tools_for_task(task_class: str | None) -> set[str]:
     names = set(TOOL_SETS.get((task_class or "").strip().lower(), ALL_NATIVE))
     names |= set(CORE_TOOLS)
     known = set(REGISTRY.tools)
-    known.add("mcp")
+    known.add("mcp_call")
     return {name for name in names if name in known}
 
 
@@ -69,13 +69,15 @@ def apply_capability_request(exposed: set[str], arguments: dict[str, Any]) -> tu
         name = str(raw or "").strip()
         if not name:
             continue
+        if name in {"mcp", "mcp_call"}:
+            if "mcp_call" not in next_set:
+                next_set.add("mcp_call")
+                added.append("mcp_call")
+            continue
         if name in known and name not in next_set:
             next_set.add(name)
             added.append(name)
-        elif name == "mcp" and "mcp" not in next_set:
-            next_set.add("mcp")
-            added.append("mcp")
-        elif name not in known and name != "mcp":
+        elif name not in known:
             unknown.append(name)
     lines = []
     if added:
@@ -90,9 +92,9 @@ def apply_capability_request(exposed: set[str], arguments: dict[str, Any]) -> tu
 
 def expose_called_tool(exposed: set[str], name: str) -> set[str]:
     """Escape hatch: executing an unlisted but real tool expands the set."""
-    if name in REGISTRY.tools:
+    if name in REGISTRY.tools or name.startswith("mcp_"):
         exposed = set(exposed)
-        exposed.add(name)
+        exposed.add(name if name in REGISTRY.tools else "mcp_call")
     return exposed
 
 

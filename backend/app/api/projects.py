@@ -20,8 +20,8 @@ class ProjectRenameIn(BaseModel):
 
 
 class ProjectLinkIn(BaseModel):
-    link_type: Literal["task", "owner_chat"]
-    link_id: str = Field(min_length=1, max_length=36)
+    link_type: Literal["task", "owner_chat", "repo"]
+    link_id: str = Field(min_length=1, max_length=1024)
 
 
 class LocalImportIn(BaseModel):
@@ -56,9 +56,17 @@ async def add_link(project_id: str, body: ProjectLinkIn) -> dict[str, Any]:
     return {"ok": True}
 
 
-@router.delete("/links/{link_type}/{link_id}")
+@router.delete("/links/{link_type}/{link_id:path}")
 async def remove_link(link_type: str, link_id: str) -> dict[str, Any]:
-    if link_type not in {"task", "owner_chat"}:
+    if link_type not in {"task", "owner_chat", "repo"}:
+        raise HTTPException(400, "Invalid link_type")
+    await portal_store.unlink_member(link_type, link_id)
+    return {"ok": True}
+
+
+@router.delete("/unlink")
+async def remove_link_query(link_type: str, link_id: str) -> dict[str, Any]:
+    if link_type not in {"task", "owner_chat", "repo"}:
         raise HTTPException(400, "Invalid link_type")
     await portal_store.unlink_member(link_type, link_id)
     return {"ok": True}

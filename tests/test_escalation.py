@@ -10,14 +10,30 @@ from app.agent.escalation import (
 from app.agent.planning import WorkingState
 
 
-def test_does_not_escalate_for_a_long_or_single_failure():
-    assert not should_escalate(EscalationSignals(consecutive_failures=6, failed_tools=["filesystem"], already_consulted=0))
-    assert not should_escalate(EscalationSignals(consecutive_failures=2, failed_tools=["filesystem", "python"]))
+def test_does_not_escalate_for_a_single_failure():
+    assert not should_escalate(EscalationSignals(consecutive_failures=1, failed_tools=["python"], already_consulted=0))
+    assert not should_escalate(
+        EscalationSignals(consecutive_failures=2, failed_tools=["filesystem"], already_consulted=0)
+    )
 
 
 def test_escalates_when_several_strategies_fail():
     assert should_escalate(
         EscalationSignals(consecutive_failures=3, failed_tools=["filesystem", "python"], already_consulted=0)
+    )
+    assert should_escalate(
+        EscalationSignals(consecutive_failures=2, failed_tools=["filesystem", "python"], already_consulted=0)
+    )
+
+
+def test_escalates_on_repeated_python_usage_failures():
+    assert should_escalate(
+        EscalationSignals(
+            consecutive_failures=2,
+            failed_tools=["python"],
+            failure_kinds=["usage", "not_found"],
+            already_consulted=0,
+        )
     )
 
 

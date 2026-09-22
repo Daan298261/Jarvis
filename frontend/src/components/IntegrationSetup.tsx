@@ -22,7 +22,7 @@ function StatusPill({ state, label }: { state: "idle" | "working" | "ready" | "f
   return <span className={`integration-status ${state}`}>{label}</span>
 }
 
-export function IntegrationSetup() {
+export function IntegrationSetup({ onReady }: { onReady?: () => void }) {
   const [emailStatus, setEmailStatus] = useState(EMPTY_EMAIL)
   const [whatsapp, setWhatsApp] = useState(EMPTY_WHATSAPP)
   const [accountName, setAccountName] = useState("personal")
@@ -48,7 +48,10 @@ export function IntegrationSetup() {
     if (!(["starting", "pairing"] as string[]).includes(whatsapp.state)) return
     const timer = window.setInterval(() => {
       getWhatsAppPairing()
-        .then((result) => setWhatsApp(result.whatsapp))
+        .then((result) => {
+          setWhatsApp(result.whatsapp)
+          if (result.whatsapp.paired || result.whatsapp.state === "connected") onReady?.()
+        })
         .catch(() => undefined)
     }, 1000)
     return () => window.clearInterval(timer)
@@ -67,6 +70,7 @@ export function IntegrationSetup() {
       })
       setEmailStatus(result.email)
       setAppPassword("")
+      onReady?.()
     } catch (error) {
       setEmailError(String(error))
     } finally {

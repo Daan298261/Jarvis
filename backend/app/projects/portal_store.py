@@ -43,12 +43,14 @@ async def list_projects() -> list[dict[str, Any]]:
             ).scalars().all()
             task_ids = [link.link_id for link in links if link.link_type == "task"]
             chat_ids = [link.link_id for link in links if link.link_type == "owner_chat"]
+            repo_paths = [link.link_id for link in links if link.link_type == "repo"]
             projects.append(
                 {
                     "id": row.id,
                     "name": row.name,
                     "taskIds": task_ids,
                     "conversationIds": chat_ids,
+                    "repoPaths": repo_paths,
                 }
             )
         return projects
@@ -60,7 +62,7 @@ async def create_project(name: str) -> dict[str, Any]:
         session.add(PortalProject(id=pid, name=name.strip()))
         await session.commit()
     project_media_dir(pid)
-    return {"id": pid, "name": name.strip(), "taskIds": [], "conversationIds": []}
+    return {"id": pid, "name": name.strip(), "taskIds": [], "conversationIds": [], "repoPaths": []}
 
 
 async def rename_project(project_id: str, name: str) -> None:
@@ -124,6 +126,16 @@ async def import_local_projects(payload: list[dict[str, Any]]) -> int:
                 if isinstance(task_id, str) and task_id:
                     session.add(
                         PortalProjectLink(project_id=pid, link_type="task", link_id=task_id)
+                    )
+            for chat_id in row.get("conversationIds") or []:
+                if isinstance(chat_id, str) and chat_id:
+                    session.add(
+                        PortalProjectLink(project_id=pid, link_type="owner_chat", link_id=chat_id)
+                    )
+            for repo_path in row.get("repoPaths") or []:
+                if isinstance(repo_path, str) and repo_path.strip():
+                    session.add(
+                        PortalProjectLink(project_id=pid, link_type="repo", link_id=repo_path.strip())
                     )
             await session.commit()
     return imported

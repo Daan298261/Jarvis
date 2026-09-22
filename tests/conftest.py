@@ -47,6 +47,17 @@ async def jarvis_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _mcp_runtime_hygiene_after_test():
+    yield
+    try:
+        from app.tools.mcp_runtime import MCP
+
+        MCP.reset_for_tests()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _obsidian_vault_hygiene_after_test():
     yield
     try:
@@ -56,6 +67,12 @@ def _obsidian_vault_hygiene_after_test():
         unbind_vault()
     except Exception:
         pass
+
+
+@pytest.fixture
+def allow_loopback_api(monkeypatch):
+    """TestClient host is not loopback; skip HTTP owner-key auth for HexStrike API tests."""
+    monkeypatch.setattr("app.main.authenticate_request", lambda request, settings=None: True)
 
 
 @pytest.fixture(autouse=True)
