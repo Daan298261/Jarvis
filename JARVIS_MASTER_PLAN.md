@@ -2412,11 +2412,19 @@ Taco 1.2.5: pairing failed without a private key and without QR; default TTS sti
 
 Decision: RFC-0075 natural speak path + reply latency (implemented)
 
-RFC-0075 is implemented on development via #188 (`99e1028`): social vs technical speak path, speak filter, natural prose, early TTS. Thought-process chevron was not in #188; RFC-0067 Show work / hide-chrome remains the owner-chat contract (UX follow-up). No new §58 backlog checkboxes. RFC-0074 / 0076 stay accepted. Prior ledger tick #190 closed without merge.
+RFC-0075 is implemented on development via #188 (`99e1028`): social vs technical speak path, speak filter, natural prose, early TTS. Thought-process chevron was not in #188; RFC-0067 Show work / hide-chrome remains the owner-chat contract (UX follow-up). No new §58 backlog checkboxes. RFC-0074 and RFC-0076 are implemented in the following ledger tick. Prior ledger tick #190 closed without merge.
 
 Reason:
 
 CoS assigned this re-tick after #188 landed on development.
+
+Decision: RFC-0074 companion pairing + RFC-0076 companion APK delivery UX (implemented)
+
+RFC-0074 is implemented on development via #191 (`ee643eca`): companion pairing streamline, QR fields, spoken onboarding hooks. RFC-0076 is implemented on development via #189 (`8ab2c28`) + #193 (`f31d2f2`): APK build progress / Download to Desktop + WhatsApp/email send when configured. No new §58 backlog checkboxes. Specs status updated from accepted → implemented (late ledger catch-up 2026-09-22 against development tip `25d1c53`; code landed 2026-09-11).
+
+Reason:
+
+CoS assigned Architect tick-only after room flagged that defaulting re-implement to 0074/0076 would collide with already-merged work.
 
 Decision: RFC-0077 local LM Studio discovery + play/hotswap context (implemented)
 
