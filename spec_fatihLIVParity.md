@@ -29,6 +29,33 @@ The goal is to use Mark-LIV as an implementation source without importing it **a
 
 Assets, prompts, branding, and other non-code material are tracked separately and are not assumed reusable merely because adjacent source code is.
 
+
+### Upstream sync policy
+
+Mark-LIV-derived components should be treated as **adapted upstream ports**, not forked files that must remain structurally identical to Mark-LIV.
+
+For each adapted component:
+
+- ANZU owns the local module boundary, API, naming, tests, and internal structure.
+- Mark-LIV is tracked as an upstream/reference implementation for selected behavior.
+- Upstream updates are reviewed at the referenced Mark-LIV component/function level.
+- Relevant fixes or improvements are **ported into the ANZU implementation**, rather than overwriting the ANZU file with the new upstream file.
+- Behavioral tests are the compatibility contract. ANZU does not need to preserve upstream class layout, function boundaries, comments, variable names, or file structure.
+- If an upstream change no longer applies because ANZU already has a stronger implementation, record it as reviewed/not-applicable rather than forcing parity.
+- Every substantial adapted component should have a mapping entry in the private provenance/chain-of-custody file linking upstream source -> ANZU destination -> adaptation notes -> last upstream review commit.
+
+Example mapping:
+
+```text
+Upstream-reference: FatihMakes/Mark-LIV @ <commit>
+Original-component: core/tts.py::KokoroTTSEngine
+ANZU-component: <local ANZU path / symbol>
+Adaptation: architecture port; interfaces/control flow restructured
+Sync-policy: manually review upstream changes; port behavior, do not overwrite local module
+```
+
+This allows ANZU to keep working independently of Mark-LIV's internal restructuring while still making future upstream review and attribution straightforward.
+
 ### Preferred source order
 
 When multiple implementations are available, use this order to minimize both engineering time and future migration cost:
