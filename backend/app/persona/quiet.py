@@ -4,12 +4,9 @@ from ..config import AppSettings, load_settings
 
 
 def is_quiet_or_dnd_active(settings: AppSettings | None = None) -> bool:
-    """Hook stub for focus mode, quiet hours, and do-not-disturb.
-
-    RFC-0055 will wire persona policy here. Until then this always returns False
-    so chat TTS is governed only by ``tts.speak_chat_replies``.
-    """
-    return False
+    """Do-not-disturb flag from RFC-0055 commentary settings (chat TTS gate)."""
+    current = settings or load_settings()
+    return bool(current.social_commentary.do_not_disturb)
 
 
 def should_speak_chat_reply(settings: AppSettings | None = None) -> bool:

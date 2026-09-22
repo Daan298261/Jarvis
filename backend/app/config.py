@@ -171,6 +171,38 @@ class DialogueSettings(BaseModel):
     background_verify: bool = True
 
 
+CommentFrequency = Literal["silent", "restrained", "normal", "talkative", "butler"]
+CommentSarcasm = Literal["off", "light", "dry", "sharp"]
+PersonalObservations = Literal["disabled", "practical_only", "casual", "broad"]
+CommentAddressStyle = Literal["neutral", "sir_maam", "first_name", "configured"]
+
+
+class SocialCommentarySettings(BaseModel):
+    """RFC-0055 gate between perception candidates and dialogue wording."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = True
+    comment_frequency: CommentFrequency = "restrained"
+    sarcasm: CommentSarcasm = "light"
+    personal_observations: PersonalObservations = "practical_only"
+    address_style: CommentAddressStyle = "neutral"
+    configured_address_name: str = Field(default="", max_length=80)
+    min_confidence: float = Field(default=0.75, ge=0.0, le=1.0)
+    min_novelty: float = Field(default=0.35, ge=0.0, le=1.0)
+    do_not_disturb: bool = False
+    focus_mode: bool = False
+    allow_personal_with_guests: bool = False
+    reveal_household_labels_to_guests: bool = False
+
+    @model_validator(mode="after")
+    def validate_address_name(self):
+        if self.address_style in {"first_name", "configured"} and not self.configured_address_name.strip():
+            if self.address_style == "configured":
+                raise ValueError("configured_address_name is required when address_style is configured")
+        return self
+
+
 class SocialPerceptionSettings(BaseModel):
     """Local semantic-perception policy. Disabled means no semantic frame processing."""
 
@@ -303,6 +335,7 @@ class AppSettings(BaseModel):
     dialogue: DialogueSettings = Field(default_factory=DialogueSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
+    social_commentary: SocialCommentarySettings = Field(default_factory=SocialCommentarySettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
