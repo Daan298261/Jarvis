@@ -118,9 +118,33 @@ if ($SkipModelLoad) { $env:JARVIS_SKIP_MODEL = "1" }
 if ($PrivateKey) { $env:JARVIS_PRIVATE_KEY = $PrivateKey }
 $bindHost = if ($LanAccess) { "0.0.0.0" } else { "127.0.0.1" }
 $log = Join-Path $Root "logs\backend.log"
-$backend = Start-Process -FilePath $python -ArgumentList "-m","uvicorn","app.main:app","--host",$bindHost,"--port","4780","--app-dir","backend" -WorkingDirectory $Root -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Root "logs\backend.err.log")
-"$($backend.Id)" | Set-Content $pidFile
-Write-Host "Backend PID $($backend.Id)"
+
+function Test-JarvisBackendHealthy {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:4780/api/health" -TimeoutSec 3
+        return ($response.StatusCode -eq 200)
+    } catch {
+        return $false
+    }
+}
+
+$adoptExistingBackend = Test-JarvisBackendHealthy
+if ($adoptExistingBackend) {
+    Write-Host "Healthy Jarvis API already listening on port 4780; adopting existing backend." -ForegroundColor Green
+} else {
+    $forceScript = Join-Path $Root "installer\windows\force-stop-jarvis.ps1"
+    if (-not (Test-Path -LiteralPath $forceScript)) {
+        throw "force-stop-jarvis.ps1 not found at $forceScript (cannot clear hung listeners before bind)."
+    }
+    Write-Host "Clearing hung or stale Jarvis processes before binding port 4780..."
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $forceScript -InstallRoot $Root -IncludeTray -MaxWaitSeconds 90
+    if ($LASTEXITCODE -ne 0) {
+        throw "force-stop-jarvis.ps1 failed with exit code $LASTEXITCODE; port 4780 is not clear for a new backend."
+    }
+    $backend = Start-Process -FilePath $python -ArgumentList "-m","uvicorn","app.main:app","--host",$bindHost,"--port","4780","--app-dir","backend" -WorkingDirectory $Root -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Root "logs\backend.err.log")
+    "$($backend.Id)" | Set-Content $pidFile
+    Write-Host "Backend PID $($backend.Id)"
+}
 
 Write-Step "Waiting for http://127.0.0.1:4780/api/health"
 $ok = $false

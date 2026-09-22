@@ -263,7 +263,8 @@ begin
       ExistingInstallDir + #13#10 + #13#10 +
       'This cannot be undone. Continue?',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
-    Exit;
+    if not Result then
+      Exit;
   end;
 
   if ExistingInstallPage.SelectedValueIndex = 2 then
@@ -283,6 +284,18 @@ begin
       'Your private key, license files, and downloaded models are kept.' + #13#10 + #13#10 +
       'Continue?',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+    if not Result then
+      Exit;
+  end;
+
+  { RFC-0136: stop hung/zombie backends before any upgrade path continues (PrepareToInstall remains backstop). }
+  if not ForceStopJarvisUnder(ExistingInstallDir) then
+  begin
+    MsgBox(
+      'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
+      'See logs\installer-stop.log in your Jarvis folder for details.',
+      mbError, MB_OK);
+    Result := False;
   end;
 end;
 
