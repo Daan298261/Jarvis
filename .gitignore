@@ -95,3 +95,6 @@ JarvisLicenseManager.exe
 JarvisLicenseManager.cmd
 *.trusted.pub
 
+
+# Private upstream provenance / chain-of-custody notes
+FATIH_LIV_PROVENANCE_PRIVATE.md
