@@ -13,15 +13,21 @@ Reference: [Mark-LIV LICENSE, lines 1-6](https://github.com/FatihMakes/Mark-LIV/
 
 ### Current personal-use phase
 
-For the current non-commercial Jarvis build, engineering agents may use the **cheapest technically sound implementation path**, including direct adaptation of Mark-LIV code when that is materially cheaper than rewriting it, provided that:
+For the current non-commercial Jarvis build, engineering agents may use the **cheapest technically sound implementation path**, including direct adaptation of Mark-LIV code when that is materially cheaper than rewriting it.
 
-- the reused portion remains compatible with Mark-LIV's CC BY-NC 4.0 terms;
-- attribution and source provenance are retained in an internal source manifest and, where required, in distributed notices;
-- copied/adapted code is clearly tagged with origin file, source URL, reference commit, and original license;
-- assets, prompts, or branding are not assumed to have the same reuse status merely because nearby source code is reusable;
-- no attempt is made to conceal provenance through superficial renaming or formatting.
+When Mark-LIV code is used as a source, agents should **adapt rather than vendor it unchanged**:
 
-Formatting, renaming, refactoring, adapting APIs, splitting functions, replacing UI bindings, or otherwise modifying source is permitted as an engineering technique during the personal/non-commercial phase, but it **does not change the upstream license status** of copied material.
+- rename classes, functions, modules, configuration keys, and internal concepts to ANZU/Jarvis terminology where that improves architectural consistency;
+- restructure functions/classes to fit ANZU-owned interfaces and package boundaries;
+- replace Mark-LIV-specific UI plumbing, state management, prompts, and naming with ANZU equivalents;
+- refactor control flow where ANZU already has stronger abstractions;
+- split or combine upstream functions when that reduces duplication or aligns with ANZU services;
+- add ANZU tests around the required behavior rather than relying on upstream structure;
+- preserve a clear provenance marker identifying the upstream source even after substantial refactoring.
+
+The goal is to use Mark-LIV as an implementation source without importing it **as-is** into the ANZU architecture. However, renaming, formatting, or restructuring does **not** by itself remove upstream copyright/license obligations. Provenance and license status must remain explicit until a separate commercial license or replacement implementation covers that code.
+
+Assets, prompts, branding, and other non-code material are tracked separately and are not assumed reusable merely because adjacent source code is.
 
 ### Preferred source order
 
@@ -34,28 +40,40 @@ When multiple implementations are available, use this order to minimize both eng
 
 ### Future commercialisation gate
 
-Before any commercial distribution, paid tier, commercial SaaS, paid binary, or other use incompatible with CC BY-NC 4.0:
+The project owner expects that a separate commercial license from FatihMakes can be obtained if/when Jarvis/ANZU becomes commercial. Therefore Mark-LIV-derived code does **not** need to be treated as throwaway by default.
+
+Before commercial distribution, paid tiers, commercial SaaS, paid binaries, or other use incompatible with the current CC BY-NC terms:
 
 - inventory every Mark-LIV-derived source fragment and asset;
-- replace it with an independently implemented or commercial-compatible alternative, **or** obtain separate permission/license from the rightsholder;
-- preserve functionality tests so replacements can be swapped without regressions;
-- run a dependency/license scan and produce a release manifest before enabling commercial distribution.
+- attach the applicable commercial permission/license to the provenance manifest, **or** replace the affected component with a commercial-compatible implementation;
+- preserve behavior tests so licensed/replacement implementations can be swapped without regressions;
+- run a dependency/license scan and produce a release manifest.
 
-Therefore, this specification should **not** force unnecessary clean-room rewrites today. Instead it must keep provenance explicit so any non-commercial dependency can be surgically replaced later.
+A commercial license, if obtained, should explicitly cover the adapted/derivative implementation actually used by ANZU, not only verbatim upstream files.
 
 ### Provenance requirement for copied/adapted code
 
-Any substantial code adapted directly from Mark-LIV should include a lightweight provenance header or adjacent manifest entry containing:
+Any substantial code adapted directly from Mark-LIV must be marked in either the source header or the repository provenance manifest. The marker should contain:
 
 - upstream: `FatihMakes/Mark-LIV`;
 - upstream commit: `476a9c09d64423e97b08958c4088fde29a1b1713`;
 - original file path;
-- original line range or function/class name;
-- upstream license: `CC BY-NC 4.0`;
+- original line range or function/class name where practical;
+- adaptation type: `ported`, `refactored`, `restructured`, or `derived-behavior`;
+- upstream license: `CC BY-NC 4.0` until superseded by documented commercial permission;
 - local adaptation date;
-- local replacement status: `temporary-noncommercial` or `commercial-safe-replacement-complete`.
+- commercial-license status: `not-required-personal-use`, `pending`, `licensed`, or `replaced`.
 
-This makes later commercial migration mechanical instead of forensic.
+Recommended source annotation:
+
+```text
+Upstream-source: FatihMakes/Mark-LIV @ 476a9c09d64423e97b08958c4088fde29a1b1713
+Upstream-path: <file/function/lines>
+Adaptation: refactored/restructured for ANZU architecture; not vendored as-is
+License-status: CC BY-NC 4.0 / commercial permission pending
+```
+
+This provenance is intentional: it allows the project owner to tell the upstream author exactly what was used as source and how it was transformed, while keeping the implementation auditable.
 
 ---
 
@@ -303,7 +321,7 @@ ANZU adaptation:
 
 ## 3. Reuse rules: copy when cheaper, replace where ANZU is stronger
 
-1. **Direct source adaptation is allowed in the present personal/non-commercial phase when it saves meaningful engineering effort.** Keep provenance and CC BY-NC status attached to that code.
+1. **Direct source adaptation is allowed in the present personal/non-commercial phase when it saves meaningful engineering effort.** Prefer refactoring/restructuring into ANZU-owned abstractions instead of dropping upstream files in unchanged. Keep provenance and current license status attached to that code.
 2. **Prefer permissively licensed equivalents when the implementation cost is similar.** This reduces future commercial migration work.
 3. **Do not downgrade stronger ANZU architecture merely to match Mark-LIV.** Copy/adapt the useful implementation detail while retaining ANZU's stronger interfaces, security model, persistence, and routing.
 4. **Do not use an LLM's own arguments as approval.** Keep ANZU's stronger approval/action-firewall model.
@@ -370,4 +388,4 @@ Where an existing RFC is stronger, keep the stronger ANZU design and add Mark-LI
 
 “Fatih LIV parity” does **not** require an identical UI or implementation. It is met when ANZU provides equivalent or better user-observable behavior for the selected capabilities while preserving ANZU's stronger goals: local-first operation, swarm routing, explicit security boundaries, durable execution, modular personalities, and companion clients.
 
-During the current personal-use phase, parity may be reached through direct adaptation of Mark-LIV code where that is the cheapest sound path. Any such adaptation must remain provenance-tracked and replaceable so a future commercial release can substitute commercial-compatible implementations without redesigning the surrounding ANZU architecture.
+During the current personal-use phase, parity may be reached through direct adaptation of Mark-LIV code where that is the cheapest sound path. Adapted code should be renamed and restructured to fit ANZU's architecture and should be explicitly marked as derived/refactored from Mark-LIV rather than vendored as-is. This architectural transformation does not itself change licensing obligations; provenance remains attached so a future commercial license can be documented cleanly, or the component can be replaced without redesigning the surrounding system.
