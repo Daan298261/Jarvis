@@ -3,17 +3,59 @@
 **Target:** ANZU / Jarvis  
 **Reference repository:** `FatihMakes/Mark-LIV`  
 **Reference commit:** `476a9c09d64423e97b08958c4088fde29a1b1713`  
-**Purpose:** Identify implementation and UX patterns Mark-LIV executes well and specify clean-room parity/adaptation for ANZU.
+**Purpose:** Identify implementation and UX patterns Mark-LIV executes well and specify the lowest-cost lawful parity/adaptation path for ANZU/Jarvis.
 
-## 0. Licensing constraint — mandatory
+## 0. Source-reuse and licensing policy
 
-Mark-LIV is published under **CC BY-NC 4.0** and explicitly states that commercial use is not permitted. ANZU is intended to support commercial distribution, so this document is a **behavioral/reference specification only**.
+**Current project status:** Jarvis/ANZU is presently a **personal-use, non-commercial project** and the Jarvis repository currently has **no project license selected**. Mark-LIV is published under **CC BY-NC 4.0**, which permits reuse subject to its terms but explicitly prohibits commercial use.
 
-- Do **not** copy Mark-LIV source code, substantial source fragments, assets, UI artwork, prompt text, or other copyrightable implementation material into ANZU.
-- Implement the concepts below independently against ANZU's own architecture, APIs, naming, tests, and UI.
-- Source links and line ranges in this document exist to show the observed behavior/design pattern and to make future review reproducible.
+Reference: [Mark-LIV LICENSE, lines 1-6](https://github.com/FatihMakes/Mark-LIV/blob/476a9c09d64423e97b08958c4088fde29a1b1713/LICENSE#L1-L6)
 
-Reference: [LICENSE, lines 1-6](https://github.com/FatihMakes/Mark-LIV/blob/476a9c09d64423e97b08958c4088fde29a1b1713/LICENSE#L1-L6)
+### Current personal-use phase
+
+For the current non-commercial Jarvis build, engineering agents may use the **cheapest technically sound implementation path**, including direct adaptation of Mark-LIV code when that is materially cheaper than rewriting it, provided that:
+
+- the reused portion remains compatible with Mark-LIV's CC BY-NC 4.0 terms;
+- attribution and source provenance are retained in an internal source manifest and, where required, in distributed notices;
+- copied/adapted code is clearly tagged with origin file, source URL, reference commit, and original license;
+- assets, prompts, or branding are not assumed to have the same reuse status merely because nearby source code is reusable;
+- no attempt is made to conceal provenance through superficial renaming or formatting.
+
+Formatting, renaming, refactoring, adapting APIs, splitting functions, replacing UI bindings, or otherwise modifying source is permitted as an engineering technique during the personal/non-commercial phase, but it **does not change the upstream license status** of copied material.
+
+### Preferred source order
+
+When multiple implementations are available, use this order to minimize both engineering time and future migration cost:
+
+1. Existing ANZU/Jarvis implementation that already meets or exceeds the requirement.
+2. Permissively licensed implementation (MIT, BSD, Apache-2.0, similarly commercial-compatible) that can be adapted cheaply.
+3. Mark-LIV code adapted under CC BY-NC 4.0 for the current personal-use phase.
+4. Fresh implementation when reuse is slower, incompatible, or technically inferior.
+
+### Future commercialisation gate
+
+Before any commercial distribution, paid tier, commercial SaaS, paid binary, or other use incompatible with CC BY-NC 4.0:
+
+- inventory every Mark-LIV-derived source fragment and asset;
+- replace it with an independently implemented or commercial-compatible alternative, **or** obtain separate permission/license from the rightsholder;
+- preserve functionality tests so replacements can be swapped without regressions;
+- run a dependency/license scan and produce a release manifest before enabling commercial distribution.
+
+Therefore, this specification should **not** force unnecessary clean-room rewrites today. Instead it must keep provenance explicit so any non-commercial dependency can be surgically replaced later.
+
+### Provenance requirement for copied/adapted code
+
+Any substantial code adapted directly from Mark-LIV should include a lightweight provenance header or adjacent manifest entry containing:
+
+- upstream: `FatihMakes/Mark-LIV`;
+- upstream commit: `476a9c09d64423e97b08958c4088fde29a1b1713`;
+- original file path;
+- original line range or function/class name;
+- upstream license: `CC BY-NC 4.0`;
+- local adaptation date;
+- local replacement status: `temporary-noncommercial` or `commercial-safe-replacement-complete`.
+
+This makes later commercial migration mechanical instead of forensic.
 
 ---
 
@@ -259,15 +301,18 @@ ANZU adaptation:
 
 ---
 
-## 3. What not to copy as-is
+## 3. Reuse rules: copy when cheaper, replace where ANZU is stronger
 
-1. **Do not copy source due to CC BY-NC.** Reimplement behavior independently.
-2. **Do not use an LLM's own arguments as approval.** Keep ANZU's stronger approval/action-firewall model.
-3. **Do not treat a real browser profile as the default automation environment.** Use an ANZU-owned persistent profile and make real-profile use opt-in.
-4. **Do not auto-run package upgrades during normal inference without a user-authorized maintenance policy.** Mark-LIV's Kokoro self-repair is useful as a diagnostic pattern, but production ANZU should use signed/version-pinned runtime components and explicit repair operations.
-5. **Do not replicate Mark-LIV's simple lexical memory search as ANZU's main memory system.** ANZU already has/targets richer semantic memory. Reuse the prompt-budget architecture, not the retrieval quality ceiling.
-6. **Do not replace ANZU's scheduler/automation system with the simple daily background monitor.** Mark-LIV's monitor is useful as a compact UX example, but ANZU's durable scheduled/conditional task engine should remain authoritative.
-7. **Do not reproduce the visual design or JARVIS branding.** Apply these interaction principles to ANZU's personality-specific avatars and appearance system.
+1. **Direct source adaptation is allowed in the present personal/non-commercial phase when it saves meaningful engineering effort.** Keep provenance and CC BY-NC status attached to that code.
+2. **Prefer permissively licensed equivalents when the implementation cost is similar.** This reduces future commercial migration work.
+3. **Do not downgrade stronger ANZU architecture merely to match Mark-LIV.** Copy/adapt the useful implementation detail while retaining ANZU's stronger interfaces, security model, persistence, and routing.
+4. **Do not use an LLM's own arguments as approval.** Keep ANZU's stronger approval/action-firewall model.
+5. **Do not treat a real browser profile as the default automation environment.** Use an ANZU-owned persistent profile and make real-profile use opt-in.
+6. **Do not auto-run package upgrades during normal inference without a user-authorized maintenance policy.** Mark-LIV's Kokoro self-repair can be adapted as a diagnostic/repair workflow rather than copied as an uncontrolled runtime mutation.
+7. **Do not replace ANZU's semantic memory with Mark-LIV's simpler lexical memory search.** Reuse code only where it contributes value; preserve ANZU's richer retrieval layer.
+8. **Do not replace ANZU's scheduler/automation system with Mark-LIV's simple daily monitor.** Its implementation can be mined for inexpensive helpers, but ANZU's durable scheduler remains authoritative.
+9. **Do not reproduce Mark-LIV/JARVIS branding or distinctive artwork as ANZU product identity.** Functional UI code may be adapted where licensed, but ANZU keeps its own identity/personality system.
+10. **Every Mark-LIV-derived module must be replaceable behind an ANZU-owned interface.** This is the key requirement for later commercialisation.
 
 ---
 
@@ -323,4 +368,6 @@ Where an existing RFC is stronger, keep the stronger ANZU design and add Mark-LI
 
 ## 6. Definition of parity
 
-“Fatih LIV parity” does **not** mean identical UI or implementation. It is met when ANZU provides equivalent or better user-observable behavior for the selected capabilities while preserving ANZU's stronger goals: local-first operation, swarm routing, explicit security boundaries, durable execution, modular personalities, companion clients, and commercial-safe independent implementation.
+“Fatih LIV parity” does **not** require an identical UI or implementation. It is met when ANZU provides equivalent or better user-observable behavior for the selected capabilities while preserving ANZU's stronger goals: local-first operation, swarm routing, explicit security boundaries, durable execution, modular personalities, and companion clients.
+
+During the current personal-use phase, parity may be reached through direct adaptation of Mark-LIV code where that is the cheapest sound path. Any such adaptation must remain provenance-tracked and replaceable so a future commercial release can substitute commercial-compatible implementations without redesigning the surrounding ANZU architecture.
