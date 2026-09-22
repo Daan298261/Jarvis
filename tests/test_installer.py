@@ -165,6 +165,13 @@ def test_vendor_license_manager_is_excluded_from_inno_payload():
     assert not (REPO_ROOT / "backend" / "app" / "licensing" / "manager_app.py").is_file()
 
 
+def test_inno_excludes_nested_jarvis_copies_and_releases():
+    iss = _read(ISS)
+    assert "Releases\\*" in iss
+    assert "*\\Jarvis\\*" in iss
+    assert "*\\Jarvis\\**" in iss
+
+
 def test_readme_documents_build_oneliner():
     text = _read(README)
     assert "build-installer.ps1" in text
