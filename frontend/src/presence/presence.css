@@ -113,6 +113,12 @@
   width: min(420px, calc(100vw - 24px));
 }
 
+.jarvis-presence-controls-body-persona {
+  display: block;
+  width: min(340px, calc(100vw - 24px));
+  padding: 10px;
+}
+
 .jarvis-presence-controls-body-voice .voice-profile-picker,
 .jarvis-presence-controls-body-voice .axis-fieldset,
 .jarvis-presence-controls-body-voice .axis-options {

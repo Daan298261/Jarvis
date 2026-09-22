@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { HudCybersecurityModule } from "../hud/HudCybersecurityModule"
 import { AppearanceSettingsPane } from "../settings/AppearanceSettingsPane"
+import { NamedPersonaControls } from "../persona/NamedPersonaControls"
 import { appearanceVoiceSettingsPath } from "../settings/settingsSubmenus"
 import type { PresentationSettings } from "./presenceTypes"
 
@@ -10,7 +11,7 @@ type AppearancePresenceControlsProps = {
   settings: PresentationSettings
 }
 
-type PresenceMenu = "voice" | "appearance" | "cybersecurity"
+type PresenceMenu = "persona" | "voice" | "appearance" | "cybersecurity"
 
 function Menu({
   id,
@@ -49,6 +50,12 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
 
   return (
     <div className="jarvis-presence-controls-split" role="toolbar" aria-label="HUD menus">
+      <Menu id="persona" label="Persona" open={openMenu === "persona"} onToggle={toggle}>
+        <div className="jarvis-presence-controls-body jarvis-presence-controls-body-persona">
+          <NamedPersonaControls />
+        </div>
+      </Menu>
+
       <Menu id="voice" label="Voice" open={openMenu === "voice"} onToggle={toggle}>
         <div className="jarvis-presence-controls-body jarvis-presence-controls-body-voice">
           <VoiceProfilePicker />

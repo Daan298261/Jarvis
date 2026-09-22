@@ -569,7 +569,7 @@ function OwnerPortal() {
         <button className="nav-toggle" type="button" aria-label="Open menu" onClick={() => setNavOpen((open) => !open)}>
           Menu
         </button>
-        <strong>JARVIS</strong>
+        <strong>ANZU</strong>
         <HelpTrigger variant="classic" onClick={() => setHelpOpen((open) => !open)} />
         <span className={`dot ${status.tone}`} />
       </header>
@@ -577,8 +577,8 @@ function OwnerPortal() {
       {navOpen && <button className="nav-backdrop" type="button" aria-label="Close menu" onClick={closeNav} />}
       <aside className="sidebar">
         <div className="brand">
-          <strong>JARVIS</strong>
-          <span>On this PC</span>
+          <strong>ANZU</strong>
+          <span>Local Superassistant</span>
           <HelpTrigger variant="classic" onClick={() => setHelpOpen((open) => !open)} />
         </div>
 
@@ -646,7 +646,7 @@ function OwnerPortal() {
         </div>
 
         <p className="tray-hint">
-          To stop Jarvis, use <strong>Stop</strong> on the Windows tray. This window is for talking and settings.
+          To stop ANZU, use <strong>Stop</strong> on the Windows tray. This window is for talking and settings.
         </p>
         <div className="side-status">
           <div>

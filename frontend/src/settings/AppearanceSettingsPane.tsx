@@ -151,13 +151,13 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           onChange={(event) =>
             apply(
               { attentionMode: event.target.value as PresentationSettings["attentionMode"] },
-              event.target.value === "camera" ? "Camera preference saved. RFC-0050 does not activate a camera." : "",
+              event.target.value === "camera" ? "Camera tracking will ask for permission when the humanoid presence is open. Video stays on this device and is never stored." : "",
             )
           }
         >
           <option value="off">Off</option>
           <option value="pointer">Follow pointer</option>
-          <option value="camera">Camera preference (not activated here)</option>
+          <option value="camera">Camera: head, eyes & hand energy</option>
         </select>
       </label>
 

@@ -6,6 +6,7 @@ export type AttentionVector = {
   y: number
   confidence: number
   source: "pointer" | "camera"
+  gesture: number
 }
 
 export type PresenceAttentionController = {
@@ -33,8 +34,8 @@ export function createPresenceAttentionController(
 ): PresenceAttentionController {
   const pointerTarget = { x: 0, y: 0 }
   const pointerSmooth = { x: 0, y: 0 }
-  const cameraTarget = { x: 0, y: 0, confidence: 0 }
-  const cameraSmooth = { x: 0, y: 0, confidence: 0 }
+  const cameraTarget = { x: 0, y: 0, confidence: 0, gesture: 0 }
+  const cameraSmooth = { x: 0, y: 0, confidence: 0, gesture: 0 }
 
   let stream: MediaStream | null = null
   let video: HTMLVideoElement | null = null
@@ -69,6 +70,7 @@ export function createPresenceAttentionController(
     cameraTarget.x = 0
     cameraTarget.y = 0
     cameraTarget.confidence = 0
+    cameraTarget.gesture = 0
     if (video) {
       video.pause()
       video.srcObject = null
@@ -89,6 +91,7 @@ export function createPresenceAttentionController(
       cameraTarget.x = sample.x
       cameraTarget.y = sample.y
       cameraTarget.confidence = sample.confidence
+      cameraTarget.gesture = sample.gesture || 0
     }
     trackFrame = window.requestAnimationFrame(tick)
   }
@@ -159,7 +162,8 @@ export function createPresenceAttentionController(
         cameraSmooth.x = 0
         cameraSmooth.y = 0
         cameraSmooth.confidence = 0
-        return { x: 0, y: 0, confidence: 0, source: "pointer" }
+        cameraSmooth.gesture = 0
+        return { x: 0, y: 0, confidence: 0, gesture: 0, source: "pointer" }
       }
 
       pointerSmooth.x = lerp(pointerSmooth.x, pointerTarget.x, 0.26)
@@ -167,12 +171,14 @@ export function createPresenceAttentionController(
       cameraSmooth.x = lerp(cameraSmooth.x, cameraTarget.x, 0.22)
       cameraSmooth.y = lerp(cameraSmooth.y, cameraTarget.y, 0.22)
       cameraSmooth.confidence = lerp(cameraSmooth.confidence, cameraTarget.confidence, 0.24)
+      cameraSmooth.gesture = lerp(cameraSmooth.gesture, cameraTarget.gesture, 0.2)
 
       if (mode === "camera" && cameraUsable && cameraSmooth.confidence > 0.3) {
         return {
           x: cameraSmooth.x,
           y: cameraSmooth.y,
           confidence: cameraSmooth.confidence,
+          gesture: cameraSmooth.gesture,
           source: "camera",
         }
       }
@@ -181,6 +187,7 @@ export function createPresenceAttentionController(
         x: pointerSmooth.x,
         y: pointerSmooth.y,
         confidence: 1,
+        gesture: 0,
         source: "pointer",
       }
     },

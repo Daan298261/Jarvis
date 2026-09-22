@@ -133,7 +133,7 @@ export function BootNova({ enabled, children }: BootNovaProps) {
             <div className="boot-nova-radar" aria-hidden />
             <NovaGlyph ready={ready} />
             <div className="boot-nova-copy">
-              <p className="boot-nova-kicker">Jarvis</p>
+              <p className="boot-nova-kicker">ANZU</p>
               <h1 className="boot-nova-title">
                 {ready ? (
                   <>
@@ -168,7 +168,7 @@ export function BootNova({ enabled, children }: BootNovaProps) {
 }
 
 const PLACEHOLDER_CHECKS: SelfCheckItem[] = [
-  { id: "core", label: "Core systems", status: "starting", detail: "Contacting Jarvis" },
+  { id: "core", label: "Core systems", status: "starting", detail: "Contacting ANZU" },
   { id: "inference", label: "Local inference", status: "starting", detail: "Checking the model" },
   { id: "household_voice", label: "Household voice", status: "starting", detail: "Preparing speech" },
   { id: "speech_recognition", label: "Speech recognition", status: "starting", detail: "Checking the microphone path" },

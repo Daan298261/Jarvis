@@ -21,7 +21,7 @@ export function ParticleBustPresence({ snapshot, settings }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const stateRef = useRef({ snapshot, settings })
-  const attentionRef = useRef<AttentionVector>({ x: 0, y: 0, confidence: 0, source: "pointer" })
+  const attentionRef = useRef<AttentionVector>({ x: 0, y: 0, confidence: 0, gesture: 0, source: "pointer" })
   const [failure, setFailure] = useState<Error | null>(null)
   useEffect(() => { stateRef.current = { snapshot, settings } }, [snapshot, settings])
 

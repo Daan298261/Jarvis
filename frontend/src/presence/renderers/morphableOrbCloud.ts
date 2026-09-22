@@ -33,6 +33,7 @@ export const particleVertexShader = `
   uniform float uLattice;
   uniform vec2 uPointer;
   uniform float uPointerStrength;
+  uniform float uGesture;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
@@ -53,7 +54,7 @@ export const particleVertexShader = `
       p.x += sin(t * 0.55 + aSeed * 42.0) * 0.055 * loose * uMotion;
       p.y += cos(t * 0.45 + aSeed * 31.0) * 0.06 * loose * uMotion;
       float sweep = pow(max(0.0, sin(t * 0.4 + p.y * 0.8)), 5.0);
-      float drift = loose * (0.08 + uActivity * 0.2) * sweep * uMotion;
+      float drift = loose * (0.08 + uActivity * 0.2 + uGesture * 0.14) * sweep * uMotion;
       p.x += drift * (0.5 + aSeed) * smoothstep(-0.3, 0.5, p.x);
       // State energy may loosen the halo, but must never tear the anatomical
       // head/shoulder cloud apart.
@@ -113,7 +114,7 @@ export const particleVertexShader = `
     vPos = p;
     vSeed = aSeed;
     float shimmer = 0.87 + 0.13 * sin(t * 1.2 + aSeed * 60.0);
-    float wave = pow(max(0.0, sin(p.y * 3.5 - t * 1.1)), 8.0) * uActivity;
+    float wave = pow(max(0.0, sin(p.y * 3.5 - t * 1.1)), 8.0) * (uActivity + uGesture * .35);
     float light = mix(aLight, bLight, m);
     vLight = light * (mix(1.0, shimmer, uMotion) + wave * uMotion * 0.24);
   }

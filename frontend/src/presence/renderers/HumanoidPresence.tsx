@@ -48,7 +48,7 @@ function galaxyAlive(phase: PresencePhase): boolean {
 export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }: HumanoidPresenceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
-  const attentionRef = useRef<AttentionVector>({ x: 0, y: 0, confidence: 0, source: "pointer" })
+  const attentionRef = useRef<AttentionVector>({ x: 0, y: 0, confidence: 0, gesture: 0, source: "pointer" })
   const stateRef = useRef({ snapshot, settings, shapeId, personaVisual })
   const [failure, setFailure] = useState<Error | null>(null)
   const [activeShapeId, setActiveShapeId] = useState(
@@ -136,6 +136,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       uGalaxy: { value: 0 },
       uGalaxyBust: { value: 0 },
       uLattice: { value: 0 },
+      uGesture: { value: 0 },
     }
     const material = new THREE.ShaderMaterial({
       uniforms,
@@ -290,6 +291,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
         bust.rotation.set(0, baseYaw, 0)
         bust.position.set(basePos[0], basePos[1], basePos[2])
         uniforms.uPointerStrength.value = 0
+        uniforms.uGesture.value = 0
       } else {
         const ax = follow ? att.x : 0
         const ay = follow ? att.y : 0
@@ -302,6 +304,8 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
         const pointerTarget = follow ? THREE.MathUtils.clamp(att.confidence, 0, 1) * 0.42 : 0
         uniforms.uPointerStrength.value += (pointerTarget - uniforms.uPointerStrength.value)
           * Math.min(1, delta * 5)
+        const gestureTarget = att.source === "camera" ? att.gesture : 0
+        uniforms.uGesture.value += (gestureTarget - uniforms.uGesture.value) * Math.min(1, delta * 4)
       }
       try {
         if (composer) composer.render()
@@ -351,7 +355,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       data-presence-shape={activeShapeId}
       data-galaxy={galaxy ? "true" : "false"}
       role="img"
-      aria-label={`Jarvis particle presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
+      aria-label={`ANZU particle presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
     >
       <canvas ref={canvasRef} aria-hidden="true" />
       {snapshot.phase === "offline" && <span className="jarvis-presence-broken-ring" aria-hidden="true" />}
@@ -380,7 +384,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
             <span className="jarvis-humanoid-hud-bl" />
           </div>
           <div className="jarvis-humanoid-label" aria-hidden="true">
-            <span>JARVIS</span><i /><span>NEURAL PRESENCE</span>
+            <span>ANZU</span><i /><span>NEURAL PRESENCE</span>
           </div>
         </>
       )}
