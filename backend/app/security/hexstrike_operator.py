@@ -313,13 +313,19 @@ async def sync_operator_surface(*, register_mcp: bool = True) -> dict[str, Any]:
     install = Path(snapshot.install_path)
     mcp_payload: dict[str, Any] = {"ok": False, "error": ""}
     if register_mcp:
-        result = await register_hexstrike_mcp(
-            install_path=install,
-            python_executable=snapshot.python_executable,
-            host=snapshot.host,
-            port=snapshot.port,
-        )
-        mcp_payload = result.as_dict()
+        from ..licensing.entitlements import HEXSTRIKE_ACCESS_FULL, hexstrike_access_mode
+
+        if hexstrike_access_mode() != HEXSTRIKE_ACCESS_FULL:
+            register_mcp = False
+            mcp_payload = {"ok": False, "error": "full operator license required for HexStrike MCP"}
+        else:
+            result = await register_hexstrike_mcp(
+                install_path=install,
+                python_executable=snapshot.python_executable,
+                host=snapshot.host,
+                port=snapshot.port,
+            )
+            mcp_payload = result.as_dict()
     catalog = await refresh_discovered_catalog(force=True)
     mcp_ok = bool(mcp_payload.get("ok")) if register_mcp else True
     if register_mcp and not mcp_ok:
@@ -343,16 +349,31 @@ def discovered_catalog() -> list[dict[str, Any]]:
 
 
 def catalog_snapshot() -> dict[str, Any]:
+    from ..licensing.entitlements import (
+        HEXSTRIKE_ACCESS_BLUE,
+        HEXSTRIKE_ACCESS_FULL,
+        HEXSTRIKE_ACCESS_LOCKED,
+        hexstrike_access_mode,
+        hexstrike_access_payload,
+    )
+
     catalog = discovered_catalog()
-    return {
+    mode = hexstrike_access_mode()
+    if mode == HEXSTRIKE_ACCESS_LOCKED:
+        catalog = []
+    elif mode == HEXSTRIKE_ACCESS_BLUE:
+        catalog = [row for row in catalog if row.get("source") == "defensive"]
+    payload = {
         "catalog": catalog,
         "count": len(catalog),
-        "catalog_stale": catalog_is_stale(),
-        "missing_host_tools": missing_host_tools(),
-        "legacy_capabilities": capability_snapshot(),
-        "mcp": mcp_registration_status(),
-        "mcp_error": mcp_registration_error(),
+        "catalog_stale": False if mode != HEXSTRIKE_ACCESS_FULL else catalog_is_stale(),
+        "missing_host_tools": missing_host_tools() if mode != HEXSTRIKE_ACCESS_LOCKED else [],
+        "legacy_capabilities": capability_snapshot() if mode != HEXSTRIKE_ACCESS_LOCKED else [],
+        "mcp": mcp_registration_status() if mode == HEXSTRIKE_ACCESS_FULL else {"ok": False, "error": ""},
+        "mcp_error": mcp_registration_error() if mode == HEXSTRIKE_ACCESS_FULL else "",
     }
+    payload.update(hexstrike_access_payload())
+    return payload
 
 
 def _validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> None:
@@ -374,8 +395,22 @@ def _resolve_capability(capability_id: str) -> dict[str, Any]:
 
 
 async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    from ..licensing.entitlements import (
+        HEXSTRIKE_ACCESS_BLUE,
+        HEXSTRIKE_ACCESS_FULL,
+        HEXSTRIKE_ACCESS_LOCKED,
+        HEXSTRIKE_OPERATOR_LICENSE_MESSAGE,
+        HEXSTRIKE_PRO_MESSAGE,
+        hexstrike_access_mode,
+    )
+
+    mode = hexstrike_access_mode()
+    if mode == HEXSTRIKE_ACCESS_LOCKED:
+        raise PermissionError(HEXSTRIKE_PRO_MESSAGE)
     capability = _resolve_capability(capability_id)
     source = str(capability.get("source") or "")
+    if source != "defensive" and mode != HEXSTRIKE_ACCESS_FULL:
+        raise PermissionError(HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
     if source == "dependency" or str(capability_id).startswith("dep:"):
         raise ValueError("dependency rows install via POST /api/hexstrike/tools/{id}/install, not operate")
     if capability.get("available") is False:

@@ -10,7 +10,7 @@ from ..config import load_settings
 from ..events import BUS
 from .quiet import should_speak_chat_reply
 from ..tts.reply_class import ReplySpeechClass, classify_reply_for_speech
-from ..tts.speak_filter import filter_text_for_speech
+from ..tts.speak_filter import filter_text_for_speech, contains_tool_markup
 
 OWNER_CHAT_CHANNEL = "__owner_chat__"
 _NONCOMMITTAL_ACK = re.compile(
@@ -158,6 +158,8 @@ def is_semantically_safe_early_social_sentence(
     if "traceback" in lowered or "http://" in lowered or "https://" in lowered:
         return False
     if "```" in sentence or "**" in sentence:
+        return False
+    if contains_tool_markup(sentence):
         return False
     return True
 

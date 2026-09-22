@@ -96,7 +96,7 @@ class ToolRegistry:
             for tool in self.tools.values()
             if tool.enabled and (names is None or tool.name in names)
         ]
-        include_mcp = names is None or "mcp" in names
+        include_mcp = names is None or "mcp" in names or "mcp_call" in names
         return native + (MCP.openai_tools() if include_mcp else [])
 
     def list_tools(self) -> list[dict[str, Any]]:
@@ -137,7 +137,13 @@ class ToolRegistry:
 
         started = time.perf_counter()
         try:
-            if name.startswith("mcp_"):
+            if name == "mcp_call":
+                proxy = self.tools.get("mcp_call")
+                if not proxy or not proxy.enabled:
+                    result = ToolResult(False, "", error="Tool mcp_call is disabled")
+                else:
+                    result = await proxy.execute(**arguments)
+            elif name.startswith("mcp_"):
                 result = await MCP.call(name, arguments)
             else:
                 tool = self.tools.get(name)

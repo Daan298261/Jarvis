@@ -106,6 +106,7 @@ def test_public_status_never_echoes_path(temp_vault):
     status = public_binding_status()
     assert status["bound"]
     assert "vault_path" not in status
+    assert status.get("vault_name")
     assert str(temp_vault) not in str(status)
 
 

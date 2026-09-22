@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { ChatPage } from "./pages/Chat"
+import { OwnerChatPage } from "./pages/OwnerChat"
 import { HistoryPage } from "./pages/History"
 import { MemoryPage } from "./pages/Memory"
 import { ObsidianPage } from "./pages/Obsidian"
@@ -39,9 +40,9 @@ import { PendingApprovalsProvider } from "./chat/pendingApprovals"
 import { HudChatHome } from "./hud/HudChatHome"
 import { getUiMode, setUiMode as persistUiMode, type UiMode } from "./hud/uiMode"
 import "./hud/hud.css"
-import { TaskHeartbeat } from "./components/TaskActivity"
-import { phaseLabel } from "./taskStatus"
 import {
+  assignConversation,
+  assignRepo,
   assignTask,
   createProject,
   createProjectRemote,
@@ -50,13 +51,15 @@ import {
   fetchProjects,
   linkProjectMember,
   persistProjects,
-  projectForTask,
   renameProject,
   renameProjectRemote,
-  unlinkProjectMember,
+  unassignConversation,
+  unassignRepo,
   unassignTask,
+  unlinkProjectMember,
   type PortalProject,
 } from "./projects"
+import { ProjectsRail } from "./projects/ProjectsRail"
 
 const WORK_LINKS = [
   { to: "/history", label: "History" },
@@ -88,7 +91,7 @@ const ADMIN_LINKS = [
 ] as const
 
 function isChatPath(pathname: string): boolean {
-  return pathname === "/" || pathname.startsWith("/tasks/")
+  return pathname === "/" || pathname.startsWith("/tasks/") || pathname.startsWith("/chats/")
 }
 
 function isAdminPath(pathname: string): boolean {
@@ -103,10 +106,6 @@ function isGuestPath(pathname: string): boolean {
 function activeTaskId(pathname: string): string | undefined {
   const match = pathname.match(/^\/tasks\/([^/]+)/)
   return match?.[1]
-}
-
-function taskLabel(task: Task): string {
-  return task.title || task.prompt?.slice(0, 72) || "Untitled task"
 }
 
 export default function App() {
@@ -134,11 +133,6 @@ function OwnerPortal() {
   const [recents, setRecents] = useState<Task[]>([])
   const [projects, setProjects] = useState<PortalProject[]>([])
   const [ownerChats, setOwnerChats] = useState<{ conversation_id: string; title: string; project_id?: string }[]>([])
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const [newProjectOpen, setNewProjectOpen] = useState(false)
-  const [newProjectName, setNewProjectName] = useState("")
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState("")
   const [adminOpen, setAdminOpen] = useState(false)
   const [uiMode, setUiModeState] = useState<UiMode>(() => getUiMode())
   const [license, setLicense] = useState<LicenseStatus | null>(null)
@@ -274,25 +268,52 @@ function OwnerPortal() {
     persistProjects(next).catch(() => undefined)
   }
 
-  async function handleCreateProject(event: FormEvent) {
-    event.preventDefault()
-    const remote = await createProjectRemote(newProjectName)
-    const created = remote || createProject(newProjectName, projects).slice(-1)[0]
+  async function handleCreateProject(name: string) {
+    const remote = await createProjectRemote(name)
+    const created = remote || createProject(name, projects).slice(-1)[0]
     if (created) {
       updateProjects([...projects.filter((p) => p.id !== created.id), created])
-      setExpanded((prev) => ({ ...prev, [created.id]: true }))
     }
-    setNewProjectName("")
-    setNewProjectOpen(false)
   }
 
-  async function commitRename(event?: FormEvent) {
-    event?.preventDefault()
-    if (!renamingId) return
-    await renameProjectRemote(renamingId, renameValue).catch(() => undefined)
-    updateProjects(renameProject(renamingId, renameValue, projects))
-    setRenamingId(null)
-    setRenameValue("")
+  async function handleRenameProject(projectId: string, name: string) {
+    await renameProjectRemote(projectId, name).catch(() => undefined)
+    updateProjects(renameProject(projectId, name, projects))
+  }
+
+  function handleDeleteProject(projectId: string) {
+    deleteProjectRemote(projectId).catch(() => undefined)
+    updateProjects(deleteProject(projectId, projects))
+  }
+
+  function handleAssignTask(projectId: string, taskId: string) {
+    updateProjects(assignTask(projectId, taskId, projects))
+    linkProjectMember(projectId, "task", taskId).catch(() => undefined)
+  }
+
+  function handleUnassignTask(taskId: string) {
+    unlinkProjectMember("task", taskId).catch(() => undefined)
+    updateProjects(unassignTask(taskId, projects))
+  }
+
+  function handleAssignChat(projectId: string, conversationId: string) {
+    updateProjects(assignConversation(projectId, conversationId, projects))
+    linkProjectMember(projectId, "owner_chat", conversationId).catch(() => undefined)
+  }
+
+  function handleUnassignChat(conversationId: string) {
+    unlinkProjectMember("owner_chat", conversationId).catch(() => undefined)
+    updateProjects(unassignConversation(conversationId, projects))
+  }
+
+  function handleAssignRepo(projectId: string, repoPath: string) {
+    updateProjects(assignRepo(projectId, repoPath, projects))
+    linkProjectMember(projectId, "repo", repoPath).catch(() => undefined)
+  }
+
+  function handleUnassignRepo(repoPath: string) {
+    unlinkProjectMember("repo", repoPath).catch(() => undefined)
+    updateProjects(unassignRepo(repoPath, projects))
   }
 
   const chatsById = useMemo(() => {
@@ -338,6 +359,7 @@ function OwnerPortal() {
   const routes = (
     <Routes>
       <Route path="/" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
+      <Route path="/chats/:conversationId" element={<OwnerChatPage variant={uiMode === "hud" ? "hud" : "classic"} />} />
       <Route path="/phone" element={<PhonePage />} />
       <Route path="/companion-pairing" element={<Navigate to="/settings/phone-pairing" replace />} />
       <Route path="/tasks/:id" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
@@ -410,6 +432,26 @@ function OwnerPortal() {
         decisionInboxCount={decisionInboxCount}
         systemDegraded={systemDegraded}
         healthIssues={healthIssues}
+        projectsPanel={
+          <ProjectsRail
+            variant="hud"
+            projects={projects}
+            tasksById={tasksById}
+            chatsById={chatsById}
+            ungroupedOwnerChats={ungroupedOwnerChats}
+            recents={recents}
+            currentTaskId={currentTaskId}
+            onCreateProject={handleCreateProject}
+            onRenameProject={handleRenameProject}
+            onDeleteProject={handleDeleteProject}
+            onAssignTask={handleAssignTask}
+            onUnassignTask={handleUnassignTask}
+            onAssignChat={handleAssignChat}
+            onUnassignChat={handleUnassignChat}
+            onAssignRepo={handleAssignRepo}
+            onUnassignRepo={handleUnassignRepo}
+          />
+        }
       >
         {routes}
       </HudShell>
@@ -442,212 +484,25 @@ function OwnerPortal() {
           New task
         </NavLink>
 
-        <section className="rail-section">
-          <div className="rail-heading">
-            <span>Projects</span>
-            <button type="button" className="rail-icon-btn" onClick={() => setNewProjectOpen((open) => !open)}>
-              {newProjectOpen ? "Close" : "New"}
-            </button>
-          </div>
-          {newProjectOpen && (
-            <form className="rail-inline-form" onSubmit={handleCreateProject}>
-              <input
-                autoFocus
-                value={newProjectName}
-                onChange={(event) => setNewProjectName(event.target.value)}
-                placeholder="Project name"
-                aria-label="Project name"
-              />
-            </form>
-          )}
-          {projects.length === 0 && !newProjectOpen && (
-            <p className="rail-empty">Group related tasks. Names stay on this PC.</p>
-          )}
-          {projects.map((project) => {
-            const open = expanded[project.id] ?? true
-            return (
-              <div key={project.id} className="rail-project">
-                <div className="rail-project-row">
-                  <button
-                    type="button"
-                    className="rail-disclosure"
-                    aria-expanded={open}
-                    onClick={() => setExpanded((prev) => ({ ...prev, [project.id]: !open }))}
-                  >
-                    {open ? "▾" : "▸"}
-                  </button>
-                  {renamingId === project.id ? (
-                    <form className="rail-inline-form" onSubmit={commitRename}>
-                      <input
-                        autoFocus
-                        value={renameValue}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        onBlur={() => commitRename()}
-                        aria-label="Rename project"
-                      />
-                    </form>
-                  ) : (
-                    <button
-                      type="button"
-                      className="rail-project-name"
-                      onClick={() => setExpanded((prev) => ({ ...prev, [project.id]: !open }))}
-                      onDoubleClick={() => {
-                        setRenamingId(project.id)
-                        setRenameValue(project.name)
-                      }}
-                    >
-                      {project.name}
-                    </button>
-                  )}
-                  {currentTaskId && !project.taskIds.includes(currentTaskId) && (
-                    <button
-                      type="button"
-                      className="rail-icon-btn"
-                      title="Add this task"
-                      onClick={() => {
-                        updateProjects(assignTask(project.id, currentTaskId, projects))
-                        linkProjectMember(project.id, "task", currentTaskId).catch(() => undefined)
-                      }}
-                    >
-                      Add
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="rail-icon-btn"
-                    title="Rename"
-                    onClick={() => {
-                      setRenamingId(project.id)
-                      setRenameValue(project.name)
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="rail-icon-btn"
-                    title="Remove project"
-                    onClick={() => {
-                      deleteProjectRemote(project.id).catch(() => undefined)
-                      updateProjects(deleteProject(project.id, projects))
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-                {open && (
-                  <div className="rail-project-tasks">
-                    {(project.conversationIds || []).map((conversationId) => {
-                      const chatRow = chatsById.get(conversationId)
-                      return (
-                        <div key={`chat-${conversationId}`} className="rail-item-row">
-                          <NavLink to="/" className="rail-item" onClick={closeNav}>
-                            <span className="rail-item-title">{chatRow?.title || "Chat"}</span>
-                            <span className="rail-item-meta">Chat</span>
-                          </NavLink>
-                        </div>
-                      )
-                    })}
-                    {project.taskIds.length === 0 && (
-                      <p className="rail-empty">No tasks in this project yet.</p>
-                    )}
-                    {project.taskIds.map((taskId) => {
-                      const task = tasksById.get(taskId)
-                      return (
-                        <div key={taskId} className="rail-item-row">
-                          <NavLink
-                            to={`/tasks/${taskId}`}
-                            className={({ isActive }) => `rail-item${isActive ? " active" : ""}`}
-                            onClick={closeNav}
-                          >
-                            <span className="rail-item-title">{task ? taskLabel(task) : "Open task"}</span>
-                            {task && ["queued", "running", "waiting"].includes(task.state || task.status) && (
-                              <span className="rail-item-meta"><TaskHeartbeat task={task} label={false} />{phaseLabel(task)}</span>
-                            )}
-                          </NavLink>
-                          <button
-                            type="button"
-                            className="rail-icon-btn"
-                            title="Remove from project"
-                            onClick={() => {
-                              unlinkProjectMember("task", taskId).catch(() => undefined)
-                              updateProjects(unassignTask(taskId, projects))
-                            }}
-                          >
-                            ×
-                          </button>
-                        </div>
-                      )
-                    })}
-                    {project.taskIds.length === 0 && (project.conversationIds || []).length === 0 && (
-                      <p className="rail-empty">No tasks or chats in this project yet.</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </section>
-
-        {ungroupedOwnerChats.length > 0 && (
-          <section className="rail-section">
-            <div className="rail-heading">
-              <span>Saved chats</span>
-            </div>
-            {ungroupedOwnerChats.slice(0, 16).map((chatRow) => (
-              <div key={chatRow.conversation_id} className="rail-item-row">
-                <span className="rail-item rail-item-static">
-                  <span className="rail-item-title">{chatRow.title || "Chat"}</span>
-                </span>
-              </div>
-            ))}
-          </section>
-        )}
-
-        <section className="rail-section">
-          <div className="rail-heading">
-            <span>Recents</span>
-          </div>
-          {recents.length === 0 && <p className="rail-empty">No tasks yet. Start from New task.</p>}
-          {recents.slice(0, 24).map((task) => {
-            const grouped = projectForTask(task.id, projects)
-            return (
-              <div key={task.id} className="rail-item-row">
-                <NavLink
-                  to={`/tasks/${task.id}`}
-                  className={({ isActive }) => `rail-item${isActive ? " active" : ""}`}
-                  onClick={closeNav}
-                >
-                  <span className="rail-item-title">{taskLabel(task)}</span>
-                  <span className="rail-item-meta">
-                    {["queued", "running", "waiting"].includes(task.state || task.status) && <TaskHeartbeat task={task} label={false} />}
-                    {phaseLabel(task)}{grouped ? ` · ${grouped.name}` : ""}
-                  </span>
-                </NavLink>
-                {projects.length > 0 && (
-                  <select
-                    className="rail-assign"
-                    aria-label={`Move ${taskLabel(task)} to a project`}
-                    value={grouped?.id || ""}
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      if (!value) updateProjects(unassignTask(task.id, projects))
-                      else updateProjects(assignTask(value, task.id, projects))
-                    }}
-                  >
-                    <option value="">—</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )
-          })}
-        </section>
+        <ProjectsRail
+          variant="classic"
+          projects={projects}
+          tasksById={tasksById}
+          chatsById={chatsById}
+          ungroupedOwnerChats={ungroupedOwnerChats}
+          recents={recents}
+          currentTaskId={currentTaskId}
+          onCreateProject={handleCreateProject}
+          onRenameProject={handleRenameProject}
+          onDeleteProject={handleDeleteProject}
+          onAssignTask={handleAssignTask}
+          onUnassignTask={handleUnassignTask}
+          onAssignChat={handleAssignChat}
+          onUnassignChat={handleUnassignChat}
+          onAssignRepo={handleAssignRepo}
+          onUnassignRepo={handleUnassignRepo}
+          onCloseNav={closeNav}
+        />
 
         <nav className="rail-work" onClick={closeNav}>
           {WORK_LINKS.map((link) => (

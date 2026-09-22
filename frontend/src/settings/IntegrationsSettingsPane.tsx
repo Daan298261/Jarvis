@@ -7,8 +7,8 @@ export function IntegrationsSettingsPane() {
       <div className="card grid">
         <h2>Integrations</h2>
         <p className="lede" style={{ margin: "0 0 12px" }}>
-          Connect Gmail, WhatsApp, and other MCP servers. Setup forms live on the Connections page — this pane
-          only links there so heavy UI is not duplicated.
+          Connect Gmail, WhatsApp, and other MCP servers on Connections. That page now shows live
+          tool lists, refresh status, Obsidian vault, Supermemory, and optional workers.
         </p>
         <div className="row">
           <Link className="btn" to="/mcp">

@@ -10,6 +10,7 @@ from app.agent.recovery import (
     UNKNOWN,
     USAGE,
     alternatives_for,
+    canned_method_switch_plan,
     classify_failure,
     recovery_hint,
 )
@@ -73,10 +74,26 @@ def test_hint_escalates_after_repeated_failures():
     third = recovery_hint("terminal", "ERROR: command not found", attempt=3)
     assert "Several strategies have now failed" not in first
     assert "Several strategies have now failed" in third
-    assert third.count("- ") > first.count("- ")
+    assert "second model" in recovery_hint("python", "ERROR: Unknown action run_code>", attempt=2)
+
+
+def test_python_failure_prefers_filesystem_copy():
+    options = [item.tool for item in alternatives_for("python", "usage")]
+    assert options[0] == "filesystem"
+    assert options[1] == "mcp_call"
+    assert "screenshot" in options
+    hint = recovery_hint("python", "ERROR: Unknown action run_code>\nimport os")
+    assert "filesystem action=copy" in hint
 
 
 def test_permission_hint_explains_the_boundary():
     hint = recovery_hint("filesystem", "ERROR: Path /etc/passwd is outside allowed directories")
     assert "sandbox boundary" in hint
     assert "Alternative tools" not in hint
+
+
+def test_canned_method_switch_mentions_vision():
+    plan = canned_method_switch_plan("python", "ERROR: Unknown action run_code>")
+    assert "filesystem action=copy" in plan
+    assert "screenshot" in plan
+    assert "desktop" in plan

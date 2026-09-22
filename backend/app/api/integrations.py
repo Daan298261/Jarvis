@@ -29,6 +29,13 @@ async def integration_status():
 async def configure_email(body: GmailSetupBody):
     try:
         result = await configure_gmail(body.account_name, body.email, body.full_name, body.app_password)
+        from ..tools.mcp_runtime import MCP
+        from ..config import load_settings
+
+        try:
+            await MCP.refresh(load_settings().mcp_servers)
+        except Exception:
+            pass
         return {"ok": True, "email": result}
     except IntegrationSetupError as exc:
         raise HTTPException(400, str(exc)) from exc

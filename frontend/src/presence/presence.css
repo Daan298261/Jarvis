@@ -46,10 +46,10 @@
 }
 
 .jarvis-presence-controls-split {
-  position: absolute;
-  top: 10px;
-  left: max(12px, env(safe-area-inset-left));
-  z-index: 26;
+  position: relative;
+  top: auto;
+  left: auto;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

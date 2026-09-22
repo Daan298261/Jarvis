@@ -32,6 +32,7 @@ def operator_store(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.security.hexstrike_operator.data_dir", lambda: tmp)
     monkeypatch.setattr("app.security.hexstrike.data_dir", lambda: tmp)
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
     return tmp
 
 
@@ -175,10 +176,11 @@ def test_artifact_paths_stay_within_job_or_allowed_roots(operator_store, jarvis_
     assert not artifact_path_allowed(outside)
 
 
-def test_hexstrike_operator_api_routes(jarvis_env, monkeypatch, operator_store):
+def test_hexstrike_operator_api_routes(jarvis_env, monkeypatch, operator_store, allow_loopback_api):
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
     monkeypatch.setattr("app.security.hexstrike_operator.data_dir", lambda: operator_store)
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
     client = TestClient(app)
     tools = client.get("/api/hexstrike/tools")
     assert tools.status_code == 200
@@ -188,14 +190,14 @@ def test_hexstrike_operator_api_routes(jarvis_env, monkeypatch, operator_store):
 
 
 def test_hexstrike_operator_tool_exposed_via_capability_alias(monkeypatch):
-    monkeypatch.setattr(tool_exposure, "gate_is_enabled", lambda role: True)
-    monkeypatch.setattr(tool_exposure, "licensed_module_allowed", lambda module_id: module_id == "hexstrike")
+    monkeypatch.setattr(tool_exposure, "hexstrike_access_mode", lambda: "full")
     names = tool_exposure.tool_names_for("filesystem", ["hexstrike"])
     assert "hexstrike_operator" in names
 
 
 @pytest.mark.asyncio
 async def test_hexstrike_operator_chat_tool_runs_operate(monkeypatch, operator_store):
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
     monkeypatch.setattr(
         "app.tools.hexstrike_operator.evaluate_permission",
         lambda permission: SimpleNamespace(status="allow"),
@@ -222,6 +224,7 @@ async def test_operate_rejects_dependency_catalog_rows(operator_store, monkeypat
             python_executable="python",
         )
 
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
     monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
     await refresh_discovered_catalog(force=True)
     with pytest.raises(ValueError, match="install via POST"):

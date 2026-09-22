@@ -113,7 +113,8 @@ from .worker_progress import (
     run_worker_progress_watchdog,
     task_still_running,
 )
-from .recovery import recovery_hint
+from .recovery import canned_method_switch_plan, classify_failure, recovery_hint
+from ..tools.call_normalize import normalize_tool_call
 from .tool_exposure import grant_requested_tools, schemas_for as exposure_schemas_for, tool_names_for
 from .skills import as_prompt_block as skills_prompt_block
 from .skills import (
@@ -1241,6 +1242,9 @@ class AgentRuntime:
         tools_used = False
         consecutive_failures = 0
         failures_by_tool: dict[str, int] = {}
+        failure_kinds: list[str] = []
+        last_failed_tool = ""
+        last_failed_observation = ""
         tool_rounds = 0
         verify_tool_rounds = 0
         last_tool_name = ""
@@ -1740,6 +1744,7 @@ class AgentRuntime:
                         raw_args = call["function"]["arguments"]
                         schema_error = not tool_arguments_valid(raw_args)
                         arguments = parse_tool_arguments(raw_args)
+                        name, arguments = normalize_tool_call(name, arguments, REGISTRY.tools.get(name))
                         if name == "request_tools":
                             granted = grant_requested_tools(arguments)
                             working.requested_tools = sorted(set(working.requested_tools) | set(granted))
@@ -1819,6 +1824,10 @@ class AgentRuntime:
                         if failed:
                             consecutive_failures += 1
                             failures_by_tool[name] = failures_by_tool.get(name, 0) + 1
+                            kind = classify_failure(observation)
+                            failure_kinds.append(kind)
+                            last_failed_tool = name
+                            last_failed_observation = observation
                             hints.append(recovery_hint(name, observation, failures_by_tool[name]))
                             await BUS.publish(task_id, "error", f"{name} failed", observation[:1500], stage="diagnose")
                         else:
@@ -1846,6 +1855,9 @@ class AgentRuntime:
                             profile_name,
                             settings,
                             verifying,
+                            failure_kinds=failure_kinds,
+                            last_tool=last_failed_tool,
+                            last_observation=last_failed_observation,
                         )
                         if expert:
                             messages.append(
@@ -2078,6 +2090,9 @@ class AgentRuntime:
         profile_name: str,
         settings: AppSettings,
         verifying: bool,
+        failure_kinds: list[str] | None = None,
+        last_tool: str = "",
+        last_observation: str = "",
     ) -> str | None:
         if verifying:
             return None
@@ -2088,6 +2103,7 @@ class AgentRuntime:
             user_requested_expert=user_requested_expert(prompt),
             architecture_task=looks_like_architecture(prompt, working.task_class),
             already_consulted=working.expert_consults,
+            failure_kinds=list(failure_kinds or []),
         )
         if not should_escalate(signals):
             return None
@@ -2114,8 +2130,15 @@ class AgentRuntime:
         if advice.used:
             await BUS.publish(task_id, "progress", "Expert analysis ready", advice.content[:1500], stage="diagnose")
             return advice.content
-        await BUS.publish(task_id, "progress", "Expert consult skipped", (advice.reason or "unavailable")[:1500], stage="diagnose")
-        return None
+        fallback = canned_method_switch_plan(last_tool or "python", last_observation)
+        await BUS.publish(
+            task_id,
+            "progress",
+            "Expert consult skipped; using method-switch plan",
+            (advice.reason or "unavailable")[:800],
+            stage="diagnose",
+        )
+        return fallback
 
 
 AGENT = AgentRuntime()

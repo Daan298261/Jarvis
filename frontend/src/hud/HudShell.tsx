@@ -28,7 +28,7 @@ const ADMIN_QUICK = [
   { to: "/system", label: "System" },
 ] as const
 
-type HudPanel = "activity" | "system" | null
+type HudPanel = "activity" | "system" | "projects" | null
 
 type HudTopChromeProps = {
   version: string
@@ -111,6 +111,14 @@ export function HudTopChrome({
             >
               Activity
               {runningCount > 0 && <span className="hud-count">{runningCount}</span>}
+            </button>
+            <button
+              type="button"
+              className={`hud-panel-toggle${panel === "projects" ? " active" : ""}`}
+              onClick={() => onPanelToggle("projects")}
+              aria-expanded={panel === "projects"}
+            >
+              Projects
             </button>
             <button
               type="button"
@@ -203,6 +211,7 @@ export type HudShellProps = {
   decisionInboxCount: number
   systemDegraded: boolean
   healthIssues?: HealthIssue[]
+  projectsPanel?: ReactNode
 }
 
 export function HudShell(props: HudShellProps) {
@@ -233,6 +242,7 @@ function HudShellInner({
   systemDegraded,
   healthIssues = [],
   model,
+  projectsPanel,
 }: HudShellProps) {
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
   const { hexSuiteExpanded, toggleHexSuite, dismissHexSuiteForOverlay } = useHudOverlay()
@@ -247,6 +257,12 @@ function HudShellInner({
     const id = window.setInterval(() => refreshSessionPersonality().catch(() => undefined), 12000)
     return () => window.clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    setPanel(null)
+    setAdminOpen(false)
+    setHelpOpen(false)
+  }, [location.pathname])
 
   const runningCount = tasks.filter((task) => ["running", "queued", "waiting"].includes(task.status)).length
   const attentionCount = decisionInboxCount + (systemDegraded ? 1 : 0)
@@ -310,7 +326,7 @@ function HudShellInner({
         onHelpToggle={toggleHelp}
         panel={panel}
         onPanelToggle={togglePanel}
-        showPanels={isChat}
+        showPanels
         runningCount={runningCount}
         attentionCount={attentionCount}
         model={model}
@@ -343,13 +359,19 @@ function HudShellInner({
         </>
       )}
 
-      {isChat && panel && (
+      {panel && (
         <>
           <button className="hud-panel-backdrop" type="button" aria-label="Close panel" onClick={closePanels} />
           {panel === "activity" && (
             <aside className="hud-drawer hud-drawer-left" aria-label="Activity panel">
               <button className="hud-drawer-close" type="button" aria-label="Close activity" onClick={closePanels}>×</button>
               <HudOpsRail tasks={tasks} activeTaskId={activeTaskId} />
+            </aside>
+          )}
+          {panel === "projects" && (
+            <aside className="hud-drawer hud-drawer-left hud-projects-drawer" aria-label="Projects panel">
+              <button className="hud-drawer-close" type="button" aria-label="Close projects" onClick={closePanels}>×</button>
+              {projectsPanel}
             </aside>
           )}
           {panel === "system" && (

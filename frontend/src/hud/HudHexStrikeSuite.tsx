@@ -215,7 +215,18 @@ export function HudHexStrikeSuite() {
 
   const live = !!status?.running
   const install = status?.install
-  const stateLabel = status?.starting ? "Igniting" : live ? "Live" : status?.installed ? "Standby" : "Not installed"
+  const accessMode = status?.access_mode || "locked"
+  const locked = accessMode === "locked"
+  const blueOnly = accessMode === "blue"
+  const stateLabel = locked
+    ? "Pro"
+    : status?.starting
+      ? "Igniting"
+      : live
+        ? "Live"
+        : status?.installed
+          ? "Standby"
+          : "Not installed"
   const op = status?.operator
   const depJobs = status?.dependency_install_jobs || {}
 
@@ -228,11 +239,29 @@ export function HudHexStrikeSuite() {
         <div className="hex-suite-mark" aria-hidden>⬡</div>
         <div className="hex-suite-titles">
           <strong>Daybreak</strong>
-          <span>HexStrike operator console · loopback suite</span>
+          <span>
+            {locked
+              ? "Pro feature"
+              : blueOnly
+                ? "HexStrike Blue · defensive suite"
+                : "HexStrike operator console · loopback suite"}
+          </span>
         </div>
         <span className={`hex-suite-pill${live ? " live" : ""}`}>{stateLabel}</span>
       </header>
 
+      {locked && (
+        <section className="hex-panel hex-pro-lock" role="status">
+          <h2>Pro feature</h2>
+          <p>{status?.access_message || "Daybreak / HexStrike is a Pro feature. Install a signed Jarvis license to unlock it."}</p>
+          <a className="hex-suite-btn" href="/license">
+            Open License
+          </a>
+        </section>
+      )}
+
+      {!locked && (
+      <>
       <nav className="hex-suite-tabs" aria-label="Daybreak sections">
         {(
           [
@@ -315,27 +344,35 @@ export function HudHexStrikeSuite() {
                     {status?.catalog_stale ? " (stale)" : ""}
                   </dd>
                 </div>
-                <div>
-                  <dt>MCP</dt>
-                  <dd>{op?.mcp?.ok ? "registered" : "pending"}</dd>
-                </div>
+                {!blueOnly && (
+                  <div>
+                    <dt>MCP</dt>
+                    <dd>{op?.mcp?.ok ? "registered" : "pending"}</dd>
+                  </div>
+                )}
               </dl>
-              <p className="hex-suite-hint">{operatorLabel(status)}</p>
-              {(status?.mcp_error || op?.mcp?.error) && (
+              <p className="hex-suite-hint">
+                {blueOnly
+                  ? status?.access_message || "This license has Daybreak Blue (defensive) capabilities."
+                  : operatorLabel(status)}
+              </p>
+              {!blueOnly && (status?.mcp_error || op?.mcp?.error) && (
                 <p className="hex-suite-error">{status?.mcp_error || op?.mcp?.error}</p>
               )}
-              <button
-                type="button"
-                className="hex-suite-btn"
-                disabled={busy || !live}
-                onClick={() =>
-                  void run(async () => {
-                    await refreshHexStrikeToolsCatalog()
-                  }, "Operator catalog refreshed.")
-                }
-              >
-                Refresh catalog
-              </button>
+              {!blueOnly && (
+                <button
+                  type="button"
+                  className="hex-suite-btn"
+                  disabled={busy || !live}
+                  onClick={() =>
+                    void run(async () => {
+                      await refreshHexStrikeToolsCatalog()
+                    }, "Operator catalog refreshed.")
+                  }
+                >
+                  Refresh catalog
+                </button>
+              )}
             </section>
 
             <section className="hex-panel hex-panel-wide">
@@ -375,18 +412,20 @@ export function HudHexStrikeSuite() {
                   setCatalogPage(0)
                 }}
               />
-              <button
-                type="button"
-                className="hex-suite-btn ghost"
-                disabled={busy || !live}
-                onClick={() =>
-                  void run(async () => {
-                    await refreshHexStrikeToolsCatalog()
-                  }, "Catalog refreshed from live suite.")
-                }
-              >
-                Sync
-              </button>
+              {!blueOnly && (
+                <button
+                  type="button"
+                  className="hex-suite-btn ghost"
+                  disabled={busy || !live}
+                  onClick={() =>
+                    void run(async () => {
+                      await refreshHexStrikeToolsCatalog()
+                    }, "Catalog refreshed from live suite.")
+                  }
+                >
+                  Sync
+                </button>
+              )}
             </div>
             {!catalog.length && (
               <p className="hex-suite-hint">
@@ -676,6 +715,8 @@ export function HudHexStrikeSuite() {
         <a className="hex-suite-help" href="/help?topic=hexstrike-blue">HexStrike setup help</a>
         {msg && <span className="hex-suite-msg" role="status">{msg}</span>}
       </footer>
+      </>
+      )}
     </div>
   )
 }

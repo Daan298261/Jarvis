@@ -54,6 +54,45 @@ def has_module(
     return False
 
 
+HEXSTRIKE_ACCESS_LOCKED = "locked"
+HEXSTRIKE_ACCESS_BLUE = "blue"
+HEXSTRIKE_ACCESS_FULL = "full"
+HEXSTRIKE_PRO_MESSAGE = (
+    "Daybreak / HexStrike is a Pro feature. Install a signed Jarvis license to unlock it."
+)
+HEXSTRIKE_OPERATOR_LICENSE_MESSAGE = (
+    "Full HexStrike operator tools require an unrestricted or law-enforcement license. "
+    "This license has Daybreak Blue (defensive) capabilities."
+)
+OWNER_UNRESTRICTED_PACKAGE_CLASS = "owner_unrestricted"
+
+
+def hexstrike_access_mode(*, now: datetime | None = None) -> str:
+    """License-only HexStrike/Daybreak surface: locked, blue, or full operator."""
+    status = evaluate(now=now)
+    if not status.installed or not status.valid or status.clock_rollback:
+        return HEXSTRIKE_ACCESS_LOCKED
+    if status.law_enforcement or status.package_class == OWNER_UNRESTRICTED_PACKAGE_CLASS:
+        return HEXSTRIKE_ACCESS_FULL
+    return HEXSTRIKE_ACCESS_BLUE
+
+
+def hexstrike_access_payload(*, now: datetime | None = None) -> dict[str, Any]:
+    mode = hexstrike_access_mode(now=now)
+    if mode == HEXSTRIKE_ACCESS_LOCKED:
+        message = HEXSTRIKE_PRO_MESSAGE
+    elif mode == HEXSTRIKE_ACCESS_BLUE:
+        message = HEXSTRIKE_OPERATOR_LICENSE_MESSAGE
+    else:
+        message = ""
+    return {
+        "access_mode": mode,
+        "access_message": message,
+        "operator_allowed": mode == HEXSTRIKE_ACCESS_FULL,
+        "blue_allowed": mode in {HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL},
+    }
+
+
 def module_entitlement_blocked_reason(module_id: str, *, now: datetime | None = None) -> str | None:
     key = normalize_module_id(module_id)
     if licensed_module_allowed(key, now=now):

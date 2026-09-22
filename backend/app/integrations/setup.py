@@ -182,13 +182,14 @@ def email_status() -> dict[str, Any]:
 
 
 def ensure_mcp_preset(preset: str) -> None:
+    prefix = str(repo_root() / "mcp")
     specs = {
         "email": {
             "name": "email",
             "preset": "email",
             "transport": "stdio",
             "command": "npm",
-            "args": ["exec", "--prefix", "mcp", "--", "email-mcp", "stdio"],
+            "args": ["exec", "--prefix", prefix, "--", "email-mcp", "stdio"],
             "env": {},
             "enabled": True,
         },
@@ -197,7 +198,7 @@ def ensure_mcp_preset(preset: str) -> None:
             "preset": "whatsapp",
             "transport": "stdio",
             "command": "npm",
-            "args": ["exec", "--prefix", "mcp", "--", "wappmcp", "mcp", "--headless"],
+            "args": ["exec", "--prefix", prefix, "--", "wappmcp", "mcp", "--headless"],
             "env": {},
             "enabled": True,
         },

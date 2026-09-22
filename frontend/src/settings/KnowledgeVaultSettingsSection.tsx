@@ -64,8 +64,9 @@ export function KnowledgeVaultSettingsSection() {
       <h3>Linked Obsidian vault (RFC-0107)</h3>
       <p className="lede">
         A Jarvis-managed vault under this PC’s data folder is bound on first start. Bind a different
-        local folder here if you already use Obsidian. Edit notes in the{" "}
-        <Link to="/obsidian">Obsidian pane</Link> — the real Obsidian UI inside Jarvis Desktop.
+        local folder here if you already use Obsidian. Edit notes in the Obsidian app (or the
+        Tauri Jarvis window if you use that shell). The{" "}
+        <Link to="/obsidian">Obsidian pane</Link> indexes the bound vault from this portal.
       </p>
       {status && (
         <p className="muted">

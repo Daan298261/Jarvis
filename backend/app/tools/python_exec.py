@@ -11,12 +11,52 @@ from typing import Any
 
 from .base import RiskLevel, Tool, ToolResult
 
+_PY_ACTIONS = ("run_code", "run_file", "create_venv", "install")
+
+
+def normalize_python_call(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Salvage Qwen-style XML leftovers that dump source into `action`.
+
+    Live 1.4.9 log: action=\"run_code>\\nimport os...\" with no `code` field.
+    """
+    out = dict(kwargs)
+    action = str(out.get("action") or "").strip()
+    code = str(out.get("code") or "").strip()
+    command = str(out.get("command") or "").strip()
+    if action in _PY_ACTIONS:
+        if action == "run_code" and not code and command:
+            out["code"] = command
+        return out
+    for name in _PY_ACTIONS:
+        if not action.startswith(name):
+            continue
+        rest = action[len(name) :].lstrip(" \t>")
+        rest = rest.lstrip("\r\n")
+        out["action"] = name
+        if name == "run_code" and rest and not code:
+            out["code"] = rest
+        elif name == "run_file" and rest and not out.get("path"):
+            out["path"] = rest.splitlines()[0].strip()
+        return out
+    if "\n" in action or action.startswith(("import ", "from ", "print(", "def ", "class ")):
+        out["action"] = "run_code"
+        if not code:
+            out["code"] = action
+        return out
+    if not action and (code or command):
+        out["action"] = "run_code"
+        if not code:
+            out["code"] = command
+    return out
+
 
 class PythonTool(Tool):
     name = "python"
     description = (
         "Create or run Python in an isolated way. Actions: run_code, run_file, create_venv, "
-        "install. Prefer create_venv for project-specific packages. working_directory should "
+        "install. Put the script in `code` (run_code) or an absolute `path` (run_file) — never "
+        "inside `action`. For copying files or folders use filesystem action=copy instead of a "
+        "script. Prefer create_venv for project-specific packages. working_directory should "
         "be the project root when installing dependencies."
     )
     risk = RiskLevel.MEDIUM
@@ -70,7 +110,18 @@ class PythonTool(Tool):
                     return str(candidate)
         return sys.executable or "python"
 
+    def _resolve_script(self, path: str, cwd: str | None) -> Path:
+        raw = Path(path)
+        if raw.is_file():
+            return raw
+        if cwd:
+            nested = Path(cwd) / path
+            if nested.is_file():
+                return nested
+        return raw
+
     async def execute(self, **kwargs: Any) -> ToolResult:
+        kwargs = normalize_python_call(kwargs)
         action = kwargs.get("action")
         cwd = kwargs.get("working_directory")
         timeout = int(kwargs.get("timeout_seconds") or 120)
@@ -79,6 +130,13 @@ class PythonTool(Tool):
         try:
             if action == "run_code":
                 code = kwargs.get("code") or ""
+                if not str(code).strip():
+                    return ToolResult(
+                        False,
+                        "",
+                        error="run_code requires `code`. Do not put the script in `action`. "
+                        "To copy files use filesystem action=copy with path and destination.",
+                    )
                 handle = tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8")
                 handle.write(code)
                 handle.close()
@@ -90,7 +148,17 @@ class PythonTool(Tool):
                 path = kwargs.get("path")
                 if not path:
                     return ToolResult(False, "", error="path is required")
-                return await self._run([py, path], cwd, timeout)
+                resolved = self._resolve_script(str(path), cwd)
+                if not resolved.is_file():
+                    return ToolResult(
+                        False,
+                        "",
+                        error=(
+                            f"Script not found: {resolved}. Pass an absolute path or working_directory. "
+                            "To copy files or folders use filesystem action=copy instead of run_file."
+                        ),
+                    )
+                return await self._run([py, str(resolved)], cwd, timeout)
             if action == "create_venv":
                 path = Path(kwargs.get("venv_path") or kwargs.get("path") or ".venv")
                 if cwd:
@@ -108,6 +176,13 @@ class PythonTool(Tool):
                 else:
                     return ToolResult(False, "", error="No packages or requirements.txt provided")
                 return await self._run(args, cwd, timeout)
-            return ToolResult(False, "", error=f"Unknown action {action}")
+            return ToolResult(
+                False,
+                "",
+                error=(
+                    f"Unknown action {action!r}. Valid actions: run_code, run_file, create_venv, install. "
+                    "Put source in `code`, not `action`. To copy a tree use filesystem action=copy."
+                ),
+            )
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))

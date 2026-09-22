@@ -24,6 +24,31 @@ _PLAN_BOARD_RE = re.compile(
     r"(?im)^\s*(?:PLAN|END STATE|ACCEPTANCE|WORKING STATE|THOUGHT PROCESS|SHOW WORK)\s*:.*$",
 )
 _TOOL_DUMP_RE = re.compile(r"(?im)^\s*(?:Tool|tool)\s+(?:output|result|call)\s*:.*$")
+_TOOL_XML_BLOCK_RE = re.compile(r"(?is)<\s*tool_call\b[^>]*>.*?<\s*/\s*tool_call\s*>")
+_TOOL_XML_UNCLOSED_RE = re.compile(r"(?is)<\s*tool_call\b[^>]*>.*\Z")
+_FUNCTION_EQ_TAG_RE = re.compile(r"(?is)<\s*/?\s*function\s*=[^>]*>")
+_PARAMETER_EQ_TAG_RE = re.compile(r"(?is)<\s*/?\s*parameter\s*=[^>]*>")
+_ARG_XML_TAG_RE = re.compile(r"(?is)<\s*/?\s*arg_(?:key|value)\s*>[^<]*")
+_GENERIC_TAG_RE = re.compile(r"</?[A-Za-z][\w:.-]*(?:\s+[^<>]*)?>")
+_JSON_TOOL_BLOB_RE = re.compile(
+    r"(?is)\{\s*\"(?:name|function)\"\s*:\s*\"[^\"]+\".*?\}",
+)
+_TOOL_DEBRIS_RE = re.compile(
+    r"(?i)\b(?:tool[_\s-]*call|function\s*=\s*\w+|parameter\s*=\s*\w+|arg_key|arg_value)\b",
+)
+_SHORT_ACK_RE = re.compile(
+    r"(?i)^(one moment|just a moment|allow me a moment|let me check|"
+    r"i(?:'|')?ll check|checking now|very well(?:[, ]+sir)?|"
+    r"certainly|of course|right away|shall i (?:continue|proceed))[.!?]?$"
+)
+_CODEISH_LINE_RE = re.compile(
+    r"(?x)^\s*(?:"
+    r"(?:def|class|import|from|return)\s+\S"
+    r"|[\$>]?\s*(?:git|npm|npx|pip|pytest|python|python3|pwsh|cmd)\s+\S"
+    r"|[\w./\\-]+\.(?:py|ts|tsx|js|json|ps1|exe|md)\b"
+    r"|[{}\[\];]+\s*$"
+    r")",
+)
 _FINAL_REPLY_PREFIX_RE = re.compile(
     r"(?is)^\s*(?:final\s+(?:reply|answer)|assistant)\s*:\s*",
 )
@@ -86,6 +111,84 @@ def _int_to_words(n: int) -> str:
             return head
         return f"{head} {_int_to_words(rem)}"
     return str(n)
+
+
+def contains_tool_markup(text: str) -> bool:
+    """True when the model is emitting tool XML / JSON rather than owner prose."""
+    sample = text or ""
+    if _TOOL_XML_BLOCK_RE.search(sample) or _TOOL_XML_UNCLOSED_RE.search(sample):
+        return True
+    if _FUNCTION_EQ_TAG_RE.search(sample) or _PARAMETER_EQ_TAG_RE.search(sample):
+        return True
+    if _TOOL_DEBRIS_RE.search(sample) and ("<" in sample or "=" in sample):
+        return True
+    return False
+
+
+def _strip_tool_markup(text: str) -> str:
+    cleaned = _TOOL_XML_BLOCK_RE.sub("\n", text)
+    cleaned = _TOOL_XML_UNCLOSED_RE.sub("\n", cleaned)
+    cleaned = _FUNCTION_EQ_TAG_RE.sub(" ", cleaned)
+    cleaned = _PARAMETER_EQ_TAG_RE.sub(" ", cleaned)
+    cleaned = _ARG_XML_TAG_RE.sub(" ", cleaned)
+    cleaned = _JSON_TOOL_BLOB_RE.sub(" ", cleaned)
+    cleaned = _GENERIC_TAG_RE.sub(" ", cleaned)
+    cleaned = _TOOL_DEBRIS_RE.sub(" ", cleaned)
+    return cleaned
+
+
+def _is_speakable_sentence(sentence: str) -> bool:
+    stripped = sentence.strip()
+    if _SHORT_ACK_RE.match(stripped):
+        return True
+    if len(stripped) < 12:
+        return False
+    words = [part for part in re.split(r"\s+", stripped) if part]
+    if len(words) < 3:
+        return False
+    if _CODEISH_LINE_RE.match(stripped):
+        return False
+    if _TOOL_DEBRIS_RE.search(stripped):
+        return False
+    letters = sum(1 for char in stripped if char.isalpha())
+    if letters < 8 or letters / max(len(stripped), 1) < 0.5:
+        return False
+    if stripped.count("=") >= 1 and ("parameter" in stripped.lower() or "function" in stripped.lower()):
+        return False
+    symbolish = sum(1 for char in stripped if char in "{}[]<>;`/\\")
+    if symbolish >= 3:
+        return False
+    return True
+
+
+def _spoken_summary(text: str, *, reply_class: ReplySpeechClass) -> str:
+    """Keep on-screen prose; drop code and internals. Technical turns stay short."""
+    chunks = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+    keep: list[str] = []
+    for chunk in chunks:
+        line = chunk.strip().strip("`").strip()
+        if not line or _CODEISH_LINE_RE.match(line):
+            continue
+        if not _is_speakable_sentence(line if line.endswith((".", "!", "?")) else f"{line}."):
+            continue
+        if not line.endswith((".", "!", "?")):
+            line = f"{line}."
+        keep.append(line)
+        if reply_class == "technical" and len(keep) >= 3:
+            break
+        if reply_class == "social" and len(keep) >= 4:
+            break
+    if not keep:
+        collapsed = re.sub(r"\s+", " ", text).strip()
+        probe = collapsed if collapsed.endswith((".", "!", "?")) else f"{collapsed}."
+        if _is_speakable_sentence(probe):
+            keep.append(probe)
+    joined = " ".join(keep)
+    limit = 280 if reply_class == "technical" else 420
+    if len(joined) > limit:
+        cut = joined[:limit].rsplit(" ", 1)[0].rstrip(",;:")
+        joined = f"{cut}." if cut else ""
+    return joined.strip()
 
 
 def _strip_plan_and_working_state(text: str) -> str:
@@ -167,6 +270,7 @@ def filter_text_for_speech(
     speech_class = reply_class or classify_reply_for_speech(cleaned, user_prompt=user_prompt)
 
     cleaned = _strip_plan_and_working_state(cleaned)
+    cleaned = _strip_tool_markup(cleaned)
     cleaned = _FINAL_REPLY_PREFIX_RE.sub("", cleaned)
     cleaned = _THINK_BLOCK_RE.sub("", cleaned)
     cleaned = _THINK_OPEN_RE.sub("", cleaned)
@@ -195,6 +299,10 @@ def filter_text_for_speech(
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = cleaned.strip()
 
+    if not cleaned:
+        return ""
+
+    cleaned = _spoken_summary(cleaned, reply_class=speech_class)
     if not cleaned:
         return ""
 

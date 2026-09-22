@@ -744,12 +744,35 @@
   min-width: 0;
   min-height: 100%;
   flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  gap: clamp(16px, 2.4vh, 32px);
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(140px, 168px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: clamp(12px, 1.6vh, 24px) 8px;
   padding: 0 0 clamp(12px, 2vh, 28px);
+}
+
+.hud-home > .jarvis-presence-controls-split {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: start;
+  z-index: 30;
+  padding: 8px 4px 0 12px;
+  max-height: 100%;
+  overflow: auto;
+  pointer-events: auto;
+}
+
+.hud-home > .hud-orb-zone {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.hud-home > .hud-chat {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: center;
 }
 
 .hud-orb-zone {
@@ -812,7 +835,9 @@
   .hud-home:has(.jarvis-presence-humanoid),
   .hud-home:has(.jarvis-presence-neural) {
     position: relative;
-    display: block;
+    display: grid;
+    grid-template-columns: minmax(140px, 168px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
     height: 100%;
     min-height: 0;
     padding: 0;
@@ -822,11 +847,13 @@
   .hud-home:has(.jarvis-presence-humanoid) > .hud-orb-zone,
   .hud-home:has(.jarvis-presence-neural) > .hud-orb-zone {
     position: absolute;
-    inset: 0;
-    width: 100%;
+    inset: 0 0 0 168px;
+    width: auto;
     height: 100%;
     min-height: 0;
     max-height: none;
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .hud-home:has(.jarvis-presence-humanoid) .hud-orb-caption,
@@ -841,12 +868,16 @@
 
   .hud-home:has(.jarvis-presence-humanoid) > .hud-chat,
   .hud-home:has(.jarvis-presence-neural) > .hud-chat {
-    position: absolute;
+    position: relative;
     z-index: 8;
-    left: 50%;
-    bottom: clamp(16px, 2.2vh, 30px);
-    width: min(1000px, calc(100% - 64px));
-    transform: translateX(-50%);
+    left: auto;
+    bottom: auto;
+    width: min(1000px, calc(100% - 32px));
+    transform: none;
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: center;
+    margin: 0 auto clamp(12px, 2vh, 24px);
   }
 }
 
@@ -898,7 +929,9 @@
 
 .hud-home.hexstrike-active {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(140px, 168px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   min-height: 0;
   padding: 0;
@@ -907,32 +940,37 @@
 
 .hud-home.hexstrike-active > .hud-orb-zone {
   position: absolute;
-  inset: 0;
-  width: 100%;
+  inset: 0 0 0 168px;
+  width: auto;
   height: 100%;
   min-height: 0;
   max-height: none;
 }
 
 .hud-home.hexstrike-active > .jarvis-presence-controls-split {
-  z-index: 26;
+  z-index: 30;
 }
 
 .hud-home.hexstrike-active .hud-orb-caption {
   position: absolute;
-  left: clamp(16px, 3vw, 36px);
+  left: 50%;
   top: clamp(96px, 14vh, 140px);
   width: min(360px, calc(100% - 48px));
   margin: 0;
+  transform: translateX(-50%);
 }
 
 .hud-home.hexstrike-active > .hud-chat {
-  position: absolute;
+  position: relative;
   z-index: 8;
-  left: 50%;
-  bottom: clamp(16px, 2.2vh, 30px);
-  width: min(1000px, calc(100% - 64px));
-  transform: translateX(-50%);
+  left: auto;
+  bottom: auto;
+  width: min(1000px, calc(100% - 32px));
+  transform: none;
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: center;
+  margin: 0 auto clamp(12px, 2vh, 24px);
 }
 
 /* High-resolution neural core. WebGL sits over a CSS fallback. */
@@ -1336,6 +1374,43 @@
 }
 
 .hud-drawer-left { left: 16px; }
+
+.hud-projects-drawer {
+  width: min(420px, calc(100% - 32px));
+  padding: 36px 10px 12px;
+  overflow: auto;
+}
+
+.hud-projects-drawer .projects-rail {
+  color: rgba(226, 245, 250, 0.9);
+}
+
+.hud-projects-drawer .rail-heading,
+.hud-projects-drawer .rail-empty,
+.hud-projects-drawer .rail-item-meta,
+.hud-projects-drawer .rail-icon-btn {
+  color: rgba(162, 199, 211, 0.78);
+}
+
+.hud-projects-drawer .rail-project-name,
+.hud-projects-drawer .rail-item-title {
+  color: rgba(232, 246, 250, 0.92);
+}
+
+.hud-projects-drawer .rail-item,
+.hud-projects-drawer .rail-item-static {
+  color: inherit;
+}
+
+.hud-projects-drawer .rail-inline-form input,
+.hud-projects-drawer .rail-assign {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid rgba(103, 220, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(8, 20, 28, 0.88);
+  color: rgba(226, 245, 250, 0.88);
+}
 .hud-drawer-right { right: 16px; }
 
 .hud-drawer-close {
@@ -1504,8 +1579,27 @@
   .hud-home {
     min-height: auto;
     justify-content: flex-start;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
     gap: 20px;
     padding: 0 0 12px;
+  }
+
+  .hud-home > .jarvis-presence-controls-split {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 8px 12px 0;
+    max-height: none;
+  }
+
+  .hud-home > .hud-orb-zone {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .hud-home > .hud-chat {
+    grid-column: 1;
+    grid-row: 3;
   }
 
   .hud-orb-zone {

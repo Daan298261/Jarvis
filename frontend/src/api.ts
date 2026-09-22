@@ -979,6 +979,10 @@ export type HexStrikeStatus = {
   catalog?: HexStrikeCatalogItem[]
   catalog_count?: number
   catalog_stale?: boolean
+  access_mode?: "locked" | "blue" | "full"
+  access_message?: string
+  operator_allowed?: boolean
+  blue_allowed?: boolean
   operator?: HexStrikeOperatorReadiness
   operator_jobs?: HexStrikeOperatorJob[]
   dependency_install_jobs?: Record<string, HexStrikeDependencyInstallJob>

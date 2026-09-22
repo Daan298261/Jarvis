@@ -5,6 +5,7 @@ export type PortalProject = {
   name: string
   taskIds: string[]
   conversationIds?: string[]
+  repoPaths?: string[]
 }
 
 type PortalProjectStore = {
@@ -33,7 +34,10 @@ function asProject(value: unknown): PortalProject | null {
   const conversationIds = Array.isArray(row.conversationIds)
     ? row.conversationIds.filter((id): id is string => typeof id === "string" && id.length > 0)
     : []
-  return { id: row.id, name: row.name.trim(), taskIds, conversationIds }
+  const repoPaths = Array.isArray(row.repoPaths)
+    ? row.repoPaths.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    : []
+  return { id: row.id, name: row.name.trim(), taskIds, conversationIds, repoPaths }
 }
 
 export function loadProjectsLocal(): PortalProject[] {
@@ -112,7 +116,7 @@ export async function deleteProjectRemote(projectId: string): Promise<void> {
 
 export async function linkProjectMember(
   projectId: string,
-  linkType: "task" | "owner_chat",
+  linkType: "task" | "owner_chat" | "repo",
   linkId: string,
 ): Promise<void> {
   await api(`/api/projects/${encodeURIComponent(projectId)}/links`, {
@@ -121,10 +125,12 @@ export async function linkProjectMember(
   })
 }
 
-export async function unlinkProjectMember(linkType: "task" | "owner_chat", linkId: string): Promise<void> {
-  await api(`/api/projects/links/${encodeURIComponent(linkType)}/${encodeURIComponent(linkId)}`, {
-    method: "DELETE",
-  })
+export async function unlinkProjectMember(
+  linkType: "task" | "owner_chat" | "repo",
+  linkId: string,
+): Promise<void> {
+  const query = new URLSearchParams({ link_type: linkType, link_id: linkId })
+  await api(`/api/projects/unlink?${query.toString()}`, { method: "DELETE" })
 }
 
 export function createProject(name: string, projects: PortalProject[]): PortalProject[] {
@@ -135,6 +141,7 @@ export function createProject(name: string, projects: PortalProject[]): PortalPr
     name: trimmed,
     taskIds: [],
     conversationIds: [],
+    repoPaths: [],
   }
   return [...projects, next]
 }
@@ -163,6 +170,46 @@ export function unassignTask(taskId: string, projects: PortalProject[]): PortalP
   return projects.map((project) => ({
     ...project,
     taskIds: project.taskIds.filter((id) => id !== taskId),
+  }))
+}
+
+export function assignConversation(
+  projectId: string,
+  conversationId: string,
+  projects: PortalProject[],
+): PortalProject[] {
+  return projects.map((project) => {
+    const without = (project.conversationIds || []).filter((id) => id !== conversationId)
+    if (project.id === projectId) {
+      return { ...project, conversationIds: [...without, conversationId] }
+    }
+    return { ...project, conversationIds: without }
+  })
+}
+
+export function unassignConversation(conversationId: string, projects: PortalProject[]): PortalProject[] {
+  return projects.map((project) => ({
+    ...project,
+    conversationIds: (project.conversationIds || []).filter((id) => id !== conversationId),
+  }))
+}
+
+export function assignRepo(projectId: string, repoPath: string, projects: PortalProject[]): PortalProject[] {
+  const path = repoPath.trim()
+  if (!path) return projects
+  return projects.map((project) => {
+    const without = (project.repoPaths || []).filter((id) => id !== path)
+    if (project.id === projectId) {
+      return { ...project, repoPaths: [...without, path] }
+    }
+    return { ...project, repoPaths: without }
+  })
+}
+
+export function unassignRepo(repoPath: string, projects: PortalProject[]): PortalProject[] {
+  return projects.map((project) => ({
+    ...project,
+    repoPaths: (project.repoPaths || []).filter((id) => id !== repoPath),
   }))
 }
 

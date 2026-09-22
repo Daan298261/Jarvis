@@ -31,7 +31,12 @@ def test_mixed_and_unknown_classes_keep_the_full_set():
     assert classify_task("Organize these files on the desktop") == "filesystem"
 
 
-def test_request_capability_adds_registered_tools():
+def test_request_capability_adds_mcp_call():
+    exposed = tools_for_task("filesystem")
+    nxt, added, text = apply_capability_request(exposed, {"capabilities": ["mcp"]})
+    assert "mcp_call" in nxt
+    assert added == ["mcp_call"]
+    assert "mcp_call" in text
     exposed = tools_for_task("filesystem")
     assert "git" not in exposed
     nxt, added, text = apply_capability_request(exposed, {"capabilities": ["git", "nope"]})

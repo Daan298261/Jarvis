@@ -235,14 +235,19 @@ def reset_vault_store() -> None:
 
 
 def public_binding_status() -> dict[str, Any]:
-    """API-safe status — never echoes the vault path."""
+    """API-safe status — never echoes the full vault path."""
     meta = _load_meta()
+    bound = meta.bound and vault_root() is not None
+    vault_name = ""
+    if bound and meta.vault_path:
+        vault_name = Path(meta.vault_path).expanduser().name
     return {
-        "bound": meta.bound and vault_root() is not None,
+        "bound": bound,
         "jarvis_managed_layout": meta.jarvis_managed_layout,
         "bound_at": meta.bound_at,
         "last_index_at": meta.last_index_at,
         "note_count": meta.note_count,
+        "vault_name": vault_name,
     }
 
 

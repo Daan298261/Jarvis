@@ -19,6 +19,7 @@ class EscalationSignals:
     architecture_task: bool = False
     critic_low_confidence: bool = False
     already_consulted: int = 0
+    failure_kinds: Iterable[str] = field(default_factory=list)
 
 
 @dataclass
@@ -39,6 +40,9 @@ class ExpertBrief:
         return (
             "You are the Expert 27B advisor. Do not execute tools. Produce a focused analysis "
             "and a concrete next plan the smaller primary model can carry out.\n\n"
+            "If the primary failed a file copy or script, prefer filesystem copy/list/search, "
+            "then terminal (robocopy/xcopy), then screenshot+desktop/computer-use only when the "
+            "source is reachable solely via a GUI. Never retry the exact failed call.\n\n"
             f"Goal: {self.goal or '(same as the user request)'}\n"
             f"Task class: {self.task_class or 'mixed'}\n"
             f"Acceptance criteria:\n{criteria}\n"
@@ -78,13 +82,21 @@ def looks_like_architecture(prompt: str, task_class: str = "") -> bool:
 
 
 def should_escalate(signals: EscalationSignals) -> bool:
-    """Escalate only when the primary model is stuck, not because a task is long."""
+    """Escalate when the primary is stuck, including malformed python calls.
+
+    A single failure is recovered with a hint. Two consecutive failures, or a
+    usage/not-found loop on one tool, consults the expert model (or a canned plan).
+    """
     if signals.already_consulted >= 1:
         return False
     if signals.user_requested_expert:
         return True
     failed = {name for name in signals.failed_tools if name}
-    if signals.consecutive_failures >= 3 and len(failed) >= 2:
+    kinds = {str(kind) for kind in signals.failure_kinds if kind}
+    usage_stuck = bool(kinds & {"usage", "not_found"})
+    if signals.consecutive_failures >= 3:
+        return True
+    if signals.consecutive_failures >= 2 and (len(failed) >= 2 or usage_stuck):
         return True
     if signals.architecture_task and signals.consecutive_failures >= 2:
         return True

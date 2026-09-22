@@ -8,6 +8,7 @@ import {
   type VaultHealthResponse,
   type VaultPublicStatus,
 } from "../vault/vaultApi"
+import { buildObsidianOpenUri } from "../vault/obsidianUri"
 import { settingsSubmenuPath } from "../settings/settingsSubmenus"
 import "../styles/obsidian-host.css"
 
@@ -131,7 +132,17 @@ export function ObsidianPage() {
       if (embed?.state !== "embedded") {
         await startEmbed()
       }
+      return
     }
+    const vault = path || status?.vault_name || ""
+    if (!vault) return
+    window.location.assign(buildObsidianOpenUri(vault, rel))
+  }
+
+  function openVaultInObsidian() {
+    const vault = vaultPath || status?.vault_name || readCachedVaultPath()
+    if (!vault) return
+    window.location.assign(buildObsidianOpenUri(vault))
   }
 
   const brokenCount = health?.broken_links?.length ?? 0
@@ -143,8 +154,9 @@ export function ObsidianPage() {
         <div className="obsidian-host-chrome-head">
           <h1>Obsidian</h1>
           <p className="lede">
-            Your linked memory vault runs in the <strong>real Obsidian app</strong> inside Jarvis — not a
-            custom note browser.
+            Your linked memory vault is indexed by this local Jarvis portal. Notes themselves
+            live in the <strong>Obsidian</strong> app — this page hosts that app only inside the
+            Tauri Jarvis window, not in Chrome.
           </p>
         </div>
         <div className="obsidian-host-status-grid">
@@ -173,8 +185,9 @@ export function ObsidianPage() {
           </Link>
           {!isDesktop && (
             <span className="obsidian-browser-hint">
-              Open <strong>Jarvis Desktop</strong> on Windows to embed Obsidian here. Browser portal does not
-              host Obsidian.exe.
+              You are already in the local Jarvis portal (this browser). Chrome cannot embed
+              Obsidian.exe in the page. Use <strong>Open vault in Obsidian</strong> to edit notes
+              in the Obsidian app.
             </span>
           )}
           {isDesktop && probe && !probe.installed && (
@@ -224,9 +237,13 @@ export function ObsidianPage() {
         {status?.bound && !isDesktop && (
           <div className="obsidian-embed-placeholder card">
             <p>
-              Vault is bound on this PC. Launch <strong>Jarvis Desktop</strong> and return to this Obsidian pane
-              to edit notes in the embedded Obsidian UI.
+              Vault is bound on this PC. Start Jarvis opens this portal in the browser, which cannot
+              parent the Obsidian window. Open the vault in Obsidian to edit notes; Jarvis still
+              indexes them here.
             </p>
+            <button type="button" className="btn" onClick={openVaultInObsidian}>
+              Open vault in Obsidian
+            </button>
           </div>
         )}
         {status?.bound && isDesktop && probe && !probe.installed && (

@@ -26,7 +26,9 @@ def test_project_media_dir_stub(jarvis_env):
 
 
 @pytest.mark.asyncio
-async def test_projects_api_and_links(jarvis_env, client):
+async def test_projects_api_and_links(jarvis_env, client, monkeypatch):
+    monkeypatch.setattr("app.auth.load_settings", lambda: jarvis_env["settings"])
+    monkeypatch.setattr("app.main.load_settings", lambda: jarvis_env["settings"])
     created = client.post("/api/projects", json={"name": "RFC-0129"})
     assert created.status_code == 200
     project_id = created.json()["id"]
@@ -51,6 +53,15 @@ async def test_projects_api_and_links(jarvis_env, client):
     assert task_id in row["taskIds"]
     assert conv_id in row["conversationIds"]
 
+    repo_path = r"C:\Users\daanv\Documents\Projects\Jarvis\Jarvis"
+    assert client.post(
+        f"/api/projects/{project_id}/links",
+        json={"link_type": "repo", "link_id": repo_path},
+    ).status_code == 200
+    row = next(p for p in client.get("/api/projects").json()["projects"] if p["id"] == project_id)
+    assert repo_path in row["repoPaths"]
+    assert client.delete("/api/projects/unlink", params={"link_type": "repo", "link_id": repo_path}).status_code == 200
+
     opened = client.get(f"/api/projects/conversations/{conv_id}")
     assert opened.status_code == 200
     assert opened.json()["title"] == "Hello"
@@ -59,7 +70,9 @@ async def test_projects_api_and_links(jarvis_env, client):
 
 
 @pytest.mark.asyncio
-async def test_chat_projects_tool(jarvis_env, client):
+async def test_chat_projects_tool(jarvis_env, client, monkeypatch):
+    monkeypatch.setattr("app.auth.load_settings", lambda: jarvis_env["settings"])
+    monkeypatch.setattr("app.main.load_settings", lambda: jarvis_env["settings"])
     legacy_id = str(uuid.uuid4())
     task_id = str(uuid.uuid4())
     imported = client.post(

@@ -68,7 +68,7 @@ def test_inference_router_ignores_hexstrike_suite(jarvis_env, monkeypatch):
     assert forced.code == "suite_not_inference"
 
 
-def test_hexstrike_status_endpoint_without_install(jarvis_env, monkeypatch):
+def test_hexstrike_status_endpoint_without_install(jarvis_env, monkeypatch, allow_loopback_api):
     monkeypatch.setattr("app.security.hexstrike.data_dir", lambda: jarvis_env["tmp"])
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
@@ -82,7 +82,7 @@ def test_hexstrike_status_endpoint_without_install(jarvis_env, monkeypatch):
     assert body["running"] is False
 
 
-def test_hexstrike_upstream_denies_command(jarvis_env, monkeypatch):
+def test_hexstrike_upstream_denies_command(jarvis_env, monkeypatch, allow_loopback_api):
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
     client = TestClient(app)
     denied = client.post("/api/hexstrike/upstream/api/command", json={"cmd": "id"})

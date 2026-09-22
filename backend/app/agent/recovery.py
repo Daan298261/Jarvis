@@ -86,10 +86,11 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("filesystem", "use direct file operations for file work"),
     ),
     "python": (
-        Alternative("terminal", "run the interpreter or tool directly and read stderr"),
-        Alternative("filesystem", "inspect the inputs before running code again"),
-        Alternative("open_interpreter", "delegate a larger coding job to Open Interpreter when it is installed"),
-        Alternative("code_worker", "delegate a larger coding job to OpenHands when it is installed"),
+        Alternative("filesystem", "copy, list, or search with absolute paths instead of a script"),
+        Alternative("terminal", "run the interpreter, robocopy, or git directly and read stderr"),
+        Alternative("screenshot", "look at Explorer only when the files are not reachable by path"),
+        Alternative("desktop", "drive Explorer or the app with UI Automation as a last resort"),
+        Alternative("cua", "computer-use worker with vision when accessibility lookup fails"),
     ),
     "open_interpreter": (
         Alternative("python", "write and run the script with the native python tool"),
@@ -102,8 +103,10 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("python", "reproduce the job in a virtualenv"),
     ),
     "filesystem": (
-        Alternative("python", "glob, compare, or transform files in a script"),
-        Alternative("terminal", "inspect the path with a shell command"),
+        Alternative("terminal", "inspect or copy the path with a shell command (robocopy/xcopy)"),
+        Alternative("python", "glob, compare, or transform files in a script if copy is not enough"),
+        Alternative("screenshot", "confirm the files visually only if the path cannot be listed"),
+        Alternative("desktop", "use Explorer via UI Automation only as a last resort"),
     ),
     "git": (
         Alternative("terminal", "run the git command directly to see the full error"),
@@ -112,6 +115,12 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
     "verify_code": (
         Alternative("terminal", "run pytest or git status directly if the verifier cannot start"),
         Alternative("filesystem", "read the changed files yourself"),
+    ),
+    "python": (
+        Alternative("filesystem", "copy, list, search, or write with the filesystem tool instead of a script"),
+        Alternative("mcp_call", "use a connected MCP tool (Gmail, WhatsApp, or other listed mcp_* schema) instead of python"),
+        Alternative("terminal", "run a one-liner when a CLI already exists"),
+        Alternative("screenshot", "confirm the result visually only if a GUI is the only remaining path"),
     ),
     "screenshot": (
         Alternative("desktop", "query the UI Automation tree instead of pixels"),
@@ -157,9 +166,14 @@ def recovery_hint(tool: str, observation: str, attempt: int = 1) -> str:
     lines = [f"{tool} failed ({kind.replace('_', ' ')}). {_KIND_GUIDANCE[kind]}"]
     options = alternatives_for(tool, kind)
     if options:
-        limit = 1 if attempt <= 1 else len(options)
+        limit = 2 if attempt <= 1 else len(options)
         lines.append("Alternative tools, most deterministic first:")
         lines.extend(f"- {item.tool}: {item.why}" for item in options[:limit])
+    if tool == "python":
+        lines.append(
+            "For copy/move of folders use filesystem action=copy with absolute path and destination. "
+            "Do not put source code in the python `action` field; use `code` or `path`."
+        )
     if kind == UNAVAILABLE:
         lines.append("If that tool is not in the current exposed set, call request_capability with its name.")
     if attempt >= 3:
@@ -171,4 +185,45 @@ def recovery_hint(tool: str, observation: str, attempt: int = 1) -> str:
             "If the tool you need is not in the current schema, call request_tools before switching."
         )
     lines.append("Do not repeat the call that just failed.")
+    if attempt >= 2:
+        lines.append(
+            "A second model will review other methods (filesystem, terminal, then screenshot/"
+            "desktop computer-use) if this still fails."
+        )
     return "\n".join(lines)
+
+
+def canned_method_switch_plan(tool: str, observation: str) -> str:
+    """Deterministic expert substitute when the second model cannot load."""
+    kind = classify_failure(observation)
+    options = alternatives_for(tool, kind)
+    steps = ["1. Do not retry the exact call that failed."]
+    if tool == "python":
+        steps.append(
+            "2. Use filesystem action=copy (or list/search) with absolute Windows paths."
+        )
+        steps.append(
+            "3. If this is mail or WhatsApp, call the exposed mcp_* / mcp_call tool instead of python."
+        )
+        steps.append(
+            "4. If the source is missing, search allowed directories and report; do not invent files."
+        )
+        steps.append(
+            "5. Only if the files exist solely in a GUI: request_capability screenshot and desktop "
+            "(or cua) and copy via Explorer with vision."
+        )
+    else:
+        n = 2
+        for item in options[:4]:
+            steps.append(f"{n}. Try {item.tool}: {item.why}.")
+            n += 1
+        steps.append(f"{n}. If still stuck, request_capability screenshot and desktop and use vision.")
+    return (
+        "ANALYSIS:\n"
+        f"{tool} failed ({kind.replace('_', ' ')}). Switch method rather than parameters.\n"
+        "NEXT PLAN:\n"
+        + "\n".join(steps)
+        + "\nPITFALLS:\n"
+        "- Repeating the same python action blob.\n"
+        "- Relative run_file paths that resolve under the Jarvis install directory.\n"
+    )

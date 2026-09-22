@@ -31,6 +31,8 @@ def test_obsidian_page_is_host_not_custom_editor():
     assert "obsidian-native-host" in text
     assert "CodeMirror" not in text
     assert "markdown editor" not in text.lower()
+    assert "Open vault in Obsidian" in text
+    assert "Launch Jarvis Desktop" not in text
 
 
 def test_tauri_registers_obsidian_commands():

@@ -6,6 +6,7 @@ export type VaultPublicStatus = {
   bound_at: string
   last_index_at: string
   note_count: number
+  vault_name?: string
 }
 
 export type VaultHealthResponse = {

@@ -19,7 +19,7 @@ from app.security.hexstrike_tools import (
 
 
 @pytest.fixture
-def hardened_env(jarvis_env, monkeypatch):
+def hardened_env(jarvis_env, monkeypatch, allow_loopback_api):
     tmp = jarvis_env["tmp"]
     monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp)
     monkeypatch.setattr("app.policy.approval_pending.data_dir", lambda: tmp)
