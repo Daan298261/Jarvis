@@ -38,7 +38,10 @@ data class CompanionState(
     val messages: List<JSONObject> = emptyList(), val conversations: List<JSONObject> = emptyList(),
     val schedules: List<JSONObject> = emptyList(), val calls: List<JSONObject> = emptyList(),
     val conversationId: String? = null, val selectedModel: String = "auto",
-    val attachmentIds: List<String> = emptyList(), val capabilities: JSONObject = JSONObject(),
+    val attachmentIds: List<String> = emptyList(),
+    val attachmentUploadProgress: Int = 0,
+    val attachmentUploadBusy: Boolean = false,
+    val capabilities: JSONObject = JSONObject(),
     val swarm: JSONObject = JSONObject(), val coding: JSONObject = JSONObject(),
     val codingDecisions: List<JSONObject> = emptyList(), val voiceProfiles: List<JSONObject> = emptyList(),
     val selectedVoice: String = "", val presenceMode: String = "orb",
@@ -88,6 +91,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var player: MediaPlayer? = null
     private var playerFile: File? = null
     private val outbox = Outbox(app)
+    private val uploadOutbox = UploadOutbox(app)
     private val offlineQueue = OutboxQueue(app)
     val packManager = CompanionPackManager(app)
     private var foreground = false
@@ -501,24 +505,94 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     fun uploadCaptured(uri: Uri, file: File) = action {
         try { uploadNow(uri) } finally { file.delete() }
     }
-    private suspend fun uploadNow(uri: Uri) {
+    fun retryUpload() = action { resumePendingUpload() }
+
+    private suspend fun resumePendingUpload() {
+        val pending = uploadOutbox.read() ?: return
+        val uri = Uri.parse(pending.getString("uri"))
+        uploadNow(uri, pending.optString("upload_id").ifBlank { null })
+    }
+
+    private suspend fun uploadNow(uri: Uri, resumeUploadId: String? = null) {
         val context = getApplication<Application>()
-        val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val output = java.io.ByteArrayOutputStream()
-                val chunk = ByteArray(32768)
-                while (true) {
-                    val count = stream.read(chunk)
-                    if (count < 0) break
-                    require(output.size() + count <= 64 * 1024 * 1024) { "Attachment exceeds 64 MiB" }
-                    output.write(chunk, 0, count)
-                }
-                output.toByteArray()
-            } ?: error("Cannot read attachment")
-        }
+        val name = uri.lastPathSegment ?: "attachment"
         val type = context.contentResolver.getType(uri) ?: "application/octet-stream"
-        val result = JSONObject(api.raw("/attachments", "POST", bytes, contentType = type, filename = uri.lastPathSegment ?: "attachment").toString(Charsets.UTF_8))
-        mutable.value = mutable.value.copy(attachmentIds = mutable.value.attachmentIds + result.getString("id"))
+        val kind = MediaUploadPlanner.detectKind(type, name)
+        val size = context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+        mutable.value = mutable.value.copy(attachmentUploadBusy = true, attachmentUploadProgress = 0, error = null)
+        try {
+            val uploadId = resumeUploadId ?: UUID.randomUUID().toString()
+            if (MediaUploadPlanner.shouldChunk(kind, size)) {
+                uploadOutbox.save(
+                    JSONObject()
+                        .put("uri", uri.toString())
+                        .put("upload_id", uploadId)
+                        .put("kind", kind)
+                        .put("name", name),
+                )
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: error("Cannot read attachment")
+                }
+                val total = MediaUploadPlanner.chunkCount(bytes.size.toLong())
+                for (index in 0 until total) {
+                    val start = index * MediaUploadPlanner.CHUNK_SIZE
+                    val end = minOf(start + MediaUploadPlanner.CHUNK_SIZE, bytes.size)
+                    val chunk = bytes.copyOfRange(start, end)
+                    val headers = mapOf(
+                        "X-Jarvis-Upload-Id" to uploadId,
+                        "X-Jarvis-Chunk-Index" to index.toString(),
+                        "X-Jarvis-Chunk-Total" to total.toString(),
+                        "X-Jarvis-Upload-Kind" to kind,
+                    )
+                    val response = JSONObject(
+                        api.raw(
+                            "/attachments",
+                            "POST",
+                            chunk,
+                            contentType = type,
+                            filename = name,
+                            extraHeaders = headers,
+                        ).toString(Charsets.UTF_8),
+                    )
+                    val received = response.optInt("received", index + 1)
+                    mutable.value = mutable.value.copy(
+                        attachmentUploadProgress = ((received.toDouble() / total.toDouble()) * 100).toInt(),
+                    )
+                    if (response.has("id")) {
+                        uploadOutbox.clear()
+                        mutable.value = mutable.value.copy(
+                            attachmentIds = mutable.value.attachmentIds + response.getString("id"),
+                            attachmentUploadBusy = false,
+                            attachmentUploadProgress = 100,
+                        )
+                        return
+                    }
+                }
+            } else {
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { stream -> stream.readBytes() }
+                        ?: error("Cannot read attachment")
+                }
+                val headers = mapOf("X-Jarvis-Upload-Kind" to kind)
+                val result = JSONObject(
+                    api.raw("/attachments", "POST", bytes, contentType = type, filename = name, extraHeaders = headers)
+                        .toString(Charsets.UTF_8),
+                )
+                uploadOutbox.clear()
+                mutable.value = mutable.value.copy(
+                    attachmentIds = mutable.value.attachmentIds + result.getString("id"),
+                    attachmentUploadBusy = false,
+                    attachmentUploadProgress = 100,
+                )
+            }
+        } catch (error: Exception) {
+            mutable.value = mutable.value.copy(
+                attachmentUploadBusy = false,
+                error = error.message ?: "Upload failed",
+            )
+            throw error
+        }
     }
     fun cancel(taskId: String) = action { api.json("/tasks/$taskId/cancel", "POST"); refresh() }
     fun approve(taskId: String, token: String, approved: Boolean) = action {

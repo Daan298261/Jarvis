@@ -8,6 +8,8 @@ import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 import { useTaskSpeech } from "../tts/useTaskSpeech"
 import { TaskActivityPanel } from "../components/TaskActivity"
+import { MediaComposerBar } from "../components/MediaComposerBar"
+import { useMediaUploads } from "../chat/useMediaUploads"
 import { DelegationPanel } from "./Delegation"
 import { usePendingApprovals } from "../chat/pendingApprovals"
 import { SETUP_PROBLEM_WORKING, isAuthFailureMessage } from "../setup/ownerFacing"
@@ -35,6 +37,7 @@ export function ChatPage() {
   const chunksRef = useRef<Blob[]>([])
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { ingestPayload } = usePendingApprovals()
+  const media = useMediaUploads()
 
   useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies)
 
@@ -109,19 +112,35 @@ export function ChatPage() {
 
   async function submit() {
     const text = prompt.trim()
-    if (!id && !text) return
+    const mediaIds = media.readyIds
+    if (!id && !text && !mediaIds.length) return
+    if (media.hasUploading) return
     stopChatTts()
     setBusy(true)
     try {
       if (id) {
         if (text) setPending((current) => (current.includes(text) ? current : [...current, text]))
-        await api(`/api/tasks/${id}/continue`, { method: "POST", body: JSON.stringify({ prompt: text || "Continue this." }) })
+        await api(`/api/tasks/${id}/continue`, {
+          method: "POST",
+          body: JSON.stringify({
+            prompt: text || (mediaIds.length ? "Review the attached media." : "Continue this."),
+            media_ids: mediaIds,
+          }),
+        })
         setPrompt("")
+        media.clear()
         const data = await api<Task>(`/api/tasks/${id}`)
         setTask(data)
       } else {
-        const created = await api<Task>("/api/tasks", { method: "POST", body: JSON.stringify({ prompt: text }) })
+        const created = await api<Task>("/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            prompt: text || (mediaIds.length ? "Review the attached media." : ""),
+            media_ids: mediaIds,
+          }),
+        })
         setPrompt("")
+        media.clear()
         navigate(`/tasks/${created.id}`)
       }
     } catch (err: any) {
@@ -274,6 +293,12 @@ export function ChatPage() {
       </div>
 
       <div className="composer-dock">
+        <MediaComposerBar
+          items={media.items}
+          onPick={media.uploadFiles}
+          onRemove={media.remove}
+          disabled={busy}
+        />
         <textarea
           className="command"
           value={prompt}
@@ -282,7 +307,11 @@ export function ChatPage() {
           placeholder={id ? "Message…" : "Organize these files, fix this project, research a topic…"}
         />
         <div className="row composer-actions">
-          <button className="btn" disabled={busy || (!id && !prompt.trim())} onClick={submit}>
+          <button
+            className="btn"
+            disabled={busy || media.hasUploading || (!id && !prompt.trim() && !media.readyIds.length)}
+            onClick={submit}
+          >
             {id ? (prompt.trim() ? "Send" : "Continue") : "Send"}
           </button>
           <button

@@ -352,6 +352,34 @@ h2 { font-size: 18px; margin: 0 0 12px; }
   padding: 12px 20px 16px;
   background: var(--panel);
 }
+.media-composer-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.media-composer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.media-composer-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.media-composer-item.error { border-color: var(--warn); }
+.media-composer-meta { color: var(--muted); }
+.media-composer-error { color: var(--warn); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
 .composer-actions { margin-top: 10px; }
 .composer-check { margin: 0; font-size: 13px; color: var(--muted); }
 

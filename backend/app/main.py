@@ -15,7 +15,11 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
+<<<<<<< HEAD
 from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, memory, mobile, model, modules, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, runtime_profiles, self_dev, session_personality, settings, setup, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+=======
+from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, owner_chat, packs, perception, perception_identity, permissions, projects, queue, runtime_profiles, self_dev, session_personality, settings, setup, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+>>>>>>> 3f0168b (Implement RFC-0109 unified media upload, analyze, and composer attach)
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -84,6 +88,7 @@ app.include_router(coding.router)
 app.include_router(mobile.router)
 app.include_router(companion.router)
 app.include_router(companion.owner_router)
+app.include_router(media.router)
 app.include_router(swarm.router)
 app.include_router(worker_environments.router)
 app.include_router(runtime_profiles.router)

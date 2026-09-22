@@ -154,8 +154,15 @@ class JarvisApi(context: Context) {
         JSONObject(raw(path, method, body?.toString()?.toByteArray()).toString(Charsets.UTF_8))
     suspend fun array(path: String): JSONArray = JSONArray(raw(path).toString(Charsets.UTF_8))
 
-    suspend fun raw(path: String, method: String = "GET", body: ByteArray? = null,
-                    authenticated: Boolean = true, contentType: String = "application/json", filename: String? = null): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun raw(
+        path: String,
+        method: String = "GET",
+        body: ByteArray? = null,
+        authenticated: Boolean = true,
+        contentType: String = "application/json",
+        filename: String? = null,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): ByteArray = withContext(Dispatchers.IO) {
         if (authenticated) session()
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
         val client = pinnedClient()
@@ -171,6 +178,7 @@ class JarvisApi(context: Context) {
         val request = Request.Builder().url("${TransportPolicy.origin(address)}/api/companion$path")
         if (authenticated) request.header("Authorization", "Bearer $token").header("X-Jarvis-Device", deviceId)
         if (filename != null) request.header("X-Filename", filename.filter { it.code in 32..126 }.take(200))
+        extraHeaders.forEach { (key, value) -> request.header(key, value) }
         request.method(method, if (method == "GET") null else (body ?: ByteArray(0)).toRequestBody(contentType.toMediaType()))
         try { client.newCall(request.build()).execute().use { response ->
             val result = response.body?.bytes() ?: ByteArray(0)
