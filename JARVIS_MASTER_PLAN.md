@@ -2592,6 +2592,16 @@ Taco needs a portal/Setup Clean Install that actually kills lockers, deletes onl
 
 ---
 
+Decision: RFC-0136 zombie-kill on Setup Next and Start (accepted)
+
+Taco 2026-09-22 (post-1.4.10): a wedged uvicorn held **4780** (`CLOSE_WAIT`, health fail) so Start died with `Errno 10048`; a second `.venv` uvicorn was also stuck. [RFC-0136](docs/rfcs/0136-zombie-kill-setup-next-and-start.md) extends RFC-0093 `force-stop-jarvis.ps1` (does **not** rewrite [RFC-0124](docs/rfcs/0124-clean-install-reinstall-owned-path-wipe.md)). Setup installation-method **Next** and `start-jarvis.ps1` (before bind) must kill hung Jarvis backends that still own 4780/4781, tray helpers, and Jarvis-started llama-server / supermemory. Exit 0 while a Jarvis PID still holds the port is a **fail**. Specs-only; no new §58 checkbox. 0130–0135 were taken.
+
+Reason:
+
+Path-only force-stop plus a Start script that binds immediately cannot recover a listener that fails health. Task Manager must not be the fix.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
