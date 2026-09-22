@@ -40,6 +40,10 @@ def test_force_stop_binds_ciminstance_not_managementobject():
     assert "Jarvis-installer-stop.log" in text
     assert "python|pythonw" in text
     assert "node|npm|java" in text
+    assert "post-kill-tcp-recheck" in text
+    assert "4780" in text
+    assert "exit-reason=ok" in text
+    assert "force-stop complete: no lockers under install tree" not in text
 
 
 def test_jarvis_iss_wires_force_stop_before_prepare():
