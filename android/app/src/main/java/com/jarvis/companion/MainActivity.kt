@@ -92,6 +92,7 @@ class MainActivity : ComponentActivity() {
             }
             val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) model.toggleRecord() }
             val attachment = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(model::upload) }
+            val videoPick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(model::upload) }
             var photoPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
             val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
                 photoPath?.let { path ->
@@ -316,9 +317,19 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 if (state.attachmentIds.isNotEmpty()) Text("${state.attachmentIds.size} attachment(s) ready", color = Gold, fontSize = 12.sp)
+                                if (state.attachmentUploadBusy) {
+                                    LinearProgressIndicator(
+                                        progress = { state.attachmentUploadProgress / 100f },
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    )
+                                }
+                                if (!state.attachmentUploadBusy && state.error != null) {
+                                    TextButton(onClick = { model.retryUpload() }) { Text("Retry upload") }
+                                }
                                 OutlinedTextField(value = draft, onValueChange = { draft = it }, placeholder = { Text("Ask anything…") }, modifier = Modifier.fillMaxWidth(), maxLines = 5, shape = RoundedCornerShape(20.dp))
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(onClick = { attachment.launch("*/*") }) { Icon(Icons.Outlined.AttachFile, "Attach file") }
+                                    IconButton(onClick = { videoPick.launch("video/*") }) { Icon(Icons.Outlined.VideoLibrary, "Attach video") }
                                     IconButton(onClick = { cameraPermission.launch(Manifest.permission.CAMERA) }) { Icon(Icons.Outlined.PhotoCamera, "Take photo") }
                                     IconButton(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }) { Icon(if (state.recording) Icons.Outlined.Stop else Icons.Outlined.Mic, "Voice message") }
                                     Spacer(Modifier.weight(1f))
