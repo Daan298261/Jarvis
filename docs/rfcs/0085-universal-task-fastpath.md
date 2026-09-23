@@ -1,6 +1,6 @@
 # RFC-0085: Universal task fast path
 
-**Status:** accepted
+**Status:** implemented
 **Queue item:** Every request receives an immediate useful response before durable task orchestration.
 **Author:** Taco request via Codex
 **Date:** 2026-09-13
@@ -17,13 +17,13 @@ The fast stage does not bypass safety policy, fabricate live facts, or perform s
 
 ## Acceptance criteria
 
-- [ ] Every submission is classified into direct reply, direct lookup, or managed task before an agent loop begins.
+- [x] Every submission is classified into direct reply, direct lookup, or managed task before an agent loop begins.
 - [ ] Direct replies use one model call, no tool catalog, no verifier, and return within the configured interactive budget.
 - [ ] Direct lookups provide a visible immediate status and invoke only their dedicated lookup path; weather remains conversational under RFC-0084.
-- [ ] Managed tasks publish an immediate acknowledgement and only expose tools required by their classified intent.
+- [x] Managed tasks publish an immediate acknowledgement and only expose tools required by their classified intent.
 - [ ] A task record captures routing decision, queue delay, model/tool/verifier timings, and the first useful response latency.
-- [ ] Follow-ups are independently rerouted rather than inheriting a previous task's expensive workflow.
-- [ ] Unit tests pass (`python -m pytest`); frontend build passes if UI changes.
+- [x] Follow-ups are independently rerouted rather than inheriting a previous task's expensive workflow.
+- [x] Unit tests pass (`python -m pytest`); frontend build passes if UI changes.
 
 ## Likely files
 
@@ -40,3 +40,5 @@ Changing model providers, bypassing approvals, parallel swarm execution, voice-e
 ## Notes
 
 RFC-0083 keeps conversational follow-ups out of the tool loop. RFC-0084 owns weather-specific lookup and Android presentation. Desktop sign-off must measure first useful response separately from total managed-task completion time.
+
+Tip audit 2026-09-23 on `development` `785d1df`. Core response-first stage is present: `route_request` in `backend/app/agent/planning.py` classifies before `AgentLoop.create_task` starts the runner (`backend/app/agent/loop.py`); `backend/app/agent/front_responder.py` speaks the first reply. Original land is merged #235 (`954e01f`); D1 tip-audit found no outstanding implement PR. Unchecked: non-trivial direct replies still use a front call plus a worker, and RFC-0128 still schedules a background verifier (front `timeout_ms` is not an interactive budget for the whole reply); weather stays conversational via Open-Meteo but the lookup is awaited before the front acknowledgement, and it is the only `direct_lookup`; the task row stores `response_route`, `first_response_ms`, `model_ms`, and `tool_ms`, not queue delay or verifier timing.
