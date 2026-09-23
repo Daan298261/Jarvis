@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, automation_breaker, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, runtime_profiles, self_dev, session_personality, settings, setup, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, automation_breaker, autonomy, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, runtime_profiles, self_dev, session_personality, settings, setup, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -77,6 +77,7 @@ app.include_router(owner_chat.router)
 app.include_router(projects.router)
 app.include_router(session_personality.router)
 app.include_router(named_personas.router)
+app.include_router(custom_presence.router)
 app.include_router(help_api.router)
 app.include_router(voice_profiles.router)
 app.include_router(workflows.router)
@@ -297,6 +298,9 @@ async def startup() -> None:
             from .persona.named_persona import reapply_stored_main_persona
 
             reapply_stored_main_persona()
+            from .presence.custom_ui import reapply_stored_custom_presence
+
+            reapply_stored_custom_presence()
         except Exception:
             logging.debug("Named persona reapply skipped", exc_info=True)
     asyncio.create_task(_maybe_launch_greeting(app.state.startup_id))

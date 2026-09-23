@@ -2691,6 +2691,26 @@ Taco / CoS 2026-09-23: generate a new presence look from the flowing orbs the ow
 
 ---
 
+Decision: RFC-0071 automation failure circuit breaker (implemented, backend; portal residual open)
+
+[RFC-0071](docs/rfcs/0071-automation-failure-circuit-breaker.md) is **implemented** for backend on development via #388 @ `5377938`. Durable `ACTIVE` → `DEGRADED` → `DISABLED_BY_FAILURE` state, mobile schedule admission before worker submit, agent-loop terminal hook (one count per finalized run; only normalized `FAILURE` increments; verified success resets), owner-key re-enable that blocks automation self-reenable, and jsonl audit. `tests/test_rfc0071_breaker.py` (11) passed on the ledger VM. Portal residual remains open: the UI/API acceptance checkbox and the portal build checkbox stay unchecked. API routes exist; no portal Re-enable surface landed in #388. `event_subscription_automation_id` is unused because RFC-0016 has no dispatcher on tip. §57 Current State and §58 Development Queue had no RFC-0071 status line, so neither section was rewritten and no §58 checkbox was added. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after backend #388 (`5377938`) landed on development tip. UX for breaker state and Re-enable is still in flight.
+
+---
+
+Decision: RFC-0085 universal task fast path (implemented)
+
+Late catch-up. The response-first stage is already on development tip `d56e2c5` (#388 @ `5377938` adds an automation-breaker terminal hook only; #390 is the RFC-0071 ledger tick and does not change routing, which is unchanged from `785d1df`). [RFC-0085](docs/rfcs/0085-universal-task-fastpath.md) is **implemented**. Original land #235 (`954e01f`): `route_request` (`direct_reply` / `direct_lookup` / `managed_task`) before the agent runner, class-scoped tools, managed acknowledgement, `response_route`. Later lanes reuse `backend/app/agent/front_responder.py` (RFC-0117 #305) and the RFC-0084 weather briefing. D1 tip-audit found no outstanding implement PR. §57 Current State and §58 Development Queue had no status lines for this RFC, so neither section was rewritten and no §58 checkbox was added. Acceptance left open: direct replies are not one model call with no verifier inside an interactive budget; weather lookup runs before the front acknowledgement and is the only direct lookup; the task record has no queue-delay or verifier-timing fields. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after the universal fast path was already on development tip. No new implement PR.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
