@@ -1,7 +1,7 @@
 # RFC-0071: Automation failure circuit breaker
 
 **Status:** implemented  
-**Queue item:** P3/P4 — automation reliability / resilient execution (no §58 checkbox; portal residual open)  
+**Queue item:** P3/P4 — automation reliability / resilient execution (no §58 checkbox; portal residual landed #392 @ 392c1572)  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-09-11
 
@@ -26,13 +26,13 @@ Re-enabling requires an explicit owner/admin action or a separately authorized r
 - [x] Crossing the configured threshold atomically disables future schedule/event wakeups before another run can be admitted, including under concurrent trigger delivery.
 - [x] Per-run retries/backoff are exhausted or resolved before the automation run contributes one terminal result to the consecutive-failure counter.
 - [x] `DISABLED_BY_FAILURE` automations consume no model/worker compute from subsequent automatic triggers; suppressed triggers may record compact audit events only.
-- [ ] UI/API exposes breaker state, threshold, current count, last failure time/summary, recent failed run links, and an explicit `Re-enable` action.
+- [x] UI/API exposes breaker state, threshold, current count, last failure time/summary, recent failed run links, and an explicit `Re-enable` action.
 - [x] Re-enable is owner/admin-authorized, audited, idempotent, and cannot be performed by the affected automation through its own normal tool authority.
 - [x] Audit history records breaker trip, suppressed triggers, threshold/policy used, re-enable actor, and reset/acknowledgement.
 - [x] Tests cover repeated failures across process restarts, success resetting the counter, concurrent triggers at the threshold boundary, retry-vs-run counting, non-failure outcomes, unauthorized self-reenable, and explicit operator recovery.
 - [x] Existing `EventSubscription`/`GoalRun` cancellation and AutomationPackage semantics remain authoritative; no duplicate scheduler or retry engine is introduced.
 - [x] Unit tests pass (`python3 -m pytest`).
-- [ ] If portal is touched, `npm --prefix frontend run build` passes.
+- [x] If portal is touched, `npm --prefix frontend run build` passes.
 
 ## Likely files
 
@@ -54,11 +54,11 @@ Discovery date: 2026-09-11.
 Recommendation: **ADAPT STRONGLY**.  
 Jarvis adapts the production reliability principle, not OpenHands internals: the breaker is implemented as Jarvis-owned durable automation state integrated with existing normalized outcomes, retry policy, event subscriptions, approvals, audit, and owner authority. OpenHands 1.11.0 also added creator-only editing and routing events into an existing conversation; those do not justify separate Jarvis RFCs because Jarvis is currently owner-controlled and durable GoalRun continuity already covers the latter concern.
 
-API landed #388 @ `5377938`; portal residual UX in flight.
+API landed #388 @ `5377938`. Portal residual landed #392 @ `392c1572` (Settings → Advanced → Automation circuit breaker).
 
 ## Implementation note
 
-Backend **implemented** on `development` via #388 @ `5377938fff2ca124e5f246d1a848ad90efceae8a`. Specs-only ledger tick. No product code in this PR. Portal residual remains open (UX in flight). §58 had no RFC-0071 checkbox; none was added.
+Backend **implemented** on `development` via #388 @ `5377938fff2ca124e5f246d1a848ad90efceae8a`. Portal residual **landed** #392 @ `392c1572dc857e225cdeb901279cd03bd70fe453`. Specs-only ledger refine. No product code in this PR. §58 had no RFC-0071 checkbox; none was added.
 
 Evidence on that commit (`backend/app/automation/breaker.py`, `audit.py`, `outcomes.py`, `api/automation_breaker.py`, `mobile/scheduler.py` admission before `submit`, `agent/loop.py` `on_task_terminal`, `tests/test_rfc0071_breaker.py`):
 
@@ -71,7 +71,15 @@ Evidence on that commit (`backend/app/automation/breaker.py`, `audit.py`, `outco
 - No second scheduler or retry engine. `GoalRun` / `EventSubscription` classes are not in the tree; loop cancellation still maps to `CANCELLED` and does not increment the counter. Automation package format is unchanged.
 - `python3 -m pytest tests/test_rfc0071_breaker.py`: 11 passed on this ledger VM. Full-suite re-run was not repeated for this specs-only tick.
 
-Unchecked on purpose:
+Portal evidence on #392 (`frontend/src/settings/AutomationBreakerPanel.tsx`, `automationBreakerView.ts`, `AdvancedSettingsPane.tsx`, `frontend/src/api.ts`). CI `frontend-build` on that PR completed success (actions run `35867007305`, job `107201060719`). This ledger PR does not touch `frontend/`.
 
-- UI/API checkbox stays open. API read/re-enable/threshold/audit routes are on tip. No portal surface references the breaker (`frontend/` has no matches). Portal Re-enable UX is still in flight. `GET` list/detail/audit are not owner-key gated; re-enable and threshold are.
-- Portal build checkbox stays open. #388 did not touch `frontend/`. `npm --prefix frontend run build` is N/A for this land.
+- Settings → Advanced mounts the panel. `GET /api/automation-breaker` is parsed fail-closed: a list error hides rows and does not treat the automation as healthy. Each row shows `breaker_state`, consecutive failures against `failure_threshold`, last failure time and summary, and recent failed run ids as links to `/tasks/:id`.
+- The audit strip reads `GET /api/automation-breaker/audit?limit=100` and shows up to six events for that automation. An audit error hides the strip and says so; the rows stay the list response only.
+- Owner Re-enable (`POST /api/automation-breaker/{id}/reenable`, body `actor: owner`) is shown for `DISABLED_BY_FAILURE`. Owner threshold save is `PUT /api/automation-breaker/{id}/threshold`. The panel replaces the row with the parsed API record.
+
+Residuals still open (documented here; not a new RFC):
+
+- `GET` list, detail, and audit are still not owner-key gated. Re-enable and threshold are.
+- `tests/test_rfc0071_breaker.py` `test_admission_race_disables_before_new_run` still asserts `sum(1 for item in allowed if item) <= 2`. The 11 tests still do not assert audit rows.
+- `event_subscription_automation_id` is still unused. RFC-0016 `EventSubscription` has no dispatcher on tip, so there is still no second event wakeup path to gate.
+- Owner threshold PUT calls `set_failure_threshold` → `ensure_automation` with default `kind="generic"`. That helper assigns `kind` whenever the argument is truthy, so a threshold save rewrites a prior kind (the scheduler sets `kind="schedule"`) to `generic`. `admit_automatic_trigger` calls `ensure_automation(automation_id)` with no kind and does the same rewrite on admission. The portal shows the kind the API returns (`Kind`). The UI/API box stays checked because the panel shows list state, threshold, count, last failure, recent failed-run links, audit, and Re-enable, and it displays the record the API returns.
