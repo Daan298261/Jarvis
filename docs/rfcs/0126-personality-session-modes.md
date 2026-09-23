@@ -34,3 +34,7 @@ RFC-0104 persona_candidate merges; voice pack retraining; full module catalog en
 ## Implementation note
 
 Landed on `development` via #334 @ `8344b806` (personality session modes v1). Prior status was `accepted (implement v1 in PR)`. Acceptance checkboxes left as written.
+
+## Notes
+
+Presence shape and voice for these modes are [RFC-0137](0137-persona-presence-shape-and-voice-binding.md). This RFC's status is unchanged.

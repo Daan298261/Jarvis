@@ -2633,6 +2633,16 @@ CoS assigned Architect tick-only after ranked accurate/fast/stable queue lock.
 
 ---
 
+Decision: RFC-0137 persona presence shape and original voice binding (accepted)
+
+[RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md): each first-party session mode binds a presence shape and an original voice pack together, and the figure morphs with RFC-0069 `uMorph` (reduced motion snaps). Anzu / `core` → new `stormbird` + `butler_original_v1` (dry butler only if the butler pack is missing). `coding` → new `code_lattice` + `synthetic_command_original_v1`. `research` → new `research_lens` + `dry_butler_original_v1`. `concise` reuses `energy_core` + `dry_butler_original_v1`. HexStrike / Daybreak suite keeps `hex_aegis` and binds `tactical_aide_original_v1` without rewriting RFC-0106. `humanoid_bust` stays the non-session fallback. A missing neural pack fails closed — no silent SAPI / `windows_natural_en_v1`. RFC-0104 persona trees stay unmerged. Specs-only; **not implemented**. No new §58 checkbox. Implement ticket: **Grok 4.7, fast=false**.
+
+Reason:
+
+Taco: each selectable persona gets a presence UI that matches its origin and a fitting original voice. Anzu is a stormbird; selecting a persona morphs the orb cloud smoothly.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:

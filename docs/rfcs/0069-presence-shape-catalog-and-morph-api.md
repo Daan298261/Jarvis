@@ -81,6 +81,8 @@ For implementers — already largely in #166:
 
 Cite #165 as the visual-parity baseline and #166 as the morph-catalog implement PR. Implementation may land after or with this RFC; this RFC is the ledger for Watch % and CoS land order (specs first, then #166, without renaming the shipped surface).
 
+RFC-0137 registers `stormbird`, `code_lattice`, and `research_lens` through `registerPresenceShape` and reuses `uMorph`. This RFC's status is unchanged.
+
 ## Implementation note
 
 Landed on `development` via #168 (specs) + #166 (impl @ `4e7b97d`). Surface: `shapes/catalog.ts`, `humanoidBust` + `energyCore`, `morphableOrbCloud`/`uMorph`.
