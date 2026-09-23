@@ -2711,6 +2711,16 @@ CoS assigned Architect tick-only after the universal fast path was already on de
 
 ---
 
+Decision: RFC-0071 automation failure circuit breaker (portal residual landed)
+
+[RFC-0071](docs/rfcs/0071-automation-failure-circuit-breaker.md) portal residual is on development via #392 @ `392c1572`. Settings → Advanced → Automation circuit breaker lists breaker state, consecutive count against threshold, last failure time and summary, recent failed-run links, an audit strip, owner Re-enable, and owner threshold save. List errors fail closed. #392 CI `frontend-build` completed success (actions run `35867007305`). Status stays **implemented**. The UI/API and portal-build acceptance boxes are checked. Backend caveats from the #390 tick still hold: GET list/detail/audit are not owner-key gated, the race test allows `<= 2`, the 11 tests do not assert audit rows, and RFC-0016 still has no dispatcher. Residual: threshold PUT (and `admit_automatic_trigger`) call `ensure_automation` with default `kind="generic"`, which rewrites a prior kind; the portal shows the returned kind. No new RFC. The earlier 0071 backend tick in this section is unchanged. §57 Current State and §58 Development Queue were not rewritten. No product code in this PR.
+
+Reason:
+
+CoS assigned a specs-only ledger refine after portal #392 (`392c1572`) landed on development tip.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
