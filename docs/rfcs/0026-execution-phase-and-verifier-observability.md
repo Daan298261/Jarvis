@@ -1,7 +1,7 @@
 # RFC-0026: Execution phase and verifier observability
 
-**Status:** accepted  
-**Queue item:** Autonomous Operator / command-center UX  
+**Status:** implemented  
+**Queue item:** Autonomous Operator / command-center UX (backend/API #393; UI and other residuals open)  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-08-31
 
