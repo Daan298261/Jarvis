@@ -13,7 +13,7 @@ TASK_TOOL_SETS: dict[str, frozenset[str]] = {
     "filesystem": frozenset({"filesystem", "python"}),
     "shell": frozenset({"filesystem", "terminal", "python"}),
     "system administration": frozenset({"filesystem", "terminal", "python", "desktop", "screenshot"}),
-    "software engineering": frozenset({"filesystem", "terminal", "python", "git"}),
+    "software engineering": frozenset({"filesystem", "terminal", "python", "git", "verify_code"}),
     "research": frozenset({"filesystem", "web_fetch", "browser", "python"}),
     "browser automation": frozenset({"filesystem", "browser", "web_fetch"}),
     "windows gui": frozenset({"filesystem", "desktop", "screenshot", "terminal"}),

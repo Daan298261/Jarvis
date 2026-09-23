@@ -111,6 +111,22 @@ def native_capabilities() -> list[dict[str, Any]]:
             "status": "ready" if shutil.which("docker") else "unavailable",
             "detail": "Optional. Jarvis continues without it.",
         },
+        {
+            "id": "blender",
+            "name": "Blender CLI",
+            "kind": "native",
+            "available": shutil.which("blender") is not None,
+            "status": "ready" if shutil.which("blender") else "missing",
+            "detail": "Headless Blender for .blend edits and mesh export (RFC-0120).",
+        },
+        {
+            "id": "openscad",
+            "name": "OpenSCAD",
+            "kind": "native",
+            "available": shutil.which("openscad") is not None,
+            "status": "ready" if shutil.which("openscad") else "missing",
+            "detail": "Compile .scad sources to STL/OBJ on disk (RFC-0120).",
+        },
         voice_status(),
     ]
 

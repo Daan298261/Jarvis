@@ -59,6 +59,17 @@ from .coding_workers import (
     route_software_task,
     should_route,
 )
+from .coding_contract import (
+    applies_3d_execution_contract,
+    applies_coding_execution_contract,
+    contract_completion_blocked_message,
+    contract_satisfied,
+    ensure_coding_worktree,
+    evidence_from_working,
+    init_coding_execution,
+    note_contract_tool,
+    persist_execution_evidence,
+)
 from .forensic import professional_prompt_block
 from .escalation import (
     EscalationSignals,
@@ -472,7 +483,33 @@ class AgentRuntime:
         verification: str,
         working: WorkingState | None = None,
         metrics: LiveTaskMetrics | None = None,
-    ) -> None:
+    ) -> bool:
+        prompt = content
+        if working is not None:
+            async with SessionLocal() as session:
+                task = await session.get(Task, task_id)
+                if task and task.prompt:
+                    prompt = task.prompt
+            if applies_coding_execution_contract(prompt, working.task_class) or applies_3d_execution_contract(
+                prompt, working.task_class
+            ):
+                if not contract_satisfied(working, prompt, working.task_class):
+                    block = contract_completion_blocked_message(working, prompt, working.task_class)
+                    messages.append(ChatMessage(role="user", content=block))
+                    await self._update(
+                        task_id,
+                        status="running",
+                        stage="act",
+                        result=block,
+                        verification="",
+                        current_action="RFC-0120: real edit/run/verify or DCC required",
+                        conversation_json=serialize_messages(messages),
+                        compact_memory=working.dumps(),
+                        **(metrics.as_fields() if metrics else {}),
+                    )
+                    await BUS.publish(task_id, "progress", "Coding/3D contract blocked chat-only completion", block[:1500], stage="act")
+                    return False
+                persist_execution_evidence(task_id, working)
         fields = {
             "status": "completed",
             "stage": "completed",
@@ -493,6 +530,7 @@ class AgentRuntime:
         await complete_coding_route(task_id, "completed", verification)
         await self._release_lazy_vision()
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+        return True
 
     async def _note_coding_outcome(self, task_id: str, working: WorkingState, outcome: str, verification: str = "") -> None:
         if not working.coding_worker:
@@ -1307,6 +1345,15 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
+        coding_worktree_path = ensure_coding_worktree(task_id) if (
+            applies_coding_execution_contract(active_prompt, working.task_class)
+            or applies_3d_execution_contract(active_prompt, working.task_class)
+        ) else None
+        if applies_coding_execution_contract(active_prompt, working.task_class) or applies_3d_execution_contract(
+            active_prompt, working.task_class
+        ):
+            init_coding_execution(working)
+            skill_requires_verify = True
         metrics = LiveTaskMetrics()
         already_escalated = bool(getattr(working, "escalated", False))
         critic_rejected = False
@@ -1358,6 +1405,11 @@ class AgentRuntime:
                 working.coding_complexity = int(decision.score or routing.get("complexity") or 0)
                 system_prompt += "\n\n" + format_routing_block(routing)
                 await BUS.publish(task_id, "progress", "Coding worker selected", format_routing_block(routing)[:1500], stage="understand")
+            if coding_worktree_path:
+                system_prompt += (
+                    f"\n\nRFC-0005 coding worktree for this task: {coding_worktree_path}\n"
+                    "Edit and verify inside this worktree via filesystem/git/terminal/python/verify_code."
+                )
             budget_headroom = None
             try:
                 budget_headroom = max(
@@ -1709,8 +1761,9 @@ class AgentRuntime:
                             "The model timed out while writing the final report. "
                             "Actions already executed are in the activity log; verify files from that log."
                         )
-                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics)
-                        return
+                        if await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics):
+                            return
+                        continue
                     content = "The model timed out before verification completed."
                     await self._update(
                         task_id,
@@ -1743,8 +1796,9 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
                     working.verified = True
                     await self._update(task_id, compact_memory=working.dumps())
-                    await self._complete(task_id, messages, content, content, working, metrics)
-                    return
+                    if await self._complete(task_id, messages, content, content, working, metrics):
+                        return
+                    continue
 
                 parsed = parse_plan_block(result.content or "")
                 if best_of_n_complete and not awaiting_plan_selection:
@@ -1887,6 +1941,7 @@ class AgentRuntime:
                             failures_by_tool.pop(name, None)
                             recovering = False
                             await BUS.publish(task_id, "observation", f"{name} finished", observation[:1500], stage="observe")
+                            note_contract_tool(working, name, arguments, observation, success=True)
                         working.note_tool(name, observation, not failed)
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
@@ -2017,13 +2072,15 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
                     continue
                 if (policy.require_verify_tools or skill_requires_verify) and verify_tool_rounds == 0:
-                    messages.append(ChatMessage(role="user", content=VERIFY_REQUIRED_PROMPT))
-                    continue
+                    if not evidence_from_working(working).verified:
+                        messages.append(ChatMessage(role="user", content=VERIFY_REQUIRED_PROMPT))
+                        continue
                 working.verified = True
                 verification = content or "Independent verification pass completed; acceptance criteria checked."
                 await self._update(task_id, compact_memory=working.dumps(), verification=verification)
-                await self._complete(task_id, messages, content or verification, verification, working, metrics)
-                return
+                if await self._complete(task_id, messages, content or verification, verification, working, metrics):
+                    return
+                continue
             await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification", **metrics.as_fields())
             await record_trajectory(task_id, working, "failed")
             await complete_coding_route(task_id, "failed", "Step limit reached before verification")
@@ -2097,6 +2154,7 @@ class AgentRuntime:
             async with SessionLocal() as session:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
+            REGISTRY._context["task_id"] = task_id
             if security_role:
                 return await REGISTRY.execute(name, arguments, security_role=security_role)
             return await REGISTRY.execute(name, arguments)

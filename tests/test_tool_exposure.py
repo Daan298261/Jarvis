@@ -23,7 +23,7 @@ def test_filesystem_task_exposes_a_small_tool_set():
 
 def test_software_engineering_includes_git_and_terminal():
     names = tool_names_for("software engineering")
-    assert names == ["filesystem", "terminal", "python", "git"]
+    assert names == ["filesystem", "terminal", "python", "git", "verify_code"]
     assert "request_tools" in [item["function"]["name"] for item in schemas_for("software engineering")]
     assert "desktop" not in names
 

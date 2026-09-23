@@ -448,6 +448,7 @@ class WorkingState:
     active_answer_profile: str = ""
     model_escalation_count: int = 0
     router_action: str = ""
+    coding_execution: dict[str, Any] = field(default_factory=dict)
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"

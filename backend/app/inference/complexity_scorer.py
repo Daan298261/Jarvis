@@ -125,7 +125,7 @@ def score_question_complexity(
         signals.append("default-general")
 
     minimum = tier if hard and tier >= 2 else 0
-    return ComplexityResult(
+    result = ComplexityResult(
         tier=tier,
         minimum_answer_tier=minimum,
         hard_rule=hard,
@@ -133,3 +133,6 @@ def score_question_complexity(
         prefer_tool=prefer_tool,
         task_class_hint=task_hint,
     )
+    from ..agent.coding_contract import bump_complexity_for_coding_contract
+
+    return bump_complexity_for_coding_contract(result, task_class=task_class, prompt=text)
