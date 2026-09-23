@@ -31,9 +31,42 @@ def _messages_from_json(raw: str) -> list[ChatMessage]:
     return out
 
 
+async def _require_project(session, project_id: str) -> PortalProject:
+    row = await session.get(PortalProject, project_id)
+    if row is None:
+        raise LookupError(f"Project not found: {project_id}")
+    return row
+
+
+async def _set_owner_chat_project(session, conversation_id: str, project_id: str) -> None:
+    row = await session.get(Conversation, conversation_id)
+    if row is None:
+        return
+    row.project_id = project_id
+
+
+async def _clear_owner_chat_project(session, conversation_id: str) -> None:
+    row = await session.get(Conversation, conversation_id)
+    if row is None:
+        return
+    row.project_id = ""
+
+
 async def list_projects() -> list[dict[str, Any]]:
     async with SessionLocal() as session:
         rows = (await session.execute(select(PortalProject).order_by(PortalProject.updated_at.desc()))).scalars().all()
+        conv_rows = (
+            await session.execute(
+                select(Conversation).where(
+                    Conversation.task_id == "",
+                    Conversation.project_id != "",
+                )
+            )
+        ).scalars().all()
+        conv_by_project: dict[str, list[str]] = {}
+        for conv in conv_rows:
+            conv_by_project.setdefault(conv.project_id, []).append(conv.id)
+
         projects = []
         for row in rows:
             links = (
@@ -42,7 +75,10 @@ async def list_projects() -> list[dict[str, Any]]:
                 )
             ).scalars().all()
             task_ids = [link.link_id for link in links if link.link_type == "task"]
-            chat_ids = [link.link_id for link in links if link.link_type == "owner_chat"]
+            chat_ids = list(dict.fromkeys(
+                [link.link_id for link in links if link.link_type == "owner_chat"]
+                + conv_by_project.get(row.id, [])
+            ))
             repo_paths = [link.link_id for link in links if link.link_type == "repo"]
             projects.append(
                 {
@@ -67,16 +103,22 @@ async def create_project(name: str) -> dict[str, Any]:
 
 async def rename_project(project_id: str, name: str) -> None:
     async with SessionLocal() as session:
-        row = await session.get(PortalProject, project_id)
-        if row is None:
-            return
+        row = await _require_project(session, project_id)
         row.name = name.strip()
         await session.commit()
 
 
 async def delete_project(project_id: str) -> None:
     async with SessionLocal() as session:
+        await _require_project(session, project_id)
         await session.execute(delete(PortalProjectLink).where(PortalProjectLink.project_id == project_id))
+        conv_rows = (
+            await session.execute(
+                select(Conversation).where(Conversation.project_id == project_id)
+            )
+        ).scalars().all()
+        for conv in conv_rows:
+            conv.project_id = ""
         row = await session.get(PortalProject, project_id)
         if row:
             await session.delete(row)
@@ -85,6 +127,7 @@ async def delete_project(project_id: str) -> None:
 
 async def link_member(project_id: str, link_type: str, link_id: str) -> None:
     async with SessionLocal() as session:
+        await _require_project(session, project_id)
         await session.execute(
             delete(PortalProjectLink).where(
                 PortalProjectLink.link_type == link_type,
@@ -94,6 +137,8 @@ async def link_member(project_id: str, link_type: str, link_id: str) -> None:
         session.add(
             PortalProjectLink(project_id=project_id, link_type=link_type, link_id=link_id)
         )
+        if link_type == "owner_chat":
+            await _set_owner_chat_project(session, link_id, project_id)
         await session.commit()
 
 
@@ -105,6 +150,8 @@ async def unlink_member(link_type: str, link_id: str) -> None:
                 PortalProjectLink.link_id == link_id,
             )
         )
+        if link_type == "owner_chat":
+            await _clear_owner_chat_project(session, link_id)
         await session.commit()
 
 
@@ -122,21 +169,43 @@ async def import_local_projects(payload: list[dict[str, Any]]) -> int:
                 session.add(PortalProject(id=pid, name=name))
                 project_media_dir(pid)
                 imported += 1
+            elif not existing.name.strip():
+                existing.name = name
+
             for task_id in row.get("taskIds") or []:
-                if isinstance(task_id, str) and task_id:
-                    session.add(
-                        PortalProjectLink(project_id=pid, link_type="task", link_id=task_id)
+                if not isinstance(task_id, str) or not task_id:
+                    continue
+                await session.execute(
+                    delete(PortalProjectLink).where(
+                        PortalProjectLink.link_type == "task",
+                        PortalProjectLink.link_id == task_id,
                     )
+                )
+                session.add(PortalProjectLink(project_id=pid, link_type="task", link_id=task_id))
+
             for chat_id in row.get("conversationIds") or []:
-                if isinstance(chat_id, str) and chat_id:
-                    session.add(
-                        PortalProjectLink(project_id=pid, link_type="owner_chat", link_id=chat_id)
+                if not isinstance(chat_id, str) or not chat_id:
+                    continue
+                await session.execute(
+                    delete(PortalProjectLink).where(
+                        PortalProjectLink.link_type == "owner_chat",
+                        PortalProjectLink.link_id == chat_id,
                     )
+                )
+                session.add(PortalProjectLink(project_id=pid, link_type="owner_chat", link_id=chat_id))
+                await _set_owner_chat_project(session, chat_id, pid)
+
             for repo_path in row.get("repoPaths") or []:
-                if isinstance(repo_path, str) and repo_path.strip():
-                    session.add(
-                        PortalProjectLink(project_id=pid, link_type="repo", link_id=repo_path.strip())
+                if not isinstance(repo_path, str) or not repo_path.strip():
+                    continue
+                path = repo_path.strip()
+                await session.execute(
+                    delete(PortalProjectLink).where(
+                        PortalProjectLink.link_type == "repo",
+                        PortalProjectLink.link_id == path,
                     )
+                )
+                session.add(PortalProjectLink(project_id=pid, link_type="repo", link_id=path))
             await session.commit()
     return imported
 
