@@ -2552,7 +2552,7 @@ Taco via Codex: delay is systemic across models, not 27B-specific; tiny front-ch
 
 Decision: RFC-0118 Taco goals highest-leverage memo (accepted) + RFC-0109 OCR amend + RFC-0120/0121
 
-Specs-only ranking for Taco’s four goals (speed; coding+3D real tools; OCR+media upload; projects folder / chats-in-DB / media placement). Memo: [`docs/rfcs/0118-taco-goals-highest-leverage.md`](docs/rfcs/0118-taco-goals-highest-leverage.md). Ranked reuse: **1** amend/implement **RFC-0109** (explicit OCR on phone+desktop — not a third media RFC); **2** implement **RFC-0115** Ornith router (0117 front responder already implemented; do not duplicate); **3** new **RFC-0120** coding+3D real tools; **4** new **RFC-0121** projects folder + chats-in-DB + media colocation vs storage node (extends RFC-0020); **5** residual **RFC-0107** hot-path use / desktop sign-off (embed landed in code; ledger stays **accepted** — do not tick implemented). **RFC-0119 reserved** for a parallel license-package entitlements RFC — unused here. **RFC-0108 continues**; 0109 after 0108. Bulk 0095–0104 later; HOLD 0092/0112; draft #282 out of scope. Ledger catch-up: **RFC-0115** and **RFC-0120** are **implemented** (batch tick below); **RFC-0121** stays accepted. No new §58 checkbox; no §57 rewrite; no invented LE/Red/Purple/ATO gates.
+Specs-only ranking for Taco’s four goals (speed; coding+3D real tools; OCR+media upload; projects folder / chats-in-DB / media placement). Memo: [`docs/rfcs/0118-taco-goals-highest-leverage.md`](docs/rfcs/0118-taco-goals-highest-leverage.md). Ranked reuse: **1** amend/implement **RFC-0109** (explicit OCR on phone+desktop — not a third media RFC); **2** implement **RFC-0115** Ornith router (0117 front responder already implemented; do not duplicate); **3** new **RFC-0120** coding+3D real tools; **4** new **RFC-0121** projects folder + chats-in-DB + media colocation vs storage node (extends RFC-0020); **5** residual **RFC-0107** hot-path use / desktop sign-off (embed landed in code; ledger stays **accepted** — do not tick implemented). **RFC-0119 reserved** for a parallel license-package entitlements RFC — unused here. **RFC-0108 continues**; 0109 after 0108. Bulk 0095–0104 later; HOLD 0092/0112; draft #282 out of scope. Ledger catch-up: **RFC-0115**, **RFC-0120**, and **RFC-0121** are **implemented** (batch tick below; 0121 via #381 `e17c9104`). No new §58 checkbox; no §57 rewrite; no invented LE/Red/Purple/ATO gates.
 
 Reason:
 
@@ -2651,9 +2651,9 @@ Taco pasted the canonical ANZU specialist roster. UX holds implement until this 
 
 ---
 
-Decision: Batch ledger tick — RFC-0127, 0128, 0133, 0115, 0120, 0117 journal (implemented)
+Decision: Batch ledger tick — RFC-0127, 0128, 0133, 0115, 0120, 0117 journal, 0121 (implemented)
 
-Late catch-up. Product already landed; specs Status was still accepted. Swift/progressive and capability-ladder items were on tip `3f523f45`; the durable-state journal then landed and the tip is #380 @ `049874c7`.
+Late catch-up. Product already landed; specs Status was still accepted. Swift/progressive and capability-ladder items were on tip `3f523f45`; the durable-state journal landed at #380 @ `049874c7`; project media placement landed at #381 @ `e17c9104`. Those earlier ticks merged in #382 (`28d1fd0`) before 0121 could be added to that PR.
 
 - RFC-0127 swift initial reply + 60s progress — #338 (`13d9aa0b`) + #354 (`19a2e4a7`) + #355 (`e87af8eb`) + #375 (`06cbf5b7`)
 - RFC-0128 progressive answer + background verify — #339 (`b85d1b14`) + #375 (`06cbf5b7`)
@@ -2661,12 +2661,13 @@ Late catch-up. Product already landed; specs Status was still accepted. Swift/pr
 - RFC-0115 Ornith orchestrator / complexity / visible handoff — #377 (`770261e5`)
 - RFC-0120 coding + 3D real tools — #378 (`3f523f45`)
 - RFC-0117 durable-state journal + known-good rollback (`0117-durable-state-journal-rollback.md`) — #380 (`049874c7`)
+- RFC-0121 projects folder + chats in DB + media placement — #381 (`e17c9104`)
 
-Held (not ticked): RFC-0137 (UX product PR), RFC-0107 (Taco desktop Obsidian sign-off), RFC-0121 (D2 #381 still open). RFC-0117 tiny front-chat (`0117-tiny-front-chat-responder.md`) was already implemented and is unchanged. §57 Current State and §58 Development Queue had no status lines for these RFCs. No new §58 checkboxes. No product code in this PR. Live model / DCC / Windows handoff and live operator rollback remain desktop sign-off.
+Held (not ticked): RFC-0137 (UX #383 still open), RFC-0107 (Taco desktop Obsidian sign-off). RFC-0117 tiny front-chat (`0117-tiny-front-chat-responder.md`) was already implemented and is unchanged. §57 Current State and §58 Development Queue had no status lines for these RFCs. No new §58 checkboxes. No product code in this PR. Live model / DCC / Windows handoff, live operator rollback, and multi-node storage remain desktop sign-off.
 
 Reason:
 
-CoS assigned Architect tick-only after the capability ladder (0115, then 0120, then 0133), the swift/progressive lane (0127/0128), and the durable-state journal (#380) were already on development tip.
+CoS assigned Architect tick-only after the capability ladder (0115, then 0120, then 0133), the swift/progressive lane (0127/0128), the durable-state journal (#380), and project media placement (#381) were already on development tip.
 
 ---
 
