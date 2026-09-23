@@ -154,8 +154,20 @@ export function formatCustomPresenceError(err: unknown, job?: CustomPresenceJob 
     return message || code || "Generation failed."
   }
   if (isApiError(err)) {
-    const body = err.body as { detail?: unknown; error?: { code?: string; message?: string } } | null
-    if (body && typeof body === "object" && body.error?.code) {
+    const body = err.body as
+      | {
+          detail?: unknown
+          error?: { code?: string; message?: string }
+        }
+      | null
+    const nested =
+      body && typeof body === "object"
+        ? body.error
+          || (body.detail && typeof body.detail === "object" && !Array.isArray(body.detail)
+            ? (body.detail as { error?: { code?: string; message?: string } }).error
+            : undefined)
+        : undefined
+    if (nested?.code) {
       return formatCustomPresenceError(null, {
         id: "",
         status: "failed",
@@ -165,8 +177,8 @@ export function formatCustomPresenceError(err: unknown, job?: CustomPresenceJob 
         orb_composition: null,
         preview_shape_id: "",
         error: {
-          code: body.error.code,
-          message: body.error.message || body.error.code,
+          code: nested.code,
+          message: nested.message || nested.code,
         },
         created_at: "",
         updated_at: "",
