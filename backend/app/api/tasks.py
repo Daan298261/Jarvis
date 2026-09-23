@@ -63,6 +63,23 @@ def _iso_utc(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat()
 
 
+def _specialist_fields(task: Task) -> dict[str, Any]:
+    raw = getattr(task, "specialist_persona_ids", None) or "[]"
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        parsed = []
+    ids = [str(item) for item in parsed if isinstance(item, str)] if isinstance(parsed, list) else []
+    sentence = ""
+    try:
+        from ..persona.named_persona import active_persona_id, card_sentence
+
+        sentence = card_sentence(active_persona_id(), ids)
+    except Exception:
+        sentence = ""
+    return {"specialist_persona_ids": ids, "persona_card_sentence": sentence}
+
+
 def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any]:
     extra: list[str] = []
     raw = getattr(task, "compact_memory", None) or ""
@@ -128,6 +145,7 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         "heartbeat_status": heartbeat_status,
         "waiting_for_confirmation": task.waiting_for_confirmation,
         "confirmation_payload": task.confirmation_payload,
+        **_specialist_fields(task),
         "created_at": _iso_utc(task.created_at),
         "updated_at": _iso_utc(task.updated_at),
         "started_at": _iso_utc(task.started_at),

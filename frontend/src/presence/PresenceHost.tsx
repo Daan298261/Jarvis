@@ -2,7 +2,7 @@ import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react
 import { NeuralPresence } from "./renderers/NeuralPresence"
 import { supportsHumanoidRuntime } from "./renderers/humanoidRuntime"
 import { PresenceFallback } from "./PresenceFallback"
-import type { EffectivePresence, PresenceSnapshot, PresentationSettings } from "./presenceTypes"
+import type { EffectivePresence, PersonaCloudVisual, PresenceSnapshot, PresentationSettings } from "./presenceTypes"
 
 const HumanoidPresence = lazy(() => import("./renderers/HumanoidPresence"))
 const ParticleBustPresence = lazy(() => import("./renderers/ParticleBustPresence"))
@@ -51,9 +51,10 @@ type PresenceHostProps = {
   settings: PresentationSettings
   size?: number
   shapeId?: string
+  personaVisual?: PersonaCloudVisual
 }
 
-export function PresenceHost({ snapshot, settings, size = 540, shapeId }: PresenceHostProps) {
+export function PresenceHost({ snapshot, settings, size = 540, shapeId, personaVisual }: PresenceHostProps) {
   const resolved = resolvePresence(settings)
   const staticFallback = <PresenceFallback snapshot={snapshot} />
   const neuralFallback = (
@@ -74,7 +75,7 @@ export function PresenceHost({ snapshot, settings, size = 540, shapeId }: Presen
       {resolved.effective === "humanoid" && (
         <PresenceErrorBoundary key="humanoid" fallback={neuralFallback}>
           <Suspense fallback={neuralFallback}>
-            <HumanoidPresence snapshot={snapshot} settings={settings} size={size} shapeId={shapeId} />
+            <HumanoidPresence snapshot={snapshot} settings={settings} size={size} shapeId={shapeId} personaVisual={personaVisual} />
           </Suspense>
         </PresenceErrorBoundary>
       )}

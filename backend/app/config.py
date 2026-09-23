@@ -301,6 +301,40 @@ class IdentityRecognitionSettings(BaseModel):
         return self
 
 
+class PersonaAppearanceSettings(BaseModel):
+    """Per-persona appearance and playback overrides (RFC-0137).
+
+    Empty colours and voice id mean "use the roster default". Pitch, rate, and
+    volume are applied on the neural PCM path, never via SAPI.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    voice_profile_id: str = ""
+    pitch: float = Field(default=0.0, ge=-6, le=6)
+    speaking_rate: float = Field(default=1.0, ge=0.75, le=1.35)
+    volume: float = Field(default=1.0, ge=0, le=1)
+    orb_color: str = ""
+    accent_color: str = ""
+    glow: float = Field(default=0.70, ge=0, le=1)
+    animation: float = Field(default=0.60, ge=0, le=1)
+    scale: float = Field(default=1.0, ge=0.5, le=2.0)
+    specialists_auto_speak: bool = False
+
+
+class NamedPersonaSettings(BaseModel):
+    """Active named persona. Separate from session-mode HUD/prompt settings."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    active_id: str = "anzu"
+    # Legacy #376 shape id, migrated on read (abzu_flow / root_coil). Not a live override.
+    presence_shape_id: str = ""
+    activated_voice_profile_id: str = ""
+    voice_profile_requested: str = ""
+    profiles: dict[str, PersonaAppearanceSettings] = Field(default_factory=dict)
+
+
 class DecisionSettings(BaseModel):
     """RFC-0116 optional TypeSafe Jev decision tier. Default is local-only."""
 
@@ -343,6 +377,7 @@ class AppSettings(BaseModel):
     knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
     supermemory: SupermemorySettings = Field(default_factory=SupermemorySettings)
     decision: DecisionSettings = Field(default_factory=DecisionSettings)
+    named_personas: NamedPersonaSettings = Field(default_factory=NamedPersonaSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)

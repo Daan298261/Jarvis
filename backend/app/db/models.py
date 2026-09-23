@@ -48,6 +48,7 @@ class Task(Base):
     duration_seconds: Mapped[float] = mapped_column(Float, default=0)
     waiting_for_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
     confirmation_payload: Mapped[str] = mapped_column(Text, default="")
+    specialist_persona_ids: Mapped[str] = mapped_column(Text, default="[]")
     model_calls: Mapped[int] = mapped_column(Integer, default=0)
     tool_call_count: Mapped[int] = mapped_column(Integer, default=0)
     schema_errors: Mapped[int] = mapped_column(Integer, default=0)

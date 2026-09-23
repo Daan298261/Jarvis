@@ -157,3 +157,31 @@
 @media (prefers-reduced-motion: reduce) {
   .jarvis-humanoid-hud { opacity: 0.55; }
 }
+
+.jarvis-presence-broken-ring,
+.jarvis-presence-lock-ring {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.jarvis-presence-broken-ring {
+  border: 2px dashed rgba(140, 160, 175, 0.7);
+}
+
+.jarvis-presence-lock-ring {
+  border: 3px solid rgba(245, 215, 110, 0.9);
+}
+
+.jarvis-presence-lock-ring::after {
+  content: "LOCK";
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  transform: translateX(-50%);
+  color: rgba(245, 215, 110, 0.95);
+  font: 10px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.16em;
+}
