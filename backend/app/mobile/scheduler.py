@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
+from ..automation.breaker import admit_automatic_trigger, bind_run_to_task, ensure_automation
+from ..automation.ids import schedule_automation_id
 from .service import TERMINAL, profile_choice, submit, task_snapshot
 from .store import database, get, put, rows
 
@@ -91,8 +93,23 @@ async def tick(now: float | None = None):
             except HTTPException:
                 pass
         request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f'schedule:{schedule["id"]}:{schedule["next_run"]}'))
+        automation_id = schedule_automation_id(schedule["id"])
+        ensure_automation(automation_id, kind="schedule", ref_id=schedule["id"])
+        admission = admit_automatic_trigger(
+            automation_id,
+            run_id=request_id,
+            trigger="schedule",
+        )
+        if not admission.allowed:
+            schedule["last_error"] = (admission.reason or "automation breaker suppressed trigger")[:200]
+            with database() as db:
+                current = get(db, "schedule", schedule["id"])
+                if current:
+                    put(db, "schedule", schedule["id"], schedule)
+            continue
         try:
             result = await submit(schedule["device_id"], request_id, schedule["prompt"], schedule.get("profile"))
+            bind_run_to_task(request_id, result["task_id"])
             following = next_due(schedule, now)
             schedule.update(last_task_id=result["task_id"], last_error=None, last_run=now,
                             enabled=following is not None, next_run=following or schedule["next_run"])
