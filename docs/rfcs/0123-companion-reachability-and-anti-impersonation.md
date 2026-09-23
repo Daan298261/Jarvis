@@ -1,6 +1,6 @@
 # RFC-0123: Companion reachability and anti-impersonation
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; implement is a follow-up after CoS names it)  
 **Author:** Taco via Chief of Staff / Jarvis Architect  
 **Date:** 2026-09-18
@@ -128,3 +128,7 @@ Product implementation in this PR. RFC-0108 GGUF runtime (sibling). RFC-0122. He
 - Source: Taco via CoS 2026-09-18. HOLD lifted for this slice only. Number **0123** (do not take 0122).
 - Linux cloud cannot sign off physical-phone WAN or live MITM fixtures. Unit-test listen/auth/cooldown/event; desktop + phone is sign-off.
 - Implement launch: this RFC only; branch from `development`; PR against `development`; do not merge other PRs; do not edit Architect spec docs in the implement PR.
+
+## Implementation note
+
+Landed on `development` via #319 @ `a6977b74` (companion reachability / anti-impersonation, with the RFC-0108 amend). Physical phone + WAN remains desktop sign-off. Acceptance checkboxes left open for that sign-off and the original specs-only box.

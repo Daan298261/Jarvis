@@ -1,6 +1,6 @@
 # RFC-0122: Ingress size-gate, spill-to-store, and trajectory quality cap
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** **Jarvis 1.4.1 priority bugfix** (no new §58 checkbox; implement is a named follow-up after CoS names it)  
 **Author:** Jarvis Architect (Taco product direction 2026-09-18)  
 **Date:** 2026-09-18
@@ -262,3 +262,7 @@ Product implementation in **this** PR. RFC-0114 recovery rewrite. Full RFC-0115 
 - Companion ports themselves are documented in `ANDROID_CLIENT.md` (Leader `bind_port` default 4780; companion gateway typically 4781; do not forward llama-server 8088). This RFC does not change those numbers; it makes the question **answerable**.
 - Linux cloud: unit-test gate, denylist, empty tools, spill metadata, compact-drops-lessons. Live 27B + HUD hotswap remains desktop sign-off.
 - Implement launch: this RFC only; branch from `development`; pytest; do not edit Architect spec docs in the implement PR (this specs PR is the §59 exception); PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via #318 @ `12827aef` (ingress size-gate, spill-to-store, trajectory quality cap). Live HUD + 27B overflow remains Windows desktop sign-off. Acceptance checkboxes left open for that sign-off.
