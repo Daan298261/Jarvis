@@ -1,6 +1,6 @@
 # RFC-0133: Salvage python tool calls and method-switch on failure
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Tool reliability — copy/script failures should not stall on malformed python calls  
 **Author:** Cursor session (Taco 1.4.9 log)  
 **Date:** 2026-09-22
@@ -35,3 +35,7 @@ Do not put License Manager source in this public git tree.
 ## Out of scope
 
 Committing `tools/license_manager/`; live 27B hotswap on the cloud VM.
+
+## Implementation note
+
+Already on `development` tip inside #366 @ `ba12c618` (no dedicated 0133 PR; salvage shipped with that HexStrike/MCP land): `normalize_python_call`, python recovery that prefers filesystem copy, `should_escalate` on two usage/not_found failures, and `canned_method_switch_plan`. 33 tests across `tests/test_python_call_normalize.py`, `tests/test_recovery.py` (including parametrized classification), and `tests/test_escalation.py`. Live 27B hotswap remains desktop sign-off.

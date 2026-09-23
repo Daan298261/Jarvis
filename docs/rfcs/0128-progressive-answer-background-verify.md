@@ -1,6 +1,6 @@
 # RFC-0128: Progressive answers with background verification
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (optional) progressive owner answers  
 **Author:** Cursor cloud worker  
 **Date:** 2026-03-19
@@ -45,3 +45,7 @@ We will **not** rework the full managed-task verification loop or block worker e
 
 - Controlled by `dialogue.background_verify` in settings (default on) and `JARVIS_BACKGROUND_VERIFY=0` to disable at runtime.
 - Desktop live-model sign-off remains optional; unit tests use mocked inference.
+
+## Implementation note
+
+Landed on `development` via #339 @ `b85d1b14` (publish the owner answer, then verify in the background; silent on `VERIFIED_OK`) and #375 @ `06cbf5b7` (async verify contract tests). Live model verification remains desktop sign-off. Acceptance checkboxes left open for that sign-off.

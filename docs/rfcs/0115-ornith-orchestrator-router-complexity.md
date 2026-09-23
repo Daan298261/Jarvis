@@ -1,6 +1,6 @@
 # RFC-0115: Ornith as orchestrator-router + complexity tiers + visible handoff
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; implement is a named follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17
@@ -379,3 +379,7 @@ Product implementation in this PR. RFC-0114 prompt-budget internals (this RFC co
 - 1.4 suggested implement order: **PR 1** (roles/tiers/gates, no UI) then **PR 3** (visible switch + handoff). CoS may split into two named tickets; both remain this RFC’s contract unless a successor is filed.
 - Linux cloud unit-tests gates, envelope, handoff contents, and event payload. Live model load remains desktop sign-off.
 - Implement launch: this RFC only (or the named PR-1/PR-3 slice); branch from `development`; pytest; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via #377 @ `770261e5` (`runtime_role` / `answer_tier` on `RuntimeProfile`, capability gates before warm-score, complexity scoring, `ModelHandoff`, visible `model_switch`, no Continue button). `tests/test_rfc0115_routing.py` covers routing cases 16–23 and 33. Live Ornith→Qwen load/switch remains Windows desktop sign-off. Acceptance checkboxes left open for that sign-off.
