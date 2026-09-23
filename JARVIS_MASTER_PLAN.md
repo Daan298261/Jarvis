@@ -2544,7 +2544,7 @@ Taco: operational soon and actually used; embed Obsidian inside Jarvis; do not b
 
 Decision: RFC-0117 tiny front-chat responder (implemented; post-1.4)
 
-Tiny always-warm **front responder** lane for first visible/audible owner-chat replies while the larger router/worker continues on the same Jarvis turn. **Implemented** on development via specs #303 (`49f6af4`) + implement #305 (`4eb25d9`): `front_responder` role with tools/thinking disabled and 96–160 token cap; `final_basic` / `ack_continue` / `ask_clarification` / `handoff_notice`; one-transcript merge; immediate safe TTS (`speak_immediately`); diagnostics (`front_responder.last_turn`). **Not** in the 1.4.0 cut (optional / post-1.4 interesting, same class as RFC-0116). Duplicate-number [`docs/rfcs/0117-durable-state-journal-rollback.md`](docs/rfcs/0117-durable-state-journal-rollback.md) from #304 stays **accepted** (separate ticket; not ticked). Windows first-visible/first-audible across two larger models remains desktop sign-off. No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
+Tiny always-warm **front responder** lane for first visible/audible owner-chat replies while the larger router/worker continues on the same Jarvis turn. **Implemented** on development via specs #303 (`49f6af4`) + implement #305 (`4eb25d9`): `front_responder` role with tools/thinking disabled and 96–160 token cap; `final_basic` / `ack_continue` / `ask_clarification` / `handoff_notice`; one-transcript merge; immediate safe TTS (`speak_immediately`); diagnostics (`front_responder.last_turn`). **Not** in the 1.4.0 cut (optional / post-1.4 interesting, same class as RFC-0116). Duplicate-number [`docs/rfcs/0117-durable-state-journal-rollback.md`](docs/rfcs/0117-durable-state-journal-rollback.md) is a separate ticket and is **implemented** on development via #380 (`049874c7`). This tiny front-chat file is unchanged. Windows first-visible/first-audible across two larger models remains desktop sign-off. No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
 
 Reason:
 
@@ -2651,21 +2651,22 @@ Taco pasted the canonical ANZU specialist roster. UX holds implement until this 
 
 ---
 
-Decision: Batch ledger tick — RFC-0127, 0128, 0133, 0115, 0120 (implemented)
+Decision: Batch ledger tick — RFC-0127, 0128, 0133, 0115, 0120, 0117 journal (implemented)
 
-Late catch-up against development tip `3f523f45`. Product already landed; specs Status was still accepted.
+Late catch-up. Product already landed; specs Status was still accepted. Swift/progressive and capability-ladder items were on tip `3f523f45`; the durable-state journal then landed and the tip is #380 @ `049874c7`.
 
 - RFC-0127 swift initial reply + 60s progress — #338 (`13d9aa0b`) + #354 (`19a2e4a7`) + #355 (`e87af8eb`) + #375 (`06cbf5b7`)
 - RFC-0128 progressive answer + background verify — #339 (`b85d1b14`) + #375 (`06cbf5b7`)
 - RFC-0133 python call salvage / method switch — #366 (`ba12c618`; shipped inside the HexStrike/MCP PR, not a dedicated 0133 PR). `normalize_python_call`, recovery, escalation; 33 tests in `tests/test_python_call_normalize.py`, `tests/test_recovery.py`, and `tests/test_escalation.py`
 - RFC-0115 Ornith orchestrator / complexity / visible handoff — #377 (`770261e5`)
 - RFC-0120 coding + 3D real tools — #378 (`3f523f45`)
+- RFC-0117 durable-state journal + known-good rollback (`0117-durable-state-journal-rollback.md`) — #380 (`049874c7`)
 
-Held (not ticked): RFC-0137 (UX product PR), RFC-0107 (Taco desktop Obsidian sign-off), RFC-0117 durable-state journal (`0117-durable-state-journal-rollback.md`, open #380), RFC-0121 (D2 gaps). RFC-0117 tiny front-chat was already implemented. §57 Current State and §58 Development Queue had no status lines for these five RFCs. No new §58 checkboxes. No product code in this PR. Live model / DCC / Windows handoff remains desktop sign-off.
+Held (not ticked): RFC-0137 (UX product PR), RFC-0107 (Taco desktop Obsidian sign-off), RFC-0121 (D2 #381 still open). RFC-0117 tiny front-chat (`0117-tiny-front-chat-responder.md`) was already implemented and is unchanged. §57 Current State and §58 Development Queue had no status lines for these RFCs. No new §58 checkboxes. No product code in this PR. Live model / DCC / Windows handoff and live operator rollback remain desktop sign-off.
 
 Reason:
 
-CoS assigned Architect tick-only after the capability ladder (0115, then 0120, then 0133) and the swift/progressive lane (0127/0128) were already on development tip.
+CoS assigned Architect tick-only after the capability ladder (0115, then 0120, then 0133), the swift/progressive lane (0127/0128), and the durable-state journal (#380) were already on development tip.
 
 ---
 

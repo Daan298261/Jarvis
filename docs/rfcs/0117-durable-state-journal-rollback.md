@@ -1,6 +1,6 @@
 # RFC-0117: Durable state journal and known-good rollback
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** P4 — resilient autonomous execution / operator recovery  
 **Author:** ChatGPT competitor-watch synthesis  
 **Date:** 2026-09-18
@@ -59,3 +59,7 @@ Source: https://www.taos.my/ — taOS describes append-only storage and `taos ro
 Discovery date: 2026-09-18.  
 Recommendation: **ADAPT STRONGLY**.  
 Jarvis adapts the recovery invariant, not taOS internals: authoritative Jarvis state remains in existing repositories, while a bounded mutation journal and verified checkpoints provide crash-safe operator rollback. This is deliberately narrower than backup/export and explicitly distinguishes internal state rollback from irreversible external side effects.
+
+## Implementation note
+
+Landed on `development` via #380 @ `049874c7` (durable mutation journal, known-good checkpoints, staged rollback). `tests/test_rfc0117_state_journal_rollback.py`. The other 0117 file, `0117-tiny-front-chat-responder.md`, was already implemented and is unchanged. Live operator rollback on a Windows install remains desktop sign-off.
