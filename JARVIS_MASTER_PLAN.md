@@ -2166,8 +2166,8 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [ ] RFC-0047 Portable automation packages — accepted
 - [ ] RFC-0029 Transactional durable execution — accepted
 - [ ] RFC-0030 Selectable inference offload backends — accepted
-- [ ] RFC-0139 Android companion fancy orb / humanoid presence UI — accepted (brighter offline; humanoid default; Desktop-parity states)
-- [ ] RFC-0140 Companion on-device small voice models (fallback + grid-down) — accepted (Whisper tiny.en + Pocket TTS class; allowlisted packs)
+- [x] RFC-0139 Android companion fancy orb / humanoid presence UI — implemented (#401 @ `e9df378`; phone daylight soak = device sign-off)
+- [x] RFC-0140 Companion on-device small voice models (fallback + grid-down) — implemented (#403 @ `59e5ea73`; Whisper/TTS native bake + phone soak = device sign-off)
 
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
@@ -2761,6 +2761,26 @@ Decision: RFC-0138 Phase C portal Add new UI (landed; RFC stays accepted)
 Reason:
 
 CoS assigned Architect ledger-tick after UX #400 (`4aaaf466`) landed on development tip. Live Anzu morph remains desktop sign-off.
+
+---
+
+Decision: RFC-0139 Android companion fancy orb / humanoid presence UI (implemented)
+
+[RFC-0139](docs/rfcs/0139-android-companion-fancy-orb-humanoid-ui.md) is **implemented** on development via #401 @ `e9df37857a42f68d13493bfdd981b4197857846f`. Compose Home HUD presence only: default **humanoid**, Desktop-aligned phases (Idle / Listening / Thinking / Working / Speaking / Alert / Waiting / Offline / Error), Offline activity floor **≥ 0.45** (`PresenceVisual.OFFLINE_ACTIVITY_FLOOR`, rejects tip ~0.12), richer multi-orb / particle composition (core + halo + sparks; density not dropped Offline), warm offline tint in addition to brightness, fail-closed Compose path (no WebView soft-fail stub). Unit tests: `PresenceVisualTest` / presence particle smoke. Out of scope left open: full 13-persona morph, RFC-0138 custom-UI on phone, Desktop. **Residual:** physical phone daylight soak = Taco device sign-off. §58 RFC-0139 checked implemented. §57 not rewritten. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect mark-implemented / §58 tick after #401 (`e9df378`) landed CLEAN. Phone daylight soak stays sign-off.
+
+---
+
+Decision: RFC-0140 Companion on-device small voice models (implemented)
+
+[RFC-0140](docs/rfcs/0140-companion-on-device-voice-models.md) is **implemented** on development via #403 @ `59e5ea73`. Allowlisted STT/TTS packs (Whisper tiny.en / base.en cpp; Pocket TTS; Piper lessac-medium), Leader catalog + API + cache, companion manager/routing (Mode A fallback + Mode B grid-down), More → Voice (on-device), fail-closed no fake audio. Online still prefers Leader/Kokoro-on-PC; RFC-0092 not weakened. Pytest + Android unit coverage for catalog URL/hash/routing. **Residuals:** Whisper native opt-in (`JARVIS_BUILD_VOICE_NATIVE`) + TTS ORT device bake (`JARVIS_VOICE_TTS_ORT`); default APK won’t synthesize live until those flags; phone soak for latency/thermal/live native synth = device sign-off. §58 RFC-0140 checked implemented. §57 not rewritten. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect ledger-tick after #403 (`59e5ea73`) landed CLEAN. Fail-closed Whisper/TTS flags acknowledged; phone soak residual.
 
 ---
 

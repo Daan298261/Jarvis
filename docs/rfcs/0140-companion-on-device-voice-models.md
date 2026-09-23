@@ -1,13 +1,13 @@
 # RFC-0140: Companion on-device small voice models (fallback + grid-down)
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** §58 RFC backlog — RFC-0140  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-23  
 
 **Related (do not rewrite):** [RFC-0108](0108-phone-companion-offline-ai-model.md) (on-device **LLM** pack — sibling; this RFC is **STT/TTS voice**). [RFC-0064](0064-realtime-voice.md) / companion WSS voice when online. [RFC-0092](0092-neural-tts-default-no-silent-sapi.md) (PC neural TTS; **do not** reintroduce silent SAPI on the PC). [RFC-0062](0062-selectable-voice-profile-catalog.md) Desktop voice profiles / Kokoro-on-PC. [RFC-0075](0075-social-vs-technical-speak-path.md) speak path. [RFC-0123](0123-companion-reachability-and-anti-impersonation.md). [RFC-0125](0125-companion-hud-lan-pair.md). [RFC-0139](0139-android-companion-fancy-orb-humanoid-ui.md) presence chrome while speaking/listening offline.
 
-This PR is **specs-only**. Product code is a **named follow-up**. Full intent; **no stubs / soft-fail**. Quality bar: multibillion-company / **Anzu 1.0**. Subpar implement → **CoS → Taco** in review.
+**Implemented** on development via #403 @ `59e5ea73` (catalog + manager + API + More Voice + routing/tests). Full intent; **no stubs / soft-fail**. Quality bar: multibillion-company / **Anzu 1.0**. Subpar → **CoS → Taco** in review. Residuals: Whisper native opt-in + TTS ORT device bake (fail-closed, no fake audio); phone soak for live native synth = device sign-off.
 
 ## Problem
 
@@ -77,15 +77,15 @@ Audio for Mode A/B stays on-device unless the owner is online and the product pa
 
 ## Acceptance criteria
 
-- [ ] Specs-only in this PR (no product weights; no silent stub voice)
-- [ ] Mode A (fallback) and Mode B (grid-down with RFC-0108 LLM) are specified and testable
-- [ ] Allowlisted STT + TTS catalogs with pinned URLs/hashes/sizes; empty URL is a **fail**
-- [ ] Recommended defaults: Whisper tiny.en class STT + Pocket TTS class TTS; Piper small TTS fallback documented
-- [ ] Size / battery / NPU-or-CPU / privacy / local-vs-gateway rules as above
-- [ ] Missing/corrupt/init failures are visible and recoverable; no fake listening/speaking
-- [ ] Online still prefers Leader/Kokoro-on-PC; RFC-0092 not weakened; no IP-clone packs
-- [ ] Unit tests for catalog non-empty URL, hash fail → not ready, routing preference table; device soak for latency/thermal is phone sign-off
-- [ ] Anzu 1.0 quality bar; soft-fail voice is a **fail**; subpar → CoS → Taco in review
+- [x] Specs-only in this PR (no product weights; no silent stub voice) — *superseded: product landed in #403; this ledger is docs-only*
+- [x] Mode A (fallback) and Mode B (grid-down with RFC-0108 LLM) are specified and testable
+- [x] Allowlisted STT + TTS catalogs with pinned URLs/hashes/sizes; empty URL is a **fail**
+- [x] Recommended defaults: Whisper tiny.en class STT + Pocket TTS class TTS; Piper small TTS fallback documented
+- [x] Size / battery / NPU-or-CPU / privacy / local-vs-gateway rules as above
+- [x] Missing/corrupt/init failures are visible and recoverable; no fake listening/speaking
+- [x] Online still prefers Leader/Kokoro-on-PC; RFC-0092 not weakened; no IP-clone packs
+- [x] Unit tests for catalog non-empty URL, hash fail → not ready, routing preference table; device soak for latency/thermal is phone sign-off
+- [x] Anzu 1.0 quality bar; soft-fail voice is a **fail**; subpar → CoS → Taco in review
 
 ## Likely files
 
