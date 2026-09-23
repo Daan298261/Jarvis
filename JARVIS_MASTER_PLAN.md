@@ -2724,6 +2724,16 @@ CoS assigned a specs-only ledger refine after portal #392 (`392c1572`) landed on
 
 ---
 
+Decision: RFC-0026 execution phase and verifier observability (implemented, backend/API; UI residual open)
+
+[RFC-0026](docs/rfcs/0026-execution-phase-and-verifier-observability.md) is **implemented** for backend/API on development via #393 @ `5da8741f431f131ccb03dd5b9a84caeb3d39d2ce`. Canonical `ExecutionPhase` and legal transitions, event projection with no second scheduler, phase history, `current_activity` without chain-of-thought, external-wait kinds, deterministic progress units, stale-phase warning (not auto-failure), `VerificationSummary` (`VERIFIED` / `VERIFICATION_FAILED` / `PARTIALLY_VERIFIED` / `NOT_VERIFIED`), completed-task verification failure projected as phase `DEGRADED`, and `DelegatedWorker` child aggregation (no `GoalRun`). `GET /api/tasks/{id}/observability` is the audit/export payload; task detail uses the same projection. `tests/test_rfc0026_execution_phase.py` (9) and `tests/test_task_observability.py` (5) — 14 passed on this ledger VM; the land claimed 13. Left open: home/task-row and task-detail UI, portal build (frontend not in #393), Decision Inbox auto-create plus a working link when a row exists (`load_decision_inbox(open_only=True)` TypeErrors against a zero-arg loader, so the API fail-closes with `decision_inbox_link_error`), `compact_memory.observability` emitters, Away Mode / RFC-0025 consumers (API contract ready; consumers later), and the destructive-approval box (policy already lives outside this diff; not claimed). §58 still shows RFC-0026 as an unchecked `accepted` line and was not rewritten. §57 was not rewritten. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after backend #393 (`5da8741`) landed on development tip. UI and the residuals above stay open.
+
+---
+
 Decision: RFC-0139 Android companion fancy orb / humanoid presence UI (accepted)
 
 [RFC-0139](docs/rfcs/0139-android-companion-fancy-orb-humanoid-ui.md) is **accepted**. Bring Desktop-quality fancy multi-orb / humanoid presence to the Android companion Home HUD. Default chrome is **humanoid** (full 13-persona morph catalog is a later RFC). Shared presence states align with RFC-0137 intent (Idle / Listening / Thinking / Working / Speaking / Alert / Waiting / Offline / Error). Tip Offline dim (~0.12 activity) is rejected: Offline must be **daylight-readable** with a brightness floor and richer particle / multi-orb detail so offline does not look dead. Prefer sharing Desktop TJS / morphable-orb quality or upgrading Compose `PresenceHud` to that bar; WebView/TJS init failure must fail closed with a readable Compose fallback that still meets the offline bar. Not a custom brain UI; not RFC-0138 custom-UI generation on phone. Specs-only; **not implemented**. Quality bar Anzu 1.0 / multibillion; subpar → CoS → Taco in review.
