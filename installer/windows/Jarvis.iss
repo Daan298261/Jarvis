@@ -240,6 +240,51 @@ begin
   ExistingInstallPage.SelectedValueIndex := 0;
 end;
 
+function ResolveForceStopScript(const AppDir: String): String;
+begin
+  Result := ExpandConstant('{tmp}\force-stop-jarvis.ps1');
+  if FileExists(Result) then
+    Exit;
+  Result := AppDir + '\installer\windows\force-stop-jarvis.ps1';
+  if FileExists(Result) then
+    Exit;
+  Result := '';
+end;
+
+function ForceStopJarvisUnder(const AppDir: String): Boolean;
+var
+  ResultCode: Integer;
+  ForceScript: String;
+  Params: String;
+  WorkDir: String;
+begin
+  Result := True;
+  if AppDir = '' then
+    Exit;
+  ForceScript := ResolveForceStopScript(AppDir);
+  if ForceScript = '' then
+  begin
+    Log('force-stop-jarvis.ps1 not found; aborting (no polite fallback)');
+    Result := False;
+    Exit;
+  end;
+
+  WorkDir := ExpandConstant('{tmp}');
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ForceScript +
+    '" -InstallRoot "' + AppDir + '" -IncludeTray -MaxWaitSeconds 90 -LogPath "' +
+    ExpandConstant('{tmp}\installer-stop.log') + '"';
+  if Exec('powershell.exe', Params, WorkDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('force-stop-jarvis.ps1 finished with code ' + IntToStr(ResultCode));
+    Result := (ResultCode = 0);
+  end
+  else
+  begin
+    Log('Failed to launch force-stop-jarvis.ps1');
+    Result := False;
+  end;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
@@ -295,51 +340,6 @@ begin
       'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
       'See logs\installer-stop.log in your Jarvis folder for details.',
       mbError, MB_OK);
-    Result := False;
-  end;
-end;
-
-function ResolveForceStopScript(const AppDir: String): String;
-begin
-  Result := ExpandConstant('{tmp}\force-stop-jarvis.ps1');
-  if FileExists(Result) then
-    Exit;
-  Result := AppDir + '\installer\windows\force-stop-jarvis.ps1';
-  if FileExists(Result) then
-    Exit;
-  Result := '';
-end;
-
-function ForceStopJarvisUnder(const AppDir: String): Boolean;
-var
-  ResultCode: Integer;
-  ForceScript: String;
-  Params: String;
-  WorkDir: String;
-begin
-  Result := True;
-  if AppDir = '' then
-    Exit;
-  ForceScript := ResolveForceStopScript(AppDir);
-  if ForceScript = '' then
-  begin
-    Log('force-stop-jarvis.ps1 not found; aborting (no polite fallback)');
-    Result := False;
-    Exit;
-  end;
-
-  WorkDir := ExpandConstant('{tmp}');
-  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ForceScript +
-    '" -InstallRoot "' + AppDir + '" -IncludeTray -MaxWaitSeconds 90 -LogPath "' +
-    ExpandConstant('{tmp}\installer-stop.log') + '"';
-  if Exec('powershell.exe', Params, WorkDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-  begin
-    Log('force-stop-jarvis.ps1 finished with code ' + IntToStr(ResultCode));
-    Result := (ResultCode = 0);
-  end
-  else
-  begin
-    Log('Failed to launch force-stop-jarvis.ps1');
     Result := False;
   end;
 end;
