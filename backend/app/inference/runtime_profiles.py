@@ -9,6 +9,7 @@ from typing import Any
 
 from ..config import data_dir
 from .profiles import PROFILES, ModelProfile
+from .profile_roles import infer_runtime_role_and_tier
 
 _lock = threading.RLock()
 RUNTIME_REGISTRY_NAME = "registry.json"
@@ -44,6 +45,8 @@ class RuntimeProfile:
     is_local: bool = True
     description: str = ""
     enabled: bool = True
+    runtime_role: str = "general"
+    answer_tier: int = 2
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -71,6 +74,8 @@ class RuntimeProfile:
             is_local=bool(raw.get("is_local", True)),
             description=str(raw.get("description") or ""),
             enabled=bool(raw.get("enabled", True)),
+            runtime_role=str(raw.get("runtime_role") or "general"),
+            answer_tier=int(raw.get("answer_tier") if raw.get("answer_tier") is not None else 2),
         )
 
 
@@ -103,6 +108,7 @@ def _runtime_profile_from_model(profile: ModelProfile, *, endpoint: str = "127.0
         tags.extend(["agentic", "coding", "high-quality"])
         specialization.extend(["leader", "coding"])
 
+    runtime_role, answer_tier = infer_runtime_role_and_tier(profile.name)
     return RuntimeProfile(
         id=f"builtin-{profile.name}",
         name=profile.name,
@@ -120,6 +126,8 @@ def _runtime_profile_from_model(profile: ModelProfile, *, endpoint: str = "127.0
         is_local=True,
         description=profile.description,
         enabled=True,
+        runtime_role=runtime_role,
+        answer_tier=answer_tier,
     )
 
 
@@ -223,6 +231,7 @@ def create_runtime_profile(
         items = _load_runtime_registry_unlocked()
         if any(item.name == normalized for item in items):
             raise ValueError(f"runtime profile already exists: {normalized}")
+        runtime_role, answer_tier = infer_runtime_role_and_tier(model_profile or normalized)
         profile = RuntimeProfile(
             id=str(uuid.uuid4()),
             name=normalized,
@@ -240,6 +249,8 @@ def create_runtime_profile(
             is_local=is_local,
             description=description,
             enabled=bool(enabled),
+            runtime_role=runtime_role,
+            answer_tier=answer_tier,
         )
         items.append(profile)
         _save_runtime_registry_unlocked(items)

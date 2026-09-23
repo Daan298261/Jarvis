@@ -66,6 +66,7 @@ class InferenceSettings(BaseModel):
     remote_model: str = ""
     api_key: str = ""
     lmstudio_models_root: str = ""
+    orchestrator_idle_seconds: int = Field(default=120, ge=60, le=180)
 
 
 class FrontResponderSettings(BaseModel):

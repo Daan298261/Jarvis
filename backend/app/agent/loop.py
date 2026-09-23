@@ -546,7 +546,14 @@ class AgentRuntime:
         if not recovered:
             from ..persona.inference_context import maybe_autoselect_runtime_for_budget
             budget = calculate_prompt_budget(messages, tools, profile=profile, max_tokens=max_tokens, active_context=MANAGER.live_context_size())
-            switched = await maybe_autoselect_runtime_for_budget(budget, profile, settings, user_prompt=working.goal or "", task_id=task_id)
+            switched = await maybe_autoselect_runtime_for_budget(
+                budget,
+                profile,
+                settings,
+                user_prompt=working.goal or "",
+                task_id=task_id,
+                minimum_answer_tier=int(working.minimum_answer_tier or 0),
+            )
             if switched:
                 profile = switched
                 updated, recovered_tools, recovered = await recover_context_after_overflow(messages, tools, profile, max_tokens, settings, manager=MANAGER, working_state_block=working.as_prompt_block(), emit=_emit)
@@ -744,6 +751,28 @@ class AgentRuntime:
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             messages.append(ChatMessage(role="user", content=user_text))
+
+        from ..inference.answer_routing import prepare_answer_route
+        from ..inference.model_escalation import schedule_orchestrator_restore
+
+        warm = ()
+        if MANAGER.state.loaded and MANAGER.state.profile:
+            warm = (MANAGER.state.profile,)
+        profile_name, messages, _route_decision, _switched = await prepare_answer_route(
+            task_id,
+            user_message=user_text,
+            working=working,
+            settings=settings,
+            profile_name=profile.name,
+            history=prior,
+            messages=messages,
+            tools_available=True,
+            vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
+            new_user_turn=True,
+            warm_models=warm,
+        )
+        profile = resolve_profile(profile_name)
+        await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
 
         prefetched_front = await generate_front_reply(
             user_text,
@@ -1020,6 +1049,7 @@ class AgentRuntime:
             task_id=task_id,
         )
         clear_stream_speak_state(stream_key)
+        schedule_orchestrator_restore(settings)
         await BUS.publish(
             task_id,
             "response_timing",
@@ -1214,6 +1244,28 @@ class AgentRuntime:
             prompt=prompt,
             current=MANAGER.state.context_size if MANAGER.state.loaded else None,
         )
+        from ..inference.answer_routing import prepare_answer_route
+        from ..inference.profile_roles import infer_runtime_role_and_tier
+
+        loaded_name = MANAGER.state.profile if MANAGER.state.loaded else profile_name
+        loaded_role, loaded_tier = infer_runtime_role_and_tier(loaded_name or profile_name)
+        if loaded_role == "orchestrator" or loaded_tier <= 1:
+            warm = (loaded_name,) if loaded_name else ()
+            profile_name, _route_messages, _route_decision, _switched = await prepare_answer_route(
+                task_id,
+                user_message=active_prompt,
+                working=working,
+                settings=settings,
+                profile_name=profile_name,
+                history=existing,
+                messages=[ChatMessage(role="user", content=active_prompt)],
+                tools_available=True,
+                vision_requested=need_vision,
+                new_user_turn=bool(not continue_existing or user_turn),
+                warm_models=warm,
+            )
+            profile = resolve_profile(profile_name)
+            await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
             await MANAGER.load(settings, profile_name)

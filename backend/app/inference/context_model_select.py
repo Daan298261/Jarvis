@@ -18,7 +18,13 @@ def _profile_identity(profile: ProfileT) -> str:
         return (profile.model_profile or profile.name or profile.id or "").strip()
     return str(getattr(profile, "name", "") or "").strip()
 
-def select_profile_for_context(required_tokens: int, profiles: Iterable[ProfileT], current_profile: ProfileT | None) -> ProfileT | None:
+def select_profile_for_context(
+    required_tokens: int,
+    profiles: Iterable[ProfileT],
+    current_profile: ProfileT | None,
+    *,
+    minimum_answer_tier: int = 0,
+) -> ProfileT | None:
     required = max(1, int(required_tokens or 0))
     current_cap = profile_context_limit(current_profile)
     if current_cap >= required: return None
@@ -26,6 +32,9 @@ def select_profile_for_context(required_tokens: int, profiles: Iterable[ProfileT
     candidates = []
     for item in profiles:
         if not bool(getattr(item, "enabled", True)): continue
+        tier = int(getattr(item, "answer_tier", 0) or 0)
+        if minimum_answer_tier and tier < minimum_answer_tier:
+            continue
         cap = profile_context_limit(item)
         if cap < required or (current_cap and cap < current_cap): continue
         candidates.append((cap, item))

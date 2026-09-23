@@ -44,6 +44,8 @@ class AgentRoutingPreferences:
     task_specialization: str | None = None
     privacy_floor: str = PRIVACY_PUBLIC_REMOTE
     max_cost_usd: float | None = None
+    minimum_answer_tier: int = 0
+    required_runtime_role: str | None = None
 
 
 @dataclass
@@ -264,6 +266,10 @@ def _filter_candidates(
             return [], "Forced runtime profile violates privacy floor", "privacy_violation"
         if not _has_capabilities(forced, prefs.required_capabilities):
             return [], "Forced runtime profile lacks required capabilities", "missing_capability"
+        if int(forced.answer_tier or 0) < int(prefs.minimum_answer_tier or 0):
+            return [], "Forced runtime profile below minimum answer tier", "tier_gate"
+        if prefs.required_runtime_role and forced.runtime_role != prefs.required_runtime_role:
+            return [], "Forced runtime profile does not match required runtime role", "role_gate"
         if policy == "local-only" and not forced.is_local:
             return [], "Forced runtime profile is not local", "local_only_violation"
         return [forced], None, None
@@ -280,6 +286,10 @@ def _filter_candidates(
         if is_suite_runtime(profile):
             continue
         if not _has_capabilities(profile, prefs.required_capabilities):
+            continue
+        if int(profile.answer_tier or 0) < int(prefs.minimum_answer_tier or 0):
+            continue
+        if prefs.required_runtime_role and profile.runtime_role != prefs.required_runtime_role:
             continue
         if prefs.max_cost_usd is not None and _estimated_cost(profile) > prefs.max_cost_usd:
             continue
@@ -324,6 +334,8 @@ def route_runtime(
             task_specialization=prefs.get("task_specialization"),
             privacy_floor=str(prefs.get("privacy_floor") or PRIVACY_PUBLIC_REMOTE),
             max_cost_usd=prefs.get("max_cost_usd"),
+            minimum_answer_tier=int(prefs.get("minimum_answer_tier") or 0),
+            required_runtime_role=prefs.get("required_runtime_role"),
         )
     elif prefs is None:
         agent_prefs = AgentRoutingPreferences()

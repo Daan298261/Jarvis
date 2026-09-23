@@ -263,6 +263,14 @@ function frontEventText(event: { kind?: string; detail?: string }): string {
   const kind = event.kind || ""
   const detail = (event.detail || "").trim()
   if (kind === "assistant_delta") return detail
+  if (kind === "model_switch" && detail) {
+    try {
+      const parsed = JSON.parse(detail) as { user_message?: string }
+      if (parsed?.user_message) return String(parsed.user_message)
+    } catch {
+      return detail
+    }
+  }
   if (kind === "front_response_completed" && detail) {
     try {
       const parsed = JSON.parse(detail) as { text?: string }

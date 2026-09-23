@@ -158,6 +158,7 @@ async def maybe_autoselect_runtime_for_budget(
     user_prompt: str = "",
     task_id: str | None = None,
     bus_channel: str | None = None,
+    minimum_answer_tier: int = 0,
 ) -> ModelProfile | None:
     required = int(budget.required_context or 0)
     cap = int(budget.profile_cap or profile_cap(profile))
@@ -171,7 +172,12 @@ async def maybe_autoselect_runtime_for_budget(
             break
     if current_runtime is None:
         current_runtime = profile
-    chosen = select_profile_for_context(required, runtimes, current_runtime)
+    chosen = select_profile_for_context(
+        required,
+        runtimes,
+        current_runtime,
+        minimum_answer_tier=minimum_answer_tier,
+    )
     if chosen is None or not isinstance(chosen, RuntimeProfile):
         return None
 
