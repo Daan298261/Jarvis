@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             var wasPaired by remember { mutableStateOf(model.api.deviceId.isNotEmpty()) }
             var showPostPairPackOffer by remember { mutableStateOf(false) }
+            var showPostPairVoiceOffer by remember { mutableStateOf(false) }
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
             var tab by remember { mutableStateOf("Home") }
             var pairingScanRequest by remember { mutableStateOf(false) }
@@ -116,10 +117,18 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 if (android.os.Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
-            LaunchedEffect(paired, state.busy, state.error, devicePack.status) {
+            LaunchedEffect(paired, state.busy, state.error, devicePack.status, state.voiceSttStatus, state.voiceTtsStatus) {
                 if (!wasPaired && paired && !state.busy && state.error == null) {
                     if (PostPairPackOfferPrefs.shouldOffer(context, model.api.deviceId, devicePack.status)) {
                         showPostPairPackOffer = true
+                    } else if (PostPairVoicePackOfferPrefs.shouldOffer(
+                            context,
+                            model.api.deviceId,
+                            state.voiceSttStatus,
+                            state.voiceTtsStatus,
+                        )
+                    ) {
+                        showPostPairVoiceOffer = true
                     }
                     wasPaired = true
                 } else if (paired) {
@@ -128,6 +137,7 @@ class MainActivity : ComponentActivity() {
             }
             val postPairPackOffer = remember(showPostPairPackOffer, devicePack) { recommendedPackOffer(model) }
             val postPairSizeMb = postPairPackOffer?.sizeBytes?.let { formatPackCatalogSizeMb(it) }
+            val postPairVoiceOffer = remember(showPostPairVoiceOffer, state.voiceSttStatus) { recommendedVoicePackOffer(model) }
             LaunchedEffect(latestIntent) {
                 val delivered = latestIntent ?: return@LaunchedEffect
                 delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
@@ -167,10 +177,41 @@ class MainActivity : ComponentActivity() {
                         PostPairPackOfferPrefs.markHandled(context, deviceId)
                         offer?.id?.let { deviceChrome.selectPack(it) }
                         deviceChrome.downloadSelectedPack()
+                        if (PostPairVoicePackOfferPrefs.shouldOffer(
+                                context,
+                                deviceId,
+                                state.voiceSttStatus,
+                                state.voiceTtsStatus,
+                            )
+                        ) {
+                            showPostPairVoiceOffer = true
+                        }
                     },
                     onDismiss = {
                         showPostPairPackOffer = false
                         PostPairPackOfferPrefs.markHandled(context, model.api.deviceId)
+                        if (PostPairVoicePackOfferPrefs.shouldOffer(
+                                context,
+                                model.api.deviceId,
+                                state.voiceSttStatus,
+                                state.voiceTtsStatus,
+                            )
+                        ) {
+                            showPostPairVoiceOffer = true
+                        }
+                    },
+                )
+                PostPairVoicePackOfferDialog(
+                    visible = showPostPairVoiceOffer && postPairVoiceOffer != null && !showPostPairPackOffer,
+                    offer = postPairVoiceOffer,
+                    onDownload = {
+                        showPostPairVoiceOffer = false
+                        PostPairVoicePackOfferPrefs.markHandled(context, model.api.deviceId)
+                        model.downloadRecommendedVoicePacks()
+                    },
+                    onDismiss = {
+                        showPostPairVoiceOffer = false
+                        PostPairVoicePackOfferPrefs.markHandled(context, model.api.deviceId)
                     },
                 )
                 if (incomingCall != null) AlertDialog(onDismissRequest = { incomingCall = null }, title = { Text("Jarvis is calling") },
@@ -295,6 +336,12 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                     }
+                                }
+                                state.voiceRouteBanner?.let { banner ->
+                                    Text(banner, color = Gold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
+                                }
+                                if (state.onDeviceVoiceActive) {
+                                    Text("On-device voice", color = Gold, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                                 }
                                 ConversationPickers(state, model::selectModel, model::selectVoice)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -514,6 +561,114 @@ private fun formatStorageBytes(bytes: Long): String {
     if (bytes <= 0) return "Storage used · 0 B"
     val mb = bytes.toDouble() / (1024.0 * 1024.0)
     return if (mb >= 1024) "Storage used · ${"%.2f".format(mb / 1024)} GiB" else "Storage used · ${"%.1f".format(mb)} MiB"
+}
+
+@Composable private fun CompanionVoicePacksSection(model: CompanionModel, state: CompanionState) {
+    val packs = remember(state.voiceSttStatus, state.voiceTtsStatus, state.voicePackProgress) {
+        model.voicePackManager.catalogJson()
+    }
+    val sttPacks = packs.filter { it.optString("role") == "stt" }
+    val ttsPacks = packs.filter { it.optString("role") == "tts" }
+    Text("Voice (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(
+        "Mode A/B fallback when the Leader is down. Online sessions still prefer host Kokoro / realtime voice (RFC-0140).",
+        color = Muted,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("STT · ${state.voiceSttStatus}", color = Gold, fontSize = 11.sp, letterSpacing = 1.sp)
+            var sttMenu by remember { mutableStateOf(false) }
+            Box {
+                OutlinedButton(onClick = { sttMenu = true }) {
+                    val selected = sttPacks.firstOrNull { it.optString("id") == model.voicePackManager.selectedSttPackId() }
+                    Text("STT · ${(selected?.optString("label") ?: "Select").take(28)} ▾")
+                }
+                DropdownMenu(sttMenu, { sttMenu = false }) {
+                    sttPacks.forEach { pack ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    pack.optString("label") +
+                                        (formatPackCatalogSizeMb(pack.optLong("size_bytes"))?.let { " · $it" } ?: ""),
+                                )
+                            },
+                            onClick = {
+                                sttMenu = false
+                                model.selectSttVoicePack(pack.optString("id"))
+                            },
+                        )
+                    }
+                }
+            }
+            Text("TTS · ${state.voiceTtsStatus}", color = Gold, fontSize = 11.sp, letterSpacing = 1.sp)
+            var ttsMenu by remember { mutableStateOf(false) }
+            Box {
+                OutlinedButton(onClick = { ttsMenu = true }) {
+                    val selected = ttsPacks.firstOrNull { it.optString("id") == model.voicePackManager.selectedTtsPackId() }
+                    Text("TTS · ${(selected?.optString("label") ?: "Select").take(28)} ▾")
+                }
+                DropdownMenu(ttsMenu, { ttsMenu = false }) {
+                    ttsPacks.forEach { pack ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    pack.optString("label") +
+                                        (formatPackCatalogSizeMb(pack.optLong("size_bytes"))?.let { " · $it" } ?: ""),
+                                )
+                            },
+                            onClick = {
+                                ttsMenu = false
+                                model.selectTtsVoicePack(pack.optString("id"))
+                            },
+                        )
+                    }
+                }
+            }
+            Text(formatStorageBytes(model.voicePackManager.storageBytes()), color = Muted, fontSize = 12.sp)
+            state.voicePackError.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp)
+            }
+            if (state.voiceSttStatus == CompanionVoicePackStatus.DOWNLOADING ||
+                state.voiceTtsStatus == CompanionVoicePackStatus.DOWNLOADING ||
+                state.voicePackProgress in 1..99
+            ) {
+                LinearProgressIndicator(
+                    progress = { (state.voicePackProgress / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("${state.voicePackProgress}%", color = Muted, fontSize = 11.sp)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { model.downloadVoicePack(model.voicePackManager.selectedSttPackId()) },
+                    enabled = !state.busy && state.voiceSttStatus != CompanionVoicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Download STT") }
+                Button(
+                    onClick = { model.downloadVoicePack(model.voicePackManager.selectedTtsPackId()) },
+                    enabled = !state.busy && state.voiceTtsStatus != CompanionVoicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Download TTS") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { model.deleteVoicePack(model.voicePackManager.selectedSttPackId()) },
+                    enabled = !state.busy,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Delete STT") }
+                OutlinedButton(
+                    onClick = { model.deleteVoicePack(model.voicePackManager.selectedTtsPackId()) },
+                    enabled = !state.busy,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Delete TTS") }
+            }
+            if (state.onDeviceVoiceActive) {
+                Text("On-device voice indicator · active", color = Gold, fontSize = 12.sp)
+            }
+        }
+    }
 }
 
 @Composable private fun InfoCard(title: String, text: String) {
@@ -794,6 +949,7 @@ private fun formatStorageBytes(bytes: Long): String {
             if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text("Background push needs the Jarvis push service configured.", color = Muted, fontSize = 12.sp)
         }
         item { CompanionModelsSection(deviceChrome, devicePack, state.busy) }
+        item { CompanionVoicePacksSection(model, state) }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
@@ -814,6 +970,12 @@ private fun formatStorageBytes(bytes: Long): String {
                 else "Audio is processed by your paired Jarvis host and transported through pinned TLS.",
                 color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp),
             )
+            if (state.onDeviceVoiceActive) {
+                Text("On-device voice active", color = Gold, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
+            state.voiceRouteBanner?.let {
+                Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
         }
         item {
             Text("Schedules", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))

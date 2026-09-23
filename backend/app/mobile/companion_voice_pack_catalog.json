@@ -1,0 +1,43 @@
+{
+  "catalog_version": 1,
+  "rfc": "0140",
+  "note": "URLs and SHA-256 only — never commit weight binaries. Mirrored in companion_voice_packs.py.",
+  "packs": [
+    {
+      "id": "whisper-tiny-en-cpp",
+      "role": "stt",
+      "filename": "ggml-tiny.en.bin",
+      "size_bytes": 77704715,
+      "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+      "recommended": true
+    },
+    {
+      "id": "whisper-base-en-cpp",
+      "role": "stt",
+      "filename": "ggml-base.en.bin",
+      "size_bytes": 147964211,
+      "sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+      "recommended": false
+    },
+    {
+      "id": "pocket-tts-en",
+      "role": "tts",
+      "filename": "pocket-tts-en",
+      "size_bytes": 126155593,
+      "sha256": "1e50e05031f8711ab0cb10aac0953432c604104e76180ec4b6f7cc4393746e08",
+      "url": "https://huggingface.co/soniqo/Pocket-TTS-100M-ONNX-INT8/resolve/v1.0.0/lm_main.int8.onnx",
+      "recommended": true
+    },
+    {
+      "id": "piper-en-lessac-medium",
+      "role": "tts",
+      "filename": "en_US-lessac-medium.onnx",
+      "size_bytes": 63206179,
+      "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
+      "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+      "recommended": false
+    }
+  ]
+}

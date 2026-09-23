@@ -17,7 +17,7 @@ from ..mobile.companion_onboarding import companion_onboarding_snapshot
 from ..mobile.pairing_payload import enrich_pairing_session
 from ..db.models import Task
 from ..db.session import SessionLocal
-from ..mobile import companion_offline, identity, realtime_voice, scheduler, service
+from ..mobile import companion_offline, companion_voice_packs, identity, realtime_voice, scheduler, service
 from ..mobile.store import database, get, put, root, rows
 
 router = APIRouter(prefix="/api/companion", tags=["companion"])
@@ -176,6 +176,32 @@ def companion_model_packs(device=Device):
 @router.get("/model-packs/{pack_id}/file")
 def companion_model_pack_file(pack_id: str, device=Device):
     path = companion_offline.resolve_pack_file(pack_id)
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=path.name,
+    )
+
+
+@router.get("/voice-packs")
+def companion_voice_packs_catalog(device=Device):
+    """Pinned companion on-device STT/TTS catalog with Leader cache status (RFC-0140)."""
+    return companion_voice_packs.voice_pack_catalog()
+
+
+@router.get("/voice-packs/{pack_id}/file")
+def companion_voice_pack_file(pack_id: str, device=Device):
+    path = companion_voice_packs.resolve_voice_pack_artifact(pack_id)
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=path.name,
+    )
+
+
+@router.get("/voice-packs/{pack_id}/file/{filename:path}")
+def companion_voice_pack_artifact(pack_id: str, filename: str, device=Device):
+    path = companion_voice_packs.resolve_voice_pack_artifact(pack_id, filename)
     return FileResponse(
         path,
         media_type="application/octet-stream",
