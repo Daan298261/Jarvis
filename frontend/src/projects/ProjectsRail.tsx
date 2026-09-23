@@ -10,6 +10,11 @@ type ChatRow = { conversation_id: string; title: string; project_id?: string }
 type ProjectsRailProps = {
   variant: "classic" | "hud"
   projects: PortalProject[]
+  loading?: boolean
+  loadError?: string | null
+  actionError?: string | null
+  migratedNotice?: boolean
+  onRetryLoad?: () => void
   tasksById: Map<string, Task>
   chatsById: Map<string, ChatRow>
   ungroupedOwnerChats: ChatRow[]
@@ -17,7 +22,7 @@ type ProjectsRailProps = {
   currentTaskId?: string
   onCreateProject: (name: string) => Promise<void> | void
   onRenameProject: (projectId: string, name: string) => Promise<void> | void
-  onDeleteProject: (projectId: string) => void
+  onDeleteProject: (projectId: string) => void | Promise<void>
   onAssignTask: (projectId: string, taskId: string) => void
   onUnassignTask: (taskId: string) => void
   onAssignChat: (projectId: string, conversationId: string) => void
@@ -40,6 +45,11 @@ function repoLabel(path: string): string {
 export function ProjectsRail({
   variant,
   projects,
+  loading = false,
+  loadError = null,
+  actionError = null,
+  migratedNotice = false,
+  onRetryLoad,
   tasksById,
   chatsById,
   ungroupedOwnerChats,
@@ -90,6 +100,23 @@ export function ProjectsRail({
             {newOpen ? "Close" : "New"}
           </button>
         </div>
+        {loadError && (
+          <div className="rail-error" role="alert">
+            <p>{loadError}</p>
+            {onRetryLoad && (
+              <button type="button" className="rail-icon-btn" onClick={onRetryLoad}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+        {actionError && !loadError && (
+          <p className="rail-error" role="alert">{actionError}</p>
+        )}
+        {migratedNotice && !loadError && (
+          <p className="rail-empty">Imported your previous browser project folders into Jarvis.</p>
+        )}
+        {loading && !loadError && <p className="rail-empty">Loading projects…</p>}
         {newOpen && (
           <form className="rail-inline-form" onSubmit={(event) => void handleCreate(event)}>
             <input
@@ -98,11 +125,12 @@ export function ProjectsRail({
               onChange={(event) => setNewName(event.target.value)}
               placeholder="Folder name"
               aria-label="Project name"
+              disabled={Boolean(loadError)}
             />
           </form>
         )}
-        {projects.length === 0 && !newOpen && (
-          <p className="rail-empty">Group chats, tasks, and repos under a folder. Names stay on this PC.</p>
+        {projects.length === 0 && !newOpen && !loading && !loadError && (
+          <p className="rail-empty">Group chats, tasks, and repos under a folder. Saved in Jarvis on this PC.</p>
         )}
         {projects.map((project) => {
           const open = expanded[project.id] ?? true

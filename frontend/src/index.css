@@ -84,6 +84,16 @@ a { color: var(--gold); text-decoration: none; }
   font-size: 12px;
   line-height: 1.4;
 }
+.rail-error {
+  margin: 0 8px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger, #c44) 12%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.rail-error p { margin: 0 0 6px; }
 .rail-icon-btn {
   background: transparent;
   border: 0;

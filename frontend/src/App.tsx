@@ -44,13 +44,13 @@ import {
   assignConversation,
   assignRepo,
   assignTask,
-  createProject,
   createProjectRemote,
   deleteProject,
   deleteProjectRemote,
+  enrichProjectsWithOwnerChats,
   fetchProjects,
   linkProjectMember,
-  persistProjects,
+  projectsFetchErrorMessage,
   renameProject,
   renameProjectRemote,
   unassignConversation,
@@ -132,6 +132,10 @@ function OwnerPortal() {
   const [shellStatus, setShellStatus] = useState<BackendLifecycleStatus>("unknown")
   const [recents, setRecents] = useState<Task[]>([])
   const [projects, setProjects] = useState<PortalProject[]>([])
+  const [projectsLoadError, setProjectsLoadError] = useState<string | null>(null)
+  const [projectsLoading, setProjectsLoading] = useState(true)
+  const [projectsMigratedNotice, setProjectsMigratedNotice] = useState(false)
+  const [projectsActionError, setProjectsActionError] = useState<string | null>(null)
   const [ownerChats, setOwnerChats] = useState<{ conversation_id: string; title: string; project_id?: string }[]>([])
   const [adminOpen, setAdminOpen] = useState(false)
   const [uiMode, setUiModeState] = useState<UiMode>(() => getUiMode())
@@ -192,13 +196,28 @@ function OwnerPortal() {
   }, [location.pathname])
 
   useEffect(() => {
-    fetchProjects().then(setProjects).catch(() => undefined)
+    let cancelled = false
+    setProjectsLoading(true)
+    setProjectsLoadError(null)
+    fetchProjects()
+      .then((result) => {
+        if (cancelled) return
+        setProjects(result.projects)
+        setProjectsMigratedNotice(result.migratedFromLocal)
+        setProjectsLoadError(null)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setProjects([])
+        setProjectsLoadError(projectsFetchErrorMessage(err))
+      })
+      .finally(() => {
+        if (!cancelled) setProjectsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
-
-  useEffect(() => {
-    if (projects.length === 0) return
-    persistProjects(projects).catch(() => undefined)
-  }, [projects])
 
   useEffect(() => {
     const tick = () =>
@@ -263,58 +282,86 @@ function OwnerPortal() {
     setNavOpen(false)
   }
 
-  function updateProjects(next: PortalProject[]) {
-    setProjects(next)
-    persistProjects(next).catch(() => undefined)
+  async function runProjectAction(action: () => Promise<void>, applyLocal: () => void) {
+    setProjectsActionError(null)
+    try {
+      await action()
+      applyLocal()
+    } catch (err: unknown) {
+      setProjectsActionError(projectsFetchErrorMessage(err))
+    }
   }
 
   async function handleCreateProject(name: string) {
-    const remote = await createProjectRemote(name)
-    const created = remote || createProject(name, projects).slice(-1)[0]
-    if (created) {
-      updateProjects([...projects.filter((p) => p.id !== created.id), created])
+    setProjectsActionError(null)
+    try {
+      const created = await createProjectRemote(name)
+      setProjects((prev) => [...prev.filter((p) => p.id !== created.id), created])
+    } catch (err: unknown) {
+      setProjectsActionError(projectsFetchErrorMessage(err))
     }
   }
 
   async function handleRenameProject(projectId: string, name: string) {
-    await renameProjectRemote(projectId, name).catch(() => undefined)
-    updateProjects(renameProject(projectId, name, projects))
+    await runProjectAction(
+      () => renameProjectRemote(projectId, name),
+      () => setProjects((prev) => renameProject(projectId, name, prev)),
+    )
   }
 
-  function handleDeleteProject(projectId: string) {
-    deleteProjectRemote(projectId).catch(() => undefined)
-    updateProjects(deleteProject(projectId, projects))
+  async function handleDeleteProject(projectId: string) {
+    await runProjectAction(
+      () => deleteProjectRemote(projectId),
+      () => setProjects((prev) => deleteProject(projectId, prev)),
+    )
   }
 
-  function handleAssignTask(projectId: string, taskId: string) {
-    updateProjects(assignTask(projectId, taskId, projects))
-    linkProjectMember(projectId, "task", taskId).catch(() => undefined)
+  async function handleAssignTask(projectId: string, taskId: string) {
+    await runProjectAction(
+      () => linkProjectMember(projectId, "task", taskId),
+      () => setProjects((prev) => assignTask(projectId, taskId, prev)),
+    )
   }
 
-  function handleUnassignTask(taskId: string) {
-    unlinkProjectMember("task", taskId).catch(() => undefined)
-    updateProjects(unassignTask(taskId, projects))
+  async function handleUnassignTask(taskId: string) {
+    await runProjectAction(
+      () => unlinkProjectMember("task", taskId),
+      () => setProjects((prev) => unassignTask(taskId, prev)),
+    )
   }
 
-  function handleAssignChat(projectId: string, conversationId: string) {
-    updateProjects(assignConversation(projectId, conversationId, projects))
-    linkProjectMember(projectId, "owner_chat", conversationId).catch(() => undefined)
+  async function handleAssignChat(projectId: string, conversationId: string) {
+    await runProjectAction(
+      () => linkProjectMember(projectId, "owner_chat", conversationId),
+      () => setProjects((prev) => assignConversation(projectId, conversationId, prev)),
+    )
   }
 
-  function handleUnassignChat(conversationId: string) {
-    unlinkProjectMember("owner_chat", conversationId).catch(() => undefined)
-    updateProjects(unassignConversation(conversationId, projects))
+  async function handleUnassignChat(conversationId: string) {
+    await runProjectAction(
+      () => unlinkProjectMember("owner_chat", conversationId),
+      () => setProjects((prev) => unassignConversation(conversationId, prev)),
+    )
   }
 
-  function handleAssignRepo(projectId: string, repoPath: string) {
-    updateProjects(assignRepo(projectId, repoPath, projects))
-    linkProjectMember(projectId, "repo", repoPath).catch(() => undefined)
+  async function handleAssignRepo(projectId: string, repoPath: string) {
+    await runProjectAction(
+      () => linkProjectMember(projectId, "repo", repoPath),
+      () => setProjects((prev) => assignRepo(projectId, repoPath, prev)),
+    )
   }
 
-  function handleUnassignRepo(repoPath: string) {
-    unlinkProjectMember("repo", repoPath).catch(() => undefined)
-    updateProjects(unassignRepo(repoPath, projects))
+  async function handleUnassignRepo(repoPath: string) {
+    await runProjectAction(
+      () => unlinkProjectMember("repo", repoPath),
+      () => setProjects((prev) => unassignRepo(repoPath, prev)),
+    )
   }
+
+  const railProjects = useMemo(
+    () => enrichProjectsWithOwnerChats(projects, ownerChats),
+    [projects, ownerChats],
+  )
 
   const chatsById = useMemo(() => {
     const map = new Map<string, { conversation_id: string; title: string }>()
@@ -327,10 +374,29 @@ function OwnerPortal() {
       ownerChats.filter(
         (row) =>
           !row.project_id &&
-          !projects.some((project) => (project.conversationIds || []).includes(row.conversation_id)),
+          !railProjects.some((project) => (project.conversationIds || []).includes(row.conversation_id)),
       ),
-    [ownerChats, projects],
+    [ownerChats, railProjects],
   )
+
+  const projectsRailProps = {
+    projects: railProjects,
+    loadError: projectsLoadError,
+    loading: projectsLoading,
+    migratedNotice: projectsMigratedNotice,
+    actionError: projectsActionError,
+    onRetryLoad: () => {
+      setProjectsLoading(true)
+      setProjectsLoadError(null)
+      fetchProjects()
+        .then((result) => {
+          setProjects(result.projects)
+          setProjectsMigratedNotice(result.migratedFromLocal)
+        })
+        .catch((err: unknown) => setProjectsLoadError(projectsFetchErrorMessage(err)))
+        .finally(() => setProjectsLoading(false))
+    },
+  }
 
   function modelStatus(): { label: string; tone: string } {
     if (model?.loaded) return { label: "Ready", tone: "on" }
@@ -435,7 +501,7 @@ function OwnerPortal() {
         projectsPanel={
           <ProjectsRail
             variant="hud"
-            projects={projects}
+            {...projectsRailProps}
             tasksById={tasksById}
             chatsById={chatsById}
             ungroupedOwnerChats={ungroupedOwnerChats}
@@ -486,7 +552,7 @@ function OwnerPortal() {
 
         <ProjectsRail
           variant="classic"
-          projects={projects}
+          {...projectsRailProps}
           tasksById={tasksById}
           chatsById={chatsById}
           ungroupedOwnerChats={ungroupedOwnerChats}
