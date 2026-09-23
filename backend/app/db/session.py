@@ -84,6 +84,13 @@ def _add_missing_columns(sync_conn) -> None:
         conv_cols = {col["name"] for col in inspector.get_columns("conversations")}
         if "project_id" not in conv_cols:
             statements.append("ALTER TABLE conversations ADD COLUMN project_id VARCHAR(36) DEFAULT ''")
+    if statements:
+        try:
+            from ..recovery.hooks import RISK_SCHEMA_MIGRATION, ensure_checkpoint_before_risk
+
+            ensure_checkpoint_before_risk(RISK_SCHEMA_MIGRATION, notes=f"columns:{len(statements)}")
+        except Exception:
+            pass
     for statement in statements:
         sync_conn.execute(text(statement))
 
