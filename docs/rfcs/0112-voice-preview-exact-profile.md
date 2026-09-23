@@ -1,6 +1,6 @@
 # RFC-0112: Voice preview uses the exact selected profile
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; implement is a named follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17
@@ -156,3 +156,7 @@ Product implementation in this PR. RFC-0111 adapter/pin/health probe (cite; do n
 - 1.4 suggested implement order: **PR 5** after Kokoro runtime (RFC-0111).
 - Linux cloud can unit-test headers, error propagation, and `onerror` → `ok: false`. Audible WAV play remains desktop sign-off.
 - Implement launch: this RFC only; branch from `development`; pytest + frontend build; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via #301 @ `d0d13528` (voice preview uses the exact selected profile). Audible preview remains Windows desktop sign-off. Acceptance checkboxes left open for that sign-off and the original specs-only box. Earlier 1.4 HOLD is lifted by this ledger tick.

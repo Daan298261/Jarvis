@@ -1,6 +1,6 @@
 # RFC-0136: Zombie-kill on Setup Next and Start
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; Taco 2026-09-22 post-1.4.10 Start unblock)  
 **Author:** Taco via Chief of Staff  
 **Date:** 2026-09-22
@@ -140,3 +140,7 @@ Product implementation in this PR. RFC-0124 Clean Install / Reinstall wipe, owne
 - Evidence in tree (do not treat as already fixed): path-only `Test-ProcessUnderInstall`; Start binds 4780 with no prior stop; method-page Next does not stop; polite stop prints `Jarvis stopped.` without a port recheck.
 - Linux cloud VMs cannot sign off a live wedged uvicorn. Implement unit-tests the script/ISS/start-jarvis contracts (Next calls force-stop, Start calls it before `Start-Process`, 4780/4781/`CloseWait`/health/`supermemory-server`/`llama-server` appear in the helper, non-zero when the port stays owned).
 - Implement launch: implement this RFC only; branch from `development`; pytest; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via #369 @ `45c7ea0c` (zombie-kill on Setup Next + `start-jarvis.ps1` before bind). Live wedged uvicorn on 4780 remains Windows desktop sign-off. Acceptance checkboxes left open for that sign-off and the original specs-only box.

@@ -2610,6 +2610,29 @@ Path-only force-stop plus a Start script that binds immediately cannot recover a
 
 ---
 
+Decision: Batch ledger tick — RFC-0136, 0055, 0109, 0122, 0124, 0108, 0123, 0112, 0126, 0131 (implemented)
+
+Late catch-up: product PRs already on development; specs Status was still accepted. Tick against development tip `62a87df`.
+
+- RFC-0136 zombie-kill Setup Next + start-jarvis — #369 (`45c7ea0c`)
+- RFC-0055 social commentary / butler persona gate — #370 (`002f84cd`)
+- RFC-0109 media upload phone+PC (+ OCR amend intent) — #371 (`25d1c535`)
+- RFC-0122 ingress size-gate / spill / trajectory quality — #318 (`12827aef`)
+- RFC-0124 Clean Install / Reinstall — #321 + #323 (`b45e8f05`, `b04ddbaa`)
+- RFC-0108 phone offline pack + #317 popup — #309 (`84251235`) + #319 (`a6977b74`) + #317 (`2ffe6c3a`)
+- RFC-0123 companion reachability / anti-impersonation — #319 (`a6977b74`, with 0108 amend)
+- RFC-0112 voice preview exact profile — #301 (`d0d13528`)
+- RFC-0126 personality session modes v1 — #334 (`8344b806`)
+- RFC-0131 context-size model autoselect — #337 (`d4eceef9`)
+
+RFC-0107 stays accepted until Taco desktop sign-off. Windows live smoke (wedged 4780, Clean wipe, HUD+27B overflow, audible preview, on-device offline tokens) remains desktop sign-off where noted in those RFCs. No new §58 checkboxes. No product code in this PR. Acceptance checkboxes left open where they are specs-only-in-this-PR or live desktop sign-off.
+
+Reason:
+
+CoS assigned Architect tick-only after ranked accurate/fast/stable queue lock.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:

@@ -1,6 +1,6 @@
 # RFC-0109: Media / file / video upload on phone and PC apps
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; implement is a follow-up after CoS names it — after RFC-0108)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17  
@@ -116,3 +116,7 @@ Product implementation in this PR. RFC-0096/0097 engine implement. RFC-0102 prot
 - Source: Taco high-impact add 2026-09-17. Number **0109**. Amended 2026-09-18: explicit **OCR** for images/photos of text on phone + desktop (Taco goal 3; RFC-0118). Do **not** file a third media RFC.
 - Linux cloud can unit-test caps, hashing, OCR job contracts with fixture bytes. Live camera, large video, GPU analyze, and OCR of real photos are Windows / device sign-off.
 - Implement launch: **after RFC-0108**; this RFC only; branch from `development`; pytest + frontend build; Android companion agent for `android/` if that slice is named; do not edit Architect spec docs; PR against `development`.
+
+## Implementation note
+
+Landed on `development` via #371 @ `25d1c535` (media upload on phone and PC, including the OCR-amend intent). Live camera / GPU analyze remains device sign-off. Acceptance checkboxes left open where they are specs-only or live sign-off.
