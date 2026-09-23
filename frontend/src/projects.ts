@@ -46,21 +46,27 @@ function asProject(value: unknown): PortalProject | null {
   return { id: row.id, name: row.name.trim(), taskIds, conversationIds, repoPaths }
 }
 
-export function loadProjectsLocal(): PortalProject[] {
+function loadProjectsLocal(): PortalProject[] {
   const store = storage()
   if (!store) return []
   try {
     const raw = store.getItem(STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw) as Partial<PortalProjectStore>
-    if (!Array.isArray(parsed?.projects)) return []
-    return parsed.projects.map(asProject).filter((row): row is PortalProject => row !== null)
+    if (!Array.isArray(parsed?.projects)) {
+      clearProjectsLocal()
+      return []
+    }
+    const projects = parsed.projects.map(asProject).filter((row): row is PortalProject => row !== null)
+    if (projects.length === 0) clearProjectsLocal()
+    return projects
   } catch {
+    clearProjectsLocal()
     return []
   }
 }
 
-export function clearProjectsLocal(): void {
+function clearProjectsLocal(): void {
   const store = storage()
   if (!store) return
   try {
@@ -70,26 +76,41 @@ export function clearProjectsLocal(): void {
   }
 }
 
-/** Leader DB is canonical; localStorage is a one-time migration source only. */
+function parseProjectList(value: unknown): PortalProject[] {
+  if (!Array.isArray(value)) return []
+  return value.map(asProject).filter((row): row is PortalProject => row !== null)
+}
+
+/**
+ * Leader DB is canonical. `jarvis_portal_projects` is read only to migrate
+ * folders the Leader does not already have, then cleared. It is never written
+ * and never returned as the rail when import fails.
+ */
 export async function fetchProjects(): Promise<FetchProjectsResult> {
-  const payload = await api<{ projects: PortalProject[] }>("/api/projects")
-  const remote = (payload.projects || []).map(asProject).filter((row): row is PortalProject => row !== null)
-  if (remote.length > 0) {
+  const payload = await api<{ projects?: unknown }>("/api/projects")
+  const remote = parseProjectList(payload?.projects)
+  const local = loadProjectsLocal()
+  if (local.length === 0) {
+    return { projects: remote, migratedFromLocal: false }
+  }
+
+  const remoteIds = new Set(remote.map((project) => project.id))
+  const pending = local.filter((project) => !remoteIds.has(project.id))
+  if (pending.length === 0) {
     clearProjectsLocal()
     return { projects: remote, migratedFromLocal: false }
   }
 
-  const local = loadProjectsLocal()
-  if (local.length === 0) {
-    return { projects: [], migratedFromLocal: false }
-  }
-
-  const imported = await api<{ projects: PortalProject[]; imported?: number }>("/api/projects/import-local", {
+  const imported = await api<{ projects?: unknown }>("/api/projects/import-local", {
     method: "POST",
-    body: JSON.stringify({ projects: local }),
+    body: JSON.stringify({ projects: pending }),
   })
+  const projects = parseProjectList(imported?.projects)
+  const importedIds = new Set(projects.map((project) => project.id))
+  if (pending.some((project) => !importedIds.has(project.id))) {
+    throw new Error("Could not import browser project folders into Jarvis.")
+  }
   clearProjectsLocal()
-  const projects = (imported.projects || []).map(asProject).filter((row): row is PortalProject => row !== null)
   return { projects, migratedFromLocal: true }
 }
 
@@ -228,9 +249,4 @@ export function unassignRepo(repoPath: string, projects: PortalProject[]): Porta
 
 export function projectForTask(taskId: string, projects: PortalProject[]): PortalProject | undefined {
   return projects.find((project) => project.taskIds.includes(taskId))
-}
-
-/** @deprecated Leader DB is canonical — use fetchProjects */
-export function loadProjects(): PortalProject[] {
-  return loadProjectsLocal()
 }
