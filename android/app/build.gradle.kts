@@ -11,8 +11,8 @@ android {
         applicationId = "com.jarvis.companion"
         minSdk = 29
         targetSdk = 35
-        versionCode = providers.gradleProperty("releaseCode").orElse("4").get().toInt()
-        versionName = "1.4.10"
+        versionCode = providers.gradleProperty("releaseCode").orElse("6").get().toInt()
+        versionName = "1.4.12"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
