@@ -22,6 +22,8 @@ class WebFetchTool(Tool):
         "Only http and https URLs are allowed."
     )
     risk = RiskLevel.MEDIUM
+    effect_class = "external"
+    replay_policy = "KEYED"
     parameters = {
         "type": "object",
         "properties": {

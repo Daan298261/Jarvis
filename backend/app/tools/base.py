@@ -39,6 +39,9 @@ class Tool:
     parameters: dict[str, Any]
     risk: RiskLevel = RiskLevel.MEDIUM
     enabled: bool = True
+    # RFC-0029 replay contract (override on tools with external side effects)
+    effect_class: str = "internal"
+    replay_policy: str | None = None
 
     def schema(self) -> dict[str, Any]:
         return {

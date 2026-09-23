@@ -112,6 +112,8 @@ class ToolRegistry:
                     "description": tool.description,
                     "enabled": tool.enabled,
                     "risk": tool.risk.value,
+                    "effect_class": getattr(tool, "effect_class", "internal"),
+                    "replay_policy": getattr(tool, "replay_policy", None),
                 }
             )
         return out

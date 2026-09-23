@@ -28,6 +28,8 @@ from ..inference.prompt_budget import (
     recover_context_after_overflow,
 )
 from ..inference.vision import messages_need_vision, should_load_vision
+from ..execution.repository import get_task_status, last_committed_step_key
+from ..execution.runner import run_model_step, run_tool_step
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..policy.authorize import AuthorizationResult, authorize
 from ..policy.computer_permissions import (
@@ -1347,6 +1349,7 @@ class AgentRuntime:
         last_failed_tool = ""
         last_failed_observation = ""
         tool_rounds = 0
+        model_turn_index = 0
         verify_tool_rounds = 0
         last_tool_name = ""
         last_tool_action = ""
@@ -1652,7 +1655,7 @@ class AgentRuntime:
                     )
                     turn_max_tokens = 400 if force_final else 1024
 
-                    async def _model_turn() -> ChatResult:
+                    async def _model_turn_inner() -> ChatResult:
                         return await asyncio.wait_for(
                             MANAGER.chat(
                                 messages,
@@ -1666,6 +1669,38 @@ class AgentRuntime:
                                 working_state_block=working.as_prompt_block(),
                             ),
                             timeout=90 if force_final else 180,
+                        )
+
+                    async def _model_turn() -> ChatResult:
+                        nonlocal model_turn_index
+                        model_turn_index += 1
+                        predecessor = await last_committed_step_key(task_id)
+                        predecessors = [predecessor] if predecessor else []
+                        step_key = (
+                            f"model:{model_turn_index}:{int(verifying)}:{int(force_final)}"
+                        )
+                        fingerprint = {
+                            "model_turn": model_turn_index,
+                            "messages_len": len(messages),
+                            "tool_rounds": tool_rounds,
+                            "verifying": verifying,
+                            "force_final": force_final,
+                        }
+
+                        def _model_cost(chat: ChatResult) -> tuple[int, float, float]:
+                            usage = chat.usage or {}
+                            timings = chat.timings or {}
+                            tokens = int(usage.get("total_tokens") or usage.get("completion_tokens") or 0)
+                            ms = float(timings.get("total_ms") or timings.get("generation_ms") or 0.0)
+                            return tokens, ms, 0.0
+
+                        return await run_model_step(
+                            task_id,
+                            step_key,
+                            predecessor_keys=predecessors,
+                            input_fingerprint=fingerprint,
+                            operation=_model_turn_inner,
+                            cost_extractor=_model_cost,
                         )
 
                     think_context = (
@@ -2161,20 +2196,50 @@ class AgentRuntime:
         consume_once_grants(permission_ids_for_tool(name, arguments))
         started = datetime.now(timezone.utc)
 
-        async def _run_tool():
+        async def _run_tool_inner() -> tuple[str, str | None, bool, str]:
             async with SessionLocal() as session:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
             REGISTRY._context["task_id"] = task_id
             if security_role:
-                return await REGISTRY.execute(name, arguments, security_role=security_role)
-            return await REGISTRY.execute(name, arguments)
+                result = await REGISTRY.execute(name, arguments, security_role=security_role)
+            else:
+                result = await REGISTRY.execute(name, arguments)
+            attach = None
+            if isinstance(result.data, dict):
+                attach = result.data.get("attach_image")
+                if not attach and result.data.get("path"):
+                    if name == "screenshot" or (name == "browser" and arguments.get("action") == "screenshot"):
+                        attach = result.data.get("path")
+            return result.text(), attach, result.success, result.error
 
-        result = await run_with_think_aloud(
-            task_id,
-            context=f"Running {name}",
-            operation=_run_tool,
-        )
+        arg_digest = hashlib.sha256(
+            f"{name}:{json.dumps(arguments, sort_keys=True)}".encode()
+        ).hexdigest()[:24]
+        step_key = f"tool:{name}:{arg_digest}"
+
+        task_status = await get_task_status(task_id)
+        if task_status is None:
+            text, attach, success, error = await run_with_think_aloud(
+                task_id,
+                context=f"Running {name}",
+                operation=_run_tool_inner,
+            )
+        else:
+            predecessor = await last_committed_step_key(task_id)
+            predecessors = [predecessor] if predecessor else []
+            text, attach = await run_tool_step(
+                task_id,
+                step_key,
+                name,
+                arguments,
+                predecessor_keys=predecessors,
+                operation=_run_tool_inner,
+            )
+            success = not text.startswith("ERROR:")
+            error = ""
+            if text.startswith("ERROR:"):
+                error = text.split("\n", 1)[0].replace("ERROR:", "").strip()
         duration = (datetime.now(timezone.utc) - started).total_seconds() * 1000
         if metrics is not None:
             metrics.note_tool(duration, schema_error=schema_error)
@@ -2184,22 +2249,18 @@ class AgentRuntime:
                     task_id=task_id,
                     tool_name=name,
                     arguments_json=json.dumps(arguments),
-                    output=result.text()[:20000],
-                    success=result.success,
-                    error=result.error,
+                    output=text[:20000],
+                    success=success,
+                    error=error,
                     duration_ms=duration,
                 )
             )
             if name == "git" and arguments.get("action") == "checkpoint":
-                session.add(Checkpoint(task_id=task_id, kind="git", path=arguments.get("path") or "", note=result.output[:500]))
+                session.add(
+                    Checkpoint(task_id=task_id, kind="git", path=arguments.get("path") or "", note=text[:500])
+                )
             await session.commit()
-        attach = None
-        if isinstance(result.data, dict):
-            attach = result.data.get("attach_image")
-            if not attach and result.data.get("path"):
-                if name == "screenshot" or (name == "browser" and arguments.get("action") == "screenshot"):
-                    attach = result.data.get("path")
-        return result.text(), attach
+        return text, attach
 
     async def _maybe_consult_expert(
         self,
