@@ -2754,6 +2754,16 @@ Taco via CoS 2026-09-23: Pocket TTS / Whisper nano class; fallback when PC down;
 
 ---
 
+Decision: RFC-0138 Phase C portal Add new UI (landed; RFC stays accepted)
+
+[RFC-0138](docs/rfcs/0138-anzu-orb-custom-ui-generation.md) **Phase C** (portal **Add new UI**) is on development via #400 @ `4aaaf466`. `CustomPresencePanel` mounts beside existing Appearance / session-mode / named-persona / HexStrike controls (nothing removed). Wizard: text and/or image → job status → preview morph path on the existing orb cloud → Set as default / Save as named / Discard; saved list with default badge; shape precedence suite → `hex_aegis`, else active custom/preview, else persona. Fail-closed surfacing of `model_unavailable`, `vision_unavailable`, and `constraint_rejected` (no fake preview). User-facing copy uses **Anzu 1.0**. Touch was `frontend/src` only. Portal-flow, keep-existing-UI, and Anzu 1.0 stretch acceptance boxes are checked from this land. **Left open:** live Anzu generate + morph + Set as default + restart (Taco Desktop sign-off; cloud had no GPU); remaining Phase A/B/D acceptance and quality-bar close; RFC status stays **accepted** (not flipped to implemented). §57 / §58 unchanged (no §58 checkbox for this RFC). No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect ledger-tick after UX #400 (`4aaaf466`) landed on development tip. Live Anzu morph remains desktop sign-off.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
