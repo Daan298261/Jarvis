@@ -1,19 +1,24 @@
 """RFC-0127: swift front ack and slow-worker progress feedback."""
 from __future__ import annotations
+
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOOP = REPO_ROOT / "backend" / "app" / "agent" / "loop.py"
 from app.agent.front_responder import (
-    SAFE_ACK,
     FrontReply,
     generate_front_reply,
     generate_progress_update,
     progress_template_for_context,
     run_two_lane_chat,
 )
+from app.agent.loop import AGENT
+from app.agent.metrics import LiveTaskMetrics
+from app.agent.planning import CONVERSATION_CLASS, WorkingState
 from app.agent.worker_progress import (
     WORKER_PROGRESS_FIRST_DELAY_SECONDS,
     clear_worker_progress_for_task,
@@ -24,6 +29,10 @@ from app.agent.worker_progress import (
     worker_useful_text_seen,
 )
 from app.config import AppSettings, FrontResponderSettings
+from app.db.models import Task
+from app.db.session import SessionLocal
+from app.inference.manager import MANAGER
+from app.persona.owner_chat import stream_owner_chat
 
 @pytest.fixture(autouse=True)
 def _clean_progress_state():
@@ -129,3 +138,166 @@ async def test_generate_progress_update_template_when_disabled():
     settings = AppSettings(front_responder=FrontResponderSettings(enabled=False))
     line = await generate_progress_update("Loading local model", settings=settings)
     assert line == progress_template_for_context("Loading local model")
+
+
+@pytest.mark.asyncio
+async def test_stream_owner_chat_front_reply_before_model_load(jarvis_env, monkeypatch):
+    """Swift ack must run before MANAGER.load on owner chat turns."""
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    order: list[str] = []
+    MANAGER.provider = None
+    MANAGER.state.loaded = False
+
+    prefetched = FrontReply(
+        action="ack_continue",
+        text="On it, sir.",
+        model="front",
+        first_text_ms=4.0,
+        complete_ms=4.0,
+    )
+
+    async def track_front(*args, **kwargs):
+        order.append("front")
+        return prefetched
+
+    class StreamProvider:
+        async def chat_stream(self, messages, **kwargs):
+            del messages, kwargs
+            yield "Certainly."
+
+    async def track_load(settings, profile_name=None):
+        order.append("load")
+        MANAGER.provider = StreamProvider()
+        MANAGER.state.loaded = True
+
+    monkeypatch.setattr("app.persona.owner_chat.generate_front_reply", track_front)
+    monkeypatch.setattr("app.persona.owner_chat.MANAGER.load", track_load)
+
+    events: list[dict] = []
+    async for event in stream_owner_chat("Tell me a quick hello."):
+        events.append(event)
+
+    assert "front" in order and "load" in order
+    assert order.index("front") < order.index("load")
+    assert any(event.get("type") == "done" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_run_conversation_front_reply_before_model_load(jarvis_env, monkeypatch):
+    """Conversation lane must prefetch/speak front ack before worker model load."""
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    order: list[str] = []
+    MANAGER.provider = None
+    MANAGER.state.loaded = False
+
+    task_id = "conv-front-before-load"
+    async with SessionLocal() as session:
+        session.add(
+            Task(
+                id=task_id,
+                title="How are you?",
+                prompt="How are you this evening?",
+                status="running",
+                stage="act",
+                task_class=CONVERSATION_CLASS,
+                response_route="conversation",
+            )
+        )
+        await session.commit()
+
+    prefetched = FrontReply(
+        action="ack_continue",
+        text="All well on my side.",
+        model="front",
+        first_text_ms=3.0,
+        complete_ms=3.0,
+    )
+
+    async def track_front(*args, **kwargs):
+        order.append("front")
+        return prefetched
+
+    class StreamProvider:
+        async def chat_stream(self, messages, **kwargs):
+            del messages, kwargs
+            yield "All well here."
+
+        async def chat(self, messages, **kwargs):
+            del messages, kwargs
+            from app.providers.base import ChatResult
+
+            return ChatResult(content="All well here.")
+
+    async def track_load(settings, profile_name=None):
+        order.append("load")
+        MANAGER.provider = StreamProvider()
+        MANAGER.state.loaded = True
+        MANAGER.state.context_size = 16384
+
+    async def noop_progress_watchdog(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.agent.loop.generate_front_reply", track_front)
+    monkeypatch.setattr("app.agent.loop.MANAGER.load", track_load)
+    monkeypatch.setattr("app.agent.loop.run_worker_progress_watchdog", noop_progress_watchdog)
+
+    await AGENT._run_conversation(
+        task_id,
+        "How are you this evening?",
+        None,
+        jarvis_env["settings"],
+        WorkingState(goal="How are you this evening?", task_class=CONVERSATION_CLASS),
+        LiveTaskMetrics(),
+    )
+
+    assert order.index("front") < order.index("load")
+
+
+@pytest.mark.asyncio
+async def test_managed_front_lane_fallback_ack_when_front_skipped(jarvis_env, monkeypatch):
+    """Managed path must still TTS a template ack when front lane returns silent_skip."""
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    task_id = "managed-front-fallback"
+    prompt = "Please refactor the auth module and run pytest."
+    async with SessionLocal() as session:
+        session.add(
+            Task(
+                id=task_id,
+                title=prompt[:80],
+                prompt=prompt,
+                status="running",
+                stage="understand",
+                task_class="software engineering",
+                response_route="managed_task",
+            )
+        )
+        await session.commit()
+
+    silent_front = FrontReply(action="silent_skip", text="", model="front", skipped=True)
+    monkeypatch.setattr(
+        "app.agent.loop.generate_front_reply",
+        AsyncMock(return_value=silent_front),
+    )
+
+    published: list[tuple[str, dict]] = []
+
+    async def capture_publish(text, **kwargs):
+        published.append((text, kwargs))
+        return {"tts_id": "ack-1"}
+
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", capture_publish)
+
+    await AGENT._run_managed_front_lane(
+        task_id,
+        prompt,
+        jarvis_env["settings"],
+        turn_started=time.perf_counter(),
+    )
+
+    assert published
+    assert published[0][1].get("source") == "task_chat"
+    assert (published[0][0] or "").strip()
+    async with SessionLocal() as session:
+        row = await session.get(Task, task_id)
+        assert row is not None
+        assert (row.result or "").strip()
