@@ -2166,6 +2166,9 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [ ] RFC-0047 Portable automation packages — accepted
 - [ ] RFC-0029 Transactional durable execution — accepted
 - [ ] RFC-0030 Selectable inference offload backends — accepted
+- [ ] RFC-0139 Android companion fancy orb / humanoid presence UI — accepted (brighter offline; humanoid default; Desktop-parity states)
+- [ ] RFC-0140 Companion on-device small voice models (fallback + grid-down) — accepted (Whisper tiny.en + Pocket TTS class; allowlisted packs)
+
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
 
@@ -2718,6 +2721,26 @@ Decision: RFC-0071 automation failure circuit breaker (portal residual landed)
 Reason:
 
 CoS assigned a specs-only ledger refine after portal #392 (`392c1572`) landed on development tip.
+
+---
+
+Decision: RFC-0139 Android companion fancy orb / humanoid presence UI (accepted)
+
+[RFC-0139](docs/rfcs/0139-android-companion-fancy-orb-humanoid-ui.md) is **accepted**. Bring Desktop-quality fancy multi-orb / humanoid presence to the Android companion Home HUD. Default chrome is **humanoid** (full 13-persona morph catalog is a later RFC). Shared presence states align with RFC-0137 intent (Idle / Listening / Thinking / Working / Speaking / Alert / Waiting / Offline / Error). Tip Offline dim (~0.12 activity) is rejected: Offline must be **daylight-readable** with a brightness floor and richer particle / multi-orb detail so offline does not look dead. Prefer sharing Desktop TJS / morphable-orb quality or upgrading Compose `PresenceHud` to that bar; WebView/TJS init failure must fail closed with a readable Compose fallback that still meets the offline bar. Not a custom brain UI; not RFC-0138 custom-UI generation on phone. Specs-only; **not implemented**. Quality bar Anzu 1.0 / multibillion; subpar → CoS → Taco in review.
+
+Reason:
+
+Taco via CoS 2026-09-23: fancy orb UI on Android, humanoid first, Offline too dim on tip, more detail.
+
+---
+
+Decision: RFC-0140 Companion on-device small voice models (accepted)
+
+[RFC-0140](docs/rfcs/0140-companion-on-device-voice-models.md) is **accepted**. Allowlisted on-device STT/TTS packs for the companion. **Mode A (Fallback):** when PC/gateway/LAN is down, phone still has usable local STT and/or TTS. **Mode B (Grid-down / local AI):** on-device voice with the RFC-0108 local LLM. Online still prefers Leader / Kokoro-on-PC. Architect defaults: Whisper **tiny.en** class STT (≤~80 MB) + **Pocket TTS** class TTS (≤~150 MB), Piper medium as small TTS fallback; combined recommended download ≤~250 MB. NPU/NNAPI/GPU when available, else CPU; privacy on-device; no silent soft-fail; no empty catalog URLs; RFC-0092 not weakened. Specs-only; **not implemented**. Quality bar Anzu 1.0 / multibillion; subpar → CoS → Taco in review.
+
+Reason:
+
+Taco via CoS 2026-09-23: Pocket TTS / Whisper nano class; fallback when PC down; grid-down with local phone AI.
 
 ---
 
