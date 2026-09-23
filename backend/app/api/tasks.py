@@ -12,15 +12,21 @@ from sse_starlette.sse import EventSourceResponse
 from ..agent.chat_turns import visible_chat_turns
 from ..agent.execution_status import (
     active_worker,
+    current_activity,
     elapsed_seconds,
+    external_wait_blocker,
+    linked_decision_inbox_item,
     normalized_state,
+    observability_export,
     phase_for_event,
+    phase_timing,
+    progress_units,
     project_phase,
     verification_summary,
 )
 from ..agent.loop import AGENT
 from ..agent.self_dev import KillSwitchActive
-from ..db.models import Task, TaskEvent
+from ..db.models import DelegatedWorker, Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..agent.tool_exposure import tool_names_for
@@ -80,7 +86,14 @@ def _specialist_fields(task: Task) -> dict[str, Any]:
     return {"specialist_persona_ids": ids, "persona_card_sentence": sentence}
 
 
-def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any]:
+def _task_dict(
+    task: Task,
+    last_event: TaskEvent | None = None,
+    *,
+    events: list[TaskEvent] | None = None,
+    children: list[DelegatedWorker] | None = None,
+    include_phase_history: bool = False,
+) -> dict[str, Any]:
     extra: list[str] = []
     raw = getattr(task, "compact_memory", None) or ""
     if raw:
@@ -108,7 +121,18 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         if last_event is not None and last_event.created_at
         else _iso_utc(task.updated_at)
     )
-    return {
+    activity = current_activity(task, last_event)
+    progress = progress_units(task)
+    phase = project_phase(task, last_event)
+    inbox_item = linked_decision_inbox_item(task.id) if phase.value == "WAITING_APPROVAL" else None
+    external_wait = external_wait_blocker(task, events or ([last_event] if last_event else None))
+    timing_source = observability_export(task, events or [], children=children) if include_phase_history else {}
+    timing = (
+        {key: timing_source[key] for key in ("phase_started_at", "phase_elapsed_seconds", "stale_phase_warning", "stale_phase_threshold_seconds")}
+        if include_phase_history
+        else phase_timing(task, [], now=datetime.now(timezone.utc))
+    )
+    payload = {
         "id": task.id,
         "title": task.title,
         "prompt": task.prompt,
@@ -121,7 +145,7 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         "status": task.status,
         "state": state,
         "stage": task.stage,
-        "execution_phase": project_phase(task, last_event).value,
+        "execution_phase": phase.value,
         "autonomy": task.autonomy,
         "profile": task.profile,
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
@@ -134,6 +158,7 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         "result": task.result,
         "error": task.error,
         "current_action": task.current_action,
+        "current_activity": activity,
         "current_tool": task.current_tool,
         "active_worker": active_worker(task),
         "retries": task.retries,
@@ -152,6 +177,14 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         "finished_at": _iso_utc(task.finished_at),
         "verification": task.verification,
         "verification_summary": verification_summary(task),
+        "progress": progress,
+        "external_wait": external_wait if phase.value == "WAITING_EXTERNAL" else None,
+        "decision_inbox_item": inbox_item,
+        "decision_inbox_item_id": (inbox_item or {}).get("id"),
+        "phase_started_at": timing.get("phase_started_at"),
+        "phase_elapsed_seconds": timing.get("phase_elapsed_seconds"),
+        "stale_phase_warning": timing.get("stale_phase_warning"),
+        "stale_phase_threshold_seconds": timing.get("stale_phase_threshold_seconds"),
         "model_calls": getattr(task, "model_calls", 0) or 0,
         "tool_calls": getattr(task, "tool_call_count", 0) or 0,
         "schema_errors": getattr(task, "schema_errors", 0) or 0,
@@ -159,6 +192,12 @@ def _task_dict(task: Task, last_event: TaskEvent | None = None) -> dict[str, Any
         "tool_ms": getattr(task, "tool_ms", 0) or 0,
         "human_interventions": getattr(task, "human_interventions", 0) or 0,
     }
+    if include_phase_history:
+        payload["phase_history"] = timing_source.get("phase_history") or []
+        child_summary = timing_source.get("child_execution")
+        if child_summary:
+            payload["child_execution"] = child_summary
+    return payload
 
 
 @router.post("")
@@ -201,7 +240,16 @@ async def get_task(task_id: str):
             await session.execute(select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.id))
         ).scalars().all()
         last_event = events[-1] if events else None
-        payload = _task_dict(task, last_event)
+        children = (
+            await session.execute(select(DelegatedWorker).where(DelegatedWorker.parent_task_id == task_id))
+        ).scalars().all()
+        payload = _task_dict(
+            task,
+            last_event,
+            events=events,
+            children=list(children),
+            include_phase_history=True,
+        )
         payload["events"] = [
             {
                 "kind": e.kind,
@@ -215,6 +263,21 @@ async def get_task(task_id: str):
             for e in events
         ]
         return payload
+
+
+@router.get("/{task_id}/observability")
+async def get_task_observability(task_id: str):
+    async with SessionLocal() as session:
+        task = await session.get(Task, task_id)
+        if not task:
+            raise HTTPException(404, "Task not found")
+        events = (
+            await session.execute(select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.id))
+        ).scalars().all()
+        children = (
+            await session.execute(select(DelegatedWorker).where(DelegatedWorker.parent_task_id == task_id))
+        ).scalars().all()
+        return observability_export(task, list(events), children=list(children))
 
 
 @router.post("/{task_id}/continue")

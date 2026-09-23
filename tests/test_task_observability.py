@@ -55,7 +55,9 @@ def test_elapsed_worker_and_verification_summary():
     )
     assert elapsed_seconds(task) == 10
     assert active_worker(task) == "cursor-acp"
-    assert verification_summary(task)["result"] == "VERIFIED"
+    summary = verification_summary(task)
+    assert summary["result"] == "VERIFIED"
+    assert summary["checks"][0]["result"] == "pass"
 
 
 def test_task_api_projection_contains_live_activity_contract():
@@ -64,7 +66,9 @@ def test_task_api_projection_contains_live_activity_contract():
     assert payload["state"] == "running"
     assert payload["execution_phase"] == "EXECUTING"
     assert payload["current_action"] == "Running filesystem"
+    assert payload["current_activity"] == "Running filesystem"
     assert payload["current_tool"] == "filesystem"
+    assert payload["verification_summary"]["checks"] == []
     assert payload["active_worker"].startswith("Jarvis agent")
     assert payload["heartbeat_status"] == "stale"
     assert payload["verification_summary"]["result"] == "NOT_VERIFIED"
