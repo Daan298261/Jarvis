@@ -12,7 +12,10 @@ from typing import Literal
 
 from fastapi import HTTPException
 
+from .. import config
 from ..config import data_dir
+from ..projects.paths import media_relative_path, project_media_dir, resolve_media_project_id
+from ..swarm.nodes import load_or_create_local_node_id
 from ..mobile.store import database, delete, get, put
 
 MediaKind = Literal["image", "video", "audio", "file"]
@@ -99,6 +102,9 @@ class MediaUpload:
     created_at: float
     analyze: dict | None
     studio: dict | None
+    project_id: str
+    relative_path: str
+    node_id: str
 
     def to_public(self) -> dict:
         return {
@@ -113,12 +119,21 @@ class MediaUpload:
             "created_at": self.created_at,
             "analyze": self.analyze,
             "studio": self.studio,
+            "project_id": self.project_id,
+            "relative_path": self.relative_path,
+            "node_id": self.node_id,
         }
 
 
 def _record_to_upload(record: dict) -> MediaUpload:
+    upload_id = record["id"]
+    project_id = str(record.get("project_id") or resolve_media_project_id(None))
+    relative_path = str(record.get("relative_path") or "")
+    if not relative_path:
+        relative_path = media_relative_path(project_id, upload_id)
+    node_id = str(record.get("node_id") or load_or_create_local_node_id())
     return MediaUpload(
-        id=record["id"],
+        id=upload_id,
         kind=record.get("kind") or detect_kind(record.get("content_type", ""), record.get("name", "")),
         name=record.get("name") or "upload",
         content_type=record.get("content_type") or "application/octet-stream",
@@ -129,11 +144,25 @@ def _record_to_upload(record: dict) -> MediaUpload:
         created_at=float(record.get("created_at") or 0),
         analyze=record.get("analyze"),
         studio=record.get("studio"),
+        project_id=project_id,
+        relative_path=relative_path,
+        node_id=node_id,
     )
 
 
-def blob_path(upload_id: str) -> Path:
-    return media_root() / upload_id
+def blob_path(upload_id: str, *, record: dict | None = None) -> Path:
+    rec = record if record is not None else _load_record(upload_id)
+    if rec and rec.get("relative_path"):
+        return data_dir() / str(rec["relative_path"])
+    legacy = media_root() / upload_id
+    if legacy.is_file():
+        return legacy
+    if rec:
+        project_id = str(rec.get("project_id") or resolve_media_project_id(None))
+        candidate = data_dir() / media_relative_path(project_id, upload_id)
+        if candidate.is_file():
+            return candidate
+    return legacy
 
 
 def _load_record(upload_id: str) -> dict | None:
@@ -182,6 +211,7 @@ def save_upload(
     owner: str,
     device_id: str | None = None,
     upload_id: str | None = None,
+    project_id: str | None = None,
 ) -> MediaUpload:
     if not data:
         raise HTTPException(400, "Upload is empty")
@@ -191,7 +221,10 @@ def save_upload(
         raise HTTPException(413, f"Upload exceeds {resolved_kind} limit ({cap} bytes)")
     upload_id = upload_id or str(uuid.uuid4())
     digest = hashlib.sha256(data).hexdigest()
-    path = blob_path(upload_id)
+    resolved_project = resolve_media_project_id(project_id)
+    relative_path = media_relative_path(resolved_project, upload_id)
+    node_id = load_or_create_local_node_id()
+    path = project_media_dir(resolved_project) / upload_id
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as handle:
         handle.write(data)
@@ -207,6 +240,9 @@ def save_upload(
         "created_at": time.time(),
         "analyze": None,
         "studio": None,
+        "project_id": resolved_project,
+        "relative_path": relative_path,
+        "node_id": node_id,
     }
     with database() as db:
         put(db, UPLOAD_RECORD_KIND, upload_id, record)
@@ -234,6 +270,7 @@ def ingest_chunk(
     content_type: str,
     owner: str,
     device_id: str | None,
+    project_id: str | None = None,
 ) -> dict | MediaUpload:
     if chunk_total < 1 or chunk_index < 0 or chunk_index >= chunk_total:
         raise HTTPException(400, "Invalid chunk index")
@@ -247,6 +284,7 @@ def ingest_chunk(
         with part_path.open("wb") as handle:
             handle.write(chunk)
     meta_key = f"{upload_id}:meta"
+    chunk_project_id = resolve_media_project_id(project_id)
     with database() as db:
         meta = get(db, CHUNK_RECORD_KIND, meta_key) or {
             "upload_id": upload_id,
@@ -255,10 +293,12 @@ def ingest_chunk(
             "content_type": (content_type or "application/octet-stream")[:100],
             "owner": owner,
             "device_id": device_id,
+            "project_id": chunk_project_id,
             "chunk_total": chunk_total,
             "received": [],
             "bytes": 0,
         }
+        chunk_project_id = str(meta.get("project_id") or chunk_project_id)
         if meta["chunk_total"] != chunk_total:
             raise HTTPException(409, "Chunk total mismatch")
         if chunk_index not in meta["received"]:
@@ -295,6 +335,7 @@ def ingest_chunk(
         owner=owner,
         device_id=device_id,
         upload_id=upload_id,
+        project_id=chunk_project_id,
     )
 
 
