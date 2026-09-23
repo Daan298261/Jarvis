@@ -190,7 +190,7 @@ async def startup() -> None:
     except Exception:
         logging.debug("Recovery journal startup reconcile skipped", exc_info=True)
     try:
-        from .execution.recovery import reconcile_execution_on_startup
+        from .agent.durable_execution.recovery import reconcile_execution_on_startup
 
         await reconcile_execution_on_startup()
     except Exception:

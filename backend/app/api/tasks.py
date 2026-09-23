@@ -20,7 +20,6 @@ from ..agent.execution_status import (
 )
 from ..agent.loop import AGENT
 from ..agent.self_dev import KillSwitchActive
-from ..execution.recovery import recover_run_state
 from ..db.models import Task, TaskEvent
 from ..db.session import SessionLocal
 from ..events import BUS
@@ -203,10 +202,6 @@ async def get_task(task_id: str):
         ).scalars().all()
         last_event = events[-1] if events else None
         payload = _task_dict(task, last_event)
-        try:
-            payload["durable_execution"] = await recover_run_state(task.id)
-        except Exception:
-            payload["durable_execution"] = None
         payload["events"] = [
             {
                 "kind": e.kind,

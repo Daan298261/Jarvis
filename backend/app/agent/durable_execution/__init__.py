@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from . import accounting, crash, recovery, replay, repository, runner
+from . import accounting, crash, observability, recovery, replay, repository, runner
 from .types import (
     AttemptStatus,
     CrashBoundary,
@@ -14,6 +14,7 @@ from .types import (
 __all__ = [
     "accounting",
     "crash",
+    "observability",
     "recovery",
     "replay",
     "repository",

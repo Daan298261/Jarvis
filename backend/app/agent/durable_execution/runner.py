@@ -7,11 +7,11 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
-from ..events import BUS
-from ..tools.registry import REGISTRY
+from ...events import BUS
+from ...tools.registry import REGISTRY
 from .accounting import ledger_for_run
 from .crash import SimulatedWorkerDeath, check_crash_boundary
-from ..providers.base import ChatResult
+from ...providers.base import ChatResult
 from .recovery import reuse_if_completed
 from .replay import (
     ambiguous_after_crash,

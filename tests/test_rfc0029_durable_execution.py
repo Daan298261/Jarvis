@@ -8,11 +8,11 @@ import pytest
 
 from app.db.models import ExecutionAttempt, ExecutionStep, Task
 from app.db.session import SessionLocal
-from app.execution.accounting import ledger_for_run, reset_ledgers
-from app.execution.crash import SimulatedWorkerDeath, configure_crash_injection, clear_crash_injection
-from app.execution.recovery import recover_run_state
-from app.execution.replay import resolve_tool_replay, stable_idempotency_key
-from app.execution.repository import (
+from app.agent.durable_execution.accounting import ledger_for_run, reset_ledgers
+from app.agent.durable_execution.crash import SimulatedWorkerDeath, configure_crash_injection, clear_crash_injection
+from app.agent.durable_execution.recovery import recover_run_state
+from app.agent.durable_execution.replay import resolve_tool_replay, stable_idempotency_key
+from app.agent.durable_execution.repository import (
     RunNotRecoverable,
     StepBlocked,
     claim_attempt,
@@ -22,8 +22,8 @@ from app.execution.repository import (
     list_steps,
     upsert_step,
 )
-from app.execution.runner import park_execution_wait, resume_execution_wait, run_durable_step, run_model_step
-from app.execution.types import CrashBoundary, EffectClass, OperationType, ReplayPolicy, StepStatus
+from app.agent.durable_execution.runner import park_execution_wait, resume_execution_wait, run_durable_step, run_model_step
+from app.agent.durable_execution.types import CrashBoundary, EffectClass, OperationType, ReplayPolicy, StepStatus
 from app.providers.base import ChatResult
 
 

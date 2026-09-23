@@ -49,8 +49,6 @@ def phase_for_event(event: TaskEvent | dict[str, Any]) -> ExecutionPhase:
         return ExecutionPhase.WAITING_APPROVAL
     if kind == "retry" or stage == "diagnose":
         return ExecutionPhase.RECOVERING
-    if kind in {"ambiguous_effect", "durable_recovery", "step_reused"}:
-        return ExecutionPhase.RECOVERING
     if kind == "failed" or stage == "failed":
         return ExecutionPhase.FAILED
     if kind == "cancelled" or stage == "cancelled":

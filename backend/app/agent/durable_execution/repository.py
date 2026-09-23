@@ -8,8 +8,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from ..db.models import ExecutionAttempt, ExecutionStep, Task, utcnow
-from ..db.session import SessionLocal
+from ...db.models import ExecutionAttempt, ExecutionStep, Task, utcnow
+from ...db.session import SessionLocal
 from .types import AttemptStatus, StepStatus, TERMINAL_RUN_STATUSES
 
 DEFAULT_LEASE_SECONDS = 45

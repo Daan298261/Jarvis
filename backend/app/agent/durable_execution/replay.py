@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..tools.base import Tool
+from ...tools.base import Tool
 from .types import EffectClass, ReplayPolicy
 
 # Explicit defaults for tools that touch external systems.

@@ -6,11 +6,11 @@ import pytest
 
 from app.db.models import Task
 from app.db.session import SessionLocal
-from app.execution.accounting import ledger_for_run, reset_ledgers
-from app.execution.crash import SimulatedWorkerDeath, configure_crash_injection, clear_crash_injection
-from app.execution.repository import get_step_by_key, list_steps
-from app.execution.runner import run_durable_step
-from app.execution.types import CrashBoundary, EffectClass, OperationType, ReplayPolicy, StepStatus
+from app.agent.durable_execution.accounting import ledger_for_run, reset_ledgers
+from app.agent.durable_execution.crash import SimulatedWorkerDeath, configure_crash_injection, clear_crash_injection
+from app.agent.durable_execution.repository import get_step_by_key, list_steps
+from app.agent.durable_execution.runner import run_durable_step
+from app.agent.durable_execution.types import CrashBoundary, EffectClass, OperationType, ReplayPolicy, StepStatus
 
 
 async def _seed_task(task_id: str) -> None:
@@ -157,7 +157,7 @@ async def test_at_most_once_crash_enters_ambiguous_effect(jarvis_env):
 
 @pytest.mark.asyncio
 async def test_model_crash_before_commit_reuses_without_second_charge(jarvis_env):
-    from app.execution.runner import run_model_step
+    from app.agent.durable_execution.runner import run_model_step
     from app.providers.base import ChatResult
 
     run_id = str(uuid.uuid4())
@@ -195,7 +195,7 @@ async def test_model_crash_before_commit_reuses_without_second_charge(jarvis_env
 
 @pytest.mark.asyncio
 async def test_approval_park_fixture_persists(jarvis_env):
-    from app.execution.runner import park_execution_wait, resume_execution_wait
+    from app.agent.durable_execution.runner import park_execution_wait, resume_execution_wait
 
     run_id = str(uuid.uuid4())
     await _seed_task(run_id)

@@ -28,8 +28,8 @@ from ..inference.prompt_budget import (
     recover_context_after_overflow,
 )
 from ..inference.vision import messages_need_vision, should_load_vision
-from ..execution.repository import get_task_status, last_committed_step_key
-from ..execution.runner import run_model_step, run_tool_step
+from .durable_execution.repository import get_task_status, last_committed_step_key
+from .durable_execution.runner import run_model_step, run_tool_step
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..policy.authorize import AuthorizationResult, authorize
 from ..policy.computer_permissions import (
