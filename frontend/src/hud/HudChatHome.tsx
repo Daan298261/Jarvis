@@ -2,16 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { usePendingApprovals } from "../chat/pendingApprovals"
 import { HudChat } from "./HudChat"
 import { HudHexStrikeSuite } from "./HudHexStrikeSuite"
-import { HEXSTRIKE_SHAPE_ID, useHexStrikeSuiteActive } from "./hexstrikeSuite"
+import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 import { useHudOverlay } from "./hudOverlayContext"
 import { deriveOrbMood, type OrbMood } from "./orbMood"
 import type { Task } from "../api"
 import { parseConfirmationPayload } from "../chat/PermissionPrompt"
 import { AppearancePresenceControls } from "../presence/AppearancePresenceControls"
+import { getActiveCustomComposition, useCustomPresence } from "../presence/customPresence"
 import { PresenceHost } from "../presence/PresenceHost"
 import { personaCardSentence, useNamedPersonas } from "../persona/namedPersonas"
 import { derivePresenceSnapshot } from "../presence/presenceState"
 import { usePresentationSettings } from "../presence/presentationSettings"
+import { resolvePresenceShapeId } from "../presence/resolvePresenceShapeId"
 import type { PresencePhase } from "../presence/presenceTypes"
 
 const MOOD_COPY: Record<OrbMood, { label: string; detail: string }> = {
@@ -58,6 +60,7 @@ export function HudChatHome() {
   const presentation = usePresentationSettings()
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
   const namedPersonas = useNamedPersonas()
+  const customPresence = useCustomPresence()
   const { hexSuiteExpanded, setHexSuiteExpanded } = useHudOverlay()
   const wasHexStrike = useRef(false)
   const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null }>({
@@ -96,18 +99,36 @@ export function HudChatHome() {
   })
   const activePersona = namedPersonas?.active
   const personaShape = activePersona?.presence_shape_id || undefined
+  const shapeId = resolvePresenceShapeId(
+    hexStrikeActive,
+    customPresence.activeShapeId,
+    namedPersonas ? personaShape : "stormbird",
+  )
   const cardSentence = moodState.task
     ? (moodState.task.persona_card_sentence
       || personaCardSentence(activePersona?.id || "anzu", moodState.task.specialist_persona_ids || []))
     : ""
-  const personaVisual = !hexStrikeActive && activePersona?.appearance
-    ? {
-        orbColor: activePersona.appearance.orb_color,
-        accentColor: activePersona.appearance.accent_color,
-        glow: activePersona.appearance.glow,
-        animation: activePersona.appearance.animation,
-        scale: activePersona.appearance.scale,
-      }
+  const customComposition = !hexStrikeActive && shapeId.startsWith("custom_ui_")
+    ? getActiveCustomComposition()
+    : null
+  const personaVisual = !hexStrikeActive
+    ? customComposition
+      ? {
+          orbColor: customComposition.orb_color,
+          accentColor: customComposition.accent_color,
+          glow: activePersona?.appearance?.glow ?? 0.7,
+          animation: activePersona?.appearance?.animation ?? 0.7,
+          scale: activePersona?.appearance?.scale ?? 1,
+        }
+      : activePersona?.appearance
+        ? {
+            orbColor: activePersona.appearance.orb_color,
+            accentColor: activePersona.appearance.accent_color,
+            glow: activePersona.appearance.glow,
+            animation: activePersona.appearance.animation,
+            scale: activePersona.appearance.scale,
+          }
+        : undefined
     : undefined
   const threadActive = Boolean(moodState.task?.messages?.length)
   const copy = MOOD_COPY[mood]
@@ -125,7 +146,7 @@ export function HudChatHome() {
           snapshot={snapshot}
           settings={presenceSettings}
           size={760}
-          shapeId={hexStrikeActive ? HEXSTRIKE_SHAPE_ID : (namedPersonas ? personaShape : "stormbird")}
+          shapeId={shapeId}
           personaVisual={personaVisual}
         />
         <div className="hud-orb-caption" aria-live="polite">
