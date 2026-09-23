@@ -2691,6 +2691,16 @@ Taco / CoS 2026-09-23: generate a new presence look from the flowing orbs the ow
 
 ---
 
+Decision: RFC-0071 automation failure circuit breaker (implemented, backend; portal residual open)
+
+[RFC-0071](docs/rfcs/0071-automation-failure-circuit-breaker.md) is **implemented** for backend on development via #388 @ `5377938`. Durable `ACTIVE` → `DEGRADED` → `DISABLED_BY_FAILURE` state, mobile schedule admission before worker submit, agent-loop terminal hook (one count per finalized run; only normalized `FAILURE` increments; verified success resets), owner-key re-enable that blocks automation self-reenable, and jsonl audit. `tests/test_rfc0071_breaker.py` (11) passed on the ledger VM. Portal residual remains open: the UI/API acceptance checkbox and the portal build checkbox stay unchecked. API routes exist; no portal Re-enable surface landed in #388. `event_subscription_automation_id` is unused because RFC-0016 has no dispatcher on tip. §57 Current State and §58 Development Queue had no RFC-0071 status line, so neither section was rewritten and no §58 checkbox was added. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after backend #388 (`5377938`) landed on development tip. UX for breaker state and Re-enable is still in flight.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
