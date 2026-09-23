@@ -1,6 +1,6 @@
 # RFC-0127: Swift initial chat response and >60s progress feedback
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Owner silence on simple queries; immediate front ack + slow-worker progress  
 **Author:** Cursor cloud worker  
 **Date:** 2026-09-19
@@ -35,3 +35,7 @@ Simple owner turns can sit silent for minutes while the worker model loads or to
 ## Out of scope
 
 Spec doc edits, portal UI, live GPU sign-off.
+
+## Implementation note
+
+Landed on `development` via #338 @ `13d9aa0b` (swift front ack and 60s worker progress), #354 @ `19a2e4a7` (progress watchdog and duplicate front TTS), #355 @ `e87af8eb` (managed follow-up swift lane), and #375 @ `06cbf5b7` (swift-ack contract tests). Live GPU/TTS remains desktop sign-off. Acceptance checkboxes left open for that sign-off.
