@@ -1,10 +1,10 @@
 # RFC-0137: Named persona presence shape and original voice binding
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-23  
-**Amended:** 2026-09-23 on `development` @ `ec5c8f8c` (PR #376). This file stays **0137**. Do not open RFC-0138 for the roster. Status stays **accepted**. Specs-only; **not implemented**.
+**Amended:** 2026-09-23 on `development` @ `ec5c8f8c` (PR #376); 13-persona roster amend #379 @ `a434f4c8`. This file stays **0137**. Do not open RFC-0138 for the roster.
 
 **Related (do not rewrite):** [RFC-0126](0126-personality-session-modes.md) and [RFC-0130](0130-session-personalities.md) stay **session modes** (HUD accent + prompt). They are not this catalog. [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (**implemented** — `registerPresenceShape`, `uMorph`). [RFC-0051](0051-humanoid-presence-runtime.md) (reduced motion; existing phase machine). [RFC-0062](0062-selectable-voice-profile-catalog.md) / [RFC-0092](0092-neural-tts-default-no-silent-sapi.md) (original packs; no silent SAPI). [RFC-0078](0078-hexstrike-cyber-suite.md) already morphs to `hex_aegis` when the HexStrike suite profile is selected. [RFC-0106](0106-hexstrike-jarvis-full-operator-control.md) operator contract stays. [RFC-0104](0104-persona-candidates-pack.md) stays an unmerged hold.
 
@@ -320,3 +320,7 @@ Taco named this implement ticket for **Grok 4.7** with **fast=false** (standard,
 Desktop sign-off: hear each bound pack once (shared packs still once each, then confirm pitch/rate differ for Veles vs Enki, Themis vs Mestor, Eir vs Nabu, Bragi vs Aegir, Hermes vs Aegir, Vulcan vs Enki), and watch a morph across several personas without a pop. With reduced motion on, the same switches snap and state motion holds still. Switching coding / research / concise does not move the figure or the voice. HexStrike profile on shows `hex_aegis` and keeps the current persona voice; profile off returns the persona figure. A missing Chatterbox install fails Aegir, Bragi, Hermes, and Maia closed.
 
 #376’s four-name decision in §59 is superseded by the amendment decision recorded with this amend. Do not implement from the #376 table.
+
+## Implementation note
+
+Evidence: UX #383 @ `5bce6a2` on `development` (13-persona ANZU roster, presence shapes, and neural voice bind: `backend/app/persona/named_persona.py`, `/api/named-personas`, thirteen `registerPresenceShape` figures). Roster specs amend #379 @ `a434f4c8` (supersedes the #376 four-name catalog). `tests/test_rfc0137_named_persona.py`. Live listening and a GPU capture of the morph remain Windows desktop sign-off. Acceptance checkboxes left open for that sign-off.
