@@ -15,7 +15,7 @@ from ..agent.execution_status import (
     current_activity,
     elapsed_seconds,
     external_wait_blocker,
-    linked_decision_inbox_item,
+    decision_inbox_link_fields,
     normalized_state,
     observability_export,
     phase_for_event,
@@ -124,7 +124,11 @@ def _task_dict(
     activity = current_activity(task, last_event)
     progress = progress_units(task)
     phase = project_phase(task, last_event)
-    inbox_item = linked_decision_inbox_item(task.id) if phase.value == "WAITING_APPROVAL" else None
+    inbox_fields = decision_inbox_link_fields(task.id) if phase.value == "WAITING_APPROVAL" else {
+        "decision_inbox_item": None,
+        "decision_inbox_item_id": None,
+        "decision_inbox_link_error": None,
+    }
     external_wait = external_wait_blocker(task, events or ([last_event] if last_event else None))
     timing_source = observability_export(task, events or [], children=children) if include_phase_history else {}
     timing = (
@@ -179,8 +183,9 @@ def _task_dict(
         "verification_summary": verification_summary(task),
         "progress": progress,
         "external_wait": external_wait if phase.value == "WAITING_EXTERNAL" else None,
-        "decision_inbox_item": inbox_item,
-        "decision_inbox_item_id": (inbox_item or {}).get("id"),
+        "decision_inbox_item": inbox_fields["decision_inbox_item"],
+        "decision_inbox_item_id": inbox_fields["decision_inbox_item_id"],
+        "decision_inbox_link_error": inbox_fields["decision_inbox_link_error"],
         "phase_started_at": timing.get("phase_started_at"),
         "phase_elapsed_seconds": timing.get("phase_elapsed_seconds"),
         "stale_phase_warning": timing.get("stale_phase_warning"),

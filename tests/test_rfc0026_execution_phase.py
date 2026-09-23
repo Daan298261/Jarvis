@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from app.agent import coding_workers
 from app.agent.execution_status import (
     ExecutionPhase,
     aggregate_child_execution,
     build_phase_history,
     current_activity,
+    decision_inbox_link_fields,
     external_wait_blocker,
+    linked_decision_inbox_item,
     is_legal_phase_transition,
     observability_export,
     progress_units,
@@ -145,6 +150,24 @@ def test_child_execution_aggregation_keeps_parent_executing_when_parallel():
     assert summary["dominant_phase"] == "EXECUTING"
     assert summary["active_workers"] == 1
     assert summary["waiting_workers"] == 1
+
+
+def test_decision_inbox_load_failure_is_not_swallowed_as_missing_link(monkeypatch):
+    def _boom(*_args, **_kwargs) -> list:
+        raise RuntimeError("decision inbox store unreadable")
+
+    monkeypatch.setattr(coding_workers, "load_decision_inbox", _boom)
+
+    with pytest.raises(RuntimeError, match="unreadable"):
+        linked_decision_inbox_item("task-rfc0026")
+
+    fields = decision_inbox_link_fields("task-rfc0026")
+    assert fields["decision_inbox_item"] is None
+    assert fields["decision_inbox_item_id"] is None
+    assert fields["decision_inbox_link_error"] == {
+        "code": "decision_inbox_load_failed",
+        "message": "decision inbox store unreadable",
+    }
 
 
 def test_observability_export_includes_audit_fields():

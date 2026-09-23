@@ -279,16 +279,44 @@ def external_wait_blocker(
     return {"kind": "other", "detail": ""}
 
 
-def linked_decision_inbox_item(task_id: str) -> dict[str, Any] | None:
+def _open_decision_inbox_items() -> list[Any] | None:
+    """Open inbox rows, or ``None`` when the coding inbox module is not installed."""
     try:
         from .coding_workers import load_decision_inbox
-
-        for item in load_decision_inbox(open_only=True):
-            if item.task_id == task_id or item.related_task_id == task_id:
-                return item.as_dict()
-    except Exception:
+    except ImportError:
         return None
+    return load_decision_inbox(open_only=True)
+
+
+def linked_decision_inbox_item(task_id: str) -> dict[str, Any] | None:
+    items = _open_decision_inbox_items()
+    if items is None:
+        return None
+    for item in items:
+        if item.task_id == task_id or item.related_task_id == task_id:
+            return item.as_dict()
     return None
+
+
+def decision_inbox_link_fields(task_id: str) -> dict[str, Any]:
+    """Resolve Decision Inbox link for APIs. Unexpected loader failures are surfaced, not masked."""
+    fields: dict[str, Any] = {
+        "decision_inbox_item": None,
+        "decision_inbox_item_id": None,
+        "decision_inbox_link_error": None,
+    }
+    try:
+        item = linked_decision_inbox_item(task_id)
+    except Exception as exc:
+        fields["decision_inbox_link_error"] = {
+            "code": "decision_inbox_load_failed",
+            "message": str(exc)[:500],
+        }
+        return fields
+    if item is not None:
+        fields["decision_inbox_item"] = item
+        fields["decision_inbox_item_id"] = item.get("id")
+    return fields
 
 
 def progress_units(task: Task) -> dict[str, Any] | None:
@@ -350,7 +378,10 @@ def current_activity(task: Task, last_event: TaskEvent | None = None) -> str:
                 return f"Waiting for approval: {title}"[:240]
             if name:
                 return f"Waiting for approval: {name}"[:240]
-        inbox = linked_decision_inbox_item(task.id)
+        try:
+            inbox = linked_decision_inbox_item(task.id)
+        except Exception:
+            inbox = None
         if inbox and inbox.get("title"):
             return f"Waiting for approval: {inbox['title']}"[:240]
         return "Waiting for approval"
@@ -782,7 +813,7 @@ def observability_export(
         "phase_history": history,
         "verification_summary": verification_summary(task),
         "external_wait": external_wait_blocker(task, events),
-        "decision_inbox_item": linked_decision_inbox_item(task.id),
+        **decision_inbox_link_fields(task.id),
         **timing,
     }
     if children:
@@ -791,6 +822,7 @@ def observability_export(
         payload["approval"] = {
             "waiting_for_confirmation": bool(task.waiting_for_confirmation),
             "confirmation_payload": task.confirmation_payload,
-            "decision_inbox_item_id": (payload.get("decision_inbox_item") or {}).get("id"),
+            "decision_inbox_item_id": payload.get("decision_inbox_item_id"),
+            "decision_inbox_link_error": payload.get("decision_inbox_link_error"),
         }
     return payload
