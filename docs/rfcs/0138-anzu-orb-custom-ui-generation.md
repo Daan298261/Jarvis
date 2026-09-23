@@ -273,6 +273,8 @@ Guidance for later implement prompts. This PR does not assign them and does not 
 - A second orb renderer, a new avatar gallery, or writing the custom look into `presentation.avatar_id`.
 - Downloading a new GGUF. Swarm, Browser Use, model-stack work.
 - Re-running generation on every launch.
+- Renaming the GitHub repo `Daan298261/Jarvis`, repo paths, or existing `Jarvis` code identifiers. Branding the stretch “Jarvis 1.x”.
+- A product code path that notifies Taco. Quality misses go **CoS → Taco** in review only.
 
 ## Notes
 
