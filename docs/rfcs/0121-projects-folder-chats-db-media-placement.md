@@ -1,6 +1,6 @@
 # RFC-0121: Projects folder, chats in DB, media placement
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** Persistent project knowledge / reusable context (extends RFC-0020; no new §58 checkbox)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-18
@@ -95,3 +95,7 @@ Product implementation in this PR. RFC-0020 indexer internals. RFC-0109 analyze/
 - Implement after RFC-0109 for media paths; chat/folder rows may land in the same named ticket or immediately after.
 - `PORTAL_UX.md` “no new public REST resource” is **superseded for projects** by this RFC. Do not edit that Architect file in the implement PR unless CoS names an Architect follow-up.
 - Number **0121**. RFC-0119 is reserved (license-package entitlements). RFC-0120 is coding+3D, not this ticket.
+
+## Implementation note
+
+Landed on `development` via #381 @ `e17c9104` (project-colocated media placement backend gaps: `projects/paths.py`, media store, DB membership). `tests/test_rfc0121_media_placement.py` and `tests/test_rfc0121_projects_db.py`. Multi-node storage remains swarm/desktop sign-off. Acceptance checkboxes left open for that sign-off.
