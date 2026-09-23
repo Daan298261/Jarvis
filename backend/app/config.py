@@ -402,7 +402,16 @@ def save_settings(settings: AppSettings) -> None:
     dump.pop("auth_token", None)
     dump["allowed_directories"] = sanitize_allowed_directories(dump.get("allowed_directories"))
     settings.allowed_directories = list(dump["allowed_directories"])
-    settings_path().write_text(json.dumps(dump, indent=2), encoding="utf-8")
+
+    def _write() -> None:
+        settings_path().write_text(json.dumps(dump, indent=2), encoding="utf-8")
+
+    try:
+        from .recovery.hooks import wrap_settings_save
+
+        wrap_settings_save(_write)
+    except Exception:
+        _write()
 
 
 def default_allowed_directories() -> list[str]:

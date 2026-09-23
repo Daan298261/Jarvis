@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, runtime_profiles, self_dev, session_personality, settings, setup, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, runtime_profiles, self_dev, session_personality, settings, setup, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -111,6 +111,7 @@ app.include_router(amazon_ads.router)
 app.include_router(setup.router)
 app.include_router(integrations.router)
 app.include_router(diagnostics.router)
+app.include_router(recovery.router)
 app.include_router(installer.router)
 app.include_router(ingest.router)
 app.include_router(perception.router)
@@ -180,6 +181,12 @@ async def auth_middleware(request: Request, call_next):
 async def startup() -> None:
     app.state.startup_id = str(uuid.uuid4())
     await init_db()
+    try:
+        from .recovery.hooks import startup_recovery
+
+        startup_recovery()
+    except Exception:
+        logging.debug("Recovery journal startup reconcile skipped", exc_info=True)
     node = await register_localhost_node()
     await bind_workers_to_node(node.id)
     await register_localhost_capabilities(node.id)
