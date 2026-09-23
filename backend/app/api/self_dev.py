@@ -57,6 +57,9 @@ async def self_dev_status():
 async def start_self_dev(body: StartBody | None = None):
     body = body or StartBody()
     try:
+        from ..recovery.hooks import RISK_SELF_IMPROVEMENT, ensure_checkpoint_before_risk
+
+        ensure_checkpoint_before_risk(RISK_SELF_IMPROVEMENT, notes="self-dev trial start")
         return start_trial(repo=body.repo, run_baseline=body.run_baseline)
     except (KillSwitchActive, WorktreeError, PermissionError) as exc:
         raise _http_error(exc) from exc

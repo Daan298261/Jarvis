@@ -396,37 +396,71 @@ def get_workflow(workflow_id: str) -> Workflow | None:
 
 
 def save_workflow(payload: dict[str, Any]) -> Workflow:
+    from ..recovery.hooks import record_workflow_mutation
+    from ..recovery.types import JournalOperation
+
     workflow = workflow_from_dict(payload, builtin=False)
     if any(item.id == workflow.id and item.builtin for item in builtin_workflows()):
         workflow.id = f"{workflow.id}-custom"
     if not workflow.steps:
         raise ValueError("A workflow needs at least one step")
-    root = workflows_dir()
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / f"{_safe_slug(workflow.id)}.json"
-    path.write_text(json.dumps(workflow.to_dict(), indent=2), encoding="utf-8")
+    before = {wf.id: wf.to_dict() for wf in load_saved_workflows()}
+
+    def _apply() -> None:
+        root = workflows_dir()
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / f"{_safe_slug(workflow.id)}.json"
+        path.write_text(json.dumps(workflow.to_dict(), indent=2), encoding="utf-8")
+
+    record_workflow_mutation(
+        workflow_id=workflow.id,
+        operation=JournalOperation.CREATE if workflow.id not in before else JournalOperation.UPDATE,
+        actor="api",
+        before=before,
+        after=None,
+        apply_fn=_apply,
+    )
     return workflow
 
 
 def delete_workflow(workflow_id: str) -> bool:
+    from ..recovery.hooks import record_workflow_mutation
+    from ..recovery.types import JournalOperation
+
     if any(item.id == workflow_id and item.builtin for item in builtin_workflows()):
         raise PermissionError("Built-in templates cannot be deleted")
-    root = workflows_dir()
-    if not root.exists():
-        return False
-    path = root / f"{_safe_slug(workflow_id)}.json"
-    if not path.exists():
-        for candidate in root.glob("*.json"):
-            try:
-                payload = json.loads(candidate.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if isinstance(payload, dict) and payload.get("id") == workflow_id:
-                candidate.unlink()
-                return True
-        return False
-    path.unlink()
-    return True
+    before = {wf.id: wf.to_dict() for wf in load_saved_workflows()}
+    deleted = False
+
+    def _apply() -> None:
+        nonlocal deleted
+        root = workflows_dir()
+        if not root.exists():
+            return
+        path = root / f"{_safe_slug(workflow_id)}.json"
+        if not path.exists():
+            for candidate in root.glob("*.json"):
+                try:
+                    payload = json.loads(candidate.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(payload, dict) and payload.get("id") == workflow_id:
+                    candidate.unlink()
+                    deleted = True
+                    return
+            return
+        path.unlink()
+        deleted = True
+
+    record_workflow_mutation(
+        workflow_id=workflow_id,
+        operation=JournalOperation.DELETE,
+        actor="api",
+        before=before,
+        after=None,
+        apply_fn=_apply,
+    )
+    return deleted
 
 
 def merge_parameter_values(workflow: Workflow, values: dict[str, str] | None) -> dict[str, str]:

@@ -1,4 +1,4 @@
-from . import agent_policy, agent_portability, diagnostics, license, mcp, model, self_dev, settings, setup, swarm, system, tasks, tools, voice, voice_profiles, worker_environments, workflows, delegation
+from . import agent_policy, agent_portability, diagnostics, license, mcp, model, recovery, self_dev, settings, setup, swarm, system, tasks, tools, voice, voice_profiles, worker_environments, workflows, delegation
 
 __all__ = [
     "agent_policy",
@@ -7,6 +7,7 @@ __all__ = [
     "license",
     "mcp",
     "model",
+    "recovery",
     "self_dev",
     "settings",
     "setup",
