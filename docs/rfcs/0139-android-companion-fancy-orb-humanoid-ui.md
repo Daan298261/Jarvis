@@ -1,13 +1,13 @@
 # RFC-0139: Android companion fancy orb / humanoid presence UI
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** §58 RFC backlog — RFC-0139  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-23  
 
 **Related (do not rewrite):** [RFC-0125](0125-companion-hud-lan-pair.md) (Compose HUD baseline — glowing orb + particle humanoid). [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) (13-persona roster + shared presence states on Desktop). [RFC-0138](0138-anzu-orb-custom-ui-generation.md) (custom orb compositions — Desktop; do not port custom-UI generation in this ticket). [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (`registerPresenceShape`, `uMorph`). [RFC-0051](0051-humanoid-presence-runtime.md) (reduced motion). [RFC-0039](0039-android-native-client.md) / [RFC-0059](0059-android-companion-delivery.md) (companion is a paired controller). [RFC-0108](0108-phone-companion-offline-ai-model.md) offline chat brain. [RFC-0123](0123-companion-reachability-and-anti-impersonation.md) reachability.
 
-This PR is **specs-only**. Product code is a **named follow-up**. Full intent; **no stubs / soft-fail**. Quality bar: multibillion-company / **Anzu 1.0**. Subpar implement → **CoS → Taco** in review (not a code path).
+**Implemented** on development via #401 @ `e9df37857a42f68d13493bfdd981b4197857846f` (Compose Home HUD presence). Full intent; **no stubs / soft-fail**. Quality bar: multibillion-company / **Anzu 1.0**. Subpar → **CoS → Taco** in review (not a code path). Physical phone daylight soak remains device sign-off.
 
 ## Problem
 
@@ -75,14 +75,14 @@ Tip’s “almost off” offline dim is **rejected**.
 
 ## Acceptance criteria
 
-- [ ] Specs-only in this PR (no `android/` / `frontend/src` / backend product edits)
-- [ ] Default companion presence mode is **humanoid**
-- [ ] Shared states cover Idle, Listening, Thinking, Working, Speaking, Alert, Waiting/approval, Offline, Error with Desktop-aligned intent
-- [ ] Offline (and idle-offline) is **daylight-readable**; brightness floor replaces tip’s ~0.12 dead dim; richer multi-orb / particle detail than a sparse stub
-- [ ] State transitions are visible (not snap-only unless reduced motion); no blank HUD; WebView/TJS failure fails closed with a readable Compose fallback that still meets the offline bar
-- [ ] No full 13-persona morph requirement in this RFC; no RFC-0138 custom-UI generation on phone; no custom brain UI
-- [ ] Android unit tests cover Offline brightness floor + humanoid particle count / composition smoke; physical phone daylight soak is device sign-off
-- [ ] Quality bar Anzu 1.0 / multibillion; soft-fail or stub presence is a **fail**; subpar → CoS → Taco in review
+- [x] Specs-only in this PR (no `android/` / `frontend/src` / backend product edits) — *superseded: product landed in #401; this ledger is docs-only*
+- [x] Default companion presence mode is **humanoid**
+- [x] Shared states cover Idle, Listening, Thinking, Working, Speaking, Alert, Waiting/approval, Offline, Error with Desktop-aligned intent
+- [x] Offline (and idle-offline) is **daylight-readable**; brightness floor replaces tip’s ~0.12 dead dim; richer multi-orb / particle detail than a sparse stub
+- [x] State transitions are visible (not snap-only unless reduced motion); no blank HUD; WebView/TJS failure fails closed with a readable Compose fallback that still meets the offline bar
+- [x] No full 13-persona morph requirement in this RFC; no RFC-0138 custom-UI generation on phone; no custom brain UI
+- [x] Android unit tests cover Offline brightness floor + humanoid particle count / composition smoke; physical phone daylight soak is device sign-off
+- [x] Quality bar Anzu 1.0 / multibillion; soft-fail or stub presence is a **fail**; subpar → CoS → Taco in review
 
 ## Likely files
 
