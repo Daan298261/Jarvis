@@ -393,7 +393,10 @@ function OwnerPortal() {
           setProjects(result.projects)
           setProjectsMigratedNotice(result.migratedFromLocal)
         })
-        .catch((err: unknown) => setProjectsLoadError(projectsFetchErrorMessage(err)))
+        .catch((err: unknown) => {
+          setProjects([])
+          setProjectsLoadError(projectsFetchErrorMessage(err))
+        })
         .finally(() => setProjectsLoading(false))
     },
   }
