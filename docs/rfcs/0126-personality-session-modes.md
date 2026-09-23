@@ -34,3 +34,7 @@ RFC-0104 persona_candidate merges; voice pack retraining; full module catalog en
 ## Implementation note
 
 Landed on `development` via #334 @ `8344b806` (personality session modes v1). Prior status was `accepted (implement v1 in PR)`. Acceptance checkboxes left as written.
+
+## Notes
+
+[RFC-0137](0137-persona-presence-shape-and-voice-binding.md) is a separate named-persona catalog (Anzu, Eagir, Veles, Enki). It does not bind these session modes. This RFC's status is unchanged.
