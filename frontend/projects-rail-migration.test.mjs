@@ -1,61 +1,13 @@
 import assert from "node:assert/strict"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import path from "node:path"
 import { test, before, describe } from "node:test"
-import { fileURLToPath, pathToFileURL } from "node:url"
-import * as esbuild from "./node_modules/esbuild/lib/main.js"
 
-const root = path.dirname(fileURLToPath(import.meta.url))
 const STORAGE_KEY = "jarvis_portal_projects"
-const outfile = path.join(mkdtempSync(path.join(tmpdir(), "jarvis-projects-")), "projects.mjs")
 
 /** @type {typeof import("./src/projects.ts")} */
 let projects
 
 before(async () => {
-  await esbuild.build({
-    absWorkingDir: root,
-    entryPoints: ["src/projects.ts"],
-    bundle: true,
-    format: "esm",
-    platform: "neutral",
-    outfile,
-    plugins: [
-      {
-        name: "stub-api",
-        setup(build) {
-          build.onResolve({ filter: /^\.\/api$/ }, (args) => ({
-            path: args.path,
-            namespace: "stub-api",
-          }))
-          build.onLoad({ filter: /.*/, namespace: "stub-api" }, () => ({
-            loader: "js",
-            contents: `
-              export class ApiError extends Error {
-                constructor(status, message, body = null) {
-                  super(message)
-                  this.name = "ApiError"
-                  this.status = status
-                  this.body = body
-                }
-              }
-              export function isApiError(err) {
-                return err instanceof ApiError
-              }
-              export async function api(path, init) {
-                if (typeof globalThis.__projectsApi !== "function") {
-                  throw new Error("missing __projectsApi")
-                }
-                return globalThis.__projectsApi(path, init)
-              }
-            `,
-          }))
-        },
-      },
-    ],
-  })
-  projects = await import(pathToFileURL(outfile).href)
+  projects = await import("./src/projects.ts")
 })
 
 function installStorage(raw) {
