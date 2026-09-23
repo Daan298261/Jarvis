@@ -31,6 +31,7 @@ from .hexstrike_defensive import HexStrikeDefensiveTool
 from .hexstrike_operator import HexStrikeOperatorTool
 from .chat_projects import ChatProjectsTool
 from .vault_memory import VaultMemoryTool
+from .dcc_tools import BlenderTool, FreecadTool, OpenScadTool
 
 
 class ToolRegistry:
@@ -68,6 +69,9 @@ class ToolRegistry:
             HexStrikeOperatorTool(getter),
             ChatProjectsTool(),
             VaultMemoryTool(),
+            BlenderTool(getter),
+            OpenScadTool(getter),
+            FreecadTool(getter),
         ]
         self.tools = {tool.name: tool for tool in items}
 
