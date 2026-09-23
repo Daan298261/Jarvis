@@ -467,13 +467,24 @@ class AgentRuntime:
             task.updated_at = utcnow()
             if not task.started_at and fields.get("status") == "running":
                 task.started_at = utcnow()
-            if _as_utc(task.started_at) and fields.get("status") in {"completed", "failed", "cancelled"}:
+            terminal_status = fields.get("status")
+            if _as_utc(task.started_at) and terminal_status in {"completed", "failed", "cancelled"}:
                 finished = utcnow()
                 task.finished_at = finished
                 started = _as_utc(task.started_at)
                 if started:
                     task.duration_seconds = (finished - started).total_seconds()
             await session.commit()
+            if terminal_status in {"completed", "failed", "cancelled"}:
+                from ..automation.breaker import on_task_terminal
+
+                on_task_terminal(
+                    task_id,
+                    status=str(terminal_status),
+                    verification=task.verification or "",
+                    error=task.error or "",
+                    waiting_for_confirmation=bool(task.waiting_for_confirmation),
+                )
 
     async def _complete(
         self,
