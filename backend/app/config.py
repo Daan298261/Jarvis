@@ -322,6 +322,33 @@ class PersonaAppearanceSettings(BaseModel):
     specialists_auto_speak: bool = False
 
 
+class CustomPresencePreset(BaseModel):
+    """Saved custom orb look (RFC-0138). Global — not tied to a named persona."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    id: str
+    name: str = Field(min_length=1, max_length=80)
+    source: Literal["text_prompt", "image", "text_and_image"]
+    source_image_ref: str = ""
+    prompt_text: str = ""
+    orb_composition: dict[str, Any] = Field(default_factory=dict)
+    shape_id: str = ""
+    default: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class CustomPresenceSettings(BaseModel):
+    """Custom presence presets and active/default selection (RFC-0138)."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    presets: dict[str, CustomPresencePreset] = Field(default_factory=dict)
+    active_preset_id: str = ""
+    default_preset_id: str = ""
+
+
 class NamedPersonaSettings(BaseModel):
     """Active named persona. Separate from session-mode HUD/prompt settings."""
 
@@ -378,6 +405,7 @@ class AppSettings(BaseModel):
     supermemory: SupermemorySettings = Field(default_factory=SupermemorySettings)
     decision: DecisionSettings = Field(default_factory=DecisionSettings)
     named_personas: NamedPersonaSettings = Field(default_factory=NamedPersonaSettings)
+    custom_presence: CustomPresenceSettings = Field(default_factory=CustomPresenceSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
@@ -429,7 +457,14 @@ def load_settings() -> AppSettings:
     if port:
         payload["bind_port"] = int(port)
     payload["allowed_directories"] = sanitize_allowed_directories(payload.get("allowed_directories"))
-    return AppSettings.model_validate(payload)
+    settings = AppSettings.model_validate(payload)
+    try:
+        from .presence.custom_ui import normalize_custom_presence
+
+        normalize_custom_presence(settings)
+    except Exception:
+        pass
+    return settings
 
 
 def save_settings(settings: AppSettings) -> None:

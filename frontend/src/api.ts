@@ -1,4 +1,8 @@
 import { jarvisApiUrl } from "./apiOrigin"
+import type {
+  AutomationBreakerAuditEvent,
+  AutomationBreakerView,
+} from "./settings/automationBreakerView"
 import { ownerFacingApiMessage } from "./setup/ownerFacing"
 
 export function getPrivateKey(): string {
@@ -5163,4 +5167,50 @@ export function formatCleanReinstallLogPaths(
 export function cleanReinstallDurableLogPath(logPaths: CleanReinstallLogPaths | null | undefined): string | null {
   const path = logPaths?.durable?.trim()
   return path || null
+}
+
+export async function listAutomationBreakers(): Promise<{ automations: AutomationBreakerView[] }> {
+  return api<{ automations: AutomationBreakerView[] }>("/api/automation-breaker")
+}
+
+export async function getAutomationBreaker(automationId: string): Promise<AutomationBreakerView> {
+  return api<AutomationBreakerView>(
+    `/api/automation-breaker/${encodeURIComponent(automationId)}`,
+  )
+}
+
+export async function listAutomationBreakerAudit(options?: {
+  automationId?: string
+  limit?: number
+}): Promise<{ events: AutomationBreakerAuditEvent[] }> {
+  const params = new URLSearchParams()
+  if (options?.automationId) params.set("automation_id", options.automationId)
+  if (options?.limit != null) params.set("limit", String(options.limit))
+  const query = params.toString()
+  return api<{ events: AutomationBreakerAuditEvent[] }>(
+    `/api/automation-breaker/audit${query ? `?${query}` : ""}`,
+  )
+}
+
+export async function setAutomationBreakerThreshold(
+  automationId: string,
+  failureThreshold: number,
+): Promise<AutomationBreakerView> {
+  return api<AutomationBreakerView>(
+    `/api/automation-breaker/${encodeURIComponent(automationId)}/threshold`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ failure_threshold: failureThreshold }),
+    },
+  )
+}
+
+export async function reenableAutomationBreaker(automationId: string): Promise<AutomationBreakerView> {
+  return api<AutomationBreakerView>(
+    `/api/automation-breaker/${encodeURIComponent(automationId)}/reenable`,
+    {
+      method: "POST",
+      body: JSON.stringify({ actor: "owner" }),
+    },
+  )
 }

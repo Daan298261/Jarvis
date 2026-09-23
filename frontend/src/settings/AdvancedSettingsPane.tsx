@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import { getJevDecisionAudit, type JevAuditEvent } from "../api"
 import { AutonomySection } from "../pages/Autonomy"
 import { ComputerUsePermissions } from "../pages/ComputerUsePermissions"
+import { AutomationBreakerPanel } from "./AutomationBreakerPanel"
 import { CleanInstallReinstallCard } from "./CleanInstallReinstallCard"
 
 type AdvancedSettingsPaneProps = {
@@ -42,6 +43,8 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
       </div>
 
       <AutonomySection />
+
+      <AutomationBreakerPanel />
 
       <div className="card grid settings-pane-card">
         <h2>Agent profiles</h2>
