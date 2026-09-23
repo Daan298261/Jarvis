@@ -2633,13 +2633,13 @@ CoS assigned Architect tick-only after ranked accurate/fast/stable queue lock.
 
 ---
 
-Decision: RFC-0137 persona presence shape and original voice binding (accepted)
+Decision: RFC-0137 named persona presence shape and original voice binding (accepted)
 
-[RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md): each first-party session mode binds a presence shape and an original voice pack together, and the figure morphs with RFC-0069 `uMorph` (reduced motion snaps). Anzu / `core` → new `stormbird` + `butler_original_v1` (dry butler only if the butler pack is missing). `coding` → new `code_lattice` + `synthetic_command_original_v1`. `research` → new `research_lens` + `dry_butler_original_v1`. `concise` reuses `energy_core` + `dry_butler_original_v1`. HexStrike / Daybreak suite keeps `hex_aegis` and binds `tactical_aide_original_v1` without rewriting RFC-0106. `humanoid_bust` stays the non-session fallback. A missing neural pack fails closed — no silent SAPI / `windows_natural_en_v1`. RFC-0104 persona trees stay unmerged. Specs-only; **not implemented**. No new §58 checkbox. Implement ticket: **Grok 4.7, fast=false**.
+[RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md): the presence+voice catalog is **named personas only** — Anzu, Eagir, Veles, Enki. Session modes (`core` / `coding` / `research` / `concise`, RFC-0126 / RFC-0130) stay HUD accent + prompt and do **not** select a shape or a voice. Anzu → `stormbird` + `butler_original_v1` (dry butler only if the butler pack is missing). Eagir (Ægir) → `ocean_swell` + `dry_butler_original_v1`. Veles → `root_coil` + `synthetic_command_original_v1`. Enki → `abzu_flow` + `tactical_aide_original_v1`. Morph uses RFC-0069 `uMorph`; reduced motion snaps. `hex_aegis` stays the HexStrike suite figure (RFC-0069 / RFC-0078), not a persona, and this ticket does not bind a suite voice. A missing neural pack fails closed — no silent SAPI. RFC-0104 trees stay unmerged. No fuller name list was in the tree; do not add further gods. Specs-only; **not implemented**. No new §58 checkbox. Implement ticket: **Grok 4.7, fast=false**.
 
 Reason:
 
-Taco: each selectable persona gets a presence UI that matches its origin and a fitting original voice. Anzu is a stormbird; selecting a persona morphs the orb cloud smoothly.
+Taco via CoS: do not treat session modes as the persona catalog. Each named personality (Anzu, Eagir, Veles, Enki) gets an origin-matched presence figure and an original voice; Anzu is the stormbird; selection morphs smoothly.
 
 ---
 

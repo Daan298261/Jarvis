@@ -37,4 +37,4 @@ Landed on `development` via #334 @ `8344b806` (personality session modes v1). Pr
 
 ## Notes
 
-Presence shape and voice for these modes are [RFC-0137](0137-persona-presence-shape-and-voice-binding.md). This RFC's status is unchanged.
+[RFC-0137](0137-persona-presence-shape-and-voice-binding.md) is a separate named-persona catalog (Anzu, Eagir, Veles, Enki). It does not bind these session modes. This RFC's status is unchanged.
