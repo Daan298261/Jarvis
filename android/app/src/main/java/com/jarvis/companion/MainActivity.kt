@@ -231,11 +231,25 @@ class MainActivity : ComponentActivity() {
                                 Spacer(Modifier.height(12.dp))
                                 Text("YOUR INTELLIGENCE, EVERYWHERE", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
                                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                                    val phase = if (state.recording) "listening"
-                                    else if (state.speaking) "speaking"
-                                    else if (state.tasks.any { it.optString("status") in listOf("queued", "running") }) "thinking"
-                                    else "idle"
-                                    PresenceHud(state.presenceMode, state.connected, phase)
+                                    val phase = PresenceVisual.resolvePhase(
+                                        PresenceInputs(
+                                            connected = state.connected,
+                                            recording = state.recording,
+                                            speaking = state.speaking,
+                                            pendingApproval = state.pendingApproval,
+                                            systemDegraded = state.inferenceError.isNotBlank(),
+                                            hardError = !state.error.isNullOrBlank() && state.connected,
+                                            offlineAnswering = state.offlineAnswering,
+                                            tasks = state.tasks.map { task ->
+                                                PresenceTaskSignal(
+                                                    status = task.optString("status"),
+                                                    waitingForConfirmation = task.optBoolean("waiting_for_confirmation"),
+                                                    hasApproval = task.optJSONObject("approval") != null,
+                                                )
+                                            },
+                                        ),
+                                    )
+                                    PresenceHud(mode = state.presenceMode, phase = phase)
                                 }
                                 Text(
                                     if (state.recording) "I’m listening."
@@ -798,8 +812,8 @@ private fun formatStorageBytes(bytes: Long): String {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(state.presenceMode == "orb", { model.selectPresence("orb") }, { Text("Glowing orb") })
                 FilterChip(state.presenceMode == "humanoid", { model.selectPresence("humanoid") }, { Text("Humanoid HUD") })
+                FilterChip(state.presenceMode == "orb", { model.selectPresence("orb") }, { Text("Glowing orb") })
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.weight(1f))

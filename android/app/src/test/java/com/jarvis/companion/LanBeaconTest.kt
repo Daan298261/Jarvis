@@ -32,7 +32,7 @@ class PresenceParticlesTest {
         val orb = PresenceParticles.orb()
         val humanoid = PresenceParticles.humanoid()
         assertTrue(orb.size > 80)
-        assertTrue(humanoid.size > 200)
+        assertTrue(humanoid.size > PresenceVisual.HUMANOID_MIN_PARTICLES)
         assertTrue(humanoid.any { it.y > 1.0f })
         assertTrue(humanoid.any { it.y < 0f })
         assertEquals(orb.size, PresenceParticles.orb().size)
