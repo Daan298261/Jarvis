@@ -2641,9 +2641,9 @@ Reason:
 
 Taco via CoS: do not treat session modes as the persona catalog. Each named personality (Anzu, Eagir, Veles, Enki) gets an origin-matched presence figure and an original voice; Anzu is the stormbird; selection morphs smoothly.
 
-Decision: RFC-0137 amended to the 13-persona ANZU roster (accepted)
+Decision: RFC-0137 amended to the 13-persona ANZU roster (accepted; implemented in the ledger tick below)
 
-[RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md) stays **accepted** and is amended in place (no RFC-0138). Taco’s canonical roster supersedes the #376 four-name catalog (`eagir` dropped; Enki is coding on `code_cube`, not `abzu_flow`; Veles shape is `serpent_orbit`, with stored `root_coil` migrated). Thirteen ids — `anzu`, `mestor`, `nabu`, `enki`, `veles`, `themis`, `aegir`, `bragi`, `hermes`, `heimdall`, `eir`, `maia`, `vulcan` — each bind one presence shape and one existing neural pack. Anzu remains the default main persona (`stormbird` + `butler_original_v1`, dry butler only if the butler pack is missing). Every other missing pack fails closed (no SAPI, no cross-pack substitute). Shared packs are distinguished by per-persona appearance (pitch, rate, colour, motion), not by new voice files. All personas share one presence state machine on the RFC-0069 orb cloud (idle, listening, thinking, working, speaking, alert, waiting for approval, offline, error). Session modes (RFC-0126 / RFC-0130) stay HUD/prompt. HexStrike still morphs to `hex_aegis` and does not rewrite RFC-0106. Keep existing session-mode, voice-picker, Appearance, HexStrike, and presence UI; the roster layers on top. Veles and Themis are presence/voice labels only — no new LE/ATO gates or offensive wiring. RFC-0104 trees stay unmerged. Specs-only; **not implemented**. No new §58 checkbox. Implement ticket: **Grok 4.7, fast=false**.
+[RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md) is amended in place (no RFC-0138). Taco’s canonical roster supersedes the #376 four-name catalog (`eagir` dropped; Enki is coding on `code_cube`, not `abzu_flow`; Veles shape is `serpent_orbit`, with stored `root_coil` migrated). Thirteen ids — `anzu`, `mestor`, `nabu`, `enki`, `veles`, `themis`, `aegir`, `bragi`, `hermes`, `heimdall`, `eir`, `maia`, `vulcan` — each bind one presence shape and one existing neural pack. Anzu remains the default main persona (`stormbird` + `butler_original_v1`, dry butler only if the butler pack is missing). Every other missing pack fails closed (no SAPI, no cross-pack substitute). Shared packs are distinguished by per-persona appearance (pitch, rate, colour, motion), not by new voice files. All personas share one presence state machine on the RFC-0069 orb cloud (idle, listening, thinking, working, speaking, alert, waiting for approval, offline, error). Session modes (RFC-0126 / RFC-0130) stay HUD/prompt. HexStrike still morphs to `hex_aegis` and does not rewrite RFC-0106. Keep existing session-mode, voice-picker, Appearance, HexStrike, and presence UI; the roster layers on top. Veles and Themis are presence/voice labels only — no new LE/ATO gates or offensive wiring. RFC-0104 trees stay unmerged. Roster amend was specs-only (#379 @ `a434f4c8`). No new §58 checkbox. Implement ticket was **Grok 4.7, fast=false**; product is #383 @ `5bce6a2` (ledger tick below).
 
 Reason:
 
@@ -2663,11 +2663,21 @@ Late catch-up. Product already landed; specs Status was still accepted. Swift/pr
 - RFC-0117 durable-state journal + known-good rollback (`0117-durable-state-journal-rollback.md`) — #380 (`049874c7`)
 - RFC-0121 projects folder + chats in DB + media placement — #381 (`e17c9104`)
 
-Held (not ticked): RFC-0137 (UX #383 still open), RFC-0107 (Taco desktop Obsidian sign-off). RFC-0117 tiny front-chat (`0117-tiny-front-chat-responder.md`) was already implemented and is unchanged. §57 Current State and §58 Development Queue had no status lines for these RFCs. No new §58 checkboxes. No product code in this PR. Live model / DCC / Windows handoff, live operator rollback, and multi-node storage remain desktop sign-off.
+Held (not ticked): RFC-0107 (Taco desktop Obsidian sign-off). RFC-0137 was held in this batch because UX #383 was still open; the following decision ticks it. RFC-0117 tiny front-chat (`0117-tiny-front-chat-responder.md`) was already implemented and is unchanged. §57 Current State and §58 Development Queue had no status lines for these RFCs. No new §58 checkboxes. No product code in this PR. Live model / DCC / Windows handoff, live operator rollback, and multi-node storage remain desktop sign-off.
 
 Reason:
 
 CoS assigned Architect tick-only after the capability ladder (0115, then 0120, then 0133), the swift/progressive lane (0127/0128), the durable-state journal (#380), and project media placement (#381) were already on development tip.
+
+---
+
+Decision: RFC-0137 named persona presence shape and original voice binding (implemented)
+
+Late catch-up. Product already on development. [RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md) is **implemented**. Roster specs amend #379 @ `a434f4c8` (13-persona ANZU roster; supersedes the #376 four-name catalog). UX implement #383 @ `5bce6a2` (catalog, presence shapes, neural voice bind; `tests/test_rfc0137_named_persona.py`). §57 Current State and §58 Development Queue had no status lines for this RFC, so neither section was rewritten and no §58 checkbox was added. RFC-0107 stays accepted until Taco desktop Obsidian sign-off. Live listening and a GPU morph capture remain desktop sign-off. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after UX #383 (`5bce6a2`) landed on development tip. #384 had left RFC-0137 held because that UX PR was still open.
 
 ---
 
