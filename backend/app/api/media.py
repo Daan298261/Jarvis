@@ -48,6 +48,13 @@ def _parse_chunk_headers(request: Request) -> tuple[str | None, int | None, int 
     return upload_id, chunk_index, chunk_total, kind
 
 
+def _project_id_from_request(request: Request, form: object | None = None) -> str | None:
+    raw = request.headers.get("x-jarvis-project-id", "").strip()
+    if not raw and form is not None and hasattr(form, "get"):
+        raw = str(form.get("project_id") or "").strip()
+    return raw or None
+
+
 @router.get("/uploads/caps")
 async def upload_caps(_owner=Owner):
     return {
@@ -64,12 +71,15 @@ async def create_upload(request: Request, _owner=Owner):
     upload_id, chunk_index, chunk_total, header_kind = _parse_chunk_headers(request)
     content_header = request.headers.get("content-type", "")
     form_kind: str | None = None
+    form_project_id: str | None = None
     filename = request.headers.get("x-filename") or "upload"
     content_type = content_header or "application/octet-stream"
     data = bytearray()
+    form = None
     if "multipart/form-data" in content_header:
         form = await request.form()
         form_kind = str(form.get("kind") or "").strip().lower() or None
+        form_project_id = str(form.get("project_id") or "").strip() or None
         upload = form.get("file")
         if upload is not None and hasattr(upload, "read"):
             filename = getattr(upload, "filename", None) or filename
@@ -92,6 +102,8 @@ async def create_upload(request: Request, _owner=Owner):
     if len(data) > caps_for_kind(resolved_kind):
         raise HTTPException(413, f"Upload exceeds {resolved_kind} limit")
 
+    media_project_id = _project_id_from_request(request, form) or form_project_id
+
     if upload_id and chunk_index is not None and chunk_total is not None:
         result = ingest_chunk(
             upload_id,
@@ -103,6 +115,7 @@ async def create_upload(request: Request, _owner=Owner):
             content_type=content_type,
             owner="desktop",
             device_id=None,
+            project_id=media_project_id,
         )
         if isinstance(result, dict):
             return result
@@ -114,6 +127,7 @@ async def create_upload(request: Request, _owner=Owner):
         filename=filename,
         content_type=content_type,
         owner="desktop",
+        project_id=media_project_id,
     )
     return item.to_public()
 
@@ -154,6 +168,7 @@ async def companion_ingest(request: Request, device: dict) -> dict:
     filename = request.headers.get("x-filename", "attachment")[:200]
     content_type = request.headers.get("content-type", "application/octet-stream")[:100]
     kind_header = request.headers.get("x-jarvis-upload-kind", "").strip().lower()
+    media_project_id = _project_id_from_request(request)
     kind: MediaKind | None = None
     if kind_header in {"image", "video", "audio", "file"}:
         kind = kind_header  # type: ignore[assignment]
@@ -179,6 +194,7 @@ async def companion_ingest(request: Request, device: dict) -> dict:
             content_type=content_type,
             owner=device["id"],
             device_id=device["id"],
+            project_id=media_project_id,
         )
         if isinstance(result, dict):
             return result
@@ -194,6 +210,7 @@ async def companion_ingest(request: Request, device: dict) -> dict:
         owner=device["id"],
         device_id=device["id"],
         upload_id=upload_id if upload_id else None,
+        project_id=media_project_id,
     )
     public = item.to_public()
     public["device_id"] = device["id"]
