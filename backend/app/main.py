@@ -190,6 +190,12 @@ async def startup() -> None:
         startup_recovery()
     except Exception:
         logging.debug("Recovery journal startup reconcile skipped", exc_info=True)
+    try:
+        from .agent.durable_execution.recovery import reconcile_execution_on_startup
+
+        await reconcile_execution_on_startup()
+    except Exception:
+        logging.debug("Execution lease reconcile skipped", exc_info=True)
     node = await register_localhost_node()
     await bind_workers_to_node(node.id)
     await register_localhost_capabilities(node.id)
