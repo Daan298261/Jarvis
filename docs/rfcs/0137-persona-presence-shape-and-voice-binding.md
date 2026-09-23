@@ -55,6 +55,24 @@ Figures are particle samples in `buildFigure` (the layer `uMorph` lerps). `build
 
 While the HexStrike suite profile is active, the existing `hex_aegis` `shapeId` override stays in front of the persona figure. Turning the suite off morphs back to the selected persona’s shape. Suite on/off does **not** change the voice. Do not rewrite RFC-0106.
 
+### Keep existing UI
+
+**Keep any existing UI. More = better.**
+
+The 13-persona catalog is a layer on the surfaces that already ship. Do not remove, hide, or collapse:
+
+- Session-mode controls (RFC-0126 / RFC-0130 `SessionPersonalityControls`)
+- `VoiceProfilePicker` / the voice catalog picker
+- The Appearance pane and the HUD Appearance menu (`AppearanceSettingsPane`, `AppearancePresenceControls`)
+- HexStrike / Daybreak suite UI (Appearance suite control, `HudHexStrikeSuite`)
+- Current presence / HUD chrome / the morphable orb path (`PresenceHost`, `HumanoidPresence`, `morphableOrbCloud`, `uMorph`)
+
+**Will not:** Do not remove or replace existing session-mode, voice-picker, Appearance, HexStrike, or presence UI.
+
+Prefer **additive** new shapes, settings, and controls. Register the 13 shapes beside `humanoid_bust`, `energy_core`, and `hex_aegis`. Mount the named-persona select and the appearance overrides **in addition to** the controls above. Selecting a named persona still binds the roster default shape and voice together. After that, the owner must still be able to open `VoiceProfilePicker` and Appearance and change voice, pitch, speed, volume, colours, glow, animation, scale, and `specialists_auto_speak`. Those edits persist per persona. The fail-closed neural pack rule is unchanged: no SAPI stand-in, no IP-violating voice (Codsworth, Cortana, Ultron, Fallout, Marvel, Disney, Iron Man, and the related strings still fail `ip_guard`).
+
+Session modes stay a separate HUD/prompt control. The HexStrike profile still forces `shapeId` `hex_aegis` without removing the suite UI or the persona select.
+
 ### Catalog
 
 Display archetype in the voice column is the **existing pack’s** display name, not a new pack. Default colours are the roster pair (orb + accent). Appearance may override them per persona; the shape id stays.
@@ -225,9 +243,9 @@ Selecting a persona the first time writes the roster defaults (shape, voice, col
 - Function phrases, in roster order: coordinating, planning, researching, coding, analysing threats, verifying security, handling media, writing, messaging, watching, looking after the house, growing the audience, working the systems. Sentence shape: `"{Main} is coordinating."` plus `"{Label} is {phrase}."` for each specialist who is not the main persona. If the main persona is not Anzu, the first clause uses that label with **coordinating** only when Anzu is also attached; otherwise the first clause is `"{Main} is {main phrase}."` and specialists follow. The locked example above is the acceptance string.
 - Attach specialists without replacing the main persona: `PUT /api/named-personas` may include `{ "id", "task_id", "as_specialist": true }`. That writes `specialist_persona_ids` on the task and does not call `set_active_voice_profile_id` unless `specialists_auto_speak` is true for that id (and the bind succeeds). Omitting `as_specialist` changes the main persona as in Apply path.
 - Show the chip and sentence on the HUD task row (`frontend/src/hud/HudOpsRail.tsx`) and the HUD task detail (`frontend/src/hud/HudChatHome.tsx` caption when that task is current). This is a label and an orb. It is not a swarm router and not a new orchestrator.
-- Settings: one named-persona `<select>` lists all 13. Copy says **shape and voice travel together**. Mount it from Appearance (`AppearanceSettingsPane`, which the HUD Appearance menu already hosts). Do not turn `SessionPersonalityControls` into this catalog.
-- Keep the session-mode control. Its copy stays about coding / research / concise accents. It must not say it changes the figure or the voice.
-- The Voice menu may still list packs. Choosing a named persona still sets both. A later voice pick is the per-persona override above.
+- Settings: one **additional** named-persona `<select>` lists all 13. Copy says **shape and voice travel together**. Mount it inside the existing Appearance pane (`AppearanceSettingsPane`, which the HUD Appearance menu already hosts). Leave `SessionPersonalityControls`, `VoiceProfilePicker`, the Appearance controls, and the HexStrike / Daybreak control on that pane.
+- Session-mode copy stays about coding / research / concise accents. It must not say it changes the figure or the voice. Do not remove, hide, or collapse that control.
+- `VoiceProfilePicker` stays. Choosing a named persona sets the roster shape and voice. The owner can still open the picker and Appearance afterwards; that change is the per-persona override above.
 
 ### Red Team and Blue Team
 
@@ -235,8 +253,10 @@ Veles and Themis are the persona labels Taco gave for Red Team (threat intellige
 
 ### What a failed implement looks like
 
+- Removing, hiding, or collapsing `SessionPersonalityControls`, `VoiceProfilePicker`, the Appearance pane / HUD Appearance menu, HexStrike / Daybreak suite UI, or the current presence / HUD chrome / morphable orb path.
+- Replacing those controls with the named-persona select instead of mounting the select beside them.
 - Binding `core`, `coding`, `research`, or `concise` to a shape or a voice.
-- Treating HexStrike / Daybreak / `hex_aegis` as a fourteenth persona, or changing voice when the suite toggles.
+- Treating HexStrike / Daybreak / `hex_aegis` as a fourteenth persona, or changing voice when the suite toggles, or deleting the suite UI.
 - Keeping `eagir` as a catalog id, or keeping the four-name table as the catalog.
 - Leaving Enki on `abzu_flow` or the tactical aide, or leaving Veles on `root_coil` as the canonical shape.
 - A `tts_voice_hint` (including `"jarvis-default"`) used as the persona voice signal.
@@ -260,7 +280,7 @@ Veles and Themis are the persona labels Taco gave for Red Team (threat intellige
 - [ ] Shared visual states exist for every persona: idle (breathing), listening (ring toward mic), thinking (rotating/expanding rings), working (`executing`, specialist motion), speaking (brightness/waveform follows TTS), alert (red/orange pulse), waiting for approval (`approval`, locked ring), offline (dim + broken ring), error (irregular flicker + warning colour). They run on the existing orb cloud.
 - [ ] Appearance overrides (voice, pitch, speaking speed, volume, orb colour, accent colour, glow, animation intensity, orb scale, `specialists_auto_speak`) persist per persona. They do not write SAPI. Pitch and rate are applied on the neural audio path.
 - [ ] `PUT /api/session-personality` and phrase detect do not change `shapeId` and do not call `set_active_voice_profile_id`. Existing `tests/test_session_personality.py` assertions still pass.
-- [ ] The Appearance persona select lists all 13, updates shape and voice together, and its copy says they travel together. The session-mode select does not.
+- [ ] The Appearance persona select lists all 13, updates shape and voice together, and its copy says they travel together. The session-mode select does not. `SessionPersonalityControls`, `VoiceProfilePicker`, the Appearance pane / HUD Appearance menu, HexStrike / Daybreak suite UI, and the presence / HUD chrome / morphable orb path are still present and usable. The owner can change voice and appearance after a persona select; those overrides persist per persona.
 - [ ] With main `anzu` and specialists `enki` and `themis` on a task, the card copy is “Anzu is coordinating. Enki is coding. Themis is verifying security.” and the main shape stays `stormbird` while `specialists_auto_speak` is false.
 - [ ] Shape change animates `uMorph` on the existing cloud. Reduced motion snaps. No remount key on shape or persona id.
 - [ ] With the HexStrike suite profile active, `shapeId` is `hex_aegis` and the persona voice is left as already bound. Suite off returns the persona figure. RFC-0106 payloads unchanged.
@@ -275,12 +295,13 @@ Live listening and a GPU capture of the morph are Windows desktop sign-off.
 | Area | Paths |
 | --- | --- |
 | Backend | **New** `backend/app/persona/named_persona.py` (13-row map, migration, apply, per-persona appearance, specialist attach). **New** route module wired from `backend/app/main.py` at `/api/named-personas`, **or** a small router beside `backend/app/api/session_personality.py` that does not change that module’s contract. Call `set_active_voice_profile_id` from the main-persona apply only. **Do not** add shape or voice fields to `SessionMode`. Pitch/rate/volume on the neural PCM path in `backend/app/tts/synthesize.py` (no SAPI branch for these personas). |
-| Frontend | `frontend/src/presence/renderers/shapes/` — `stormbird.ts`, `commandFacet.ts`, `memoryRings.ts`, `codeCube.ts`, `serpentOrbit.ts`, `twinShield.ts`, `oceanSwell.ts`, `waveformLetters.ts`, `cometTrail.ts`, `eyeRadar.ts`, `breathLeaf.ts`, `starSocial.ts`, `forgeCore.ts`. `catalog.ts` (`registerPresenceShape`). `frontend/src/presence/presenceTypes.ts` and `presenceState.ts` (add `approval` and `error`; working stays `executing`). `HumanoidPresence.tsx` (shared state visuals + persona colour/glow/scale). `frontend/src/hud/HudChatHome.tsx` (`shapeId`: suite `hex_aegis`, else the main persona). `frontend/src/hud/HudOpsRail.tsx` (specialist orb + sentence). **New** named-persona select and appearance overrides mounted from `frontend/src/settings/AppearanceSettingsPane.tsx`. Do not turn `SessionPersonalityControls` into the persona catalog. Do not set a React `key` from the shape or persona id. |
+| Frontend | `frontend/src/presence/renderers/shapes/` — `stormbird.ts`, `commandFacet.ts`, `memoryRings.ts`, `codeCube.ts`, `serpentOrbit.ts`, `twinShield.ts`, `oceanSwell.ts`, `waveformLetters.ts`, `cometTrail.ts`, `eyeRadar.ts`, `breathLeaf.ts`, `starSocial.ts`, `forgeCore.ts`. `catalog.ts` (`registerPresenceShape` **beside** the existing shapes). `frontend/src/presence/presenceTypes.ts` and `presenceState.ts` (add `approval` and `error`; working stays `executing`). `HumanoidPresence.tsx` (shared state visuals + persona colour/glow/scale on the existing cloud). `frontend/src/hud/HudChatHome.tsx` (`shapeId`: suite `hex_aegis`, else the main persona). `frontend/src/hud/HudOpsRail.tsx` (specialist orb + sentence, added on the existing row). **New** named-persona select and appearance overrides mounted from `frontend/src/settings/AppearanceSettingsPane.tsx` **in addition to** `SessionPersonalityControls`, `VoiceProfilePicker`, and the HexStrike control. Do not turn `SessionPersonalityControls` into the persona catalog. Do not set a React `key` from the shape or persona id. |
 | Tests | `tests/test_rfc0137_named_persona.py`. Leave `tests/test_session_personality.py` green without shape assertions. |
 | Docs | This RFC. §59 Decision line only. Do not add a §58 checkbox. |
 
 ## Out of scope
 
+- **Will not:** Do not remove or replace existing session-mode, voice-picker, Appearance, HexStrike, or presence UI.
 - Wiring RFC-0126 / RFC-0130 modes to these personas. Chat phrases such as “start a coding session” stay mode switches.
 - A HexStrike / Daybreak persona, or a suite voice bind. Rewriting RFC-0106.
 - A fourteenth name, or restoring `eagir` / `abzu_flow` / `root_coil` as canonical ids.
