@@ -3,13 +3,24 @@
 **Status:** accepted  
 **Queue item:** (none — no new §58 checkbox)  
 **Author:** Jarvis Architect  
-**Date:** 2026-09-23
+**Date:** 2026-09-23  
+**Amended:** 2026-09-23 — quality bar and **Anzu 1.0** release stretch (Taco via CoS). Status stays **accepted**. Specs-only.
 
 **Related (do not rewrite):** [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (**implemented** — `registerPresenceShape`, `buildFigure`, `uMorph`). [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) (13-persona ANZU roster, neural voice bind, shared presence states). [RFC-0051](0051-humanoid-presence-runtime.md) (reduced motion snaps). [RFC-0126](0126-personality-session-modes.md) / [RFC-0130](0130-session-personalities.md) stay session modes (HUD accent + prompt). [RFC-0062](0062-selectable-voice-profile-catalog.md) / [RFC-0092](0092-neural-tts-default-no-silent-sapi.md) voice catalog. [RFC-0078](0078-hexstrike-cyber-suite.md) `hex_aegis` while the suite profile is active. [RFC-0106](0106-hexstrike-jarvis-full-operator-control.md) operator contract stays. [RFC-0104](0104-persona-candidates-pack.md) stays an unmerged hold. [RFC-0109](0109-media-file-video-upload-phone-and-pc.md) image byte cap (`caps_for_kind("image")`).
 
 This file is **0138**. It is not a fourteenth persona and not an amendment of the roster. The §59 line that amended RFC-0137 in place (“no RFC-0138”) means do not open a new RFC for that catalog. This RFC is the custom presence look.
 
 This PR is **specs-only**. Product code is a **named follow-up** after CoS merges this PR. Full intent; **no stubs / soft-fail**. Do not merge RFC-0104 trees. Do not add voice packs.
+
+### Quality bar
+
+The implement is **multibillion-company grade**. Production-grade UX polish, durable persistence, and fail-closed errors are acceptance, not polish to add later. Preview and Set as default must feel finished: the cloud morphs, the saved list updates, the default badge is the one the owner just set, and a restart shows that same look. A prototype panel, a placeholder figure, a success toast before the server persists, or a look that vanishes on restart is a **fail**.
+
+If the landed implement is below that bar, the notify path is **CoS → Taco**. That path is a review rule written in Acceptance and Notes. It is not an API, a setting, a log line, or any other code path.
+
+### Release stretch
+
+User-facing release wording for this feature is **Anzu 1.0**. Do not brand the stretch as “Jarvis 1.x”. The GitHub repository stays [`Daan298261/Jarvis`](https://github.com/Daan298261/Jarvis). Repo paths and existing `Jarvis` code identifiers stay. This RFC does not rename them.
 
 ## Problem
 
@@ -50,6 +61,8 @@ The custom-UI control is a layer on the surfaces that already ship. Do not remov
 **Will not:** Do not remove or replace existing session-mode, voice-picker, Appearance, named-persona, HexStrike, or presence UI.
 
 Mount **Add new UI** beside those controls inside `AppearanceSettingsPane`. Do not replace `NamedPersonaControls`.
+
+The wizard is shipping UI for the **Anzu 1.0** stretch: labeled fields, actions disabled while a job runs, the server’s error text on screen, and keyboard-reachable controls. Copy the owner reads may say **Anzu 1.0**. It must not say “Jarvis 1.x”. Buttons, routes, and code identifiers that already say Jarvis stay.
 
 ### Shape precedence
 
@@ -172,7 +185,7 @@ The button opens one modal wizard:
 1. **Input.** A text area for the look, and an image file input. The owner may send text, or an image, or both. Copy states that the result is built from the flowing orbs.
 2. **Generate.** `POST` the job. Show `queued` / `running`. Show `model_unavailable`, `vision_unavailable`, and `constraint_rejected` as errors with the server message. Do not show a fake preview on those codes.
 3. **Preview.** On `succeeded`, morph the **existing** orb cloud to `custom_ui_preview_<job_id>` through `uMorph`. Do not mount a second `HumanoidPresence`, a second canvas, or a second WebGL context. If the shell is Classic (`requestedPresence` `none`) and the cloud is not mounted, say that preview needs Humanoid HUD or Particle bust. Do not spawn a renderer to paper over that, and do not change the shell unless the owner picks that presence mode with the existing Appearance controls.
-4. **Actions:**
+4. **Actions** (finished, not a prototype — the list, the badge, and the cloud agree before the wizard says it is done):
    - **Set as default** — save if the preview is not saved yet (name required; default the name from the first 48 characters of `prompt_text`, or `Custom look` when the prompt is empty), set `default` / `default_preset_id` / `active_preset_id` to this preset, clear `default` on every other preset, register `custom_ui_<preset id>`, morph to it, unregister the preview id.
    - **Save as named custom UI** — same persist, owner-supplied name, **without** changing `default_preset_id`. It becomes `active_preset_id` so the look they kept stays on the cloud until they discard or pick another.
    - **Discard** — unregister `custom_ui_preview_*`, morph back to the shape precedence **before** the wizard opened, delete the unsaved preview. Do not delete presets already in `presets`.
@@ -214,6 +227,8 @@ Tests live in `tests/test_rfc0138_custom_presence.py`. They assert. They do not 
 - HTTP 200 or a saved preset when Anzu is unavailable, when vision is required and missing, or when the validator rejected the reply.
 - A cloud screenshot-to-code SaaS or a required MCP as the only generation path.
 - A merged RFC-0104 tree, or product code in the specs PR.
+- Prototype UX: a mock preview, a control that claims Set as default before `settings.json` has the preset, a soft-fail that stores a partial look, or copy that brands this stretch “Jarvis 1.x”.
+- A code path whose job is to notify Taco. The quality escalate is **CoS → Taco** in review, written here, not implemented.
 
 ## Acceptance criteria
 
@@ -227,8 +242,10 @@ Tests live in `tests/test_rfc0138_custom_presence.py`. They assert. They do not 
 - [ ] **Launch reload.** Process start re-registers the default preset’s `buildFigure` from the stored composition and selects it when the suite is off, without calling the model again. Suite on still renders `hex_aegis`.
 - [ ] **Keep existing UI.** Session modes, `VoiceProfilePicker`, Appearance, the 13-persona roster, HexStrike / Daybreak, and the morphable orb path still work. Persona voice bind and session-mode behaviour are unchanged. No new voice packs. RFC-0104 stays unmerged.
 - [ ] **Tests.** `tests/test_rfc0138_custom_presence.py` covers the bullets above. Pytest may script the model provider; product code must not. No `pytest.skip` and no soft-fail on `model_unavailable`. `python3 -m pytest`. Portal implement also runs `npm --prefix frontend run build` and `npm --prefix frontend run lint`.
+- [ ] **Quality bar.** The wizard, errors, preview morph, Set as default, named save, and launch reload are production-grade: durable persistence, fail-closed errors with no stubs or soft-fail, and a preview / default that feel finished. Subpar implement is not accepted on review. The notify path is **CoS → Taco**. That path is this review rule, not a code path.
+- [ ] **Anzu 1.0 stretch.** User-facing release wording this feature adds says **Anzu 1.0**, not “Jarvis 1.x”. The repo stays `Daan298261/Jarvis`. Existing paths and `Jarvis` identifiers stay.
 
-Live Anzu vision and a GPU capture of the preview morph are Windows desktop sign-off.
+Live Anzu vision and a GPU capture of the preview morph are Windows desktop sign-off. Sign-off includes the quality bar: the flow looks finished, the default survives restart, and failures stay fail-closed. A miss goes **CoS → Taco**.
 
 ## Likely files
 
@@ -259,6 +276,10 @@ Guidance for later implement prompts. This PR does not assign them and does not 
 
 ## Notes
 
-Desktop sign-off: with the local model loaded, generate one text look and one image look, confirm the cloud morphs without a pop, Set as default, restart, and confirm the same figure returns while the speaking persona can still change voice. With the model stopped, the wizard shows `model_unavailable` and stores nothing. With an image and vision unloaded, it shows `vision_unavailable`. HexStrike on shows `hex_aegis` and leaves the preset and the voice stored. Reduced motion snaps. Classic shell does not grow a second canvas.
+**Quality bar.** Multibillion-company grade. Production UX, durable `settings.json` persistence, fail-closed errors, and a preview / Set as default that feel finished. If the implement is subpar, notify **CoS → Taco**. Do not add a notifier, webhook, or setting for that escalate.
+
+**Release stretch.** **Anzu 1.0** is the product stretch name wherever this feature talks about a release. Do not write “Jarvis 1.x” in that copy. Do not rename the GitHub repo. Do not rename existing `Jarvis` paths or code identifiers.
+
+Desktop sign-off: with the local model loaded, generate one text look and one image look, confirm the cloud morphs without a pop, Set as default, restart, and confirm the same figure returns while the speaking persona can still change voice. With the model stopped, the wizard shows `model_unavailable` and stores nothing. With an image and vision unloaded, it shows `vision_unavailable`. HexStrike on shows `hex_aegis` and leaves the preset and the voice stored. Reduced motion snaps. Classic shell does not grow a second canvas. The wizard reads as finished **Anzu 1.0** UI, not a prototype.
 
 Screenshot-to-code and MCP are cited as the familiar image→structured-UI pattern. The bytes that persist are `orb_composition` plus an optional image file under `custom_ui_uploads/`.
