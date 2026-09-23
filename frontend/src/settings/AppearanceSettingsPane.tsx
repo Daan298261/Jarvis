@@ -4,6 +4,7 @@ import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
 import { NamedPersonaControls } from "../persona/NamedPersonaControls"
 import { SessionPersonalityControls } from "../personality/SessionPersonalityControls"
+import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
 
@@ -111,6 +112,7 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
 
       <SessionPersonalityControls />
       <NamedPersonaControls />
+      <CustomPresencePanel settings={settings} />
 
       <label>
         Rendering

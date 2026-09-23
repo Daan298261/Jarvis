@@ -18,12 +18,58 @@ import { forgeCoreShape } from "./forgeCore"
 
 export const DEFAULT_PRESENCE_SHAPE_ID: PresenceShapeId = "humanoid_bust"
 
+/** Built-in + RFC-0137 roster ids — custom UI must never overwrite these. */
+export const PROTECTED_PRESENCE_SHAPE_IDS = new Set<string>([
+  "humanoid_bust",
+  "energy_core",
+  "hex_aegis",
+  "stormbird",
+  "command_facet",
+  "memory_rings",
+  "code_cube",
+  "serpent_orbit",
+  "twin_shield",
+  "ocean_swell",
+  "waveform_letters",
+  "comet_trail",
+  "eye_radar",
+  "breath_leaf",
+  "star_social",
+  "forge_core",
+])
+
 const registry = new Map<PresenceShapeId, PresenceShapeDefinition>()
 
 /** Register or replace a morphable presence shape. Catalog is intentionally expandable. */
 export function registerPresenceShape(definition: PresenceShapeDefinition): void {
   if (!definition.id.trim()) throw new Error("Presence shape id must be non-empty")
   registry.set(definition.id, definition)
+}
+
+/**
+ * Register a custom / preview presence shape.
+ * Refuses protected built-in and roster ids (RFC-0138 — no overwrite path).
+ */
+export function registerCustomPresenceShape(definition: PresenceShapeDefinition): void {
+  const id = definition.id.trim()
+  if (!id) throw new Error("Presence shape id must be non-empty")
+  if (PROTECTED_PRESENCE_SHAPE_IDS.has(id)) {
+    throw new Error(`cannot register protected shape id: ${id}`)
+  }
+  if (!id.startsWith("custom_ui_")) {
+    throw new Error(`custom presence shape id must start with custom_ui_: ${id}`)
+  }
+  registry.set(id, definition)
+}
+
+export function unregisterPresenceShape(id: string): void {
+  const key = (id || "").trim()
+  if (!key || PROTECTED_PRESENCE_SHAPE_IDS.has(key)) return
+  registry.delete(key)
+}
+
+export function hasPresenceShape(id: string | undefined | null): boolean {
+  return Boolean(id && registry.has(id))
 }
 
 export function listPresenceShapes(): PresenceShapeDefinition[] {
