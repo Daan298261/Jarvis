@@ -44,7 +44,7 @@ data class CompanionState(
     val capabilities: JSONObject = JSONObject(),
     val swarm: JSONObject = JSONObject(), val coding: JSONObject = JSONObject(),
     val codingDecisions: List<JSONObject> = emptyList(), val voiceProfiles: List<JSONObject> = emptyList(),
-    val selectedVoice: String = "", val presenceMode: String = "orb",
+    val selectedVoice: String = "", val presenceMode: String = PresenceVisual.DEFAULT_PRESENCE_MODE,
     val liveTranscript: String = "", val voiceMode: String = "clip",
     val inferenceLoaded: Boolean = false, val inferenceLoading: Boolean = false,
     val inferenceProfile: String = "", val inferenceFamily: String = "", val inferenceError: String = "",
@@ -83,7 +83,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val mutable = MutableStateFlow(CompanionState(
         selectedModel = companionPrefs.getString("inference_profile", "auto") ?: "auto",
         selectedVoice = companionPrefs.getString("voice_profile", "") ?: "",
-        presenceMode = companionPrefs.getString("presence_mode", "orb").takeIf { it in setOf("orb", "humanoid") } ?: "orb",
+        presenceMode = PresenceVisual.normalizePresenceMode(companionPrefs.getString("presence_mode", PresenceVisual.DEFAULT_PRESENCE_MODE)),
     ))
     val state = mutable.asStateFlow()
     private var recorder: MediaRecorder? = null
