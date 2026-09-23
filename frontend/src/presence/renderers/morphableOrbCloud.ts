@@ -25,6 +25,8 @@ export const particleVertexShader = `
   uniform float uSpeech;
   uniform float uPixelScale;
   uniform float uMorph;
+  uniform float uPhaseKind;
+  uniform float uGlow;
   uniform vec2 uPointer;
   uniform float uPointerStrength;
   varying float vGold;
@@ -63,6 +65,18 @@ export const particleVertexShader = `
     } else {
       p *= 1.0 + uSpeech * 0.03 * sin(t * 9.5);
     }
+    float working = step(2.5, uPhaseKind) * (1.0 - step(3.5, uPhaseKind));
+    float thinking = step(1.5, uPhaseKind) * (1.0 - step(2.5, uPhaseKind));
+    if (flow > 0.22 && flow < 0.72) {
+      float ang = t * (0.9 * working + 0.32 * thinking) * uMotion;
+      float c = cos(ang);
+      float s = sin(ang);
+      float x = p.x;
+      float z = p.z;
+      p.x = x * c - z * s;
+      p.z = x * s + z * c;
+      p *= 1.0 + thinking * uMotion * 0.05 * sin(t * 1.6);
+    }
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
     gl_PointSize = clamp(size * uPixelScale * 6.6 / -mv.z, 0.72, 96.0);
@@ -80,6 +94,10 @@ export const particleFragmentShader = `
   uniform vec3 uColor;
   uniform vec3 uGold;
   uniform float uOpacity;
+  uniform float uTime;
+  uniform float uMotion;
+  uniform float uPhaseKind;
+  uniform float uGlow;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
@@ -95,6 +113,9 @@ export const particleFragmentShader = `
     float depthWeight = mix(clamp(0.72 + vDepth * 0.52, 0.52, 1.12), 1.0, environment);
     float alpha = (core + halo) * (1.0 - smoothstep(0.6, 1.0, r))
       * vLight * uOpacity * depthWeight * mix(1.0, 0.72, loose);
+    float errorPhase = step(6.5, uPhaseKind) * (1.0 - step(7.5, uPhaseKind)) * step(0.01, uMotion);
+    float flicker = mix(1.0, 0.42 + 0.58 * step(0.55, fract(sin(uTime * 23.0 + vDepth * 12.0) * 43758.5)), errorPhase);
+    alpha *= flicker * mix(1.0, uGlow, 0.65);
     vec3 color = mix(uColor, uGold, smoothstep(0.13, 0.75, vGold));
     float hot = smoothstep(2.4, 4.5, vLight);
     gl_FragColor = vec4(color + vec3(core * (0.18 + hot * 0.42)), alpha);

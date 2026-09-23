@@ -207,6 +207,8 @@ export type Task = {
   heartbeat_status?: "alive" | "waiting" | "stale" | "stopped" | string
   waiting_for_confirmation: boolean
   confirmation_payload?: unknown
+  specialist_persona_ids?: string[]
+  persona_card_sentence?: string
   verification_summary?: {
     result: "VERIFIED" | "VERIFICATION_FAILED" | "PARTIALLY_VERIFIED" | "NOT_VERIFIED" | string
     verifier: string

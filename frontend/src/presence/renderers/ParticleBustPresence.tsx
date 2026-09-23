@@ -14,6 +14,7 @@ type Props = { snapshot: PresenceSnapshot; settings: PresentationSettings; size?
 const COLORS: Record<PresenceSnapshot["phase"], number> = {
   offline: 0x547084, idle: 0x00c8ff, listening: 0x2ad8ff, thinking: 0x1aa0ff,
   executing: 0x00bdff, speaking: 0x3ad4ff, waiting: 0x7996b3, alert: 0xff7957,
+  approval: 0xf5d76e, error: 0xffb020,
 }
 
 export function ParticleBustPresence({ snapshot, settings }: Props) {
@@ -52,6 +53,7 @@ export function ParticleBustPresence({ snapshot, settings }: Props) {
     const uniforms = {
       uTime: { value: 0 }, uMotion: { value: 1 }, uActivity: { value: 0 }, uSpeech: { value: 0 },
       uPixelScale: { value: 1 }, uOpacity: { value: 1 }, uMorph: { value: 1 },
+      uPhaseKind: { value: 0 }, uGlow: { value: 1 },
       uPointer: { value: new THREE.Vector2() }, uPointerStrength: { value: 0 },
       uColor: { value: new THREE.Color(COLORS.idle) }, uGold: { value: new THREE.Color(0xff941f) },
     }
@@ -83,7 +85,7 @@ export function ParticleBustPresence({ snapshot, settings }: Props) {
       const interval = reduced ? 100 : efficient ? 33 : 16
       if (time - last < interval) return
       const delta = Math.min((time - last) / 1000, 0.05); last = time; if (!reduced) animationTime += delta
-      const activity = { offline: 0, idle: .18, listening: .45, thinking: .72, executing: 1, speaking: .68, waiting: .12, alert: .85 }[current.snapshot.phase]
+      const activity = { offline: 0, idle: .18, listening: .45, thinking: .72, executing: 1, speaking: .68, waiting: .12, alert: .85, approval: .4, error: .9 }[current.snapshot.phase]
       uniforms.uTime.value = animationTime; uniforms.uMotion.value = reduced ? 0 : 1; uniforms.uActivity.value += (activity - uniforms.uActivity.value) * (reduced ? 1 : Math.min(1, delta * 3))
       uniforms.uSpeech.value = !reduced && current.snapshot.phase === "speaking" ? THREE.MathUtils.clamp(current.snapshot.audioLevel, 0, 1) : 0
       uniforms.uOpacity.value = current.snapshot.phase === "offline" ? .35 : current.snapshot.phase === "waiting" ? .72 : 1

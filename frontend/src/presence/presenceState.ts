@@ -7,6 +7,7 @@ type PresenceInputs = {
   speaking: boolean
   connected?: boolean
   systemDegraded?: boolean
+  pendingApproval?: boolean
   runningTaskCount?: number
   decisionCount?: number
   audioLevel?: number
@@ -14,15 +15,12 @@ type PresenceInputs = {
 
 function phaseFor(inputs: PresenceInputs): PresencePhase {
   if (inputs.connected === false) return "offline"
-  if (
-    inputs.systemDegraded ||
-    inputs.task?.status === "failed" ||
-    inputs.task?.waiting_for_confirmation
-  ) return "alert"
+  if (inputs.task?.status === "failed") return "error"
+  if (inputs.task?.waiting_for_confirmation || inputs.pendingApproval) return "approval"
+  if (inputs.systemDegraded) return "alert"
   if (inputs.speaking) return "speaking"
   if (inputs.recording) return "listening"
   if (inputs.task?.status === "running") return "executing"
-  if (inputs.task?.status === "queued" || inputs.task?.status === "waiting") return "waiting"
   if (inputs.task && !["completed", "cancelled", "failed"].includes(inputs.task.status)) return "thinking"
   return "idle"
 }
@@ -36,6 +34,8 @@ function intensityFor(phase: PresencePhase): number {
     case "thinking": return 0.62
     case "executing": return 0.72
     case "alert": return 0.78
+    case "approval": return 0.5
+    case "error": return 0.84
     case "speaking": return 0.92
   }
 }

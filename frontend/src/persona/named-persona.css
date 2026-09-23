@@ -1,0 +1,42 @@
+.named-persona-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.named-persona-overrides {
+  display: grid;
+  gap: 8px;
+}
+
+.named-persona-overrides label,
+.named-persona-controls > label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.named-persona-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-specialist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.hud-specialist-orb {
+  width: 72px;
+  height: 72px;
+  flex: 0 0 72px;
+}
+
+.hud-persona-sentence {
+  display: block;
+}

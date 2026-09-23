@@ -2,6 +2,19 @@ import type { ParticleOrb, PresenceShapeDefinition, PresenceShapeId } from "../p
 import { humanoidBustShape } from "./humanoidBust"
 import { energyCoreShape } from "./energyCore"
 import { hexAegisShape } from "./hexAegis"
+import { stormbirdShape } from "./stormbird"
+import { commandFacetShape } from "./commandFacet"
+import { memoryRingsShape } from "./memoryRings"
+import { codeCubeShape } from "./codeCube"
+import { serpentOrbitShape } from "./serpentOrbit"
+import { twinShieldShape } from "./twinShield"
+import { oceanSwellShape } from "./oceanSwell"
+import { waveformLettersShape } from "./waveformLetters"
+import { cometTrailShape } from "./cometTrail"
+import { eyeRadarShape } from "./eyeRadar"
+import { breathLeafShape } from "./breathLeaf"
+import { starSocialShape } from "./starSocial"
+import { forgeCoreShape } from "./forgeCore"
 
 export const DEFAULT_PRESENCE_SHAPE_ID: PresenceShapeId = "humanoid_bust"
 
@@ -56,3 +69,16 @@ export function resampleOrbs(orbs: ParticleOrb[], count: number): ParticleOrb[] 
 registerPresenceShape(humanoidBustShape)
 registerPresenceShape(energyCoreShape)
 registerPresenceShape(hexAegisShape)
+registerPresenceShape(stormbirdShape)
+registerPresenceShape(commandFacetShape)
+registerPresenceShape(memoryRingsShape)
+registerPresenceShape(codeCubeShape)
+registerPresenceShape(serpentOrbitShape)
+registerPresenceShape(twinShieldShape)
+registerPresenceShape(oceanSwellShape)
+registerPresenceShape(waveformLettersShape)
+registerPresenceShape(cometTrailShape)
+registerPresenceShape(eyeRadarShape)
+registerPresenceShape(breathLeafShape)
+registerPresenceShape(starSocialShape)
+registerPresenceShape(forgeCoreShape)

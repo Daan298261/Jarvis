@@ -5,7 +5,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js"
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
-import type { PresenceSnapshot, PresentationSettings } from "../presenceTypes"
+import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import {
   createMorphablePresenceSystem,
   particleFragmentShader,
@@ -20,26 +20,38 @@ type HumanoidPresenceProps = {
   size?: number
   /** Optional override for harness / morph demos; defaults from settings.avatarId. */
   shapeId?: string
+  personaVisual?: PersonaCloudVisual
 }
 
 const PHASE_COLOR: Record<PresenceSnapshot["phase"], number> = {
   offline: 0x547084, idle: 0x00c8ff, listening: 0x2ad8ff, thinking: 0x1aa0ff,
   executing: 0x00bdff, speaking: 0x3ad4ff, waiting: 0x7996b3, alert: 0xff7957,
+  approval: 0xf5d76e, error: 0xffb020,
 }
 
-export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresenceProps) {
+const PHASE_KIND: Record<PresencePhase, number> = {
+  idle: 0, waiting: 0, listening: 1, thinking: 2, executing: 3,
+  speaking: 4, alert: 5, approval: 6, error: 7, offline: 8,
+}
+
+function phaseLabel(phase: PresencePhase): string {
+  if (phase === "executing") return "WORKING"
+  return phase.toUpperCase()
+}
+
+export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }: HumanoidPresenceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const attentionRef = useRef<AttentionVector>({ x: 0, y: 0, confidence: 0, source: "pointer" })
-  const stateRef = useRef({ snapshot, settings, shapeId })
+  const stateRef = useRef({ snapshot, settings, shapeId, personaVisual })
   const [failure, setFailure] = useState<Error | null>(null)
   const [activeShapeId, setActiveShapeId] = useState(
     () => shapeId || presenceShapeIdForAvatar(settings.avatarId),
   )
 
   useEffect(() => {
-    stateRef.current = { snapshot, settings, shapeId }
-  }, [snapshot, settings, shapeId])
+    stateRef.current = { snapshot, settings, shapeId, personaVisual }
+  }, [snapshot, settings, shapeId, personaVisual])
 
   useEffect(() => {
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -85,6 +97,8 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       uTime: { value: 0 }, uMotion: { value: 1 }, uActivity: { value: 0 },
       uSpeech: { value: 0 }, uPixelScale: { value: 1 }, uOpacity: { value: 1 },
       uMorph: { value: 1 },
+      uPhaseKind: { value: 0 },
+      uGlow: { value: 1 },
       uPointer: { value: new THREE.Vector2(0, 0) },
       uPointerStrength: { value: 0 },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
@@ -123,6 +137,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
     let disposed = false
     let lastRender = 0
     let animationTime = 0
+    let framingScale = 0.98
 
     const resize = () => {
       const { width, height } = stage.getBoundingClientRect()
@@ -139,7 +154,9 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       camera.lookAt(0, 0.06, 0)
       // Keep the environment full-bleed. Only the bust is framed to occupy roughly
       // three quarters of the stage height on desktop.
-      bust.scale.setScalar(aspect < 0.85 ? 0.98 : aspect > 2.05 ? 0.91 : 0.98)
+      framingScale = aspect < 0.85 ? 0.98 : aspect > 2.05 ? 0.91 : 0.98
+      const personaScale = stateRef.current.personaVisual?.scale
+      bust.scale.setScalar(framingScale * (personaScale && personaScale > 0 ? personaScale : 1))
       camera.updateProjectionMatrix()
       const scaleCap = aspect > 2.05 ? 720 : 580
       uniforms.uPixelScale.value = renderer.getPixelRatio() * Math.max(0.72, height / scaleCap)
@@ -178,19 +195,33 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       const activity = {
         offline: 0, idle: 0.18, listening: 0.45, thinking: 0.72,
         executing: 1, speaking: 0.68, waiting: 0.12, alert: 0.85,
+        approval: 0.4, error: 0.9,
       }[phase]
+      const visual = current.personaVisual
+      const animation = typeof visual?.animation === "number" ? visual.animation : 1
       uniforms.uTime.value = animationTime
-      uniforms.uMotion.value = reduced ? 0 : 1
+      uniforms.uMotion.value = reduced ? 0 : animation
+      uniforms.uPhaseKind.value = PHASE_KIND[phase]
+      uniforms.uGlow.value = typeof visual?.glow === "number" ? visual.glow : 1
+      if (bloom) bloom.strength = 0.35 + (uniforms.uGlow.value as number) * 0.35
+      const personaScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
+      bust.scale.setScalar(framingScale * personaScale)
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)
         * (reduced ? 1 : Math.min(1, delta * 3))
       uniforms.uSpeech.value = !reduced && phase === "speaking"
         ? THREE.MathUtils.clamp(current.snapshot.audioLevel, 0, 1) : 0
-      uniforms.uOpacity.value = phase === "offline" ? 0.35 : phase === "waiting" ? 0.72 : 1
-      color.setHex(PHASE_COLOR[phase])
+      uniforms.uOpacity.value = phase === "offline" ? 0.35 : phase === "waiting" ? 0.72 : phase === "error" ? 0.92 : 1
+      const warning = phase === "alert" || phase === "error" || phase === "offline" || phase === "approval"
+      if (!warning && visual?.orbColor) {
+        color.set(visual.orbColor)
+        uniforms.uGold.value.set(visual.accentColor || "#D4A017")
+      } else {
+        color.setHex(PHASE_COLOR[phase])
+        uniforms.uGold.value.setHex(
+          phase === "alert" || phase === "error" ? 0xff543b : phase === "offline" ? 0x607580 : phase === "approval" ? 0xffe7a3 : 0xff941f,
+        )
+      }
       uniforms.uColor.value.lerp(color, reduced ? 1 : 0.12)
-      uniforms.uGold.value.setHex(
-        phase === "alert" ? 0xff543b : phase === "offline" ? 0x607580 : 0xff941f,
-      )
 
       const framing = resolvePresenceShape(system.currentShapeId).framing
       const baseYaw = framing?.yaw ?? 0.06
@@ -265,15 +296,17 @@ export function HumanoidPresence({ snapshot, settings, shapeId }: HumanoidPresen
       data-attention-mode={settings.attentionMode}
       data-presence-shape={activeShapeId}
       role="img"
-      aria-label={`Jarvis particle presence is ${snapshot.phase}`}
+      aria-label={`Jarvis particle presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
     >
       <canvas ref={canvasRef} aria-hidden="true" />
+      {snapshot.phase === "offline" && <span className="jarvis-presence-broken-ring" aria-hidden="true" />}
+      {snapshot.phase === "approval" && <span className="jarvis-presence-lock-ring" aria-hidden="true" />}
       <div className="jarvis-humanoid-hud" aria-hidden="true">
         <span className="jarvis-humanoid-hud-tl" />
         <span className="jarvis-humanoid-hud-tr">
           TEM // PRESENCE
           <br />
-          {snapshot.phase.toUpperCase()}
+          {phaseLabel(snapshot.phase)}
         </span>
         <span className="jarvis-humanoid-hud-bl" />
       </div>

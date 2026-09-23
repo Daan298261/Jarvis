@@ -9,8 +9,10 @@ import type { Task } from "../api"
 import { parseConfirmationPayload } from "../chat/PermissionPrompt"
 import { AppearancePresenceControls } from "../presence/AppearancePresenceControls"
 import { PresenceHost } from "../presence/PresenceHost"
+import { personaCardSentence, useNamedPersonas } from "../persona/namedPersonas"
 import { derivePresenceSnapshot } from "../presence/presenceState"
 import { usePresentationSettings } from "../presence/presentationSettings"
+import type { PresencePhase } from "../presence/presenceTypes"
 
 const MOOD_COPY: Record<OrbMood, { label: string; detail: string }> = {
   idle: { label: "Ready", detail: "Local intelligence standing by" },
@@ -25,6 +27,15 @@ function taskHasPendingDecision(task: Task | null, queuePending: boolean): boole
   if (!task?.waiting_for_confirmation) return false
   const payload = parseConfirmationPayload(task.confirmation_payload)
   return Boolean(payload?.pending_id || payload?.permission_id || payload?.kind === "permission")
+}
+
+function presenceLabel(phase: PresencePhase, fallback: string, hexStrike: boolean): string {
+  if (hexStrike) return "Aegis"
+  if (phase === "executing") return "Working"
+  if (phase === "error") return "Error"
+  if (phase === "approval") return "Waiting for approval"
+  if (phase === "offline") return "Offline"
+  return fallback
 }
 
 function taskDetail(
@@ -46,6 +57,7 @@ export function HudChatHome() {
   const { hasPending: approvalQueuePending } = usePendingApprovals()
   const presentation = usePresentationSettings()
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
+  const namedPersonas = useNamedPersonas()
   const { hexSuiteExpanded, setHexSuiteExpanded } = useHudOverlay()
   const wasHexStrike = useRef(false)
   const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null }>({
@@ -79,8 +91,24 @@ export function HudChatHome() {
     task: moodState.task,
     recording: moodState.recording,
     speaking: moodState.speaking,
-    systemDegraded: moodState.task?.status === "failed" || approvalWaiting,
+    pendingApproval: approvalWaiting,
+    systemDegraded: false,
   })
+  const activePersona = namedPersonas?.active
+  const personaShape = activePersona?.presence_shape_id || undefined
+  const cardSentence = moodState.task
+    ? (moodState.task.persona_card_sentence
+      || personaCardSentence(activePersona?.id || "anzu", moodState.task.specialist_persona_ids || []))
+    : ""
+  const personaVisual = !hexStrikeActive && activePersona?.appearance
+    ? {
+        orbColor: activePersona.appearance.orb_color,
+        accentColor: activePersona.appearance.accent_color,
+        glow: activePersona.appearance.glow,
+        animation: activePersona.appearance.animation,
+        scale: activePersona.appearance.scale,
+      }
+    : undefined
   const threadActive = Boolean(moodState.task?.messages?.length)
   const copy = MOOD_COPY[mood]
   const presenceSettings = hexStrikeActive
@@ -97,17 +125,19 @@ export function HudChatHome() {
           snapshot={snapshot}
           settings={presenceSettings}
           size={760}
-          shapeId={hexStrikeActive ? HEXSTRIKE_SHAPE_ID : undefined}
+          shapeId={hexStrikeActive ? HEXSTRIKE_SHAPE_ID : (namedPersonas ? personaShape : "stormbird")}
+          personaVisual={personaVisual}
         />
         <div className="hud-orb-caption" aria-live="polite">
-          <span className={`hud-orb-state${mood === "alert" ? " alert" : ""}`}>
-            {hexStrikeActive ? "Aegis" : copy.label}
+          <span className={`hud-orb-state${snapshot.phase === "alert" || snapshot.phase === "error" || snapshot.phase === "approval" ? " alert" : ""}`}>
+            {presenceLabel(snapshot.phase, copy.label, hexStrikeActive)}
           </span>
           <span className="hud-orb-detail">
             {hexStrikeActive
               ? "HexStrike cybersecurity suite"
               : taskDetail(moodState.task, mood, threadActive, approvalWaiting)}
           </span>
+          {cardSentence && <span className="hud-orb-detail hud-persona-sentence">{cardSentence}</span>}
         </div>
       </section>
       {showHexSuite && <HudHexStrikeSuite />}

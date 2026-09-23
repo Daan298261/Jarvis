@@ -22,6 +22,17 @@ export type PresencePhase =
   | "speaking"
   | "waiting"
   | "alert"
+  | "approval"
+  | "error"
+
+/** Optional named-persona colour, glow, and scale on the existing orb cloud. */
+export type PersonaCloudVisual = {
+  orbColor?: string
+  accentColor?: string
+  glow?: number
+  animation?: number
+  scale?: number
+}
 
 export type PresenceAttention = {
   x: number

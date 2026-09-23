@@ -49,6 +49,71 @@ def _float32_to_pcm16(audio) -> bytes:
     return (arr * 32767.0).astype(np.int16).tobytes()
 
 
+def _persona_playback() -> tuple[float, float, float] | None:
+    try:
+        from ..persona.named_persona import active_playback_overrides
+
+        return active_playback_overrides()
+    except Exception:
+        return None
+
+
+def _wav_to_float(wav: bytes):
+    import numpy as np
+
+    with wave.open(io.BytesIO(wav), "rb") as handle:
+        channels = handle.getnchannels()
+        sample_rate = handle.getframerate()
+        width = handle.getsampwidth()
+        frames = handle.readframes(handle.getnframes())
+    if width != 2:
+        raise RuntimeError("Neural PCM adjustments expect 16-bit WAV")
+    samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32767.0
+    if channels > 1:
+        samples = samples.reshape(-1, channels).mean(axis=1)
+    return samples, sample_rate
+
+
+def _resample_linear(samples, new_len: int):
+    import numpy as np
+
+    count = int(samples.shape[0])
+    if new_len <= 1 or count <= 1:
+        return samples[:1]
+    if new_len == count:
+        return samples
+    source = np.linspace(0.0, 1.0, num=count, endpoint=False)
+    target = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
+    return np.interp(target, source, samples).astype(np.float32)
+
+
+def apply_neural_pcm_adjustments(
+    wav: bytes,
+    *,
+    pitch_semitones: float = 0.0,
+    speaking_rate: float | None = None,
+    volume: float = 1.0,
+) -> bytes:
+    """Pitch-shift, time-stretch, and gain on neural PCM. Never calls SAPI."""
+    rate = 1.0 if speaking_rate is None else float(speaking_rate)
+    neutral_rate = abs(rate - 1.0) < 1e-3
+    if abs(pitch_semitones) < 1e-3 and abs(volume - 1.0) < 1e-3 and neutral_rate:
+        return wav
+    samples, sample_rate = _wav_to_float(wav)
+    if not neutral_rate and rate > 0:
+        samples = _resample_linear(samples, max(1, int(round(len(samples) / rate))))
+    if abs(pitch_semitones) >= 1e-3:
+        factor = 2.0 ** (float(pitch_semitones) / 12.0)
+        pitched_len = max(1, int(round(len(samples) / factor)))
+        original = len(samples)
+        samples = _resample_linear(_resample_linear(samples, pitched_len), original)
+    if abs(volume - 1.0) >= 1e-3:
+        import numpy as np
+
+        samples = np.clip(samples * float(volume), -1.0, 1.0)
+    return _pcm_to_wav(_float32_to_pcm16(samples), sample_rate=sample_rate)
+
+
 async def synthesize_with_engine(
     text: str,
     *,
@@ -61,21 +126,37 @@ async def synthesize_with_engine(
     voice = speaker_ref or (profile.tts.speaker_ref if profile else "") or ""
     speaking_rate = profile.tts.speaking_rate if profile else 1.0
     profile_id = profile.id if profile else ""
+    playback = _persona_playback()
     if engine == "kokoro":
         try:
-            return await _synthesize_kokoro(
+            # Persona rate is Kokoro's speed argument. Pitch and gain stay on the PCM.
+            speed = playback[0] if playback is not None else speaking_rate
+            audio = await _synthesize_kokoro(
                 text,
                 voice=voice,
                 model_dir=model_dir,
                 profile=profile,
-                speaking_rate=speaking_rate,
+                speaking_rate=speed,
             )
+            if playback is None:
+                return audio
+            _rate, pitch, volume = playback
+            return apply_neural_pcm_adjustments(audio, pitch_semitones=pitch, speaking_rate=None, volume=volume)
         except Exception as exc:
             logger.exception("Kokoro synthesis failed for profile=%s; SAPI fallback is disabled", profile_id)
             raise TtsSynthesisError("kokoro", profile_id, str(exc)) from exc
     if engine in {"chatterbox", "chatterbox_turbo", "chatterbox-turbo"}:
         try:
-            return await _synthesize_chatterbox(text, voice=voice)
+            audio = await _synthesize_chatterbox(text, voice=voice)
+            if playback is None:
+                return audio
+            rate, pitch, volume = playback
+            return apply_neural_pcm_adjustments(
+                audio,
+                pitch_semitones=pitch,
+                speaking_rate=rate,
+                volume=volume,
+            )
         except Exception as exc:
             logger.exception("Chatterbox synthesis failed for profile=%s; system fallback is disabled", profile_id)
             raise TtsSynthesisError("chatterbox", profile_id, str(exc)) from exc

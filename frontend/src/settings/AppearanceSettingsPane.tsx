@@ -2,6 +2,7 @@ import { useState } from "react"
 import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
 import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
+import { NamedPersonaControls } from "../persona/NamedPersonaControls"
 import { SessionPersonalityControls } from "../personality/SessionPersonalityControls"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
@@ -109,6 +110,7 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
       </div>
 
       <SessionPersonalityControls />
+      <NamedPersonaControls />
 
       <label>
         Rendering
