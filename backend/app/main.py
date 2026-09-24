@@ -273,6 +273,7 @@ async def startup() -> None:
         logging.debug("Vault bind on startup skipped", exc_info=True)
     try:
         asyncio.create_task(_auto_start_supermemory_and_refresh_node(node.id))
+        asyncio.create_task(_auto_start_crucix())
     except Exception:
         logging.debug("Supermemory auto-start scheduling skipped", exc_info=True)
     if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
@@ -347,6 +348,14 @@ async def _auto_start_supermemory_and_refresh_node(node_id: str) -> None:
             logging.debug("Supermemory node registration refresh skipped", exc_info=True)
 
 
+async def _auto_start_crucix() -> None:
+    try:
+        from .modules.crucix_runtime import auto_start as auto_start_crucix
+        await auto_start_crucix()
+    except Exception:
+        logging.exception("Crucix auto-start failed")
+
+
 @app.on_event("shutdown")
 async def shutdown() -> None:
     QUEUE_WATCHER.stop()
@@ -360,10 +369,14 @@ async def shutdown() -> None:
         logging.debug("HexStrike shutdown skipped", exc_info=True)
     try:
         from .modules.supermemory_runtime import shutdown as shutdown_supermemory
-
         await shutdown_supermemory()
     except Exception:
         logging.debug("Supermemory shutdown skipped", exc_info=True)
+    try:
+        from .modules.crucix_runtime import shutdown as shutdown_crucix
+        await shutdown_crucix()
+    except Exception:
+        logging.debug("Crucix shutdown skipped", exc_info=True)
 
 
 async def _autoload_model(current) -> None:
