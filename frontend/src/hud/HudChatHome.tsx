@@ -13,6 +13,8 @@ import { PresenceHost } from "../presence/PresenceHost"
 import { personaCardSentence, useNamedPersonas } from "../persona/namedPersonas"
 import { derivePresenceSnapshot } from "../presence/presenceState"
 import { usePresentationSettings } from "../presence/presentationSettings"
+import { galaxyFigureShapeId, isGalaxyPresenceEffective } from "../presence/galaxyPresence"
+import { supportsHumanoidRuntime } from "../presence/renderers/humanoidRuntime"
 import { resolvePresenceShapeId } from "../presence/resolvePresenceShapeId"
 import type { PresencePhase } from "../presence/presenceTypes"
 
@@ -99,7 +101,7 @@ export function HudChatHome() {
   })
   const activePersona = namedPersonas?.active
   const personaShape = activePersona?.presence_shape_id || undefined
-  const shapeId = resolvePresenceShapeId(
+  const resolvedShapeId = resolvePresenceShapeId(
     hexStrikeActive,
     customPresence.activeShapeId,
     namedPersonas ? personaShape : "stormbird",
@@ -108,6 +110,21 @@ export function HudChatHome() {
     ? (moodState.task.persona_card_sentence
       || personaCardSentence(activePersona?.id || "anzu", moodState.task.specialist_persona_ids || []))
     : ""
+  const presenceSettings = hexStrikeActive
+    ? { ...presentation, requestedPresence: "humanoid" as const }
+    : presentation
+  const shapeId = galaxyFigureShapeId({
+    requestedPresence: presenceSettings.requestedPresence,
+    resolvedShapeId,
+    suiteActive: hexStrikeActive,
+    customPresetActive: Boolean(customPresence.activeShapeId),
+    personaId: activePersona?.id,
+  })
+  const galaxyEffective = isGalaxyPresenceEffective({
+    requestedPresence: presentation.requestedPresence,
+    suiteOverride: hexStrikeActive,
+    webglAvailable: supportsHumanoidRuntime(),
+  })
   const customComposition = !hexStrikeActive && shapeId.startsWith("custom_ui_")
     ? getActiveCustomComposition()
     : null
@@ -132,13 +149,10 @@ export function HudChatHome() {
     : undefined
   const threadActive = Boolean(moodState.task?.messages?.length)
   const copy = MOOD_COPY[mood]
-  const presenceSettings = hexStrikeActive
-    ? { ...presentation, requestedPresence: "humanoid" as const }
-    : presentation
 
   return (
     <div
-      className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}${hexStrikeActive && !showHexSuite ? " hex-suite-collapsed" : ""}`}
+      className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}${hexStrikeActive && !showHexSuite ? " hex-suite-collapsed" : ""}${galaxyEffective ? " galaxy-effective" : ""}`}
     >
       <AppearancePresenceControls settings={presentation} />
       <section className="hud-orb-zone" aria-label="Jarvis state">

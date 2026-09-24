@@ -1,0 +1,15 @@
+.voice-waveform-bar {
+  height: 32px;
+  margin: 0 0 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(90deg, rgba(8, 18, 28, 0.2), rgba(18, 36, 48, 0.45) 50%, rgba(42, 24, 12, 0.28));
+  box-shadow: inset 0 0 0 1px rgba(140, 210, 230, 0.16);
+  pointer-events: none;
+}
+
+.voice-waveform-canvas {
+  display: block;
+  width: 100%;
+  height: 32px;
+}

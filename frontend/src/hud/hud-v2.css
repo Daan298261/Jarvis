@@ -45,6 +45,18 @@
   pointer-events: none;
 }
 
+.hud-app.hud-galaxy {
+  background: #010308;
+}
+
+.hud-app.hud-galaxy::before {
+  opacity: 0.04;
+}
+
+.hud-home.galaxy-effective .hud-orb-caption {
+  display: none;
+}
+
 .hud-app.hud-sky {
   background:
     radial-gradient(ellipse 68% 52% at 52% 38%, rgba(36, 118, 158, 0.14), transparent 72%),

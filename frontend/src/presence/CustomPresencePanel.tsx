@@ -28,7 +28,9 @@ type WizardStep = "input" | "generating" | "preview"
 
 function canPreviewOnCloud(settings: PresentationSettings): boolean {
   if (settings.shell === "classic" || settings.requestedPresence === "none") return false
-  return settings.requestedPresence === "humanoid" || settings.requestedPresence === "particle_bust"
+  return settings.requestedPresence === "humanoid"
+    || settings.requestedPresence === "particle_bust"
+    || settings.requestedPresence === "galaxy"
 }
 
 export function CustomPresencePanel({ settings }: CustomPresencePanelProps) {

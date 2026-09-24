@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
 import * as THREE from "three"
 import { createPresenceAttentionController, type AttentionVector } from "../presenceAttention"
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js"
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
+import { galaxyStatusText } from "../galaxyPresence"
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
+import { readVoiceMeter } from "../../tts/voiceAnalyser"
 import {
   createMorphablePresenceSystem,
   particleFragmentShader,
@@ -39,6 +41,10 @@ function phaseLabel(phase: PresencePhase): string {
   return phase.toUpperCase()
 }
 
+function galaxyAlive(phase: PresencePhase): boolean {
+  return phase !== "idle" && phase !== "waiting" && phase !== "offline"
+}
+
 export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }: HumanoidPresenceProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -48,10 +54,33 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
   const [activeShapeId, setActiveShapeId] = useState(
     () => shapeId || presenceShapeIdForAvatar(settings.avatarId),
   )
+  const [meter, setMeter] = useState({ level: 0, attached: false })
+  const galaxy = settings.requestedPresence === "galaxy"
 
   useEffect(() => {
     stateRef.current = { snapshot, settings, shapeId, personaVisual }
   }, [snapshot, settings, shapeId, personaVisual])
+
+  useEffect(() => {
+    const live = galaxy && (snapshot.phase === "speaking" || snapshot.phase === "listening")
+    if (!live) {
+      setMeter({ level: 0, attached: false })
+      return
+    }
+    const expected = snapshot.phase === "speaking" ? "tts" : "mic"
+    let frame = 0
+    let last = 0
+    const tick = (time: number) => {
+      frame = window.requestAnimationFrame(tick)
+      if (time - last < 80) return
+      last = time
+      const reading = readVoiceMeter()
+      const attached = reading.attached && reading.kind === expected
+      setMeter({ level: attached ? reading.level : 0, attached })
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
+  }, [galaxy, snapshot.phase])
 
   useEffect(() => {
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -103,6 +132,10 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       uPointerStrength: { value: 0 },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
       uGold: { value: new THREE.Color(0xff941f) },
+      uAccent: { value: new THREE.Color(0xd4a017) },
+      uGalaxy: { value: 0 },
+      uGalaxyBust: { value: 0 },
+      uLattice: { value: 0 },
     }
     const material = new THREE.ShaderMaterial({
       uniforms,
@@ -203,23 +236,44 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       uniforms.uMotion.value = reduced ? 0 : animation
       uniforms.uPhaseKind.value = PHASE_KIND[phase]
       uniforms.uGlow.value = typeof visual?.glow === "number" ? visual.glow : 1
-      if (bloom) bloom.strength = 0.35 + (uniforms.uGlow.value as number) * 0.35
       const personaScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
       bust.scale.setScalar(framingScale * personaScale)
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)
         * (reduced ? 1 : Math.min(1, delta * 3))
-      uniforms.uSpeech.value = !reduced && phase === "speaking"
-        ? THREE.MathUtils.clamp(current.snapshot.audioLevel, 0, 1) : 0
+      const galaxyOn = current.settings.requestedPresence === "galaxy"
+      const bustShape = system.currentShapeId === "humanoid_bust"
+      const alive = galaxyAlive(phase)
+      uniforms.uGalaxy.value = galaxyOn ? 1 : 0
+      uniforms.uGalaxyBust.value = galaxyOn && bustShape ? 1 : 0
+      uniforms.uLattice.value = alive ? 1 : 0
+      system.setGalaxy(galaxyOn)
+      system.syncStars(animationTime, reduced ? 0 : 1)
+      renderer.setClearColor(galaxyOn ? 0x000000 : 0x03070b, galaxyOn ? 0 : 1)
+      const meterNow = galaxyOn && (phase === "speaking" || phase === "listening") ? readVoiceMeter() : null
+      const speechLevel = !reduced && meterNow && meterNow.attached && meterNow.kind === "tts" && phase === "speaking"
+        ? THREE.MathUtils.clamp(meterNow.level, 0, 1)
+        : 0
+      uniforms.uSpeech.value = speechLevel
+      if (bloom) {
+        const base = 0.35 + (uniforms.uGlow.value as number) * 0.35
+        bloom.strength = galaxyOn && bustShape && alive ? base + 0.2 : base
+      }
       uniforms.uOpacity.value = phase === "offline" ? 0.35 : phase === "waiting" ? 0.72 : phase === "error" ? 0.92 : 1
       const warning = phase === "alert" || phase === "error" || phase === "offline" || phase === "approval"
-      if (!warning && visual?.orbColor) {
+      if (galaxyOn && bustShape) {
+        color.setHex(alive ? 0x6fd0ff : 0x8ec4de)
+        uniforms.uGold.value.setHex(alive ? 0xff8a1a : 0x24303a)
+        uniforms.uAccent.value.set(visual?.accentColor || "#9fd4ea")
+      } else if (!warning && visual?.orbColor) {
         color.set(visual.orbColor)
         uniforms.uGold.value.set(visual.accentColor || "#D4A017")
+        uniforms.uAccent.value.set(visual.accentColor || "#D4A017")
       } else {
         color.setHex(PHASE_COLOR[phase])
         uniforms.uGold.value.setHex(
           phase === "alert" || phase === "error" ? 0xff543b : phase === "offline" ? 0x607580 : phase === "approval" ? 0xffe7a3 : 0xff941f,
         )
+        uniforms.uAccent.value.copy(uniforms.uGold.value)
       }
       uniforms.uColor.value.lerp(color, reduced ? 1 : 0.12)
 
@@ -290,29 +344,46 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
   return (
     <div
       ref={stageRef}
-      className="jarvis-presence jarvis-presence-humanoid"
+      className={`jarvis-presence jarvis-presence-humanoid${galaxy ? " galaxy" : ""}`}
       data-phase={snapshot.phase}
       data-performance-preset={settings.performancePreset}
       data-attention-mode={settings.attentionMode}
       data-presence-shape={activeShapeId}
+      data-galaxy={galaxy ? "true" : "false"}
       role="img"
       aria-label={`Jarvis particle presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
     >
       <canvas ref={canvasRef} aria-hidden="true" />
       {snapshot.phase === "offline" && <span className="jarvis-presence-broken-ring" aria-hidden="true" />}
       {snapshot.phase === "approval" && <span className="jarvis-presence-lock-ring" aria-hidden="true" />}
-      <div className="jarvis-humanoid-hud" aria-hidden="true">
-        <span className="jarvis-humanoid-hud-tl" />
-        <span className="jarvis-humanoid-hud-tr">
-          TEM // PRESENCE
-          <br />
-          {phaseLabel(snapshot.phase)}
-        </span>
-        <span className="jarvis-humanoid-hud-bl" />
-      </div>
-      <div className="jarvis-humanoid-label" aria-hidden="true">
-        <span>JARVIS</span><i /><span>NEURAL PRESENCE</span>
-      </div>
+      {galaxy ? (
+        <p
+          className="jarvis-galaxy-status"
+          role="status"
+          style={personaVisual?.accentColor ? { "--galaxy-accent": personaVisual.accentColor } as CSSProperties : undefined}
+        >
+          {galaxyStatusText(snapshot.phase, {
+            analyser: meter.attached,
+            level: meter.level,
+            bust: true,
+          })}
+        </p>
+      ) : (
+        <>
+          <div className="jarvis-humanoid-hud" aria-hidden="true">
+            <span className="jarvis-humanoid-hud-tl" />
+            <span className="jarvis-humanoid-hud-tr">
+              TEM // PRESENCE
+              <br />
+              {phaseLabel(snapshot.phase)}
+            </span>
+            <span className="jarvis-humanoid-hud-bl" />
+          </div>
+          <div className="jarvis-humanoid-label" aria-hidden="true">
+            <span>JARVIS</span><i /><span>NEURAL PRESENCE</span>
+          </div>
+        </>
+      )}
     </div>
   )
 }

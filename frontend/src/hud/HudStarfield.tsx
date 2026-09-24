@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react"
+import { hudStarfieldCount } from "../presence/galaxyPresence"
 
 export type StarfieldMode = "cluster" | "sky"
 
@@ -23,6 +24,7 @@ type Particle = {
 type HudStarfieldProps = {
   mode: StarfieldMode
   pulseKey: string
+  galaxy?: boolean
 }
 
 function hashSeed(i: number): number {
@@ -67,15 +69,22 @@ function makeParticles(width: number, height: number, count: number): Particle[]
   return particles
 }
 
-export function HudStarfield({ mode, pulseKey }: HudStarfieldProps) {
+export function HudStarfield({ mode, pulseKey, galaxy = false }: HudStarfieldProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const modeRef = useRef(mode)
+  const galaxyRef = useRef(galaxy)
   const burstRef = useRef(0)
   const mouseRef = useRef({ x: 0.5, y: 0.45, active: false })
+  const resizeRef = useRef<() => void>(() => undefined)
 
   useEffect(() => {
     modeRef.current = mode
   }, [mode])
+
+  useEffect(() => {
+    galaxyRef.current = galaxy
+    resizeRef.current()
+  }, [galaxy])
 
   useEffect(() => {
     burstRef.current = 1
@@ -106,8 +115,9 @@ export function HudStarfield({ mode, pulseKey }: HudStarfieldProps) {
       canvas.style.width = `${width}px`
       canvas.style.height = `${height}px`
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      const count = reduced ? 90 : Math.round(Math.min(420, Math.max(160, (width * height) / 9000)))
+      const count = hudStarfieldCount(width, height, reduced, galaxyRef.current)
       particles = makeParticles(width, height, count)
+      resizeRef.current = resize
     }
 
     const onMove = (event: PointerEvent) => {
@@ -132,12 +142,19 @@ export function HudStarfield({ mode, pulseKey }: HudStarfieldProps) {
       const my = mouse.y * height
       const attract = (mouse.active ? 1 : 0.35) * (sky ? 0.55 : 0.28)
 
-      ctx.clearRect(0, 0, width, height)
+      const galaxyOn = galaxyRef.current
+      ctx.globalCompositeOperation = "source-over"
+      if (galaxyOn) {
+        ctx.fillStyle = "#010308"
+        ctx.fillRect(0, 0, width, height)
+      } else {
+        ctx.clearRect(0, 0, width, height)
+      }
       ctx.globalCompositeOperation = "lighter"
 
       for (const p of particles) {
-        p.homeX = sky ? p.skyX : p.clusterX
-        p.homeY = sky ? p.skyY : p.clusterY
+        p.homeX = galaxyOn || sky ? p.skyX : p.clusterX
+        p.homeY = galaxyOn || sky ? p.skyY : p.clusterY
         if (burstRef.current > 0.02) {
           const awayX = p.x - width * 0.5
           const awayY = p.y - height * 0.42
@@ -159,16 +176,22 @@ export function HudStarfield({ mode, pulseKey }: HudStarfieldProps) {
           p.x += p.vx * dt * 18
           p.y += p.vy * dt * 18
           p.twinkle += dt * p.twinkleSpeed
+          if (galaxyOn) {
+            if (p.x < -24) p.x += width + 48
+            if (p.x > width + 24) p.x -= width + 48
+            if (p.y < -24) p.y += height + 48
+            if (p.y > height + 24) p.y -= height + 48
+          }
         } else {
           p.x = p.homeX
           p.y = p.homeY
         }
         const tw = 0.55 + 0.45 * Math.sin(p.twinkle)
-        const alpha = (sky ? 0.55 : 0.28) * p.glow * tw
-        const radius = p.size * (sky ? 1.35 : 1.9)
-        ctx.fillStyle = `hsla(${p.hue}, 92%, 70%, ${alpha * 0.16})`
+        const alpha = (galaxyOn ? 0.72 : sky ? 0.55 : 0.28) * p.glow * tw
+        const radius = p.size * (galaxyOn ? 0.42 : sky ? 1.35 : 1.9)
+        ctx.fillStyle = `hsla(${p.hue}, 92%, 70%, ${alpha * (galaxyOn ? 0.08 : 0.16)})`
         ctx.beginPath()
-        ctx.arc(p.x, p.y, radius * 5.2, 0, Math.PI * 2)
+        ctx.arc(p.x, p.y, radius * (galaxyOn ? 2.1 : 5.2), 0, Math.PI * 2)
         ctx.fill()
         ctx.fillStyle = `hsla(${p.hue}, 100%, 82%, ${alpha})`
         ctx.beginPath()

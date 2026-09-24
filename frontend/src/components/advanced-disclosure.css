@@ -1,0 +1,22 @@
+.portal-advanced {
+  margin: 12px 0;
+  border: 1px solid var(--line, rgba(143, 218, 239, 0.18));
+  border-radius: 12px;
+  background: rgba(6, 12, 18, 0.35);
+  padding: 8px 12px 12px;
+}
+
+.portal-advanced > summary {
+  cursor: pointer;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: inherit;
+}
+
+.portal-advanced-body {
+  margin-top: 12px;
+}
+
+.portal-advanced-body > :first-child {
+  margin-top: 0;
+}

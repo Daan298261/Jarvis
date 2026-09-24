@@ -1,4 +1,5 @@
 import * as THREE from "three"
+import { presenceBudgets } from "../galaxyPresence"
 import type { ParticleOrb } from "./particleTypes"
 import {
   presenceShapeIdForAvatar,
@@ -27,12 +28,17 @@ export const particleVertexShader = `
   uniform float uMorph;
   uniform float uPhaseKind;
   uniform float uGlow;
+  uniform float uGalaxy;
+  uniform float uGalaxyBust;
+  uniform float uLattice;
   uniform vec2 uPointer;
   uniform float uPointerStrength;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
   varying float vDepth;
+  varying vec3 vPos;
+  varying float vSeed;
   void main() {
     float m = smoothstep(0.0, 1.0, uMorph);
     vec3 p = mix(aPos, bPos, m);
@@ -77,12 +83,35 @@ export const particleVertexShader = `
       p.z = x * s + z * c;
       p *= 1.0 + thinking * uMotion * 0.05 * sin(t * 1.6);
     }
+    if (uGalaxy > 0.5) {
+      float crown = smoothstep(1.05, 1.75, p.y);
+      float side = smoothstep(0.7, 1.45, abs(p.x));
+      float edge = max(crown, side);
+      float amp = edge * mix(0.42, 0.22, uLattice);
+      p.x += (aSeed - 0.5) * amp * 1.4;
+      p.y += (fract(aSeed * 7.0) - 0.5) * amp;
+      p.z += (fract(aSeed * 13.0) - 0.5) * amp * 0.6;
+      p.x += sin(uTime * 0.22 + aSeed * 40.0) * 0.03 * uMotion;
+      p.y += cos(uTime * 0.18 + aSeed * 19.0) * 0.02 * uMotion;
+    }
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
     gl_PointSize = clamp(size * uPixelScale * 6.6 / -mv.z, 0.72, 96.0);
+    if (uGalaxyBust > 0.5) {
+      float goldNow = mix(aGold, bGold, m);
+      float neck = step(0.45, goldNow) * (1.0 - smoothstep(0.15, 0.45, p.y)) * smoothstep(-1.35, -0.2, p.y);
+      float idleScale = mix(0.78, 1.0, uLattice);
+      float neckScale = mix(1.0, 0.62, neck * uLattice);
+      float band = pow(abs(sin(p.y * 52.0)), 8.0);
+      float cranial = smoothstep(0.35, 0.6, p.y) * (1.0 - smoothstep(1.45, 1.75, p.y));
+      float fiber = band * cranial * (1.0 - step(0.55, goldNow)) * uLattice;
+      gl_PointSize *= idleScale * neckScale * mix(1.0, 1.35, fiber);
+    }
     vGold = mix(aGold, bGold, m);
     vFlow = flow;
     vDepth = p.z;
+    vPos = p;
+    vSeed = aSeed;
     float shimmer = 0.87 + 0.13 * sin(t * 1.2 + aSeed * 60.0);
     float wave = pow(max(0.0, sin(p.y * 3.5 - t * 1.1)), 8.0) * uActivity;
     float light = mix(aLight, bLight, m);
@@ -93,15 +122,22 @@ export const particleVertexShader = `
 export const particleFragmentShader = `
   uniform vec3 uColor;
   uniform vec3 uGold;
+  uniform vec3 uAccent;
   uniform float uOpacity;
   uniform float uTime;
   uniform float uMotion;
+  uniform float uSpeech;
   uniform float uPhaseKind;
   uniform float uGlow;
+  uniform float uGalaxy;
+  uniform float uGalaxyBust;
+  uniform float uLattice;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
   varying float vDepth;
+  varying vec3 vPos;
+  varying float vSeed;
   void main() {
     float r = length(gl_PointCoord - 0.5) * 2.0;
     if (r > 1.0) discard;
@@ -116,7 +152,37 @@ export const particleFragmentShader = `
     float errorPhase = step(6.5, uPhaseKind) * (1.0 - step(7.5, uPhaseKind)) * step(0.01, uMotion);
     float flicker = mix(1.0, 0.42 + 0.58 * step(0.55, fract(sin(uTime * 23.0 + vDepth * 12.0) * 43758.5)), errorPhase);
     alpha *= flicker * mix(1.0, uGlow, 0.65);
-    vec3 color = mix(uColor, uGold, smoothstep(0.13, 0.75, vGold));
+    float goldAmt = vGold;
+    float cranial = smoothstep(0.45, 0.7, vPos.y) * (1.0 - smoothstep(1.35, 1.7, vPos.y));
+    cranial *= 1.0 - smoothstep(0.42, 0.75, abs(vPos.x));
+    float neckGold = step(0.45, vGold) * smoothstep(0.28, -0.15, vPos.y) * smoothstep(-1.4, -0.15, vPos.y);
+    if (uGalaxyBust > 0.5) {
+      float goldKeep = mix(0.0, mix(neckGold * 0.72, 1.0, cranial), uLattice);
+      goldAmt *= goldKeep;
+      float corePulse = step(1.5, vFlow);
+      alpha *= mix(1.0, mix(0.12, 1.0, uLattice), corePulse);
+      if (uLattice < 0.5 && environment < 0.5) alpha *= 0.48;
+      if (uLattice < 0.5 && vGold > 0.45) alpha *= 0.12;
+      if (environment > 0.5) alpha *= mix(0.16, 1.0, uLattice);
+      alpha *= 1.0 + uSpeech * cranial * uLattice * 0.9;
+    }
+    if (uGalaxy > 0.5 && environment < 0.5) {
+      float crown = smoothstep(1.15, 1.9, vPos.y);
+      float side = smoothstep(0.8, 1.7, abs(vPos.x));
+      alpha *= 1.0 - max(crown, side) * mix(0.9, 0.42, uLattice);
+    }
+    vec3 color = mix(uColor, uGold, smoothstep(0.13, 0.75, goldAmt));
+    if (uGalaxyBust > 0.5 && uLattice > 0.5) {
+      float fiber = pow(abs(sin(vPos.y * 55.0)), 6.0);
+      float shell = 1.0 - smoothstep(0.2, 0.7, goldAmt);
+      float head = smoothstep(0.25, 0.55, vPos.y) * (1.0 - smoothstep(1.55, 1.85, vPos.y));
+      color = mix(color, uColor * 1.35, fiber * shell * head * 0.75);
+      alpha *= mix(1.0, 1.18, fiber * shell * head);
+    }
+    if (uGalaxy > 0.5) {
+      float highlight = step(0.93, vSeed) * (1.0 - smoothstep(0.2, 0.55, goldAmt));
+      color = mix(color, uAccent, highlight * 0.7);
+    }
     float hot = smoothstep(2.4, 4.5, vLight);
     gl_FragColor = vec4(color + vec3(core * (0.18 + hot * 0.42)), alpha);
   }
@@ -176,14 +242,96 @@ function geometryFromOrbs(orbs: ParticleOrb[], material: THREE.ShaderMaterial): 
   return new THREE.Points(geometry, material)
 }
 
+const galaxyStarVertexShader = `
+  attribute float aSeed;
+  attribute float aSize;
+  attribute float aWarm;
+  uniform float uTime;
+  uniform float uMotion;
+  varying float vWarm;
+  varying float vSeed;
+  void main() {
+    vec3 p = position;
+    p.x += sin(uTime * 0.05 + aSeed * 20.0) * 0.12 * uMotion;
+    p.y += cos(uTime * 0.04 + aSeed * 12.0) * 0.08 * uMotion;
+    p.z += uTime * 0.06 * uMotion;
+    p.x = mod(p.x + 14.0, 28.0) - 14.0;
+    p.y = mod(p.y + 8.0, 16.0) - 8.0;
+    p.z = mod(p.z + 2.0, 18.0) - 20.0;
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    gl_Position = projectionMatrix * mv;
+    gl_PointSize = clamp(aSize * 18.0 / -mv.z, 0.4, 3.2);
+    vWarm = aWarm;
+    vSeed = aSeed;
+  }
+`
+
+const galaxyStarFragmentShader = `
+  varying float vWarm;
+  varying float vSeed;
+  void main() {
+    float r = length(gl_PointCoord - 0.5) * 2.0;
+    if (r > 1.0) discard;
+    float core = exp(-r * r * 14.0);
+    float alpha = core * (0.35 + vSeed * 0.65);
+    vec3 cool = vec3(0.72, 0.86, 1.0);
+    vec3 warm = vec3(1.0, 0.78, 0.42);
+    gl_FragColor = vec4(mix(cool, warm, vWarm) * (0.7 + core), alpha);
+  }
+`
+
+function createGalaxyStarLayer(density: number): { points: THREE.Points; material: THREE.ShaderMaterial } {
+  const count = presenceBudgets(density).galaxyStars
+  const positions = new Float32Array(count * 3)
+  const seeds = new Float32Array(count)
+  const sizes = new Float32Array(count)
+  const warm = new Float32Array(count)
+  for (let i = 0; i < count; i++) {
+    const s = (i * 0.61803398875) % 1
+    const s2 = ((i + 17) * 0.41421356237) % 1
+    const s3 = ((i + 91) * 0.70710678118) % 1
+    const inView = s < 0.72
+    positions[i * 3] = (s2 - 0.5) * (inView ? 9 : 28)
+    positions[i * 3 + 1] = (s3 - 0.46) * (inView ? 7.2 : 16)
+    positions[i * 3 + 2] = -1.6 - ((i * 0.173) % 1) * (inView ? 12 : 18)
+    seeds[i] = s
+    sizes[i] = 0.28 + s3 * (inView ? 1.15 : 0.7)
+    warm[i] = s2 < 0.07 ? 1 : 0
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3))
+  geometry.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1))
+  geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1))
+  geometry.setAttribute("aWarm", new THREE.BufferAttribute(warm, 1))
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uMotion: { value: 1 },
+    },
+    vertexShader: galaxyStarVertexShader,
+    fragmentShader: galaxyStarFragmentShader,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+  })
+  const points = new THREE.Points(geometry, material)
+  points.visible = false
+  points.frustumCulled = false
+  return { points, material }
+}
+
 export type MorphablePresenceSystem = {
   group: THREE.Group
   bust: THREE.Group
   figure: THREE.Points
   field: THREE.Points | null
+  stars: THREE.Points
   currentShapeId: PresenceShapeId
   morphTo: (shapeId: PresenceShapeId, opts?: { duration?: number; immediate?: boolean }) => void
   tick: (delta: number) => void
+  setGalaxy: (on: boolean) => void
+  syncStars: (time: number, motion: number) => void
   dispose: () => void
 }
 
@@ -194,6 +342,7 @@ export function createMorphablePresenceSystem(
 ): MorphablePresenceSystem {
   // Put the budget where the user reads identity: the face and shoulders.
   // The flowing environment stays intact but no longer outnumbers the bust.
+  // Galaxy stars are a separate layer (presenceBudgets) and do not reduce these.
   const figureBudget = Math.round(82000 * density)
   const fieldBudget = Math.round(15000 * density)
   let shape = resolvePresenceShape(initialShapeId)
@@ -203,12 +352,14 @@ export function createMorphablePresenceSystem(
   if (shape.buildField) {
     field = geometryFromOrbs(resampleOrbs(shape.buildField(density), fieldBudget), material)
   }
+  const galaxyStars = createGalaxyStarLayer(density)
 
   const group = new THREE.Group()
   const bust = new THREE.Group()
   bust.add(figure)
   group.add(bust)
   if (field) group.add(field)
+  group.add(galaxyStars.points)
 
   let morph = 1
   let morphDuration = 0
@@ -286,6 +437,7 @@ export function createMorphablePresenceSystem(
     bust,
     figure,
     field,
+    stars: galaxyStars.points,
     currentShapeId: shape.id,
     morphTo(shapeId, opts) {
       if (shapeId === system.currentShapeId && !morphing) return
@@ -331,9 +483,18 @@ export function createMorphablePresenceSystem(
       uniforms.uMorph.value = morph
       if (morph >= 1) morphing = false
     },
+    setGalaxy(on) {
+      galaxyStars.points.visible = on
+    },
+    syncStars(time, motion) {
+      galaxyStars.material.uniforms.uTime.value = time
+      galaxyStars.material.uniforms.uMotion.value = motion
+    },
     dispose() {
       figure.geometry.dispose()
       field?.geometry.dispose()
+      galaxyStars.points.geometry.dispose()
+      galaxyStars.material.dispose()
     },
   }
 

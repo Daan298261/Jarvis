@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api, ensureDesktopSession, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { prunePendingUserTexts } from "../chat/ownerChatView"
+import { VoiceWaveformBar } from "../chat/VoiceWaveformBar"
+import { useLocalVoiceListen } from "../chat/useLocalVoiceListen"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
@@ -26,7 +28,6 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [pending, setPending] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [showSetupProblem, setShowSetupProblem] = useState(false)
-  const [recording] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
@@ -34,6 +35,20 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const { ingestPayload } = usePendingApprovals()
   const voiceSwitching = useVoiceProfileSwitching()
   const media = useMediaUploads()
+  const { recording, listening, voice, toggleRecord } = useLocalVoiceListen({
+    setBusy,
+    onResult: ({ transcript, taskId }) => {
+      if (transcript) setPrompt(transcript)
+      if (taskId) navigate(`/tasks/${taskId}`)
+    },
+    onAuthFailure: async () => {
+      setShowSetupProblem(true)
+      const recovered = await ensureDesktopSession()
+      if (recovered) setShowSetupProblem(false)
+      return recovered
+    },
+    onError: (message) => alert(message),
+  })
   const composerLocked = busy || voiceSwitching || media.hasUploading
 
   useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies, setSpeaking)
@@ -186,6 +201,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
       )}
 
       <div className={`hud-composer${voiceSwitching ? " voice-switching" : ""}`}>
+        <VoiceWaveformBar speaking={speaking} listening={listening} />
         <MediaComposerBar
           className="media-composer-bar hud-media-bar"
           items={media.items}
@@ -209,6 +225,15 @@ export function HudChat({ onMoodChange }: HudChatProps) {
               Switching voice…
             </span>
           )}
+          <button
+            className={recording ? "btn recording" : "btn secondary"}
+            type="button"
+            disabled={!recording && composerLocked}
+            onClick={() => void toggleRecord()}
+            title={voice?.stt_ready ? "Record a spoken command (local Whisper)" : (voice?.detail || "Local Whisper is not installed")}
+          >
+            {recording ? "Stop" : "Speak"}
+          </button>
           <ChatTtsMuteButton
             enabled={speakChatReplies}
             variant="hud"

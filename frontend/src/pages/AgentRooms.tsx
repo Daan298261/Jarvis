@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react"
+import { AdvancedDisclosure } from "../components/AdvancedDisclosure"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import {
   createAgentRoom,
@@ -203,24 +204,26 @@ export function AgentRoomsPage() {
                 </label>
               ))}
             </div>
-            <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
-              <label style={{ flex: "1 1 180px" }}>
-                Cost mode
-                <select aria-label="Cost mode" value={costMode} onChange={(event) => setCostMode(event.target.value)}>
-                  {COST_MODES.map((mode) => (
-                    <option key={mode.id} value={mode.id}>{mode.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ flex: "1 1 180px" }}>
-                Privacy mode
-                <select aria-label="Privacy mode" value={privacyMode} onChange={(event) => setPrivacyMode(event.target.value)}>
-                  {PRIVACY_MODES.map((mode) => (
-                    <option key={mode.id} value={mode.id}>{mode.label}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <AdvancedDisclosure>
+              <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
+                <label style={{ flex: "1 1 180px" }}>
+                  Cost mode
+                  <select aria-label="Cost mode" value={costMode} onChange={(event) => setCostMode(event.target.value)}>
+                    {COST_MODES.map((mode) => (
+                      <option key={mode.id} value={mode.id}>{mode.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ flex: "1 1 180px" }}>
+                  Privacy mode
+                  <select aria-label="Privacy mode" value={privacyMode} onChange={(event) => setPrivacyMode(event.target.value)}>
+                    {PRIVACY_MODES.map((mode) => (
+                      <option key={mode.id} value={mode.id}>{mode.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </AdvancedDisclosure>
             <div className="row" style={{ gap: 8, marginTop: 12 }}>
               <button className="btn" type="submit" disabled={busy}>Open room</button>
               <button className="btn secondary" type="button" disabled={busy} onClick={() => void refreshList()}>
@@ -589,6 +592,7 @@ function RoomDetail({
             )}
 
             {open && (
+              <AdvancedDisclosure>
               <form
                 style={{ marginTop: 16 }}
                 onSubmit={(event) => {
@@ -635,6 +639,7 @@ function RoomDetail({
                 </label>
                 <button className="btn" type="submit" disabled={busy}>Post message</button>
               </form>
+              </AdvancedDisclosure>
             )}
           </div>
 
@@ -743,6 +748,7 @@ function RoomDetail({
               </>
             )}
             {open && (
+              <AdvancedDisclosure>
               <form
                 style={{ marginTop: 16 }}
                 onSubmit={(event) => {
@@ -787,13 +793,16 @@ function RoomDetail({
                 </label>
                 <button className="btn" type="submit" disabled={busy}>Publish</button>
               </form>
+              </AdvancedDisclosure>
             )}
           </div>
 
-          <div className="card" style={{ marginBottom: 16 }}>
-            <h3 className="env-subhead">Resource governor</h3>
-            <GovernorPanel governor={room.governor} />
-          </div>
+          <AdvancedDisclosure>
+            <div className="card" style={{ marginBottom: 0 }}>
+              <h3 className="env-subhead">Resource governor</h3>
+              <GovernorPanel governor={room.governor} />
+            </div>
+          </AdvancedDisclosure>
 
           <div className="card" style={{ marginBottom: 16 }}>
             <h3 className="env-subhead">Synthesis</h3>
@@ -819,7 +828,8 @@ function RoomDetail({
         </>
       )}
 
-      <div className="card" style={{ marginBottom: 16 }}>
+      <AdvancedDisclosure>
+      <div className="card" style={{ marginBottom: 0 }}>
         <h3 className="env-subhead">Audit replay</h3>
         {auditError && (
           <div className="card coding-banner bad" role="alert">
@@ -885,6 +895,7 @@ function RoomDetail({
           </>
         )}
       </div>
+      </AdvancedDisclosure>
     </section>
   )
 }
