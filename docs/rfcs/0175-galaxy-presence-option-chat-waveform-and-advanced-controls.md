@@ -19,7 +19,7 @@ If the landed implement is below that bar, the notify path is **CoS → Taco**. 
 
 ## Problem
 
-Owners can already choose Classic, Neural HUD, Humanoid HUD, or Particle bust, and the humanoid path is a morphable cloud of glowing orbs (`frontend/src/presence/renderers/shapes/humanoidBust.ts`, RFC-0069). That cloud is not yet the desk-photo presence Taco pointed at on 2026-09-24: a dense particle bust whose back dissolves into a black star field, with an amber cranial core, fiber lines through the neck, and a quiet status line. There is no owner opt-in for that look. `PresentationSettings.requested_presence` is `Literal["none", "neural", "humanoid", "particle_bust"]` and the default in `backend/app/config.py` is `"neural"`.
+Owners can already choose Classic, Neural HUD, Humanoid HUD, or Particle bust, and the humanoid path is a morphable cloud of glowing orbs (`frontend/src/presence/renderers/shapes/humanoidBust.ts`, RFC-0069). That cloud is not yet the room presence Taco locked on 2026-09-24: an idle particle bust with a discreet `STATUS: IDLE | ····· | SYN-01` pill (Ref A), a neural lattice and fiber fill in that same bust (Ref B), and a full-screen black star field behind it (Ref C). There is no owner opt-in for that look. `PresentationSettings.requested_presence` is `Literal["none", "neural", "humanoid", "particle_bust"]` and the default in `backend/app/config.py` is `"neural"`.
 
 Chat has no luxury voice meter. `frontend/src/tts/chatTtsPlayer.ts` plays real TTS on an `HTMLAudioElement` (`activeAudio`) and `useTaskSpeech` already reports speaking. Classic chat (`frontend/src/pages/Chat.tsx`) opens a real mic and posts `/api/voice/listen`. HUD chat (`frontend/src/hud/HudChat.tsx`) keeps `recording` stuck at `false` and never shows listen state. `frontend/src/presence/renderers/shapes/waveformLetters.ts` is a **presence shape** (orb rings and letter strokes). It is not a chat waveform.
 
@@ -61,51 +61,61 @@ Non-Galaxy Humanoid HUD keeps today’s bust, today’s `buildField` terrain, an
 
 Work the current humanoid cloud toward the three frames below. Same renderer (`HumanoidPresence`, `morphableOrbCloud`). Same `ParticleOrb` samples. No second canvas, no mesh, no GLTF.
 
-**Hero angle.** Three-quarter / side profile, matching ref1 and ref2: face contour readable, back of the head open to the star field. The same cloud, seen more from the front, matches ref3 (fiber neck, amber face core, terrain streams). Pointer attention may still yaw the bust. Reduced motion holds the hero angle.
+**Hero angle.** Front-facing bust, as in Ref A and Ref B. Pointer attention may yaw it a little. Reduced motion holds the front. The crown and the sides dissolve into the star field. There is no hard silhouette card.
 
-**Figure, only on the Galaxy + `humanoid_bust` path:**
+**One bust, two reads** (Galaxy + `humanoid_bust` only):
 
-- Dense particle bust: head and shoulders made of glowing points, cool cyan and blue in the majority. Not a solid skin.
-- Warm orange/amber **brain core** inside the cranium (use the existing `gold` channel; concentrate it in the cranial volume). The core is a glow, not an orange helmet.
-- One bright cyan-white point at the base of the neck / upper chest.
-- Vertical **fiber lines** through the neck into the head, thinner and brighter than the dust, visible from the front and as interior structure in profile.
-- **Soft dissolve** at the occipital edge: point size and alpha fall off into the star field. No clip plane and no hard card edge.
+- **Idle** (`idle`, `waiting`, `offline`) matches **Ref A**. Head and shoulders are a loose cloud of cool blue particles. The dark ground shows through. Edges fall off into dust. The amber core stays dim or off. Neck fibers stay quiet.
+- **Alive** (`thinking`, `listening`, `speaking`, `executing`, `alert`, `error`, `approval`) matches **Ref B**, the same bust with the lattice filled in. Horizontal fiber lines run through the head. A warm orange/amber concentric core glows in the face (existing `gold` channel, cranial volume only — a glow, not a helmet). Thinner gold fibers run down the neck into the chest. The crown breaks into loose particles. Digital terrain / nebula streams (cyan ridges, gold highlights) sit beside the bust, in this same field, not in a second host.
+- Speaking may also follow real `snapshot.audioLevel` when the TTS graph provides it. That brightens the core. It does not play a fake meter on the bust while idle.
 
-**Field (Galaxy only, every winning shape):**
+**Field (Galaxy only, every winning shape) — Ref C:**
 
-- Deep black ground. Stars read as infinite: they exist past the frame and re-enter (wrap or regenerate). No hard rectangular star plate.
+- Deep black ground packed with small cool stars, the way Ref C fills the glass. Stars read as infinite: they exist past the frame and re-enter (wrap or regenerate). No hard rectangular star plate. This is the Galaxy ambience, including when a persona shape or `hex_aegis` is the figure in front of it.
 - `HudStarfield` (`frontend/src/hud/HudShell.tsx`) stays the far layer. Today’s count is `reduced ? 90 : min(420, max(160, area/9000))`. While Galaxy is effective, raise the non-reduced cap into the **2,400–4,000** range on a desktop HUD viewport, keep the wrap, and clear to near-black. When Galaxy is not effective, leave that formula alone.
 - Add a separate 3D star/orb layer in `createMorphablePresenceSystem`. Today `figureBudget` is `82000 * density` and `fieldBudget` is `15000 * density`. **Do not lower either.** Galaxy stars are an extra budget (on the order of `24000 * density`) and do not enter `uMorph` figure samples. Morph still moves the figure.
-- Optional digital terrain / nebula streams, as in ref3: ridgelines of cyan particles with gold highlights beside and behind the bust. They are more samples in this same field, not a second presence host. The humanoid shape’s existing `buildField` mountains stay available on non-Galaxy Humanoid; Galaxy may strengthen that stream language. It does not delete `buildField`.
+- The humanoid shape’s existing `buildField` mountains stay available on non-Galaxy Humanoid. Galaxy may use that stream language for the Ref B terrain. It does not delete `buildField`.
 
-**Color.** The Galaxy + `humanoid_bust` palette is the reference palette (cyan field, amber core, white-blue base point) so the frames below are recognizable. A named persona’s `accent_color` may tint the status label and a minority of highlight particles. It does not repaint the core away from amber or flatten the field to one hue.
+**Color.** Cool cyan/blue particles, amber core only when the lattice is up. A named persona’s `accent_color` may tint the status pill and a minority of highlight particles. It does not repaint an alive core away from amber or flatten the field to one hue.
 
-**Motion.** Slow galactic drift and a living particle flow while motion is allowed. Phase may brighten the core (`thinking`, `speaking`, `executing`). Speaking may also follow real `snapshot.audioLevel` when the TTS graph provides it. Idle is a quiet drift with **STATUS · IDLE**, not a fake voice meter. Reduced motion (`prefers-reduced-motion` or `reducedMotion: reduce`): static points, `uMotion = 0`, status text still follows phase. The dissolve is a static falloff.
+**Motion.** Slow drift while motion is allowed. Reduced motion (`prefers-reduced-motion` or `reducedMotion: reduce`): static points, `uMotion = 0`, status text still follows phase. The dissolve is a static falloff.
 
-**Status chrome (Galaxy view only).** One discreet line, small, tracked, lux — not a stack of fake gauges and not the current “TEM // PRESENCE” block:
+**Status chrome (Galaxy view only).** One pill, bottom-center of the presence stage, small and low-contrast. Not a stack of gauges, and not the current “TEM // PRESENCE” block. Copy matches Ref A:
 
-| Phase | Line |
+`STATUS: <PHASE> | ····· | SYN-01`
+
+| Phase | `<PHASE>` |
 | --- | --- |
-| `idle`, `waiting` | STATUS · IDLE |
-| `thinking` | STATUS · THINKING |
-| `listening` | STATUS · LISTENING |
-| `speaking` | STATUS · SPEAKING |
-| `executing` | STATUS · WORKING |
-| `approval` | STATUS · WAITING |
-| `alert`, `error` | STATUS · ATTENTION |
-| `offline` | STATUS · OFFLINE |
+| `idle`, `waiting` | IDLE |
+| `thinking` | THINKING |
+| `listening` | LISTENING |
+| `speaking` | SPEAKING |
+| `executing` | WORKING |
+| `approval` | WAITING |
+| `alert`, `error` | ATTENTION |
+| `offline` | OFFLINE |
 
-Corner placement is enough (ref3). The line announces the real `PresencePhase`. It does not invent a phase.
+`SYN-01` is a fixed mark on this pill, as in Ref A. It is not a setting, not a second synth, and not a model name. The middle rule stays static unless speaking or listening and an analyser is attached; then those few marks may follow that real level. No looping decoration. Over a field with no bust (the Ref C read), the pill may shorten to `STATUS: <PHASE>`. The HUD home shows the bust, so the full pill is what ships there. One pill only.
 
 #### Visual acceptance targets
 
-Three frames supplied by Taco via CoS on 2026-09-24. This RFC describes them. The binaries are **not** added to the repo. Match the presence on the display. Do not reproduce room clutter, webcams, keyboards, or social-app chrome.
+Authoritative mood boards are the three room frames Taco sent after the earlier attach failed. Match the picture on the glass. Do not reproduce phone status bars, social-app chrome, usernames, keyboards, or hands. Earlier side-profile desk photos are not this target.
 
-- **ref1 — side profile, clean desk photo.** Ultrawide, near-black display. A left-facing head and shoulders built only from glowing particles. Cool cyan/blue dust draws the brow, nose, lips, and shoulder. A warm orange-amber core sits in the skull. The back of the head thins into a trail of stars; there is no hard outline. A single bright point glows at the base of the neck. The rest of the photo (keyboard, webcam, wall) is the room, not UI.
-- **ref2 — same side-profile bust**, photographed inside a social post captioned “Humanoid final version.” Match the monitor image: the same cyan bust, amber core, base point, and dissolve into stars. Ignore the post chrome, captions, and engagement controls.
-- **ref3 — front bust with terrain.** The figure faces the owner. Dense cyan particles, orange-amber face core, vertical fiber lines in the neck, and digital mountain / nebula streams in cyan and gold on both sides of a black field. Small status text sits in the display; it is not a dashboard. Ignore the social-app chrome around the photo.
+| Board | What to match |
+| --- | --- |
+| **Ref A** — particle idle bust | Loose cool-blue particle head and shoulders. Dark ground shows through. Edges dissolve. No bright amber face. Bottom-center pill reads `STATUS: IDLE \| ····· \| SYN-01`. |
+| **Ref B** — neural lattice, same family as A | The same bust, filled with horizontal fiber lines, a warm orange/amber concentric face core, gold fibers in the neck, crown dissolving into particles, terrain streams left and right. |
+| **Ref C** — galaxy field | The glass is a deep black star field. No bust is required in this frame. A discreet `STATUS: IDLE` pill sits on that field. This is the Galaxy ambience, not a separate presence mode. |
 
-Shipped Galaxy + `humanoid_bust` is accepted when a reviewer can set the hero angle and recognize ref1/ref2, and can face the bust and recognize ref3, on the real WebGL cloud. A screenshot collage, a video texture, or a single pre-baked PNG is a **fail**.
+Intended files, under `docs/rfcs/assets/0175/`:
+
+- `ref-a-particle-idle.jpg`
+- `ref-b-neural-lattice.jpg`
+- `ref-c-galaxy-field.jpg`
+
+The resized JPEGs were not on this worker (announced path `jarvis-humanoid-refs/taco-0175-sm/` was absent), so this commit does not add the binaries. The table above is the acceptance contract. Dropping those three files into that folder later does not change the decision.
+
+Shipped Galaxy + `humanoid_bust` is accepted when idle on the live WebGL cloud reads as Ref A, an alive phase reads as Ref B, and the ground reads as Ref C. A screenshot collage, a video texture, or a single pre-baked PNG is a **fail**.
 
 ### 3. Chat voice waveform
 
@@ -143,10 +153,10 @@ Any other portal tab follows the same rule: the control that finishes that tab�
 
 - [ ] Appearance offers Galaxy next to Classic, Neural HUD, Humanoid HUD, Particle bust, and HexStrike. Those five controls still select what they select today.
 - [ ] Default `requested_presence` remains `neural`. Existing saved values are not rewritten to `galaxy`. Restart restores a saved `galaxy` choice and does not force it on anyone else.
-- [ ] Galaxy + `humanoid_bust` matches the ref1/ref2 side profile and the ref3 front read on the live orb cloud: cyan particles, amber core, base point, neck fibers, occipital dissolve, infinite black star field, optional terrain streams.
+- [ ] Galaxy + `humanoid_bust` at idle matches Ref A (loose blue particle bust, dissolve, pill `STATUS: IDLE | ····· | SYN-01`). An alive phase matches Ref B (fiber lattice, amber core, gold neck, terrain streams) on that same bust. The ground matches Ref C (full-frame black star field).
 - [ ] Figure budget and the shape’s own field budget are not reduced. Galaxy stars are additional. `uMorph` still morphs the winning shape. `hex_aegis`, custom presets, and persona shapes still win under the current precedence.
 - [ ] Non-Galaxy Humanoid HUD still shows its current bust and its current “TEM // PRESENCE” chrome.
-- [ ] Galaxy status line follows real phase (`STATUS · THINKING`, `STATUS · IDLE`, and the other rows). Reduced motion freezes drift and keeps a static glow.
+- [ ] Galaxy status pill follows real phase (`STATUS: THINKING | ····· | SYN-01`, `STATUS: IDLE | ····· | SYN-01`, and the other rows). Reduced motion freezes drift and keeps a static glow.
 - [ ] WebGL failure falls back to Neural with an honest note. No poster image of the references.
 - [ ] Waveform is mounted on HUD and Classic composers, visible only during real TTS playback or an open mic, hidden when idle, driven by an analyser when one attaches, steady when it does not.
 - [ ] HUD Speak uses the existing `/api/voice/listen` path and sets real `recording` state.
@@ -165,7 +175,7 @@ Any other portal tab follows the same rule: the control that finishes that tab�
 | Waveform | `frontend/src/chat/VoiceWaveformBar.tsx` (new), `frontend/src/hud/HudChat.tsx`, `frontend/src/pages/Chat.tsx`, `frontend/src/tts/chatTtsPlayer.ts`, `frontend/src/tts/useTaskSpeech.ts` |
 | Advanced disclosures | `frontend/src/pages/Chat.tsx`, `frontend/src/pages/AgentRooms.tsx`, `frontend/src/pages/SkillForge.tsx`, `frontend/src/hud/HudHexStrikeSuite.tsx` |
 | Tests | Presentation-settings tests; waveform visibility test |
-| Docs | This RFC. Queue line in `JARVIS_MASTER_PLAN.md` §58. Decision in §59. |
+| Docs | This RFC. Mood boards intended at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, `ref-c-galaxy-field.jpg` (descriptions in §2 are the contract while the JPEGs are absent). Queue line in `JARVIS_MASTER_PLAN.md` §58. Decision in §59. |
 
 ## Out of scope
 
@@ -174,6 +184,7 @@ A second presence renderer. Removing or rewriting Classic, Neural, Humanoid, Par
 ## Notes
 
 - Tip when written: `development` @ `2cb6c0b2` (#417).
-- Visual sign-off of the Galaxy bust against ref1–ref3 is a desktop/browser check. Cloud VMs have no GPU; they can still unit-test the literal, the visibility rules, and the frontend build.
+- Visual sign-off of Galaxy against Ref A / Ref B / Ref C is a desktop/browser check. Cloud VMs have no GPU; they can still unit-test the literal, the visibility rules, and the frontend build.
+- Mood-board binaries were not on the worker filesystem for this amend. Descriptions in §2 are authoritative until `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, and `ref-c-galaxy-field.jpg` are added.
 - Subpar implement: CoS reviews and escalates to Taco. Do not encode that escalate as a runtime feature.
 - Implement only after CoS merges this PR and names the UX ticket.
