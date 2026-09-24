@@ -1,4 +1,8 @@
-"""RFC-0115 Ornith routing envelope, structured actions, and rule/model merge."""
+"""RFC-0115 Ornith routing envelope, structured actions, and rule/model merge.
+
+RFC-0174 attaches optional Agent Room routing hints when multi-specialist
+collaboration is warranted (see ``room_hint`` on ``RouterDecision``).
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ..agents.rooms.router_hooks import RoomRoutingHint, suggest_room_routing
 from ..providers.base import ChatMessage
 from .complexity_scorer import ComplexityResult, score_question_complexity
 from .profile_roles import infer_runtime_role_and_tier
@@ -27,9 +32,11 @@ class RouterDecision:
     task_class: str = ""
     required_capabilities: list[str] = field(default_factory=list)
     preferred_context: int = 32768
+    # RFC-0174: optional multi-agent room signal (never required for single-agent path).
+    room_hint: RoomRoutingHint | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "action": self.action,
             "required_answer_tier": self.required_answer_tier,
             "minimum_answer_tier": self.minimum_answer_tier,
@@ -40,6 +47,9 @@ class RouterDecision:
             "required_capabilities": list(self.required_capabilities),
             "preferred_context": self.preferred_context,
         }
+        if self.room_hint is not None:
+            payload["room_hint"] = self.room_hint.as_dict()
+        return payload
 
 
 def build_routing_envelope(
@@ -98,6 +108,7 @@ def merge_router_output(
     *,
     current_model: str,
     model_output: dict[str, Any] | None = None,
+    user_message: str = "",
 ) -> RouterDecision:
     """Rules first; optional model JSON may raise tier, almost never lower a hard rule."""
     _, current_tier = infer_runtime_role_and_tier(current_model)
@@ -106,6 +117,7 @@ def merge_router_output(
     reason = "; ".join(baseline.signals) or "complexity baseline"
     task_class = baseline.task_class_hint
     caps: list[str] = []
+    explicit_specialists: list[str] = []
 
     if model_output:
         raw_action = str(model_output.get("action") or "").strip().lower()
@@ -132,9 +144,19 @@ def merge_router_output(
         raw_caps = model_output.get("required_capabilities") or []
         if isinstance(raw_caps, list):
             caps = [str(c) for c in raw_caps]
+        raw_specs = model_output.get("specialists") or model_output.get("room_specialists") or []
+        if isinstance(raw_specs, list):
+            explicit_specialists = [str(s) for s in raw_specs if str(s).strip()]
 
     if baseline.hard_rule and baseline.minimum_answer_tier >= 2 and action == "answer_basic":
         action = "use_tool" if baseline.prefer_tool else "switch_model"
+
+    room_hint = suggest_room_routing(
+        user_message,
+        router_action=action,
+        task_class=task_class,
+        explicit_specialists=explicit_specialists,
+    )
 
     return RouterDecision(
         action=action,
@@ -145,6 +167,7 @@ def merge_router_output(
         prefer_tool=baseline.prefer_tool,
         task_class=task_class,
         required_capabilities=caps,
+        room_hint=room_hint,
     )
 
 
@@ -165,7 +188,12 @@ def resolve_router_decision(
         vision_requested=vision_requested,
         prior_failures=prior_failures,
     )
-    return merge_router_output(baseline, current_model=current_model, model_output=model_output)
+    return merge_router_output(
+        baseline,
+        current_model=current_model,
+        model_output=model_output,
+        user_message=user_message,
+    )
 
 
 def parse_router_model_json(raw: str) -> dict[str, Any] | None:
