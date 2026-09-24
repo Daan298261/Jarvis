@@ -156,6 +156,7 @@ export function HudTopChrome({
           ))}
           <Link to="/agents" onClick={() => onAdminNav?.()}>Agents</Link>
           <Link to="/coding" onClick={() => onAdminNav?.()}>Coding</Link>
+          <Link to="/skills" onClick={() => onAdminNav?.()}>Modules / Skills</Link>
           <Link to="/environments" onClick={() => onAdminNav?.()}>Environments</Link>
           <Link to="/model" onClick={() => onAdminNav?.()}>Model</Link>
           <Link to="/tools" onClick={() => onAdminNav?.()}>Tools</Link>

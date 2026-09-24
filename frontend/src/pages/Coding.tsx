@@ -402,7 +402,8 @@ export function CodingPage() {
       <p className="lede">
         Every coding task gets its own Git worktree and branch. Jarvis never writes to the primary
         checkout. <strong>Nothing lands silently</strong> — integrate is blocked until a verifier or
-        you approve. Overlaps go to Decision Inbox and are never auto-resolved.
+        you approve. Overlaps go to Decision Inbox and are never auto-resolved. Anzu 1.0 Skill Forge
+        candidates live under <Link to="/skills#decision-inbox">Modules / Skills</Link>.
       </p>
 
       {error && (

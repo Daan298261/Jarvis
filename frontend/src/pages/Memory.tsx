@@ -169,7 +169,9 @@ export function MemoryPage() {
         Skills are workflows Jarvis has repeated successfully. When tool arguments were recorded, they become parameters and the skill can run itself instead of only guiding the model.
       </p>
       <p className="lede" style={{ marginTop: -12 }}>
-        Identity, projects, lessons, and other saved notes live on <Link to="/context">Context</Link>.
+        Anzu 1.0 Skill Forge (approve → activate, no auto-publish) is on{" "}
+        <Link to="/skills">Modules / Skills</Link>. Identity, projects, lessons, and other saved notes live on{" "}
+        <Link to="/context">Context</Link>.
       </p>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap" }}>
