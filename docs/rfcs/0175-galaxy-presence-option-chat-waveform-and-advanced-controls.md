@@ -113,7 +113,7 @@ Mood boards are in-repo:
 - [`docs/rfcs/assets/0175/ref-b-neural-lattice.jpg`](assets/0175/ref-b-neural-lattice.jpg)
 - [`docs/rfcs/assets/0175/ref-c-galaxy-field.jpg`](assets/0175/ref-c-galaxy-field.jpg)
 
-The table above and those binaries are the acceptance contract. Match the picture on the glass. Do not reproduce phone status bars, social-app chrome, usernames, keyboards, or hands.
+The table above and those binaries are the acceptance contract.
 
 Shipped Galaxy + `humanoid_bust` is accepted when idle on the live WebGL cloud reads as Ref A, an alive phase reads as Ref B, and the ground reads as Ref C. A screenshot collage, a video texture, or a single pre-baked PNG is a **fail**.
 
