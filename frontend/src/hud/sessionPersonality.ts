@@ -6,6 +6,11 @@ export type SessionMode = {
   hud_theme: string
   dialogue_preset?: string
   system_prefix_addendum?: string
+  description?: string
+  icon?: string
+  accent?: string
+  task_class_hint?: string
+  preferred_profile?: string | null
 }
 
 const STORAGE_KEY = "jarvis.sessionMode"
