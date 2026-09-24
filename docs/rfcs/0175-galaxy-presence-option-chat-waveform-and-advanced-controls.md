@@ -107,13 +107,13 @@ Authoritative mood boards are the three room frames Taco sent after the earlier 
 | **Ref B** — neural lattice, same family as A | The same bust, filled with horizontal fiber lines, a warm orange/amber concentric face core, gold fibers in the neck, crown dissolving into particles, terrain streams left and right. |
 | **Ref C** — galaxy field | The glass is a deep black star field. No bust is required in this frame. A discreet `STATUS: IDLE` pill sits on that field. This is the Galaxy ambience, not a separate presence mode. |
 
-Intended files, under `docs/rfcs/assets/0175/`:
+Mood boards are in-repo:
 
-- `ref-a-particle-idle.jpg`
-- `ref-b-neural-lattice.jpg`
-- `ref-c-galaxy-field.jpg`
+- [`docs/rfcs/assets/0175/ref-a-particle-idle.jpg`](assets/0175/ref-a-particle-idle.jpg)
+- [`docs/rfcs/assets/0175/ref-b-neural-lattice.jpg`](assets/0175/ref-b-neural-lattice.jpg)
+- [`docs/rfcs/assets/0175/ref-c-galaxy-field.jpg`](assets/0175/ref-c-galaxy-field.jpg)
 
-The resized JPEGs were not on this worker (announced path `jarvis-humanoid-refs/taco-0175-sm/` was absent), so this commit does not add the binaries. The table above is the acceptance contract. Dropping those three files into that folder later does not change the decision.
+The table above and those binaries are the acceptance contract. Match the picture on the glass. Do not reproduce phone status bars, social-app chrome, usernames, keyboards, or hands.
 
 Shipped Galaxy + `humanoid_bust` is accepted when idle on the live WebGL cloud reads as Ref A, an alive phase reads as Ref B, and the ground reads as Ref C. A screenshot collage, a video texture, or a single pre-baked PNG is a **fail**.
 
@@ -175,7 +175,7 @@ Any other portal tab follows the same rule: the control that finishes that tab�
 | Waveform | `frontend/src/chat/VoiceWaveformBar.tsx` (new), `frontend/src/hud/HudChat.tsx`, `frontend/src/pages/Chat.tsx`, `frontend/src/tts/chatTtsPlayer.ts`, `frontend/src/tts/useTaskSpeech.ts` |
 | Advanced disclosures | `frontend/src/pages/Chat.tsx`, `frontend/src/pages/AgentRooms.tsx`, `frontend/src/pages/SkillForge.tsx`, `frontend/src/hud/HudHexStrikeSuite.tsx` |
 | Tests | Presentation-settings tests; waveform visibility test |
-| Docs | This RFC. Mood boards intended at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, `ref-c-galaxy-field.jpg` (descriptions in §2 are the contract while the JPEGs are absent). Queue line in `JARVIS_MASTER_PLAN.md` §58. Decision in §59. |
+| Docs | This RFC. Mood boards in-repo at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, `ref-c-galaxy-field.jpg`. Queue line in `JARVIS_MASTER_PLAN.md` §58. Decision in §59. |
 
 ## Out of scope
 
@@ -185,6 +185,6 @@ A second presence renderer. Removing or rewriting Classic, Neural, Humanoid, Par
 
 - Tip when written: `development` @ `2cb6c0b2` (#417).
 - Visual sign-off of Galaxy against Ref A / Ref B / Ref C is a desktop/browser check. Cloud VMs have no GPU; they can still unit-test the literal, the visibility rules, and the frontend build.
-- Mood-board binaries were not on the worker filesystem for this amend. Descriptions in §2 are authoritative until `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, and `ref-c-galaxy-field.jpg` are added.
+- Mood boards are in-repo at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, and `ref-c-galaxy-field.jpg`.
 - Subpar implement: CoS reviews and escalates to Taco. Do not encode that escalate as a runtime feature.
 - Implement only after CoS merges this PR and names the UX ticket.
