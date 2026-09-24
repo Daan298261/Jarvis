@@ -899,12 +899,44 @@ def _router_orientation_excerpt() -> VaultHit | None:
     )
 
 
+def _reflex_rerank_memory_hits(query: str, hits: list[VaultHit], *, limit: int) -> list[VaultHit]:
+    """RFC-0171: batch memory relevance scores over the same query state."""
+    if len(hits) <= 1:
+        return hits[: max(1, limit)]
+    try:
+        from ..decision.surfaces import answer_value, score_memory_relevance
+        from ..decision.tier import resolve_status
+        from ..decision.surfaces import privacy_for_tier
+
+        status = resolve_status()
+        result = score_memory_relevance(
+            user_message=query,
+            candidates=[
+                {"excerpt": h.excerpt, "title": h.title, "rel_path": h.rel_path}
+                for h in hits
+            ],
+            privacy=privacy_for_tier(str(status.get("decision_tier") or "local")),
+        )
+        scored: list[tuple[float, VaultHit]] = []
+        for idx, hit in enumerate(hits):
+            raw = answer_value(result, f"memory_{idx}")
+            try:
+                relevance = float(raw) if raw is not None else float(hit.score or 0.0)
+            except (TypeError, ValueError):
+                relevance = float(hit.score or 0.0)
+            scored.append((relevance, hit))
+        scored.sort(key=lambda item: (-item[0], item[1].rel_path))
+        return [hit for _score, hit in scored[: max(1, limit)]]
+    except Exception:
+        return hits[: max(1, limit)]
+
+
 def vault_turn_hits(query: str, *, limit: int = 6) -> list[VaultHit]:
     """Lexical search with vault-relevant fallbacks (router orientation, token retry)."""
     cleaned = (query or "").strip()
-    hits = search_vault(cleaned, limit=limit)
+    hits = search_vault(cleaned, limit=max(limit, 8))
     if hits:
-        return hits
+        return _reflex_rerank_memory_hits(cleaned, hits, limit=limit)
     tokens = _tokenize_query(cleaned)
     if len(tokens) > 1:
         for tok in sorted(tokens, key=len, reverse=True):

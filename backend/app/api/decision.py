@@ -1,4 +1,4 @@
-"""RFC-0116 decision-tier Settings + probe API. Never echoes TypeSafe secrets."""
+"""RFC-0116 / RFC-0171 decision Settings, probe, Reflex metrics, and Laya status."""
 
 from __future__ import annotations
 
@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field
 
 from ..decision.audit import list_events
 from ..decision.jev_client import reset_http_post, using_labeled_fixture
+from ..decision.laya import pins as laya_pins
+from ..decision.laya import runtime as laya_runtime
+from ..decision import metrics as reflex_metrics
+from ..decision import quartermaster
 from ..decision.tier import bind_typesafe_key, probe_jev, resolve_status, set_decision_tier, set_notify_requested
 from ..licensing.inference import InferenceCredentialError
 
@@ -22,6 +26,10 @@ class DecisionTierIn(BaseModel):
 class TypesafeKeyIn(BaseModel):
     secret: str = Field(min_length=1, max_length=4000)
     label: str = Field(default="TypeSafe Jev", max_length=120)
+
+
+class LayaEnableIn(BaseModel):
+    warm: bool = True
 
 
 @router.get("/jev")
@@ -73,3 +81,34 @@ async def jev_reset_fixture() -> dict[str, Any]:
     """Labeled fixtures are process-local; this clears a test double without claiming live success."""
     reset_http_post()
     return {"ok": True, "fixture": using_labeled_fixture()}
+
+
+@router.get("/reflex/metrics")
+async def reflex_metrics_snapshot() -> dict[str, Any]:
+    """Control Room: p50/p95/p99 latency, fallback rate, quality per class/provider."""
+    return {
+        **reflex_metrics.snapshot(),
+        "quartermaster": quartermaster.selection_snapshot("default"),
+    }
+
+
+@router.get("/laya")
+async def laya_status() -> dict[str, Any]:
+    return {
+        **laya_runtime.status(),
+        "pins": laya_pins.pin_manifest(),
+    }
+
+
+@router.post("/laya/enable")
+async def laya_enable(body: LayaEnableIn | None = None) -> dict[str, Any]:
+    warm = True if body is None else bool(body.warm)
+    try:
+        return laya_runtime.enable(warm=warm, allow_fixture=True)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/laya/disable")
+async def laya_disable() -> dict[str, Any]:
+    return laya_runtime.disable()

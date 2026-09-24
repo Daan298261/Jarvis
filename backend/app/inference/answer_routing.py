@@ -27,6 +27,7 @@ def select_runtime_for_decision(
     current_profile: str,
     warm_models: tuple[str, ...] = (),
     profiles: list[RuntimeProfile] | None = None,
+    user_message: str = "",
 ) -> str | None:
     minimum = int(decision.minimum_answer_tier or 0)
     if decision.action == "answer_basic" and minimum <= 1:
@@ -49,7 +50,32 @@ def select_runtime_for_decision(
     routed = route_runtime(prefs, nodes=nodes, profiles=profiles)
     if not routed.accepted or routed.runtime_profile is None:
         return None
-    return routed.runtime_profile.model_profile or routed.runtime_profile.name
+    selected = routed.runtime_profile.model_profile or routed.runtime_profile.name
+    # RFC-0171: typed Reflex may refine among eligible profiles without lowering the tier floor.
+    try:
+        from ..decision.surfaces import answer_value, privacy_for_tier, route_persona_model
+        from ..decision.tier import resolve_status
+
+        catalog = profiles if profiles is not None else list_runtime_profiles()
+        candidates = [
+            (row.model_profile or row.name)
+            for row in catalog
+            if row.enabled and profile_meets_minimum_tier(row.model_profile or row.name, minimum, runtime_row=row)
+        ]
+        if len(candidates) >= 2 and user_message:
+            status = resolve_status()
+            reflex = route_persona_model(
+                user_message=user_message,
+                candidates=candidates,
+                preferred_profile=selected or current_profile,
+                privacy=privacy_for_tier(str(status.get("decision_tier") or "local")),
+            )
+            pick = answer_value(reflex, "route_profile")
+            if pick in candidates:
+                return str(pick)
+    except Exception:
+        pass
+    return selected
 
 
 def should_switch_for_decision(
@@ -122,6 +148,7 @@ async def prepare_answer_route(
             decision,
             current_profile=effective,
             warm_models=warm_models or (effective,),
+            user_message=user_message,
         )
         if target and target != effective:
             handoff = build_model_handoff(
