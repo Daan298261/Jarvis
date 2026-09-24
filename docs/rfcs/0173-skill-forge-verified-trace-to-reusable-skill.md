@@ -2,7 +2,8 @@
 
 **Status:** implemented
 **Implemented:** #414 @ `e442b3314c9b9d03e6eff9bdc020f8e8db111a01` (`backend/app/skills/`, `/api/skill-forge/*`).
-**Residuals:** Modules/Skills portal UI (UX); Desktop live soak N/A-unit-covered.
+**Portal:** #416 @ `ebcdf9dacf787719b5f28159d31515817034fca0` (`frontend/src/pages/SkillForge.tsx` — Modules / Skills Decision Inbox, approve → activate).
+**Residuals:** none. The Modules/Skills portal UI residual is closed by #416. Desktop live soak stays N/A (unit-covered).
 **Renumbered on development:** was incorrectly `RFC-0139` on main @ `ac18fb32` (collided with Android companion orb RFC-0139). Canonical on development is **RFC-0173**.  
 **Date:** 2026-09-24
 
@@ -29,3 +30,7 @@ A skill manifest declares purpose, input/output schema, tools, permissions, secr
 ## Likely files
 
 `backend/app/skills/`, policy/audit integration, evaluation harness, Modules/Skills UI, `tests/test_skill_forge_*.py`.
+
+## Notes
+
+Portal UI residual closed 2026-09-24 by #416 @ `ebcdf9dacf787719b5f28159d31515817034fca0`. The page is Modules / Skills (`/skills`): Decision Inbox, approve then activate, reject, published skills. No further residual. Desktop live soak stays N/A (unit-covered).

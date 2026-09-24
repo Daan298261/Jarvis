@@ -2,7 +2,8 @@
 
 **Status:** implemented
 **Implemented:** #413 @ `13740066e6409bb3da384026e349c6f65c4fa6a8` (`backend/app/agents/rooms/`).
-**Residuals:** Portal/websocket UI (UX); live multi-model room Desktop sign-off.
+**Portal:** #417 @ `2cb6c0b2feb56374c2e55007fd8ff5932837592a` (`frontend/src/pages/AgentRooms.tsx`, `backend/app/api/agent_rooms.py`).
+**Residuals:** live multi-model room Desktop soak. The portal UI residual is closed by #417.
 **Renumbered on development:** was incorrectly `RFC-0140` on main @ `ac18fb32` (collided with companion on-device voice RFC-0140). Canonical on development is **RFC-0174**.  
 **Date:** 2026-09-24
 
@@ -31,3 +32,7 @@ UI shows room participants, active model, task graph, messages, artifacts and wh
 ## Likely files
 
 `backend/app/agents/rooms/`, orchestrator/router, resource governor, portal websocket/events, `frontend/src/`, tests.
+
+## Notes
+
+Portal UI residual closed 2026-09-24 by #417 @ `2cb6c0b2feb56374c2e55007fd8ff5932837592a`. Owner page is `/rooms` and `/rooms/:roomId`. HTTP routes under `/api/agent-rooms` list, create, read messages, blackboard, and audit replay, and they hand off, synthesize, and terminate. The landed portal loads over REST. It does not add a websocket push, and websocket push is not an open residual. Remaining residual: a live multi-model room on Desktop (cloud VMs have no GPU).
