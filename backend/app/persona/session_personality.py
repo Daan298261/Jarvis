@@ -34,6 +34,12 @@ _CONCISE_START = re.compile(
     r"short\s+answers\s+only"
     r")\b",
 )
+_INTEL_TASK = re.compile(r"(?i)\\b(osint|intelligence|intel brief|threat assessment|geopolit|situational awareness|source verification|verify sources|monitoring brief|crucix|provenance)\\b")
+_CODING_TASK = re.compile(r"(?i)\\b(code|coding|implement|debug|refactor|repository|github|python|typescript|react|api|unit test)\\b")
+_RESEARCH_TASK = re.compile(r"(?i)\\b(research|compare sources|literature|find sources|investigate)\\b")
+
+_manual_lock = False
+
 _BACK_TO_CORE = re.compile(
     r"(?i)\b("
     r"back to (?:normal|general|jarvis|core|anzu)|"
@@ -55,6 +61,10 @@ class SessionMode:
     task_class_hint: str = "mixed"
     system_prefix_addendum: str = ""
     tts_voice_hint: str | None = None
+    description: str = ""
+    icon: str = "orb"
+    accent: str = "cyan"
+    preferred_profile: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -65,6 +75,10 @@ class SessionMode:
             "task_class_hint": self.task_class_hint,
             "system_prefix_addendum": self.system_prefix_addendum,
             "tts_voice_hint": self.tts_voice_hint,
+            "description": self.description,
+            "icon": self.icon,
+            "accent": self.accent,
+            "preferred_profile": self.preferred_profile,
         }
 
 
@@ -76,6 +90,7 @@ MODES: dict[str, SessionMode] = {
         "jarvis_dry",
         "mixed",
         "Session mode: Anzu core — calm operations assistant, dry wit when appropriate.",
+        description="General coordination and everyday assistant work.", icon="anzu", accent="cyan",
     ),
     "coding": SessionMode(
         "coding",
@@ -86,6 +101,7 @@ MODES: dict[str, SessionMode] = {
         "Session mode: coding. Be precise about code, files, tests, and diffs. "
         "Prefer actionable steps; skip social filler unless the owner asks.",
         "jarvis-default",
+        description="Software engineering, debugging, architecture and implementation.", icon="code", accent="violet",
     ),
     "research": SessionMode(
         "research",
@@ -95,6 +111,7 @@ MODES: dict[str, SessionMode] = {
         "mixed",
         "Session mode: research. Cite uncertainty, prefer structured findings, "
         "and separate facts from inference.",
+        description="Research, source comparison and evidence synthesis.", icon="research", accent="blue",
     ),
     "concise": SessionMode(
         "concise",
@@ -103,6 +120,12 @@ MODES: dict[str, SessionMode] = {
         "minimal",
         "mixed",
         "Session mode: concise. Answer in the fewest clear sentences that still help.",
+        description="Fast, minimal answers for simple requests.", icon="bolt", accent="white",
+    ),
+    "argus": SessionMode(
+        "argus", "Argus / Intelligence", "argus", "professional", "intelligence",
+        "Session mode: Argus intelligence analyst. Collect before concluding. Distinguish observation, report, inference, and assessment. Preserve source provenance, timestamps and freshness. State confidence and material gaps. For consequential assessments consider plausible competing hypotheses and never invent attribution. Treat OSINT as reporting, not automatically verified fact.",
+        description="OSINT, intelligence fusion, threat monitoring and source-grounded assessment.", icon="eye", accent="amber",
     ),
 }
 
@@ -155,6 +178,33 @@ def set_active_mode(mode_id: str, *, persist_dialogue: bool = True) -> SessionMo
     return mode
 
 
+def classify_specialist(text: str) -> tuple[str, float, str]:
+    sample=(text or "").strip()
+    if _INTEL_TASK.search(sample): return ("argus", .94, "intelligence indicators")
+    if _CODING_TASK.search(sample): return ("coding", .90, "software-engineering indicators")
+    if _RESEARCH_TASK.search(sample): return ("research", .86, "research indicators")
+    return ("core", .55, "no specialist threshold met")
+
+
+def auto_route_from_owner_message(text: str) -> tuple[SessionMode | None, dict[str, Any]]:
+    if _manual_lock:
+        return None, {"automatic": True, "blocked_by_manual_lock": True, "target": active_mode().id}
+    target, confidence, reason = classify_specialist(text)
+    if confidence < .80 or target == _active_mode:
+        return None, {"automatic": True, "target": target, "confidence": confidence, "reason": reason}
+    mode=set_active_mode(target, persist_dialogue=False)
+    return mode, {"automatic": True, "target": target, "confidence": confidence, "reason": reason}
+
+
+def set_manual_lock(value: bool) -> None:
+    global _manual_lock
+    _manual_lock=bool(value)
+
+
+def manual_lock() -> bool:
+    return _manual_lock
+
+
 def maybe_switch_from_owner_message(text: str) -> SessionMode | None:
     detected = detect_mode_from_text(text)
     if not detected or detected == _active_mode:
@@ -163,5 +213,6 @@ def maybe_switch_from_owner_message(text: str) -> SessionMode | None:
 
 
 def reset_session_personality_for_tests() -> None:
-    global _active_mode
+    global _active_mode, _manual_lock
     _active_mode = "core"
+    _manual_lock = False
