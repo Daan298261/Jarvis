@@ -2170,8 +2170,9 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [x] RFC-0140 Companion on-device small voice models (fallback + grid-down) — implemented (#403 @ `59e5ea73`; Whisper/TTS native bake + phone soak = device sign-off)
 - [x] RFC-0171 Priority System-One Reflex Lane — Jev + local Laya — implemented (#409 @ `f7bf66a9`; GPU/Laya sha + speed-claim release gate = Desktop sign-off)
 - [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
-- [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal UI residual)
-- [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal UI + live room soak residual)
+- [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal #416 @ `ebcdf9da`; no residual)
+- [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal #417 @ `2cb6c0b2`; live multi-model room Desktop soak residual)
+- [ ] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — accepted (specs; implement is a separate UX ticket)
 
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
@@ -2842,6 +2843,36 @@ Decision: RFC-0174 Multi-agent rooms (implemented)
 Reason:
 
 CoS assigned Architect paired ledger-tick 0173+0174 after both lands.
+
+---
+
+Decision: RFC-0173 portal residual closed
+
+[RFC-0173](docs/rfcs/0173-skill-forge-verified-trace-to-reusable-skill.md) portal UI residual is **closed** on development via #416 @ `ebcdf9dacf787719b5f28159d31515817034fca0`. Modules / Skills (`frontend/src/pages/SkillForge.tsx`) reviews forge candidates and requires an explicit Approve, then Activate. Backend #414 is unchanged. **Residuals:** none. Desktop live soak stays N/A (unit-covered). §58 portal-residual wording removed. No product code in this ledger PR.
+
+Reason:
+
+CoS held the 0173 portal ledger to pair with the 0174 portal. #416 is merged.
+
+---
+
+Decision: RFC-0174 portal residual closed
+
+[RFC-0174](docs/rfcs/0174-multi-agent-rooms-blackboard-deadlock-and-handoff.md) portal UI residual is **closed** on development via #417 @ `2cb6c0b2feb56374c2e55007fd8ff5932837592a`. Agent rooms (`frontend/src/pages/AgentRooms.tsx`, `/api/agent-rooms`) shows participants, task graph, typed timeline, blackboard, and audit replay over REST. Backend #413 is unchanged. **Residual:** live multi-model room Desktop soak. Websocket push was not part of the landed portal and is not left open. §58 portal-residual wording removed. No product code in this ledger PR.
+
+Reason:
+
+CoS paired this close with the 0173 portal ledger after #417 landed on `development`.
+
+---
+
+Decision: RFC-0175 Galaxy presence option, chat waveform, and Advanced controls (accepted)
+
+[RFC-0175](docs/rfcs/0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) is **accepted** (specs only). Galaxy is an additional Appearance presence choice. Default stays `requested_presence: neural`. Classic, Neural HUD, Humanoid HUD, Particle bust, persona shapes, RFC-0138 presets, and HexStrike `hex_aegis` stay selectable. When Galaxy is selected, the current humanoid cloud is enriched toward Taco’s room frames: Ref A idle particle bust with `STATUS: IDLE | ····· | SYN-01`, Ref B neural lattice in that same bust, Ref C full-frame starfield ambience. Chat gains a voice waveform bound to real TTS/STT state. Common controls stay on their tab; power controls sit under Advanced, beside the existing RFC-0094 Advanced group. Implement is a separate named UX ticket after CoS merges this PR. §58 checkbox unchecked. No product code in this PR.
+
+Reason:
+
+Taco via CoS, 2026-09-24. Visual targets are the three attached reference frames, described in the RFC. Subpar implement is a CoS → Taco review escalate, not a code path.
 
 ---
 
