@@ -16,12 +16,14 @@ TASK_TOOL_SETS: dict[str, frozenset[str]] = {
     "software engineering": frozenset({"filesystem", "terminal", "python", "git", "verify_code"}),
     "research": frozenset({"filesystem", "web_fetch", "browser", "python"}),
     "browser automation": frozenset({"filesystem", "browser", "web_fetch"}),
-    "windows gui": frozenset({"filesystem", "desktop", "screenshot", "terminal"}),
+    "windows gui": frozenset({"filesystem", "desktop", "screenshot", "terminal", "reflex_computer_use"}),
     "office": frozenset({"filesystem", "office", "python"}),
     "document processing": frozenset({"filesystem", "office", "python"}),
     "data processing": frozenset({"filesystem", "python", "terminal"}),
-    "multimodal": frozenset({"filesystem", "screenshot", "desktop", "browser"}),
-    "mixed": frozenset({"filesystem", "terminal", "python", "git", "web_fetch", "browser", "desktop", "screenshot"}),
+    "multimodal": frozenset({"filesystem", "screenshot", "desktop", "browser", "reflex_computer_use"}),
+    "mixed": frozenset(
+        {"filesystem", "terminal", "python", "git", "web_fetch", "browser", "desktop", "screenshot", "reflex_computer_use"}
+    ),
     "long-horizon autonomous": frozenset(
         {
             "filesystem",
@@ -33,6 +35,7 @@ TASK_TOOL_SETS: dict[str, frozenset[str]] = {
             "desktop",
             "screenshot",
             "office",
+            "reflex_computer_use",
         }
     ),
 }
@@ -66,6 +69,8 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "interpreter": "open_interpreter",
     "open-interpreter": "open_interpreter",
     "browseruse": "browser_use",
+    "reflex": "reflex_computer_use",
+    "reflex_loop": "reflex_computer_use",
 }
 
 NATIVE_TOOLS = (
@@ -86,6 +91,7 @@ NATIVE_TOOLS = (
     "open_interpreter",
     "ufo",
     "cua",
+    "reflex_computer_use",
 )
 
 

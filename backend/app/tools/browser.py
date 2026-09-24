@@ -16,6 +16,7 @@ _pages: list[Any] = []
 _ACTIONS_NEEDING_PAGE = {
     "open",
     "snapshot",
+    "action_frame",
     "click",
     "type",
     "fill",
@@ -86,6 +87,7 @@ class BrowserTool(Tool):
                 "enum": [
                     "open",
                     "snapshot",
+                    "action_frame",
                     "click",
                     "type",
                     "fill",
@@ -163,6 +165,16 @@ class BrowserTool(Tool):
                         True,
                         f"{_title_payload(page.url, title)}\n\n{truncated}",
                         data={"url": page.url, "title": title},
+                    )
+                if action == "action_frame":
+                    # RFC-0172: atomic ActionFrame from DOM/a11y identity (no selector payload).
+                    from ..reflex_loop.adapters import snapshot_browser_page
+
+                    frame = await snapshot_browser_page(page)
+                    return ToolResult(
+                        True,
+                        f"ActionFrame {frame.frame_id} nodes={len(frame.nodes)} url={frame.url_or_title}",
+                        data={"action_frame": frame.as_dict()},
                     )
                 if action == "click":
                     method = "selector"
