@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react"
 import { AdvancedDisclosure } from "../components/AdvancedDisclosure"
 import { Link, useNavigate, useParams } from "react-router-dom"
+import "./luxury-portals.css"
 import {
   createAgentRoom,
   formatAgentRoomsError,
@@ -134,49 +135,52 @@ export function AgentRoomsPage() {
 
   return (
     <div className="agent-rooms-page">
-      <h1>Agent rooms</h1>
-      <p className="lede">
-        Anzu 1.0 collaboration. Anzu supervises named specialists. Messages are typed
-        (request, result, question, challenge, handoff, blocked, final). The blackboard
-        holds shared facts, artifacts, decisions, and citations. Hidden chain-of-thought
-        is not shown — only the concise rationale on each handoff.
-      </p>
+      <header className="luxury-page-head">
+        <h1>Agent rooms</h1>
+        <p className="lede">
+          Anzu 1.0 collaboration. Anzu supervises named specialists. Messages are typed
+          (request, result, question, challenge, handoff, blocked, final). The blackboard
+          holds shared facts, artifacts, decisions, and citations. Hidden chain-of-thought
+          is not shown — only the concise rationale on each handoff.
+        </p>
+      </header>
 
       {loadError && (
-        <div className="card coding-banner bad" role="alert">
-          <p className="license-kicker">Could not load agent rooms</p>
-          <p className="lede" style={{ margin: 0 }}>{loadError}</p>
+        <div className="luxury-banner" role="alert">
+          <p className="luxury-kicker">Could not load agent rooms</p>
+          <p className="luxury-banner-body">{loadError}</p>
         </div>
       )}
       {actionError && (
-        <div className="card coding-banner bad" role="alert">
-          <p className="license-kicker">Action failed</p>
-          <p className="lede" style={{ margin: 0 }}>{actionError}</p>
+        <div className="luxury-banner" role="alert">
+          <p className="luxury-kicker">Action failed</p>
+          <p className="luxury-banner-body">{actionError}</p>
         </div>
       )}
       {actionOk && (
-        <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
-          <p className="lede" style={{ margin: 0 }}>{actionOk}</p>
+        <div className="luxury-banner ok" role="status">
+          <p className="luxury-kicker">Completed</p>
+          <p className="luxury-banner-body">{actionOk}</p>
         </div>
       )}
 
-      <form className="card" style={{ marginBottom: 16 }} onSubmit={(event) => void onCreate(event)}>
-        <div className="rail-heading" style={{ padding: "0 0 8px" }}>
+      <form className="luxury-panel" onSubmit={(event) => void onCreate(event)}>
+        <div className="luxury-rail">
           <span>Open a room</span>
         </div>
-        <p className="lede">
+        <p className="luxury-copy">
           Anzu joins as supervisor. Pick specialists from the named roster. The resource
           governor uses the cost and privacy mode you choose.
         </p>
         {!listReady ? (
-          <p className="lede">Loading the Anzu roster…</p>
+          <p className="luxury-state loading">Loading the Anzu roster…</p>
         ) : !rosterReady ? (
-          <p className="lede" style={{ margin: 0 }}>
+          <p className="luxury-state failed">
             Specialists are unavailable until the roster loads. This is not an empty room list.
           </p>
         ) : (
           <>
-            <label>
+            <label className="luxury-field block">
               Goal
               <textarea
                 value={goal}
@@ -186,7 +190,7 @@ export function AgentRoomsPage() {
                 placeholder="What should this room finish?"
               />
             </label>
-            <p className="lede" style={{ marginBottom: 4 }}>Specialists</p>
+            <p className="luxury-label">Specialists</p>
             <div className="agent-room-roster">
               {roster!.map((row) => (
                 <label key={row.id}>
@@ -197,7 +201,7 @@ export function AgentRoomsPage() {
                   />
                   <span>
                     <strong>{row.label}</strong>
-                    <span className="lede" style={{ display: "block", margin: 0 }}>
+                    <span className="luxury-sub">
                       {row.phrase}. {row.role}
                     </span>
                   </span>
@@ -205,8 +209,8 @@ export function AgentRoomsPage() {
               ))}
             </div>
             <AdvancedDisclosure>
-              <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
-                <label style={{ flex: "1 1 180px" }}>
+              <div className="luxury-row">
+                <label className="luxury-field md">
                   Cost mode
                   <select aria-label="Cost mode" value={costMode} onChange={(event) => setCostMode(event.target.value)}>
                     {COST_MODES.map((mode) => (
@@ -214,7 +218,7 @@ export function AgentRoomsPage() {
                     ))}
                   </select>
                 </label>
-                <label style={{ flex: "1 1 180px" }}>
+                <label className="luxury-field md">
                   Privacy mode
                   <select aria-label="Privacy mode" value={privacyMode} onChange={(event) => setPrivacyMode(event.target.value)}>
                     {PRIVACY_MODES.map((mode) => (
@@ -224,7 +228,7 @@ export function AgentRoomsPage() {
                 </label>
               </div>
             </AdvancedDisclosure>
-            <div className="row" style={{ gap: 8, marginTop: 12 }}>
+            <div className="luxury-row actions">
               <button className="btn" type="submit" disabled={busy}>Open room</button>
               <button className="btn secondary" type="button" disabled={busy} onClick={() => void refreshList()}>
                 Refresh
@@ -234,18 +238,18 @@ export function AgentRoomsPage() {
         )}
       </form>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="rail-heading" style={{ padding: "0 0 8px" }}>
+      <div className="luxury-panel">
+        <div className="luxury-rail">
           <span>Rooms</span>
         </div>
         {!listReady ? (
-          <p className="lede" style={{ margin: 0 }}>Loading rooms…</p>
+          <p className="luxury-state loading">Loading rooms…</p>
         ) : rooms === null ? (
-          <p className="lede" style={{ margin: 0 }}>
+          <p className="luxury-state failed">
             Rooms did not load. Fix the error above — this is not an empty room list.
           </p>
         ) : rooms.length === 0 ? (
-          <p className="lede" style={{ margin: 0 }}>No agent rooms yet. Open one with a goal and at least one specialist.</p>
+          <p className="luxury-state empty">No agent rooms yet. Open one with a goal and at least one specialist.</p>
         ) : (
           <table>
             <thead>
@@ -262,7 +266,7 @@ export function AgentRoomsPage() {
                 <tr key={room.id}>
                   <td>
                     <strong>{room.goal}</strong>
-                    <div className="lede" style={{ margin: "4px 0 0" }}>{shortId(room.id)}</div>
+                    <div className="luxury-id">{shortId(room.id)}</div>
                   </td>
                   <td><span className={statusClass(room.status)}>{room.status}</span></td>
                   <td>{room.participants.map((p) => labelFor(p.agent_id, roster || [])).join(", ")}</td>
@@ -438,35 +442,34 @@ function RoomDetail({
 
   return (
     <section aria-label="Room detail">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
-        <h2 style={{ marginBottom: 8 }}>Room {shortId(roomId)}</h2>
+      <div className="luxury-row spread luxury-room-head">
+        <h2>Room {shortId(roomId)}</h2>
         <Link to="/rooms">All rooms</Link>
       </div>
 
-      {detailStatus === "loading" && <p className="lede">Loading room…</p>}
+      {detailStatus === "loading" && <p className="luxury-state loading">Loading room…</p>}
 
       {roomError && (
-        <div className="card coding-banner bad" role="alert">
-          <p className="license-kicker">Could not load this room</p>
-          <p className="lede" style={{ margin: 0 }}>{roomError}</p>
+        <div className="luxury-banner" role="alert">
+          <p className="luxury-kicker">Could not load this room</p>
+          <p className="luxury-banner-body">{roomError}</p>
         </div>
       )}
 
       {detailStatus === "ready" && !room && (
-        <p className="lede">Room detail is unavailable. The error above is the result — participants were not loaded.</p>
+        <p className="luxury-state failed">Room detail is unavailable. The error above is the result — participants were not loaded.</p>
       )}
 
       {room && (
         <>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <p className="lede" style={{ marginTop: 0 }}>{room.goal}</p>
+          <div className="luxury-panel">
+            <p className="luxury-copy goal">{room.goal}</p>
             <p>
               <span className={statusClass(room.status)}>{room.status}</span>
             </p>
             {open ? (
               <form
-                className="row"
-                style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}
+                className="luxury-row"
                 onSubmit={(event) => {
                   event.preventDefault()
                   const reason = terminateReason.trim()
@@ -480,7 +483,7 @@ function RoomDetail({
                   })
                 }}
               >
-                <label style={{ flex: "1 1 240px" }}>
+                <label className="luxury-field lg">
                   Termination reason
                   <input
                     value={terminateReason}
@@ -491,14 +494,14 @@ function RoomDetail({
                 <button className="btn secondary" type="submit" disabled={busy}>Terminate</button>
               </form>
             ) : (
-              <p className="lede" style={{ marginBottom: 0 }}>This room is closed. New messages, handoffs, and blackboard writes are rejected.</p>
+              <p className="luxury-state empty">This room is closed. New messages, handoffs, and blackboard writes are rejected.</p>
             )}
           </div>
 
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="luxury-panel">
             <h3 className="env-subhead">Participants</h3>
             {participants.length === 0 ? (
-              <p className="lede" style={{ margin: 0 }}>This room has no participants.</p>
+              <p className="luxury-state empty">This room has no participants.</p>
             ) : (
               <table>
                 <thead>
@@ -523,12 +526,12 @@ function RoomDetail({
             )}
           </div>
 
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="luxury-panel">
             <h3 className="env-subhead">Task graph</h3>
             {!room.task_graph || !Array.isArray(room.task_graph.tasks) ? (
-              <p className="lede" style={{ margin: 0 }}>Task graph was missing from the room.</p>
+              <p className="luxury-state failed">Task graph was missing from the room.</p>
             ) : room.task_graph.tasks.length === 0 ? (
-              <p className="lede" style={{ margin: 0 }}>No tasks assigned.</p>
+              <p className="luxury-state empty">No tasks assigned.</p>
             ) : (
               <table>
                 <thead>
@@ -544,7 +547,7 @@ function RoomDetail({
                     <tr key={task.id}>
                       <td>
                         {task.title}
-                        <div className="lede" style={{ margin: "4px 0 0" }}>{shortId(task.id)}</div>
+                        <div className="luxury-id">{shortId(task.id)}</div>
                       </td>
                       <td>{task.assignee ? name(task.assignee) : "Unassigned"}</td>
                       <td><span className={statusClass(task.status)}>{task.status}</span></td>
@@ -556,20 +559,20 @@ function RoomDetail({
             )}
           </div>
 
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="luxury-panel">
             <h3 className="env-subhead">Typed timeline</h3>
             {messagesError && (
-              <div className="card coding-banner bad" role="alert">
-                <p className="license-kicker">Could not load messages</p>
-                <p className="lede" style={{ margin: 0 }}>{messagesError}</p>
+              <div className="luxury-banner" role="alert">
+                <p className="luxury-kicker">Could not load messages</p>
+                <p className="luxury-banner-body">{messagesError}</p>
               </div>
             )}
             {messagesError ? (
-              <p className="lede" style={{ margin: 0 }}>Timeline unavailable until messages load.</p>
+              <p className="luxury-state failed">Timeline unavailable until messages load.</p>
             ) : messages === null ? (
-              <p className="lede" style={{ margin: 0 }}>Loading messages…</p>
+              <p className="luxury-state loading">Loading messages…</p>
             ) : messages.length === 0 ? (
-              <p className="lede" style={{ margin: 0 }}>No typed messages yet.</p>
+              <p className="luxury-state empty">No typed messages yet.</p>
             ) : (
               <ol className="agent-room-timeline">
                 {messages.map((message) => (
@@ -577,14 +580,14 @@ function RoomDetail({
                     <span className={statusClass(message.kind)}>{message.kind}</span>{" "}
                     <strong>{name(message.from_agent)}</strong>
                     {message.to_agent ? ` → ${name(message.to_agent)}` : ""}
-                    <p style={{ margin: "6px 0" }}>{message.body}</p>
+                    <p className="luxury-message-body">{message.body}</p>
                     {message.kind === "HANDOFF" && (
-                      <p className="lede" style={{ margin: 0 }}>
+                      <p className="luxury-note">
                         Handoff rationale: {message.rationale || "No rationale recorded"}
                       </p>
                     )}
                     {message.kind !== "HANDOFF" && message.rationale ? (
-                      <p className="lede" style={{ margin: 0 }}>Rationale: {message.rationale}</p>
+                      <p className="luxury-note">Rationale: {message.rationale}</p>
                     ) : null}
                   </li>
                 ))}
@@ -594,7 +597,7 @@ function RoomDetail({
             {open && (
               <AdvancedDisclosure>
               <form
-                style={{ marginTop: 16 }}
+                className="luxury-follow"
                 onSubmit={(event) => {
                   event.preventDefault()
                   const body = messageBody.trim()
@@ -617,8 +620,8 @@ function RoomDetail({
                 }}
               >
                 <h3 className="env-subhead">Post a typed message</h3>
-                <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
-                  <label style={{ flex: "1 1 140px" }}>
+                <div className="luxury-row">
+                  <label className="luxury-field sm">
                     Kind
                     <select aria-label="Message kind" value={kind} onChange={(event) => setKind(event.target.value)}>
                       {MESSAGE_KINDS.map((item) => (
@@ -629,11 +632,11 @@ function RoomDetail({
                   <AgentSelect label="From" value={fromAgent} options={participantOptions} onChange={setFromAgent} />
                   <AgentSelect label="To" value={toAgent} options={participantOptions} onChange={setToAgent} allowEmpty />
                 </div>
-                <label>
+                <label className="luxury-field block">
                   Body
                   <textarea aria-label="Message body" rows={3} value={messageBody} onChange={(event) => setMessageBody(event.target.value)} />
                 </label>
-                <label>
+                <label className="luxury-field block">
                   Rationale
                   <input aria-label="Message rationale" value={messageRationale} onChange={(event) => setMessageRationale(event.target.value)} />
                 </label>
@@ -645,8 +648,7 @@ function RoomDetail({
 
           {open && (
             <form
-              className="card"
-              style={{ marginBottom: 16 }}
+              className="luxury-panel"
               onSubmit={(event) => {
                 event.preventDefault()
                 const body = handoffBody.trim()
@@ -677,11 +679,11 @@ function RoomDetail({
               }}
             >
               <h3 className="env-subhead">Handoff</h3>
-              <p className="lede">The rationale is stored with the handoff and shown on the timeline and in the audit replay.</p>
-              <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
+              <p className="luxury-copy">The rationale is stored with the handoff and shown on the timeline and in the audit replay.</p>
+              <div className="luxury-row">
                 <AgentSelect label="From" value={handoffFrom} options={participantOptions} onChange={setHandoffFrom} />
                 <AgentSelect label="To" value={handoffTo} options={participantOptions} onChange={setHandoffTo} />
-                <label style={{ flex: "1 1 220px" }}>
+                <label className="luxury-field">
                   Task
                   <select aria-label="Handoff task" value={taskId} onChange={(event) => setTaskId(event.target.value)}>
                     <option value="">No task</option>
@@ -691,11 +693,11 @@ function RoomDetail({
                   </select>
                 </label>
               </div>
-              <label>
+              <label className="luxury-field block">
                 Body
                 <textarea aria-label="Handoff body" rows={2} value={handoffBody} onChange={(event) => setHandoffBody(event.target.value)} />
               </label>
-              <label>
+              <label className="luxury-field block">
                 Why this handoff
                 <input aria-label="Handoff rationale" value={handoffRationale} onChange={(event) => setHandoffRationale(event.target.value)} />
               </label>
@@ -703,26 +705,26 @@ function RoomDetail({
             </form>
           )}
 
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="luxury-panel">
             <h3 className="env-subhead">Blackboard</h3>
             {boardError && (
-              <div className="card coding-banner bad" role="alert">
-                <p className="license-kicker">Could not load the blackboard</p>
-                <p className="lede" style={{ margin: 0 }}>{boardError}</p>
+              <div className="luxury-banner" role="alert">
+                <p className="luxury-kicker">Could not load the blackboard</p>
+                <p className="luxury-banner-body">{boardError}</p>
               </div>
             )}
             {boardError ? (
-              <p className="lede">Blackboard unavailable. An empty board is not shown in place of this failure.</p>
+              <p className="luxury-state failed">Blackboard unavailable. An empty board is not shown in place of this failure.</p>
             ) : board === null ? (
-              <p className="lede">Loading blackboard…</p>
+              <p className="luxury-state loading">Loading blackboard…</p>
             ) : (
               <>
-                <p className="lede">
+                <p className="luxury-copy">
                   {board.counts.total} entries · {board.counts.facts} facts · {board.counts.artifacts} artifacts ·{" "}
                   {board.counts.decisions} decisions · {board.counts.citations} citations · {board.bounds.used_chars} / {board.bounds.max_total_chars} characters
                 </p>
                 {board.entries.length === 0 ? (
-                  <p className="lede" style={{ margin: 0 }}>No shared blackboard entries yet.</p>
+                  <p className="luxury-state empty">No shared blackboard entries yet.</p>
                 ) : (
                   <table>
                     <thead>
@@ -750,7 +752,7 @@ function RoomDetail({
             {open && (
               <AdvancedDisclosure>
               <form
-                style={{ marginTop: 16 }}
+                className="luxury-follow"
                 onSubmit={(event) => {
                   event.preventDefault()
                   const key = boardKey.trim()
@@ -772,8 +774,8 @@ function RoomDetail({
                   })
                 }}
               >
-                <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
-                  <label style={{ flex: "1 1 140px" }}>
+                <div className="luxury-row">
+                  <label className="luxury-field sm">
                     Kind
                     <select aria-label="Blackboard kind" value={boardKind} onChange={(event) => setBoardKind(event.target.value)}>
                       {BOARD_KINDS.map((item) => (
@@ -782,12 +784,12 @@ function RoomDetail({
                     </select>
                   </label>
                   <AgentSelect label="Author" value={boardAuthor} options={participantOptions} onChange={setBoardAuthor} />
-                  <label style={{ flex: "2 1 180px" }}>
+                  <label className="luxury-field grow">
                     Key
                     <input aria-label="Blackboard key" value={boardKey} onChange={(event) => setBoardKey(event.target.value)} />
                   </label>
                 </div>
-                <label>
+                <label className="luxury-field block">
                   Content
                   <textarea aria-label="Blackboard content" rows={2} value={boardContent} onChange={(event) => setBoardContent(event.target.value)} />
                 </label>
@@ -798,18 +800,18 @@ function RoomDetail({
           </div>
 
           <AdvancedDisclosure>
-            <div className="card" style={{ marginBottom: 0 }}>
+            <div className="luxury-panel flush">
               <h3 className="env-subhead">Resource governor</h3>
               <GovernorPanel governor={room.governor} />
             </div>
           </AdvancedDisclosure>
 
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="luxury-panel">
             <h3 className="env-subhead">Synthesis</h3>
             {room.synthesis ? (
               <SynthesisBlock synthesis={room.synthesis} name={name} />
             ) : (
-              <p className="lede">No synthesis yet. Anzu writes one when you synthesize and finalize.</p>
+              <p className="luxury-state empty">No synthesis yet. Anzu writes one when you synthesize and finalize.</p>
             )}
             {open && (
               <button
@@ -829,28 +831,32 @@ function RoomDetail({
       )}
 
       <AdvancedDisclosure>
-      <div className="card" style={{ marginBottom: 0 }}>
+      <div className="luxury-panel flush">
         <h3 className="env-subhead">Audit replay</h3>
         {auditError && (
-          <div className="card coding-banner bad" role="alert">
-            <p className="license-kicker">Could not replay the audit</p>
-            <p className="lede" style={{ margin: 0 }}>{auditError}</p>
+          <div className="luxury-banner" role="alert">
+            <p className="luxury-kicker">Could not replay the audit</p>
+            <p className="luxury-banner-body">{auditError}</p>
           </div>
         )}
         {auditError ? (
-          <p className="lede" style={{ margin: 0 }}>Replay unavailable. An empty event list is not shown in place of this failure.</p>
+          <p className="luxury-state failed">Replay unavailable. An empty event list is not shown in place of this failure.</p>
         ) : audit === null ? (
-          <p className="lede" style={{ margin: 0 }}>{detailStatus === "loading" ? "Loading audit…" : "Audit replay did not load."}</p>
+          detailStatus === "loading" ? (
+            <p className="luxury-state loading">Loading audit…</p>
+          ) : (
+            <p className="luxury-state failed">Audit replay did not load.</p>
+          )
         ) : (
           <>
-            <p className="lede">
+            <p className="luxury-copy">
               {audit.event_count} events
               {audit.terminated ? " · terminated" : ""}
               {audit.escalated ? " · escalated to owner" : ""}
             </p>
             <h3 className="env-subhead">Handoff rationale</h3>
             {audit.handoffs.length === 0 ? (
-              <p className="lede">No handoffs in this replay.</p>
+              <p className="luxury-state empty">No handoffs in this replay.</p>
             ) : (
               <ul className="env-file-list">
                 {audit.handoffs.map((handoff, index) => (
@@ -877,7 +883,7 @@ function RoomDetail({
               </>
             )}
             {audit.events.length === 0 ? (
-              <p className="lede" style={{ margin: 0 }}>No audit events recorded.</p>
+              <p className="luxury-state empty">No audit events recorded.</p>
             ) : (
               <ol className="agent-room-timeline">
                 {audit.events.map((event) => {
@@ -886,7 +892,7 @@ function RoomDetail({
                   return (
                     <li key={event.id}>
                       <span className="badge queued">{event.kind}</span> {event.summary}
-                      {rationale ? <div className="lede">Rationale: {rationale}</div> : null}
+                      {rationale ? <div className="luxury-note">Rationale: {rationale}</div> : null}
                     </li>
                   )
                 })}
@@ -914,7 +920,7 @@ function AgentSelect({
   allowEmpty?: boolean
 }) {
   return (
-    <label style={{ flex: "1 1 160px" }}>
+    <label className="luxury-field sm">
       {label}
       <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
         {allowEmpty && <option value="">Anyone</option>}
@@ -928,11 +934,11 @@ function AgentSelect({
 
 function GovernorPanel({ governor }: { governor: AgentRoomSummary["governor"] | undefined }) {
   if (!governor || !governor.budget) {
-    return <p className="lede" style={{ margin: 0 }}>Governor usage was missing from the room.</p>
+    return <p className="luxury-state failed">Governor usage was missing from the room.</p>
   }
   const budget = governor.budget
   return (
-    <p className="lede" style={{ margin: 0 }}>
+    <p className="luxury-note">
       Cost {budget.cost_mode}, privacy {budget.privacy_mode}. Active leases {governor.active_leases}.
       Local {governor.parallel_local}/{budget.max_parallel_local}, cloud {governor.parallel_cloud}/{budget.max_parallel_cloud}.
       CPU {governor.cpu_slots}/{budget.cpu_slots}, GPU {governor.gpu_slots}/{budget.gpu_slots}, VRAM {governor.vram_mib}/{budget.vram_mib} MiB.
@@ -949,12 +955,12 @@ function SynthesisBlock({
 }) {
   return (
     <>
-      <p>{synthesis.summary}</p>
-      <p className="lede">Rationale: {synthesis.rationale || "No rationale recorded"}</p>
-      <p className="lede">
+      <p className="luxury-copy goal">{synthesis.summary}</p>
+      <p className="luxury-note">Rationale: {synthesis.rationale || "No rationale recorded"}</p>
+      <p className="luxury-note">
         Cited agents: {synthesis.cited_agents.length ? synthesis.cited_agents.map(name).join(", ") : "none"}
       </p>
-      <p className="lede">
+      <p className="luxury-note">
         Cited artifacts: {synthesis.cited_artifact_ids.length ? synthesis.cited_artifact_ids.map(shortId).join(", ") : "none"}
       </p>
     </>

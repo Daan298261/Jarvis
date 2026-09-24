@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
 import { AdvancedDisclosure } from "../components/AdvancedDisclosure"
 import { Link, useParams } from "react-router-dom"
+import "./luxury-portals.css"
 import {
   activateSkillForgeCandidate,
   approveSkillForgeCandidate,
@@ -346,7 +347,7 @@ export function SkillForgePage() {
       const result = await searchSkillForge({ query: q, limit: 20 })
       setSearchHits(result.results || [])
     } catch (err: unknown) {
-      setSearchHits([])
+      setSearchHits(null)
       setActionError(formatSkillForgeError(err))
     } finally {
       setBusy(false)
@@ -402,25 +403,27 @@ export function SkillForgePage() {
 
   return (
     <div className="skill-forge-page">
-      <h1>Modules / Skills</h1>
-      <p className="lede">
-        Anzu 1.0 Skill Forge. Verified traces become candidates — never auto-published. Review purpose,
-        provenance, eval status, and permissions, then <strong>Approve</strong> and separately{" "}
-        <strong>Activate</strong>. Coding merge conflicts stay on{" "}
-        <Link to="/coding">Coding → Decision Inbox</Link>. Memory guides live on{" "}
-        <Link to="/memory">Memory</Link>.
-      </p>
+      <header className="luxury-page-head">
+        <h1>Modules / Skills</h1>
+        <p className="lede">
+          Anzu 1.0 Skill Forge. Verified traces become candidates — never auto-published. Review purpose,
+          provenance, eval status, and permissions, then <strong>Approve</strong> and separately{" "}
+          <strong>Activate</strong>. Coding merge conflicts stay on{" "}
+          <Link to="/coding">Coding → Decision Inbox</Link>. Memory guides live on{" "}
+          <Link to="/memory">Memory</Link>.
+        </p>
+      </header>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="rail-heading" style={{ padding: "0 0 8px" }}>
+      <div className="luxury-panel">
+        <div className="luxury-rail">
           <span>Owner actor</span>
         </div>
-        <p className="lede" style={{ marginTop: 0 }}>
+        <p className="luxury-copy">
           Approve, activate, reject, disable, and rollback send this actor string. Anzu does not silently
           substitute an auto-admin identity.
         </p>
-        <div className="row" style={{ flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-          <label style={{ flex: "1 1 220px" }}>
+        <div className="luxury-row">
+          <label className="luxury-field">
             Actor (owner id)
             <input
               type="text"
@@ -431,7 +434,7 @@ export function SkillForgePage() {
               autoComplete="username"
             />
           </label>
-          <label className="row" style={{ gap: 8, marginBottom: 6 }}>
+          <label className="luxury-check">
             <input
               type="checkbox"
               checked={adminAuthority}
@@ -446,22 +449,23 @@ export function SkillForgePage() {
       </div>
 
       {loadError && (
-        <div className="card coding-banner bad" style={{ marginBottom: 16 }}>
-          <p className="license-kicker">Could not load Skill Forge</p>
-          <p className="lede" style={{ margin: 0 }}>{loadError}</p>
+        <div className="luxury-banner" role="alert">
+          <p className="luxury-kicker">Could not load Skill Forge</p>
+          <p className="luxury-banner-body">{loadError}</p>
         </div>
       )}
 
       {actionError && (
-        <div className="card coding-banner bad" style={{ marginBottom: 16 }}>
-          <p className="license-kicker">Action failed</p>
-          <p className="lede" style={{ margin: 0 }}>{actionError}</p>
+        <div className="luxury-banner" role="alert">
+          <p className="luxury-kicker">Action failed</p>
+          <p className="luxury-banner-body">{actionError}</p>
         </div>
       )}
 
       {actionOk && (
-        <div className="card" style={{ marginBottom: 16, borderLeft: "4px solid var(--ok)", padding: "12px 16px" }}>
-          <p className="lede" style={{ margin: 0 }}>{actionOk}</p>
+        <div className="luxury-banner ok" role="status">
+          <p className="luxury-kicker">Completed</p>
+          <p className="luxury-banner-body">{actionOk}</p>
         </div>
       )}
 
@@ -493,22 +497,22 @@ export function SkillForgePage() {
         />
       )}
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="rail-heading" style={{ padding: "0 0 8px" }}>
+      <div className="luxury-panel">
+        <div className="luxury-rail">
           <span>Published skills</span>
         </div>
-        <p className="lede">
+        <p className="luxury-copy">
           Active Skill Forge registry. Search routes by purpose and tools. Disable clears the active
           pointer; rollback restores a prior version without mutating history.
         </p>
-        <form className="row" style={{ gap: 8, marginBottom: 12, flexWrap: "wrap" }} onSubmit={(e) => void onSearch(e)}>
+        <form className="luxury-row search" onSubmit={(e) => void onSearch(e)}>
           <input
+            className="luxury-search"
             type="search"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder="Search published skills…"
             aria-label="Search skills"
-            style={{ flex: "1 1 220px" }}
           />
           <button className="btn" type="submit" disabled={busy}>
             Search
@@ -528,10 +532,10 @@ export function SkillForgePage() {
         </form>
 
         {searchHits && (
-          <div style={{ marginBottom: 16 }}>
+          <div className="luxury-results">
             <h3 className="env-subhead">Search results</h3>
             {searchHits.length === 0 ? (
-              <p className="lede" style={{ margin: 0 }}>No published skills matched that query.</p>
+              <p className="luxury-state empty">No published skills matched that query.</p>
             ) : (
               <ul className="env-file-list">
                 {searchHits.map((hit, index) => (
@@ -539,7 +543,7 @@ export function SkillForgePage() {
                     <strong>{String(hit.name || hit.skill_id || "Skill")}</strong>
                     {hit.purpose ? ` — ${String(hit.purpose)}` : ""}
                     {hit.version_id ? (
-                      <span className="lede"> · {String(hit.version_id)}</span>
+                      <span className="luxury-meta"> · {String(hit.version_id)}</span>
                     ) : null}
                   </li>
                 ))}
@@ -549,11 +553,11 @@ export function SkillForgePage() {
         )}
 
         {!loaded ? (
-          <p className="lede" style={{ margin: 0 }}>Loading published skills…</p>
+          <p className="luxury-state loading">Loading published skills…</p>
         ) : loadError ? (
-          <p className="lede" style={{ margin: 0 }}>Published skills unavailable until Skill Forge loads.</p>
+          <p className="luxury-state failed">Published skills unavailable until Skill Forge loads. This is not an empty registry.</p>
         ) : skills.length === 0 ? (
-          <p className="lede" style={{ margin: 0 }}>
+          <p className="luxury-state empty">
             No published skills yet. Approve and activate a verified candidate to publish one.
           </p>
         ) : (
@@ -573,7 +577,7 @@ export function SkillForgePage() {
                 <tr key={skill.skill_id}>
                   <td>
                     <strong>{skill.name || skill.skill_id}</strong>
-                    <div className="lede" style={{ margin: "4px 0 0" }}>{skill.skill_id}</div>
+                    <div className="luxury-id">{skill.skill_id}</div>
                   </td>
                   <td>{skill.origin || "forge"}</td>
                   <td title={skill.active_version_id || undefined}>
@@ -584,7 +588,7 @@ export function SkillForgePage() {
                   <td>{skill.versions?.length ?? 0}</td>
                   <td>{formatWhen(skill.updated_at)}</td>
                   <td>
-                    <div className="row coding-actions" style={{ gap: 6, flexWrap: "wrap" }}>
+                    <div className="luxury-row actions compact coding-actions">
                       <button
                         className="btn secondary"
                         type="button"
@@ -610,10 +614,10 @@ export function SkillForgePage() {
         )}
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="rail-heading" style={{ padding: "0 0 8px" }}>
+      <div className="luxury-panel">
+        <div className="luxury-rail">
           <span>Candidate queue</span>
-          <label className="row" style={{ gap: 8, color: "var(--muted)", fontSize: 13 }}>
+          <label className="luxury-filter">
             Status
             <select
               value={statusFilter}
@@ -631,14 +635,18 @@ export function SkillForgePage() {
             </select>
           </label>
         </div>
-        <p className="lede">
+        <p className="luxury-copy">
           Full forge pipeline queue, including quarantine/marketplace imports. Select a row to review
           before any activation.
         </p>
         {!loaded ? (
-          <p className="lede" style={{ margin: 0 }}>Loading candidates…</p>
+          <p className="luxury-state loading">Loading candidates…</p>
+        ) : loadError ? (
+          <p className="luxury-state failed">
+            Candidate queue unavailable until Skill Forge loads. This is not an empty queue.
+          </p>
         ) : filteredCandidates.length === 0 ? (
-          <p className="lede" style={{ margin: 0 }}>
+          <p className="luxury-state empty">
             {statusFilter
               ? `No candidates with status “${statusFilter}”.`
               : "No Skill Forge candidates yet. Eligible traces enter the pipeline from the forge backend."}
@@ -666,7 +674,7 @@ export function SkillForgePage() {
                   >
                     <td>
                       <strong>{manifest?.name || candidate.candidate_id}</strong>
-                      <div className="lede" style={{ margin: "4px 0 0" }}>{candidate.candidate_id}</div>
+                      <div className="luxury-id">{candidate.candidate_id}</div>
                     </td>
                     <td>
                       <span className={`badge ${statusBadgeClass(candidate.status)}`}>
@@ -694,16 +702,16 @@ export function SkillForgePage() {
       </div>
 
       <AdvancedDisclosure>
-      <div className="card">
-        <div className="rail-heading" style={{ padding: "0 0 8px" }}>
+      <div className="luxury-panel flush">
+        <div className="luxury-rail">
           <span>Marketplace / quarantine import</span>
         </div>
-        <p className="lede">
+        <p className="luxury-copy">
           Imported manifests enter quarantine and use the same evaluate → approve → activate path. Nothing
           from an import becomes active without those steps.
         </p>
         <form onSubmit={(event) => void onImport(event)}>
-          <label>
+          <label className="luxury-field block">
             Manifest JSON
             <textarea
               className="field"
@@ -714,7 +722,7 @@ export function SkillForgePage() {
               aria-label="Skill manifest JSON"
             />
           </label>
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="luxury-row actions">
             <button className="btn" type="submit" disabled={busy}>
               Import to quarantine
             </button>
@@ -742,25 +750,25 @@ function DecisionInboxSection({
   onSelect: (id: string) => void
 }) {
   return (
-    <div className="card" style={{ marginBottom: 16 }} id="decision-inbox">
-      <div className="rail-heading" style={{ padding: "0 0 8px" }}>
+    <div className="luxury-panel" id="decision-inbox">
+      <div className="luxury-rail">
         <span>Decision Inbox</span>
-        <span className={`badge ${items.length ? "waiting" : "completed"}`}>
-          {items.length ? `${items.length} awaiting` : "Clear"}
+        <span className={`badge ${!loaded ? "queued" : loadError ? "failed" : items.length ? "waiting" : "completed"}`}>
+          {!loaded ? "Loading" : loadError ? "Unavailable" : items.length ? `${items.length} awaiting` : "Clear"}
         </span>
       </div>
-      <p className="lede">
+      <p className="luxury-copy">
         Skill Forge candidates waiting for an explicit owner decision. Approve records authority;
         Activate publishes. Reject needs a reason. Anzu never auto-activates from this list.
       </p>
       {!loaded ? (
-        <p className="lede" style={{ margin: 0 }}>Loading Decision Inbox…</p>
+        <p className="luxury-state loading">Loading Decision Inbox…</p>
       ) : loadError ? (
-        <p className="lede" style={{ margin: 0 }}>
+        <p className="luxury-state failed">
           Decision Inbox could not load. Fix the Skill Forge error above — this is not an empty success.
         </p>
       ) : items.length === 0 ? (
-        <p className="lede" style={{ margin: 0 }}>
+        <p className="luxury-state empty">
           No Skill Forge candidates awaiting approval or activation.
         </p>
       ) : (
@@ -771,25 +779,14 @@ function DecisionInboxSection({
             <button
               key={candidate.candidate_id}
               type="button"
-              className={`context-entry${candidate.candidate_id === selectedId ? " selected" : " conflict"}`}
-              style={{
-                display: "block",
-                width: "100%",
-                textAlign: "left",
-                cursor: busy ? "wait" : "pointer",
-                marginBottom: 10,
-                background: "transparent",
-                border: "1px solid var(--line)",
-                borderRadius: 8,
-                padding: 12,
-              }}
+              className={`luxury-inbox${candidate.candidate_id === selectedId ? " selected" : " pending"}${busy ? " is-busy" : ""}`}
               onClick={() => onSelect(candidate.candidate_id)}
             >
-              <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <div className="luxury-row spread">
                 <strong>{manifest?.name || candidate.candidate_id}</strong>
                 <span className={`badge ${statusBadgeClass(candidate.status)}`}>{candidate.status}</span>
               </div>
-              <p className="lede" style={{ margin: "6px 0 8px" }}>
+              <p className="luxury-purpose">
                 {manifest?.purpose || "No purpose declared."}
               </p>
               <div className="kv">
@@ -860,15 +857,15 @@ function CandidateDetail({
   const activateReady = canActivate(candidate)
 
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div className="rail-heading" style={{ padding: "0 0 8px" }}>
+    <div className="luxury-panel">
+      <div className="luxury-rail">
         <span>Candidate review</span>
         <button className="btn secondary" type="button" onClick={onClose}>
           Close
         </button>
       </div>
-      <h2 style={{ marginBottom: 8 }}>{manifest?.name || candidate.candidate_id}</h2>
-      <p className="lede">{manifest?.purpose || "No purpose on this manifest."}</p>
+      <h2>{manifest?.name || candidate.candidate_id}</h2>
+      <p className="luxury-copy">{manifest?.purpose || "No purpose on this manifest."}</p>
 
       <div className="kv">
         <b>Status</b>
@@ -963,12 +960,12 @@ function CandidateDetail({
           <span>{(permissionPreview.declared || []).join(", ") || "—"}</span>
         </div>
       ) : (
-        <p className="lede" style={{ margin: 0 }}>
+        <p className="luxury-state failed">
           Permission preview not loaded yet. Use Refresh permissions — empty here is not a silent allow.
         </p>
       )}
 
-      <div className="row coding-actions" style={{ marginTop: 12, flexWrap: "wrap", gap: 8 }}>
+      <div className="luxury-row actions coding-actions">
         <button className="btn secondary" type="button" disabled={busy} onClick={onSandbox}>
           Sandbox
         </button>
@@ -981,7 +978,7 @@ function CandidateDetail({
       </div>
       </AdvancedDisclosure>
       {String(candidate.status).toLowerCase() === "verified" && !approval.requested && (
-        <div className="row coding-actions" style={{ marginTop: 12 }}>
+        <div className="luxury-row actions coding-actions">
           <button className="btn secondary" type="button" disabled={busy} onClick={onRequestApproval}>
             Request approval
           </button>
@@ -989,11 +986,11 @@ function CandidateDetail({
       )}
 
       <h3 className="env-subhead">Approve, then Activate</h3>
-      <p className="lede">
+      <p className="luxury-copy">
         Two distinct steps. Activate stays disabled until approve succeeds. Failures surface the API
         detail — Anzu will not invent a successful activate.
       </p>
-      <div className="row coding-actions" style={{ flexWrap: "wrap", gap: 8 }}>
+      <div className="luxury-row actions coding-actions">
         <button
           className="btn"
           type="button"
@@ -1021,7 +1018,7 @@ function CandidateDetail({
       {canReject(candidate) && (
         <>
           <h3 className="env-subhead">Reject</h3>
-          <label>
+          <label className="luxury-field block">
             Reason (required)
             <input
               type="text"
@@ -1031,7 +1028,7 @@ function CandidateDetail({
               aria-label="Rejection reason"
             />
           </label>
-          <div className="row" style={{ marginTop: 12 }}>
+          <div className="luxury-row actions">
             <button className="btn danger" type="button" disabled={busy || !rejectReason.trim()} onClick={onReject}>
               Reject
             </button>
