@@ -2168,8 +2168,8 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [ ] RFC-0030 Selectable inference offload backends — accepted
 - [x] RFC-0139 Android companion fancy orb / humanoid presence UI — implemented (#401 @ `e9df378`; phone daylight soak = device sign-off)
 - [x] RFC-0140 Companion on-device small voice models (fallback + grid-down) — implemented (#403 @ `59e5ea73`; Whisper/TTS native bake + phone soak = device sign-off)
-- [ ] RFC-0171 Priority System-One Reflex Lane — Jev + local Laya — accepted (P0; after Dual Seat)
-- [ ] RFC-0172 Reflex-first browser/computer-use fast loop — accepted (P0; depends on 0171; 0145/0151 soft until ported)
+- [x] RFC-0171 Priority System-One Reflex Lane — Jev + local Laya — implemented (#409 @ `f7bf66a9`; GPU/Laya sha + speed-claim release gate = Desktop sign-off)
+- [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
 - [ ] RFC-0173 Skill Forge — verified trace to reusable skill — accepted (renumbered from main’s false RFC-0139)
 - [ ] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — accepted (renumbered from main’s false RFC-0140)
 
@@ -2802,6 +2802,26 @@ Development **RFC-0139** / **RFC-0140** remain the implemented Android orb + on-
 Reason:
 
 CoS 2026-09-24: Dual Seat clean; open development docs PR for 0171+0172 and resolve 0139/0140 number collision cleanly (do not clobber tip Android RFCs).
+
+---
+
+Decision: RFC-0171 System-One Reflex Lane (implemented)
+
+[RFC-0171](docs/rfcs/0171-system-one-reflex-lane-jev-laya-priority.md) is **implemented** on development via #409 @ `f7bf66a943b4d365f6a5f6084d8d774f76358f4b`. Provider-neutral `decide()` lane (`backend/app/decision/`): rules → Laya → Jev (opt-in + probe) → generative; batching/cache/deadline fallback; Quartermaster; surfaces for routing/tools/memory/`browser_operation_target`; Control Room metrics; `tests/system_one/`; RFC-0116 waitlist-era copy updated (still opt-in + probe). **Residuals (do not block acceptance):** live TypeSafe/Laya GPU soak + latency budgets; production Laya sha256 fills (empty pin fail-closed); release-gate speed claims need reproducible Desktop evidence. Browser fast-loop criterion satisfied via sibling #408. §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect ledger-tick after #409 land; TypeSafe/Laya GPU + sha residuals are sign-off, not acceptance blockers (fail-closed pins already refuse bad installs).
+
+---
+
+Decision: RFC-0172 Reflex-first browser/computer-use fast loop (implemented)
+
+[RFC-0172](docs/rfcs/0172-reflex-first-browser-computer-use-fast-loop.md) is **implemented** on development via #408 @ `8f81e5890a1131a40bc678d165ebcbd4ba95b3ef`. `backend/app/reflex_loop/` ActionFrame + adapters + executor + sandbox + benchmark; tool/API wires; 15 module tests green. Soft 0145/0151 unchanged. **Residuals:** D2 tip follow-up wiring forwarder → landed 0171 `browser_operation_target` / DecisionResult (claim in flight); live Playwright/CDP + Windows UIA Desktop sign-off. §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect ledger-tick 0171+0172 after tip has both lands. Soft 0145/0151 stays soft.
 
 ---
 

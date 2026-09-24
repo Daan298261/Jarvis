@@ -1,7 +1,9 @@
 # RFC-0172: P0 Reflex-first browser/computer-use fast loop
 
-**Status:** accepted — P0  
+**Status:** implemented — P0  
 **Date:** 2026-09-24  
+**Implemented:** #408 @ `8f81e5890a1131a40bc678d165ebcbd4ba95b3ef` (`backend/app/reflex_loop/` + tool/API wires).  
+**Residuals:** D2 tip follow-up wiring forwarder → 0171 `browser_operation_target` / DecisionResult (in flight); soft 0145/0151; live Playwright/CDP + Windows UIA Desktop sign-off.  
 **Depends on:** RFC-0171 (hard). RFC-0145 and RFC-0151 exist on main @ `ac18fb32` but are **not yet ported** to development — soft until a later parity port. Implement may ship a minimal in-ticket `ActionFrame` / sandbox posture if those RFCs are absent; do not block on a full 0145/0151 land.
 
 ## Problem
@@ -16,15 +18,15 @@ For browser tasks prefer DOM/accessibility/CDP identity; desktop prefers native 
 
 ## Acceptance criteria
 
-- [ ] Atomic `ActionFrame` schema for browser and desktop.
-- [ ] One typed decision chooses operation + target when possible.
-- [ ] No model-generated selector/coordinate/JS/shell execution in fast path.
-- [ ] Stale frames and changed targets are rejected before execution.
-- [ ] TYPE_TEXT is the only default path that invokes text generation for ordinary form navigation.
-- [ ] Postcondition verification after mutating actions.
-- [ ] Deterministic benchmark compares Reflex loop to current Anzu computer/browser loop on identical tasks.
-- [ ] Metrics include model calls, protocol/native calls, wall time, success and recovery count.
-- [ ] Safety/approval rules remain outside the decision model.
+- [x] Atomic `ActionFrame` schema for browser and desktop.
+- [x] One typed decision chooses operation + target when possible.
+- [x] No model-generated selector/coordinate/JS/shell execution in fast path.
+- [x] Stale frames and changed targets are rejected before execution.
+- [x] TYPE_TEXT is the only default path that invokes text generation for ordinary form navigation.
+- [x] Postcondition verification after mutating actions.
+- [x] Deterministic benchmark compares Reflex loop to current Anzu computer/browser loop on identical tasks.
+- [x] Metrics include model calls, protocol/native calls, wall time, success and recovery count.
+- [x] Safety/approval rules remain outside the decision model.
 
 ## Likely files
 

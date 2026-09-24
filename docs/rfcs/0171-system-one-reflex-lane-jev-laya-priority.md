@@ -1,7 +1,9 @@
 # RFC-0171: Priority System-One Reflex Lane — Jev + local Laya
 
-**Status:** accepted — P0 / priority accelerator  
+**Status:** implemented — P0 / priority accelerator  
 **Date:** 2026-09-24  
+**Implemented:** #409 @ `f7bf66a943b4d365f6a5f6084d8d774f76358f4b` (`backend/app/decision/`, `tests/system_one/`).  
+**Residuals (do not block implemented):** live TypeSafe/Laya GPU soak + latency budgets; production Laya sha256 fills (empty pin still fail-closed / refuses install); release-gate speed claims need reproducible Desktop evidence.  
 **Supersedes/extends:** RFC-0116 implementation assumptions; does not remove local fallback or policy authority.
 
 ## Problem
@@ -58,19 +60,19 @@ Adopt the transferable `jev-ultrafast` pattern without copying its application w
 
 ## Acceptance criteria
 
-- [ ] Provider-neutral System-One API with Jev, Laya and deterministic/fallback adapters.
-- [ ] RFC-0116 availability UI/docs updated from waitlist-era assumptions; Jev still requires real probe and explicit cloud opt-in.
-- [ ] Managed Laya install pins source/checkpoint versions + hashes and validates Apache-2.0 provenance.
-- [ ] Laya service is loopback-only/in-process, authenticated if networked, and kept warm when enabled.
-- [ ] At least routing, tool selection, memory relevance and browser operation/target use typed Reflex decisions.
-- [ ] Same-state questions batch into one call; no repeated LLM calls for independent bounded judgments.
-- [ ] Per-class byte-identical Jev/Laya/rules/generative-fallback benchmark fixtures exist.
-- [ ] Quartermaster selects provider from measured quality + p50/p95 latency + privacy + cost + hardware fit.
-- [ ] Hard policy/approval rules cannot be weakened by Jev/Laya output.
-- [ ] Reflex timeout/failure never strands the turn; fallback source is explicit and audited.
-- [ ] Control Room reports p50/p95/p99 end-to-end and inference-only latency, throughput, confidence/calibration, fallback rate and quality per decision class/provider/version.
-- [ ] Browser fast loop uses semantic/native node identity, freshness and postcondition verification.
-- [ ] Release gate prevents claiming a speed improvement without reproducible hardware/model/provider evidence.
+- [x] Provider-neutral System-One API with Jev, Laya and deterministic/fallback adapters.
+- [x] RFC-0116 availability UI/docs updated from waitlist-era assumptions; Jev still requires real probe and explicit cloud opt-in.
+- [x] Managed Laya install pins source/checkpoint versions + hashes and validates Apache-2.0 provenance.
+- [x] Laya service is loopback-only/in-process, authenticated if networked, and kept warm when enabled.
+- [x] At least routing, tool selection, memory relevance and browser operation/target use typed Reflex decisions.
+- [x] Same-state questions batch into one call; no repeated LLM calls for independent bounded judgments.
+- [x] Per-class byte-identical Jev/Laya/rules/generative-fallback benchmark fixtures exist.
+- [x] Quartermaster selects provider from measured quality + p50/p95 latency + privacy + cost + hardware fit.
+- [x] Hard policy/approval rules cannot be weakened by Jev/Laya output.
+- [x] Reflex timeout/failure never strands the turn; fallback source is explicit and audited.
+- [x] Control Room reports p50/p95/p99 end-to-end and inference-only latency, throughput, confidence/calibration, fallback rate and quality per decision class/provider/version.
+- [x] Browser fast loop uses semantic/native node identity, freshness and postcondition verification — *landed via sibling RFC-0172 #408; D2 tip wire follow-up in flight*
+- [ ] Release gate prevents claiming a speed improvement without reproducible hardware/model/provider evidence — *open residual: Desktop/GPU sign-off; does not block code implemented*
 
 ## Performance targets
 
