@@ -268,6 +268,15 @@ class SupermemorySettings(BaseModel):
     allow_remote: bool = False
 
 
+class CrucixSettings(BaseModel):
+    """RFC-0127 managed local Crucix OSINT sidecar."""
+    model_config = ConfigDict(validate_assignment=True)
+    enabled: bool = False
+    auto_start: bool = True
+    base_url: str = "http://127.0.0.1:3117"
+    timeout_ms: int = Field(default=8000, ge=500, le=30000)
+
+
 class HexStrikeSettings(BaseModel):
     """Local HexStrike AI suite (RFC-0078). Loopback only; never a WAN listener."""
 
@@ -403,6 +412,7 @@ class AppSettings(BaseModel):
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
     knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
     supermemory: SupermemorySettings = Field(default_factory=SupermemorySettings)
+    crucix: CrucixSettings = Field(default_factory=CrucixSettings)
     decision: DecisionSettings = Field(default_factory=DecisionSettings)
     named_personas: NamedPersonaSettings = Field(default_factory=NamedPersonaSettings)
     custom_presence: CustomPresenceSettings = Field(default_factory=CustomPresenceSettings)
