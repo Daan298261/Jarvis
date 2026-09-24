@@ -5509,3 +5509,275 @@ export async function importSkillForgeManifest(body: {
     body: JSON.stringify(body),
   })
 }
+
+export type AgentRoomParticipant = {
+  agent_id: string
+  role: string
+  model: string
+  provider: string
+}
+
+export type AgentRoomTask = {
+  id: string
+  title: string
+  assignee: string | null
+  depends_on: string[]
+  status: string
+  rationale: string
+}
+
+export type AgentRoomBlackboardEntry = {
+  id: string
+  kind: string
+  key: string
+  content: string
+  author: string
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export type AgentRoomBlackboard = {
+  entries: AgentRoomBlackboardEntry[]
+  counts: {
+    total: number
+    facts: number
+    artifacts: number
+    decisions: number
+    citations: number
+  }
+  bounds: {
+    max_entries: number
+    max_entry_chars: number
+    max_total_chars: number
+    used_chars: number
+  }
+}
+
+export type AgentRoomGovernor = {
+  parallel_local: number
+  parallel_cloud: number
+  cpu_slots: number
+  gpu_slots: number
+  vram_mib: number
+  provider_calls: number
+  active_leases: number
+  budget: {
+    max_parallel_local: number
+    max_parallel_cloud: number
+    cpu_slots: number
+    gpu_slots: number
+    vram_mib: number
+    provider_calls: number
+    cost_mode: string
+    privacy_mode: string
+  }
+}
+
+export type AgentRoomSynthesis = {
+  summary: string
+  cited_artifact_ids: string[]
+  cited_agents: string[]
+  cited_decision_ids: string[]
+  cited_citation_ids: string[]
+  rationale: string
+}
+
+export type AgentRoomSummary = {
+  id: string
+  goal: string
+  status: string
+  participants: AgentRoomParticipant[]
+  message_count: number
+  task_graph: { tasks: AgentRoomTask[] }
+  blackboard: AgentRoomBlackboard
+  governor: AgentRoomGovernor
+  synthesis: AgentRoomSynthesis | null
+  created_at: string
+}
+
+export type AgentRoomRosterEntry = {
+  id: string
+  label: string
+  role: string
+  phrase: string
+}
+
+export type AgentRoomMessage = {
+  id: string
+  room_id: string
+  kind: string
+  from_agent: string
+  to_agent: string | null
+  mentions: string[]
+  body: string
+  rationale: string
+  task_id: string | null
+  artifact_ids: string[]
+  citation_ids: string[]
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export type AgentRoomAuditEvent = {
+  id: string
+  room_id: string
+  kind: string
+  summary: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export type AgentRoomHandoffRecord = {
+  from_agent?: string
+  to_agent?: string
+  task_id?: string | null
+  rationale?: string
+  message_id?: string
+}
+
+export type AgentRoomAudit = {
+  room_id: string
+  participants: string[]
+  messages: AgentRoomMessage[]
+  blackboard_writes: AgentRoomBlackboardEntry[]
+  handoffs: AgentRoomHandoffRecord[]
+  deadlocks: Array<Record<string, unknown>>
+  synthesis: AgentRoomSynthesis | null
+  terminated: boolean
+  escalated: boolean
+  event_count: number
+  events: AgentRoomAuditEvent[]
+}
+
+export type AgentRoomIndex = {
+  rooms: AgentRoomSummary[]
+  roster: AgentRoomRosterEntry[]
+}
+
+const HIDDEN_ROOM_KEYS = new Set([
+  "reasoning",
+  "reasoning_content",
+  "chain_of_thought",
+  "chainOfThought",
+  "thinking",
+  "think",
+  "hidden_reasoning",
+  "cot",
+  "scratchpad",
+])
+
+export function formatAgentRoomsError(err: unknown): string {
+  if (isApiError(err)) return err.message || `Request failed (${err.status})`
+  if (err instanceof Error && err.message) return err.message
+  return String(err || "Agent rooms request failed")
+}
+
+/** Drop hidden chain-of-thought keys if a payload ever carries them. */
+export function publicRoomFields(payload: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!payload) return {}
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(payload)) {
+    if (HIDDEN_ROOM_KEYS.has(key) || key.startsWith("_")) continue
+    out[key] = value
+  }
+  return out
+}
+
+export async function listAgentRooms(): Promise<AgentRoomIndex> {
+  return api<AgentRoomIndex>("/api/agent-rooms")
+}
+
+export async function createAgentRoom(body: {
+  goal: string
+  specialists: string[]
+  cost_mode?: string
+  privacy_mode?: string
+  supervisor_model?: string
+  specialist_models?: Record<string, string>
+}): Promise<AgentRoomSummary> {
+  return api<AgentRoomSummary>("/api/agent-rooms", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAgentRoom(roomId: string): Promise<AgentRoomSummary> {
+  return api<AgentRoomSummary>(`/api/agent-rooms/${encodeURIComponent(roomId)}`)
+}
+
+export async function listAgentRoomMessages(roomId: string): Promise<{ messages: AgentRoomMessage[] }> {
+  return api<{ messages: AgentRoomMessage[] }>(`/api/agent-rooms/${encodeURIComponent(roomId)}/messages`)
+}
+
+export async function postAgentRoomMessage(
+  roomId: string,
+  body: {
+    kind: string
+    from_agent: string
+    body: string
+    to_agent?: string | null
+    rationale?: string
+    task_id?: string | null
+    artifact_ids?: string[]
+    citation_ids?: string[]
+  },
+): Promise<AgentRoomMessage> {
+  return api<AgentRoomMessage>(`/api/agent-rooms/${encodeURIComponent(roomId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAgentRoomBlackboard(roomId: string): Promise<AgentRoomBlackboard> {
+  return api<AgentRoomBlackboard>(`/api/agent-rooms/${encodeURIComponent(roomId)}/blackboard`)
+}
+
+export async function publishAgentRoomBlackboard(
+  roomId: string,
+  body: { kind: string; key: string; content: string; author: string },
+): Promise<AgentRoomBlackboardEntry> {
+  return api<AgentRoomBlackboardEntry>(`/api/agent-rooms/${encodeURIComponent(roomId)}/blackboard`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAgentRoomAudit(roomId: string): Promise<AgentRoomAudit> {
+  return api<AgentRoomAudit>(`/api/agent-rooms/${encodeURIComponent(roomId)}/audit`)
+}
+
+export async function handoffAgentRoom(
+  roomId: string,
+  body: {
+    from_agent: string
+    to_agent: string
+    body: string
+    task_id?: string | null
+    rationale: string
+  },
+): Promise<AgentRoomMessage> {
+  return api<AgentRoomMessage>(`/api/agent-rooms/${encodeURIComponent(roomId)}/handoff`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function synthesizeAgentRoom(roomId: string): Promise<{
+  synthesis: AgentRoomSynthesis
+  room: AgentRoomSummary
+}> {
+  return api<{ synthesis: AgentRoomSynthesis; room: AgentRoomSummary }>(
+    `/api/agent-rooms/${encodeURIComponent(roomId)}/synthesize`,
+    { method: "POST", body: JSON.stringify({}) },
+  )
+}
+
+export async function terminateAgentRoom(
+  roomId: string,
+  body?: { reason?: string },
+): Promise<AgentRoomSummary> {
+  return api<AgentRoomSummary>(`/api/agent-rooms/${encodeURIComponent(roomId)}/terminate`, {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  })
+}

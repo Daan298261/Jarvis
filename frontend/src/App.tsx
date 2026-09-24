@@ -29,6 +29,7 @@ import { TrajectoriesPage } from "./pages/Trajectories"
 import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
 import { SkillForgePage } from "./pages/SkillForge"
+import { AgentRoomsPage } from "./pages/AgentRooms"
 import {
   api,
   ensureDesktopSession,
@@ -92,6 +93,7 @@ const ADMIN_LINKS = [
   { to: "/advisor", label: "Advisor" },
   { to: "/guest-portals", label: "Guest portals" },
   { to: "/agents", label: "Agents" },
+  { to: "/rooms", label: "Agent rooms" },
   { to: "/portability", label: "Portability" },
   { to: "/context", label: "Context" },
   { to: "/trajectories", label: "Trajectories" },
@@ -472,6 +474,8 @@ function OwnerPortal() {
       <Route path="/advisor" element={<AdvisorPage />} />
       <Route path="/guest-portals" element={<GuestPortalsPage />} />
       <Route path="/agents" element={<AgentsPage />} />
+      <Route path="/rooms" element={<AgentRoomsPage />} />
+      <Route path="/rooms/:roomId" element={<AgentRoomsPage />} />
       <Route path="/agents/new" element={<AgentInterviewPage />} />
       <Route path="/agents/:id" element={<AgentInterviewPage />} />
       <Route path="/portability" element={<PortabilityPage />} />
