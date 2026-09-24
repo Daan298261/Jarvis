@@ -2172,7 +2172,7 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
 - [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal #416 @ `ebcdf9da`; no residual)
 - [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal #417 @ `2cb6c0b2`; live multi-model room Desktop soak residual)
-- [ ] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — accepted (specs; implement is a separate UX ticket)
+- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; Desktop GPU soak vs refs A/B/C residual)
 
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
@@ -2873,6 +2873,16 @@ Decision: RFC-0175 Galaxy presence option, chat waveform, and Advanced controls 
 Reason:
 
 Taco via CoS, 2026-09-24. Visual targets are the three attached reference frames, described in the RFC. Subpar implement is a CoS → Taco review escalate, not a code path.
+
+---
+
+Decision: RFC-0175 Galaxy presence / waveform / Advanced implemented
+
+[RFC-0175](docs/rfcs/0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) is **implemented** on development via #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47`. Specs-only land was #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. Galaxy is a selectable Appearance ADD option; default stays neural; waveform fail-closed on real TTS/STT; per-tab Advanced disclosures. **Residual:** Desktop GPU / live WebGL soak against docs/rfcs/assets/0175 refs A/B/C. §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #419 landed; Desktop soak vs mood boards may stay residual.
 
 ---
 

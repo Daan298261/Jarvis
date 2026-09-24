@@ -1,13 +1,16 @@
 # RFC-0175: Galaxy presence option, chat voice waveform, and Advanced controls
 
-**Status:** accepted  
-**Queue item:** `JARVIS_MASTER_PLAN.md` §58 — RFC-0175 (unchecked; implement is a separate UX ticket after this PR merges)  
+**Status:** implemented
+**Implemented:** #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47` (product code; front-end/presence/waveform/Advanced).
+**Specs:** #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`.
+**Residuals:** Desktop GPU / live WebGL soak vs `docs/rfcs/assets/0175/` refs A/B/C (cloud VMs cannot sign this off).
+**Queue item:** `JARVIS_MASTER_PLAN.md` §58 — RFC-0175 (checked; implemented #419; Desktop GPU soak vs refs A/B/C residual)
 **Author:** Jarvis Architect  
 **Date:** 2026-09-24
 
 **Related (do not rewrite):** [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (morphable orb cloud, `buildFigure` / `buildField`, `uMorph`). [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) (persona shapes and voice bind). [RFC-0138](0138-anzu-orb-custom-ui-generation.md) (custom presets; `hex_aegis` still wins while the suite is on). [RFC-0051](0051-humanoid-presence-runtime.md) (reduced motion). [RFC-0094](0094-settings-menu-information-architecture.md) / [RFC-0113](0113-admin-settings-submenu-1-4.md) (Settings groups, including `advanced`). [RFC-0061](0061-always-on-chat-tts-and-universal-personality.md) / [RFC-0067](0067-owner-chat-hide-plan-chrome-and-launch-greeting.md) / [RFC-0075](0075-natural-speak-path-and-reply-latency.md) (owner chat and the speak path). [RFC-0092](0092-neural-tts-default-no-silent-sapi.md) (neural TTS; this RFC does not change the engine). [RFC-0078](0078-hexstrike-cyber-suite.md) (`hex_aegis`).
 
-This PR is **specs-only**. Product code is a **named follow-up** after CoS merges this PR. Full intent; **no stubs / soft-fail**.
+Product code landed in #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47`. Specs landed in #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. Full intent; **no stubs / soft-fail**. Desktop GPU soak against refs A/B/C remains residual.
 
 ### Quality bar
 
@@ -151,20 +154,20 @@ Any other portal tab follows the same rule: the control that finishes that tab�
 
 ## Acceptance criteria
 
-- [ ] Appearance offers Galaxy next to Classic, Neural HUD, Humanoid HUD, Particle bust, and HexStrike. Those five controls still select what they select today.
-- [ ] Default `requested_presence` remains `neural`. Existing saved values are not rewritten to `galaxy`. Restart restores a saved `galaxy` choice and does not force it on anyone else.
-- [ ] Galaxy + `humanoid_bust` at idle matches Ref A (loose blue particle bust, dissolve, pill `STATUS: IDLE | ····· | SYN-01`). An alive phase matches Ref B (fiber lattice, amber core, gold neck, terrain streams) on that same bust. The ground matches Ref C (full-frame black star field).
-- [ ] Figure budget and the shape’s own field budget are not reduced. Galaxy stars are additional. `uMorph` still morphs the winning shape. `hex_aegis`, custom presets, and persona shapes still win under the current precedence.
-- [ ] Non-Galaxy Humanoid HUD still shows its current bust and its current “TEM // PRESENCE” chrome.
-- [ ] Galaxy status pill follows real phase (`STATUS: THINKING | ····· | SYN-01`, `STATUS: IDLE | ····· | SYN-01`, and the other rows). Reduced motion freezes drift and keeps a static glow.
-- [ ] WebGL failure falls back to Neural with an honest note. No poster image of the references.
-- [ ] Waveform is mounted on HUD and Classic composers, visible only during real TTS playback or an open mic, hidden when idle, driven by an analyser when one attaches, steady when it does not.
-- [ ] HUD Speak uses the existing `/api/voice/listen` path and sets real `recording` state.
-- [ ] `waveformLetters.ts` is unchanged as the chat meter.
-- [ ] Settings submenu ids are unchanged. Voice and Appearance are not placed under Advanced. The per-tab Advanced disclosures in §4 exist, collapsed by default, and the visible controls in that table still work.
-- [ ] Unit coverage for the new presence literal (default `neural`, `galaxy` round-trips, old values still parse) and for waveform visibility (idle hidden, speaking shown, listening shown, end hidden).
-- [ ] `python3 -m pytest`
-- [ ] `npm --prefix frontend run build` and `npm --prefix frontend run lint`
+- [x] Appearance offers Galaxy next to Classic, Neural HUD, Humanoid HUD, Particle bust, and HexStrike. Those five controls still select what they select today.
+- [x] Default `requested_presence` remains `neural`. Existing saved values are not rewritten to `galaxy`. Restart restores a saved `galaxy` choice and does not force it on anyone else.
+- [ ] Galaxy + `humanoid_bust` at idle matches Ref A (loose blue particle bust, dissolve, pill `STATUS: IDLE | ····· | SYN-01`). An alive phase matches Ref B (fiber lattice, amber core, gold neck, terrain streams) on that same bust. The ground matches Ref C (full-frame black star field). **Residual:** Desktop GPU / live WebGL soak against `docs/rfcs/assets/0175/` refs A/B/C. #419 shipped the Galaxy + `humanoid_bust` path (idle / alive / starfield) and noted that live sign-off is still required. Cloud VMs cannot sign the silhouette match.
+- [x] Figure budget and the shape’s own field budget are not reduced. Galaxy stars are additional. `uMorph` still morphs the winning shape. `hex_aegis`, custom presets, and persona shapes still win under the current precedence.
+- [x] Non-Galaxy Humanoid HUD still shows its current bust and its current “TEM // PRESENCE” chrome.
+- [x] Galaxy status pill follows real phase (`STATUS: THINKING | ····· | SYN-01`, `STATUS: IDLE | ····· | SYN-01`, and the other rows). Reduced motion freezes drift and keeps a static glow.
+- [x] WebGL failure falls back to Neural with an honest note. No poster image of the references.
+- [x] Waveform is mounted on HUD and Classic composers, visible only during real TTS playback or an open mic, hidden when idle, driven by an analyser when one attaches, steady when it does not.
+- [x] HUD Speak uses the existing `/api/voice/listen` path and sets real `recording` state.
+- [x] `waveformLetters.ts` is unchanged as the chat meter.
+- [x] Settings submenu ids are unchanged. Voice and Appearance are not placed under Advanced. The per-tab Advanced disclosures in §4 exist, collapsed by default, and the visible controls in that table still work.
+- [x] Unit coverage for the new presence literal (default `neural`, `galaxy` round-trips, old values still parse) and for waveform visibility (idle hidden, speaking shown, listening shown, end hidden).
+- [x] `python3 -m pytest`
+- [x] `npm --prefix frontend run build` and `npm --prefix frontend run lint`
 
 ## Likely files
 
@@ -183,8 +186,6 @@ A second presence renderer. Removing or rewriting Classic, Neural, Humanoid, Par
 
 ## Notes
 
-- Tip when written: `development` @ `2cb6c0b2` (#417).
-- Visual sign-off of Galaxy against Ref A / Ref B / Ref C is a desktop/browser check. Cloud VMs have no GPU; they can still unit-test the literal, the visibility rules, and the frontend build.
-- Mood boards are in-repo at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, and `ref-c-galaxy-field.jpg`.
+- Specs land: #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. Product code: #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47` (Galaxy Appearance option, chat waveform, per-tab Advanced disclosures).
+- **Residual:** Desktop GPU / live WebGL soak of the Galaxy + `humanoid_bust` cloud against Ref A / Ref B / Ref C. Mood boards stay at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, and `ref-c-galaxy-field.jpg`. #419 notes that Desktop sign-off of the live WebGL cloud is still required. Cloud VMs have no GPU and cannot sign this off.
 - Subpar implement: CoS reviews and escalates to Taco. Do not encode that escalate as a runtime feature.
-- Implement only after CoS merges this PR and names the UX ticket.
