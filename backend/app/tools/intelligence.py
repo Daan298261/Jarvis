@@ -1,6 +1,7 @@
 """Agent-facing intelligence tool backed by the enabled Crucix module."""
 from __future__ import annotations
 import json
+import httpx
 from typing import Any
 from .base import RiskLevel, Tool, ToolResult
 from .. import config
