@@ -2168,6 +2168,10 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [ ] RFC-0030 Selectable inference offload backends — accepted
 - [x] RFC-0139 Android companion fancy orb / humanoid presence UI — implemented (#401 @ `e9df378`; phone daylight soak = device sign-off)
 - [x] RFC-0140 Companion on-device small voice models (fallback + grid-down) — implemented (#403 @ `59e5ea73`; Whisper/TTS native bake + phone soak = device sign-off)
+- [ ] RFC-0171 Priority System-One Reflex Lane — Jev + local Laya — accepted (P0; after Dual Seat)
+- [ ] RFC-0172 Reflex-first browser/computer-use fast loop — accepted (P0; depends on 0171; 0145/0151 soft until ported)
+- [ ] RFC-0173 Skill Forge — verified trace to reusable skill — accepted (renumbered from main’s false RFC-0139)
+- [ ] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — accepted (renumbered from main’s false RFC-0140)
 
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
@@ -2781,6 +2785,23 @@ Decision: RFC-0140 Companion on-device small voice models (implemented)
 Reason:
 
 CoS assigned Architect ledger-tick after #403 (`59e5ea73`) landed CLEAN. Fail-closed Whisper/TTS flags acknowledged; phone soak residual.
+
+---
+
+Decision: RFC-0171 / RFC-0172 ported to development; main 0139/0140 collision resolved
+
+P0 RFCs from main @ `ac18fb32` (#406) are now on **development** without clobbering Android companion RFCs:
+
+- [RFC-0171](docs/rfcs/0171-system-one-reflex-lane-jev-laya-priority.md) — System-One Reflex Lane (Jev + local Laya). **Accepted / P0.**
+- [RFC-0172](docs/rfcs/0172-reflex-first-browser-computer-use-fast-loop.md) — Reflex-first browser/computer-use fast loop. **Accepted / P0.** Hard dep RFC-0171; RFC-0145/0151 soft until parity port.
+- [RFC-0173](docs/rfcs/0173-skill-forge-verified-trace-to-reusable-skill.md) — Skill Forge (was wrongly numbered RFC-0139 on main).
+- [RFC-0174](docs/rfcs/0174-multi-agent-rooms-blackboard-deadlock-and-handoff.md) — Multi-agent rooms (was wrongly numbered RFC-0140 on main).
+
+Development **RFC-0139** / **RFC-0140** remain the implemented Android orb + on-device voice RFCs. See [NUMBERING_NOTE_main_ac18fb32.md](docs/rfcs/NUMBERING_NOTE_main_ac18fb32.md). §58 checkboxes added (accepted). Specs-only; **not implemented**. CoS assigns D1→0171 and D2→0172 after this lands.
+
+Reason:
+
+CoS 2026-09-24: Dual Seat clean; open development docs PR for 0171+0172 and resolve 0139/0140 number collision cleanly (do not clobber tip Android RFCs).
 
 ---
 
