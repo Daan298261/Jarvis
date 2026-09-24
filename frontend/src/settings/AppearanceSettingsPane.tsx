@@ -108,6 +108,19 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
         >
           HexStrike · Daybreak
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          className={selected === "galaxy" ? "active" : ""}
+          onClick={() =>
+            apply(
+              { shell: "hud", requestedPresence: "galaxy" },
+              "Galaxy presence active. Jarvis will fall back to Neural if WebGL is unavailable.",
+            )
+          }
+        >
+          Galaxy
+        </button>
       </div>
 
       <SessionPersonalityControls />

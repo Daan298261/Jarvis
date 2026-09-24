@@ -1,24 +1,21 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { api, apiForm, ensureDesktopSession, type Task } from "../api"
+import { api, ensureDesktopSession, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { prunePendingUserTexts } from "../chat/ownerChatView"
+import { VoiceWaveformBar } from "../chat/VoiceWaveformBar"
+import { useLocalVoiceListen } from "../chat/useLocalVoiceListen"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 import { useTaskSpeech } from "../tts/useTaskSpeech"
+import { AdvancedDisclosure } from "../components/AdvancedDisclosure"
 import { TaskActivityPanel } from "../components/TaskActivity"
 import { MediaComposerBar } from "../components/MediaComposerBar"
 import { useMediaUploads } from "../chat/useMediaUploads"
 import { DelegationPanel } from "./Delegation"
 import { usePendingApprovals } from "../chat/pendingApprovals"
 import { SETUP_PROBLEM_WORKING, isAuthFailureMessage } from "../setup/ownerFacing"
-
-type VoiceStatus = {
-  stt_ready?: boolean
-  tts_ready?: boolean
-  detail?: string
-}
 
 export function ChatPage() {
   const { id } = useParams()
@@ -29,21 +26,27 @@ export function ChatPage() {
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [showSetupProblem, setShowSetupProblem] = useState<boolean>(false)
-  const [voice, setVoice] = useState<VoiceStatus | null>(null)
-  const [recording, setRecording] = useState(false)
+  const [speaking, setSpeaking] = useState(false)
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
-  const [helpersOpen, setHelpersOpen] = useState(true)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const chunksRef = useRef<Blob[]>([])
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { ingestPayload } = usePendingApprovals()
   const media = useMediaUploads()
+  const { recording, listening, voice, toggleRecord } = useLocalVoiceListen({
+    setBusy,
+    onResult: ({ transcript, taskId }) => {
+      if (transcript) setPrompt(transcript)
+      if (taskId) navigate(`/tasks/${taskId}`)
+    },
+    onAuthFailure: async () => {
+      setShowSetupProblem(true)
+      const recovered = await ensureDesktopSession()
+      if (recovered) setShowSetupProblem(false)
+      return recovered
+    },
+    onError: (message) => alert(message),
+  })
 
-  useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies)
-
-  useEffect(() => {
-    api<VoiceStatus>("/api/voice/status").then(setVoice).catch(() => undefined)
-  }, [])
+  useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies, setSpeaking)
 
   useEffect(() => {
     if (!id) {
@@ -116,6 +119,7 @@ export function ChatPage() {
     if (!id && !text && !mediaIds.length) return
     if (media.hasUploading) return
     stopChatTts()
+    setSpeaking(false)
     setBusy(true)
     try {
       if (id) {
@@ -158,54 +162,6 @@ export function ChatPage() {
     }
   }
 
-  async function toggleRecord() {
-    if (recording) {
-      recorderRef.current?.stop()
-      return
-    }
-    if (!voice?.stt_ready) {
-      alert(voice?.detail || "Local Whisper is not installed. Voice stays on this machine; cloud speech APIs are not used.")
-      return
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      chunksRef.current = []
-      recorder.ondataavailable = (event) => {
-        if (event.data.size) chunksRef.current.push(event.data)
-      }
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop())
-        setRecording(false)
-        setBusy(true)
-        try {
-          const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })
-          const body = new FormData()
-          body.append("audio", blob, "command.webm")
-          const created = await apiForm<Task & { transcript?: string; task_id?: string }>("/api/voice/listen", body)
-          const taskId = created.id || created.task_id
-          if (created.transcript) setPrompt(created.transcript)
-          if (taskId) navigate(`/tasks/${taskId}`)
-        } catch (err: any) {
-          if (err.message && isAuthFailureMessage(err.message)) {
-            setShowSetupProblem(true)
-            const recovered = await ensureDesktopSession()
-            if (recovered) setShowSetupProblem(false)
-          } else {
-            alert(err.message)
-          }
-        } finally {
-          setBusy(false)
-        }
-      }
-      recorder.start()
-      recorderRef.current = recorder
-      setRecording(true)
-    } catch (err: any) {
-      alert(err?.message || "Microphone permission was denied.")
-    }
-  }
-
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
@@ -231,14 +187,6 @@ export function ChatPage() {
               {shown.current_tool ? ` · ${shown.current_tool}` : ""}
               {" · "}
               <span className="stat">{elapsed || Math.round(shown.duration_seconds || 0)}s</span>
-              {" · "}
-              <button
-                type="button"
-                className="rail-icon-btn"
-                onClick={() => setHelpersOpen((open) => !open)}
-              >
-                {helpersOpen ? "Hide helpers" : "Show helpers"}
-              </button>
             </p>
           </>
         ) : empty ? (
@@ -252,15 +200,14 @@ export function ChatPage() {
       </header>
 
       {shown && (
-        <div className="chat-activity-wrap">
-          <TaskActivityPanel task={shown} elapsed={elapsed || Math.round(shown.elapsed_seconds || shown.duration_seconds || 0)} />
-        </div>
-      )}
-
-      {shown && helpersOpen && (
-        <div className="chat-helpers">
-          <DelegationPanel key={shown.id} parentTaskId={shown.id} task={shown} compact />
-        </div>
+        <AdvancedDisclosure>
+          <div className="chat-activity-wrap">
+            <TaskActivityPanel task={shown} elapsed={elapsed || Math.round(shown.elapsed_seconds || shown.duration_seconds || 0)} />
+          </div>
+          <div className="chat-helpers">
+            <DelegationPanel key={shown.id} parentTaskId={shown.id} task={shown} compact />
+          </div>
+        </AdvancedDisclosure>
       )}
 
       {showSetupProblem && (
@@ -293,6 +240,7 @@ export function ChatPage() {
       </div>
 
       <div className="composer-dock">
+        <VoiceWaveformBar speaking={speaking} listening={listening} />
         <MediaComposerBar
           items={media.items}
           onPick={media.uploadFiles}

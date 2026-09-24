@@ -35,6 +35,30 @@
 }
 .hud-orb-zone:has(.jarvis-presence-humanoid) .hud-orb-caption { margin-top: -8px; }
 
+.jarvis-presence-humanoid.galaxy,
+.jarvis-presence-humanoid[data-galaxy="true"] {
+  background: transparent;
+}
+
+.jarvis-galaxy-status {
+  --galaxy-accent: rgba(176, 198, 210, 0.55);
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  z-index: 3;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--galaxy-accent) 55%, transparent);
+  background: rgba(6, 10, 16, 0.46);
+  color: rgba(198, 214, 222, 0.78);
+  font: 11px/1 "IBM Plex Mono", ui-monospace, monospace;
+  letter-spacing: 0.16em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .jarvis-presence-humanoid canvas {
   display: block;
   width: 100%;

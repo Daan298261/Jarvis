@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
+import { AdvancedDisclosure } from "../components/AdvancedDisclosure"
 import { Link, useParams } from "react-router-dom"
 import {
   activateSkillForgeCandidate,
@@ -692,6 +693,7 @@ export function SkillForgePage() {
         )}
       </div>
 
+      <AdvancedDisclosure>
       <div className="card">
         <div className="rail-heading" style={{ padding: "0 0 8px" }}>
           <span>Marketplace / quarantine import</span>
@@ -719,6 +721,7 @@ export function SkillForgePage() {
           </div>
         </form>
       </div>
+      </AdvancedDisclosure>
     </div>
   )
 }
@@ -880,18 +883,6 @@ function CandidateDetail({
         <span>{manifest?.version || "—"}</span>
         <b>Summary</b>
         <span>{manifestSummary(manifest)}</span>
-        <b>Content hash</b>
-        <span title={manifest?.content_hash || undefined}>{manifest?.content_hash || "—"}</span>
-        <b>Signature</b>
-        <span title={manifest?.signature || undefined}>{shortHash(manifest?.signature)}</span>
-        <b>Provenance</b>
-        <span>
-          {provenance?.source || "—"}
-          {provenance?.created_by ? ` · by ${provenance.created_by}` : ""}
-          {provenance?.imported_from ? ` · from ${provenance.imported_from}` : ""}
-        </span>
-        <b>Trajectories</b>
-        <span>{(provenance?.trajectory_ids || []).join(", ") || "—"}</span>
         <b>Eval / verify</b>
         <span>{verifierLabel(candidate.version?.verifier || versionDetail?.verifier)}</span>
         <b>Decision inbox</b>
@@ -936,6 +927,23 @@ function CandidateDetail({
         <span>{(manifest?.compatible_personas || []).join(", ") || "—"}</span>
       </div>
 
+      <AdvancedDisclosure>
+        <h3 className="env-subhead">Provenance</h3>
+        <div className="kv">
+          <b>Content hash</b>
+          <span title={manifest?.content_hash || undefined}>{manifest?.content_hash || "—"}</span>
+          <b>Signature</b>
+          <span title={manifest?.signature || undefined}>{shortHash(manifest?.signature)}</span>
+          <b>Provenance</b>
+          <span>
+            {provenance?.source || "—"}
+            {provenance?.created_by ? ` · by ${provenance.created_by}` : ""}
+            {provenance?.imported_from ? ` · from ${provenance.imported_from}` : ""}
+          </span>
+          <b>Trajectories</b>
+          <span>{(provenance?.trajectory_ids || []).join(", ") || "—"}</span>
+        </div>
+
       <h3 className="env-subhead">Permission preview</h3>
       {permissionPreview ? (
         <div className="kv">
@@ -970,12 +978,15 @@ function CandidateDetail({
         <button className="btn secondary" type="button" disabled={busy} onClick={onRefreshPermissions}>
           Refresh permissions
         </button>
-        {String(candidate.status).toLowerCase() === "verified" && !approval.requested && (
+      </div>
+      </AdvancedDisclosure>
+      {String(candidate.status).toLowerCase() === "verified" && !approval.requested && (
+        <div className="row coding-actions" style={{ marginTop: 12 }}>
           <button className="btn secondary" type="button" disabled={busy} onClick={onRequestApproval}>
             Request approval
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       <h3 className="env-subhead">Approve, then Activate</h3>
       <p className="lede">

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
 import { api } from "../api"
 import { getUiMode, setUiMode } from "../hud/uiMode"
+import { parseRequestedPresence } from "./galaxyPresence"
 import {
   DEFAULT_PRESENTATION_SETTINGS,
   type AttentionMode,
-  type PresenceMode,
   type PresencePerformancePreset,
   type PresentationSettings,
   type ReducedMotionMode,
@@ -15,7 +15,6 @@ const STORAGE_KEY = "jarvis.presentation.v3"
 export const PRESENTATION_CHANGED_EVENT = "jarvis:presentation-changed"
 
 const SHELLS = new Set<ShellMode>(["classic", "hud"])
-const PRESENCES = new Set<PresenceMode>(["none", "neural", "humanoid", "particle_bust"])
 const PRESETS = new Set<PresencePerformancePreset>(["auto", "efficient", "balanced", "cinematic"])
 const ATTENTION = new Set<AttentionMode>(["off", "pointer", "camera"])
 const MOTION = new Set<ReducedMotionMode>(["system", "reduce", "full"])
@@ -40,9 +39,7 @@ export function normalizePresentation(value: unknown): PresentationSettings {
     shell: typeof shellRaw === "string" && SHELLS.has(shellRaw as ShellMode)
       ? shellRaw as ShellMode
       : DEFAULT_PRESENTATION_SETTINGS.shell,
-    requestedPresence: typeof presenceRaw === "string" && PRESENCES.has(presenceRaw as PresenceMode)
-      ? presenceRaw as PresenceMode
-      : DEFAULT_PRESENTATION_SETTINGS.requestedPresence,
+    requestedPresence: parseRequestedPresence(presenceRaw),
     performancePreset: typeof presetRaw === "string" && PRESETS.has(presetRaw as PresencePerformancePreset)
       ? presetRaw as PresencePerformancePreset
       : DEFAULT_PRESENTATION_SETTINGS.performancePreset,

@@ -56,6 +56,8 @@ export function ParticleBustPresence({ snapshot, settings }: Props) {
       uPhaseKind: { value: 0 }, uGlow: { value: 1 },
       uPointer: { value: new THREE.Vector2() }, uPointerStrength: { value: 0 },
       uColor: { value: new THREE.Color(COLORS.idle) }, uGold: { value: new THREE.Color(0xff941f) },
+      uAccent: { value: new THREE.Color(0xff941f) },
+      uGalaxy: { value: 0 }, uGalaxyBust: { value: 0 }, uLattice: { value: 0 },
     }
     const material = new THREE.ShaderMaterial({ uniforms, vertexShader: particleVertexShader, fragmentShader: particleFragmentShader, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending })
     const density = efficient ? 0.55 : settings.performancePreset === "cinematic" ? 1 : 0.75

@@ -12,6 +12,9 @@ import type { UiMode } from "./uiMode"
 import { HudOverlayProvider, useHudOverlay } from "./hudOverlayContext"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 import type { HealthIssue } from "./systemHealth"
+import { isGalaxyPresenceEffective } from "../presence/galaxyPresence"
+import { usePresentationSettings } from "../presence/presentationSettings"
+import { supportsHumanoidRuntime } from "../presence/renderers/humanoidRuntime"
 import { HudStarfield } from "./HudStarfield"
 import "./hud.css"
 import "./hud-v2.css"
@@ -313,10 +316,16 @@ function HudShellInner({
 
   const skyOpen = !isChat || adminOpen || helpOpen || panel !== null || modelMenuOpen
   const pulseKey = `${location.pathname}|${skyOpen ? "sky" : "cluster"}|${panel ?? ""}|${adminOpen}|${helpOpen}`
+  const presentation = usePresentationSettings()
+  const galaxyEffective = isGalaxyPresenceEffective({
+    requestedPresence: presentation.requestedPresence,
+    suiteOverride: hexStrikeActive,
+    webglAvailable: supportsHumanoidRuntime(),
+  })
 
   return (
-    <div className={`hud-app${skyOpen ? " hud-sky" : ""}`}>
-      <HudStarfield mode={skyOpen ? "sky" : "cluster"} pulseKey={pulseKey} />
+    <div className={`hud-app${skyOpen ? " hud-sky" : ""}${galaxyEffective ? " hud-galaxy" : ""}`}>
+      <HudStarfield mode={skyOpen ? "sky" : "cluster"} pulseKey={pulseKey} galaxy={galaxyEffective} />
       <HudTopChrome
         version={version}
         statusOnline={statusOnline}
