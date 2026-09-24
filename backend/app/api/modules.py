@@ -8,7 +8,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ..modules import catalog_download, cybersecurity, supermemory_runtime
+from ..modules import catalog_download, cybersecurity, supermemory_runtime, crucix_runtime
 from ..swarm.capabilities import register_localhost_capabilities
 from ..swarm.nodes import register_localhost_node
 from ..swarm.workers import bind_workers_to_node
@@ -44,7 +44,7 @@ class DownloadBody(BaseModel):
 
 @router.get("/catalog")
 async def list_catalog() -> dict[str, Any]:
-    return {"entries": [cybersecurity.catalog_list_row(), supermemory_runtime.catalog_list_row()]}
+    return {"entries": [cybersecurity.catalog_list_row(), supermemory_runtime.catalog_list_row(), crucix_runtime.catalog_list_row()]}
 
 
 @router.get("/catalog/{entry_id}")
@@ -54,6 +54,9 @@ async def get_catalog_entry(entry_id: str) -> dict[str, Any]:
         return {"module": module, **module}
     if entry_id == supermemory_runtime.MODULE_ID:
         module = await supermemory_runtime.module_status()
+        return {"module": module, **module}
+    if entry_id == crucix_runtime.MODULE_ID:
+        module = await crucix_runtime.status()
         return {"module": module, **module}
     source = catalog_download.allowlisted_source(entry_id)
     if source is None:
@@ -111,6 +114,28 @@ async def stop_supermemory_module() -> dict[str, Any]:
     await _refresh_local_supermemory_registration()
     return {"module": result, **result}
 
+
+
+@router.post("/catalog/crucix/enable")
+async def enable_crucix_module(body: EnableBody) -> dict[str, Any]:
+    module = await crucix_runtime.set_enabled(body.enabled)
+    return {"enabled": body.enabled, "module": module, **module, "detail": module.get("detail", "Crucix module updated.")}
+
+@router.post("/catalog/crucix/install")
+async def install_crucix_module() -> dict[str, Any]:
+    module = await crucix_runtime.install_and_start()
+    return {"module": module, **module}
+
+@router.post("/catalog/crucix/start")
+async def start_crucix_module() -> dict[str, Any]:
+    module = await crucix_runtime.start()
+    if not module.get("ok"): raise HTTPException(status_code=400, detail=module.get("detail") or "Start failed")
+    return {"module": module, **module}
+
+@router.post("/catalog/crucix/stop")
+async def stop_crucix_module() -> dict[str, Any]:
+    module = await crucix_runtime.stop()
+    return {"module": module, **module}
 
 @router.post("/catalog/{entry_id}/download")
 async def download_catalog_entry(entry_id: str, body: DownloadBody) -> dict[str, Any]:
