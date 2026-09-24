@@ -201,7 +201,7 @@ export function AgentRoomsPage() {
                   />
                   <span>
                     <strong>{row.label}</strong>
-                    <span className="luxury-id">
+                    <span className="luxury-sub">
                       {row.phrase}. {row.role}
                     </span>
                   </span>

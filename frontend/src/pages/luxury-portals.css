@@ -3,7 +3,8 @@
 
 .skill-forge-page,
 .agent-rooms-page {
-  max-width: 960px;
+  max-width: min(960px, 100%);
+  min-width: 0;
   color: var(--text);
 }
 
@@ -55,6 +56,8 @@
 
 .luxury-panel {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
   margin-bottom: 16px;
   padding: 18px 20px 20px;
   border: 1px solid rgba(130, 219, 246, 0.18);
@@ -383,6 +386,14 @@
   color: rgba(162, 199, 211, 0.72);
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 12px;
+}
+
+.luxury-sub {
+  display: block;
+  margin-top: 3px;
+  color: rgba(196, 228, 237, 0.72);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .luxury-purpose {
