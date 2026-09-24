@@ -63,6 +63,12 @@ def build_persona_instructions(pack: PersonaPack | None = None) -> str:
         parts.append("You must:\n" + "\n".join(f"- {item}" for item in chosen.must))
     if chosen.must_not:
         parts.append("You must not:\n" + "\n".join(f"- {item}" for item in chosen.must_not))
+    # RFC-0173: thin Skill Forge routing hook for the active persona pack.
+    from ..skills.routing import persona_skill_context
+
+    forge_block = persona_skill_context(chosen.id, chosen.system_prefix or chosen.id)
+    if forge_block:
+        parts.append(forge_block)
     return "\n\n".join(parts).strip()
 
 
