@@ -15,10 +15,16 @@ from app.reflex_loop.benchmark import (
 )
 from app.reflex_loop.executor import ReflexLoopExecutor, parse_reflex_decision
 from app.reflex_loop.reflex_client import (
+    BROWSER_OP_TARGET_CLASS,
+    DecisionPackageForwarder,
     DecisionQuestion,
     DecisionResult,
     FailClosedDecideClient,
+    adapt_decision_result,
     get_reflex_decide_client,
+    map_decision_class,
+    map_privacy,
+    questions_to_0171_map,
     set_reflex_decide_client,
 )
 from app.reflex_loop.sandbox import gate_decision_payload
@@ -63,16 +69,210 @@ def test_action_frame_schema_browser_and_desktop():
 
 
 def test_fail_closed_decide_stub_refuses():
-    set_reflex_decide_client(None)
-    client = get_reflex_decide_client(force_reload=True)
-    assert isinstance(client, FailClosedDecideClient)
+    client = FailClosedDecideClient()
     result = client.decide(
         {"goal": "click Save"},
         [DecisionQuestion(id="operation", kind="choice", prompt="op", options=("CLICK",))],
-        "browser_computer_op_target",
+        "browser_operation_target",
     )
     assert result.ok is False
     assert "not available" in result.error.lower() or "refuse" in result.error.lower()
+
+
+def test_privacy_and_class_mapping():
+    assert map_privacy("local") == "local_only"
+    assert map_privacy("local_only") == "local_only"
+    assert map_privacy("allow_cloud") == "allow_cloud"
+    assert map_privacy("require_local") == "require_local"
+    assert map_privacy("garbage") == "local_only"
+    assert map_decision_class("browser_computer_op_target") == BROWSER_OP_TARGET_CLASS
+    assert map_decision_class("browser_operation_target") == "browser_operation_target"
+    assert BROWSER_OP_TARGET_CLASS == "browser_operation_target"
+
+
+def test_questions_to_0171_map_uses_type_and_choices():
+    payload = questions_to_0171_map(
+        [
+            DecisionQuestion(
+                id="operation",
+                kind="choice",
+                prompt="Which op?",
+                options=("CLICK", "DONE"),
+            ),
+            DecisionQuestion(id="done", kind="boolean", prompt="Done?"),
+        ]
+    )
+    assert payload["operation"]["type"] == "choice"
+    assert payload["operation"]["choices"] == ["CLICK", "DONE"]
+    assert "options" not in payload["operation"]
+    assert "kind" not in payload["operation"]
+    assert payload["done"]["type"] == "boolean"
+
+
+def test_adapt_0171_decision_result_flattens_answers():
+    from app.decision.types import Answer, DecisionResult as UpstreamResult, LatencyBreakdown
+
+    upstream = UpstreamResult(
+        answers={
+            "operation": Answer("operation", "choice", "CLICK", 0.9),
+            "target_id": Answer("target_id", "choice", "t0", 0.8),
+            "done": Answer("done", "boolean", False, 1.0),
+            "block": Answer("block", "boolean", False, 1.0),
+        },
+        source="rules",
+        decision_class="browser_operation_target",
+        provider="rules",
+        latency=LatencyBreakdown(total_ms=12.5),
+    )
+    adapted = adapt_decision_result(upstream)
+    assert adapted.ok is True
+    assert adapted.answers["operation"] == "CLICK"
+    assert adapted.answers["target_id"] == "t0"
+    assert adapted.provider == "rules"
+    assert adapted.source == "rules"
+    assert adapted.latency_ms == 12.5
+    assert adapted.confidence > 0.0
+
+
+def test_forwarder_prefers_browser_operation_target_surface():
+    calls: list[dict] = []
+
+    def fake_surface(**kwargs):
+        calls.append(kwargs)
+        from app.decision.types import Answer, DecisionResult as UpstreamResult
+
+        return UpstreamResult(
+            answers={
+                "operation": Answer("operation", "choice", "CLICK", 1.0),
+                "target_id": Answer("target_id", "choice", "t0", 1.0),
+            },
+            source="rules",
+            decision_class="browser_operation_target",
+            provider="rules",
+        )
+
+    def boom_decide(*args, **kwargs):
+        raise AssertionError("decide() must not be called when surface is available")
+
+    client = DecisionPackageForwarder(decide_fn=boom_decide, browser_op_target_fn=fake_surface)
+    result = client.decide(
+        {"goal": "Click Save", "frame_id": "af_1"},
+        [
+            DecisionQuestion(
+                id="operation",
+                kind="choice",
+                prompt="op",
+                options=("CLICK", "DONE"),
+            ),
+            DecisionQuestion(
+                id="target_id",
+                kind="choice",
+                prompt="target",
+                options=("t0", "none"),
+            ),
+        ],
+        "browser_computer_op_target",  # legacy class name must map
+        deadline_ms=80,
+        privacy="local",  # alias must map to local_only
+    )
+    assert result.ok is True
+    assert result.answers["operation"] == "CLICK"
+    assert result.answers["target_id"] == "t0"
+    assert len(calls) == 1
+    assert calls[0]["goal"] == "Click Save"
+    assert calls[0]["operations"] == ["CLICK", "DONE"]
+    assert calls[0]["target_ids"] == ["t0", "none"]
+    assert calls[0]["privacy"] == "local_only"
+    assert calls[0]["frame_id"] == "af_1"
+
+
+def test_forwarder_decide_fallback_shapes_questions():
+    captured: dict = {}
+
+    def fake_decide(state, questions, decision_class, deadline_ms=None, privacy="local_only"):
+        captured["questions"] = questions
+        captured["decision_class"] = decision_class
+        captured["privacy"] = privacy
+        from app.decision.types import Answer, DecisionResult as UpstreamResult
+
+        return UpstreamResult(
+            answers={
+                "operation": Answer("operation", "choice", "DONE", 1.0),
+                "done": Answer("done", "boolean", True, 1.0),
+            },
+            source="rules",
+            decision_class=decision_class,
+            provider="rules",
+        )
+
+    client = DecisionPackageForwarder(decide_fn=fake_decide, browser_op_target_fn=None)
+    result = client.decide(
+        {"goal": "finish"},
+        [
+            DecisionQuestion(
+                id="operation",
+                kind="choice",
+                prompt="op",
+                options=("DONE", "BLOCK"),
+            ),
+        ],
+        BROWSER_OP_TARGET_CLASS,
+        privacy="local",
+    )
+    assert result.ok is True
+    assert result.answers["operation"] == "DONE"
+    assert captured["decision_class"] == "browser_operation_target"
+    assert captured["privacy"] == "local_only"
+    assert isinstance(captured["questions"], dict)
+    assert captured["questions"]["operation"]["type"] == "choice"
+    assert captured["questions"]["operation"]["choices"] == ["DONE", "BLOCK"]
+
+
+def test_live_decision_package_resolves_to_forwarder():
+    """On tips where RFC-0171 landed, get_reflex_decide_client must not fail-close."""
+    set_reflex_decide_client(None)
+    client = get_reflex_decide_client(force_reload=True)
+    assert isinstance(client, DecisionPackageForwarder)
+    result = client.decide(
+        {"goal": "click search", "suggested_operation": "CLICK", "suggested_target_id": "t0"},
+        [
+            DecisionQuestion(
+                id="operation",
+                kind="choice",
+                prompt="op",
+                options=("CLICK", "TYPE_TEXT", "DONE"),
+            ),
+            DecisionQuestion(
+                id="target_id",
+                kind="choice",
+                prompt="target",
+                options=("t0", "t1", "none"),
+            ),
+        ],
+        BROWSER_OP_TARGET_CLASS,
+        deadline_ms=100,
+        privacy="local_only",
+    )
+    assert result.ok is True
+    assert "operation" in result.answers
+    assert result.answers["operation"] in {"CLICK", "TYPE_TEXT", "DONE", "NOOP"}
+    set_reflex_decide_client(None)
+
+
+def test_forwarder_absent_when_decision_cannot_import(monkeypatch):
+    import app.reflex_loop.reflex_client as rc
+
+    set_reflex_decide_client(None)
+    monkeypatch.setattr(rc, "_try_import_decision_api", lambda: (None, None))
+    client = get_reflex_decide_client(force_reload=True)
+    assert isinstance(client, FailClosedDecideClient)
+    result = client.decide(
+        {"goal": "x"},
+        [DecisionQuestion(id="operation", kind="choice", prompt="op", options=("CLICK",))],
+        BROWSER_OP_TARGET_CLASS,
+    )
+    assert result.ok is False
+    set_reflex_decide_client(None)
 
 
 def test_parse_reflex_decision_and_sandbox_rejects_forbidden_payload():

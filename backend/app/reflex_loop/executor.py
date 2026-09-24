@@ -155,7 +155,7 @@ def build_op_target_questions(frame: ActionFrame, goal: str) -> list[DecisionQue
             prompt="Is the goal already satisfied?",
         ),
         DecisionQuestion(
-            id="blocked",
+            id="block",
             kind="boolean",
             prompt="Should the loop stop because the goal cannot proceed safely?",
         ),
@@ -216,11 +216,12 @@ class ReflexLoopExecutor:
                 {
                     "goal": goal_text,
                     "frame": frame.compact_state(),
+                    "frame_id": frame.frame_id,
                 },
                 build_op_target_questions(frame, goal_text),
                 BROWSER_OP_TARGET_CLASS,
                 deadline_ms=100,
-                privacy="local",
+                privacy="local_only",
             )
             # Reflex decide is not a generative LLM call; only TYPE_TEXT counts as model_calls.
             decision = parse_reflex_decision(decide_result)
