@@ -1,0 +1,614 @@
+/* Anzu 1.0 luxury glass for Skill Forge and Agent Rooms only.
+   Tokens follow Appearance / custom-presence: cyan hairlines, ink glass, gold primary. */
+
+.skill-forge-page,
+.agent-rooms-page {
+  max-width: 960px;
+  color: var(--text);
+}
+
+.luxury-page-head {
+  margin: 0 0 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(130, 219, 246, 0.12);
+}
+
+.luxury-page-head h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.luxury-page-head .lede {
+  margin: 0;
+  max-width: 44rem;
+  line-height: 1.55;
+  color: rgba(196, 228, 237, 0.78);
+}
+
+.skill-forge-page a,
+.agent-rooms-page a {
+  color: #e8c56a;
+  text-underline-offset: 3px;
+}
+
+.skill-forge-page a:hover,
+.agent-rooms-page a:hover {
+  color: #f6dc9a;
+  text-decoration: underline;
+}
+
+.skill-forge-page a:focus-visible,
+.agent-rooms-page a:focus-visible,
+.skill-forge-page button:focus-visible,
+.agent-rooms-page button:focus-visible,
+.skill-forge-page input:focus-visible,
+.agent-rooms-page input:focus-visible,
+.skill-forge-page select:focus-visible,
+.agent-rooms-page select:focus-visible,
+.skill-forge-page textarea:focus-visible,
+.agent-rooms-page textarea:focus-visible {
+  outline: 2px solid rgba(103, 220, 255, 0.72);
+  outline-offset: 2px;
+}
+
+.luxury-panel {
+  position: relative;
+  margin-bottom: 16px;
+  padding: 18px 20px 20px;
+  border: 1px solid rgba(130, 219, 246, 0.18);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(18, 32, 42, 0.55), rgba(8, 14, 22, 0.72));
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(226, 245, 250, 0.06);
+  backdrop-filter: blur(14px);
+}
+
+.luxury-panel.flush {
+  margin-bottom: 0;
+}
+
+.luxury-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(130, 219, 246, 0.55),
+    rgba(212, 160, 23, 0.4),
+    transparent
+  );
+  pointer-events: none;
+}
+
+.luxury-rail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid rgba(103, 220, 255, 0.1);
+  color: rgba(177, 218, 231, 0.78);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.luxury-copy {
+  margin: 0 0 14px;
+  color: rgba(196, 228, 237, 0.74);
+  line-height: 1.5;
+}
+
+.luxury-copy.flush,
+.luxury-flush {
+  margin: 0;
+}
+
+.luxury-copy.tight {
+  margin-bottom: 4px;
+}
+
+.luxury-copy.goal {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: rgba(232, 230, 225, 0.92);
+  font-size: 15px;
+}
+
+.luxury-label {
+  margin: 4px 0 8px;
+  color: rgba(177, 218, 231, 0.74);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.luxury-kicker {
+  margin: 0 0 6px;
+  color: #f0b4ad;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.luxury-banner {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid rgba(212, 101, 90, 0.42);
+  border-left: 4px solid var(--bad);
+  border-radius: 12px;
+  background: rgba(42, 16, 14, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 210, 204, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.luxury-banner .luxury-banner-body {
+  margin: 0;
+  color: rgba(250, 230, 226, 0.92);
+  line-height: 1.45;
+}
+
+.luxury-panel .luxury-banner {
+  margin-bottom: 12px;
+  box-shadow: none;
+}
+
+.luxury-banner.ok {
+  border-color: rgba(61, 186, 122, 0.38);
+  border-left-color: var(--ok);
+  background: rgba(10, 28, 20, 0.58);
+}
+
+.luxury-banner.ok .luxury-kicker {
+  color: #9ddec0;
+}
+
+.luxury-banner.ok .luxury-banner-body {
+  color: rgba(214, 242, 226, 0.94);
+}
+
+.luxury-state {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.luxury-state.empty {
+  border: 1px dashed rgba(142, 219, 241, 0.28);
+  background: rgba(6, 12, 20, 0.38);
+  color: rgba(196, 228, 237, 0.78);
+}
+
+.luxury-state.loading {
+  border: 1px solid rgba(103, 220, 255, 0.16);
+  background: rgba(8, 20, 28, 0.45);
+  color: rgba(186, 220, 232, 0.8);
+}
+
+.luxury-state.failed {
+  border: 1px solid rgba(212, 101, 90, 0.4);
+  background: rgba(42, 16, 14, 0.38);
+  color: rgba(250, 220, 214, 0.92);
+}
+
+.luxury-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.luxury-row.center {
+  align-items: center;
+}
+
+.luxury-row.spread {
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.luxury-row.search {
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.luxury-row.actions {
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.luxury-row.actions.compact {
+  margin-top: 0;
+}
+
+.luxury-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-width: 0;
+  margin: 0;
+  color: rgba(177, 218, 231, 0.82);
+  font-size: 12px;
+}
+
+.luxury-field.sm { flex-basis: 140px; }
+.luxury-field.md { flex-basis: 180px; }
+.luxury-field.lg { flex-basis: 240px; }
+.luxury-field.grow { flex: 2 1 180px; }
+.luxury-field.block {
+  flex: 1 1 100%;
+  margin-top: 10px;
+}
+
+.luxury-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: rgba(226, 245, 250, 0.86);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.luxury-check input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  accent-color: #d4a017;
+}
+
+.luxury-filter {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: rgba(196, 228, 237, 0.82);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.skill-forge-page .luxury-filter select,
+.agent-rooms-page .luxury-filter select {
+  width: auto;
+  min-width: 9.5rem;
+}
+
+.luxury-search {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.skill-forge-page input[type="text"],
+.skill-forge-page input[type="search"],
+.skill-forge-page select,
+.skill-forge-page textarea,
+.agent-rooms-page input[type="text"],
+.agent-rooms-page input[type="search"],
+.agent-rooms-page select,
+.agent-rooms-page textarea {
+  width: 100%;
+  box-sizing: border-box;
+  color: inherit;
+  border-radius: 10px;
+  border: 1px solid rgba(142, 219, 241, 0.18);
+  background: rgba(6, 12, 20, 0.85);
+  padding: 9px 11px;
+}
+
+.skill-forge-page textarea,
+.agent-rooms-page textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.45;
+}
+
+.skill-forge-page input:focus,
+.skill-forge-page select:focus,
+.skill-forge-page textarea:focus,
+.agent-rooms-page input:focus,
+.agent-rooms-page select:focus,
+.agent-rooms-page textarea:focus {
+  border-color: rgba(103, 220, 255, 0.62);
+  box-shadow:
+    inset 0 0 0 1px rgba(103, 220, 255, 0.16),
+    0 0 16px rgba(103, 220, 255, 0.08);
+}
+
+.skill-forge-page .btn,
+.agent-rooms-page .btn {
+  border-radius: 9px;
+  letter-spacing: 0.01em;
+}
+
+.skill-forge-page .btn:not(.secondary):not(.danger):hover:not(:disabled),
+.agent-rooms-page .btn:not(.secondary):not(.danger):hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 0 18px rgba(212, 160, 23, 0.24);
+}
+
+.skill-forge-page .btn.secondary,
+.agent-rooms-page .btn.secondary {
+  border: 1px solid rgba(142, 219, 241, 0.24);
+  background: rgba(8, 20, 28, 0.55);
+}
+
+.skill-forge-page .btn.secondary:hover:not(:disabled),
+.agent-rooms-page .btn.secondary:hover:not(:disabled) {
+  border-color: rgba(103, 220, 255, 0.5);
+  box-shadow: 0 0 16px rgba(103, 220, 255, 0.1);
+}
+
+.skill-forge-page .btn:focus-visible,
+.agent-rooms-page .btn:focus-visible {
+  outline-offset: 3px;
+}
+
+.luxury-results {
+  margin-bottom: 16px;
+}
+
+.luxury-rail .btn,
+.luxury-rail .badge {
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.luxury-id {
+  display: block;
+  margin: 4px 0 0;
+  color: rgba(162, 199, 211, 0.72);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.luxury-meta {
+  color: rgba(162, 199, 211, 0.72);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.luxury-purpose {
+  margin: 6px 0 8px;
+  color: rgba(196, 228, 237, 0.78);
+  line-height: 1.45;
+}
+
+.luxury-inbox {
+  display: block;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid rgba(213, 154, 58, 0.45);
+  border-radius: 12px;
+  background: rgba(6, 12, 20, 0.42);
+}
+
+.luxury-inbox:hover,
+.luxury-inbox:focus-visible {
+  border-color: rgba(103, 220, 255, 0.55);
+  box-shadow:
+    inset 0 0 0 1px rgba(103, 220, 255, 0.14),
+    0 0 18px rgba(103, 220, 255, 0.08);
+}
+
+.luxury-inbox.selected {
+  border-color: rgba(212, 160, 23, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(212, 160, 23, 0.22);
+  background: rgba(212, 160, 23, 0.06);
+}
+
+.luxury-inbox.is-busy {
+  cursor: wait;
+}
+
+.luxury-panel h2,
+.luxury-room-head h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.luxury-room-head {
+  margin: 4px 0 8px;
+}
+
+.luxury-follow {
+  margin-top: 16px;
+}
+
+.luxury-message-body {
+  margin: 6px 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.luxury-note {
+  margin: 0;
+  color: rgba(196, 228, 237, 0.74);
+  line-height: 1.5;
+}
+
+.luxury-note + .luxury-note {
+  margin-top: 6px;
+}
+
+.skill-forge-page .env-subhead,
+.agent-rooms-page .env-subhead {
+  margin: 16px 0 8px;
+  color: rgba(226, 245, 250, 0.92);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.luxury-panel > .env-subhead:first-child,
+.luxury-follow > .env-subhead:first-child {
+  margin-top: 0;
+}
+
+.luxury-panel > .btn {
+  margin-top: 14px;
+}
+
+.portal-advanced .luxury-panel {
+  margin: 0;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.portal-advanced .luxury-panel::before {
+  display: none;
+}
+
+.skill-forge-page .kv,
+.agent-rooms-page .kv {
+  padding: 10px 12px;
+  border: 1px solid rgba(130, 219, 246, 0.1);
+  border-radius: 10px;
+  background: rgba(6, 12, 20, 0.35);
+}
+
+.skill-forge-page table,
+.agent-rooms-page table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.skill-forge-page th,
+.agent-rooms-page th {
+  padding: 8px 8px 10px;
+  color: rgba(177, 218, 231, 0.74);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(103, 220, 255, 0.14);
+}
+
+.skill-forge-page td,
+.agent-rooms-page td {
+  padding: 12px 8px;
+  border-bottom: 1px solid rgba(103, 220, 255, 0.08);
+  vertical-align: top;
+}
+
+.skill-forge-page tbody tr:hover td,
+.agent-rooms-page tbody tr:hover td,
+.skill-forge-page .env-row.selected td {
+  background: rgba(103, 220, 255, 0.05);
+}
+
+.skill-forge-page .env-row {
+  cursor: pointer;
+}
+
+.skill-forge-page .portal-advanced,
+.agent-rooms-page .portal-advanced {
+  margin-top: 14px;
+  border-color: rgba(142, 219, 241, 0.16);
+  background: rgba(6, 12, 20, 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.skill-forge-page .portal-advanced > summary,
+.agent-rooms-page .portal-advanced > summary {
+  color: rgba(177, 218, 231, 0.86);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.skill-forge-page .portal-advanced > summary:hover,
+.agent-rooms-page .portal-advanced > summary:hover,
+.skill-forge-page .portal-advanced[open] > summary,
+.agent-rooms-page .portal-advanced[open] > summary {
+  color: rgba(226, 245, 250, 0.96);
+}
+
+.agent-rooms-page .agent-room-roster {
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.agent-rooms-page .agent-room-roster label {
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  align-items: flex-start;
+  border: 1px solid rgba(142, 219, 241, 0.16);
+  border-radius: 12px;
+  background: rgba(6, 12, 20, 0.42);
+  color: inherit;
+  cursor: pointer;
+}
+
+.agent-rooms-page .agent-room-roster label:hover,
+.agent-rooms-page .agent-room-roster label:focus-within {
+  border-color: rgba(103, 220, 255, 0.5);
+  box-shadow:
+    inset 0 0 0 1px rgba(103, 220, 255, 0.12),
+    0 0 18px rgba(103, 220, 255, 0.06);
+}
+
+.agent-rooms-page .agent-room-roster label:has(input:checked) {
+  border-color: rgba(212, 160, 23, 0.62);
+  background: rgba(212, 160, 23, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(212, 160, 23, 0.16);
+}
+
+.agent-rooms-page .agent-room-roster input {
+  margin-top: 3px;
+  accent-color: #d4a017;
+}
+
+.agent-rooms-page .agent-room-timeline li {
+  padding: 12px 2px 14px;
+  border-top: 1px solid rgba(103, 220, 255, 0.1);
+}
+
+.agent-rooms-page .env-file-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: rgba(226, 245, 250, 0.9);
+}
+
+.agent-rooms-page .env-file-list li,
+.skill-forge-page .env-file-list li {
+  margin: 6px 0;
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .luxury-panel,
+  .luxury-banner,
+  .skill-forge-page .portal-advanced,
+  .agent-rooms-page .portal-advanced {
+    backdrop-filter: none;
+  }
+}
