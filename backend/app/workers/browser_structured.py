@@ -173,3 +173,17 @@ def browser_use_ingest_payload(*, data: dict[str, Any] | None, output: str = "")
         "steps": int(payload.get("steps") or 0),
         "session_reused": bool(payload.get("session_reused")),
     }
+
+
+def action_frame_summary(frame: dict[str, Any] | None) -> dict[str, Any]:
+    """Compact ActionFrame fields for worker/tool result data (RFC-0172)."""
+    if not isinstance(frame, dict):
+        return {}
+    nodes = frame.get("nodes") if isinstance(frame.get("nodes"), list) else []
+    return {
+        "frame_id": str(frame.get("frame_id") or ""),
+        "surface": str(frame.get("surface") or ""),
+        "app_or_page_id": str(frame.get("app_or_page_id") or ""),
+        "node_count": len(nodes),
+        "url_or_title": str(frame.get("url_or_title") or ""),
+    }

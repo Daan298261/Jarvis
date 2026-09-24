@@ -1,9 +1,12 @@
-"""Computer-use targeting and RDP launch API (RFC-0079)."""
+"""Computer-use targeting and RDP launch API (RFC-0079) + Reflex fast loop (RFC-0172)."""
 from __future__ import annotations
+
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..workers.computer import run_reflex_computer_use
 from ..workers.computer_use_plan import isolate_device_plan, list_computer_targets, plan_computer_use, start_rdp_session
 
 router = APIRouter(prefix="/api/computer-use", tags=["computer-use"])
@@ -23,6 +26,12 @@ class RdpBody(BaseModel):
 class IsolateBody(BaseModel):
     device: str = Field(..., min_length=1, max_length=200)
     reason: str = ""
+
+
+class ReflexBody(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=4000)
+    app: str | None = None
+    nodes: list[dict[str, Any]] | None = None
 
 
 @router.get("/targets")
@@ -68,3 +77,32 @@ async def computer_use_blue_isolate(body: IsolateBody):
     if plan["status"] == "deny":
         raise HTTPException(403, plan["reason"])
     return plan
+
+
+@router.post("/reflex/run")
+async def computer_use_reflex_run(body: ReflexBody):
+    """RFC-0172 Reflex-first fast loop. Fail closed without ActionFrame / Reflex Lane."""
+    from ..policy.cyber_ato import license_blocks
+
+    blocked = license_blocks("computer-use")
+    if blocked:
+        raise HTTPException(403, blocked)
+    result = await run_reflex_computer_use(body.goal, app=body.app, nodes=body.nodes)
+    payload = {
+        "success": result.success,
+        "output": result.output,
+        "error": result.error,
+        "data": result.data,
+    }
+    if not result.success:
+        # Honest refuse — not a soft 200 success.
+        raise HTTPException(status_code=409, detail=payload)
+    return payload
+
+
+@router.get("/reflex/benchmark")
+async def computer_use_reflex_benchmark():
+    """Deterministic Reflex vs Anzu baseline metrics (RFC-0172 acceptance)."""
+    from ..reflex_loop.runtime import run_reflex_benchmark
+
+    return await run_reflex_benchmark()

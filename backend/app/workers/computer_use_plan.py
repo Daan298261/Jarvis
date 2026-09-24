@@ -64,6 +64,14 @@ def _local_backends() -> dict[str, Any]:
         "ufo": ufo.probe(),
         "cua": cua.probe(),
         "native_desktop": {"id": "desktop", "available": True, "detail": "Native desktop tool on this process."},
+        "reflex_loop": {
+            "id": "reflex_computer_use",
+            "available": True,
+            "detail": (
+                "RFC-0172 Reflex-first ActionFrame fast loop. "
+                "Requires ActionFrame nodes + Reflex Lane decide(); fail-closed without them."
+            ),
+        },
     }
 
 
@@ -97,6 +105,7 @@ async def plan_computer_use(
     steps: list[str] = [
         "Phone or companion sends the request to the Jarvis leader.",
         "Leader classifies the work as computer use and selects a node with desktop_control.",
+        "Prefer RFC-0172 Reflex-first ActionFrame loop (typed op+target) before generative computer-use.",
     ]
     rdp_plan: dict[str, Any] | None = None
     if chosen and not chosen.get("is_local"):
