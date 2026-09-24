@@ -387,8 +387,9 @@ function TrajectoryInspectView({
           <div className="card" style={{ marginTop: 16 }}>
             <h2>Suggested lessons</h2>
             <p className="lede">
-              These are notes from the run. They are not skills and they do not change what Jarvis
-              may do. Promote real skills from Memory after repeated success.
+              These are notes from the run. They are not skills and they do not change what Anzu
+              may do. Promote forge candidates from{" "}
+              <Link to="/skills">Modules / Skills</Link> after verification — never auto-publish.
             </p>
             {skills.length === 0 && <p className="lede">No suggested lessons on this record.</p>}
             {skills.map((skill, index) => (

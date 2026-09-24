@@ -28,7 +28,24 @@ import { ContextRepoPage } from "./pages/ContextRepo"
 import { TrajectoriesPage } from "./pages/Trajectories"
 import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
-import { api, ensureDesktopSession, getAwayMode, getDiagnostics, getLicenseStatus, getSetupStatus, isApiError, listCodingDecisionInbox, listSwarmNodes, type AwayModeState, type LicenseStatus, type SwarmNode, type Task } from "./api"
+import { SkillForgePage } from "./pages/SkillForge"
+import {
+  api,
+  ensureDesktopSession,
+  getAwayMode,
+  getDiagnostics,
+  getLicenseStatus,
+  getSetupStatus,
+  isApiError,
+  listCodingDecisionInbox,
+  listSkillForgeCandidates,
+  listSwarmNodes,
+  skillForgeNeedsOwnerDecision,
+  type AwayModeState,
+  type LicenseStatus,
+  type SwarmNode,
+  type Task,
+} from "./api"
 import { collectHealthIssues, type SelfCheckSnapshot } from "./hud/systemHealth"
 import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
 import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
@@ -80,6 +97,7 @@ const ADMIN_LINKS = [
   { to: "/trajectories", label: "Trajectories" },
   { to: "/environments", label: "Environments" },
   { to: "/coding", label: "Coding" },
+  { to: "/skills", label: "Modules / Skills" },
   { to: "/packs", label: "Packs" },
   { to: "/ads", label: "Amazon Ads" },
   { to: "/delegation", label: "Helpers" },
@@ -261,8 +279,17 @@ function OwnerPortal() {
       listSwarmNodes()
         .then((res) => setSwarmNodes(res.nodes || []))
         .catch(() => undefined)
-      listCodingDecisionInbox(true)
-        .then((res) => setDecisionInboxCount(res.items?.length || 0))
+      Promise.all([
+        listCodingDecisionInbox(true).catch(() => ({ items: [] as { id?: string }[] })),
+        listSkillForgeCandidates(undefined, 50).catch(() => ({
+          candidates: [] as import("./api").SkillForgeCandidate[],
+        })),
+      ])
+        .then(([coding, forge]) => {
+          const codingOpen = coding.items?.length || 0
+          const forgeOpen = (forge.candidates || []).filter(skillForgeNeedsOwnerDecision).length
+          setDecisionInboxCount(codingOpen + forgeOpen)
+        })
         .catch(() => undefined)
       getDiagnostics().then(setDiagnostics).catch(() => undefined)
       api<SelfCheckSnapshot>("/api/system/self-check").then(setSelfCheck).catch(() => undefined)
@@ -456,6 +483,8 @@ function OwnerPortal() {
       <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
       <Route path="/coding" element={<CodingPage />} />
       <Route path="/coding/:taskId" element={<CodingPage />} />
+      <Route path="/skills" element={<SkillForgePage />} />
+      <Route path="/skills/:candidateId" element={<SkillForgePage />} />
       <Route path="/packs" element={<PacksPage />} />
       <Route path="/ads" element={<AdsPage />} />
       <Route path="/delegation" element={<DelegationPage />} />

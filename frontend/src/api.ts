@@ -5214,3 +5214,298 @@ export async function reenableAutomationBreaker(automationId: string): Promise<A
     },
   )
 }
+
+/* ---- Skill Forge (RFC-0173) — Modules/Skills portal ---- */
+
+export type SkillForgeLifecycleStatus =
+  | "proposed"
+  | "sandboxed"
+  | "verified"
+  | "approved"
+  | "active"
+  | "rejected"
+  | "superseded"
+  | "rolled_back"
+  | "quarantined"
+  | string
+
+export type SkillForgeProvenance = {
+  source?: string
+  trajectory_ids?: string[]
+  parent_version_id?: string | null
+  created_by?: string
+  imported_from?: string | null
+  notes?: string
+}
+
+export type SkillForgeVerifierResult = {
+  passed?: boolean
+  tests_run?: number
+  tests_passed?: number
+  tests_failed?: number
+  details?: Record<string, unknown>[]
+  isolated_workspace?: string | null
+  evaluated_at?: string | null
+}
+
+export type SkillForgeManifest = {
+  name: string
+  purpose?: string
+  version?: string
+  scope?: string
+  task_class?: string
+  inputs?: { name: string; type?: string; description?: string; required?: boolean }[]
+  outputs?: { name: string; type?: string; description?: string; required?: boolean }[]
+  steps?: { tool: string; arguments?: Record<string, unknown>; description?: string }[]
+  tools?: string[]
+  required_capabilities?: string[]
+  secrets?: string[]
+  network_scope?: string[]
+  filesystem_scope?: string[]
+  compatible_personas?: string[]
+  compatible_models?: string[]
+  examples?: Record<string, unknown>[]
+  tests?: { id: string; description?: string }[]
+  provenance?: SkillForgeProvenance
+  rollback_target_version_id?: string | null
+  content_hash?: string
+  signature?: string
+}
+
+export type SkillForgeVersion = {
+  version_id: string
+  skill_id: string
+  status: SkillForgeLifecycleStatus
+  manifest: SkillForgeManifest
+  verifier?: SkillForgeVerifierResult | null
+  effective_capabilities?: string[]
+  approval?: Record<string, unknown>
+  created_at: string
+  activated_at?: string | null
+  disabled?: boolean
+  quarantine_reason?: string | null
+  metrics?: Record<string, unknown>
+  immutable?: boolean
+}
+
+export type SkillForgeCandidate = {
+  candidate_id: string
+  skill_id: string
+  status: SkillForgeLifecycleStatus
+  version: SkillForgeVersion
+  created_at: string
+  updated_at: string
+  decision_inbox_item_id?: string | null
+  rejection_reason?: string | null
+}
+
+export type SkillForgeRegistryEntry = {
+  skill_id: string
+  name: string
+  active_version_id?: string | null
+  versions?: string[]
+  created_at: string
+  updated_at: string
+  origin?: string
+}
+
+export type SkillForgePermissionPreview = {
+  declared?: string[]
+  policy?: string[]
+  effective?: string[]
+  denied?: string[]
+  undeclared_tool_capabilities?: string[]
+  allows_execution?: boolean
+  privilege_expansion?: boolean
+}
+
+export type SkillForgeSearchHit = {
+  skill_id?: string
+  name?: string
+  purpose?: string
+  version_id?: string
+  score?: number
+  [key: string]: unknown
+}
+
+export type SkillForgeCandidateAction = {
+  actor: string
+  admin?: boolean
+  reason?: string
+  profile_id?: string | null
+  task_capabilities?: string[]
+  node_capabilities?: string[]
+  parent_capabilities?: string[]
+}
+
+export function formatSkillForgeError(err: unknown): string {
+  if (isApiError(err)) return err.message || `Request failed (${err.status})`
+  if (err instanceof Error && err.message) return err.message
+  return String(err || "Skill Forge request failed")
+}
+
+/** Candidates that need an explicit owner decision (approve and/or activate). */
+export function skillForgeNeedsOwnerDecision(candidate: SkillForgeCandidate): boolean {
+  const status = String(candidate.status || "").toLowerCase()
+  if (status === "verified" || status === "approved" || status === "quarantined") return true
+  const approval = candidate.version?.approval || {}
+  if (approval.requested && !approval.approved && status !== "rejected" && status !== "active") {
+    return true
+  }
+  return false
+}
+
+export async function getSkillForgeIndex(): Promise<{
+  skills: SkillForgeRegistryEntry[]
+  candidates: SkillForgeCandidate[]
+}> {
+  return api<{ skills: SkillForgeRegistryEntry[]; candidates: SkillForgeCandidate[] }>("/api/skill-forge")
+}
+
+export async function listSkillForgeSkills(): Promise<{ skills: SkillForgeRegistryEntry[] }> {
+  return api<{ skills: SkillForgeRegistryEntry[] }>("/api/skill-forge/skills")
+}
+
+export async function listSkillForgeCandidates(
+  status?: string,
+  limit = 50,
+): Promise<{ candidates: SkillForgeCandidate[] }> {
+  const params = new URLSearchParams()
+  if (status) params.set("status", status)
+  if (limit) params.set("limit", String(limit))
+  const query = params.toString() ? `?${params.toString()}` : ""
+  return api<{ candidates: SkillForgeCandidate[] }>(`/api/skill-forge/candidates${query}`)
+}
+
+export async function getSkillForgeCandidate(candidateId: string): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(`/api/skill-forge/candidates/${encodeURIComponent(candidateId)}`)
+}
+
+export async function getSkillForgeVersion(versionId: string): Promise<SkillForgeVersion> {
+  return api<SkillForgeVersion>(`/api/skill-forge/versions/${encodeURIComponent(versionId)}`)
+}
+
+export async function requestSkillForgeApproval(
+  candidateId: string,
+  body: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/request-approval`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function approveSkillForgeCandidate(
+  candidateId: string,
+  body: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/approve`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function rejectSkillForgeCandidate(
+  candidateId: string,
+  body: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/reject`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function activateSkillForgeCandidate(
+  candidateId: string,
+  body: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/activate`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function sandboxSkillForgeCandidate(
+  candidateId: string,
+  body?: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/sandbox`,
+    { method: "POST", body: JSON.stringify(body || { actor: "portal" }) },
+  )
+}
+
+export async function verifySkillForgeCandidate(candidateId: string): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/verify`,
+    { method: "POST" },
+  )
+}
+
+export async function previewSkillForgePermissions(
+  candidateId: string,
+  body?: SkillForgeCandidateAction,
+): Promise<SkillForgePermissionPreview> {
+  return api<SkillForgePermissionPreview>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/permissions`,
+    { method: "POST", body: JSON.stringify(body || { actor: "portal" }) },
+  )
+}
+
+export async function disableSkillForgeSkill(
+  skillId: string,
+  actor: string,
+): Promise<{ ok: boolean; disabled_version: SkillForgeVersion | null }> {
+  return api<{ ok: boolean; disabled_version: SkillForgeVersion | null }>(
+    `/api/skill-forge/skills/${encodeURIComponent(skillId)}/disable`,
+    { method: "POST", body: JSON.stringify({ actor }) },
+  )
+}
+
+export async function rollbackSkillForgeSkill(
+  skillId: string,
+  body: { actor: string; to_version_id?: string | null },
+): Promise<SkillForgeVersion> {
+  return api<SkillForgeVersion>(
+    `/api/skill-forge/skills/${encodeURIComponent(skillId)}/rollback`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function repairSkillForgeSkill(
+  skillId: string,
+  body?: {
+    trajectory_id?: string
+    trajectory?: Record<string, unknown>
+    manifest_patch?: Record<string, unknown>
+    created_by?: string
+  },
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/skills/${encodeURIComponent(skillId)}/repair`,
+    { method: "POST", body: JSON.stringify(body || {}) },
+  )
+}
+
+export async function searchSkillForge(body: {
+  query: string
+  persona_id?: string
+  goal_id?: string
+  task_class?: string
+  limit?: number
+}): Promise<{ results: SkillForgeSearchHit[] }> {
+  return api<{ results: SkillForgeSearchHit[] }>("/api/skill-forge/search", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function importSkillForgeManifest(body: {
+  manifest: Record<string, unknown>
+  imported_from?: string
+}): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>("/api/skill-forge/import", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
