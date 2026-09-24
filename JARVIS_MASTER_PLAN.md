@@ -2170,8 +2170,8 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [x] RFC-0140 Companion on-device small voice models (fallback + grid-down) — implemented (#403 @ `59e5ea73`; Whisper/TTS native bake + phone soak = device sign-off)
 - [x] RFC-0171 Priority System-One Reflex Lane — Jev + local Laya — implemented (#409 @ `f7bf66a9`; GPU/Laya sha + speed-claim release gate = Desktop sign-off)
 - [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
-- [ ] RFC-0173 Skill Forge — verified trace to reusable skill — accepted (renumbered from main’s false RFC-0139)
-- [ ] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — accepted (renumbered from main’s false RFC-0140)
+- [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal UI residual)
+- [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal UI + live room soak residual)
 
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
@@ -2822,6 +2822,26 @@ Decision: RFC-0172 Reflex-first browser/computer-use fast loop (implemented)
 Reason:
 
 CoS assigned Architect ledger-tick 0171+0172 after tip has both lands. Soft 0145/0151 stays soft.
+
+---
+
+Decision: RFC-0173 Skill Forge (implemented)
+
+[RFC-0173](docs/rfcs/0173-skill-forge-verified-trace-to-reusable-skill.md) is **implemented** on development via #414 @ `e442b3314c9b9d03e6eff9bdc020f8e8db111a01`. `backend/app/skills/` pipeline: eligibility → extract → isolated eval → Decision Inbox approve → activate; permission ∩; hash/rollback; marketplace quarantine; persona + Goal Runtime routing; `/api/skill-forge/*`; 14 forge tests. No auto-publish / privilege expansion. **Residuals:** Modules/Skills portal UI (UX lane). §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect paired ledger-tick after #414 land (with #413).
+
+---
+
+Decision: RFC-0174 Multi-agent rooms (implemented)
+
+[RFC-0174](docs/rfcs/0174-multi-agent-rooms-blackboard-deadlock-and-handoff.md) is **implemented** on development via #413 @ `13740066e6409bb3da384026e349c6f65c4fa6a8`. `backend/app/agents/rooms/`: typed protocol, bounded Blackboard, private histories, deadlock/governor, supervisor synthesis + audit replay without hidden CoT; router `room_hint`; tests green. Backend-only. **Residuals:** portal/websocket UI (UX); live multi-model room Desktop sign-off. §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect paired ledger-tick 0173+0174 after both lands.
 
 ---
 

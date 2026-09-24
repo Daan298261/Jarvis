@@ -1,6 +1,8 @@
 # RFC-0173: Skill Forge — verified trace to reusable skill
 
-**Status:** accepted
+**Status:** implemented
+**Implemented:** #414 @ `e442b3314c9b9d03e6eff9bdc020f8e8db111a01` (`backend/app/skills/`, `/api/skill-forge/*`).
+**Residuals:** Modules/Skills portal UI (UX); Desktop live soak N/A-unit-covered.
 **Renumbered on development:** was incorrectly `RFC-0139` on main @ `ac18fb32` (collided with Android companion orb RFC-0139). Canonical on development is **RFC-0173**.  
 **Date:** 2026-09-24
 
@@ -16,13 +18,13 @@ A skill manifest declares purpose, input/output schema, tools, permissions, secr
 
 ## Acceptance criteria
 
-- [ ] Trace eligibility excludes secrets, hidden reasoning and unapproved consequential actions.
-- [ ] Candidate extraction produces typed manifests and deterministic tests.
-- [ ] Replay/evaluation is isolated and compares against golden criteria.
-- [ ] No automatic publication or privilege expansion.
-- [ ] Versioning, provenance, signatures/hashes, disable and rollback work.
-- [ ] Repair creates a new candidate version; active skill remains intact until approval.
-- [ ] Skill search/routing integrates with personas and Goal Runtime.
+- [x] Trace eligibility excludes secrets, hidden reasoning and unapproved consequential actions.
+- [x] Candidate extraction produces typed manifests and deterministic tests.
+- [x] Replay/evaluation is isolated and compares against golden criteria.
+- [x] No automatic publication or privilege expansion.
+- [x] Versioning, provenance, signatures/hashes, disable and rollback work.
+- [x] Repair creates a new candidate version; active skill remains intact until approval.
+- [x] Skill search/routing integrates with personas and Goal Runtime.
 
 ## Likely files
 
