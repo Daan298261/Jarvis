@@ -7,6 +7,7 @@ import { PortalNav } from "../components/PortalNav"
 import { HudHealthRail } from "./HudHealthRail"
 import { HudLocalStatus } from "./HudLocalStatus"
 import { HudModelSelector } from "./HudModelSelector"
+import { HudPersonalityRail } from "./HudPersonalityRail"
 import { HudOpsRail } from "./HudOpsRail"
 import type { UiMode } from "./uiMode"
 import { HudOverlayProvider, useHudOverlay } from "./hudOverlayContext"
@@ -251,6 +252,7 @@ function HudShellInner({
   const [helpOpen, setHelpOpen] = useState(false)
   const [panel, setPanel] = useState<HudPanel>(null)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [personalityOpen, setPersonalityOpen] = useState(false)
 
   useEffect(() => {
     refreshSessionPersonality().catch(() => undefined)
@@ -262,6 +264,7 @@ function HudShellInner({
     setPanel(null)
     setAdminOpen(false)
     setHelpOpen(false)
+    setPersonalityOpen(false)
   }, [location.pathname])
 
   const runningCount = tasks.filter((task) => ["running", "queued", "waiting"].includes(task.status)).length
@@ -270,6 +273,7 @@ function HudShellInner({
   function togglePanel(next: Exclude<HudPanel, null>) {
     setAdminOpen(false)
     setHelpOpen(false)
+    setPersonalityOpen(false)
     dismissHexSuiteForOverlay()
     setPanel((current) => current === next ? null : next)
   }
@@ -277,6 +281,7 @@ function HudShellInner({
   function toggleAdmin() {
     setPanel(null)
     setHelpOpen(false)
+    setPersonalityOpen(false)
     setAdminOpen((open) => {
       const next = !open
       if (next) dismissHexSuiteForOverlay()
@@ -287,6 +292,7 @@ function HudShellInner({
   function toggleHelp() {
     setPanel(null)
     setAdminOpen(false)
+    setPersonalityOpen(false)
     setHelpOpen((open) => {
       const next = !open
       if (next) dismissHexSuiteForOverlay()
@@ -302,6 +308,11 @@ function HudShellInner({
     setPanel(null)
     setAdminOpen(false)
     setHelpOpen(false)
+    setPersonalityOpen(false)
+  }
+
+  function togglePersonality() {
+    setPanel(null); setAdminOpen(false); setHelpOpen(false); setModelMenuOpen(false); dismissHexSuiteForOverlay(); setPersonalityOpen(v=>!v)
   }
 
   function onDaybreakToggle() {
@@ -309,7 +320,7 @@ function HudShellInner({
     toggleHexSuite()
   }
 
-  const skyOpen = !isChat || adminOpen || helpOpen || panel !== null || modelMenuOpen
+  const skyOpen = !isChat || adminOpen || helpOpen || personalityOpen || panel !== null || modelMenuOpen
   const pulseKey = `${location.pathname}|${skyOpen ? "sky" : "cluster"}|${panel ?? ""}|${adminOpen}|${helpOpen}`
 
   return (
@@ -344,6 +355,7 @@ function HudShellInner({
           }
         }}
       />
+      <HudPersonalityRail open={personalityOpen} onToggle={togglePersonality} onSelected={()=>setPersonalityOpen(false)} />
       <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} variant="hud" />
 
       {isChat ? (
