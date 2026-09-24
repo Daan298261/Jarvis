@@ -81,7 +81,7 @@ class ScriptedDecideClient:
         decision_class: str,
         *,
         deadline_ms: int = 100,
-        privacy: str = "local",
+        privacy: str = "local_only",
     ) -> DecisionResult:
         del state, questions, decision_class, deadline_ms, privacy
         if self._index >= len(self._decisions):
