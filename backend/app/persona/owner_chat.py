@@ -170,14 +170,18 @@ async def stream_owner_chat(
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
 
-    from .session_personality import maybe_switch_from_owner_message
+    from .session_personality import auto_route_from_owner_message, maybe_switch_from_owner_message, session_personality_system_addendum
 
     switched = maybe_switch_from_owner_message(cleaned)
+    route_meta = {"automatic": False, "reason": "explicit switch"} if switched else {}
+    if not switched:
+        switched, route_meta = auto_route_from_owner_message(cleaned)
     if switched:
         yield {
             "type": "session_mode",
             "conversation_id": cid,
             "mode": switched.as_dict(),
+            "route": route_meta,
         }
 
     settings = load_settings()
@@ -253,6 +257,9 @@ async def stream_owner_chat(
         return
 
     worker_messages = _owner_messages(cid, cleaned, briefing)
+    persona_addendum = session_personality_system_addendum()
+    if persona_addendum:
+        worker_messages.insert(1, ChatMessage(role="system", content=persona_addendum))
     parts: list[str] = []
     worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
 
