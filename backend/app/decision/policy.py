@@ -83,21 +83,17 @@ def rerank_tools(prompt: str, candidates: Iterable[str]) -> list[str]:
     local = [name for name in candidates if name]
     if not local:
         return []
-    from .tier import decide_turn, jev_calls_allowed, resolve_status
+    try:
+        from .laya import ready as laya_ready
+        from .wire import cloud_opt_in_active, decide_tool_shortlist
 
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
+        if not laya_ready() and not cloud_opt_in_active():
+            return local
+        return decide_tool_shortlist(
+            prompt,
+            local,
+            limit=len(local),
+            cloud_ok=cloud_opt_in_active(),
+        )
+    except Exception:
         return local
-    decision = decide_turn(
-        user_message=prompt,
-        candidate_tools=local,
-        local_complexity=local_complexity_tier(prompt),
-    )
-    if decision.get("source") != "jev":
-        return local
-    selected = decision.get("tool_select")
-    if not selected:
-        return local
-    if selected not in local:
-        return local
-    return [selected, *[name for name in local if name != selected]]

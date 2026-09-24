@@ -11,7 +11,7 @@ from ..licensing.entitlements import FEATURE_JEV_PLUS, evaluate_cluster_entitlem
 from ..licensing.inference import get_secret_by_provider, upsert_inference_credential
 from ..licensing.lease import get_stored_lease
 from . import audit
-from .jev_client import JevHttpError, parse_answer, post_systemone, probe_key, using_labeled_fixture
+from .jev_client import JevHttpError, parse_answer, probe_key, using_labeled_fixture
 
 DecisionTier = Literal["local", "jev_optional", "jev_plus"]
 Availability = Literal["unavailable", "waitlisted", "connected", "error"]
@@ -111,8 +111,16 @@ def resolve_status() -> dict[str, Any]:
         if not owner_error and availability in {"unavailable", "waitlisted"}:
             owner_error = ""
     elif not key_present:
-        availability = "waitlisted" if decision.notify_requested_at else "unavailable"
-        owner_error = "Jev is early access. Join the TypeSafe waitlist, then bind a real API key. Notify when ready does not mean connected."
+        availability = "unavailable" if not decision.notify_requested_at else decision.last_availability
+        if availability == "connected":
+            availability = "unavailable"
+        if availability not in {"unavailable", "waitlisted", "error"}:
+            availability = "unavailable"
+        # RFC-0171: Jev is publicly usable; still requires real probe + explicit opt-in.
+        owner_error = (
+            "TypeSafe Jev is available publicly, but cloud decisions stay off until you opt in, "
+            "bind a real API key, and a probe succeeds. Local Reflex (rules/Laya) remains the default."
+        )
     elif availability == "connected" and not key_present:
         availability = "error"
         owner_error = "Saved probe is stale because the TypeSafe key is missing."
@@ -126,6 +134,11 @@ def resolve_status() -> dict[str, Any]:
         "key_bound": key_present,
         "notify_requested_at": decision.notify_requested_at,
         "waitlist_url": WAITLIST_URL,
+        "docs_url": WAITLIST_URL,
+        "public_availability_note": (
+            "Jev is publicly usable (RFC-0171). Owner cloud opt-in + real probe still required; "
+            "no fake-live attribution."
+        ),
         "last_probe_at": decision.last_probe_at,
         "last_probe_latency_ms": decision.last_probe_latency_ms,
         "last_probe_error": owner_error or decision.last_probe_error,
@@ -142,7 +155,7 @@ def _cta(availability: Availability, plus_blocked: bool, key_present: bool) -> s
     if availability == "connected":
         return ""
     if not key_present:
-        return "Notify when ready"
+        return "Bind TypeSafe API key"
     return "Retry probe"
 
 
@@ -242,140 +255,64 @@ def decide_turn(
     policy_requires_approval: bool = False,
     policy_deny: bool = False,
 ) -> dict[str, Any]:
+    """RFC-0116 compatibility wrapper over the RFC-0171 Reflex Lane."""
     request_id = uuid4().hex
     status = resolve_status()
-    allowed, reason = jev_calls_allowed(status)
-    base = {
-        "request_id": request_id,
-        "decision_tier": status["decision_tier"],
-        "jev_availability": status["jev_availability"],
-        "plus_entitled": status["plus_entitled"],
-        "source": "heuristics",
-        "fallback_used": True,
-        "fallback_reason": reason or "local default",
-        "model": "",
-        "latency_ms": None,
-        "answers": {},
-        "tool_select": None,
-        "speak_class": local_speak,
-        "complexity_tier": local_complexity,
-        "escalate": local_escalate,
-        "approval_needed": policy_requires_approval and not policy_deny,
-    }
-    if status["decision_tier"] == "local" or not allowed:
-        if status["decision_tier"] != "local" and not allowed:
-            audit.record_event("jev_fallback", {**base, "kind_detail": reason})
-        else:
-            audit.record_event("jev_fallback", {**base, "kind_detail": "local default"})
-        return base
+    from .wire import compose_turn_decisions
 
-    tools = [name for name in candidate_tools if name][: min(MAX_JEV_CHOICES - 1, 32)]
-    questions: dict[str, Any] = {
-        "speak_class": {
-            "type": "choice",
-            "choices": ["social", "technical"],
-            "question": "Is the upcoming assistant reply social small-talk or technical?",
-        },
-        "complexity_tier": {
-            "type": "score",
-            "question": "Task complexity 1-4 matching Jarvis answer tiers.",
-        },
-        "escalate": {
-            "type": "noul",
-            "question": "Does this need a stronger model than the current orchestrator should answer?",
-        },
-        "approval_needed": {
-            "type": "noul",
-            "question": "Does this step need Always allow / Allow this time / Deny before it runs?",
-        },
-    }
-    if tools:
-        questions["tool_select"] = {
-            "type": "choice",
-            "choices": [*tools, "none"],
-            "question": "Which retrieved tool should this turn use? none if chat-only.",
-        }
-    started = datetime.now(timezone.utc)
-    try:
-        result = post_systemone(
-            api_key=get_secret_by_provider(TYPESAFE_PROVIDER),
-            state={
-                "user_message": (user_message or "")[:800],
-                "candidate_tools": tools,
-                "local_complexity": local_complexity,
-            },
-            questions=questions,
-        )
-    except JevHttpError as exc:
-        payload = {
-            **base,
-            "fallback_reason": str(exc),
-            "http_status": exc.status_code,
-        }
-        audit.record_event("jev_error", payload)
-        return payload
-
-    latency = (datetime.now(timezone.utc) - started).total_seconds() * 1000.0
-    answers = result.get("answers") or {}
-    parsed = {qid: parse_answer(qid, answers.get(qid)) for qid in questions}
-    speak = parsed.get("speak_class")
-    complexity = parsed.get("complexity_tier")
-    escalate = parsed.get("escalate")
-    approval = parsed.get("approval_needed")
-    tool = parsed.get("tool_select")
-
-    from .policy import apply_complexity_tier, approval_popup_required, should_escalate
-
-    speak_value = None
-    if speak and speak.value in {"social", "technical"}:
-        speak_value = str(speak.value)
-    complexity_value = apply_complexity_tier(
-        local_complexity,
-        float(complexity.value) if complexity and complexity.primitive == "score" else None,
-    )
-    escalate_value = should_escalate(
-        local_escalate,
-        float(escalate.value) if escalate and escalate.primitive == "noul" else None,
-        confidence=escalate.confidence if escalate else None,
-    )
-    approval_value = approval_popup_required(
-        policy_requires=policy_requires_approval,
+    composed = compose_turn_decisions(
+        user_message=user_message,
+        candidate_tools=candidate_tools,
+        local_speak=local_speak,
+        local_complexity=local_complexity,
+        local_escalate=local_escalate,
+        policy_requires_approval=policy_requires_approval,
         policy_deny=policy_deny,
-        jev_noul=float(approval.value) if approval and approval.primitive == "noul" else None,
-        confidence=approval.confidence if approval else None,
+        cloud_ok=bool(jev_calls_allowed(status)[0]),
     )
-    tool_value = None
-    if tool and tool.value != "none" and tool.value in tools:
-        tool_value = str(tool.value)
+    source = composed.get("source") or "rules"
+    # Preserve RFC-0116 audit vocabulary for Jev-attributed turns.
+    if source == "jev":
+        audit_kind = "jev_decision"
+        legacy_source = "jev"
+        legacy_fallback = bool(composed.get("fallback_used"))
+        legacy_reason = composed.get("fallback_reason") or ""
+    else:
+        # Non-Jev path is always an explicit local/Reflex fallback for RFC-0116 callers.
+        audit_kind = "jev_fallback" if status["decision_tier"] != "local" else "reflex_decision"
+        if status["decision_tier"] == "local":
+            audit_kind = "jev_fallback"
+        legacy_source = "heuristics" if source in {"rules", "generative_fallback", "deadline_fallback", "cache"} else source
+        if source == "laya":
+            legacy_source = "laya"
+        legacy_fallback = True
+        legacy_reason = composed.get("fallback_reason") or (
+            "local default" if status["decision_tier"] == "local" else f"reflex:{source}"
+        )
 
     event = {
         "request_id": request_id,
         "decision_tier": status["decision_tier"],
-        "jev_availability": "connected",
+        "jev_availability": status["jev_availability"],
         "plus_entitled": status["plus_entitled"],
-        "source": "jev",
-        "fallback_used": False,
-        "fallback_reason": "",
-        "model": result.get("model") or "",
-        "latency_ms": round(latency, 1),
-        "fixture": bool(result.get("fixture")),
-        "answers": {
-            key: (
-                None
-                if parsed[key] is None
-                else {
-                    "type": parsed[key].primitive,
-                    parsed[key].primitive: parsed[key].value,
-                    "confidence": parsed[key].confidence,
-                }
-            )
-            for key in parsed
-        },
-        "tool_select": tool_value,
-        "speak_class": speak_value or local_speak,
-        "complexity_tier": complexity_value,
-        "escalate": escalate_value,
-        "approval_needed": approval_value,
+        "source": legacy_source,
+        "reflex_source": source,
+        "fallback_used": legacy_fallback,
+        "fallback_reason": legacy_reason,
+        "model": composed.get("model") or "",
+        "latency_ms": composed.get("latency_ms"),
+        "answers": composed.get("answers") or {},
+        "tool_select": composed.get("tool_select"),
+        "speak_class": composed.get("speak_class"),
+        "complexity_tier": composed.get("complexity_tier"),
+        "escalate": composed.get("escalate"),
+        "approval_needed": composed.get("approval_needed"),
+        "batch_size": composed.get("batch_size"),
+        "decision_class": composed.get("decision_class"),
+        "provider": composed.get("provider"),
     }
-    audit.record_event("jev_decision", event)
+    if source == "jev":
+        event["source"] = "jev"
+        event["jev_availability"] = "connected"
+    audit.record_event(audit_kind, event)
     return event

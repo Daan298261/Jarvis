@@ -899,12 +899,66 @@ def _router_orientation_excerpt() -> VaultHit | None:
     )
 
 
+def _reflex_rerank_hits(query: str, hits: list[VaultHit], *, limit: int) -> list[VaultHit]:
+    """RFC-0171: typed memory relevance over lexical vault shortlist when System-One is active."""
+    if not hits:
+        return []
+    try:
+        from ..decision.laya import ready as laya_ready
+        from ..decision.wire import cloud_opt_in_active, decide_memory_relevance
+
+        if not laya_ready() and not cloud_opt_in_active():
+            return hits[: max(1, limit)]
+
+        ranked = decide_memory_relevance(
+            query,
+            [
+                {
+                    "rel_path": hit.rel_path,
+                    "title": hit.title,
+                    "excerpt": hit.excerpt,
+                    "content_hash": hit.content_hash,
+                    "score": hit.score,
+                    "heading": hit.heading,
+                    "provenance": getattr(hit, "provenance", "") or "",
+                }
+                for hit in hits
+            ],
+            deadline_ms=60,
+            cloud_ok=cloud_opt_in_active(),
+        )
+    except Exception:
+        return hits[: max(1, limit)]
+    by_path = {hit.rel_path: hit for hit in hits}
+    out: list[VaultHit] = []
+    for row in ranked:
+        path = str(row.get("rel_path") or "")
+        hit = by_path.get(path)
+        if hit is None:
+            continue
+        reflex_score = float(row.get("reflex_score") or 0.0)
+        out.append(
+            VaultHit(
+                rel_path=hit.rel_path,
+                title=hit.title,
+                heading=hit.heading,
+                excerpt=hit.excerpt,
+                content_hash=hit.content_hash,
+                score=max(float(hit.score or 0.0), reflex_score),
+                provenance=getattr(hit, "provenance", "") or "",
+            )
+        )
+        if len(out) >= max(1, limit):
+            break
+    return out or hits[: max(1, limit)]
+
+
 def vault_turn_hits(query: str, *, limit: int = 6) -> list[VaultHit]:
     """Lexical search with vault-relevant fallbacks (router orientation, token retry)."""
     cleaned = (query or "").strip()
     hits = search_vault(cleaned, limit=limit)
     if hits:
-        return hits
+        return _reflex_rerank_hits(cleaned, hits, limit=limit)
     tokens = _tokenize_query(cleaned)
     if len(tokens) > 1:
         for tok in sorted(tokens, key=len, reverse=True):
@@ -912,7 +966,7 @@ def vault_turn_hits(query: str, *, limit: int = 6) -> list[VaultHit]:
                 continue
             hits = search_vault(tok, limit=limit)
             if hits:
-                return hits
+                return _reflex_rerank_hits(cleaned, hits, limit=limit)
     if not query_looks_vault_relevant(cleaned):
         return []
     router = _router_orientation_excerpt()

@@ -165,7 +165,79 @@ def resolve_router_decision(
         vision_requested=vision_requested,
         prior_failures=prior_failures,
     )
-    return merge_router_output(baseline, current_model=current_model, model_output=model_output)
+    reflex_output = _reflex_routing_hints(user_message, current_model=current_model, baseline=baseline)
+    merged_model = dict(model_output or {})
+    if reflex_output:
+        # Reflex may raise tier / suggest switch; hard-rule floor stays in merge_router_output.
+        if "required_answer_tier" in reflex_output:
+            merged_model["required_answer_tier"] = max(
+                int(merged_model.get("required_answer_tier") or 0),
+                int(reflex_output["required_answer_tier"]),
+            )
+        if reflex_output.get("action") and "action" not in merged_model:
+            merged_model["action"] = reflex_output["action"]
+        if reflex_output.get("reason"):
+            merged_model["reason"] = reflex_output["reason"]
+    return merge_router_output(baseline, current_model=current_model, model_output=merged_model or None)
+
+
+def _reflex_routing_hints(
+    user_message: str,
+    *,
+    current_model: str,
+    baseline: ComplexityResult,
+) -> dict[str, Any] | None:
+    """RFC-0171 persona/model routing via typed Reflex decisions when System-One is active."""
+    try:
+        from ..decision.laya import ready as laya_ready
+        from ..decision.wire import cloud_opt_in_active, decide_persona_model_route
+        from .runtime_profiles import list_runtime_profiles
+
+        if not laya_ready() and not cloud_opt_in_active():
+            return None
+
+        profiles = [
+            (row.model_profile or row.name)
+            for row in list_runtime_profiles()
+            if row.enabled and (row.model_profile or row.name)
+        ]
+        if not profiles:
+            profiles = [current_model or "balanced", "balanced", "quality", "fast"]
+        # Dedupe preserve order.
+        seen: set[str] = set()
+        choices: list[str] = []
+        for name in profiles:
+            if name in seen:
+                continue
+            seen.add(name)
+            choices.append(name)
+        result = decide_persona_model_route(
+            user_message,
+            choices[:16],
+            preferred_profile=current_model or "",
+            local_complexity=baseline.minimum_answer_tier or baseline.tier,
+            deadline_ms=80,
+            cloud_ok=cloud_opt_in_active(),
+        )
+        complexity = result.value("complexity_tier")
+        escalate = result.value("escalate")
+        profile = result.value("model_profile")
+        hints: dict[str, Any] = {
+            "reason": f"reflex:{result.source}",
+        }
+        if complexity is not None:
+            try:
+                hints["required_answer_tier"] = max(baseline.minimum_answer_tier, int(round(float(complexity))))
+            except (TypeError, ValueError):
+                pass
+        if escalate is not None and float(escalate) >= 0.7:
+            hints["action"] = "switch_model"
+            hints["required_answer_tier"] = max(int(hints.get("required_answer_tier") or 0), 3)
+        elif profile and profile != current_model and float(escalate or 0) >= 0.45:
+            hints["action"] = "switch_model"
+        return hints
+    except Exception:
+        return None
 
 
 def parse_router_model_json(raw: str) -> dict[str, Any] | None:

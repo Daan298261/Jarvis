@@ -1,4 +1,4 @@
-"""Wire Jev into speak-class, tool retrieval, complexity, and approval (RFC-0116)."""
+"""Wire Reflex / Jev into speak-class, tool retrieval, complexity, and approval (RFC-0116/0171)."""
 
 from __future__ import annotations
 
@@ -7,21 +7,27 @@ from typing import Any
 from ..policy.authorize import AuthorizationResult, authorize
 from ..tts.reply_class import ReplySpeechClass, register_reply_classifier_hook
 from .policy import apply_complexity_tier, approval_popup_required, local_complexity_tier, should_escalate
-from .tier import decide_turn, jev_calls_allowed, resolve_status
+from .tier import decide_turn
 
 
 def _speak_hook(text: str, user_prompt: str | None) -> ReplySpeechClass | None:
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
+    from .laya import ready as laya_ready
+    from .wire import cloud_opt_in_active
+
+    # Keep legacy default classifiers unless System-One is active or hard technical markers fire.
+    prompt = user_prompt or text
+    hard_technical = bool(
+        prompt
+        and ("traceback" in prompt.lower() or "runtimeerror" in prompt.lower() or "exception" in prompt.lower())
+    )
+    if not laya_ready() and not cloud_opt_in_active() and not hard_technical:
         return None
     decision = decide_turn(
-        user_message=user_prompt or text,
+        user_message=prompt,
         candidate_tools=[],
         local_speak=None,
-        local_complexity=local_complexity_tier(user_prompt or text),
+        local_complexity=local_complexity_tier(prompt),
     )
-    if decision.get("source") != "jev":
-        return None
     speak = decision.get("speak_class")
     if speak in {"social", "technical"}:
         return speak  # type: ignore[return-value]
@@ -34,31 +40,21 @@ def register_decision_hooks() -> None:
 
 def classify_complexity(prompt: str) -> int:
     local = local_complexity_tier(prompt)
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
-        return local
     decision = decide_turn(
         user_message=prompt,
         candidate_tools=[],
         local_complexity=local,
     )
-    if decision.get("source") != "jev":
-        return local
     return apply_complexity_tier(local, float(decision.get("complexity_tier") or local))
 
 
 def classify_escalate(prompt: str, *, local_escalate: bool = False) -> bool:
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
-        return local_escalate
     decision = decide_turn(
         user_message=prompt,
         candidate_tools=[],
         local_complexity=local_complexity_tier(prompt),
         local_escalate=local_escalate,
     )
-    if decision.get("source") != "jev":
-        return local_escalate
     return should_escalate(local_escalate, 1.0 if decision.get("escalate") else 0.0)
 
 
@@ -71,9 +67,6 @@ def authorize_with_jev(
 ) -> AuthorizationResult:
     result = authorize(tool_name, action=action, arguments=arguments, **kwargs)
     if not result.allowed and not result.requires_approval:
-        return result
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
         return result
     decision = decide_turn(
         user_message=str((arguments or {}).get("prompt") or action or tool_name),

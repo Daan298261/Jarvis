@@ -372,7 +372,7 @@ class NamedPersonaSettings(BaseModel):
 
 
 class DecisionSettings(BaseModel):
-    """RFC-0116 optional TypeSafe Jev decision tier. Default is local-only."""
+    """RFC-0116/0171 decision tier + local Laya Reflex settings. Default is local-only."""
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -384,6 +384,10 @@ class DecisionSettings(BaseModel):
     last_probe_at: str = ""
     last_probe_latency_ms: float | None = None
     last_model: str = ""
+    # RFC-0171 local Laya
+    laya_enabled: bool = False
+    laya_warm: bool = False
+    reflex_default_deadline_ms: int = 100
 
 
 class AppSettings(BaseModel):
