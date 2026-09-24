@@ -2172,7 +2172,7 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
 - [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal #416 @ `ebcdf9da`; no residual)
 - [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal #417 @ `2cb6c0b2`; live multi-model room Desktop soak residual)
-- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; Desktop GPU soak vs refs A/B/C residual)
+- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 residual: free→humanoid morph all avatars / attract; Desktop GPU soak of live morph vs refs + attract)
 
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
@@ -2883,6 +2883,16 @@ Decision: RFC-0175 Galaxy presence / waveform / Advanced implemented
 Reason:
 
 CoS asked Architect to ledger-tick after #419 landed; Desktop soak vs mood boards may stay residual.
+
+---
+
+Decision: RFC-0175 one-presence lifecycle amend (accepted residual)
+
+[RFC-0175](docs/rfcs/0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) stays **implemented** for the #419 land (Galaxy ADD option, default `neural`, HexStrike override, chat waveform, per-tab Advanced, budgets) via #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47`. Specs #418 and the prior accepted and implemented ledger entries above stay. Amend 2026-09-25 (Taco lock via Chief of Staff) accepts a follow-up implement, not a new mode picker: refs A/B/C are stages of **one** continuous presence. Idle / attract is free-floating orbs drawn to the pointer, and to the face when webcam/person tracking is available (fail closed; mouse-only still works; RFC-0050 / RFC-0051 attention, not a second camera stack). Engage / start morph-clumps into the humanoid silhouette (Ref B lattice; Ref C field through the lifecycle, especially Galaxy) with RFC-0069 `uMorph`. That free→humanoid morph is required on every UI avatar / presence mode (Neural, Humanoid, Particle bust, Galaxy, HexStrike host, persona shapes, Classic only where presence shows). It is not gated on `requestedPresence: galaxy`. Galaxy stays an ADD Appearance option for the starfield already specified. Lifecycle acceptance stays unchecked. **Residual:** Desktop GPU soak of the live morph vs refs plus the new attract behavior. §58 stays checked with that residual phrase. No product code in this amend. Morph implement waits until the UX Skill Forge + Rooms luxury CSS PR lands and CoS/Architect undraft this amend.
+
+Reason:
+
+Taco lock 2026-09-25 via Chief of Staff. Refs A/B/C are stages of one presence, not three looks to swap. Do not mass-rewrite RFC-0069, RFC-0050, or RFC-0051.
 
 ---
 
