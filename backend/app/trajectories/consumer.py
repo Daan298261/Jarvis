@@ -60,8 +60,12 @@ async def _consume_loop() -> None:
 async def _handle_trajectory(trajectory: JarvisTrajectoryV1) -> None:
     """Lightweight async hook for the memory/skill pipeline."""
     from ..agent.skills import note_imported_trajectory_evidence
+    from ..skills.forge import forge
 
     result = await note_imported_trajectory_evidence(trajectory)
+    # RFC-0173: observe eligibility only — never auto-publish forged skills.
+    forge_result = forge.observe_trajectory(trajectory, auto_extract=False)
+    result = {**result, "skill_forge": forge_result.get("eligibility")}
     record_consumed(trajectory, result=result)
 
 
