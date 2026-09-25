@@ -9,6 +9,7 @@ const lifecycle = await import("./src/presence/presenceLifecycle.ts")
 const attention = await import("./src/presence/presenceAttention.ts")
 const cloud = await import("./src/presence/renderers/morphableOrbCloud.ts")
 const shapes = await import("./src/presence/renderers/shapes/catalog.ts")
+const quality = await import("./src/presence/presenceQuality.ts")
 const THREE = await import("three")
 
 function meanAxis(attribute, axis) {
@@ -205,6 +206,59 @@ test("shared motion cues breathe without attention and keep alerts reduced-motio
   assert.match(stage, /phase !== "idle" \? 0 : Math\.sin/)
   assert.match(stage, /if \(reduced\) alertAge = 4/)
   assert.match(stage, /meterNow\.attached && meterNow\.kind === "tts" && phase === "speaking"/)
+})
+
+test("auto presence quality adapts with sustained thresholds and fit bounds keep safe margins", () => {
+  const controller = new quality.AutoPresenceQuality()
+  for (let t = 0; t <= 5000; t += 100) controller.sample(t, 33)
+  assert.equal(controller.current, 0, "sustained slow frames step down one tier")
+  for (let t = 5100; t <= 18000; t += 100) controller.sample(t, 16)
+  assert.equal(controller.current, 1, "sustained fast frames recover after cooldown")
+
+  const fit = quality.normalizedPresenceFitScale(
+    new Float32Array([-2, -1, 0, 2, 1, 0]), 1, 32, 5.6,
+  )
+  assert.ok(fit > 0 && fit < 1, `wide silhouettes should be scaled into the stage, got ${fit}`)
+})
+
+test("presence quality changes figure, field, and stars in place without resetting morph", () => {
+  const system = cloud.createMorphablePresenceSystem(0.95, material(), "humanoid_bust", 1.15)
+  const initial = system.setQuality(0.95)
+  assert.deepEqual(initial, { figure: 77900, field: 14250, galaxyStars: 22800 })
+  system.setLifecycleTarget(1, { duration: 1 })
+  system.tick(0.25)
+  const morph = system.morphValue()
+  const low = system.setQuality(0.6)
+  assert.ok(morph > 0 && morph < 1)
+  assert.deepEqual(low, { figure: 49200, field: 9000, galaxyStars: 14400 })
+  assert.equal(system.morphValue(), morph)
+  system.dispose()
+})
+
+test("catalog shapes resolve a safe frame in desktop, ultrawide, portrait, and short stages", () => {
+  for (const shape of shapes.listPresenceShapes()) {
+    const orbs = shape.buildFigure(0.08)
+    const samples = shapes.resampleOrbs(orbs, Math.min(600, Math.max(1, orbs.length)))
+    const positions = new Float32Array(samples.length * 3)
+    samples.forEach((orb, i) => positions.set([orb.x, orb.y, orb.z], i * 3))
+    for (const [aspect, fov, distance] of [[1.7, 32, 5.6], [3.2, 32, 5.6], [0.58, 37, 6.15], [1.2, 32, 5.6]]) {
+      const yaw = shape.framing?.yaw ?? 0
+      const margin = shape.framing?.fitMargin ?? 0.88
+      const scale = quality.normalizedPresenceFitScale(positions, aspect, fov, distance, yaw, margin)
+      assert.ok(Number.isFinite(scale) && scale >= 0.45 && scale <= 1.35, `${shape.id} should fit at aspect ${aspect}`)
+      const c = Math.cos(yaw)
+      const s = Math.sin(yaw)
+      let extentX = 0
+      let extentY = 0
+      for (let i = 0; i < positions.length; i += 3) {
+        extentX = Math.max(extentX, Math.abs(positions[i] * c + positions[i + 2] * s))
+        extentY = Math.max(extentY, Math.abs(positions[i + 1]))
+      }
+      const visibleHeight = 2 * distance * Math.tan((fov * Math.PI) / 360)
+      assert.ok(extentX * scale <= visibleHeight * aspect * (margin / 2) + 0.02, `${shape.id} should fit stage width at aspect ${aspect}`)
+      assert.ok(extentY * scale <= visibleHeight * (margin / 2) + 0.02, `${shape.id} should fit stage height at aspect ${aspect}`)
+    }
+  }
 })
 
 test("attention controller fails closed to the pointer without a webcam", () => {

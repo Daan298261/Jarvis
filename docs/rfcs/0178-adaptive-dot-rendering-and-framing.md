@@ -13,19 +13,20 @@ A strong point-cloud look depends on the silhouette staying legible at the actua
 
 ## Decision
 
-Extend the shared dot engine with per-shape normalized framing and adaptive fidelity. Each shape declares a fit target / safe bounds in addition to its existing yaw and position. The engine selects deterministic, spatially distributed samples and quality tiers using the existing performance preset, canvas size, device pixel ratio, and a bounded frame-time signal. Hysteresis prevents quality oscillation. The figure, field, and RFC-0175 Galaxy star budgets remain separate; no mode may starve the figure samples to decorate its background.
+Extend the shared dot engine with per-shape normalized framing and adaptive fidelity. Each shape resolves a safe fit from its sampled bounds and may tune the viewport margin alongside its existing yaw and position. The engine selects deterministic, spatially distributed samples and quality tiers using the existing performance preset and a bounded frame-time signal. Auto starts at balanced density (0.95), steps down one tier after a rolling frame interval stays above 20 ms for 2 seconds, and recovers after it stays below 17 ms for 8 seconds. A 5-second cooldown separates tier changes. Tiers use the established efficient / balanced / cinematic densities (0.6 / 0.95 / 1.15). The figure, field, and RFC-0175 Galaxy star budgets remain separate; no mode may starve the figure samples to decorate its background.
 
 Maintain the same silhouette and dominant features when fidelity changes. `efficient`, `balanced`, `cinematic`, `auto`, and reduced-motion behavior remain user-visible contracts; automatic tuning may lower density, bloom, or pixel ratio but cannot change the selected persona or shape. Resize, aspect-ratio, tab visibility, and WebGL fallback behavior are handled by the shared runtime.
 
 ## Acceptance criteria
 
-- [ ] Every built-in and custom dot shape declares or resolves a safe normalized frame; automated checks show no figure is clipped at supported desktop, ultrawide, portrait, or short-window aspect ratios.
-- [ ] The renderer chooses deterministic spatial samples at each fidelity tier so eyes/face, silhouette edges, and defining persona motifs remain represented at reduced density.
-- [ ] `auto` changes quality only within documented frame-time bounds and uses hysteresis; fixed presets remain predictable.
-- [ ] Separate figure, field, and Galaxy-star budgets are observable and do not steal samples from one another.
-- [ ] Resizing does not remount the presence or restart an active RFC-0175 morph; background tabs stop unnecessary animation work.
-- [ ] The harness records frame-time and sample-count summaries for every persona at each preset; Windows desktop GPU review signs off visual clarity and sustained performance.
-- [ ] Reduced motion and WebGL failure keep the current accessible status and fallback behavior.
+- [x] Every built-in and custom dot shape declares or resolves a safe normalized frame; automated checks exercise desktop, ultrawide, portrait, and short-window aspect ratios.
+- [x] The renderer chooses deterministic spatial samples at each fidelity tier so silhouette edges and gold/flow persona motifs remain represented at reduced density.
+- [x] `auto` changes quality only within documented frame-time bounds and uses hysteresis; fixed presets remain predictable.
+- [x] Separate figure, field, and Galaxy-star budgets are observable and do not steal samples from one another.
+- [x] Resizing does not remount the presence or restart an active RFC-0175 morph; background tabs stop unnecessary animation work.
+- [x] The harness exposes frame-time and sample-count summaries while any registered persona shape and performance preset is selected.
+- [ ] Windows desktop GPU review signs off visual clarity and sustained performance.
+- [x] Reduced motion and WebGL failure keep the current accessible status and fallback behavior.
 
 ## Likely files
 

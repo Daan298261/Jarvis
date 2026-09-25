@@ -22,7 +22,7 @@ def test_humanoid_anatomy_is_stable_during_activity_and_pointer_tracking():
 
     assert "float dissolve = loose * smoothstep" in renderer
     assert "pointerFalloff * loose * uPointerStrength" in renderer
-    assert "const figureBudget = Math.round(82000 * density)" in renderer
+    assert "const figureBudget = Math.round(82000 * maxDensity)" in renderer
 
 
 def test_humanoid_face_uses_distributed_heat_without_a_chest_orb():
