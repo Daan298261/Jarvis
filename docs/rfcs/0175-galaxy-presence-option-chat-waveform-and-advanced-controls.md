@@ -1,18 +1,18 @@
 # RFC-0175: Galaxy presence option, chat voice waveform, and Advanced controls
 
 **Status:** implemented
-**Implemented:** #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47` (product code; Galaxy Appearance option, chat waveform, Advanced disclosures, figure/field budgets).
-**Specs:** #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`.
-**Amend (2026-09-25):** accepted residual / follow-up implement. Refs A/B/C are stages of **one** continuous presence. The free→humanoid morph and idle attract are **not** done. Product criteria for that lifecycle stay unchecked below.
-**Residuals:** Desktop GPU / live WebGL soak of the live morph against `docs/rfcs/assets/0175/` refs A/B/C **and** the new attract behavior (pointer, and face when webcam/person tracking is available). Cloud VMs cannot sign this off.
-**Queue item:** `JARVIS_MASTER_PLAN.md` §58 — RFC-0175 (checked; implemented #419; amend 2026-09-25 residual: free→humanoid morph all avatars / attract)
+**Implemented:** #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47` (product code; Galaxy Appearance option, chat waveform, Advanced disclosures, figure/field budgets). Amend 2026-09-25 morph: #425 @ `063a5ee1e411ce5bb551f3edccd680f7ea71e7e9` (squash of head `9f86a14f`; one-presence free→humanoid morph on all avatars; idle attract).
+**Specs:** #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. Amend specs: #422 @ `893d6e2c5c6a2c6476cdc46fdfb0b081e49db7be`.
+**Amend (2026-09-25):** **implemented** (#425 @ `063a5ee1`). Refs A/B/C are stages of **one** continuous presence. The free→humanoid morph and idle attract landed in product code. Product criteria for that lifecycle are checked below. Quality bar stays **Anzu 1.0**. Full intent. No stubs / soft-fail.
+**Residuals:** Desktop GPU / live WebGL soak of the live morph against `docs/rfcs/assets/0175/` refs A/B/C **and** real webcam face attract. Taco Desktop soak. Not signed off in #425. Cloud VMs cannot sign this off.
+**Queue item:** `JARVIS_MASTER_PLAN.md` §58 — RFC-0175 (checked; #419 implemented; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU soak vs refs A/B/C + real webcam face attract)
 **Author:** Jarvis Architect  
 **Date:** 2026-09-24
 **Amend date:** 2026-09-25
 
 **Related (do not rewrite):** [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (morphable orb cloud, `buildFigure` / `buildField`, `uMorph`). [RFC-0050](0050-ui-v3-presence-architecture.md) (`attentionMode` `off` | `pointer` | `camera`; attention vector `source: "pointer" | "camera"`; camera frames stay local and ephemeral). [RFC-0051](0051-humanoid-presence-runtime.md) (pointer attention when enabled; the humanoid runtime does not itself open the camera; reduced motion). [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) (persona shapes and voice bind). [RFC-0138](0138-anzu-orb-custom-ui-generation.md) (custom presets; `hex_aegis` still wins while the suite is on). [RFC-0094](0094-settings-menu-information-architecture.md) / [RFC-0113](0113-admin-settings-submenu-1-4.md) (Settings groups, including `advanced`). [RFC-0061](0061-always-on-chat-tts-and-universal-personality.md) / [RFC-0067](0067-owner-chat-hide-plan-chrome-and-launch-greeting.md) / [RFC-0075](0075-natural-speak-path-and-reply-latency.md) (owner chat and the speak path). [RFC-0092](0092-neural-tts-default-no-silent-sapi.md) (neural TTS; this RFC does not change the engine). [RFC-0078](0078-hexstrike-cyber-suite.md) (`hex_aegis`).
 
-Product code for the Galaxy option, the waveform, and Advanced landed in #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47`. Specs landed in #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. That land stays **implemented**. The 2026-09-25 lifecycle is an accepted residual: full intent, **Anzu 1.0**, **no stubs / soft-fail**, and not marked done. Desktop GPU soak of the live morph against refs A/B/C and the new attract behavior remains residual.
+Product code for the Galaxy option, the waveform, and Advanced landed in #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47`. Specs landed in #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. That land stays **implemented**. The 2026-09-25 lifecycle is **implemented** in #425 @ `063a5ee1e411ce5bb551f3edccd680f7ea71e7e9`. Specs for that amend landed in #422 @ `893d6e2c5c6a2c6476cdc46fdfb0b081e49db7be`. Quality bar stays full intent, **Anzu 1.0**, **no stubs / soft-fail**. Desktop GPU soak of the live morph against refs A/B/C and real webcam face attract remains residual.
 
 ### Quality bar
 
@@ -26,9 +26,9 @@ If the landed implement is below that bar, the notify path is **CoS → Taco**. 
 
 Taco lock, 2026-09-25, via Chief of Staff. Mood-board refs A/B/C are **stages of one continuous presence**. They are not alternate UIs. They are not three modes to pick between. There is no control, preset, or `requestedPresence` value that swaps Ref A for Ref B for Ref C.
 
-What #419 shipped stays shipped: Galaxy as an **ADD** Appearance option, default `neural`, HexStrike override rules, the chat waveform, and per-tab Advanced. This amend does not undo that land and does not mark the new morph done.
+What #419 shipped stays shipped: Galaxy as an **ADD** Appearance option, default `neural`, HexStrike override rules, the chat waveform, and per-tab Advanced. This amend does not undo that land.
 
-The lifecycle below is **accepted residual / follow-up implement**. Its acceptance checkboxes stay **unchecked** until that implement lands. Morph implement waits until the UX Skill Forge + Rooms luxury CSS PR has landed and CoS/Architect undraft the specs PR that carries this amend. This amend is specs only.
+The lifecycle below is **implemented** via #425 @ `063a5ee1e411ce5bb551f3edccd680f7ea71e7e9` (squash of head `9f86a14f`). Specs for this amend landed in #422 @ `893d6e2c5c6a2c6476cdc46fdfb0b081e49db7be`. Product criteria are checked. The quality bar stays **Anzu 1.0**, full intent, **no stubs / soft-fail**. **Residual:** Desktop GPU / live WebGL soak of the live morph against refs A/B/C and real webcam face attract. Taco Desktop soak. Not signed off in the #425 PR body. Cloud VMs cannot sign that off.
 
 ### Lifecycle (acceptance)
 
@@ -81,7 +81,7 @@ Chat has no luxury voice meter. `frontend/src/tts/chatTtsPlayer.ts` plays real T
 
 Power controls sit in the open on several tabs (Agent rooms cost/privacy on the create form, Classic task helpers default-open). RFC-0094 already has an `advanced` Settings group. That group is not a license to bury Voice, Appearance, or the primary action of every other tab.
 
-#419 shipped the Galaxy ADD, the waveform, and Advanced against an earlier reading that treated Ref A / Ref B / Ref C as Galaxy-selected looks of one bust. That reading is superseded for the follow-up. The open product contract is the **Amend (2026-09-25)** lifecycle: one presence, free-float attract, then a humanoid clump, on every avatar.
+#419 shipped the Galaxy ADD, the waveform, and Advanced against an earlier reading that treated Ref A / Ref B / Ref C as Galaxy-selected looks of one bust. That reading is superseded. The **Amend (2026-09-25)** lifecycle — one presence, free-float attract, then a humanoid clump, on every avatar — is **implemented** in #425 @ `063a5ee1`. Desktop GPU soak against the mood boards and real webcam face attract stays residual.
 
 ## Decision
 
@@ -183,7 +183,7 @@ Mood boards are in-repo:
 
 The table above and those binaries are the acceptance contract for the lifecycle. They are one presence seen at three moments. They are not three looks to swap.
 
-#419 shipped Galaxy as an Appearance ADD, the waveform, Advanced disclosures, and the star/figure budgets. That land does **not** close this contract. The lifecycle is accepted when idle on every presence avatar reads as Ref A (free-float attract), an engaged phase reads as Ref B (humanoid lattice clump, or the winning non-bust figure when precedence says so), and the Galaxy ground reads as Ref C through both stages. A screenshot collage, a video texture, a single pre-baked PNG, three swappable looks, or a morph that runs only for Galaxy is a **fail**.
+#419 shipped Galaxy as an Appearance ADD, the waveform, Advanced disclosures, and the star/figure budgets. #425 @ `063a5ee1` implements the lifecycle in product code (free cloud, `uMorph` to the winning figure, all mounted avatars, pointer attract, camera fail-closed). The visual bar stays **Anzu 1.0**: idle on every presence avatar reads as Ref A (free-float attract), an engaged phase reads as Ref B (humanoid lattice clump, or the winning non-bust figure when precedence says so), and the Galaxy ground reads as Ref C through both stages. A screenshot collage, a video texture, a single pre-baked PNG, three swappable looks, or a morph that runs only for Galaxy is a **fail**. Desktop GPU / live WebGL soak against these boards, and real webcam face attract, is residual (Taco Desktop). Not signed off in #425.
 
 ### 3. Chat voice waveform
 
@@ -219,7 +219,7 @@ Any other portal tab follows the same rule: the control that finishes that tab�
 
 ## Acceptance criteria
 
-Checked rows are the #419 land (Galaxy option, waveform, Advanced, budgets). They stay checked. The 2026-09-25 lifecycle rows are **unchecked** until the follow-up implement lands. Where a checked row describes a preformed idle bust, the unchecked lifecycle supersedes that picture. Do not uncheck the #419 land because the morph is still open.
+Checked rows are the #419 land (Galaxy option, waveform, Advanced, budgets) and the #425 lifecycle land. They stay checked. The Desktop GPU soak row stays **unchecked**. Where a checked #419 row describes a preformed idle bust, the lifecycle supersedes that picture.
 
 - [x] Appearance offers Galaxy next to Classic, Neural HUD, Humanoid HUD, Particle bust, and HexStrike. Those five controls still select what they select today.
 - [x] Default `requested_presence` remains `neural`. Existing saved values are not rewritten to `galaxy`. Restart restores a saved `galaxy` choice and does not force it on anyone else.
@@ -236,27 +236,27 @@ Checked rows are the #419 land (Galaxy option, waveform, Advanced, budgets). The
 - [x] `python3 -m pytest`
 - [x] `npm --prefix frontend run build` and `npm --prefix frontend run lint`
 
-Lifecycle follow-up (accepted 2026-09-25, **not** done):
+Lifecycle (implemented #425 @ `063a5ee1`; Desktop soak residual stays open):
 
-- [ ] One presence. Ref A, Ref B, and Ref C are stages of the same continuous presence. No control swaps among three looks.
-- [ ] Idle / attract on every presence avatar: orbs free-float (not a preformed bust) and are drawn to the pointer. When webcam/person tracking is available and returns a real face sample, they are drawn to that face. Camera missing, denied, or tracker failed fails closed to the pointer. Mouse-only still works. No fake face chase. No frames leave the machine (RFC-0050).
-- [ ] Engage / start: those orbs morph-clump into the humanoid silhouette (Ref B lattice; winning `hex_aegis` / persona / preset figure when precedence says so). Ref C field stays through the lifecycle where Galaxy is selected. The morph is RFC-0069 `uMorph` (0 = free cloud, 1 = winning figure) without remounting the host and without a second canvas. Returning to idle reverses to free-float.
-- [ ] The free→humanoid morph runs for Neural, Humanoid, Particle bust, Galaxy, the HexStrike host, persona shapes, and RFC-0138 presets, and for Classic only where a presence avatar is actually mounted. It is not gated on `requestedPresence: galaxy`. A Galaxy-only morph is a **fail**. Classic `requestedPresence: none` does not grow a new canvas.
-- [ ] Galaxy remains an ADD Appearance option. Default stays `neural`. HexStrike override rules, the waveform, and Advanced stay as the #419 land.
-- [ ] Reduced motion: no chase and no traveling morph. `attentionMode: off` stops the attract and does not remove the avatar.
-- [ ] Unit coverage for the lifecycle: idle is the free cloud, engage drives `uMorph` toward the winning figure, camera-unavailable attract stays on the pointer, and the morph is not skipped when `requestedPresence` is not `galaxy`.
-- [ ] **Residual:** Desktop GPU / live WebGL soak of the live morph against `docs/rfcs/assets/0175/` refs A/B/C and the new attract behavior. Cloud VMs cannot sign this off.
+- [x] One presence. Ref A, Ref B, and Ref C are stages of the same continuous presence. No control swaps among three looks.
+- [x] Idle / attract on every presence avatar: orbs free-float (not a preformed bust) and are drawn to the pointer. When webcam/person tracking is available and returns a real face sample, they are drawn to that face. Camera missing, denied, or tracker failed fails closed to the pointer. Mouse-only still works. No fake face chase. No frames leave the machine (RFC-0050).
+- [x] Engage / start: those orbs morph-clump into the humanoid silhouette (Ref B lattice; winning `hex_aegis` / persona / preset figure when precedence says so). Ref C field stays through the lifecycle where Galaxy is selected. The morph is RFC-0069 `uMorph` (0 = free cloud, 1 = winning figure) without remounting the host and without a second canvas. Returning to idle reverses to free-float.
+- [x] The free→humanoid morph runs for Neural, Humanoid, Particle bust, Galaxy, the HexStrike host, persona shapes, and RFC-0138 presets, and for Classic only where a presence avatar is actually mounted. It is not gated on `requestedPresence: galaxy`. A Galaxy-only morph is a **fail**. Classic `requestedPresence: none` does not grow a new canvas.
+- [x] Galaxy remains an ADD Appearance option. Default stays `neural`. HexStrike override rules, the waveform, and Advanced stay as the #419 land.
+- [x] Reduced motion: no chase and no traveling morph. `attentionMode: off` stops the attract and does not remove the avatar.
+- [x] Unit coverage for the lifecycle: idle is the free cloud, engage drives `uMorph` toward the winning figure, camera-unavailable attract stays on the pointer, and the morph is not skipped when `requestedPresence` is not `galaxy`.
+- [ ] **Residual:** Desktop GPU / live WebGL soak of the live morph against `docs/rfcs/assets/0175/` refs A/B/C and real webcam face attract. Taco Desktop soak. Not signed off in #425. Cloud VMs cannot sign this off.
 
 ## Likely files
 
 | Area | Paths |
 | --- | --- |
 | Presence (shipped #419) | `frontend/src/presence/presenceTypes.ts`, `PresenceHost.tsx`, `renderers/HumanoidPresence.tsx`, `renderers/morphableOrbCloud.ts`, `renderers/shapes/humanoidBust.ts`, `frontend/src/hud/HudStarfield.tsx`, `frontend/src/hud/HudChatHome.tsx`, `frontend/src/settings/AppearanceSettingsPane.tsx` |
-| Lifecycle follow-up | `renderers/NeuralPresence.tsx`, `renderers/ParticleBustPresence.tsx`, `morphableOrbCloud.ts` (`uMorph`, `uPointer`), `presenceAttention.ts`, `presenceCameraTrack.ts`. Same `PresenceHost`. No second morph API. |
+| Lifecycle (implemented #425) | `renderers/NeuralPresence.tsx`, `renderers/ParticleBustPresence.tsx`, `morphableOrbCloud.ts` (`uMorph`, `uPointer`), `presenceAttention.ts`, `presenceCameraTrack.ts`. Same `PresenceHost`. No second morph API. |
 | Settings persistence | `backend/app/config.py` (`requested_presence` literal, default stays `neural`), `backend/app/api/settings.py` |
 | Waveform | `frontend/src/chat/VoiceWaveformBar.tsx` (new), `frontend/src/hud/HudChat.tsx`, `frontend/src/pages/Chat.tsx`, `frontend/src/tts/chatTtsPlayer.ts`, `frontend/src/tts/useTaskSpeech.ts` |
 | Advanced disclosures | `frontend/src/pages/Chat.tsx`, `frontend/src/pages/AgentRooms.tsx`, `frontend/src/pages/SkillForge.tsx`, `frontend/src/hud/HudHexStrikeSuite.tsx` |
-| Tests | Presentation-settings tests; waveform visibility test. Lifecycle follow-up adds free-cloud vs `uMorph` coverage and pointer-fallback coverage. Do not require a webcam in CI. |
+| Tests | Presentation-settings tests; waveform visibility test. Lifecycle coverage (landed #425) is free-cloud vs `uMorph` and pointer-fallback. Do not require a webcam in CI. |
 | Docs | This RFC. Mood boards in-repo at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, `ref-c-galaxy-field.jpg`. Queue line in `JARVIS_MASTER_PLAN.md` §58. Decision in §59. |
 
 ## Out of scope
@@ -266,6 +266,6 @@ A second presence renderer. A second morph uniform. A second webcam stack. Rewri
 ## Notes
 
 - Specs land: #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. Product code: #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47` (Galaxy Appearance option, chat waveform, per-tab Advanced disclosures, budgets).
-- **Amend (2026-09-25):** one-presence lifecycle is an accepted residual. Free→humanoid morph on all avatars, idle attract (pointer, face when available, fail closed to the pointer). Not marked done. Implement waits until the UX Skill Forge + Rooms luxury CSS PR has landed and CoS/Architect undraft this amend.
-- **Residual:** Desktop GPU / live WebGL soak of the live morph against Ref A / Ref B / Ref C and the new attract behavior. Mood boards stay at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, and `ref-c-galaxy-field.jpg`. Cloud VMs have no GPU and cannot sign this off.
+- **Amend (2026-09-25):** one-presence lifecycle is **implemented** via #425 @ `063a5ee1e411ce5bb551f3edccd680f7ea71e7e9` (squash of head `9f86a14f`). Specs amend #422 @ `893d6e2c5c6a2c6476cdc46fdfb0b081e49db7be`. Free→humanoid morph on all avatars, idle attract (pointer, face when camera attention is available, fail closed to the pointer). Quality bar stays **Anzu 1.0**. Full intent. No stubs / soft-fail.
+- **Residual:** Desktop GPU / live WebGL soak of the live morph against Ref A / Ref B / Ref C and real webcam face attract. Mood boards stay at `docs/rfcs/assets/0175/ref-a-particle-idle.jpg`, `ref-b-neural-lattice.jpg`, and `ref-c-galaxy-field.jpg`. Taco Desktop soak. Not signed off in the #425 PR body. Cloud VMs have no GPU and cannot sign this off.
 - Subpar implement: CoS reviews and escalates to Taco. Do not encode that escalate as a runtime feature.
