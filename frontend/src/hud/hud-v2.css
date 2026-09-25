@@ -765,17 +765,22 @@ html[data-session-mode] .hud-app {
 }
 
 .hud-home {
+  --hud-menu-track: 168px;
   width: 100%;
   min-width: 0;
   min-height: 100%;
   flex: 0 0 auto;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(140px, 168px) minmax(0, 1fr);
+  grid-template-columns: minmax(140px, var(--hud-menu-track)) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   align-items: stretch;
   gap: clamp(12px, 1.6vh, 24px) 8px;
   padding: 0 0 clamp(12px, 2vh, 28px);
+}
+
+.hud-home:has(.jarvis-presence-controls.open) {
+  --hud-menu-track: min(400px, calc(100vw - 28px));
 }
 
 .hud-home > .jarvis-presence-controls-split {
@@ -787,6 +792,11 @@ html[data-session-mode] .hud-app {
   max-height: 100%;
   overflow: auto;
   pointer-events: auto;
+}
+
+.hud-home:has(.jarvis-presence-controls.open) > .jarvis-presence-controls-split {
+  width: var(--hud-menu-track);
+  max-width: var(--hud-menu-track);
 }
 
 .hud-home > .hud-orb-zone {
@@ -861,7 +871,7 @@ html[data-session-mode] .hud-app {
   .hud-home:has(.jarvis-presence-neural) {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(140px, 168px) minmax(0, 1fr);
+    grid-template-columns: minmax(140px, var(--hud-menu-track)) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
     height: 100%;
     min-height: 0;
@@ -872,7 +882,7 @@ html[data-session-mode] .hud-app {
   .hud-home:has(.jarvis-presence-humanoid) > .hud-orb-zone,
   .hud-home:has(.jarvis-presence-neural) > .hud-orb-zone {
     position: absolute;
-    inset: 0 0 0 168px;
+    inset: 0 0 0 var(--hud-menu-track);
     width: auto;
     height: 100%;
     min-height: 0;
@@ -955,7 +965,7 @@ html[data-session-mode] .hud-app {
 .hud-home.hexstrike-active {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(140px, 168px) minmax(0, 1fr);
+  grid-template-columns: minmax(140px, var(--hud-menu-track)) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   min-height: 0;
@@ -965,7 +975,7 @@ html[data-session-mode] .hud-app {
 
 .hud-home.hexstrike-active > .hud-orb-zone {
   position: absolute;
-  inset: 0 0 0 168px;
+  inset: 0 0 0 var(--hud-menu-track);
   width: auto;
   height: 100%;
   min-height: 0;
@@ -1615,6 +1625,12 @@ html[data-session-mode] .hud-app {
     grid-row: 1;
     padding: 8px 12px 0;
     max-height: none;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .hud-home:has(.jarvis-presence-controls.open) {
+    --hud-menu-track: 100%;
   }
 
   .hud-home > .hud-orb-zone {
