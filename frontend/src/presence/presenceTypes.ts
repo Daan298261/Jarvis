@@ -32,6 +32,10 @@ export type PersonaCloudVisual = {
   glow?: number
   animation?: number
   scale?: number
+  /** Bounded renderer-wide orb size multiplier, independent of bust framing. */
+  pointScale?: number
+  /** 0 keeps depth contrast; 1 softens it for a flatter luminous look. */
+  depthSoftness?: number
 }
 
 export type PresenceAttention = {

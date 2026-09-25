@@ -7,6 +7,7 @@ await register("./presence-lifecycle-loader.mjs", import.meta.url)
 const lifecycle = await import("./src/presence/presenceLifecycle.ts")
 const attention = await import("./src/presence/presenceAttention.ts")
 const cloud = await import("./src/presence/renderers/morphableOrbCloud.ts")
+const shapes = await import("./src/presence/renderers/shapes/catalog.ts")
 const THREE = await import("three")
 
 function meanAxis(attribute, axis) {
@@ -186,6 +187,13 @@ test("camera-unavailable attract stays on the pointer and does not invent a face
   })
   assert.equal(reduced.chase, false)
   assert.equal(reduced.source, "hold")
+})
+
+test("shared dot appearance supports optional profiles and bounded shader controls", () => {
+  const shape = shapes.resolvePresenceShape("humanoid_bust")
+  assert.equal(shape.appearance, undefined, "legacy shapes use neutral defaults")
+  assert.match(cloud.particleVertexShader, /size \* uPointScale \* uPixelScale/)
+  assert.match(cloud.particleFragmentShader, /uDepthSoftness/)
 })
 
 test("attention controller fails closed to the pointer without a webcam", () => {
