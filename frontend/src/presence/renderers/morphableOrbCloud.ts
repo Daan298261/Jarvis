@@ -32,6 +32,9 @@ export const particleVertexShader = `
   uniform float uGlow;
   uniform float uPointScale;
   uniform float uDepthSoftness;
+  uniform float uBreath;
+  uniform float uListen;
+  uniform float uAlertAge;
   uniform float uGalaxy;
   uniform float uGalaxyBust;
   uniform float uLattice;
@@ -47,6 +50,7 @@ export const particleVertexShader = `
   void main() {
     float m = smoothstep(0.0, 1.0, uMorph);
     vec3 p = mix(aPos, bPos, m);
+    p.y += uBreath * smoothstep(-1.0, 0.15, p.y);
     float flow = mix(aFlow, bFlow, m);
     float size = mix(aSize, bSize, m);
     float t = uTime;
@@ -100,6 +104,10 @@ export const particleVertexShader = `
       p.z = x * s + z * c;
       p *= 1.0 + thinking * uMotion * 0.05 * sin(t * 1.6);
     }
+    if (uListen > 0.001) {
+      float listeningWave = sin(t * 2.2 - p.y * 5.0 + aSeed * 5.0);
+      p.z += listeningWave * 0.012 * uListen * uMotion;
+    }
     if (uGalaxy > 0.5) {
       float crown = smoothstep(1.05, 1.75, p.y);
       float side = smoothstep(0.7, 1.45, abs(p.x));
@@ -147,6 +155,8 @@ export const particleFragmentShader = `
   uniform float uPhaseKind;
   uniform float uGlow;
   uniform float uDepthSoftness;
+  uniform float uListen;
+  uniform float uAlertAge;
   uniform float uGalaxy;
   uniform float uGalaxyBust;
   uniform float uLattice;
@@ -167,6 +177,11 @@ export const particleFragmentShader = `
     float depthWeight = mix(mix(clamp(0.72 + vDepth * 0.52, 0.52, 1.12), 1.0, uDepthSoftness), 1.0, environment);
     float alpha = (core + halo) * (1.0 - smoothstep(0.6, 1.0, r))
       * vLight * uOpacity * depthWeight * mix(1.0, 0.72, loose);
+    float listenShimmer = 0.82 + 0.18 * sin(uTime * 5.0 + vSeed * 70.0);
+    alpha *= mix(1.0, listenShimmer, uListen);
+    float alertRadius = uAlertAge * 1.15;
+    float alertRing = exp(-pow((length(vPos.xy) - alertRadius) * 13.0, 2.0)) * exp(-uAlertAge * 1.9);
+    alpha *= 1.0 + alertRing * 1.25;
     float errorPhase = step(6.5, uPhaseKind) * (1.0 - step(7.5, uPhaseKind)) * step(0.01, uMotion);
     float flicker = mix(1.0, 0.42 + 0.58 * step(0.55, fract(sin(uTime * 23.0 + vDepth * 12.0) * 43758.5)), errorPhase);
     alpha *= flicker * mix(1.0, uGlow, 0.65);

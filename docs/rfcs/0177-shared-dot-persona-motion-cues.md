@@ -19,13 +19,13 @@ The RFC-0175 idle / engaged transition remains the outer lifecycle and retains o
 
 ## Acceptance criteria
 
-- [ ] The shared engine exposes a bounded, typed cue set for breath, listen, think/work, speech, and alert, driven by the existing snapshot and attention/audio inputs.
-- [ ] Every registered persona shape receives the same cue implementation; its profile can tune intensity without shape-specific renderer code.
-- [ ] Speech response follows actual `snapshot.audioLevel` only while real speech is active; it is quiet when idle or audio data is absent.
-- [ ] Cue transitions are smoothed and interrupt safely when the presence phase changes.
-- [ ] Reduced motion removes continuous breathing and traveling impulses while preserving a clear static phase indication; attention chase follows RFC-0175's existing reduced-motion contract.
-- [ ] The preview harness can drive each cue over every persona shape and inspect its reduced-motion behavior without a live model or webcam.
-- [ ] RFC-0175's free-cloud / figure morph and camera privacy/fallback acceptance remain unchanged and independently testable.
+- [x] The shared engine exposes a bounded, typed cue set for breath, listen, think/work, speech, and alert, driven by the existing snapshot and attention/audio inputs.
+- [x] Every registered persona shape receives the same cue implementation; its profile can tune intensity without shape-specific renderer code.
+- [x] Speech response follows the attached live TTS analyser only while real speech is active; it is quiet when idle, when listening, or when audio data is absent. A snapshot scalar alone must not fabricate speech activity.
+- [x] Cue transitions are smoothed and interrupt safely when the presence phase changes.
+- [x] Reduced motion removes continuous breathing and traveling impulses while preserving a clear static phase indication; attention chase follows RFC-0175's existing reduced-motion contract.
+- [x] The preview harness can drive each cue over every persona shape and inspect its reduced-motion behavior without a live model or webcam.
+- [x] RFC-0175's free-cloud / figure morph and camera privacy/fallback acceptance remain unchanged and independently testable.
 
 ## Likely files
 

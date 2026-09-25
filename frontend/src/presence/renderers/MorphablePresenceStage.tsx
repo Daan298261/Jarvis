@@ -126,6 +126,9 @@ export function MorphablePresenceStage({
       uGlow: { value: 1 },
       uPointScale: { value: 1 },
       uDepthSoftness: { value: 0 },
+      uBreath: { value: 0 },
+      uListen: { value: 0 },
+      uAlertAge: { value: 4 },
       uPointer: { value: new THREE.Vector2(0, 0) },
       uPointerStrength: { value: 0 },
       uGesture: { value: 0 },
@@ -170,6 +173,8 @@ export function MorphablePresenceStage({
     let lastRender = 0
     let animationTime = 0
     let framingScale = 0.98
+    let previousPhase: PresencePhase = snapshot.phase
+    let alertAge = 4
 
     const resize = () => {
       const { width, height } = stage.getBoundingClientRect()
@@ -240,6 +245,16 @@ export function MorphablePresenceStage({
       uniforms.uTime.value = animationTime
       uniforms.uMotion.value = reduced ? 0 : animation
       uniforms.uPhaseKind.value = PHASE_KIND[phase]
+      if (phase !== previousPhase) {
+        if (phase === "alert") alertAge = 0
+        previousPhase = phase
+      }
+      if (reduced) alertAge = 4
+      else alertAge = Math.min(4, alertAge + delta)
+      uniforms.uAlertAge.value = alertAge
+      uniforms.uBreath.value = reduced || phase !== "idle" ? 0 : Math.sin(animationTime * 1.15) * 0.009
+      const listenTarget = phase === "listening" && !reduced ? 1 : 0
+      uniforms.uListen.value += (listenTarget - uniforms.uListen.value) * Math.min(1, delta * 4)
       uniforms.uGlow.value = typeof visual?.glow === "number" ? visual.glow : 1
       const personaScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
       bust.scale.setScalar(framingScale * personaScale)
@@ -298,7 +313,7 @@ export function MorphablePresenceStage({
       const rotationLerp = 1 - Math.exp(-delta * 3.4)
       if (!follow) {
         bust.rotation.set(0, baseYaw, 0)
-        bust.position.set(basePos[0], basePos[1], basePos[2])
+        bust.position.set(basePos[0], basePos[1] + (reduced ? 0 : Math.sin(animationTime * 1.05) * 0.016), basePos[2])
         uniforms.uPointerStrength.value = 0
         uniforms.uGesture.value = 0
       } else {

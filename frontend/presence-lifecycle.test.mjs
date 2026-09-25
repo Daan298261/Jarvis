@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { register } from "node:module"
 import { test } from "node:test"
+import { readFile } from "node:fs/promises"
 
 await register("./presence-lifecycle-loader.mjs", import.meta.url)
 
@@ -194,6 +195,16 @@ test("shared dot appearance supports optional profiles and bounded shader contro
   assert.equal(shape.appearance, undefined, "legacy shapes use neutral defaults")
   assert.match(cloud.particleVertexShader, /size \* uPointScale \* uPixelScale/)
   assert.match(cloud.particleFragmentShader, /uDepthSoftness/)
+})
+
+test("shared motion cues breathe without attention and keep alerts reduced-motion safe", async () => {
+  assert.match(cloud.particleVertexShader, /uBreath/)
+  assert.match(cloud.particleVertexShader, /uListen/)
+  assert.match(cloud.particleFragmentShader, /alertRing/)
+  const stage = await readFile(new URL("./src/presence/renderers/MorphablePresenceStage.tsx", import.meta.url), "utf8")
+  assert.match(stage, /phase !== "idle" \? 0 : Math\.sin/)
+  assert.match(stage, /if \(reduced\) alertAge = 4/)
+  assert.match(stage, /meterNow\.attached && meterNow\.kind === "tts" && phase === "speaking"/)
 })
 
 test("attention controller fails closed to the pointer without a webcam", () => {
