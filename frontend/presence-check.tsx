@@ -30,7 +30,7 @@ function Check() {
             value={phase}
             onChange={(e) => setPhase(e.target.value as PresencePhase)}
           >
-            {["idle", "listening", "thinking", "executing", "speaking", "waiting", "alert", "offline"].map((p) => (
+            {["idle", "listening", "thinking", "executing", "speaking", "waiting", "alert", "approval", "error", "offline"].map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
