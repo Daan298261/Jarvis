@@ -1,11 +1,19 @@
 # RFC-0178: Adaptive dot rendering and persona framing
 
-**Status:** accepted
+**Status:** implemented
+**Implemented:** #430 @ `ae582af2d842f436fb69c0345d9c0717a6f66a83` (deterministic spatial LOD, frame-time hysteresis, separate layer budgets, responsive fit, harness summaries), including follow-up #432 @ `f51d5b3edb74bb3533979490b0de7a4e2c32fca1` (auto lowest tier renders through WebGL and bypasses composer, bloom, and post-processing; reduced pixel ratio and sample budgets stay). That bypass is in this RFC's decision, so #432 is part of the implement, not an open residual. Development tip at this ledger is #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83`.
+**Specs:** #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`.
+**Quality bar:** **Anzu 1.0**. Full intent. No stubs / soft-fail.
+**Residuals:** Windows desktop GPU review of visual clarity and sustained performance stays unchecked. #430 body: desktop GPU sign-off remains pending because measured FPS in that run was low. #432 does not close that sign-off. Cloud VMs cannot sign it off.
 **Author:** Codex
 **Date:** 2026-09-25
 
 **Depends on:** [RFC-0176](0176-shared-dot-appearance-profiles.md)
 **Related (do not rewrite):** [RFC-0051](0051-humanoid-presence-runtime.md) (quality presets and reduced motion); [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (`buildFigure(density)` and shape framing); [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) (persona silhouettes); [RFC-0175](0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) (figure and Galaxy field budgets).
+
+### Quality bar
+
+The implement is **multibillion-company grade** and the user-facing stretch is **Anzu 1.0**. Framing and fidelity stay on the shared engine. Starving the figure budget, oscillating auto tiers, or changing the selected persona when quality drops is a **fail**. Full intent. No stubs / soft-fail. Desktop GPU sign-off stays residual.
 
 ## Problem
 
@@ -42,3 +50,5 @@ A fixed 300,000-dot requirement, new user-facing persona or quality setting, rew
 ## Notes
 
 Implement after RFC-0176. Use screenshot references for visual review and report CI sampling results separately from desktop GPU and visual sign-off.
+
+Product landed on development via #430 @ `ae582af2d842f436fb69c0345d9c0717a6f66a83`, including the low-tier WebGL bypass in #432 @ `f51d5b3edb74bb3533979490b0de7a4e2c32fca1` (the decision already requires the lowest tier to drop pixel ratio and bypass bloom and post-processing). Specs were #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`. Quality bar stays **Anzu 1.0**. Windows desktop GPU sign-off remains the open residual (low measured FPS in the #430 run). #432 does not close that sign-off.

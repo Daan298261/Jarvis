@@ -2173,6 +2173,9 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal #416 @ `ebcdf9da`; no residual)
 - [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal #417 @ `2cb6c0b2`; live multi-model room Desktop soak residual)
 - [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU / live WebGL soak vs refs A/B/C + real webcam face attract)
+- [x] RFC-0176 Shared dot appearance profiles — implemented (#428 @ `7ecfdcf0`; specs #426 @ `d792ed47`; harness row closed #433 @ `a128942` via #430 preview; no residual)
+- [x] RFC-0177 Shared dot persona motion cues — implemented (#429 @ `f0ea9e40`; specs #426 @ `d792ed47`; status line #433 @ `a128942`; no residual)
+- [x] RFC-0178 Adaptive dot rendering and persona framing — implemented (#430 @ `ae582af2` including low-tier WebGL bypass #432 @ `f51d5b3`; residual: Windows desktop GPU sign-off, low measured FPS in #430)
 
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
@@ -2903,6 +2906,36 @@ Decision: RFC-0175 one-presence morph residual implemented
 Reason:
 
 CoS asked Architect to ledger-tick after #425 squash-landed on `development`. Desktop soak vs mood boards and a real webcam stays residual.
+
+---
+
+Decision: RFC-0176 shared dot appearance profiles implemented
+
+[RFC-0176](docs/rfcs/0176-shared-dot-appearance-profiles.md) is **implemented** on development via #428 @ `7ecfdcf0128c8e67d4ece8aef6af8ed4ca66977c`. Specs-only land was #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28` (shared dot presence engine docs; no master-plan rows in that PR). Shared appearance profiles tune the existing renderer (palette, glow, bounded point scale, depth softness). Catalog geometry and persona selection stay. Missing profile data stays the neutral appearance. Quality bar is **Anzu 1.0**. Full intent. No stubs / soft-fail. **Residuals:** none. #428 left the catalog-profile harness row open. #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83` checked it: shared profile controls and the cross-shape preview added in #430 cover geometry, phase, reduced-motion, and WebGL fallback. §58 checked. RFC-0175 rows above stay closed. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect a specs-only ledger tick after the GPT product wave for 0176–0178 landed on `development`. Tip at this tick is #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83`, which includes #428, #429, #430, and #432.
+
+---
+
+Decision: RFC-0177 shared dot persona motion cues implemented
+
+[RFC-0177](docs/rfcs/0177-shared-dot-persona-motion-cues.md) is **implemented** on development via #429 @ `f0ea9e40bb186971bf75119bb966462da900a9da`. Specs-only land was #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`. #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83` set the status line to implemented. Shared cues: idle breathing, listening shimmer, think/work energy, real-TTS speech response, and a short alert impulse. Reduced motion stays static. RFC-0175 owns the outer lifecycle. Quality bar is **Anzu 1.0**. Full intent. No stubs / soft-fail. **Residuals:** none. The #429 body lists none. Acceptance rows are checked. §58 checked. RFC-0175 rows above stay closed. No product code in this ledger PR.
+
+Reason:
+
+Same ledger tick as RFC-0176 and RFC-0178. #429 is on tip `a128942`.
+
+---
+
+Decision: RFC-0178 adaptive dot rendering and framing implemented
+
+[RFC-0178](docs/rfcs/0178-adaptive-dot-rendering-and-framing.md) is **implemented** on development via #430 @ `ae582af2d842f436fb69c0345d9c0717a6f66a83`, including follow-up #432 @ `f51d5b3edb74bb3533979490b0de7a4e2c32fca1`. #432 is the low-tier WebGL path: auto's lowest tier renders directly and bypasses composer, bloom, and post-processing, with the reduced pixel ratio and sample budgets kept. That behavior is already in this RFC's decision, so #432 is part of the implement, not an open residual. Specs-only land was #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`. Deterministic spatial LOD, frame-time hysteresis, separate figure/field/Galaxy budgets, and responsive fit landed in #430. Development tip at this tick is #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83`. Quality bar is **Anzu 1.0**. Full intent. No stubs / soft-fail. **Residual:** Windows desktop GPU review of visual clarity and sustained performance stays unchecked. #430 body: desktop GPU sign-off remains pending because measured FPS in that run was low. #432 does not close that sign-off. Cloud VMs cannot sign it off. §58 checked. RFC-0175 rows above stay closed. No product code in this ledger PR.
+
+Reason:
+
+Same ledger tick as RFC-0176 and RFC-0177. Tip is #433 @ `a128942`, which includes #428, #429, #430, and the #432 low-tier follow-up.
 
 ---
 

@@ -1,10 +1,18 @@
 # RFC-0176: Shared dot appearance profiles
 
 **Status:** implemented
+**Implemented:** #428 @ `7ecfdcf0128c8e67d4ece8aef6af8ed4ca66977c` (shared appearance profiles; bounded point scale and depth softness).
+**Specs:** #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`.
+**Quality bar:** **Anzu 1.0**. Full intent. No stubs / soft-fail.
+**Residuals:** none. The catalog-profile harness row is checked. #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83` closed it: shared profile controls and the cross-shape preview added in #430 cover geometry, phase, reduced-motion, and WebGL fallback. The #428 body reported the frontend build and focused presence checks passing.
 **Author:** Codex
 **Date:** 2026-09-25
 
 **Related (do not rewrite):** [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (shape catalog and `ParticleOrb` morph API); [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) (13 named persona shapes); [RFC-0138](0138-anzu-orb-custom-ui-generation.md) (custom orb compositions); [RFC-0175](0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) (one cross-avatar lifecycle and same-cloud morph).
+
+### Quality bar
+
+The implement is **multibillion-company grade** and the user-facing stretch is **Anzu 1.0**. Profiles tune the existing shared renderer. A persona-specific shader branch, a second renderer, or a profile that drops silhouette and motif attributes is a **fail**. Full intent. No stubs / soft-fail.
 
 ## Problem
 
@@ -39,3 +47,5 @@ Changing persona roster, shape precedence, voice bindings, custom-UI generation,
 ## Notes
 
 This contract should be implemented before persona-specific render polish. RFC-0175 continues to own the single-cloud free-float / figure morph and pointer / optional face attract behavior; this RFC does not add a second morph API or camera path.
+
+Product landed on development via #428 @ `7ecfdcf0128c8e67d4ece8aef6af8ed4ca66977c`. Specs were #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`. Quality bar stays **Anzu 1.0**. The harness acceptance row is closed by #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83` (covered by the #430 shared profile controls and cross-shape preview). No residual.
