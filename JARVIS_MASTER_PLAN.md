@@ -2172,7 +2172,7 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
 - [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal #416 @ `ebcdf9da`; no residual)
 - [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal #417 @ `2cb6c0b2`; live multi-model room Desktop soak residual)
-- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 residual: free→humanoid morph all avatars / attract; Desktop GPU soak of live morph vs refs + attract)
+- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU / live WebGL soak vs refs A/B/C + real webcam face attract)
 
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
@@ -2893,6 +2893,16 @@ Decision: RFC-0175 one-presence lifecycle amend (accepted residual)
 Reason:
 
 Taco lock 2026-09-25 via Chief of Staff. Refs A/B/C are stages of one presence, not three looks to swap. Do not mass-rewrite RFC-0069, RFC-0050, or RFC-0051.
+
+---
+
+Decision: RFC-0175 one-presence morph residual implemented
+
+[RFC-0175](docs/rfcs/0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) amend 2026-09-25 (one-presence free→humanoid morph on all avatars, idle attract) is **implemented** on development via #425 @ `063a5ee1e411ce5bb551f3edccd680f7ea71e7e9` (squash; pre-squash head `9f86a14f`). Specs amend was #422 @ `893d6e2c5c6a2c6476cdc46fdfb0b081e49db7be`. The #419 land (Galaxy ADD option, default `neural`, HexStrike override, chat waveform, per-tab Advanced, budgets) and the prior accepted, implemented, and accepted-residual ledger entries above stay. Refs A/B/C remain stages of **one** continuous presence. Idle / attract is free-floating orbs drawn to the pointer, and to the face when webcam/person tracking is available (fail closed; mouse-only still works; RFC-0050 / RFC-0051 attention, not a second camera stack). Engage / start morph-clumps into the humanoid silhouette (Ref B lattice; Ref C field through the lifecycle, especially Galaxy) with RFC-0069 `uMorph`. That morph runs on every UI avatar / presence mode (Neural, Humanoid, Particle bust, Galaxy, HexStrike host, persona shapes, Classic only where presence shows). It is not gated on `requestedPresence: galaxy`. Galaxy stays an ADD Appearance option. Quality bar stays **Anzu 1.0**. Full intent. No stubs / soft-fail. Lifecycle product criteria are checked. **Residual:** Desktop GPU / live WebGL soak of the live morph against mood-board refs A/B/C and real webcam face attract. Taco Desktop soak. Not signed off in the #425 PR body. Cloud VMs cannot sign that off. §58 stays checked; the morph residual phrase is closed and the soak residual remains. No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #425 squash-landed on `development`. Desktop soak vs mood boards and a real webcam stays residual.
 
 ---
 
