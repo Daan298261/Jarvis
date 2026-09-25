@@ -101,12 +101,34 @@ export function resampleOrbs(orbs: ParticleOrb[], count: number): ParticleOrb[] 
       x: 0, y: 0, z: 0, gold: 0, light: 0.2, flow: 0, size: 1.4,
     }))
   }
-  if (orbs.length === count) return orbs.slice()
-  const out: ParticleOrb[] = new Array(count)
-  for (let i = 0; i < count; i++) {
-    const t = i / count
-    const idx = Math.min(orbs.length - 1, Math.floor(t * orbs.length))
-    out[i] = orbs[idx]
+  const selected: ParticleOrb[] = new Array(count)
+  for (let i = 0; i < selected.length; i++) {
+    const t = i / selected.length
+    selected[i] = orbs[Math.min(orbs.length - 1, Math.floor(t * orbs.length))]
+  }
+  // Interleave semantic and spatial buckets so every prefix is a stable LOD:
+  // facial gold, silhouette, and the full cloud remain represented as count falls.
+  const buckets = new Map<number, ParticleOrb[]>()
+  const bin = (value: number) => Math.max(0, Math.min(7, Math.floor((value + 2.4) * 1.65)))
+  for (const orb of selected) {
+    const material = (orb.gold >= 0.5 ? 1 : 0) * 3 + Math.max(0, Math.min(2, Math.floor(orb.flow)))
+    const key = (((material * 8 + bin(orb.x)) * 8 + bin(orb.y)) * 8 + bin(orb.z))
+    const bucket = buckets.get(key) ?? []
+    bucket.push(orb)
+    buckets.set(key, bucket)
+  }
+  const keys = [...buckets.keys()].sort((a, b) => a - b)
+  const out: ParticleOrb[] = []
+  let remaining = true
+  for (let depth = 0; remaining; depth++) {
+    remaining = false
+    for (const key of keys) {
+      const orb = buckets.get(key)![depth]
+      if (orb) {
+        out.push(orb)
+        remaining = true
+      }
+    }
   }
   return out
 }

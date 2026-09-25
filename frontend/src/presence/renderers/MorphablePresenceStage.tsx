@@ -8,6 +8,7 @@ import { createPresenceAttentionController, type AttentionVector } from "../pres
 import { LIFECYCLE_MORPH_SECONDS, lifecycleMorphTarget } from "../presenceLifecycle"
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
+import { AutoPresenceQuality, normalizedPresenceFitScale, PRESENCE_QUALITY_DENSITIES } from "../presenceQuality"
 import {
   createMorphablePresenceSystem,
   particleFragmentShader,
@@ -150,7 +151,12 @@ export function MorphablePresenceStage({
     })
     const density = efficient ? 0.6 : settings.performancePreset === "cinematic" ? 1.15 : 0.95
     const initialId = shapeId || presenceShapeIdForAvatar(settings.avatarId)
-    const system = createMorphablePresenceSystem(density, material, initialId)
+    const system = createMorphablePresenceSystem(
+      density, material, initialId, settings.performancePreset === "auto" ? 1.15 : density,
+    )
+    system.setQuality(density)
+    const initialSamples = system.sampleCounts()
+    stage.dataset.presenceSamples = `${initialSamples.figure}/${initialSamples.field}/${initialSamples.galaxyStars}`
     const bust = system.bust
     scene.add(system.group)
     setActiveShapeId(system.currentShapeId)
@@ -175,11 +181,26 @@ export function MorphablePresenceStage({
     let framingScale = 0.98
     let previousPhase: PresencePhase = snapshot.phase
     let alertAge = 4
+    const autoQuality = new AutoPresenceQuality()
+    let autoTier = autoQuality.current
+    let lastFrameSample: number | undefined
+    let appliedDensity = density
+    let averageFrameInterval = 16.67
+
+    const fitCurrentShape = (aspect: number) => {
+      const profile = resolvePresenceShape(system.currentShapeId)
+      const bPos = system.figure.geometry.getAttribute("bPos")
+      framingScale = normalizedPresenceFitScale(
+        bPos.array as ArrayLike<number>, aspect, camera.fov, camera.position.z,
+        profile.framing?.yaw ?? 0, profile.framing?.fitMargin ?? 0.88,
+      )
+    }
 
     const resize = () => {
       const { width, height } = stage.getBoundingClientRect()
       const preset = stateRef.current.settings.performancePreset
-      const cap = preset === "efficient" ? 1 : preset === "cinematic" ? 1.5 : 1.25
+      const cap = preset === "efficient" ? 1 : preset === "cinematic" ? 1.5
+        : preset === "auto" ? [1, 1.25, 1.5][autoTier] : 1.25
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cap))
       renderer.setSize(Math.max(1, width), Math.max(1, height), false)
       composer?.setPixelRatio(renderer.getPixelRatio())
@@ -189,7 +210,7 @@ export function MorphablePresenceStage({
       camera.fov = aspect < 0.85 ? 37 : 32
       camera.position.set(0, 0.12, aspect < 0.85 ? 6.15 : 5.6)
       camera.lookAt(0, 0.06, 0)
-      framingScale = aspect < 0.85 ? 0.98 : aspect > 2.05 ? 0.91 : 0.98
+      fitCurrentShape(aspect)
       const personaScale = stateRef.current.personaVisual?.scale
       bust.scale.setScalar(framingScale * (personaScale && personaScale > 0 ? personaScale : 1))
       camera.updateProjectionMatrix()
@@ -210,6 +231,23 @@ export function MorphablePresenceStage({
       if (disposed || document.hidden) return
       frame = window.requestAnimationFrame(render)
       const current = stateRef.current
+      const frameMs = lastFrameSample === undefined ? 16.67 : time - lastFrameSample
+      averageFrameInterval += (frameMs - averageFrameInterval) * 0.08
+      stage.dataset.presenceFrameMs = averageFrameInterval.toFixed(1)
+      stage.dataset.presenceFps = (1000 / Math.max(1, averageFrameInterval)).toFixed(0)
+      if (current.settings.performancePreset === "auto") {
+        const tier = autoQuality.sample(time, frameMs)
+        const targetDensity = PRESENCE_QUALITY_DENSITIES[tier]
+        const tierChanged = tier !== autoTier
+        autoTier = tier
+        if (targetDensity !== appliedDensity) {
+          const counts = system.setQuality(targetDensity)
+          appliedDensity = targetDensity
+          stage.dataset.presenceSamples = `${counts.figure}/${counts.field}/${counts.galaxyStars}`
+        }
+        if (tierChanged) resize()
+      }
+      lastFrameSample = time
       const reduced = current.settings.reducedMotion === "reduce"
         || (current.settings.reducedMotion === "system" && motionQuery.matches)
       const interval = reduced ? 100 : efficient ? 33 : 16
@@ -231,6 +269,7 @@ export function MorphablePresenceStage({
           immediate: reduced,
         })
         setActiveShapeId(system.currentShapeId)
+        fitCurrentShape(camera.aspect)
       }
       system.tick(delta)
       stage.dataset.morph = system.morphValue().toFixed(3)
@@ -278,6 +317,7 @@ export function MorphablePresenceStage({
       if (bloom) {
         const base = 0.35 + (uniforms.uGlow.value as number) * 0.35
         bloom.strength = galaxyOn && bustShape && alive ? base + 0.2 : base
+        bloom.enabled = current.settings.performancePreset !== "auto" || autoTier > 0
       }
       uniforms.uOpacity.value = phase === "offline" ? 0.35 : phase === "waiting" ? 0.72 : phase === "error" ? 0.92 : 1
       const warning = phase === "alert" || phase === "error" || phase === "offline" || phase === "approval"
@@ -380,6 +420,7 @@ export function MorphablePresenceStage({
       data-performance-preset={settings.performancePreset}
       data-attention-mode={settings.attentionMode}
       data-presence-shape={activeShapeId}
+      data-presence-samples=""
       data-lifecycle="on"
       data-lifecycle-stage={stageName}
       data-galaxy={settings.requestedPresence === "galaxy" ? "true" : "false"}

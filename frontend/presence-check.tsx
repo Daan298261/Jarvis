@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import { PresenceHost } from "./src/presence/PresenceHost"
@@ -13,6 +13,7 @@ function Check() {
   const shapes = listPresenceShapes()
   const [phase, setPhase] = useState<PresencePhase>("idle")
   const [shapeId, setShapeId] = useState("humanoid_bust")
+  const [personaVisual, setPersonaVisual] = useState({ pointScale: 1, depthSoftness: 0 })
   const [settings, setSettings] = useState({
     ...DEFAULT_PRESENTATION_SETTINGS,
     requestedPresence: "humanoid" as const,
@@ -20,9 +21,19 @@ function Check() {
     reducedMotion: "full" as const,
     avatarId: "humanoid_bust",
   })
+  const [summary, setSummary] = useState("Waiting for renderer…")
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const stage = document.querySelector<HTMLElement>("[data-presence-samples]")
+      if (!stage) return
+      setSummary(`${stage.dataset.presenceFps ?? "—"} fps · ${stage.dataset.presenceFrameMs ?? "—"} ms avg · ${stage.dataset.presenceSamples ?? "—"} points`)
+    }, 500)
+    return () => window.clearInterval(timer)
+  }, [])
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#03070b" }}>
+    <div style={{ width: "100vw", height: "100vh", minHeight: 0, display: "flex", flexDirection: "column", background: "#03070b", overflow: "hidden" }}>
       <div style={{ padding: 12, display: "flex", gap: 20, flexWrap: "wrap", flex: "0 0 auto" }}>
         <label>
           Phase{" "}
@@ -67,6 +78,7 @@ function Check() {
           </select>
         </label>
         <label>
+          Reduced motion{" "}
           <input
             type="checkbox"
             onChange={(e) =>
@@ -78,21 +90,32 @@ function Check() {
           />
         </label>
         <label>
-          Efficient{" "}
-          <input
-            type="checkbox"
-            onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
-                performancePreset: e.target.checked ? "efficient" : "cinematic",
-              }))
-            }
-          />
+          Quality{" "}
+          <select
+            value={settings.performancePreset}
+            onChange={(e) => setSettings((s) => ({ ...s, performancePreset: e.target.value as typeof s.performancePreset }))}
+          >
+            {["auto", "efficient", "balanced", "cinematic"].map((preset) => (
+              <option key={preset} value={preset}>{preset}</option>
+            ))}
+          </select>
         </label>
+        <label>
+          Point size{" "}
+          <input type="range" min="0.5" max="1.5" step="0.05" value={personaVisual.pointScale}
+            onChange={(e) => setPersonaVisual((v) => ({ ...v, pointScale: Number(e.target.value) }))} />
+        </label>
+        <label>
+          Depth softness{" "}
+          <input type="range" min="0" max="1" step="0.05" value={personaVisual.depthSoftness}
+            onChange={(e) => setPersonaVisual((v) => ({ ...v, depthSoftness: Number(e.target.value) }))} />
+        </label>
+        <output aria-live="polite">{summary}</output>
       </div>
       <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex" }}>
         <PresenceHost
           settings={settings}
+          personaVisual={personaVisual}
           snapshot={{
             phase,
             intensity: 0.7,

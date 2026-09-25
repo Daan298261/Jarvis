@@ -17,6 +17,8 @@ export type PresenceShapeFraming = {
   /** Bust yaw in radians (¾ profile ≈ 0.95). */
   yaw?: number
   position?: readonly [number, number, number]
+  /** Fraction of the stage viewport reserved for the projected shape (0.5–0.96). */
+  fitMargin?: number
 }
 
 /** Shared shader appearance values; geometry remains owned by each shape. */

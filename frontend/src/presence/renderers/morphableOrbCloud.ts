@@ -399,6 +399,8 @@ export type MorphablePresenceSystem = {
   tick: (delta: number) => void
   setGalaxy: (on: boolean) => void
   syncStars: (time: number, motion: number) => void
+  setQuality: (density: number) => { figure: number; field: number; galaxyStars: number }
+  sampleCounts: () => { figure: number; field: number; galaxyStars: number }
   dispose: () => void
 }
 
@@ -406,22 +408,31 @@ export function createMorphablePresenceSystem(
   density: number,
   material: THREE.ShaderMaterial,
   initialShapeId?: PresenceShapeId,
+  qualityCeiling = density,
 ): MorphablePresenceSystem {
   // Put the budget where the user reads identity: the face and shoulders.
   // The flowing environment stays intact but no longer outnumbers the bust.
   // Galaxy stars are a separate layer (presenceBudgets) and do not reduce these.
-  const figureBudget = Math.round(82000 * density)
-  const fieldBudget = Math.round(15000 * density)
+  const maxDensity = THREE.MathUtils.clamp(qualityCeiling, 0.01, 1.15)
+  const figureBudget = Math.round(82000 * maxDensity)
+  const fieldBudget = Math.round(15000 * maxDensity)
+  let qualityDensity = THREE.MathUtils.clamp(density, Math.min(0.6, maxDensity), maxDensity)
   let shape = resolvePresenceShape(initialShapeId)
-  let figureOrbs = resampleOrbs(shape.buildFigure(density), figureBudget)
+  let figureOrbs = resampleOrbs(shape.buildFigure(maxDensity), figureBudget)
   const freeOrbs = buildFreeFloatCloud(figureBudget)
   // aPos = free cloud (uMorph 0). bPos = winning figure (uMorph 1).
   const figure = geometryFromOrbs(freeOrbs, material, figureOrbs)
   let field: THREE.Points | null = null
   if (shape.buildField) {
-    field = geometryFromOrbs(resampleOrbs(shape.buildField(density), fieldBudget), material)
+    field = geometryFromOrbs(resampleOrbs(shape.buildField(maxDensity), fieldBudget), material)
   }
-  const galaxyStars = createGalaxyStarLayer(density)
+  const galaxyStars = createGalaxyStarLayer(maxDensity)
+  const applyQuality = () => {
+    figure.geometry.setDrawRange(0, Math.round(figureBudget * qualityDensity / maxDensity))
+    field?.geometry.setDrawRange(0, Math.round(fieldBudget * qualityDensity / maxDensity))
+    galaxyStars.points.geometry.setDrawRange(0, Math.round(presenceBudgets(maxDensity).galaxyStars * qualityDensity / maxDensity))
+  }
+  applyQuality()
 
   const group = new THREE.Group()
   const bust = new THREE.Group()
@@ -609,7 +620,7 @@ export function createMorphablePresenceSystem(
     morphTo(shapeId, opts) {
       if (shapeId === system.currentShapeId) return
       const next = resolvePresenceShape(shapeId)
-      const nextOrbs = resampleOrbs(next.buildFigure(density), figureBudget)
+      const nextOrbs = resampleOrbs(next.buildFigure(maxDensity), figureBudget)
 
       // Field swaps immediately (environment of the target shape). Figure lerps.
       if (field) {
@@ -619,10 +630,11 @@ export function createMorphablePresenceSystem(
         system.field = null
       }
       if (next.buildField) {
-        field = geometryFromOrbs(resampleOrbs(next.buildField(density), fieldBudget), material)
+        field = geometryFromOrbs(resampleOrbs(next.buildField(maxDensity), fieldBudget), material)
         group.add(field)
         system.field = field
       }
+      applyQuality()
 
       shape = next
       system.currentShapeId = next.id
@@ -686,6 +698,18 @@ export function createMorphablePresenceSystem(
     syncStars(time, motion) {
       galaxyStars.material.uniforms.uTime.value = time
       galaxyStars.material.uniforms.uMotion.value = motion
+    },
+    setQuality(density) {
+      qualityDensity = THREE.MathUtils.clamp(Number.isFinite(density) ? density : 0.95, Math.min(0.6, maxDensity), maxDensity)
+      applyQuality()
+      return system.sampleCounts()
+    },
+    sampleCounts() {
+      return {
+        figure: figure.geometry.drawRange.count,
+        field: field?.geometry.drawRange.count ?? 0,
+        galaxyStars: galaxyStars.points.geometry.drawRange.count,
+      }
     },
     dispose() {
       figure.geometry.dispose()
