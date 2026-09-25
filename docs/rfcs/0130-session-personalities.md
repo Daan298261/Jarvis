@@ -29,4 +29,4 @@ Extend the existing `/api/session-personality` surface (do not replace it):
 
 ## Notes
 
-HUD theming remains partial (CSS accents + top-bar label). Full Daybreak/presence reskin and automatic TTS voice swap stay out of scope. Parallel branch `cursor/rfc0130-session-personalities-34ee` is superseded by this enhancement on top of #334.
+HUD theming remains partial (CSS accents + top-bar label). Full Daybreak/presence reskin and automatic TTS voice swap stay out of scope. Parallel branch `cursor/rfc0130-session-personalities-34ee` is superseded by this enhancement on top of #334. [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) is a separate named-persona catalog (13-persona ANZU roster, amended in place) and does not bind these modes. This RFC's status is unchanged.

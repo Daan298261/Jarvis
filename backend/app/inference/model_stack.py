@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from .profile_roles import infer_runtime_role_and_tier
 from .runtime_profiles import (
     PRIVACY_LOCAL_ONLY,
     PRIVACY_PUBLIC_REMOTE,
@@ -44,6 +45,11 @@ class SpecialistModel:
     def runtime_profile(self) -> RuntimeProfile | None:
         if not self.ship_runtime_template:
             return None
+        runtime_role, answer_tier = infer_runtime_role_and_tier(self.runtime_profile_name)
+        if self.role == "orchestrator":
+            runtime_role, answer_tier = "orchestrator", 1
+        elif self.role == "leader":
+            runtime_role, answer_tier = "expert", 4
         return RuntimeProfile(
             id=f"recommended-{self.runtime_profile_name}",
             name=self.runtime_profile_name,
@@ -61,6 +67,8 @@ class SpecialistModel:
             is_local=self.is_local,
             description=self.description,
             enabled=self.enabled_by_default,
+            runtime_role=runtime_role,
+            answer_tier=answer_tier,
         )
 
 

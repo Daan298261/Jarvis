@@ -38,10 +38,13 @@ data class CompanionState(
     val messages: List<JSONObject> = emptyList(), val conversations: List<JSONObject> = emptyList(),
     val schedules: List<JSONObject> = emptyList(), val calls: List<JSONObject> = emptyList(),
     val conversationId: String? = null, val selectedModel: String = "auto",
-    val attachmentIds: List<String> = emptyList(), val capabilities: JSONObject = JSONObject(),
+    val attachmentIds: List<String> = emptyList(),
+    val attachmentUploadProgress: Int = 0,
+    val attachmentUploadBusy: Boolean = false,
+    val capabilities: JSONObject = JSONObject(),
     val swarm: JSONObject = JSONObject(), val coding: JSONObject = JSONObject(),
     val codingDecisions: List<JSONObject> = emptyList(), val voiceProfiles: List<JSONObject> = emptyList(),
-    val selectedVoice: String = "", val presenceMode: String = "orb",
+    val selectedVoice: String = "", val presenceMode: String = PresenceVisual.DEFAULT_PRESENCE_MODE,
     val liveTranscript: String = "", val voiceMode: String = "clip",
     val inferenceLoaded: Boolean = false, val inferenceLoading: Boolean = false,
     val inferenceProfile: String = "", val inferenceFamily: String = "", val inferenceError: String = "",
@@ -49,6 +52,12 @@ data class CompanionState(
     val localPackStatus: String = "missing",
     val localPackProgress: Int = 0,
     val localPackError: String = "",
+    val voiceSttStatus: String = "missing",
+    val voiceTtsStatus: String = "missing",
+    val voicePackProgress: Int = 0,
+    val voicePackError: String = "",
+    val onDeviceVoiceActive: Boolean = false,
+    val voiceRouteBanner: String? = null,
     val offlineQueueDepth: Int = 0,
     val offlineAnswering: Boolean = false,
     val lanStatus: String = "idle",
@@ -80,7 +89,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val mutable = MutableStateFlow(CompanionState(
         selectedModel = companionPrefs.getString("inference_profile", "auto") ?: "auto",
         selectedVoice = companionPrefs.getString("voice_profile", "") ?: "",
-        presenceMode = companionPrefs.getString("presence_mode", "orb").takeIf { it in setOf("orb", "humanoid") } ?: "orb",
+        presenceMode = PresenceVisual.normalizePresenceMode(companionPrefs.getString("presence_mode", PresenceVisual.DEFAULT_PRESENCE_MODE)),
     ))
     val state = mutable.asStateFlow()
     private var recorder: MediaRecorder? = null
@@ -88,8 +97,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var player: MediaPlayer? = null
     private var playerFile: File? = null
     private val outbox = Outbox(app)
+    private val uploadOutbox = UploadOutbox(app)
     private val offlineQueue = OutboxQueue(app)
     val packManager = CompanionPackManager(app)
+    val voicePackManager = CompanionVoicePackManager(app)
     private var foreground = false
     private val sendLock = kotlinx.coroutines.sync.Mutex()
     private var audioRecord: AudioRecord? = null
@@ -98,6 +109,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var listenJob: Job? = null
     private val ttsQueue = LinkedBlockingQueue<ByteArray>()
     private var ttsJob: Job? = null
+    private var onDevicePcm: java.io.ByteArrayOutputStream? = null
+    private var onDeviceListening = false
     init {
         deviceModelChrome.actions = object : DevicePackChromeActions {
             override fun downloadSelectedPack() {
@@ -119,12 +132,18 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             .onFailure { mutable.value = mutable.value.copy(error = "Cannot recover pending message: ${it.message}") }
         viewModelScope.launch {
             runCatching { packManager.refreshStatus() }
+            runCatching { voicePackManager.refreshStatus() }
             mutable.value = mutable.value.copy(
                 localPackStatus = packManager.status(),
                 localPackProgress = packManager.downloadProgress(),
                 localPackError = packManager.lastError(),
+                voiceSttStatus = voicePackManager.sttStatus(),
+                voiceTtsStatus = voicePackManager.ttsStatus(),
+                voicePackProgress = voicePackManager.downloadProgress(),
+                voicePackError = voicePackManager.lastError(),
                 offlineQueueDepth = offlineQueue.pendingCount(),
             )
+            publishVoiceRoute()
         }
         viewModelScope.launch {
             while (true) {
@@ -244,6 +263,91 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         packManager.selectPack(id)
     }
 
+    fun refreshVoicePackStatus() = action {
+        voicePackManager.refreshStatus()
+        mutable.value = mutable.value.copy(
+            voiceSttStatus = voicePackManager.sttStatus(),
+            voiceTtsStatus = voicePackManager.ttsStatus(),
+            voicePackProgress = voicePackManager.downloadProgress(),
+            voicePackError = voicePackManager.lastError(),
+        )
+        publishVoiceRoute()
+    }
+
+    fun downloadVoicePack(packId: String) = action {
+        voicePackManager.downloadPack(packId) { progress ->
+            mutable.value = mutable.value.copy(voicePackProgress = progress)
+        }
+        mutable.value = mutable.value.copy(
+            voiceSttStatus = voicePackManager.sttStatus(),
+            voiceTtsStatus = voicePackManager.ttsStatus(),
+            voicePackProgress = voicePackManager.downloadProgress(),
+            voicePackError = voicePackManager.lastError(),
+        )
+        publishVoiceRoute()
+    }
+
+    fun downloadRecommendedVoicePacks() = action {
+        voicePackManager.downloadRecommendedPair { progress ->
+            mutable.value = mutable.value.copy(voicePackProgress = progress)
+        }
+        mutable.value = mutable.value.copy(
+            voiceSttStatus = voicePackManager.sttStatus(),
+            voiceTtsStatus = voicePackManager.ttsStatus(),
+            voicePackProgress = voicePackManager.downloadProgress(),
+            voicePackError = voicePackManager.lastError(),
+        )
+        publishVoiceRoute()
+    }
+
+    fun deleteVoicePack(packId: String) = action {
+        voicePackManager.deletePack(packId)
+        mutable.value = mutable.value.copy(
+            voiceSttStatus = voicePackManager.sttStatus(),
+            voiceTtsStatus = voicePackManager.ttsStatus(),
+            voicePackProgress = 0,
+            voicePackError = voicePackManager.lastError(),
+        )
+        publishVoiceRoute()
+    }
+
+    fun selectSttVoicePack(id: String) {
+        voicePackManager.selectSttPack(id)
+        viewModelScope.launch {
+            voicePackManager.refreshStatus()
+            mutable.value = mutable.value.copy(voiceSttStatus = voicePackManager.sttStatus())
+            publishVoiceRoute()
+        }
+    }
+
+    fun selectTtsVoicePack(id: String) {
+        voicePackManager.selectTtsPack(id)
+        viewModelScope.launch {
+            voicePackManager.refreshStatus()
+            mutable.value = mutable.value.copy(voiceTtsStatus = voicePackManager.ttsStatus())
+            publishVoiceRoute()
+        }
+    }
+
+    private fun publishVoiceRoute() {
+        val state = mutable.value
+        val voiceCaps = state.capabilities.optJSONObject("voice")
+        val decision = CompanionVoiceRouting.decide(
+            leaderReachable = state.leaderReachable || state.connected,
+            realtimeVoiceHealthy = state.connected && voiceCaps?.optBoolean("realtime") == true,
+            hostTtsHealthy = state.connected && voiceCaps?.optBoolean("tts_ready") == true,
+            sttPackStatus = voicePackManager.sttStatus(),
+            ttsPackStatus = voicePackManager.ttsStatus(),
+            localLlmReady = packManager.isPackReady(),
+        )
+        mutable.value = state.copy(
+            onDeviceVoiceActive = decision.onDeviceIndicator,
+            voiceRouteBanner = decision.banner ?: decision.error,
+            voiceSttStatus = voicePackManager.sttStatus(),
+            voiceTtsStatus = voicePackManager.ttsStatus(),
+        )
+    }
+
     suspend fun refresh() {
         api.refreshEndpoints()
         val previous = mutable.value
@@ -256,6 +360,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             val tasks = async { api.array("/tasks").objects() }
             val modelsBody = async { api.json("/models") }
             val packCatalog = async { runCatching { api.json("/model-packs") }.getOrNull() }
+            val voiceCatalog = async { runCatching { api.json("/voice-packs") }.getOrNull() }
             val conversations = async { api.array("/conversations").objects() }
             val schedules = async { api.array("/schedules").objects() }
             val calls = async { api.array("/calls").objects() }
@@ -267,7 +372,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             val voices = async { runCatching { api.json("/voice/profiles") }.getOrDefault(previousVoices) }
             val modelsJson = modelsBody.await()
             packCatalog.await()?.let { packManager.updateCatalog(it) }
+            voiceCatalog.await()?.let { voicePackManager.updateCatalog(it) }
             runCatching { packManager.refreshStatus() }
+            runCatching { voicePackManager.refreshStatus() }
             RefreshPayload(
                 capabilities.await(),
                 tasks.await(),
@@ -297,21 +404,39 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val inferenceLabel = payload.models.firstOrNull { it.optString("name") == inferenceProfile }?.optString("label")
             ?: inference.optString("family").ifBlank { inferenceProfile }
         val wasOffline = !previous.leaderReachable
-        mutable.value = mutable.value.copy(connected = true, leaderReachable = true, activity = active?.optString("activity") ?: "Ready when you are",
-            tasks = payload.tasks, models = payload.models, conversations = payload.conversations, schedules = payload.schedules,
-            calls = payload.calls, messages = payload.messages, capabilities = payload.capabilities, swarm = payload.swarm,
+        mutable.value = mutable.value.copy(
+            connected = true,
+            leaderReachable = true,
+            activity = active?.optString("activity") ?: "Ready when you are",
+            tasks = payload.tasks,
+            models = payload.models,
+            conversations = payload.conversations,
+            schedules = payload.schedules,
+            calls = payload.calls,
+            messages = payload.messages,
+            capabilities = payload.capabilities,
+            swarm = payload.swarm,
             coding = payload.coding.optJSONObject("overview") ?: JSONObject(),
             codingDecisions = payload.coding.optJSONObject("decisions")?.optJSONArray("items")?.objects() ?: emptyList(),
-            voiceProfiles = voiceProfiles, selectedVoice = selectedVoice, selectedModel = selectedModel,
-            inferenceLoaded = inference.optBoolean("loaded"), inferenceLoading = inference.optBoolean("loading"),
-            inferenceProfile = inferenceProfile, inferenceFamily = inferenceLabel,
+            voiceProfiles = voiceProfiles,
+            selectedVoice = selectedVoice,
+            selectedModel = selectedModel,
+            inferenceLoaded = inference.optBoolean("loaded"),
+            inferenceLoading = inference.optBoolean("loading"),
+            inferenceProfile = inferenceProfile,
+            inferenceFamily = inferenceLabel,
             inferenceError = inference.optString("last_error"),
             pendingMessage = outbox.read() != null,
             localPackStatus = packManager.status(),
             localPackProgress = packManager.downloadProgress(),
             localPackError = packManager.lastError(),
+            voiceSttStatus = voicePackManager.sttStatus(),
+            voiceTtsStatus = voicePackManager.ttsStatus(),
+            voicePackProgress = voicePackManager.downloadProgress(),
+            voicePackError = voicePackManager.lastError(),
             offlineQueueDepth = offlineQueue.pendingCount(),
         )
+        publishVoiceRoute()
         if (CompanionRouting.shouldSyncAfterLeaderReturn(wasOffline, true, offlineQueue.pendingCount())) {
             syncOfflineTurns()
         }
@@ -501,24 +626,94 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     fun uploadCaptured(uri: Uri, file: File) = action {
         try { uploadNow(uri) } finally { file.delete() }
     }
-    private suspend fun uploadNow(uri: Uri) {
+    fun retryUpload() = action { resumePendingUpload() }
+
+    private suspend fun resumePendingUpload() {
+        val pending = uploadOutbox.read() ?: return
+        val uri = Uri.parse(pending.getString("uri"))
+        uploadNow(uri, pending.optString("upload_id").ifBlank { null })
+    }
+
+    private suspend fun uploadNow(uri: Uri, resumeUploadId: String? = null) {
         val context = getApplication<Application>()
-        val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
-                val output = java.io.ByteArrayOutputStream()
-                val chunk = ByteArray(32768)
-                while (true) {
-                    val count = stream.read(chunk)
-                    if (count < 0) break
-                    require(output.size() + count <= 64 * 1024 * 1024) { "Attachment exceeds 64 MiB" }
-                    output.write(chunk, 0, count)
-                }
-                output.toByteArray()
-            } ?: error("Cannot read attachment")
-        }
+        val name = uri.lastPathSegment ?: "attachment"
         val type = context.contentResolver.getType(uri) ?: "application/octet-stream"
-        val result = JSONObject(api.raw("/attachments", "POST", bytes, contentType = type, filename = uri.lastPathSegment ?: "attachment").toString(Charsets.UTF_8))
-        mutable.value = mutable.value.copy(attachmentIds = mutable.value.attachmentIds + result.getString("id"))
+        val kind = MediaUploadPlanner.detectKind(type, name)
+        val size = context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
+        mutable.value = mutable.value.copy(attachmentUploadBusy = true, attachmentUploadProgress = 0, error = null)
+        try {
+            val uploadId = resumeUploadId ?: UUID.randomUUID().toString()
+            if (MediaUploadPlanner.shouldChunk(kind, size)) {
+                uploadOutbox.save(
+                    JSONObject()
+                        .put("uri", uri.toString())
+                        .put("upload_id", uploadId)
+                        .put("kind", kind)
+                        .put("name", name),
+                )
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: error("Cannot read attachment")
+                }
+                val total = MediaUploadPlanner.chunkCount(bytes.size.toLong())
+                for (index in 0 until total) {
+                    val start = index * MediaUploadPlanner.CHUNK_SIZE
+                    val end = minOf(start + MediaUploadPlanner.CHUNK_SIZE, bytes.size)
+                    val chunk = bytes.copyOfRange(start, end)
+                    val headers = mapOf(
+                        "X-Jarvis-Upload-Id" to uploadId,
+                        "X-Jarvis-Chunk-Index" to index.toString(),
+                        "X-Jarvis-Chunk-Total" to total.toString(),
+                        "X-Jarvis-Upload-Kind" to kind,
+                    )
+                    val response = JSONObject(
+                        api.raw(
+                            "/attachments",
+                            "POST",
+                            chunk,
+                            contentType = type,
+                            filename = name,
+                            extraHeaders = headers,
+                        ).toString(Charsets.UTF_8),
+                    )
+                    val received = response.optInt("received", index + 1)
+                    mutable.value = mutable.value.copy(
+                        attachmentUploadProgress = ((received.toDouble() / total.toDouble()) * 100).toInt(),
+                    )
+                    if (response.has("id")) {
+                        uploadOutbox.clear()
+                        mutable.value = mutable.value.copy(
+                            attachmentIds = mutable.value.attachmentIds + response.getString("id"),
+                            attachmentUploadBusy = false,
+                            attachmentUploadProgress = 100,
+                        )
+                        return
+                    }
+                }
+            } else {
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { stream -> stream.readBytes() }
+                        ?: error("Cannot read attachment")
+                }
+                val headers = mapOf("X-Jarvis-Upload-Kind" to kind)
+                val result = JSONObject(
+                    api.raw("/attachments", "POST", bytes, contentType = type, filename = name, extraHeaders = headers)
+                        .toString(Charsets.UTF_8),
+                )
+                uploadOutbox.clear()
+                mutable.value = mutable.value.copy(
+                    attachmentIds = mutable.value.attachmentIds + result.getString("id"),
+                    attachmentUploadBusy = false,
+                    attachmentUploadProgress = 100,
+                )
+            }
+        } catch (error: Exception) {
+            mutable.value = mutable.value.copy(
+                attachmentUploadBusy = false,
+                error = error.message ?: "Upload failed",
+            )
+            throw error
+        }
     }
     fun cancel(taskId: String) = action { api.json("/tasks/$taskId/cancel", "POST"); refresh() }
     fun approve(taskId: String, token: String, approved: Boolean) = action {
@@ -580,8 +775,30 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
     fun toggleRecord() {
-        val realtimeReady = mutable.value.connected &&
-            mutable.value.capabilities.optJSONObject("voice")?.optBoolean("realtime") == true
+        val voiceCaps = mutable.value.capabilities.optJSONObject("voice")
+        val route = CompanionVoiceRouting.decide(
+            leaderReachable = mutable.value.leaderReachable || mutable.value.connected,
+            realtimeVoiceHealthy = mutable.value.connected && voiceCaps?.optBoolean("realtime") == true,
+            hostTtsHealthy = mutable.value.connected && voiceCaps?.optBoolean("tts_ready") == true,
+            sttPackStatus = voicePackManager.sttStatus(),
+            ttsPackStatus = voicePackManager.ttsStatus(),
+            localLlmReady = packManager.isPackReady(),
+        )
+        if (route.stt == SttVoiceRoute.ON_DEVICE) {
+            if (onDeviceListening) {
+                stopOnDeviceListen()
+            } else {
+                startOnDeviceListen()
+            }
+            return
+        }
+        if (route.stt == SttVoiceRoute.INSTALL && !mutable.value.connected) {
+            mutable.value = mutable.value.copy(
+                error = route.error ?: "Install on-device STT in More → Voice before listening offline",
+            )
+            return
+        }
+        val realtimeReady = mutable.value.connected && voiceCaps?.optBoolean("realtime") == true
         if (realtimeReady && audioRecord == null && recorder == null) {
             startRealtimeTalk()
             return
@@ -611,6 +828,75 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 recorder?.release(); recorder = null; recordingFile?.delete()
                 mutable.value = mutable.value.copy(recording = false)
             }
+        }
+    }
+
+    private fun startOnDeviceListen() = action {
+        if (!hasRecordAudioPermission()) {
+            mutable.value = mutable.value.copy(error = "Microphone permission is required for on-device voice")
+            return@action
+        }
+        stopSpeaking()
+        val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val record = try {
+            AudioRecord(AudioSource.VOICE_COMMUNICATION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
+        } catch (_: SecurityException) {
+            mutable.value = mutable.value.copy(error = "Microphone permission is required for on-device voice")
+            return@action
+        }
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            mutable.value = mutable.value.copy(error = "Microphone is unavailable")
+            return@action
+        }
+        audioRecord = record
+        onDevicePcm = java.io.ByteArrayOutputStream()
+        onDeviceListening = true
+        try {
+            record.startRecording()
+        } catch (_: SecurityException) {
+            record.release()
+            audioRecord = null
+            onDeviceListening = false
+            mutable.value = mutable.value.copy(error = "Microphone permission is required for on-device voice")
+            return@action
+        }
+        mutable.value = mutable.value.copy(
+            recording = true,
+            voiceMode = "on_device",
+            liveTranscript = "",
+            activity = "Listening on-device…",
+            onDeviceVoiceActive = true,
+        )
+        captureJob = viewModelScope.launch(Dispatchers.IO) {
+            val buffer = ByteArray(minBuf.coerceAtLeast(3200))
+            while (isActive && onDeviceListening && audioRecord != null) {
+                val read = record.read(buffer, 0, buffer.size)
+                if (read > 0) onDevicePcm?.write(buffer, 0, read)
+            }
+        }
+    }
+
+    private fun stopOnDeviceListen() = action {
+        onDeviceListening = false
+        captureJob?.cancel(); captureJob = null
+        runCatching { audioRecord?.stop() }
+        audioRecord?.release(); audioRecord = null
+        mutable.value = mutable.value.copy(recording = false)
+        val pcm = onDevicePcm?.toByteArray() ?: ByteArray(0)
+        onDevicePcm = null
+        if (pcm.isEmpty()) {
+            mutable.value = mutable.value.copy(error = "No audio captured for on-device STT")
+            voicePackManager.unloadIdle()
+            return@action
+        }
+        try {
+            val text = voicePackManager.transcribePcm16le(pcm, 16_000)
+            mutable.value = mutable.value.copy(liveTranscript = text, activity = "On-device transcript ready")
+            sendNow(text)
+        } finally {
+            voicePackManager.unloadIdle()
+            publishVoiceRoute()
         }
     }
 
@@ -740,6 +1026,32 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
 
     fun speak(text: String) = action {
         if (player != null || mutable.value.speaking) { stopSpeaking(); realtime?.interrupt(); return@action }
+        val voiceCaps = mutable.value.capabilities.optJSONObject("voice")
+        val route = CompanionVoiceRouting.decide(
+            leaderReachable = mutable.value.leaderReachable || mutable.value.connected,
+            realtimeVoiceHealthy = mutable.value.connected && voiceCaps?.optBoolean("realtime") == true,
+            hostTtsHealthy = mutable.value.connected && voiceCaps?.optBoolean("tts_ready") == true,
+            sttPackStatus = voicePackManager.sttStatus(),
+            ttsPackStatus = voicePackManager.ttsStatus(),
+            localLlmReady = packManager.isPackReady(),
+        )
+        if (route.tts == TtsVoiceRoute.ON_DEVICE) {
+            mutable.value = mutable.value.copy(onDeviceVoiceActive = true, activity = "Speaking on-device…")
+            try {
+                val audio = voicePackManager.synthesize(text.take(6000))
+                playAudio(audio)
+            } finally {
+                voicePackManager.unloadIdle()
+                publishVoiceRoute()
+            }
+            return@action
+        }
+        if (route.tts == TtsVoiceRoute.INSTALL) {
+            mutable.value = mutable.value.copy(
+                error = route.error ?: "Install on-device TTS in More → Voice before speaking offline",
+            )
+            return@action
+        }
         val body = JSONObject().put("text", text.take(6000))
         mutable.value.selectedVoice.takeIf { it.isNotEmpty() }?.let { body.put("voice_profile_id", it) }
         val audio = api.raw("/voice/speak", "POST", body.toString().toByteArray())
@@ -774,10 +1086,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
     override fun onCleared() {
         captureJob?.cancel(); listenJob?.cancel(); ttsJob?.cancel()
+        onDeviceListening = false
         runCatching { audioRecord?.stop() }; audioRecord?.release()
         realtime?.close()
         recorder?.release(); recordingFile?.delete(); stopSpeaking()
         packManager.unload()
+        voicePackManager.unloadIdle()
         super.onCleared()
     }
 }

@@ -19,6 +19,7 @@ import {
   type HexStrikeStatus,
 } from "../api"
 import { extractPendingApprovalError } from "../chat/approvalsApi"
+import { AdvancedDisclosure } from "../components/AdvancedDisclosure"
 import { usePendingApprovals } from "../chat/pendingApprovals"
 import "./hexstrike.css"
 
@@ -293,22 +294,41 @@ export function HudHexStrikeSuite() {
           <>
             <section className="hex-panel">
               <h2>Lifecycle</h2>
-              <dl>
-                <div>
-                  <dt>Bind</dt>
-                  <dd>
-                    {status?.host || "127.0.0.1"}:{status?.port || 8888}
-                  </dd>
-                </div>
-                <div>
-                  <dt>PID</dt>
-                  <dd>{status?.pid ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt>Commit</dt>
-                  <dd title={install?.approved_commit}>{install?.approved_commit?.slice(0, 10) || "—"}</dd>
-                </div>
-              </dl>
+              <AdvancedDisclosure>
+                <dl>
+                  <div>
+                    <dt>Bind</dt>
+                    <dd>
+                      {status?.host || "127.0.0.1"}:{status?.port || 8888}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>PID</dt>
+                    <dd>{status?.pid ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Commit</dt>
+                    <dd title={install?.approved_commit}>{install?.approved_commit?.slice(0, 10) || "—"}</dd>
+                  </div>
+                </dl>
+                <label>
+                  Install path
+                  <input
+                    value={pathDraft}
+                    onChange={(event) => setPathDraft(event.target.value)}
+                    placeholder="runtime/hexstrike-ai"
+                    spellCheck={false}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="hex-suite-btn ghost"
+                  disabled={busy}
+                  onClick={() => void run(() => configureHexStrike({ install_path: pathDraft }), "Install path saved.")}
+                >
+                  Save path
+                </button>
+              </AdvancedDisclosure>
               {status?.last_error && <p className="hex-suite-error">{status.last_error}</p>}
               <div className="hex-btn-row">
                 <button
@@ -493,6 +513,7 @@ export function HudHexStrikeSuite() {
               </div>
             )}
             {Object.keys(depJobs).length > 0 && (
+              <AdvancedDisclosure>
               <div className="hex-install-jobs">
                 <h3>Dependency installs</h3>
                 <ul className="hex-proc-list">
@@ -504,6 +525,7 @@ export function HudHexStrikeSuite() {
                   ))}
                 </ul>
               </div>
+              </AdvancedDisclosure>
             )}
           </section>
         )}
@@ -558,20 +580,22 @@ export function HudHexStrikeSuite() {
                   ))}
                 </select>
               )}
-              <label className="hex-args-label">
-                Arguments (JSON)
-                <textarea
-                  className="hex-args-editor"
-                  aria-label="Capability arguments JSON"
-                  value={argsJson}
-                  spellCheck={false}
-                  onChange={(e) => {
-                    setArgsJson(e.target.value)
-                    setArgsError("")
-                  }}
-                />
-              </label>
-              {argsError && <p className="hex-suite-error">{argsError}</p>}
+              <AdvancedDisclosure>
+                <label className="hex-args-label">
+                  Arguments (JSON)
+                  <textarea
+                    className="hex-args-editor"
+                    aria-label="Capability arguments JSON"
+                    value={argsJson}
+                    spellCheck={false}
+                    onChange={(e) => {
+                      setArgsJson(e.target.value)
+                      setArgsError("")
+                    }}
+                  />
+                </label>
+                {argsError && <p className="hex-suite-error">{argsError}</p>}
+              </AdvancedDisclosure>
             </div>
             <button
               type="button"
@@ -631,10 +655,6 @@ export function HudHexStrikeSuite() {
                 <>
                   <dl className="hex-job-meta">
                     <div>
-                      <dt>ID</dt>
-                      <dd>{jobDetail.id}</dd>
-                    </div>
-                    <div>
                       <dt>Status</dt>
                       <dd>{jobDetail.status}</dd>
                     </div>
@@ -654,6 +674,13 @@ export function HudHexStrikeSuite() {
                     )}
                   </dl>
                   {jobDetail.error && <p className="hex-suite-error">{jobDetail.error}</p>}
+                  <AdvancedDisclosure>
+                  <dl className="hex-job-meta">
+                    <div>
+                      <dt>ID</dt>
+                      <dd>{jobDetail.id}</dd>
+                    </div>
+                  </dl>
                   {jobDetail.log_tail && (
                     <pre className="hex-suite-json hex-job-log">{jobDetail.log_tail}</pre>
                   )}
@@ -672,6 +699,7 @@ export function HudHexStrikeSuite() {
                         ))}
                     </ul>
                   )}
+                  </AdvancedDisclosure>
                   {jobDetail.status === "running" && (
                     <button
                       type="button"
@@ -695,23 +723,6 @@ export function HudHexStrikeSuite() {
       </div>
 
       <footer className="hex-suite-foot">
-        <label>
-          Install path
-          <input
-            value={pathDraft}
-            onChange={(event) => setPathDraft(event.target.value)}
-            placeholder="runtime/hexstrike-ai"
-            spellCheck={false}
-          />
-        </label>
-        <button
-          type="button"
-          className="hex-suite-btn ghost"
-          disabled={busy}
-          onClick={() => void run(() => configureHexStrike({ install_path: pathDraft }), "Install path saved.")}
-        >
-          Save path
-        </button>
         <a className="hex-suite-help" href="/help?topic=hexstrike-blue">HexStrike setup help</a>
         {msg && <span className="hex-suite-msg" role="status">{msg}</span>}
       </footer>

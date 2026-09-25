@@ -3,6 +3,7 @@ models/
 *.gguf
 *.gguf.partial
 data/companion-packs/
+data/companion-voice-packs/
 runtime/llama.cpp/
 runtime/*.zip
 runtime/llama-server-help.txt

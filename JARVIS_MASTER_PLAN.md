@@ -2166,6 +2166,14 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [ ] RFC-0047 Portable automation packages — accepted
 - [ ] RFC-0029 Transactional durable execution — accepted
 - [ ] RFC-0030 Selectable inference offload backends — accepted
+- [x] RFC-0139 Android companion fancy orb / humanoid presence UI — implemented (#401 @ `e9df378`; phone daylight soak = device sign-off)
+- [x] RFC-0140 Companion on-device small voice models (fallback + grid-down) — implemented (#403 @ `59e5ea73`; Whisper/TTS native bake + phone soak = device sign-off)
+- [x] RFC-0171 Priority System-One Reflex Lane — Jev + local Laya — implemented (#409 @ `f7bf66a9`; GPU/Laya sha + speed-claim release gate = Desktop sign-off)
+- [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
+- [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal #416 @ `ebcdf9da`; no residual)
+- [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal #417 @ `2cb6c0b2`; live multi-model room Desktop soak residual)
+- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU / live WebGL soak vs refs A/B/C + real webcam face attract)
+
 
 ### Jarvis 2.0 — Away Mode (`JARVIS_2.0.md`)
 
@@ -2412,11 +2420,19 @@ Taco 1.2.5: pairing failed without a private key and without QR; default TTS sti
 
 Decision: RFC-0075 natural speak path + reply latency (implemented)
 
-RFC-0075 is implemented on development via #188 (`99e1028`): social vs technical speak path, speak filter, natural prose, early TTS. Thought-process chevron was not in #188; RFC-0067 Show work / hide-chrome remains the owner-chat contract (UX follow-up). No new §58 backlog checkboxes. RFC-0074 / 0076 stay accepted. Prior ledger tick #190 closed without merge.
+RFC-0075 is implemented on development via #188 (`99e1028`): social vs technical speak path, speak filter, natural prose, early TTS. Thought-process chevron was not in #188; RFC-0067 Show work / hide-chrome remains the owner-chat contract (UX follow-up). No new §58 backlog checkboxes. RFC-0074 and RFC-0076 are implemented in the following ledger tick. Prior ledger tick #190 closed without merge.
 
 Reason:
 
 CoS assigned this re-tick after #188 landed on development.
+
+Decision: RFC-0074 companion pairing + RFC-0076 companion APK delivery UX (implemented)
+
+RFC-0074 is implemented on development via #191 (`ee643eca`): companion pairing streamline, QR fields, spoken onboarding hooks. RFC-0076 is implemented on development via #189 (`8ab2c28`) + #193 (`f31d2f2`): APK build progress / Download to Desktop + WhatsApp/email send when configured. No new §58 backlog checkboxes. Specs status updated from accepted → implemented (late ledger catch-up 2026-09-22 against development tip `25d1c53`; code landed 2026-09-11).
+
+Reason:
+
+CoS assigned Architect tick-only after room flagged that defaulting re-implement to 0074/0076 would collide with already-merged work.
 
 Decision: RFC-0077 local LM Studio discovery + play/hotswap context (implemented)
 
@@ -2498,7 +2514,7 @@ Reason:
 
 Taco: large durable context out of the prompt; search tools per ask; approval popup like ChatGPT only when needed. CoS assigned the RFC-0110 ledger tick after #290 landed on development.
 
-Decision: Jarvis 1.4.0 release scope lock (RFC-0112–0113, RFC-0115 accepted; RFC-0111 implemented; RFC-0114 implemented)
+Decision: Jarvis 1.4.0 release scope lock (RFC-0112–0113 accepted; RFC-0111 implemented; RFC-0114 implemented; RFC-0115 implemented)
 
 Living spec [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md) is on `development` (copied from `main` @ `6f6a633`; light path note only). Implementable contracts:
 
@@ -2506,9 +2522,9 @@ Living spec [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md) is on `development` (co
 - **RFC-0112** Voice preview uses the exact selected profile (canonical route, error preservation, playback failure is failure). **HOLD** (Sol/Taco) — do not tick.
 - **RFC-0113** Admin > Settings 1.4 IA deltas (Appearance & Voice composed, Phone Pairing, Network & Swarm, redirects) — RFC-0094 remains implemented; HUD Voice/Appearance split stays.
 - **RFC-0114** Context overflow preflight + automatic recovery — **implemented** on development via specs #286 (`1f8320d`) + implement #293 (`265b758`): canonical `PromptBudget`, preflight, expand 8K→16K→32K, recoverable 400, compact/expand/retry ≤2. Identity-only `n_keep` + per-message tools preserved. **No** RFC-0115 escalate placeholder (same-model recovery only). RFC-0107 durable brain stays the non-compress-forever end-state. Live llama.cpp 400 remains desktop sign-off.
-- **RFC-0115** Ornith 9B orchestrator-router + complexity tiers + visible model handoff (gates before warm-score; no Continue button).
+- **RFC-0115** Ornith 9B orchestrator-router + complexity tiers + visible model handoff — **implemented** on development via #377 (`770261e5`): `runtime_role` / `answer_tier`, capability gates before warm-score, complexity scoring, `ModelHandoff`, visible `model_switch` (no Continue button). Live Ornith→Qwen switch remains desktop sign-off.
 
-**IN 1.4.0:** core packages above (**0111 implemented**, **0114 implemented**) **plus** already-filed interesting integrations **RFC-0107** Obsidian durable brain, **0108** phone offline, **0109** media upload, **0110** approval modal (**implemented**), **plus** HexStrike / Daybreak / cyber already in flight (**0105** implemented, **0106** implemented).
+**IN 1.4.0:** core packages above (**0111 implemented**, **0114 implemented**, **0115 implemented**) **plus** already-filed interesting integrations **RFC-0107** Obsidian durable brain, **0108** phone offline, **0109** media upload, **0110** approval modal (**implemented**), **plus** HexStrike / Daybreak / cyber already in flight (**0105** implemented, **0106** implemented).
 
 **OUT of the 1.4 cut:** bulk Instagram / catalog RFCs **0095–0104** — they stay on [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) / later queue. Do **not** re-scope them into 1.4 RFCs or block the cut.
 
@@ -2516,7 +2532,7 @@ Specs-only; no new §58 checkbox; no invented LE/Red/Purple/ATO gates; no exploi
 
 Reason:
 
-Taco 1.4.0 scope lock: split `JARVIS_1.4_SPECS.md` into RFC-0111–0115; keep interesting 0107–0110 and in-flight HexStrike/cyber; leave bulk reel catalog for later. CoS assigned the RFC-0114 ledger tick after #293 landed on development. CoS assigned the RFC-0111 ledger tick after #296 landed on development.
+Taco 1.4.0 scope lock: split `JARVIS_1.4_SPECS.md` into RFC-0111–0115; keep interesting 0107–0110 and in-flight HexStrike/cyber; leave bulk reel catalog for later. CoS assigned the RFC-0114 ledger tick after #293 landed on development. CoS assigned the RFC-0111 ledger tick after #296 landed on development. CoS assigned the RFC-0115 ledger tick after #377 landed on development.
 
 Decision: RFC-0116 TypeSafe Jev optional decision tier (accepted; post-1.4)
 
@@ -2536,7 +2552,7 @@ Taco: operational soon and actually used; embed Obsidian inside Jarvis; do not b
 
 Decision: RFC-0117 tiny front-chat responder (implemented; post-1.4)
 
-Tiny always-warm **front responder** lane for first visible/audible owner-chat replies while the larger router/worker continues on the same Jarvis turn. **Implemented** on development via specs #303 (`49f6af4`) + implement #305 (`4eb25d9`): `front_responder` role with tools/thinking disabled and 96–160 token cap; `final_basic` / `ack_continue` / `ask_clarification` / `handoff_notice`; one-transcript merge; immediate safe TTS (`speak_immediately`); diagnostics (`front_responder.last_turn`). **Not** in the 1.4.0 cut (optional / post-1.4 interesting, same class as RFC-0116). Duplicate-number [`docs/rfcs/0117-durable-state-journal-rollback.md`](docs/rfcs/0117-durable-state-journal-rollback.md) from #304 stays **accepted** (separate ticket; not ticked). Windows first-visible/first-audible across two larger models remains desktop sign-off. No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
+Tiny always-warm **front responder** lane for first visible/audible owner-chat replies while the larger router/worker continues on the same Jarvis turn. **Implemented** on development via specs #303 (`49f6af4`) + implement #305 (`4eb25d9`): `front_responder` role with tools/thinking disabled and 96–160 token cap; `final_basic` / `ack_continue` / `ask_clarification` / `handoff_notice`; one-transcript merge; immediate safe TTS (`speak_immediately`); diagnostics (`front_responder.last_turn`). **Not** in the 1.4.0 cut (optional / post-1.4 interesting, same class as RFC-0116). Duplicate-number [`docs/rfcs/0117-durable-state-journal-rollback.md`](docs/rfcs/0117-durable-state-journal-rollback.md) is a separate ticket and is **implemented** on development via #380 (`049874c7`). This tiny front-chat file is unchanged. Windows first-visible/first-audible across two larger models remains desktop sign-off. No new §58 checkbox; no invented LE/Red/Purple/ATO gates.
 
 Reason:
 
@@ -2544,7 +2560,7 @@ Taco via Codex: delay is systemic across models, not 27B-specific; tiny front-ch
 
 Decision: RFC-0118 Taco goals highest-leverage memo (accepted) + RFC-0109 OCR amend + RFC-0120/0121
 
-Specs-only ranking for Taco’s four goals (speed; coding+3D real tools; OCR+media upload; projects folder / chats-in-DB / media placement). Memo: [`docs/rfcs/0118-taco-goals-highest-leverage.md`](docs/rfcs/0118-taco-goals-highest-leverage.md). Ranked reuse: **1** amend/implement **RFC-0109** (explicit OCR on phone+desktop — not a third media RFC); **2** implement **RFC-0115** Ornith router (0117 front responder already implemented; do not duplicate); **3** new **RFC-0120** coding+3D real tools; **4** new **RFC-0121** projects folder + chats-in-DB + media colocation vs storage node (extends RFC-0020); **5** residual **RFC-0107** hot-path use / desktop sign-off (embed landed in code; ledger stays **accepted** — do not tick implemented). **RFC-0119 reserved** for a parallel license-package entitlements RFC — unused here. **RFC-0108 continues**; 0109 after 0108. Bulk 0095–0104 later; HOLD 0092/0112; draft #282 out of scope. No new §58 checkbox; no §57 rewrite; no invented LE/Red/Purple/ATO gates.
+Specs-only ranking for Taco’s four goals (speed; coding+3D real tools; OCR+media upload; projects folder / chats-in-DB / media placement). Memo: [`docs/rfcs/0118-taco-goals-highest-leverage.md`](docs/rfcs/0118-taco-goals-highest-leverage.md). Ranked reuse: **1** amend/implement **RFC-0109** (explicit OCR on phone+desktop — not a third media RFC); **2** implement **RFC-0115** Ornith router (0117 front responder already implemented; do not duplicate); **3** new **RFC-0120** coding+3D real tools; **4** new **RFC-0121** projects folder + chats-in-DB + media colocation vs storage node (extends RFC-0020); **5** residual **RFC-0107** hot-path use / desktop sign-off (embed landed in code; ledger stays **accepted** — do not tick implemented). **RFC-0119 reserved** for a parallel license-package entitlements RFC — unused here. **RFC-0108 continues**; 0109 after 0108. Bulk 0095–0104 later; HOLD 0092/0112; draft #282 out of scope. Ledger catch-up: **RFC-0115**, **RFC-0120**, and **RFC-0121** are **implemented** (batch tick below; 0121 via #381 `e17c9104`). No new §58 checkbox; no §57 rewrite; no invented LE/Red/Purple/ATO gates.
 
 Reason:
 
@@ -2589,6 +2605,304 @@ Taco via CoS 2026-09-18 (blocked on local install). [RFC-0124](docs/rfcs/0124-cl
 Reason:
 
 Taco needs a portal/Setup Clean Install that actually kills lockers, deletes only Jarvis-owned trees, and reinstalls — not a polite hang or a wipe of unrelated AppData.
+
+---
+
+Decision: RFC-0136 zombie-kill on Setup Next and Start (accepted)
+
+Taco 2026-09-22 (post-1.4.10): a wedged uvicorn held **4780** (`CLOSE_WAIT`, health fail) so Start died with `Errno 10048`; a second `.venv` uvicorn was also stuck. [RFC-0136](docs/rfcs/0136-zombie-kill-setup-next-and-start.md) extends RFC-0093 `force-stop-jarvis.ps1` (does **not** rewrite [RFC-0124](docs/rfcs/0124-clean-install-reinstall-owned-path-wipe.md)). Setup installation-method **Next** and `start-jarvis.ps1` (before bind) must kill hung Jarvis backends that still own 4780/4781, tray helpers, and Jarvis-started llama-server / supermemory. Exit 0 while a Jarvis PID still holds the port is a **fail**. Specs-only; no new §58 checkbox. 0130–0135 were taken.
+
+Reason:
+
+Path-only force-stop plus a Start script that binds immediately cannot recover a listener that fails health. Task Manager must not be the fix.
+
+---
+
+Decision: Batch ledger tick — RFC-0136, 0055, 0109, 0122, 0124, 0108, 0123, 0112, 0126, 0131 (implemented)
+
+Late catch-up: product PRs already on development; specs Status was still accepted. Tick against development tip `62a87df`.
+
+- RFC-0136 zombie-kill Setup Next + start-jarvis — #369 (`45c7ea0c`)
+- RFC-0055 social commentary / butler persona gate — #370 (`002f84cd`)
+- RFC-0109 media upload phone+PC (+ OCR amend intent) — #371 (`25d1c535`)
+- RFC-0122 ingress size-gate / spill / trajectory quality — #318 (`12827aef`)
+- RFC-0124 Clean Install / Reinstall — #321 + #323 (`b45e8f05`, `b04ddbaa`)
+- RFC-0108 phone offline pack + #317 popup — #309 (`84251235`) + #319 (`a6977b74`) + #317 (`2ffe6c3a`)
+- RFC-0123 companion reachability / anti-impersonation — #319 (`a6977b74`, with 0108 amend)
+- RFC-0112 voice preview exact profile — #301 (`d0d13528`)
+- RFC-0126 personality session modes v1 — #334 (`8344b806`)
+- RFC-0131 context-size model autoselect — #337 (`d4eceef9`)
+
+RFC-0107 stays accepted until Taco desktop sign-off. Windows live smoke (wedged 4780, Clean wipe, HUD+27B overflow, audible preview, on-device offline tokens) remains desktop sign-off where noted in those RFCs. No new §58 checkboxes. No product code in this PR. Acceptance checkboxes left open where they are specs-only-in-this-PR or live desktop sign-off.
+
+Reason:
+
+CoS assigned Architect tick-only after ranked accurate/fast/stable queue lock.
+
+---
+
+Decision: RFC-0137 named persona presence shape and original voice binding (accepted; superseded by the 13-persona amendment below)
+
+[RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md): the presence+voice catalog is **named personas only** — Anzu, Eagir, Veles, Enki. Session modes (`core` / `coding` / `research` / `concise`, RFC-0126 / RFC-0130) stay HUD accent + prompt and do **not** select a shape or a voice. Anzu → `stormbird` + `butler_original_v1` (dry butler only if the butler pack is missing). Eagir (Ægir) → `ocean_swell` + `dry_butler_original_v1`. Veles → `root_coil` + `synthetic_command_original_v1`. Enki → `abzu_flow` + `tactical_aide_original_v1`. Morph uses RFC-0069 `uMorph`; reduced motion snaps. `hex_aegis` stays the HexStrike suite figure (RFC-0069 / RFC-0078), not a persona, and this ticket does not bind a suite voice. A missing neural pack fails closed — no silent SAPI. RFC-0104 trees stay unmerged. No fuller name list was in the tree; do not add further gods. Specs-only; **not implemented**. No new §58 checkbox. Implement ticket: **Grok 4.7, fast=false**.
+
+Reason:
+
+Taco via CoS: do not treat session modes as the persona catalog. Each named personality (Anzu, Eagir, Veles, Enki) gets an origin-matched presence figure and an original voice; Anzu is the stormbird; selection morphs smoothly.
+
+Decision: RFC-0137 amended to the 13-persona ANZU roster (accepted; implemented in the ledger tick below)
+
+[RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md) is amended in place (no RFC-0138). Taco’s canonical roster supersedes the #376 four-name catalog (`eagir` dropped; Enki is coding on `code_cube`, not `abzu_flow`; Veles shape is `serpent_orbit`, with stored `root_coil` migrated). Thirteen ids — `anzu`, `mestor`, `nabu`, `enki`, `veles`, `themis`, `aegir`, `bragi`, `hermes`, `heimdall`, `eir`, `maia`, `vulcan` — each bind one presence shape and one existing neural pack. Anzu remains the default main persona (`stormbird` + `butler_original_v1`, dry butler only if the butler pack is missing). Every other missing pack fails closed (no SAPI, no cross-pack substitute). Shared packs are distinguished by per-persona appearance (pitch, rate, colour, motion), not by new voice files. All personas share one presence state machine on the RFC-0069 orb cloud (idle, listening, thinking, working, speaking, alert, waiting for approval, offline, error). Session modes (RFC-0126 / RFC-0130) stay HUD/prompt. HexStrike still morphs to `hex_aegis` and does not rewrite RFC-0106. Keep existing session-mode, voice-picker, Appearance, HexStrike, and presence UI; the roster layers on top. Veles and Themis are presence/voice labels only — no new LE/ATO gates or offensive wiring. RFC-0104 trees stay unmerged. Roster amend was specs-only (#379 @ `a434f4c8`). No new §58 checkbox. Implement ticket was **Grok 4.7, fast=false**; product is #383 @ `5bce6a2` (ledger tick below).
+
+Reason:
+
+Taco pasted the canonical ANZU specialist roster. UX holds implement until this amend is the catalog.
+
+---
+
+Decision: Batch ledger tick — RFC-0127, 0128, 0133, 0115, 0120, 0117 journal, 0121 (implemented)
+
+Late catch-up. Product already landed; specs Status was still accepted. Swift/progressive and capability-ladder items were on tip `3f523f45`; the durable-state journal landed at #380 @ `049874c7`; project media placement landed at #381 @ `e17c9104`. Those earlier ticks merged in #382 (`28d1fd0`) before 0121 could be added to that PR.
+
+- RFC-0127 swift initial reply + 60s progress — #338 (`13d9aa0b`) + #354 (`19a2e4a7`) + #355 (`e87af8eb`) + #375 (`06cbf5b7`)
+- RFC-0128 progressive answer + background verify — #339 (`b85d1b14`) + #375 (`06cbf5b7`)
+- RFC-0133 python call salvage / method switch — #366 (`ba12c618`; shipped inside the HexStrike/MCP PR, not a dedicated 0133 PR). `normalize_python_call`, recovery, escalation; 33 tests in `tests/test_python_call_normalize.py`, `tests/test_recovery.py`, and `tests/test_escalation.py`
+- RFC-0115 Ornith orchestrator / complexity / visible handoff — #377 (`770261e5`)
+- RFC-0120 coding + 3D real tools — #378 (`3f523f45`)
+- RFC-0117 durable-state journal + known-good rollback (`0117-durable-state-journal-rollback.md`) — #380 (`049874c7`)
+- RFC-0121 projects folder + chats in DB + media placement — #381 (`e17c9104`)
+
+Held (not ticked): RFC-0107 (Taco desktop Obsidian sign-off). RFC-0137 was held in this batch because UX #383 was still open; the following decision ticks it. RFC-0117 tiny front-chat (`0117-tiny-front-chat-responder.md`) was already implemented and is unchanged. §57 Current State and §58 Development Queue had no status lines for these RFCs. No new §58 checkboxes. No product code in this PR. Live model / DCC / Windows handoff, live operator rollback, and multi-node storage remain desktop sign-off.
+
+Reason:
+
+CoS assigned Architect tick-only after the capability ladder (0115, then 0120, then 0133), the swift/progressive lane (0127/0128), the durable-state journal (#380), and project media placement (#381) were already on development tip.
+
+---
+
+Decision: RFC-0137 named persona presence shape and original voice binding (implemented)
+
+Late catch-up. Product already on development. [RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md) is **implemented**. Roster specs amend #379 @ `a434f4c8` (13-persona ANZU roster; supersedes the #376 four-name catalog). UX implement #383 @ `5bce6a2` (catalog, presence shapes, neural voice bind; `tests/test_rfc0137_named_persona.py`). §57 Current State and §58 Development Queue had no status lines for this RFC, so neither section was rewritten and no §58 checkbox was added. RFC-0107 stays accepted until Taco desktop Obsidian sign-off. Live listening and a GPU morph capture remain desktop sign-off. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after UX #383 (`5bce6a2`) landed on development tip. #384 had left RFC-0137 held because that UX PR was still open.
+
+---
+
+Decision: RFC-0138 Anzu orb custom UI generation (accepted)
+
+[RFC-0138](docs/rfcs/0138-anzu-orb-custom-ui-generation.md) is **accepted** and is not a roster amendment (the RFC-0137 “no RFC-0138” line still means do not open another file for the 13 personas). The owner generates a custom presence look from text and/or an image through **local Anzu**. Every generated object is an orb composition (`sphere`, `ring`, `arc`, `orbit`, `sparks`, or `shape_sample` of a registered shape) driving RFC-0069 `buildFigure` / `registerPresenceShape` / `uMorph`. Mesh, GLTF, texture, and HTML/CSS are rejected. The look is a **global** preset on `AppSettings.custom_presence` (same `settings.json` path as named personas), independent of who is speaking; HexStrike still forces `hex_aegis` while the suite is active and does not change voice. **Add new UI** mounts beside session modes, `VoiceProfilePicker`, Appearance, and the 13-persona roster. Set as default, save as a named custom UI, or discard. Launch reloads the stored default without calling the model again. Anzu unavailable or vision missing fails closed — no stub success. Screenshot-to-code / MCP is a reference for image→structure only, not a vendor. Quality bar is multibillion-company grade (production UX, durable persistence, finished preview and Set as default). A subpar implement is escalated **CoS → Taco** in review, not as a code path. User-facing release wording for this stretch is **Anzu 1.0**; the GitHub repo stays `Daan298261/Jarvis` and existing `Jarvis` identifiers stay. Phases A–D are one RFC. Specs-only; **not implemented**. No new §58 checkbox. No new voice packs. RFC-0104 trees stay unmerged.
+
+Reason:
+
+Taco / CoS 2026-09-23: generate a new presence look from the flowing orbs the owner already has, at a finished **Anzu 1.0** bar. More UI, not a replacement of the roster, session modes, or HexStrike.
+
+---
+
+Decision: RFC-0071 automation failure circuit breaker (implemented, backend; portal residual open)
+
+[RFC-0071](docs/rfcs/0071-automation-failure-circuit-breaker.md) is **implemented** for backend on development via #388 @ `5377938`. Durable `ACTIVE` → `DEGRADED` → `DISABLED_BY_FAILURE` state, mobile schedule admission before worker submit, agent-loop terminal hook (one count per finalized run; only normalized `FAILURE` increments; verified success resets), owner-key re-enable that blocks automation self-reenable, and jsonl audit. `tests/test_rfc0071_breaker.py` (11) passed on the ledger VM. Portal residual remains open: the UI/API acceptance checkbox and the portal build checkbox stay unchecked. API routes exist; no portal Re-enable surface landed in #388. `event_subscription_automation_id` is unused because RFC-0016 has no dispatcher on tip. §57 Current State and §58 Development Queue had no RFC-0071 status line, so neither section was rewritten and no §58 checkbox was added. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after backend #388 (`5377938`) landed on development tip. UX for breaker state and Re-enable is still in flight.
+
+---
+
+Decision: RFC-0085 universal task fast path (implemented)
+
+Late catch-up. The response-first stage is already on development tip `d56e2c5` (#388 @ `5377938` adds an automation-breaker terminal hook only; #390 is the RFC-0071 ledger tick and does not change routing, which is unchanged from `785d1df`). [RFC-0085](docs/rfcs/0085-universal-task-fastpath.md) is **implemented**. Original land #235 (`954e01f`): `route_request` (`direct_reply` / `direct_lookup` / `managed_task`) before the agent runner, class-scoped tools, managed acknowledgement, `response_route`. Later lanes reuse `backend/app/agent/front_responder.py` (RFC-0117 #305) and the RFC-0084 weather briefing. D1 tip-audit found no outstanding implement PR. §57 Current State and §58 Development Queue had no status lines for this RFC, so neither section was rewritten and no §58 checkbox was added. Acceptance left open: direct replies are not one model call with no verifier inside an interactive budget; weather lookup runs before the front acknowledgement and is the only direct lookup; the task record has no queue-delay or verifier-timing fields. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after the universal fast path was already on development tip. No new implement PR.
+
+---
+
+Decision: RFC-0071 automation failure circuit breaker (portal residual landed)
+
+[RFC-0071](docs/rfcs/0071-automation-failure-circuit-breaker.md) portal residual is on development via #392 @ `392c1572`. Settings → Advanced → Automation circuit breaker lists breaker state, consecutive count against threshold, last failure time and summary, recent failed-run links, an audit strip, owner Re-enable, and owner threshold save. List errors fail closed. #392 CI `frontend-build` completed success (actions run `35867007305`). Status stays **implemented**. The UI/API and portal-build acceptance boxes are checked. Backend caveats from the #390 tick still hold: GET list/detail/audit are not owner-key gated, the race test allows `<= 2`, the 11 tests do not assert audit rows, and RFC-0016 still has no dispatcher. Residual: threshold PUT (and `admit_automatic_trigger`) call `ensure_automation` with default `kind="generic"`, which rewrites a prior kind; the portal shows the returned kind. No new RFC. The earlier 0071 backend tick in this section is unchanged. §57 Current State and §58 Development Queue were not rewritten. No product code in this PR.
+
+Reason:
+
+CoS assigned a specs-only ledger refine after portal #392 (`392c1572`) landed on development tip.
+
+---
+
+Decision: RFC-0026 execution phase and verifier observability (implemented, backend/API; UI residual open)
+
+[RFC-0026](docs/rfcs/0026-execution-phase-and-verifier-observability.md) is **implemented** for backend/API on development via #393 @ `5da8741f431f131ccb03dd5b9a84caeb3d39d2ce`. Canonical `ExecutionPhase` and legal transitions, event projection with no second scheduler, phase history, `current_activity` without chain-of-thought, external-wait kinds, deterministic progress units, stale-phase warning (not auto-failure), `VerificationSummary` (`VERIFIED` / `VERIFICATION_FAILED` / `PARTIALLY_VERIFIED` / `NOT_VERIFIED`), completed-task verification failure projected as phase `DEGRADED`, and `DelegatedWorker` child aggregation (no `GoalRun`). `GET /api/tasks/{id}/observability` is the audit/export payload; task detail uses the same projection. `tests/test_rfc0026_execution_phase.py` (9) and `tests/test_task_observability.py` (5) — 14 passed on this ledger VM; the land claimed 13. Left open: home/task-row and task-detail UI, portal build (frontend not in #393), Decision Inbox auto-create plus a working link when a row exists (`load_decision_inbox(open_only=True)` TypeErrors against a zero-arg loader, so the API fail-closes with `decision_inbox_link_error`), `compact_memory.observability` emitters, Away Mode / RFC-0025 consumers (API contract ready; consumers later), and the destructive-approval box (policy already lives outside this diff; not claimed). §58 still shows RFC-0026 as an unchecked `accepted` line and was not rewritten. §57 was not rewritten. No product code in this PR.
+
+Reason:
+
+CoS assigned Architect tick-only after backend #393 (`5da8741`) landed on development tip. UI and the residuals above stay open.
+
+---
+
+Decision: RFC-0139 Android companion fancy orb / humanoid presence UI (accepted)
+
+[RFC-0139](docs/rfcs/0139-android-companion-fancy-orb-humanoid-ui.md) is **accepted**. Bring Desktop-quality fancy multi-orb / humanoid presence to the Android companion Home HUD. Default chrome is **humanoid** (full 13-persona morph catalog is a later RFC). Shared presence states align with RFC-0137 intent (Idle / Listening / Thinking / Working / Speaking / Alert / Waiting / Offline / Error). Tip Offline dim (~0.12 activity) is rejected: Offline must be **daylight-readable** with a brightness floor and richer particle / multi-orb detail so offline does not look dead. Prefer sharing Desktop TJS / morphable-orb quality or upgrading Compose `PresenceHud` to that bar; WebView/TJS init failure must fail closed with a readable Compose fallback that still meets the offline bar. Not a custom brain UI; not RFC-0138 custom-UI generation on phone. Specs-only; **not implemented**. Quality bar Anzu 1.0 / multibillion; subpar → CoS → Taco in review.
+
+Reason:
+
+Taco via CoS 2026-09-23: fancy orb UI on Android, humanoid first, Offline too dim on tip, more detail.
+
+---
+
+Decision: RFC-0140 Companion on-device small voice models (accepted)
+
+[RFC-0140](docs/rfcs/0140-companion-on-device-voice-models.md) is **accepted**. Allowlisted on-device STT/TTS packs for the companion. **Mode A (Fallback):** when PC/gateway/LAN is down, phone still has usable local STT and/or TTS. **Mode B (Grid-down / local AI):** on-device voice with the RFC-0108 local LLM. Online still prefers Leader / Kokoro-on-PC. Architect defaults: Whisper **tiny.en** class STT (≤~80 MB) + **Pocket TTS** class TTS (≤~150 MB), Piper medium as small TTS fallback; combined recommended download ≤~250 MB. NPU/NNAPI/GPU when available, else CPU; privacy on-device; no silent soft-fail; no empty catalog URLs; RFC-0092 not weakened. Specs-only; **not implemented**. Quality bar Anzu 1.0 / multibillion; subpar → CoS → Taco in review.
+
+Reason:
+
+Taco via CoS 2026-09-23: Pocket TTS / Whisper nano class; fallback when PC down; grid-down with local phone AI.
+
+---
+
+Decision: RFC-0138 Phase C portal Add new UI (landed; RFC stays accepted)
+
+[RFC-0138](docs/rfcs/0138-anzu-orb-custom-ui-generation.md) **Phase C** (portal **Add new UI**) is on development via #400 @ `4aaaf466`. `CustomPresencePanel` mounts beside existing Appearance / session-mode / named-persona / HexStrike controls (nothing removed). Wizard: text and/or image → job status → preview morph path on the existing orb cloud → Set as default / Save as named / Discard; saved list with default badge; shape precedence suite → `hex_aegis`, else active custom/preview, else persona. Fail-closed surfacing of `model_unavailable`, `vision_unavailable`, and `constraint_rejected` (no fake preview). User-facing copy uses **Anzu 1.0**. Touch was `frontend/src` only. Portal-flow, keep-existing-UI, and Anzu 1.0 stretch acceptance boxes are checked from this land. **Left open:** live Anzu generate + morph + Set as default + restart (Taco Desktop sign-off; cloud had no GPU); remaining Phase A/B/D acceptance and quality-bar close; RFC status stays **accepted** (not flipped to implemented). §57 / §58 unchanged (no §58 checkbox for this RFC). No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect ledger-tick after UX #400 (`4aaaf466`) landed on development tip. Live Anzu morph remains desktop sign-off.
+
+---
+
+Decision: RFC-0139 Android companion fancy orb / humanoid presence UI (implemented)
+
+[RFC-0139](docs/rfcs/0139-android-companion-fancy-orb-humanoid-ui.md) is **implemented** on development via #401 @ `e9df37857a42f68d13493bfdd981b4197857846f`. Compose Home HUD presence only: default **humanoid**, Desktop-aligned phases (Idle / Listening / Thinking / Working / Speaking / Alert / Waiting / Offline / Error), Offline activity floor **≥ 0.45** (`PresenceVisual.OFFLINE_ACTIVITY_FLOOR`, rejects tip ~0.12), richer multi-orb / particle composition (core + halo + sparks; density not dropped Offline), warm offline tint in addition to brightness, fail-closed Compose path (no WebView soft-fail stub). Unit tests: `PresenceVisualTest` / presence particle smoke. Out of scope left open: full 13-persona morph, RFC-0138 custom-UI on phone, Desktop. **Residual:** physical phone daylight soak = Taco device sign-off. §58 RFC-0139 checked implemented. §57 not rewritten. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect mark-implemented / §58 tick after #401 (`e9df378`) landed CLEAN. Phone daylight soak stays sign-off.
+
+---
+
+Decision: RFC-0140 Companion on-device small voice models (implemented)
+
+[RFC-0140](docs/rfcs/0140-companion-on-device-voice-models.md) is **implemented** on development via #403 @ `59e5ea73`. Allowlisted STT/TTS packs (Whisper tiny.en / base.en cpp; Pocket TTS; Piper lessac-medium), Leader catalog + API + cache, companion manager/routing (Mode A fallback + Mode B grid-down), More → Voice (on-device), fail-closed no fake audio. Online still prefers Leader/Kokoro-on-PC; RFC-0092 not weakened. Pytest + Android unit coverage for catalog URL/hash/routing. **Residuals:** Whisper native opt-in (`JARVIS_BUILD_VOICE_NATIVE`) + TTS ORT device bake (`JARVIS_VOICE_TTS_ORT`); default APK won’t synthesize live until those flags; phone soak for latency/thermal/live native synth = device sign-off. §58 RFC-0140 checked implemented. §57 not rewritten. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect ledger-tick after #403 (`59e5ea73`) landed CLEAN. Fail-closed Whisper/TTS flags acknowledged; phone soak residual.
+
+---
+
+Decision: RFC-0171 / RFC-0172 ported to development; main 0139/0140 collision resolved
+
+P0 RFCs from main @ `ac18fb32` (#406) are now on **development** without clobbering Android companion RFCs:
+
+- [RFC-0171](docs/rfcs/0171-system-one-reflex-lane-jev-laya-priority.md) — System-One Reflex Lane (Jev + local Laya). **Accepted / P0.**
+- [RFC-0172](docs/rfcs/0172-reflex-first-browser-computer-use-fast-loop.md) — Reflex-first browser/computer-use fast loop. **Accepted / P0.** Hard dep RFC-0171; RFC-0145/0151 soft until parity port.
+- [RFC-0173](docs/rfcs/0173-skill-forge-verified-trace-to-reusable-skill.md) — Skill Forge (was wrongly numbered RFC-0139 on main).
+- [RFC-0174](docs/rfcs/0174-multi-agent-rooms-blackboard-deadlock-and-handoff.md) — Multi-agent rooms (was wrongly numbered RFC-0140 on main).
+
+Development **RFC-0139** / **RFC-0140** remain the implemented Android orb + on-device voice RFCs. See [NUMBERING_NOTE_main_ac18fb32.md](docs/rfcs/NUMBERING_NOTE_main_ac18fb32.md). §58 checkboxes added (accepted). Specs-only; **not implemented**. CoS assigns D1→0171 and D2→0172 after this lands.
+
+Reason:
+
+CoS 2026-09-24: Dual Seat clean; open development docs PR for 0171+0172 and resolve 0139/0140 number collision cleanly (do not clobber tip Android RFCs).
+
+---
+
+Decision: RFC-0171 System-One Reflex Lane (implemented)
+
+[RFC-0171](docs/rfcs/0171-system-one-reflex-lane-jev-laya-priority.md) is **implemented** on development via #409 @ `f7bf66a943b4d365f6a5f6084d8d774f76358f4b`. Provider-neutral `decide()` lane (`backend/app/decision/`): rules → Laya → Jev (opt-in + probe) → generative; batching/cache/deadline fallback; Quartermaster; surfaces for routing/tools/memory/`browser_operation_target`; Control Room metrics; `tests/system_one/`; RFC-0116 waitlist-era copy updated (still opt-in + probe). **Residuals (do not block acceptance):** live TypeSafe/Laya GPU soak + latency budgets; production Laya sha256 fills (empty pin fail-closed); release-gate speed claims need reproducible Desktop evidence. Browser fast-loop criterion satisfied via sibling #408. §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect ledger-tick after #409 land; TypeSafe/Laya GPU + sha residuals are sign-off, not acceptance blockers (fail-closed pins already refuse bad installs).
+
+---
+
+Decision: RFC-0172 Reflex-first browser/computer-use fast loop (implemented)
+
+[RFC-0172](docs/rfcs/0172-reflex-first-browser-computer-use-fast-loop.md) is **implemented** on development via #408 @ `8f81e5890a1131a40bc678d165ebcbd4ba95b3ef`. `backend/app/reflex_loop/` ActionFrame + adapters + executor + sandbox + benchmark; tool/API wires; 15 module tests green. Soft 0145/0151 unchanged. **Residuals:** D2 tip follow-up wiring forwarder → landed 0171 `browser_operation_target` / DecisionResult (claim in flight); live Playwright/CDP + Windows UIA Desktop sign-off. §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect ledger-tick 0171+0172 after tip has both lands. Soft 0145/0151 stays soft.
+
+---
+
+Decision: RFC-0173 Skill Forge (implemented)
+
+[RFC-0173](docs/rfcs/0173-skill-forge-verified-trace-to-reusable-skill.md) is **implemented** on development via #414 @ `e442b3314c9b9d03e6eff9bdc020f8e8db111a01`. `backend/app/skills/` pipeline: eligibility → extract → isolated eval → Decision Inbox approve → activate; permission ∩; hash/rollback; marketplace quarantine; persona + Goal Runtime routing; `/api/skill-forge/*`; 14 forge tests. No auto-publish / privilege expansion. **Residuals:** Modules/Skills portal UI (UX lane). §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect paired ledger-tick after #414 land (with #413).
+
+---
+
+Decision: RFC-0174 Multi-agent rooms (implemented)
+
+[RFC-0174](docs/rfcs/0174-multi-agent-rooms-blackboard-deadlock-and-handoff.md) is **implemented** on development via #413 @ `13740066e6409bb3da384026e349c6f65c4fa6a8`. `backend/app/agents/rooms/`: typed protocol, bounded Blackboard, private histories, deadlock/governor, supervisor synthesis + audit replay without hidden CoT; router `room_hint`; tests green. Backend-only. **Residuals:** portal/websocket UI (UX); live multi-model room Desktop sign-off. §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS assigned Architect paired ledger-tick 0173+0174 after both lands.
+
+---
+
+Decision: RFC-0173 portal residual closed
+
+[RFC-0173](docs/rfcs/0173-skill-forge-verified-trace-to-reusable-skill.md) portal UI residual is **closed** on development via #416 @ `ebcdf9dacf787719b5f28159d31515817034fca0`. Modules / Skills (`frontend/src/pages/SkillForge.tsx`) reviews forge candidates and requires an explicit Approve, then Activate. Backend #414 is unchanged. **Residuals:** none. Desktop live soak stays N/A (unit-covered). §58 portal-residual wording removed. No product code in this ledger PR.
+
+Reason:
+
+CoS held the 0173 portal ledger to pair with the 0174 portal. #416 is merged.
+
+---
+
+Decision: RFC-0174 portal residual closed
+
+[RFC-0174](docs/rfcs/0174-multi-agent-rooms-blackboard-deadlock-and-handoff.md) portal UI residual is **closed** on development via #417 @ `2cb6c0b2feb56374c2e55007fd8ff5932837592a`. Agent rooms (`frontend/src/pages/AgentRooms.tsx`, `/api/agent-rooms`) shows participants, task graph, typed timeline, blackboard, and audit replay over REST. Backend #413 is unchanged. **Residual:** live multi-model room Desktop soak. Websocket push was not part of the landed portal and is not left open. §58 portal-residual wording removed. No product code in this ledger PR.
+
+Reason:
+
+CoS paired this close with the 0173 portal ledger after #417 landed on `development`.
+
+---
+
+Decision: RFC-0175 Galaxy presence option, chat waveform, and Advanced controls (accepted)
+
+[RFC-0175](docs/rfcs/0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) is **accepted** (specs only). Galaxy is an additional Appearance presence choice. Default stays `requested_presence: neural`. Classic, Neural HUD, Humanoid HUD, Particle bust, persona shapes, RFC-0138 presets, and HexStrike `hex_aegis` stay selectable. When Galaxy is selected, the current humanoid cloud is enriched toward Taco’s room frames: Ref A idle particle bust with `STATUS: IDLE | ····· | SYN-01`, Ref B neural lattice in that same bust, Ref C full-frame starfield ambience. Chat gains a voice waveform bound to real TTS/STT state. Common controls stay on their tab; power controls sit under Advanced, beside the existing RFC-0094 Advanced group. Implement is a separate named UX ticket after CoS merges this PR. §58 checkbox unchecked. No product code in this PR.
+
+Reason:
+
+Taco via CoS, 2026-09-24. Visual targets are the three attached reference frames, described in the RFC. Subpar implement is a CoS → Taco review escalate, not a code path.
+
+---
+
+Decision: RFC-0175 Galaxy presence / waveform / Advanced implemented
+
+[RFC-0175](docs/rfcs/0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) is **implemented** on development via #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47`. Specs-only land was #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. Galaxy is a selectable Appearance ADD option; default stays neural; waveform fail-closed on real TTS/STT; per-tab Advanced disclosures. **Residual:** Desktop GPU / live WebGL soak against docs/rfcs/assets/0175 refs A/B/C. §58 checked. No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #419 landed; Desktop soak vs mood boards may stay residual.
+
+---
+
+Decision: RFC-0175 one-presence lifecycle amend (accepted residual)
+
+[RFC-0175](docs/rfcs/0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) stays **implemented** for the #419 land (Galaxy ADD option, default `neural`, HexStrike override, chat waveform, per-tab Advanced, budgets) via #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47`. Specs #418 and the prior accepted and implemented ledger entries above stay. Amend 2026-09-25 (Taco lock via Chief of Staff) accepts a follow-up implement, not a new mode picker: refs A/B/C are stages of **one** continuous presence. Idle / attract is free-floating orbs drawn to the pointer, and to the face when webcam/person tracking is available (fail closed; mouse-only still works; RFC-0050 / RFC-0051 attention, not a second camera stack). Engage / start morph-clumps into the humanoid silhouette (Ref B lattice; Ref C field through the lifecycle, especially Galaxy) with RFC-0069 `uMorph`. That free→humanoid morph is required on every UI avatar / presence mode (Neural, Humanoid, Particle bust, Galaxy, HexStrike host, persona shapes, Classic only where presence shows). It is not gated on `requestedPresence: galaxy`. Galaxy stays an ADD Appearance option for the starfield already specified. Lifecycle acceptance stays unchecked. **Residual:** Desktop GPU soak of the live morph vs refs plus the new attract behavior. §58 stays checked with that residual phrase. No product code in this amend. Morph implement waits until the UX Skill Forge + Rooms luxury CSS PR lands and CoS/Architect undraft this amend.
+
+Reason:
+
+Taco lock 2026-09-25 via Chief of Staff. Refs A/B/C are stages of one presence, not three looks to swap. Do not mass-rewrite RFC-0069, RFC-0050, or RFC-0051.
+
+---
+
+Decision: RFC-0175 one-presence morph residual implemented
+
+[RFC-0175](docs/rfcs/0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) amend 2026-09-25 (one-presence free→humanoid morph on all avatars, idle attract) is **implemented** on development via #425 @ `063a5ee1e411ce5bb551f3edccd680f7ea71e7e9` (squash; pre-squash head `9f86a14f`). Specs amend was #422 @ `893d6e2c5c6a2c6476cdc46fdfb0b081e49db7be`. The #419 land (Galaxy ADD option, default `neural`, HexStrike override, chat waveform, per-tab Advanced, budgets) and the prior accepted, implemented, and accepted-residual ledger entries above stay. Refs A/B/C remain stages of **one** continuous presence. Idle / attract is free-floating orbs drawn to the pointer, and to the face when webcam/person tracking is available (fail closed; mouse-only still works; RFC-0050 / RFC-0051 attention, not a second camera stack). Engage / start morph-clumps into the humanoid silhouette (Ref B lattice; Ref C field through the lifecycle, especially Galaxy) with RFC-0069 `uMorph`. That morph runs on every UI avatar / presence mode (Neural, Humanoid, Particle bust, Galaxy, HexStrike host, persona shapes, Classic only where presence shows). It is not gated on `requestedPresence: galaxy`. Galaxy stays an ADD Appearance option. Quality bar stays **Anzu 1.0**. Full intent. No stubs / soft-fail. Lifecycle product criteria are checked. **Residual:** Desktop GPU / live WebGL soak of the live morph against mood-board refs A/B/C and real webcam face attract. Taco Desktop soak. Not signed off in the #425 PR body. Cloud VMs cannot sign that off. §58 stays checked; the morph residual phrase is closed and the soak residual remains. No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #425 squash-landed on `development`. Desktop soak vs mood boards and a real webcam stays residual.
 
 ---
 

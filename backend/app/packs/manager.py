@@ -340,6 +340,12 @@ def install_pack(
     require_signature: bool = False,
     enforce_policies: bool = True,
 ) -> dict[str, Any]:
+    from ..recovery.hooks import RISK_PACK_RUNTIME, ensure_checkpoint_before_risk
+    from ..recovery.journal import journal_mutate
+    from ..recovery.resources import capture_packs_state
+    from ..recovery.types import JournalOperation, RESOURCE_PACKS_STATE
+
+    ensure_checkpoint_before_risk(RISK_PACK_RUNTIME, notes=f"install:{manifest.id}")
     preview = preview_pack(manifest, action="install", overrides=overrides, require_signature=require_signature)
     if not preview.valid:
         raise PackError("; ".join(preview.errors))
@@ -350,24 +356,42 @@ def install_pack(
         enforce_trust_policy(manifest, require_signature=require_signature)
         enforce_capability_policy(manifest)
 
-    applied = _apply_changes(manifest, preview.changes, installed_version=manifest.version)
-    record = InstalledPack(
-        id=manifest.id,
-        name=manifest.name,
-        version=manifest.version,
-        description=manifest.description,
-        status="installed",
-        installed_at=_utc_now(),
-        manifest_hash=_hash_manifest(manifest),
-        previous_version=None,
-        snapshot_id=None,
-        resource_ids=applied,
+    before = capture_packs_state()
+    result_holder: dict[str, Any] = {}
+
+    def _apply() -> None:
+        applied = _apply_changes(manifest, preview.changes, installed_version=manifest.version)
+        record = InstalledPack(
+            id=manifest.id,
+            name=manifest.name,
+            version=manifest.version,
+            description=manifest.description,
+            status="installed",
+            installed_at=_utc_now(),
+            manifest_hash=_hash_manifest(manifest),
+            previous_version=None,
+            snapshot_id=None,
+            resource_ids=applied,
+        )
+        set_installation(record)
+        append_history(
+            history_event("pack.installed", manifest.id, version=manifest.version, details={"resources": applied})
+        )
+        result_holder["installation"] = record.model_dump(mode="json")
+        result_holder["preview"] = preview.model_dump(mode="json")
+
+    journal_mutate(
+        resource_class=RESOURCE_PACKS_STATE,
+        resource_id=manifest.id,
+        operation=JournalOperation.CREATE,
+        actor="packs",
+        before=before,
+        after_fn=capture_packs_state,
+        risk_tag=RISK_PACK_RUNTIME,
+        external_effects=[f"pack_install:{manifest.id}"],
+        apply_fn=_apply,
     )
-    set_installation(record)
-    append_history(
-        history_event("pack.installed", manifest.id, version=manifest.version, details={"resources": applied})
-    )
-    return {"installation": record.model_dump(mode="json"), "preview": preview.model_dump(mode="json")}
+    return result_holder
 
 
 def upgrade_pack(
@@ -377,6 +401,12 @@ def upgrade_pack(
     require_signature: bool = False,
     enforce_policies: bool = True,
 ) -> dict[str, Any]:
+    from ..recovery.hooks import RISK_PACK_RUNTIME, ensure_checkpoint_before_risk
+    from ..recovery.journal import journal_mutate
+    from ..recovery.resources import capture_packs_state
+    from ..recovery.types import JournalOperation, RESOURCE_PACKS_STATE
+
+    ensure_checkpoint_before_risk(RISK_PACK_RUNTIME, notes=f"upgrade:{manifest.id}")
     installed = get_installation(manifest.id)
     if installed is None:
         raise PackError(f"Pack {manifest.id!r} is not installed")
@@ -391,36 +421,51 @@ def upgrade_pack(
         enforce_trust_policy(manifest, require_signature=require_signature)
         enforce_capability_policy(manifest)
 
-    snapshot_id = _snapshot_current_state(manifest.id)
-    applied = _apply_changes(manifest, preview.changes, installed_version=manifest.version)
-    resource_ids = sorted({*installed.resource_ids, *applied})
-    record = InstalledPack(
-        id=manifest.id,
-        name=manifest.name,
-        version=manifest.version,
-        description=manifest.description,
-        status="installed",
-        installed_at=installed.installed_at,
-        manifest_hash=_hash_manifest(manifest),
-        previous_version=installed.version,
-        snapshot_id=snapshot_id,
-        resource_ids=resource_ids,
-    )
-    set_installation(record)
-    append_history(
-        history_event(
-            "pack.upgraded",
-            manifest.id,
+    before = capture_packs_state()
+    result_holder: dict[str, Any] = {}
+
+    def _apply() -> None:
+        snapshot_id = _snapshot_current_state(manifest.id)
+        applied = _apply_changes(manifest, preview.changes, installed_version=manifest.version)
+        resource_ids = sorted({*installed.resource_ids, *applied})
+        record = InstalledPack(
+            id=manifest.id,
+            name=manifest.name,
             version=manifest.version,
+            description=manifest.description,
+            status="installed",
+            installed_at=installed.installed_at,
+            manifest_hash=_hash_manifest(manifest),
+            previous_version=installed.version,
             snapshot_id=snapshot_id,
-            details={"resources": applied, "previous_version": installed.version},
+            resource_ids=resource_ids,
         )
+        set_installation(record)
+        append_history(
+            history_event(
+                "pack.upgraded",
+                manifest.id,
+                version=manifest.version,
+                snapshot_id=snapshot_id,
+                details={"resources": applied, "previous_version": installed.version},
+            )
+        )
+        result_holder["installation"] = record.model_dump(mode="json")
+        result_holder["preview"] = preview.model_dump(mode="json")
+        result_holder["snapshot_id"] = snapshot_id
+
+    journal_mutate(
+        resource_class=RESOURCE_PACKS_STATE,
+        resource_id=manifest.id,
+        operation=JournalOperation.UPDATE,
+        actor="packs",
+        before=before,
+        after_fn=capture_packs_state,
+        risk_tag=RISK_PACK_RUNTIME,
+        external_effects=[f"pack_upgrade:{manifest.id}"],
+        apply_fn=_apply,
     )
-    return {
-        "installation": record.model_dump(mode="json"),
-        "preview": preview.model_dump(mode="json"),
-        "snapshot_id": snapshot_id,
-    }
+    return result_holder
 
 
 def rollback_pack(pack_id: str) -> dict[str, Any]:

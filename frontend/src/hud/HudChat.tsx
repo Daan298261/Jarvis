@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "react-router-dom"
 import { api, ensureDesktopSession, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
 import { prunePendingUserTexts } from "../chat/ownerChatView"
+import { VoiceWaveformBar } from "../chat/VoiceWaveformBar"
+import { useLocalVoiceListen } from "../chat/useLocalVoiceListen"
 import { ChatTtsMuteButton } from "../tts/ChatTtsMuteButton"
 import { stopChatTts } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
@@ -11,6 +13,8 @@ import { useVoiceProfileSwitching } from "../tts/voiceProfiles"
 import { usePendingApprovals } from "../chat/pendingApprovals"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 import { SETUP_PROBLEM_WORKING, isAuthFailureMessage } from "../setup/ownerFacing"
+import { MediaComposerBar } from "../components/MediaComposerBar"
+import { useMediaUploads } from "../chat/useMediaUploads"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null }) => void
@@ -24,14 +28,28 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [pending, setPending] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [showSetupProblem, setShowSetupProblem] = useState(false)
-  const [recording] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
   const { ingestPayload } = usePendingApprovals()
   const voiceSwitching = useVoiceProfileSwitching()
-  const composerLocked = busy || voiceSwitching
+  const media = useMediaUploads()
+  const { recording, listening, voice, toggleRecord } = useLocalVoiceListen({
+    setBusy,
+    onResult: ({ transcript, taskId }) => {
+      if (transcript) setPrompt(transcript)
+      if (taskId) navigate(`/tasks/${taskId}`)
+    },
+    onAuthFailure: async () => {
+      setShowSetupProblem(true)
+      const recovered = await ensureDesktopSession()
+      if (recovered) setShowSetupProblem(false)
+      return recovered
+    },
+    onError: (message) => alert(message),
+  })
+  const composerLocked = busy || voiceSwitching || media.hasUploading
 
   useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies, setSpeaking)
 
@@ -92,7 +110,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
 
   async function submit() {
     const text = prompt.trim()
-    if (!id && !text) return
+    const mediaIds = media.readyIds
+    if (!id && !text && !mediaIds.length) return
     if (voiceSwitching) return
     stopChatTts()
     setSpeaking(false)
@@ -102,16 +121,24 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         if (text) setPending((current) => (current.includes(text) ? current : [...current, text]))
         await api(`/api/tasks/${id}/continue`, {
           method: "POST",
-          body: JSON.stringify({ prompt: text || "Continue this." }),
+          body: JSON.stringify({
+            prompt: text || (mediaIds.length ? "Review the attached media." : "Continue this."),
+            media_ids: mediaIds,
+          }),
         })
         setPrompt("")
+        media.clear()
         const data = await api<Task>(`/api/tasks/${id}`)
         setTask(data)
       } else {
-        const body: { prompt: string; security_role?: string } = { prompt: text }
+        const body: { prompt: string; security_role?: string; media_ids?: string[] } = {
+          prompt: text || (mediaIds.length ? "Review the attached media." : ""),
+          media_ids: mediaIds,
+        }
         if (hexStrikeActive) body.security_role = "blue-team"
         const created = await api<Task>("/api/tasks", { method: "POST", body: JSON.stringify(body) })
         setPrompt("")
+        media.clear()
         navigate(`/tasks/${created.id}`)
       }
     } catch (err: unknown) {
@@ -174,14 +201,22 @@ export function HudChat({ onMoodChange }: HudChatProps) {
       )}
 
       <div className={`hud-composer${voiceSwitching ? " voice-switching" : ""}`}>
+        <VoiceWaveformBar speaking={speaking} listening={listening} />
+        <MediaComposerBar
+          className="media-composer-bar hud-media-bar"
+          items={media.items}
+          onPick={media.uploadFiles}
+          onRemove={media.remove}
+          disabled={composerLocked}
+        />
         <textarea
           className="hud-command"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder={voiceSwitching ? "Switching voice…" : id ? "Message…" : "Ask Jarvis anything…"}
+          placeholder={voiceSwitching ? "Switching voice…" : id ? "Message…" : "Ask ANZU anything…"}
           rows={2}
-          aria-label="Message Jarvis"
+          aria-label="Message ANZU"
           aria-disabled={voiceSwitching}
         />
         <div className="hud-composer-actions">
@@ -190,6 +225,15 @@ export function HudChat({ onMoodChange }: HudChatProps) {
               Switching voice…
             </span>
           )}
+          <button
+            className={recording ? "btn recording" : "btn secondary"}
+            type="button"
+            disabled={!recording && composerLocked}
+            onClick={() => void toggleRecord()}
+            title={voice?.stt_ready ? "Record a spoken command (local Whisper)" : (voice?.detail || "Local Whisper is not installed")}
+          >
+            {recording ? "Stop" : "Speak"}
+          </button>
           <ChatTtsMuteButton
             enabled={speakChatReplies}
             variant="hud"
@@ -204,7 +248,12 @@ export function HudChat({ onMoodChange }: HudChatProps) {
               Cancel
             </button>
           )}
-          <button className="btn hud-send" type="button" disabled={composerLocked || (!id && !prompt.trim())} onClick={submit}>
+          <button
+            className="btn hud-send"
+            type="button"
+            disabled={composerLocked || (!id && !prompt.trim() && !media.readyIds.length)}
+            onClick={submit}
+          >
             {id ? (prompt.trim() ? "Send" : "Continue") : "Send"}
           </button>
         </div>

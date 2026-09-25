@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.4.10"
+#define MyAppVersion "1.4.12"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -240,52 +240,6 @@ begin
   ExistingInstallPage.SelectedValueIndex := 0;
 end;
 
-function NextButtonClick(CurPageID: Integer): Boolean;
-begin
-  Result := True;
-  if (ExistingInstallPage = nil) or (CurPageID <> ExistingInstallPage.ID) then
-    Exit;
-
-  if ExistingInstallPage.SelectedValueIndex = 3 then
-  begin
-    if not IsSafeJarvisInstallDir(ExistingInstallDir) then
-    begin
-      MsgBox(
-        'Jarvis cannot safely verify the existing installation folder, so custom files will not be removed.' + #13#10 + #13#10 +
-        'Choose an option that keeps custom files.',
-        mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-
-    Result := MsgBox(
-      'Clean reinstall permanently removes all Jarvis settings, downloaded models, task data, logs, and other files in:' + #13#10 +
-      ExistingInstallDir + #13#10 + #13#10 +
-      'This cannot be undone. Continue?',
-      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
-    Exit;
-  end;
-
-  if ExistingInstallPage.SelectedValueIndex = 2 then
-  begin
-    if not IsSafeJarvisInstallDir(ExistingInstallDir) then
-    begin
-      MsgBox(
-        'Jarvis cannot safely verify the existing installation folder, so user data will not be reset.' + #13#10 + #13#10 +
-        'Choose an option that keeps custom files.',
-        mbError, MB_OK);
-      Result := False;
-      Exit;
-    end;
-
-    Result := MsgBox(
-      'Semi-clean reinstall removes chats, tasks, routines, memory, browser profile, and logs.' + #13#10 +
-      'Your private key, license files, and downloaded models are kept.' + #13#10 + #13#10 +
-      'Continue?',
-      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
-  end;
-end;
-
 function ResolveForceStopScript(const AppDir: String): String;
 begin
   Result := ExpandConstant('{tmp}\force-stop-jarvis.ps1');
@@ -327,6 +281,65 @@ begin
   else
   begin
     Log('Failed to launch force-stop-jarvis.ps1');
+    Result := False;
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (ExistingInstallPage = nil) or (CurPageID <> ExistingInstallPage.ID) then
+    Exit;
+
+  if ExistingInstallPage.SelectedValueIndex = 3 then
+  begin
+    if not IsSafeJarvisInstallDir(ExistingInstallDir) then
+    begin
+      MsgBox(
+        'Jarvis cannot safely verify the existing installation folder, so custom files will not be removed.' + #13#10 + #13#10 +
+        'Choose an option that keeps custom files.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+
+    Result := MsgBox(
+      'Clean reinstall permanently removes all Jarvis settings, downloaded models, task data, logs, and other files in:' + #13#10 +
+      ExistingInstallDir + #13#10 + #13#10 +
+      'This cannot be undone. Continue?',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+    if not Result then
+      Exit;
+  end;
+
+  if ExistingInstallPage.SelectedValueIndex = 2 then
+  begin
+    if not IsSafeJarvisInstallDir(ExistingInstallDir) then
+    begin
+      MsgBox(
+        'Jarvis cannot safely verify the existing installation folder, so user data will not be reset.' + #13#10 + #13#10 +
+        'Choose an option that keeps custom files.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+
+    Result := MsgBox(
+      'Semi-clean reinstall removes chats, tasks, routines, memory, browser profile, and logs.' + #13#10 +
+      'Your private key, license files, and downloaded models are kept.' + #13#10 + #13#10 +
+      'Continue?',
+      mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+    if not Result then
+      Exit;
+  end;
+
+  { RFC-0136: stop hung/zombie backends before any upgrade path continues (PrepareToInstall remains backstop). }
+  if not ForceStopJarvisUnder(ExistingInstallDir) then
+  begin
+    MsgBox(
+      'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
+      'See logs\installer-stop.log in your Jarvis folder for details.',
+      mbError, MB_OK);
     Result := False;
   end;
 end;

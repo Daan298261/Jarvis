@@ -1,4 +1,8 @@
 import { jarvisApiUrl } from "./apiOrigin"
+import type {
+  AutomationBreakerAuditEvent,
+  AutomationBreakerView,
+} from "./settings/automationBreakerView"
 import { ownerFacingApiMessage } from "./setup/ownerFacing"
 
 export function getPrivateKey(): string {
@@ -207,6 +211,8 @@ export type Task = {
   heartbeat_status?: "alive" | "waiting" | "stale" | "stopped" | string
   waiting_for_confirmation: boolean
   confirmation_payload?: unknown
+  specialist_persona_ids?: string[]
+  persona_card_sentence?: string
   verification_summary?: {
     result: "VERIFIED" | "VERIFICATION_FAILED" | "PARTIALLY_VERIFIED" | "NOT_VERIFIED" | string
     verifier: string
@@ -5161,4 +5167,617 @@ export function formatCleanReinstallLogPaths(
 export function cleanReinstallDurableLogPath(logPaths: CleanReinstallLogPaths | null | undefined): string | null {
   const path = logPaths?.durable?.trim()
   return path || null
+}
+
+export async function listAutomationBreakers(): Promise<{ automations: AutomationBreakerView[] }> {
+  return api<{ automations: AutomationBreakerView[] }>("/api/automation-breaker")
+}
+
+export async function getAutomationBreaker(automationId: string): Promise<AutomationBreakerView> {
+  return api<AutomationBreakerView>(
+    `/api/automation-breaker/${encodeURIComponent(automationId)}`,
+  )
+}
+
+export async function listAutomationBreakerAudit(options?: {
+  automationId?: string
+  limit?: number
+}): Promise<{ events: AutomationBreakerAuditEvent[] }> {
+  const params = new URLSearchParams()
+  if (options?.automationId) params.set("automation_id", options.automationId)
+  if (options?.limit != null) params.set("limit", String(options.limit))
+  const query = params.toString()
+  return api<{ events: AutomationBreakerAuditEvent[] }>(
+    `/api/automation-breaker/audit${query ? `?${query}` : ""}`,
+  )
+}
+
+export async function setAutomationBreakerThreshold(
+  automationId: string,
+  failureThreshold: number,
+): Promise<AutomationBreakerView> {
+  return api<AutomationBreakerView>(
+    `/api/automation-breaker/${encodeURIComponent(automationId)}/threshold`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ failure_threshold: failureThreshold }),
+    },
+  )
+}
+
+export async function reenableAutomationBreaker(automationId: string): Promise<AutomationBreakerView> {
+  return api<AutomationBreakerView>(
+    `/api/automation-breaker/${encodeURIComponent(automationId)}/reenable`,
+    {
+      method: "POST",
+      body: JSON.stringify({ actor: "owner" }),
+    },
+  )
+}
+
+/* ---- Skill Forge (RFC-0173) — Modules/Skills portal ---- */
+
+export type SkillForgeLifecycleStatus =
+  | "proposed"
+  | "sandboxed"
+  | "verified"
+  | "approved"
+  | "active"
+  | "rejected"
+  | "superseded"
+  | "rolled_back"
+  | "quarantined"
+  | string
+
+export type SkillForgeProvenance = {
+  source?: string
+  trajectory_ids?: string[]
+  parent_version_id?: string | null
+  created_by?: string
+  imported_from?: string | null
+  notes?: string
+}
+
+export type SkillForgeVerifierResult = {
+  passed?: boolean
+  tests_run?: number
+  tests_passed?: number
+  tests_failed?: number
+  details?: Record<string, unknown>[]
+  isolated_workspace?: string | null
+  evaluated_at?: string | null
+}
+
+export type SkillForgeManifest = {
+  name: string
+  purpose?: string
+  version?: string
+  scope?: string
+  task_class?: string
+  inputs?: { name: string; type?: string; description?: string; required?: boolean }[]
+  outputs?: { name: string; type?: string; description?: string; required?: boolean }[]
+  steps?: { tool: string; arguments?: Record<string, unknown>; description?: string }[]
+  tools?: string[]
+  required_capabilities?: string[]
+  secrets?: string[]
+  network_scope?: string[]
+  filesystem_scope?: string[]
+  compatible_personas?: string[]
+  compatible_models?: string[]
+  examples?: Record<string, unknown>[]
+  tests?: { id: string; description?: string }[]
+  provenance?: SkillForgeProvenance
+  rollback_target_version_id?: string | null
+  content_hash?: string
+  signature?: string
+}
+
+export type SkillForgeVersion = {
+  version_id: string
+  skill_id: string
+  status: SkillForgeLifecycleStatus
+  manifest: SkillForgeManifest
+  verifier?: SkillForgeVerifierResult | null
+  effective_capabilities?: string[]
+  approval?: Record<string, unknown>
+  created_at: string
+  activated_at?: string | null
+  disabled?: boolean
+  quarantine_reason?: string | null
+  metrics?: Record<string, unknown>
+  immutable?: boolean
+}
+
+export type SkillForgeCandidate = {
+  candidate_id: string
+  skill_id: string
+  status: SkillForgeLifecycleStatus
+  version: SkillForgeVersion
+  created_at: string
+  updated_at: string
+  decision_inbox_item_id?: string | null
+  rejection_reason?: string | null
+}
+
+export type SkillForgeRegistryEntry = {
+  skill_id: string
+  name: string
+  active_version_id?: string | null
+  versions?: string[]
+  created_at: string
+  updated_at: string
+  origin?: string
+}
+
+export type SkillForgePermissionPreview = {
+  declared?: string[]
+  policy?: string[]
+  effective?: string[]
+  denied?: string[]
+  undeclared_tool_capabilities?: string[]
+  allows_execution?: boolean
+  privilege_expansion?: boolean
+}
+
+export type SkillForgeSearchHit = {
+  skill_id?: string
+  name?: string
+  purpose?: string
+  version_id?: string
+  score?: number
+  [key: string]: unknown
+}
+
+export type SkillForgeCandidateAction = {
+  actor: string
+  admin?: boolean
+  reason?: string
+  profile_id?: string | null
+  task_capabilities?: string[]
+  node_capabilities?: string[]
+  parent_capabilities?: string[]
+}
+
+export function formatSkillForgeError(err: unknown): string {
+  if (isApiError(err)) return err.message || `Request failed (${err.status})`
+  if (err instanceof Error && err.message) return err.message
+  return String(err || "Skill Forge request failed")
+}
+
+/** Candidates that need an explicit owner decision (approve and/or activate). */
+export function skillForgeNeedsOwnerDecision(candidate: SkillForgeCandidate): boolean {
+  const status = String(candidate.status || "").toLowerCase()
+  if (status === "verified" || status === "approved" || status === "quarantined") return true
+  const approval = candidate.version?.approval || {}
+  if (approval.requested && !approval.approved && status !== "rejected" && status !== "active") {
+    return true
+  }
+  return false
+}
+
+export async function getSkillForgeIndex(): Promise<{
+  skills: SkillForgeRegistryEntry[]
+  candidates: SkillForgeCandidate[]
+}> {
+  return api<{ skills: SkillForgeRegistryEntry[]; candidates: SkillForgeCandidate[] }>("/api/skill-forge")
+}
+
+export async function listSkillForgeSkills(): Promise<{ skills: SkillForgeRegistryEntry[] }> {
+  return api<{ skills: SkillForgeRegistryEntry[] }>("/api/skill-forge/skills")
+}
+
+export async function listSkillForgeCandidates(
+  status?: string,
+  limit = 50,
+): Promise<{ candidates: SkillForgeCandidate[] }> {
+  const params = new URLSearchParams()
+  if (status) params.set("status", status)
+  if (limit) params.set("limit", String(limit))
+  const query = params.toString() ? `?${params.toString()}` : ""
+  return api<{ candidates: SkillForgeCandidate[] }>(`/api/skill-forge/candidates${query}`)
+}
+
+export async function getSkillForgeCandidate(candidateId: string): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(`/api/skill-forge/candidates/${encodeURIComponent(candidateId)}`)
+}
+
+export async function getSkillForgeVersion(versionId: string): Promise<SkillForgeVersion> {
+  return api<SkillForgeVersion>(`/api/skill-forge/versions/${encodeURIComponent(versionId)}`)
+}
+
+export async function requestSkillForgeApproval(
+  candidateId: string,
+  body: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/request-approval`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function approveSkillForgeCandidate(
+  candidateId: string,
+  body: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/approve`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function rejectSkillForgeCandidate(
+  candidateId: string,
+  body: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/reject`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function activateSkillForgeCandidate(
+  candidateId: string,
+  body: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/activate`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function sandboxSkillForgeCandidate(
+  candidateId: string,
+  body?: SkillForgeCandidateAction,
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/sandbox`,
+    { method: "POST", body: JSON.stringify(body || { actor: "portal" }) },
+  )
+}
+
+export async function verifySkillForgeCandidate(candidateId: string): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/verify`,
+    { method: "POST" },
+  )
+}
+
+export async function previewSkillForgePermissions(
+  candidateId: string,
+  body?: SkillForgeCandidateAction,
+): Promise<SkillForgePermissionPreview> {
+  return api<SkillForgePermissionPreview>(
+    `/api/skill-forge/candidates/${encodeURIComponent(candidateId)}/permissions`,
+    { method: "POST", body: JSON.stringify(body || { actor: "portal" }) },
+  )
+}
+
+export async function disableSkillForgeSkill(
+  skillId: string,
+  actor: string,
+): Promise<{ ok: boolean; disabled_version: SkillForgeVersion | null }> {
+  return api<{ ok: boolean; disabled_version: SkillForgeVersion | null }>(
+    `/api/skill-forge/skills/${encodeURIComponent(skillId)}/disable`,
+    { method: "POST", body: JSON.stringify({ actor }) },
+  )
+}
+
+export async function rollbackSkillForgeSkill(
+  skillId: string,
+  body: { actor: string; to_version_id?: string | null },
+): Promise<SkillForgeVersion> {
+  return api<SkillForgeVersion>(
+    `/api/skill-forge/skills/${encodeURIComponent(skillId)}/rollback`,
+    { method: "POST", body: JSON.stringify(body) },
+  )
+}
+
+export async function repairSkillForgeSkill(
+  skillId: string,
+  body?: {
+    trajectory_id?: string
+    trajectory?: Record<string, unknown>
+    manifest_patch?: Record<string, unknown>
+    created_by?: string
+  },
+): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>(
+    `/api/skill-forge/skills/${encodeURIComponent(skillId)}/repair`,
+    { method: "POST", body: JSON.stringify(body || {}) },
+  )
+}
+
+export async function searchSkillForge(body: {
+  query: string
+  persona_id?: string
+  goal_id?: string
+  task_class?: string
+  limit?: number
+}): Promise<{ results: SkillForgeSearchHit[] }> {
+  return api<{ results: SkillForgeSearchHit[] }>("/api/skill-forge/search", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function importSkillForgeManifest(body: {
+  manifest: Record<string, unknown>
+  imported_from?: string
+}): Promise<SkillForgeCandidate> {
+  return api<SkillForgeCandidate>("/api/skill-forge/import", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export type AgentRoomParticipant = {
+  agent_id: string
+  role: string
+  model: string
+  provider: string
+}
+
+export type AgentRoomTask = {
+  id: string
+  title: string
+  assignee: string | null
+  depends_on: string[]
+  status: string
+  rationale: string
+}
+
+export type AgentRoomBlackboardEntry = {
+  id: string
+  kind: string
+  key: string
+  content: string
+  author: string
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export type AgentRoomBlackboard = {
+  entries: AgentRoomBlackboardEntry[]
+  counts: {
+    total: number
+    facts: number
+    artifacts: number
+    decisions: number
+    citations: number
+  }
+  bounds: {
+    max_entries: number
+    max_entry_chars: number
+    max_total_chars: number
+    used_chars: number
+  }
+}
+
+export type AgentRoomGovernor = {
+  parallel_local: number
+  parallel_cloud: number
+  cpu_slots: number
+  gpu_slots: number
+  vram_mib: number
+  provider_calls: number
+  active_leases: number
+  budget: {
+    max_parallel_local: number
+    max_parallel_cloud: number
+    cpu_slots: number
+    gpu_slots: number
+    vram_mib: number
+    provider_calls: number
+    cost_mode: string
+    privacy_mode: string
+  }
+}
+
+export type AgentRoomSynthesis = {
+  summary: string
+  cited_artifact_ids: string[]
+  cited_agents: string[]
+  cited_decision_ids: string[]
+  cited_citation_ids: string[]
+  rationale: string
+}
+
+export type AgentRoomSummary = {
+  id: string
+  goal: string
+  status: string
+  participants: AgentRoomParticipant[]
+  message_count: number
+  task_graph: { tasks: AgentRoomTask[] }
+  blackboard: AgentRoomBlackboard
+  governor: AgentRoomGovernor
+  synthesis: AgentRoomSynthesis | null
+  created_at: string
+}
+
+export type AgentRoomRosterEntry = {
+  id: string
+  label: string
+  role: string
+  phrase: string
+}
+
+export type AgentRoomMessage = {
+  id: string
+  room_id: string
+  kind: string
+  from_agent: string
+  to_agent: string | null
+  mentions: string[]
+  body: string
+  rationale: string
+  task_id: string | null
+  artifact_ids: string[]
+  citation_ids: string[]
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export type AgentRoomAuditEvent = {
+  id: string
+  room_id: string
+  kind: string
+  summary: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export type AgentRoomHandoffRecord = {
+  from_agent?: string
+  to_agent?: string
+  task_id?: string | null
+  rationale?: string
+  message_id?: string
+}
+
+export type AgentRoomAudit = {
+  room_id: string
+  participants: string[]
+  messages: AgentRoomMessage[]
+  blackboard_writes: AgentRoomBlackboardEntry[]
+  handoffs: AgentRoomHandoffRecord[]
+  deadlocks: Array<Record<string, unknown>>
+  synthesis: AgentRoomSynthesis | null
+  terminated: boolean
+  escalated: boolean
+  event_count: number
+  events: AgentRoomAuditEvent[]
+}
+
+export type AgentRoomIndex = {
+  rooms: AgentRoomSummary[]
+  roster: AgentRoomRosterEntry[]
+}
+
+const HIDDEN_ROOM_KEYS = new Set([
+  "reasoning",
+  "reasoning_content",
+  "chain_of_thought",
+  "chainOfThought",
+  "thinking",
+  "think",
+  "hidden_reasoning",
+  "cot",
+  "scratchpad",
+])
+
+export function formatAgentRoomsError(err: unknown): string {
+  if (isApiError(err)) return err.message || `Request failed (${err.status})`
+  if (err instanceof Error && err.message) return err.message
+  return String(err || "Agent rooms request failed")
+}
+
+/** Drop hidden chain-of-thought keys if a payload ever carries them. */
+export function publicRoomFields(payload: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!payload) return {}
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(payload)) {
+    if (HIDDEN_ROOM_KEYS.has(key) || key.startsWith("_")) continue
+    out[key] = value
+  }
+  return out
+}
+
+export async function listAgentRooms(): Promise<AgentRoomIndex> {
+  return api<AgentRoomIndex>("/api/agent-rooms")
+}
+
+export async function createAgentRoom(body: {
+  goal: string
+  specialists: string[]
+  cost_mode?: string
+  privacy_mode?: string
+  supervisor_model?: string
+  specialist_models?: Record<string, string>
+}): Promise<AgentRoomSummary> {
+  return api<AgentRoomSummary>("/api/agent-rooms", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAgentRoom(roomId: string): Promise<AgentRoomSummary> {
+  return api<AgentRoomSummary>(`/api/agent-rooms/${encodeURIComponent(roomId)}`)
+}
+
+export async function listAgentRoomMessages(roomId: string): Promise<{ messages: AgentRoomMessage[] }> {
+  return api<{ messages: AgentRoomMessage[] }>(`/api/agent-rooms/${encodeURIComponent(roomId)}/messages`)
+}
+
+export async function postAgentRoomMessage(
+  roomId: string,
+  body: {
+    kind: string
+    from_agent: string
+    body: string
+    to_agent?: string | null
+    rationale?: string
+    task_id?: string | null
+    artifact_ids?: string[]
+    citation_ids?: string[]
+  },
+): Promise<AgentRoomMessage> {
+  return api<AgentRoomMessage>(`/api/agent-rooms/${encodeURIComponent(roomId)}/messages`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAgentRoomBlackboard(roomId: string): Promise<AgentRoomBlackboard> {
+  return api<AgentRoomBlackboard>(`/api/agent-rooms/${encodeURIComponent(roomId)}/blackboard`)
+}
+
+export async function publishAgentRoomBlackboard(
+  roomId: string,
+  body: { kind: string; key: string; content: string; author: string },
+): Promise<AgentRoomBlackboardEntry> {
+  return api<AgentRoomBlackboardEntry>(`/api/agent-rooms/${encodeURIComponent(roomId)}/blackboard`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getAgentRoomAudit(roomId: string): Promise<AgentRoomAudit> {
+  return api<AgentRoomAudit>(`/api/agent-rooms/${encodeURIComponent(roomId)}/audit`)
+}
+
+export async function handoffAgentRoom(
+  roomId: string,
+  body: {
+    from_agent: string
+    to_agent: string
+    body: string
+    task_id?: string | null
+    rationale: string
+  },
+): Promise<AgentRoomMessage> {
+  return api<AgentRoomMessage>(`/api/agent-rooms/${encodeURIComponent(roomId)}/handoff`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export async function synthesizeAgentRoom(roomId: string): Promise<{
+  synthesis: AgentRoomSynthesis
+  room: AgentRoomSummary
+}> {
+  return api<{ synthesis: AgentRoomSynthesis; room: AgentRoomSummary }>(
+    `/api/agent-rooms/${encodeURIComponent(roomId)}/synthesize`,
+    { method: "POST", body: JSON.stringify({}) },
+  )
+}
+
+export async function terminateAgentRoom(
+  roomId: string,
+  body?: { reason?: string },
+): Promise<AgentRoomSummary> {
+  return api<AgentRoomSummary>(`/api/agent-rooms/${encodeURIComponent(roomId)}/terminate`, {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  })
 }

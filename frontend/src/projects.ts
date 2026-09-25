@@ -1,4 +1,4 @@
-import { api } from "./api"
+import { api, isApiError } from "./api"
 
 export type PortalProject = {
   id: string
@@ -6,6 +6,12 @@ export type PortalProject = {
   taskIds: string[]
   conversationIds?: string[]
   repoPaths?: string[]
+}
+
+export type FetchProjectsResult = {
+  projects: PortalProject[]
+  /** True when browser localStorage groupings were migrated via import-local. */
+  migratedFromLocal: boolean
 }
 
 type PortalProjectStore = {
@@ -40,67 +46,93 @@ function asProject(value: unknown): PortalProject | null {
   return { id: row.id, name: row.name.trim(), taskIds, conversationIds, repoPaths }
 }
 
-export function loadProjectsLocal(): PortalProject[] {
+function loadProjectsLocal(): PortalProject[] {
   const store = storage()
   if (!store) return []
   try {
     const raw = store.getItem(STORAGE_KEY)
     if (!raw) return []
     const parsed = JSON.parse(raw) as Partial<PortalProjectStore>
-    if (!Array.isArray(parsed?.projects)) return []
-    return parsed.projects.map(asProject).filter((row): row is PortalProject => row !== null)
+    if (!Array.isArray(parsed?.projects)) {
+      clearProjectsLocal()
+      return []
+    }
+    const projects = parsed.projects.map(asProject).filter((row): row is PortalProject => row !== null)
+    if (projects.length === 0) clearProjectsLocal()
+    return projects
   } catch {
+    clearProjectsLocal()
     return []
   }
 }
 
-export function saveProjectsLocal(projects: PortalProject[]): void {
+function clearProjectsLocal(): void {
   const store = storage()
   if (!store) return
   try {
-    const payload: PortalProjectStore = { version: 1, projects }
-    store.setItem(STORAGE_KEY, JSON.stringify(payload))
+    store.removeItem(STORAGE_KEY)
   } catch {
-    // ignore quota / private-mode failures
+    // ignore
   }
 }
 
-/** Leader DB is canonical; localStorage is a one-time migration source. */
-export async function fetchProjects(): Promise<PortalProject[]> {
-  try {
-    const payload = await api<{ projects: PortalProject[] }>("/api/projects")
-    const remote = (payload.projects || []).map(asProject).filter((row): row is PortalProject => row !== null)
-    if (remote.length > 0) {
-      saveProjectsLocal(remote)
-      return remote
+function parseProjectList(value: unknown): PortalProject[] {
+  if (!Array.isArray(value)) return []
+  return value.map(asProject).filter((row): row is PortalProject => row !== null)
+}
+
+/**
+ * Leader DB is canonical. `jarvis_portal_projects` is read only to migrate
+ * folders the Leader does not already have, then cleared. It is never written
+ * and never returned as the rail when import fails.
+ */
+export async function fetchProjects(): Promise<FetchProjectsResult> {
+  const payload = await api<{ projects?: unknown }>("/api/projects")
+  const remote = parseProjectList(payload?.projects)
+  const local = loadProjectsLocal()
+  if (local.length === 0) {
+    return { projects: remote, migratedFromLocal: false }
+  }
+
+  const remoteIds = new Set(remote.map((project) => project.id))
+  const pending = local.filter((project) => !remoteIds.has(project.id))
+  if (pending.length === 0) {
+    clearProjectsLocal()
+    return { projects: remote, migratedFromLocal: false }
+  }
+
+  const imported = await api<{ projects?: unknown }>("/api/projects/import-local", {
+    method: "POST",
+    body: JSON.stringify({ projects: pending }),
+  })
+  const projects = parseProjectList(imported?.projects)
+  const importedIds = new Set(projects.map((project) => project.id))
+  if (pending.some((project) => !importedIds.has(project.id))) {
+    throw new Error("Could not import browser project folders into Jarvis.")
+  }
+  clearProjectsLocal()
+  return { projects, migratedFromLocal: true }
+}
+
+export function projectsFetchErrorMessage(err: unknown): string {
+  if (isApiError(err)) {
+    if (err.status === 401) {
+      return "Authentication required. Add your owner key in Settings or open Jarvis on this PC."
     }
-    const local = loadProjectsLocal()
-    if (local.length > 0) {
-      const imported = await api<{ projects: PortalProject[] }>("/api/projects/import-local", {
-        method: "POST",
-        body: JSON.stringify({ projects: local }),
-      })
-      return (imported.projects || []).map(asProject).filter((row): row is PortalProject => row !== null)
-    }
-    return []
-  } catch {
-    return loadProjectsLocal()
+    return err.message || `Projects API failed (${err.status})`
   }
+  if (err instanceof Error && err.message) return err.message
+  return "Could not load projects from Jarvis."
 }
 
-export async function persistProjects(projects: PortalProject[]): Promise<void> {
-  saveProjectsLocal(projects)
-}
-
-export async function createProjectRemote(name: string): Promise<PortalProject | null> {
-  try {
-    return await api<PortalProject>("/api/projects", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    })
-  } catch {
-    return null
-  }
+export async function createProjectRemote(name: string): Promise<PortalProject> {
+  const row = await api<PortalProject>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  })
+  const project = asProject(row)
+  if (!project) throw new Error("Invalid project response from server")
+  return project
 }
 
 export async function renameProjectRemote(projectId: string, name: string): Promise<void> {
@@ -133,17 +165,19 @@ export async function unlinkProjectMember(
   await api(`/api/projects/unlink?${query.toString()}`, { method: "DELETE" })
 }
 
-export function createProject(name: string, projects: PortalProject[]): PortalProject[] {
-  const trimmed = name.trim()
-  if (!trimmed) return projects
-  const next: PortalProject = {
-    id: crypto.randomUUID(),
-    name: trimmed,
-    taskIds: [],
-    conversationIds: [],
-    repoPaths: [],
-  }
-  return [...projects, next]
+/** Merge link-table chats with legacy conversation.project_id rows for rail display. */
+export function enrichProjectsWithOwnerChats(
+  projects: PortalProject[],
+  ownerChats: { conversation_id: string; project_id?: string }[],
+): PortalProject[] {
+  if (ownerChats.length === 0) return projects
+  return projects.map((project) => {
+    const ids = new Set(project.conversationIds || [])
+    for (const chat of ownerChats) {
+      if (chat.project_id === project.id) ids.add(chat.conversation_id)
+    }
+    return { ...project, conversationIds: [...ids] }
+  })
 }
 
 export function renameProject(projectId: string, name: string, projects: PortalProject[]): PortalProject[] {
@@ -215,14 +249,4 @@ export function unassignRepo(repoPath: string, projects: PortalProject[]): Porta
 
 export function projectForTask(taskId: string, projects: PortalProject[]): PortalProject | undefined {
   return projects.find((project) => project.taskIds.includes(taskId))
-}
-
-/** @deprecated use fetchProjects */
-export function loadProjects(): PortalProject[] {
-  return loadProjectsLocal()
-}
-
-/** @deprecated use persistProjects */
-export function saveProjects(projects: PortalProject[]): void {
-  saveProjectsLocal(projects)
 }

@@ -107,7 +107,7 @@ Nearby send/receive of owner-approved files on the home LAN (interop with LocalS
 
 ### RFC-0104 — Persona candidates pack (later)
 
-Tag-only hold for full AI-assistant / harness repos (hermes-agent, openhuman, F.R.I.D.A.Y, deer-flow, openclaude, opencode, locally-uncensored). **No butler / voice / system-prompt merge.** Download ≠ integrate. Personality track is a later named RFC after Taco promotes it. **RFC:** [`docs/rfcs/0104-persona-candidates-pack.md`](docs/rfcs/0104-persona-candidates-pack.md). **Status:** accepted hold (not an implement ticket now). **Local clone:** `/workspace/projects/persona/<name>` · `C:\Users\daanv\projects\jarvis-ig\persona\<name>`. **Lane:** later (Architect / UX catalog badges only until promoted).
+Tag-only hold for full AI-assistant / harness repos (hermes-agent, openhuman, F.R.I.D.A.Y, deer-flow, openclaude, opencode, locally-uncensored). **No butler / voice / system-prompt merge.** Named-persona presence and voice (13-persona ANZU roster) is [RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md); it does not promote this hold and does not bind RFC-0126 session modes. Download ≠ integrate. Personality track is a later named RFC after Taco promotes it. **RFC:** [`docs/rfcs/0104-persona-candidates-pack.md`](docs/rfcs/0104-persona-candidates-pack.md). **Status:** accepted hold (not an implement ticket now). **Local clone:** `/workspace/projects/persona/<name>` · `C:\Users\daanv\projects\jarvis-ig\persona\<name>`. **Lane:** later (Architect / UX catalog badges only until promoted).
 
 ### RFC-0105 — Cybersecurity module
 

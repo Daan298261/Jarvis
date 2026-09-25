@@ -1,6 +1,6 @@
 # RFC-0124: Clean Install / Reinstall — owned-path wipe
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; **P0** for Taco local-install unblock; D1 implements after this spec lands)  
 **Author:** Taco via Chief of Staff / Jarvis Architect  
 **Date:** 2026-09-18
@@ -130,3 +130,7 @@ Product implementation in this PR. RFC-0093 rewrite. Semi-clean / keep-models. T
 - Evidence in tree (do not treat as already fixed): no portal Clean button; ISS Clean = `unins000` + `DelTree` after 0093 force-stop; `reset-user-data.ps1` is semi-clean; `ForceStopJarvisUnder` polite fallback can still return success.
 - Linux cloud VMs cannot sign off live Inno. Implement unit-tests the allowlist, abort-on-locker, Setup-found-before-wipe, and Advanced-button contracts.
 - Implement launch: implement this RFC only; branch from `development`; pytest; do not edit Architect spec docs; PR against `development`; do not merge other PRs.
+
+## Implementation note
+
+Landed on `development` via #321 @ `b45e8f05` + #323 @ `b04ddbaa` (Clean Install / Reinstall owned-path wipe). Live Clean wipe on a running Jarvis remains Windows desktop sign-off. Acceptance checkboxes left open for that sign-off and the original specs-only box.

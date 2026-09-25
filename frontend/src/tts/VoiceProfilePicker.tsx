@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react"
 import { api } from "../api"
+import { savePersonaAppearance, useNamedPersonas } from "../persona/namedPersonas"
 import {
   installVoiceProfile,
   loadVoiceProfileCatalog,
   previewVoiceProfile,
   setActiveVoiceProfile,
+  WINDOWS_NATURAL_VOICE_PROFILE_ID,
   type VoiceProfile,
   type VoiceProfileCatalog,
 } from "./voiceProfiles"
@@ -32,6 +34,7 @@ function kokoroRuntime(status: VoiceEngineStatus): VoiceRuntimeStatus | undefine
 }
 
 export function VoiceProfilePicker() {
+  const named = useNamedPersonas()
   const [catalog, setCatalog] = useState<VoiceProfileCatalog | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -77,11 +80,24 @@ export function VoiceProfilePicker() {
 
   async function selectProfile(profile: VoiceProfile) {
     if (!profile.available || busyId) return
+    if (profile.id === WINDOWS_NATURAL_VOICE_PROFILE_ID) {
+      setMsg("Named personas keep a neural voice. Windows SAPI is not a persona voice.")
+      return
+    }
     setBusyId(profile.id)
     setMsg("")
     try {
       const nextId = await setActiveVoiceProfile(profile.id)
       setActiveId(nextId)
+      const personaId = named?.active?.id
+      if (personaId) {
+        try {
+          await savePersonaAppearance(personaId, { voice_profile_id: profile.id })
+        } catch (err) {
+          setMsg(err instanceof Error ? err.message : "Could not store that voice on the persona.")
+          return
+        }
+      }
       setMsg(`Active voice: ${profile.display_name}`)
     } finally {
       setBusyId(null)

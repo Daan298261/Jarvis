@@ -218,6 +218,19 @@ class FilesystemTool(Tool):
     def _path(self, raw: str) -> Path:
         return resolve_allowed_path(raw, _allowed(self.context_getter()))
 
+    def _guard_coding_write(self, resolved: Path) -> Path:
+        ctx = self.context_getter() or {}
+        task_id = str(ctx.get("task_id") or "").strip()
+        if not task_id:
+            return resolved
+        from ..agent.worktrees import WorktreeError, assert_task_write_path, get_coding_task
+
+        try:
+            get_coding_task(task_id)
+        except WorktreeError:
+            return resolved
+        return assert_task_write_path(task_id, resolved)
+
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
         try:
@@ -278,6 +291,7 @@ class FilesystemTool(Tool):
                     digest = hashlib.sha256(path.read_bytes()).hexdigest()
                     return ToolResult(True, f"Binary file ({path.stat().st_size} bytes). sha256={digest}")
             if action == "write":
+                path = self._guard_coding_write(path)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 if path.exists() and kwargs.get("create_backup", True):
                     backup = path.with_suffix(path.suffix + f".bak-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}")
@@ -285,6 +299,7 @@ class FilesystemTool(Tool):
                 path.write_text(kwargs.get("content") or "", encoding="utf-8")
                 return ToolResult(True, f"Wrote {path} ({path.stat().st_size} bytes)")
             if action == "edit":
+                path = self._guard_coding_write(path)
                 if not path.exists():
                     return ToolResult(False, "", error="File not found")
                 text = path.read_text(encoding="utf-8")

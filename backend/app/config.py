@@ -66,6 +66,7 @@ class InferenceSettings(BaseModel):
     remote_model: str = ""
     api_key: str = ""
     lmstudio_models_root: str = ""
+    orchestrator_idle_seconds: int = Field(default=120, ge=60, le=180)
 
 
 class FrontResponderSettings(BaseModel):
@@ -139,7 +140,7 @@ class PresentationSettings(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     shell: Literal["classic", "hud"] = "hud"
-    requested_presence: Literal["none", "neural", "humanoid", "particle_bust"] = "neural"
+    requested_presence: Literal["none", "neural", "humanoid", "particle_bust", "galaxy"] = "neural"
     performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] = "auto"
     attention_mode: Literal["off", "pointer", "camera"] = "pointer"
     reduced_motion: Literal["system", "reduce", "full"] = "system"
@@ -169,6 +170,38 @@ class DialogueSettings(BaseModel):
     directness: float = Field(default=0.90, ge=0.0, le=1.0)
     preserve_structured_content: bool = True
     background_verify: bool = True
+
+
+CommentFrequency = Literal["silent", "restrained", "normal", "talkative", "butler"]
+CommentSarcasm = Literal["off", "light", "dry", "sharp"]
+PersonalObservations = Literal["disabled", "practical_only", "casual", "broad"]
+CommentAddressStyle = Literal["neutral", "sir_maam", "first_name", "configured"]
+
+
+class SocialCommentarySettings(BaseModel):
+    """RFC-0055 gate between perception candidates and dialogue wording."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = True
+    comment_frequency: CommentFrequency = "restrained"
+    sarcasm: CommentSarcasm = "light"
+    personal_observations: PersonalObservations = "practical_only"
+    address_style: CommentAddressStyle = "neutral"
+    configured_address_name: str = Field(default="", max_length=80)
+    min_confidence: float = Field(default=0.75, ge=0.0, le=1.0)
+    min_novelty: float = Field(default=0.35, ge=0.0, le=1.0)
+    do_not_disturb: bool = False
+    focus_mode: bool = False
+    allow_personal_with_guests: bool = False
+    reveal_household_labels_to_guests: bool = False
+
+    @model_validator(mode="after")
+    def validate_address_name(self):
+        if self.address_style in {"first_name", "configured"} and not self.configured_address_name.strip():
+            if self.address_style == "configured":
+                raise ValueError("configured_address_name is required when address_style is configured")
+        return self
 
 
 class SocialPerceptionSettings(BaseModel):
@@ -235,6 +268,15 @@ class SupermemorySettings(BaseModel):
     allow_remote: bool = False
 
 
+class CrucixSettings(BaseModel):
+    """RFC-0127 managed local Crucix OSINT sidecar."""
+    model_config = ConfigDict(validate_assignment=True)
+    enabled: bool = False
+    auto_start: bool = True
+    base_url: str = "http://127.0.0.1:3117"
+    timeout_ms: int = Field(default=8000, ge=500, le=30000)
+
+
 class HexStrikeSettings(BaseModel):
     """Local HexStrike AI suite (RFC-0078). Loopback only; never a WAN listener."""
 
@@ -268,8 +310,69 @@ class IdentityRecognitionSettings(BaseModel):
         return self
 
 
+class PersonaAppearanceSettings(BaseModel):
+    """Per-persona appearance and playback overrides (RFC-0137).
+
+    Empty colours and voice id mean "use the roster default". Pitch, rate, and
+    volume are applied on the neural PCM path, never via SAPI.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    voice_profile_id: str = ""
+    pitch: float = Field(default=0.0, ge=-6, le=6)
+    speaking_rate: float = Field(default=1.0, ge=0.75, le=1.35)
+    volume: float = Field(default=1.0, ge=0, le=1)
+    orb_color: str = ""
+    accent_color: str = ""
+    glow: float = Field(default=0.70, ge=0, le=1)
+    animation: float = Field(default=0.60, ge=0, le=1)
+    scale: float = Field(default=1.0, ge=0.5, le=2.0)
+    specialists_auto_speak: bool = False
+
+
+class CustomPresencePreset(BaseModel):
+    """Saved custom orb look (RFC-0138). Global — not tied to a named persona."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    id: str
+    name: str = Field(min_length=1, max_length=80)
+    source: Literal["text_prompt", "image", "text_and_image"]
+    source_image_ref: str = ""
+    prompt_text: str = ""
+    orb_composition: dict[str, Any] = Field(default_factory=dict)
+    shape_id: str = ""
+    default: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class CustomPresenceSettings(BaseModel):
+    """Custom presence presets and active/default selection (RFC-0138)."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    presets: dict[str, CustomPresencePreset] = Field(default_factory=dict)
+    active_preset_id: str = ""
+    default_preset_id: str = ""
+
+
+class NamedPersonaSettings(BaseModel):
+    """Active named persona. Separate from session-mode HUD/prompt settings."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    active_id: str = "anzu"
+    # Legacy #376 shape id, migrated on read (abzu_flow / root_coil). Not a live override.
+    presence_shape_id: str = ""
+    activated_voice_profile_id: str = ""
+    voice_profile_requested: str = ""
+    profiles: dict[str, PersonaAppearanceSettings] = Field(default_factory=dict)
+
+
 class DecisionSettings(BaseModel):
-    """RFC-0116 optional TypeSafe Jev decision tier. Default is local-only."""
+    """RFC-0116/0171 decision tier + local Laya Reflex. Default is local-only."""
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -281,6 +384,10 @@ class DecisionSettings(BaseModel):
     last_probe_at: str = ""
     last_probe_latency_ms: float | None = None
     last_model: str = ""
+    laya_enabled: bool = False
+    laya_warm: bool = True
+    reflex_cache_ttl_s: float = 8.0
+    reflex_default_deadline_ms: float = 100.0
 
 
 class AppSettings(BaseModel):
@@ -303,12 +410,16 @@ class AppSettings(BaseModel):
     dialogue: DialogueSettings = Field(default_factory=DialogueSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
+    social_commentary: SocialCommentarySettings = Field(default_factory=SocialCommentarySettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
     knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
     supermemory: SupermemorySettings = Field(default_factory=SupermemorySettings)
+    crucix: CrucixSettings = Field(default_factory=CrucixSettings)
     decision: DecisionSettings = Field(default_factory=DecisionSettings)
+    named_personas: NamedPersonaSettings = Field(default_factory=NamedPersonaSettings)
+    custom_presence: CustomPresenceSettings = Field(default_factory=CustomPresenceSettings)
     allowed_directories: list[str] = Field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     disabled_tools: list[str] = Field(default_factory=list)
@@ -360,7 +471,14 @@ def load_settings() -> AppSettings:
     if port:
         payload["bind_port"] = int(port)
     payload["allowed_directories"] = sanitize_allowed_directories(payload.get("allowed_directories"))
-    return AppSettings.model_validate(payload)
+    settings = AppSettings.model_validate(payload)
+    try:
+        from .presence.custom_ui import normalize_custom_presence
+
+        normalize_custom_presence(settings)
+    except Exception:
+        pass
+    return settings
 
 
 def save_settings(settings: AppSettings) -> None:
@@ -368,7 +486,16 @@ def save_settings(settings: AppSettings) -> None:
     dump.pop("auth_token", None)
     dump["allowed_directories"] = sanitize_allowed_directories(dump.get("allowed_directories"))
     settings.allowed_directories = list(dump["allowed_directories"])
-    settings_path().write_text(json.dumps(dump, indent=2), encoding="utf-8")
+
+    def _write() -> None:
+        settings_path().write_text(json.dumps(dump, indent=2), encoding="utf-8")
+
+    try:
+        from .recovery.hooks import wrap_settings_save
+
+        wrap_settings_save(_write)
+    except Exception:
+        _write()
 
 
 def default_allowed_directories() -> list[str]:

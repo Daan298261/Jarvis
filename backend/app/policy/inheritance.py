@@ -40,6 +40,7 @@ TOOL_CAPABILITY_MAP: dict[str, str] = {
     "desktop": "desktop",
     "ufo": "desktop",
     "cua": "desktop",
+    "reflex_computer_use": "desktop",
     "office": "office",
     "screenshot": "screenshot",
     "web_fetch": "web_fetch",

@@ -2,7 +2,9 @@ import { useState } from "react"
 import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
 import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
+import { NamedPersonaControls } from "../persona/NamedPersonaControls"
 import { SessionPersonalityControls } from "../personality/SessionPersonalityControls"
+import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
 
@@ -67,9 +69,15 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           type="button"
           disabled={busy}
           className={selected === "neural" ? "active" : ""}
-          onClick={() => apply({ shell: "hud", requestedPresence: "neural" })}
+          title="The APEX-UI orb and reasoning graph adapted for Jarvis."
+          onClick={() =>
+            apply(
+              { shell: "hud", requestedPresence: "neural" },
+              "APEX orb and reasoning graph active. Jarvis uses its existing Neural HUD renderer.",
+            )
+          }
         >
-          Neural HUD
+          APEX UI · orb + graph
         </button>
         <button
           type="button"
@@ -106,9 +114,24 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
         >
           HexStrike · Daybreak
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          className={selected === "galaxy" ? "active" : ""}
+          onClick={() =>
+            apply(
+              { shell: "hud", requestedPresence: "galaxy" },
+              "Galaxy presence active. Jarvis will fall back to Neural if WebGL is unavailable.",
+            )
+          }
+        >
+          Galaxy
+        </button>
       </div>
 
       <SessionPersonalityControls />
+      <NamedPersonaControls />
+      <CustomPresencePanel settings={settings} />
 
       <label>
         Rendering
@@ -134,13 +157,13 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           onChange={(event) =>
             apply(
               { attentionMode: event.target.value as PresentationSettings["attentionMode"] },
-              event.target.value === "camera" ? "Camera preference saved. RFC-0050 does not activate a camera." : "",
+              event.target.value === "camera" ? "Camera tracking will ask for permission when the humanoid presence is open. Video stays on this device and is never stored." : "",
             )
           }
         >
           <option value="off">Off</option>
           <option value="pointer">Follow pointer</option>
-          <option value="camera">Camera preference (not activated here)</option>
+          <option value="camera">Camera: head, eyes & hand energy</option>
         </select>
       </label>
 

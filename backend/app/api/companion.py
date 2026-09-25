@@ -17,7 +17,7 @@ from ..mobile.companion_onboarding import companion_onboarding_snapshot
 from ..mobile.pairing_payload import enrich_pairing_session
 from ..db.models import Task
 from ..db.session import SessionLocal
-from ..mobile import companion_offline, identity, realtime_voice, scheduler, service
+from ..mobile import companion_offline, companion_voice_packs, identity, realtime_voice, scheduler, service
 from ..mobile.store import database, get, put, root, rows
 
 router = APIRouter(prefix="/api/companion", tags=["companion"])
@@ -152,9 +152,14 @@ def capabilities(device=Device):
     voice = voice_status()
     voice["realtime"] = True
     voice["realtime_path"] = "/api/companion/voice/realtime"
+    from ..media.store import caps_for_kind
+
     return {"api_version": 1, "device": identity.safe_device(device), "voice": voice,
             "calls": call_capabilities(), "studio": service.studio_capabilities(),
-            "attachments_max_bytes": 64 * 1024 * 1024, "schedules": True}
+            "attachments_max_bytes": caps_for_kind("file"),
+            "video_max_bytes": caps_for_kind("video"),
+            "chunked_upload": True,
+            "schedules": True}
 
 
 @router.get("/models")
@@ -171,6 +176,32 @@ def companion_model_packs(device=Device):
 @router.get("/model-packs/{pack_id}/file")
 def companion_model_pack_file(pack_id: str, device=Device):
     path = companion_offline.resolve_pack_file(pack_id)
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=path.name,
+    )
+
+
+@router.get("/voice-packs")
+def companion_voice_packs_catalog(device=Device):
+    """Pinned companion on-device STT/TTS catalog with Leader cache status (RFC-0140)."""
+    return companion_voice_packs.voice_pack_catalog()
+
+
+@router.get("/voice-packs/{pack_id}/file")
+def companion_voice_pack_file(pack_id: str, device=Device):
+    path = companion_voice_packs.resolve_voice_pack_artifact(pack_id)
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=path.name,
+    )
+
+
+@router.get("/voice-packs/{pack_id}/file/{filename:path}")
+def companion_voice_pack_artifact(pack_id: str, filename: str, device=Device):
+    path = companion_voice_packs.resolve_voice_pack_artifact(pack_id, filename)
     return FileResponse(
         path,
         media_type="application/octet-stream",
@@ -271,37 +302,16 @@ async def approve_task(task_id: uuid.UUID, body: Approval, device=Device):
 
 @router.post("/attachments")
 async def upload(request: Request, device=Device):
-    attachment_id = str(uuid.uuid4())
-    folder = root() / "attachments"
-    folder.mkdir(exist_ok=True)
-    path = folder / attachment_id
-    size = 0
-    try:
-        with path.open("xb") as output:
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > 64 * 1024 * 1024:
-                    raise HTTPException(413, "Attachment exceeds 64 MiB")
-                output.write(chunk)
-        if not size:
-            raise HTTPException(400, "Attachment is empty")
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
-    value = {"id": attachment_id, "device_id": device["id"], "name": request.headers.get("x-filename", "attachment")[:200],
-             "content_type": request.headers.get("content-type", "application/octet-stream")[:100], "size": size}
-    with database() as db:
-        put(db, "attachment", attachment_id, value)
-    return value
+    from . import media as media_api
+
+    return await media_api.companion_ingest(request, device)
 
 
 @router.get("/attachments/{attachment_id}")
 def download(attachment_id: uuid.UUID, device=Device):
-    with database() as db:
-        item = get(db, "attachment", str(attachment_id))
-    if not item or item["device_id"] != device["id"]:
-        raise HTTPException(404, "Attachment not found")
-    return FileResponse(root() / "attachments" / item["id"], filename=item["name"], media_type="application/octet-stream")
+    from . import media as media_api
+
+    return media_api.companion_download(str(attachment_id), device)
 
 
 @router.post("/voice/transcribe")

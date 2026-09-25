@@ -1,6 +1,6 @@
 # RFC-0126: Selectable personality session modes
 
-**Status:** accepted (implement v1 in PR)  
+**Status:** implemented  
 **Author:** Cursor cloud agent (Taco goal follow-up)  
 **Date:** 2026-09-19
 
@@ -30,3 +30,11 @@ Modes are stored in process memory with optional persistence later; v1 exposes R
 ## Out of scope
 
 RFC-0104 persona_candidate merges; voice pack retraining; full module catalog entries.
+
+## Implementation note
+
+Landed on `development` via #334 @ `8344b806` (personality session modes v1). Prior status was `accepted (implement v1 in PR)`. Acceptance checkboxes left as written.
+
+## Notes
+
+[RFC-0137](0137-persona-presence-shape-and-voice-binding.md) is a separate named-persona catalog (13-persona ANZU roster, amended in place). It does not bind these session modes. This RFC's status is unchanged.

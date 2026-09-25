@@ -25,7 +25,7 @@ _SESSION_GRANTS: dict[str, str] = {}
 GRANT_MODES = frozenset({"ask", "allow_once", "allow_session", "always", "deny"})
 PROMPT_OPTIONS = ("allow_once", "allow_session", "always", "deny")
 
-COMPUTER_TOOLS = frozenset({"desktop", "ufo", "cua"})
+COMPUTER_TOOLS = frozenset({"desktop", "ufo", "cua", "reflex_computer_use"})
 INTERNET_TOOLS = frozenset({"browser", "browser_use", "web_fetch"})
 RDP_MARKERS = ("rdp", "mstsc", "remote desktop", "xfreerdp")
 NODE_KEYS = ("node_id", "hostname", "worker_node", "target_node", "rdp_host")

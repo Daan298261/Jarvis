@@ -101,8 +101,13 @@ async def test_coding_route_is_recorded_and_completed(jarvis_env):
                 ]
             ),
             ChatResult(content="Updated the json."),
-            ChatResult(tool_calls=[_tool("filesystem", {"action": "read", "path": str(target)}, "c2")]),
+            ChatResult(tool_calls=[_tool("terminal", {"command": "echo config-updated", "shell": "bash"}, "c2")]),
+            ChatResult(content="Ran update command."),
+            ChatResult(tool_calls=[_tool("verify_code", {"path": str(tmp)}, "c3")]),
+            ChatResult(content="verify_code ok."),
+            ChatResult(tool_calls=[_tool("filesystem", {"action": "read", "path": str(target)}, "c4")]),
             ChatResult(content="Verified theme is dark."),
+            ChatResult(content="Final report: theme is dark and verify_code passed."),
         ]
     )
     jarvis_env["manager"].provider = provider

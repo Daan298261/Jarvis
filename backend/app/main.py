@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, amazon_ads, approvals, auth, autonomy, coding, companion, computer_use, context_repo, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, memory, mobile, model, modules, owner_chat, packs, perception, perception_identity, permissions, projects, queue, runtime_profiles, self_dev, session_personality, settings, setup, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, runtime_profiles, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -76,6 +76,8 @@ app.include_router(voice.router)
 app.include_router(owner_chat.router)
 app.include_router(projects.router)
 app.include_router(session_personality.router)
+app.include_router(named_personas.router)
+app.include_router(custom_presence.router)
 app.include_router(help_api.router)
 app.include_router(voice_profiles.router)
 app.include_router(workflows.router)
@@ -84,6 +86,7 @@ app.include_router(coding.router)
 app.include_router(mobile.router)
 app.include_router(companion.router)
 app.include_router(companion.owner_router)
+app.include_router(media.router)
 app.include_router(swarm.router)
 app.include_router(worker_environments.router)
 app.include_router(runtime_profiles.router)
@@ -95,6 +98,8 @@ app.include_router(lmstudio.router)
 app.include_router(packs.router)
 app.include_router(modules.router)
 app.include_router(trajectories.router)
+app.include_router(skill_forge.router)
+app.include_router(agent_rooms.router)
 app.include_router(context_repo.router)
 app.include_router(supermemory.router)
 app.include_router(vault.router)
@@ -105,14 +110,17 @@ app.include_router(license.router)
 app.include_router(decision.router)
 app.include_router(cyber_ato.router)
 app.include_router(autonomy.router)
+app.include_router(automation_breaker.router)
 app.include_router(agent_policy.router)
 app.include_router(amazon_ads.router)
 app.include_router(setup.router)
 app.include_router(integrations.router)
 app.include_router(diagnostics.router)
+app.include_router(recovery.router)
 app.include_router(installer.router)
 app.include_router(ingest.router)
 app.include_router(perception.router)
+app.include_router(perception_commentary.router)
 app.include_router(perception_identity.router)
 app.include_router(companion_calls_router)
 mobile_runtime = MobileRuntime()
@@ -178,6 +186,18 @@ async def auth_middleware(request: Request, call_next):
 async def startup() -> None:
     app.state.startup_id = str(uuid.uuid4())
     await init_db()
+    try:
+        from .recovery.hooks import startup_recovery
+
+        startup_recovery()
+    except Exception:
+        logging.debug("Recovery journal startup reconcile skipped", exc_info=True)
+    try:
+        from .agent.durable_execution.recovery import reconcile_execution_on_startup
+
+        await reconcile_execution_on_startup()
+    except Exception:
+        logging.debug("Execution lease reconcile skipped", exc_info=True)
     node = await register_localhost_node()
     await bind_workers_to_node(node.id)
     await register_localhost_capabilities(node.id)
@@ -255,6 +275,7 @@ async def startup() -> None:
         logging.debug("Vault bind on startup skipped", exc_info=True)
     try:
         asyncio.create_task(_auto_start_supermemory_and_refresh_node(node.id))
+        asyncio.create_task(_auto_start_crucix())
     except Exception:
         logging.debug("Supermemory auto-start scheduling skipped", exc_info=True)
     if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
@@ -281,6 +302,16 @@ async def startup() -> None:
         schedule_tts_warm_start()
     except Exception:
         logging.debug("TTS warm-start scheduling skipped", exc_info=True)
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        try:
+            from .persona.named_persona import reapply_stored_main_persona
+
+            reapply_stored_main_persona()
+            from .presence.custom_ui import reapply_stored_custom_presence
+
+            reapply_stored_custom_presence()
+        except Exception:
+            logging.debug("Named persona reapply skipped", exc_info=True)
     asyncio.create_task(_maybe_launch_greeting(app.state.startup_id))
     asyncio.create_task(_maybe_notify_health())
 
@@ -319,6 +350,14 @@ async def _auto_start_supermemory_and_refresh_node(node_id: str) -> None:
             logging.debug("Supermemory node registration refresh skipped", exc_info=True)
 
 
+async def _auto_start_crucix() -> None:
+    try:
+        from .modules.crucix_runtime import auto_start as auto_start_crucix
+        await auto_start_crucix()
+    except Exception:
+        logging.exception("Crucix auto-start failed")
+
+
 @app.on_event("shutdown")
 async def shutdown() -> None:
     QUEUE_WATCHER.stop()
@@ -332,10 +371,14 @@ async def shutdown() -> None:
         logging.debug("HexStrike shutdown skipped", exc_info=True)
     try:
         from .modules.supermemory_runtime import shutdown as shutdown_supermemory
-
         await shutdown_supermemory()
     except Exception:
         logging.debug("Supermemory shutdown skipped", exc_info=True)
+    try:
+        from .modules.crucix_runtime import shutdown as shutdown_crucix
+        await shutdown_crucix()
+    except Exception:
+        logging.debug("Crucix shutdown skipped", exc_info=True)
 
 
 async def _autoload_model(current) -> None:

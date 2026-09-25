@@ -1,5 +1,5 @@
 export type ShellMode = "classic" | "hud"
-export type PresenceMode = "none" | "neural" | "humanoid" | "particle_bust"
+export type PresenceMode = "none" | "neural" | "humanoid" | "particle_bust" | "galaxy"
 export type PresencePerformancePreset = "auto" | "efficient" | "balanced" | "cinematic"
 export type AttentionMode = "off" | "pointer" | "camera"
 export type ReducedMotionMode = "system" | "reduce" | "full"
@@ -22,6 +22,21 @@ export type PresencePhase =
   | "speaking"
   | "waiting"
   | "alert"
+  | "approval"
+  | "error"
+
+/** Optional named-persona colour, glow, and scale on the existing orb cloud. */
+export type PersonaCloudVisual = {
+  orbColor?: string
+  accentColor?: string
+  glow?: number
+  animation?: number
+  scale?: number
+  /** Bounded renderer-wide orb size multiplier, independent of bust framing. */
+  pointScale?: number
+  /** 0 keeps depth contrast; 1 softens it for a flatter luminous look. */
+  depthSoftness?: number
+}
 
 export type PresenceAttention = {
   x: number

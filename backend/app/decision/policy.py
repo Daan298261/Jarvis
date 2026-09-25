@@ -83,21 +83,16 @@ def rerank_tools(prompt: str, candidates: Iterable[str]) -> list[str]:
     local = [name for name in candidates if name]
     if not local:
         return []
-    from .tier import decide_turn, jev_calls_allowed, resolve_status
+    from .surfaces import answer_value, privacy_for_tier, select_tools
+    from .tier import resolve_status
 
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
-        return local
-    decision = decide_turn(
+    status = resolve_status()
+    result = select_tools(
         user_message=prompt,
-        candidate_tools=local,
-        local_complexity=local_complexity_tier(prompt),
+        candidates=local,
+        privacy=privacy_for_tier(str(status.get("decision_tier") or "local")),
     )
-    if decision.get("source") != "jev":
-        return local
-    selected = decision.get("tool_select")
-    if not selected:
-        return local
-    if selected not in local:
+    selected = answer_value(result, "tool_select")
+    if not selected or selected == "none" or selected not in local:
         return local
     return [selected, *[name for name in local if name != selected]]

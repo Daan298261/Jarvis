@@ -1,6 +1,6 @@
 # RFC-0120: Coding and 3D modelling — real tool calls
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; implement is a named follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-18
@@ -88,3 +88,7 @@ Product implementation in this PR. RFC-0108. BlackGrid image/video gen (0096/009
 - Implement after RFC-0115 so specialist/expert routing exists. Recommended strong coding model for the implement ticket; Composer 2.5 may write tests under review.
 - Linux cloud: unit-test the contract with fake CLIs on PATH. Live Blender/OpenSCAD is Windows/desktop sign-off.
 - Number **0120** (not 0119). RFC-0119 is reserved for license-package entitlements.
+
+## Implementation note
+
+Landed on `development` via #378 @ `3f523f45` (coding edit/run/verify contract, Blender / OpenSCAD / FreeCAD CLI tools, RFC-0107 retrieval hooks; chat-only software-change completion rejected). `tests/test_rfc0120_coding_contract.py`. Live Blender/OpenSCAD and Windows worktrees remain desktop sign-off. Acceptance checkboxes left open for that sign-off.

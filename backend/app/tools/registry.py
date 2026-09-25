@@ -9,7 +9,7 @@ from .browser import BrowserTool
 from .browser_use import BrowserUseTool
 from .capability import RequestCapabilityTool
 from .code_worker import CodeWorkerTool
-from .computer_use import CuaTool, UFOTool
+from .computer_use import CuaTool, ReflexComputerUseTool, UFOTool
 from .desktop import DesktopTool
 from .docker_tools import DockerTool
 from .exposure import REQUEST_CAPABILITY, ToolExposure
@@ -31,6 +31,8 @@ from .hexstrike_defensive import HexStrikeDefensiveTool
 from .hexstrike_operator import HexStrikeOperatorTool
 from .chat_projects import ChatProjectsTool
 from .vault_memory import VaultMemoryTool
+from .intelligence import IntelligenceTool
+from .dcc_tools import BlenderTool, FreecadTool, OpenScadTool
 
 
 class ToolRegistry:
@@ -63,11 +65,16 @@ class ToolRegistry:
             MCPProxyTool(),
             UFOTool(),
             CuaTool(),
+            ReflexComputerUseTool(),
             MobileCallTool(),
             HexStrikeDefensiveTool(getter),
             HexStrikeOperatorTool(getter),
             ChatProjectsTool(),
             VaultMemoryTool(),
+            IntelligenceTool(),
+            BlenderTool(getter),
+            OpenScadTool(getter),
+            FreecadTool(getter),
         ]
         self.tools = {tool.name: tool for tool in items}
 
@@ -108,6 +115,8 @@ class ToolRegistry:
                     "description": tool.description,
                     "enabled": tool.enabled,
                     "risk": tool.risk.value,
+                    "effect_class": getattr(tool, "effect_class", "internal"),
+                    "replay_policy": getattr(tool, "replay_policy", None),
                 }
             )
         return out

@@ -1,4 +1,5 @@
 import { fetchAudio } from "../api"
+import { attachPlaybackAnalyser, detachVoiceAnalyser } from "./voiceAnalyser"
 import { getActiveVoiceProfileId } from "./voiceProfiles"
 
 const MAX_SPEAK_CHARS = 800
@@ -23,6 +24,7 @@ let pumpRunning = false
 const speechQueue: QueuedSpeech[] = []
 
 function releaseMedia(): void {
+  detachVoiceAnalyser()
   if (activeAudio) {
     activeAudio.pause()
     activeAudio.onended = null
@@ -64,6 +66,7 @@ async function play(item: QueuedSpeech, epoch: number): Promise<void> {
     activeUrl = url
     const audio = new Audio(url)
     activeAudio = audio
+    attachPlaybackAnalyser(audio)
     await new Promise<void>((resolve) => {
       let finished = false
       const finish = () => {

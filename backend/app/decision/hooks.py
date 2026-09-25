@@ -1,4 +1,4 @@
-"""Wire Jev into speak-class, tool retrieval, complexity, and approval (RFC-0116)."""
+"""Wire Reflex / Jev into speak-class, tool retrieval, complexity, and approval (RFC-0116/0171)."""
 
 from __future__ import annotations
 
@@ -7,22 +7,31 @@ from typing import Any
 from ..policy.authorize import AuthorizationResult, authorize
 from ..tts.reply_class import ReplySpeechClass, register_reply_classifier_hook
 from .policy import apply_complexity_tier, approval_popup_required, local_complexity_tier, should_escalate
-from .tier import decide_turn, jev_calls_allowed, resolve_status
+from .surfaces import answer_value, complexity_and_escalate, privacy_for_tier
+from .tier import decide_turn, resolve_status
 
 
 def _speak_hook(text: str, user_prompt: str | None) -> ReplySpeechClass | None:
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
-        return None
-    decision = decide_turn(
-        user_message=user_prompt or text,
-        candidate_tools=[],
-        local_speak=None,
-        local_complexity=local_complexity_tier(user_prompt or text),
+    status = resolve_status()
+    privacy = privacy_for_tier(str(status.get("decision_tier") or "local"))
+    from .reflex import decide
+    from .types import Question
+
+    result = decide(
+        {"user_message": user_prompt or text},
+        [
+            Question(
+                id="speak_class",
+                type="choice",
+                prompt="Is the upcoming assistant reply social small-talk or technical?",
+                choices=("social", "technical"),
+            )
+        ],
+        "speak_class",
+        80.0,
+        privacy,
     )
-    if decision.get("source") != "jev":
-        return None
-    speak = decision.get("speak_class")
+    speak = answer_value(result, "speak_class")
     if speak in {"social", "technical"}:
         return speak  # type: ignore[return-value]
     return None
@@ -34,32 +43,35 @@ def register_decision_hooks() -> None:
 
 def classify_complexity(prompt: str) -> int:
     local = local_complexity_tier(prompt)
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
-        return local
-    decision = decide_turn(
+    status = resolve_status()
+    result = complexity_and_escalate(
         user_message=prompt,
-        candidate_tools=[],
         local_complexity=local,
+        privacy=privacy_for_tier(str(status.get("decision_tier") or "local")),
     )
-    if decision.get("source") != "jev":
-        return local
-    return apply_complexity_tier(local, float(decision.get("complexity_tier") or local))
+    raw = answer_value(result, "complexity_tier")
+    try:
+        scored = float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        scored = None
+    return apply_complexity_tier(local, scored)
 
 
 def classify_escalate(prompt: str, *, local_escalate: bool = False) -> bool:
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
-        return local_escalate
-    decision = decide_turn(
+    status = resolve_status()
+    result = complexity_and_escalate(
         user_message=prompt,
-        candidate_tools=[],
         local_complexity=local_complexity_tier(prompt),
         local_escalate=local_escalate,
+        privacy=privacy_for_tier(str(status.get("decision_tier") or "local")),
     )
-    if decision.get("source") != "jev":
+    escalate = answer_value(result, "escalate")
+    if isinstance(escalate, bool):
+        return should_escalate(local_escalate, 1.0 if escalate else 0.0)
+    try:
+        return should_escalate(local_escalate, float(escalate) if escalate is not None else None)
+    except (TypeError, ValueError):
         return local_escalate
-    return should_escalate(local_escalate, 1.0 if decision.get("escalate") else 0.0)
 
 
 def authorize_with_jev(
@@ -71,9 +83,6 @@ def authorize_with_jev(
 ) -> AuthorizationResult:
     result = authorize(tool_name, action=action, arguments=arguments, **kwargs)
     if not result.allowed and not result.requires_approval:
-        return result
-    allowed, _reason = jev_calls_allowed(resolve_status())
-    if not allowed:
         return result
     decision = decide_turn(
         user_message=str((arguments or {}).get("prompt") or action or tool_name),

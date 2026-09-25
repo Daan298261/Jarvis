@@ -153,6 +153,10 @@ def create_profile(
     generated_prompt: str | None = None,
     actor: str = "system",
 ) -> dict[str, Any]:
+    from ..recovery.hooks import record_policy_profiles_mutation
+    from ..recovery.resources import capture_policy_profiles
+    from ..recovery.types import JournalOperation
+
     profile_id = str(uuid.uuid4())
     normalized = dict(policy or normalize_policy_from_interview(interview_answers))
     prompt = generated_prompt or generate_prompt_from_policy(name, interview_answers, normalized)
@@ -165,17 +169,29 @@ def create_profile(
         "created_at": _utc_now(),
         "updated_at": _utc_now(),
     }
-    with _lock:
-        state = _load_json(_profiles_path(), _empty_profiles())
-        profiles = state.setdefault("profiles", {})
-        profiles[profile_id] = record
-        _save_json(_profiles_path(), state)
-    record_policy_change(
-        actor=actor,
+    before = capture_policy_profiles()
+
+    def _apply() -> None:
+        with _lock:
+            state = _load_json(_profiles_path(), _empty_profiles())
+            profiles = state.setdefault("profiles", {})
+            profiles[profile_id] = record
+            _save_json(_profiles_path(), state)
+        record_policy_change(
+            actor=actor,
+            profile_id=profile_id,
+            field="profile.created",
+            old_value=None,
+            new_value={"name": name},
+        )
+
+    record_policy_profiles_mutation(
         profile_id=profile_id,
-        field="profile.created",
-        old_value=None,
-        new_value={"name": name},
+        operation=JournalOperation.CREATE,
+        actor=actor,
+        before=before,
+        apply_fn=_apply,
+        correlation_id=profile_id,
     )
     return record
 
@@ -189,67 +205,118 @@ def update_profile(
     generated_prompt: str | None = None,
     actor: str = "system",
 ) -> dict[str, Any]:
+    from ..recovery.hooks import record_policy_profiles_mutation
+    from ..recovery.resources import capture_policy_profiles
+    from ..recovery.types import JournalOperation
+
     with _lock:
         state = _load_json(_profiles_path(), _empty_profiles())
         profiles = state.setdefault("profiles", {})
         raw = profiles.get(profile_id)
         if not isinstance(raw, dict):
             raise KeyError(f"profile not found: {profile_id}")
-        record = dict(raw)
 
-        if name is not None and name != record.get("name"):
-            record_policy_change(actor=actor, profile_id=profile_id, field="name", old_value=record.get("name"), new_value=name)
-            record["name"] = name
+    before = capture_policy_profiles()
+    record_holder: dict[str, Any] = {}
 
-        if interview_answers is not None:
-            old = record.get("interview_answers")
-            record_policy_change(
-                actor=actor,
-                profile_id=profile_id,
-                field="interview_answers",
-                old_value=old,
-                new_value=interview_answers,
-            )
-            record["interview_answers"] = dict(interview_answers)
-            if policy is None:
-                policy = normalize_policy_from_interview(interview_answers)
+    def _apply() -> None:
+        with _lock:
+            state = _load_json(_profiles_path(), _empty_profiles())
+            profiles = state.setdefault("profiles", {})
+            raw = profiles.get(profile_id)
+            if not isinstance(raw, dict):
+                raise KeyError(f"profile not found: {profile_id}")
+            record = dict(raw)
 
-        if policy is not None:
-            old = record.get("policy")
-            record_policy_change(actor=actor, profile_id=profile_id, field="policy", old_value=old, new_value=policy)
-            record["policy"] = dict(policy)
-            if generated_prompt is None:
-                generated_prompt = generate_prompt_from_policy(
-                    record.get("name") or profile_id,
-                    record.get("interview_answers") or {},
-                    record["policy"],
+            if name is not None and name != record.get("name"):
+                record_policy_change(actor=actor, profile_id=profile_id, field="name", old_value=record.get("name"), new_value=name)
+                record["name"] = name
+
+            if interview_answers is not None:
+                old = record.get("interview_answers")
+                record_policy_change(
+                    actor=actor,
+                    profile_id=profile_id,
+                    field="interview_answers",
+                    old_value=old,
+                    new_value=interview_answers,
                 )
+                record["interview_answers"] = dict(interview_answers)
+                nonlocal policy
+                if policy is None:
+                    policy = normalize_policy_from_interview(interview_answers)
 
-        if generated_prompt is not None and generated_prompt != record.get("generated_prompt"):
-            record_policy_change(
-                actor=actor,
-                profile_id=profile_id,
-                field="generated_prompt",
-                old_value=record.get("generated_prompt"),
-                new_value=generated_prompt,
-            )
-            record["generated_prompt"] = generated_prompt
+            if policy is not None:
+                old = record.get("policy")
+                record_policy_change(actor=actor, profile_id=profile_id, field="policy", old_value=old, new_value=policy)
+                record["policy"] = dict(policy)
+                nonlocal generated_prompt
+                if generated_prompt is None:
+                    generated_prompt = generate_prompt_from_policy(
+                        record.get("name") or profile_id,
+                        record.get("interview_answers") or {},
+                        record["policy"],
+                    )
 
-        record["updated_at"] = _utc_now()
-        profiles[profile_id] = record
-        _save_json(_profiles_path(), state)
-    return record
+            if generated_prompt is not None and generated_prompt != record.get("generated_prompt"):
+                record_policy_change(
+                    actor=actor,
+                    profile_id=profile_id,
+                    field="generated_prompt",
+                    old_value=record.get("generated_prompt"),
+                    new_value=generated_prompt,
+                )
+                record["generated_prompt"] = generated_prompt
+
+            record["updated_at"] = _utc_now()
+            profiles[profile_id] = record
+            _save_json(_profiles_path(), state)
+            record_holder["record"] = record
+
+    record_policy_profiles_mutation(
+        profile_id=profile_id,
+        operation=JournalOperation.UPDATE,
+        actor=actor,
+        before=before,
+        apply_fn=_apply,
+        correlation_id=profile_id,
+        replay_safe=True,
+    )
+    return record_holder.get("record") or get_profile(profile_id) or {}
 
 
 def delete_profile(profile_id: str, *, actor: str = "system") -> None:
+    from ..recovery.hooks import record_policy_profiles_mutation
+    from ..recovery.resources import capture_policy_profiles
+    from ..recovery.types import JournalOperation
+
     with _lock:
         state = _load_json(_profiles_path(), _empty_profiles())
         profiles = state.setdefault("profiles", {})
         if profile_id not in profiles:
             raise KeyError(f"profile not found: {profile_id}")
-        old = profiles.pop(profile_id)
-        _save_json(_profiles_path(), state)
-    record_policy_change(actor=actor, profile_id=profile_id, field="profile.deleted", old_value=old, new_value=None)
+        old = profiles[profile_id]
+
+    before = capture_policy_profiles()
+
+    def _apply() -> None:
+        with _lock:
+            state = _load_json(_profiles_path(), _empty_profiles())
+            profiles = state.setdefault("profiles", {})
+            if profile_id not in profiles:
+                raise KeyError(f"profile not found: {profile_id}")
+            profiles.pop(profile_id)
+            _save_json(_profiles_path(), state)
+        record_policy_change(actor=actor, profile_id=profile_id, field="profile.deleted", old_value=old, new_value=None)
+
+    record_policy_profiles_mutation(
+        profile_id=profile_id,
+        operation=JournalOperation.DELETE,
+        actor=actor,
+        before=before,
+        apply_fn=_apply,
+        correlation_id=profile_id,
+    )
 
 
 def get_platform_policy() -> dict[str, Any]:
@@ -263,30 +330,41 @@ def update_platform_policy(
     default_agent_autonomy: str | None = None,
     actor: str = "system",
 ) -> dict[str, Any]:
-    with _lock:
-        current = _load_json(_platform_path(), _default_platform_policy())
-        if autonomy_caps is not None:
-            old = current.get("autonomy_caps")
-            record_policy_change(
-                actor=actor,
-                profile_id=None,
-                field="platform.autonomy_caps",
-                old_value=old,
-                new_value=autonomy_caps,
-            )
-            current["autonomy_caps"] = dict(autonomy_caps)
-        if default_agent_autonomy is not None:
-            old = current.get("default_agent_autonomy")
-            record_policy_change(
-                actor=actor,
-                profile_id=None,
-                field="platform.default_agent_autonomy",
-                old_value=old,
-                new_value=default_agent_autonomy,
-            )
-            current["default_agent_autonomy"] = parse_level(default_agent_autonomy).value
-        _save_json(_platform_path(), current)
-    return current
+    from ..recovery.hooks import RISK_BULK_POLICY, ensure_checkpoint_before_risk, record_policy_platform_mutation
+    from ..recovery.resources import capture_policy_platform
+
+    ensure_checkpoint_before_risk(RISK_BULK_POLICY, actor=actor, notes="platform policy update")
+    before = capture_policy_platform()
+    result_holder: dict[str, Any] = {}
+
+    def _apply() -> None:
+        with _lock:
+            current = _load_json(_platform_path(), _default_platform_policy())
+            if autonomy_caps is not None:
+                old = current.get("autonomy_caps")
+                record_policy_change(
+                    actor=actor,
+                    profile_id=None,
+                    field="platform.autonomy_caps",
+                    old_value=old,
+                    new_value=autonomy_caps,
+                )
+                current["autonomy_caps"] = dict(autonomy_caps)
+            if default_agent_autonomy is not None:
+                old = current.get("default_agent_autonomy")
+                record_policy_change(
+                    actor=actor,
+                    profile_id=None,
+                    field="platform.default_agent_autonomy",
+                    old_value=old,
+                    new_value=default_agent_autonomy,
+                )
+                current["default_agent_autonomy"] = parse_level(default_agent_autonomy).value
+            _save_json(_platform_path(), current)
+            result_holder["current"] = current
+
+    record_policy_platform_mutation(actor=actor, before=before, apply_fn=_apply)
+    return result_holder.get("current") or get_platform_policy()
 
 
 def get_agent_autonomy_map(profile_id: str | None) -> dict[str, str]:

@@ -1,5 +1,8 @@
 import * as THREE from "three"
+import { presenceBudgets } from "../galaxyPresence"
+import { LIFECYCLE_MORPH_SECONDS } from "../presenceLifecycle"
 import type { ParticleOrb } from "./particleTypes"
+import { makeRng } from "./shapes/figureKit"
 import {
   presenceShapeIdForAvatar,
   resampleOrbs,
@@ -25,15 +28,29 @@ export const particleVertexShader = `
   uniform float uSpeech;
   uniform float uPixelScale;
   uniform float uMorph;
+  uniform float uPhaseKind;
+  uniform float uGlow;
+  uniform float uPointScale;
+  uniform float uDepthSoftness;
+  uniform float uBreath;
+  uniform float uListen;
+  uniform float uAlertAge;
+  uniform float uGalaxy;
+  uniform float uGalaxyBust;
+  uniform float uLattice;
   uniform vec2 uPointer;
   uniform float uPointerStrength;
+  uniform float uGesture;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
   varying float vDepth;
+  varying vec3 vPos;
+  varying float vSeed;
   void main() {
     float m = smoothstep(0.0, 1.0, uMorph);
     vec3 p = mix(aPos, bPos, m);
+    p.y += uBreath * smoothstep(-1.0, 0.15, p.y);
     float flow = mix(aFlow, bFlow, m);
     float size = mix(aSize, bSize, m);
     float t = uTime;
@@ -45,7 +62,7 @@ export const particleVertexShader = `
       p.x += sin(t * 0.55 + aSeed * 42.0) * 0.055 * loose * uMotion;
       p.y += cos(t * 0.45 + aSeed * 31.0) * 0.06 * loose * uMotion;
       float sweep = pow(max(0.0, sin(t * 0.4 + p.y * 0.8)), 5.0);
-      float drift = loose * (0.08 + uActivity * 0.2) * sweep * uMotion;
+      float drift = loose * (0.08 + uActivity * 0.2 + uGesture * 0.14) * sweep * uMotion;
       p.x += drift * (0.5 + aSeed) * smoothstep(-0.3, 0.5, p.x);
       // State energy may loosen the halo, but must never tear the anatomical
       // head/shoulder cloud apart.
@@ -63,14 +80,65 @@ export const particleVertexShader = `
     } else {
       p *= 1.0 + uSpeech * 0.03 * sin(t * 9.5);
     }
+    // Free-float attract (RFC-0175). Idle orbs are drawn toward uPointer
+    // (pointer, or a live camera face). The pull fades as uMorph reaches the figure.
+    float freeWeight = 1.0 - m;
+    if (freeWeight > 0.001 && uPointerStrength > 0.001) {
+      vec2 towardPointer = uPointer - p.xy;
+      float pointerReach = length(towardPointer);
+      vec2 attractDir = towardPointer / max(pointerReach, 0.04);
+      float attractFalloff = smoothstep(0.02, 1.85, pointerReach);
+      float pull = freeWeight * uPointerStrength * attractFalloff * uMotion;
+      p.xy += attractDir * pull * 0.72;
+      p.z += pull * (0.015 + aSeed * 0.03);
+    }
+    float working = step(2.5, uPhaseKind) * (1.0 - step(3.5, uPhaseKind));
+    float thinking = step(1.5, uPhaseKind) * (1.0 - step(2.5, uPhaseKind));
+    if (flow > 0.22 && flow < 0.72) {
+      float ang = t * (0.9 * working + 0.32 * thinking) * uMotion;
+      float c = cos(ang);
+      float s = sin(ang);
+      float x = p.x;
+      float z = p.z;
+      p.x = x * c - z * s;
+      p.z = x * s + z * c;
+      p *= 1.0 + thinking * uMotion * 0.05 * sin(t * 1.6);
+    }
+    if (uListen > 0.001) {
+      float listeningWave = sin(t * 2.2 - p.y * 5.0 + aSeed * 5.0);
+      p.z += listeningWave * 0.012 * uListen * uMotion;
+    }
+    if (uGalaxy > 0.5) {
+      float crown = smoothstep(1.05, 1.75, p.y);
+      float side = smoothstep(0.7, 1.45, abs(p.x));
+      float edge = max(crown, side);
+      float amp = edge * mix(0.42, 0.22, uLattice);
+      p.x += (aSeed - 0.5) * amp * 1.4;
+      p.y += (fract(aSeed * 7.0) - 0.5) * amp;
+      p.z += (fract(aSeed * 13.0) - 0.5) * amp * 0.6;
+      p.x += sin(uTime * 0.22 + aSeed * 40.0) * 0.03 * uMotion;
+      p.y += cos(uTime * 0.18 + aSeed * 19.0) * 0.02 * uMotion;
+    }
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = clamp(size * uPixelScale * 6.6 / -mv.z, 0.72, 96.0);
+    gl_PointSize = clamp(size * uPointScale * uPixelScale * 6.6 / -mv.z, 0.72, 96.0);
+    if (uGalaxyBust > 0.5) {
+      float goldNow = mix(aGold, bGold, m);
+      float neck = step(0.45, goldNow) * (1.0 - smoothstep(0.15, 0.45, p.y)) * smoothstep(-1.35, -0.2, p.y);
+      float idleScale = mix(0.78, 1.0, uLattice);
+      float neckScale = mix(1.0, 0.62, neck * uLattice);
+      float band = pow(abs(sin(p.y * 52.0)), 8.0);
+      float cranial = smoothstep(0.35, 0.6, p.y) * (1.0 - smoothstep(1.45, 1.75, p.y));
+      float fiber = band * cranial * (1.0 - step(0.55, goldNow)) * uLattice;
+      gl_PointSize *= idleScale * neckScale * mix(1.0, 1.35, fiber);
+    }
     vGold = mix(aGold, bGold, m);
     vFlow = flow;
     vDepth = p.z;
+    vPos = p;
+    vSeed = aSeed;
     float shimmer = 0.87 + 0.13 * sin(t * 1.2 + aSeed * 60.0);
-    float wave = pow(max(0.0, sin(p.y * 3.5 - t * 1.1)), 8.0) * uActivity;
+    float wave = pow(max(0.0, sin(p.y * 3.5 - t * 1.1)), 8.0) * (uActivity + uGesture * .35);
     float light = mix(aLight, bLight, m);
     vLight = light * (mix(1.0, shimmer, uMotion) + wave * uMotion * 0.24);
   }
@@ -79,11 +147,25 @@ export const particleVertexShader = `
 export const particleFragmentShader = `
   uniform vec3 uColor;
   uniform vec3 uGold;
+  uniform vec3 uAccent;
   uniform float uOpacity;
+  uniform float uTime;
+  uniform float uMotion;
+  uniform float uSpeech;
+  uniform float uPhaseKind;
+  uniform float uGlow;
+  uniform float uDepthSoftness;
+  uniform float uListen;
+  uniform float uAlertAge;
+  uniform float uGalaxy;
+  uniform float uGalaxyBust;
+  uniform float uLattice;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
   varying float vDepth;
+  varying vec3 vPos;
+  varying float vSeed;
   void main() {
     float r = length(gl_PointCoord - 0.5) * 2.0;
     if (r > 1.0) discard;
@@ -92,10 +174,48 @@ export const particleFragmentShader = `
     float environment = step(0.8, vFlow);
     float core = exp(-r * r * 18.0) * mix(1.0, 0.42, loose);
     float halo = exp(-r * r * 3.6) * mix(0.45, 0.62, loose);
-    float depthWeight = mix(clamp(0.72 + vDepth * 0.52, 0.52, 1.12), 1.0, environment);
+    float depthWeight = mix(mix(clamp(0.72 + vDepth * 0.52, 0.52, 1.12), 1.0, uDepthSoftness), 1.0, environment);
     float alpha = (core + halo) * (1.0 - smoothstep(0.6, 1.0, r))
       * vLight * uOpacity * depthWeight * mix(1.0, 0.72, loose);
-    vec3 color = mix(uColor, uGold, smoothstep(0.13, 0.75, vGold));
+    float listenShimmer = 0.82 + 0.18 * sin(uTime * 5.0 + vSeed * 70.0);
+    alpha *= mix(1.0, listenShimmer, uListen);
+    float alertRadius = uAlertAge * 1.15;
+    float alertRing = exp(-pow((length(vPos.xy) - alertRadius) * 13.0, 2.0)) * exp(-uAlertAge * 1.9);
+    alpha *= 1.0 + alertRing * 1.25;
+    float errorPhase = step(6.5, uPhaseKind) * (1.0 - step(7.5, uPhaseKind)) * step(0.01, uMotion);
+    float flicker = mix(1.0, 0.42 + 0.58 * step(0.55, fract(sin(uTime * 23.0 + vDepth * 12.0) * 43758.5)), errorPhase);
+    alpha *= flicker * mix(1.0, uGlow, 0.65);
+    float goldAmt = vGold;
+    float cranial = smoothstep(0.45, 0.7, vPos.y) * (1.0 - smoothstep(1.35, 1.7, vPos.y));
+    cranial *= 1.0 - smoothstep(0.42, 0.75, abs(vPos.x));
+    float neckGold = step(0.45, vGold) * smoothstep(0.28, -0.15, vPos.y) * smoothstep(-1.4, -0.15, vPos.y);
+    if (uGalaxyBust > 0.5) {
+      float goldKeep = mix(0.0, mix(neckGold * 0.72, 1.0, cranial), uLattice);
+      goldAmt *= goldKeep;
+      float corePulse = step(1.5, vFlow);
+      alpha *= mix(1.0, mix(0.12, 1.0, uLattice), corePulse);
+      if (uLattice < 0.5 && environment < 0.5) alpha *= 0.48;
+      if (uLattice < 0.5 && vGold > 0.45) alpha *= 0.12;
+      if (environment > 0.5) alpha *= mix(0.16, 1.0, uLattice);
+      alpha *= 1.0 + uSpeech * cranial * uLattice * 0.9;
+    }
+    if (uGalaxy > 0.5 && environment < 0.5) {
+      float crown = smoothstep(1.15, 1.9, vPos.y);
+      float side = smoothstep(0.8, 1.7, abs(vPos.x));
+      alpha *= 1.0 - max(crown, side) * mix(0.9, 0.42, uLattice);
+    }
+    vec3 color = mix(uColor, uGold, smoothstep(0.13, 0.75, goldAmt));
+    if (uGalaxyBust > 0.5 && uLattice > 0.5) {
+      float fiber = pow(abs(sin(vPos.y * 55.0)), 6.0);
+      float shell = 1.0 - smoothstep(0.2, 0.7, goldAmt);
+      float head = smoothstep(0.25, 0.55, vPos.y) * (1.0 - smoothstep(1.55, 1.85, vPos.y));
+      color = mix(color, uColor * 1.35, fiber * shell * head * 0.75);
+      alpha *= mix(1.0, 1.18, fiber * shell * head);
+    }
+    if (uGalaxy > 0.5) {
+      float highlight = step(0.93, vSeed) * (1.0 - smoothstep(0.2, 0.55, goldAmt));
+      color = mix(color, uAccent, highlight * 0.7);
+    }
     float hot = smoothstep(2.4, 4.5, vLight);
     gl_FragColor = vec4(color + vec3(core * (0.18 + hot * 0.42)), alpha);
   }
@@ -122,8 +242,39 @@ function writeSlot(
   }
 }
 
-function geometryFromOrbs(orbs: ParticleOrb[], material: THREE.ShaderMaterial): THREE.Points {
+/**
+ * Idle end of uMorph. Scattered cool orbs — not a head-and-shoulders bust.
+ * Gold stays off so the amber core appears only as the figure wins.
+ */
+export function buildFreeFloatCloud(count: number): ParticleOrb[] {
+  const random = makeRng(1750917)
+  const orbs: ParticleOrb[] = []
+  for (let i = 0; i < count; i++) {
+    const angle = random() * Math.PI * 2
+    const radius = Math.pow(random(), 0.55) * 1.7
+    const y = (random() - 0.42) * 1.55
+    const z = (random() - 0.5) * 1.1
+    const edge = radius / 1.7
+    orbs.push({
+      x: Math.cos(angle) * radius,
+      y,
+      z,
+      gold: 0,
+      light: 0.25 + (1 - edge) * 0.85,
+      flow: 0.34 + random() * 0.28,
+      size: 0.85 + random() * 1.25,
+    })
+  }
+  return orbs
+}
+
+function geometryFromOrbs(
+  orbs: ParticleOrb[],
+  material: THREE.ShaderMaterial,
+  targetOrbs?: ParticleOrb[],
+): THREE.Points {
   const count = orbs.length
+  const bOrbs = targetOrbs && targetOrbs.length === count ? targetOrbs : orbs
   const aPos = new Float32Array(count * 3)
   const bPos = new Float32Array(count * 3)
   const aSize = new Float32Array(count)
@@ -136,7 +287,7 @@ function geometryFromOrbs(orbs: ParticleOrb[], material: THREE.ShaderMaterial): 
   const bFlow = new Float32Array(count)
   const seeds = new Float32Array(count)
   writeSlot(orbs, aPos, aSize, aGold, aLight, aFlow)
-  writeSlot(orbs, bPos, bSize, bGold, bLight, bFlow)
+  writeSlot(bOrbs, bPos, bSize, bGold, bLight, bFlow)
   for (let i = 0; i < count; i++) seeds[i] = (i * 0.618033) % 1
 
   const geometry = new THREE.BufferGeometry()
@@ -155,14 +306,101 @@ function geometryFromOrbs(orbs: ParticleOrb[], material: THREE.ShaderMaterial): 
   return new THREE.Points(geometry, material)
 }
 
+const galaxyStarVertexShader = `
+  attribute float aSeed;
+  attribute float aSize;
+  attribute float aWarm;
+  uniform float uTime;
+  uniform float uMotion;
+  varying float vWarm;
+  varying float vSeed;
+  void main() {
+    vec3 p = position;
+    p.x += sin(uTime * 0.05 + aSeed * 20.0) * 0.12 * uMotion;
+    p.y += cos(uTime * 0.04 + aSeed * 12.0) * 0.08 * uMotion;
+    p.z += uTime * 0.06 * uMotion;
+    p.x = mod(p.x + 14.0, 28.0) - 14.0;
+    p.y = mod(p.y + 8.0, 16.0) - 8.0;
+    p.z = mod(p.z + 2.0, 18.0) - 20.0;
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    gl_Position = projectionMatrix * mv;
+    gl_PointSize = clamp(aSize * 18.0 / -mv.z, 0.4, 3.2);
+    vWarm = aWarm;
+    vSeed = aSeed;
+  }
+`
+
+const galaxyStarFragmentShader = `
+  varying float vWarm;
+  varying float vSeed;
+  void main() {
+    float r = length(gl_PointCoord - 0.5) * 2.0;
+    if (r > 1.0) discard;
+    float core = exp(-r * r * 14.0);
+    float alpha = core * (0.35 + vSeed * 0.65);
+    vec3 cool = vec3(0.72, 0.86, 1.0);
+    vec3 warm = vec3(1.0, 0.78, 0.42);
+    gl_FragColor = vec4(mix(cool, warm, vWarm) * (0.7 + core), alpha);
+  }
+`
+
+function createGalaxyStarLayer(density: number): { points: THREE.Points; material: THREE.ShaderMaterial } {
+  const count = presenceBudgets(density).galaxyStars
+  const positions = new Float32Array(count * 3)
+  const seeds = new Float32Array(count)
+  const sizes = new Float32Array(count)
+  const warm = new Float32Array(count)
+  for (let i = 0; i < count; i++) {
+    const s = (i * 0.61803398875) % 1
+    const s2 = ((i + 17) * 0.41421356237) % 1
+    const s3 = ((i + 91) * 0.70710678118) % 1
+    const inView = s < 0.72
+    positions[i * 3] = (s2 - 0.5) * (inView ? 9 : 28)
+    positions[i * 3 + 1] = (s3 - 0.46) * (inView ? 7.2 : 16)
+    positions[i * 3 + 2] = -1.6 - ((i * 0.173) % 1) * (inView ? 12 : 18)
+    seeds[i] = s
+    sizes[i] = 0.28 + s3 * (inView ? 1.15 : 0.7)
+    warm[i] = s2 < 0.07 ? 1 : 0
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3))
+  geometry.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1))
+  geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1))
+  geometry.setAttribute("aWarm", new THREE.BufferAttribute(warm, 1))
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uMotion: { value: 1 },
+    },
+    vertexShader: galaxyStarVertexShader,
+    fragmentShader: galaxyStarFragmentShader,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+  })
+  const points = new THREE.Points(geometry, material)
+  points.visible = false
+  points.frustumCulled = false
+  return { points, material }
+}
+
 export type MorphablePresenceSystem = {
   group: THREE.Group
   bust: THREE.Group
   figure: THREE.Points
   field: THREE.Points | null
+  stars: THREE.Points
   currentShapeId: PresenceShapeId
   morphTo: (shapeId: PresenceShapeId, opts?: { duration?: number; immediate?: boolean }) => void
+  /** 0 = free cloud, 1 = winning figure. One uniform. Does not remount the cloud. */
+  setLifecycleTarget: (target: 0 | 1, opts?: { duration?: number; immediate?: boolean }) => void
+  morphValue: () => number
   tick: (delta: number) => void
+  setGalaxy: (on: boolean) => void
+  syncStars: (time: number, motion: number) => void
+  setQuality: (density: number) => { figure: number; field: number; galaxyStars: number }
+  sampleCounts: () => { figure: number; field: number; galaxyStars: number }
   dispose: () => void
 }
 
@@ -170,32 +408,51 @@ export function createMorphablePresenceSystem(
   density: number,
   material: THREE.ShaderMaterial,
   initialShapeId?: PresenceShapeId,
+  qualityCeiling = density,
 ): MorphablePresenceSystem {
   // Put the budget where the user reads identity: the face and shoulders.
   // The flowing environment stays intact but no longer outnumbers the bust.
-  const figureBudget = Math.round(82000 * density)
-  const fieldBudget = Math.round(15000 * density)
+  // Galaxy stars are a separate layer (presenceBudgets) and do not reduce these.
+  const maxDensity = THREE.MathUtils.clamp(qualityCeiling, 0.01, 1.15)
+  const figureBudget = Math.round(82000 * maxDensity)
+  const fieldBudget = Math.round(15000 * maxDensity)
+  let qualityDensity = THREE.MathUtils.clamp(density, Math.min(0.6, maxDensity), maxDensity)
   let shape = resolvePresenceShape(initialShapeId)
-  const figureOrbs = resampleOrbs(shape.buildFigure(density), figureBudget)
-  const figure = geometryFromOrbs(figureOrbs, material)
+  let figureOrbs = resampleOrbs(shape.buildFigure(maxDensity), figureBudget)
+  const freeOrbs = buildFreeFloatCloud(figureBudget)
+  // aPos = free cloud (uMorph 0). bPos = winning figure (uMorph 1).
+  const figure = geometryFromOrbs(freeOrbs, material, figureOrbs)
   let field: THREE.Points | null = null
   if (shape.buildField) {
-    field = geometryFromOrbs(resampleOrbs(shape.buildField(density), fieldBudget), material)
+    field = geometryFromOrbs(resampleOrbs(shape.buildField(maxDensity), fieldBudget), material)
   }
+  const galaxyStars = createGalaxyStarLayer(maxDensity)
+  const applyQuality = () => {
+    figure.geometry.setDrawRange(0, Math.round(figureBudget * qualityDensity / maxDensity))
+    field?.geometry.setDrawRange(0, Math.round(fieldBudget * qualityDensity / maxDensity))
+    galaxyStars.points.geometry.setDrawRange(0, Math.round(presenceBudgets(maxDensity).galaxyStars * qualityDensity / maxDensity))
+  }
+  applyQuality()
 
   const group = new THREE.Group()
   const bust = new THREE.Group()
   bust.add(figure)
   group.add(bust)
   if (field) group.add(field)
+  group.add(galaxyStars.points)
 
-  let morph = 1
-  let morphDuration = 0
-  let morphElapsed = 0
-  let morphing = false
+  let lifecycleTarget: 0 | 1 = 0
+  let animFrom = 0
+  let animTo = 0
+  let animElapsed = 0
+  let animDuration = 0
+  let animating = false
+  let shapeBlendActive = false
+  let pendingFigureRestore = false
+  let restoreFreeOnArrive = false
   const uniforms = material.uniforms
-  uniforms.uMorph = uniforms.uMorph ?? { value: 1 }
-  uniforms.uMorph.value = 1
+  uniforms.uMorph = uniforms.uMorph ?? { value: 0 }
+  uniforms.uMorph.value = 0
 
   const copyCurrentToA = (points: THREE.Points) => {
     const geo = points.geometry
@@ -227,29 +484,79 @@ export function createMorphablePresenceSystem(
     aFlow.needsUpdate = true
   }
 
-  const writeB = (points: THREE.Points, orbs: ParticleOrb[]) => {
+  const writeSlotAttr = (points: THREE.Points, orbs: ParticleOrb[], slot: "a" | "b") => {
     const geo = points.geometry
-    const bPos = geo.getAttribute("bPos") as THREE.BufferAttribute
-    const bSize = geo.getAttribute("bSize") as THREE.BufferAttribute
-    const bGold = geo.getAttribute("bGold") as THREE.BufferAttribute
-    const bLight = geo.getAttribute("bLight") as THREE.BufferAttribute
-    const bFlow = geo.getAttribute("bFlow") as THREE.BufferAttribute
-    for (let i = 0; i < orbs.length; i++) {
+    const pos = geo.getAttribute(`${slot}Pos`) as THREE.BufferAttribute
+    const size = geo.getAttribute(`${slot}Size`) as THREE.BufferAttribute
+    const gold = geo.getAttribute(`${slot}Gold`) as THREE.BufferAttribute
+    const light = geo.getAttribute(`${slot}Light`) as THREE.BufferAttribute
+    const flow = geo.getAttribute(`${slot}Flow`) as THREE.BufferAttribute
+    const n = Math.min(orbs.length, pos.count)
+    for (let i = 0; i < n; i++) {
       const orb = orbs[i]
       const i3 = i * 3
-      bPos.array[i3] = orb.x
-      bPos.array[i3 + 1] = orb.y
-      bPos.array[i3 + 2] = orb.z
-      bSize.array[i] = orb.size
-      bGold.array[i] = orb.gold
-      bLight.array[i] = orb.light
-      bFlow.array[i] = orb.flow
+      pos.array[i3] = orb.x
+      pos.array[i3 + 1] = orb.y
+      pos.array[i3 + 2] = orb.z
+      size.array[i] = orb.size
+      gold.array[i] = orb.gold
+      light.array[i] = orb.light
+      flow.array[i] = orb.flow
     }
-    bPos.needsUpdate = true
-    bSize.needsUpdate = true
-    bGold.needsUpdate = true
-    bLight.needsUpdate = true
-    bFlow.needsUpdate = true
+    pos.needsUpdate = true
+    size.needsUpdate = true
+    gold.needsUpdate = true
+    light.needsUpdate = true
+    flow.needsUpdate = true
+  }
+
+  const anchorFreeAndFigure = () => {
+    writeSlotAttr(figure, freeOrbs, "a")
+    writeSlotAttr(figure, figureOrbs, "b")
+  }
+
+  const captureDisplayed = (): ParticleOrb[] => {
+    const geo = figure.geometry
+    const aPos = geo.getAttribute("aPos") as THREE.BufferAttribute
+    const bPos = geo.getAttribute("bPos") as THREE.BufferAttribute
+    const aSize = geo.getAttribute("aSize") as THREE.BufferAttribute
+    const bSize = geo.getAttribute("bSize") as THREE.BufferAttribute
+    const aGold = geo.getAttribute("aGold") as THREE.BufferAttribute
+    const bGold = geo.getAttribute("bGold") as THREE.BufferAttribute
+    const aLight = geo.getAttribute("aLight") as THREE.BufferAttribute
+    const bLight = geo.getAttribute("bLight") as THREE.BufferAttribute
+    const aFlow = geo.getAttribute("aFlow") as THREE.BufferAttribute
+    const bFlow = geo.getAttribute("bFlow") as THREE.BufferAttribute
+    const m = uniforms.uMorph.value as number
+    const out: ParticleOrb[] = []
+    for (let i = 0; i < aPos.count; i++) {
+      const i3 = i * 3
+      out.push({
+        x: aPos.array[i3] * (1 - m) + bPos.array[i3] * m,
+        y: aPos.array[i3 + 1] * (1 - m) + bPos.array[i3 + 1] * m,
+        z: aPos.array[i3 + 2] * (1 - m) + bPos.array[i3 + 2] * m,
+        size: aSize.array[i] * (1 - m) + bSize.array[i] * m,
+        gold: aGold.array[i] * (1 - m) + bGold.array[i] * m,
+        light: aLight.array[i] * (1 - m) + bLight.array[i] * m,
+        flow: aFlow.array[i] * (1 - m) + bFlow.array[i] * m,
+      })
+    }
+    return out
+  }
+
+  const beginReturnToFree = (duration: number) => {
+    const current = captureDisplayed()
+    writeSlotAttr(figure, freeOrbs, "a")
+    writeSlotAttr(figure, current, "b")
+    uniforms.uMorph.value = 1
+    animFrom = 1
+    animTo = 0
+    animElapsed = 0
+    animDuration = duration
+    animating = true
+    shapeBlendActive = false
+    pendingFigureRestore = true
+    restoreFreeOnArrive = false
   }
 
   const applyFraming = (target: THREE.Object3D) => {
@@ -265,14 +572,57 @@ export function createMorphablePresenceSystem(
     bust,
     figure,
     field,
+    stars: galaxyStars.points,
     currentShapeId: shape.id,
+    morphValue() {
+      return uniforms.uMorph.value as number
+    },
+    setLifecycleTarget(target, opts) {
+      const duration = opts?.duration ?? LIFECYCLE_MORPH_SECONDS
+      const immediate = Boolean(opts?.immediate) || duration <= 0
+      const previous = lifecycleTarget
+      lifecycleTarget = target
+      const current = uniforms.uMorph.value as number
+      if (
+        previous === target
+        && !animating
+        && !shapeBlendActive
+        && !pendingFigureRestore
+        && !restoreFreeOnArrive
+        && Math.abs(current - target) < 0.0008
+      ) {
+        return
+      }
+      if (immediate) {
+        anchorFreeAndFigure()
+        uniforms.uMorph.value = target
+        animating = false
+        shapeBlendActive = false
+        pendingFigureRestore = false
+        restoreFreeOnArrive = false
+        return
+      }
+      if (shapeBlendActive && target === 1) return
+      if (shapeBlendActive && target === 0) {
+        beginReturnToFree(duration)
+        return
+      }
+      if (pendingFigureRestore && target === 0) return
+      if (restoreFreeOnArrive && target === 1) return
+      if (animating && animTo === target && !shapeBlendActive) return
+      if (!animating && Math.abs(current - target) < 0.0008) return
+      animFrom = current
+      animTo = target
+      animElapsed = 0
+      animDuration = duration
+      animating = true
+    },
     morphTo(shapeId, opts) {
-      if (shapeId === system.currentShapeId && !morphing) return
+      if (shapeId === system.currentShapeId) return
       const next = resolvePresenceShape(shapeId)
-      copyCurrentToA(figure)
-      writeB(figure, resampleOrbs(next.buildFigure(density), figureBudget))
+      const nextOrbs = resampleOrbs(next.buildFigure(maxDensity), figureBudget)
 
-      // Field swaps immediately (environment of the target shape).
+      // Field swaps immediately (environment of the target shape). Figure lerps.
       if (field) {
         group.remove(field)
         field.geometry.dispose()
@@ -280,39 +630,92 @@ export function createMorphablePresenceSystem(
         system.field = null
       }
       if (next.buildField) {
-        field = geometryFromOrbs(resampleOrbs(next.buildField(density), fieldBudget), material)
+        field = geometryFromOrbs(resampleOrbs(next.buildField(maxDensity), fieldBudget), material)
         group.add(field)
         system.field = field
       }
+      applyQuality()
 
       shape = next
       system.currentShapeId = next.id
+      figureOrbs = nextOrbs
       applyFraming(bust)
-      if (opts?.immediate || (opts?.duration ?? 1.15) <= 0) {
-        morph = 1
-        morphing = false
-        uniforms.uMorph.value = 1
-        // Snap A/B to the target so subsequent morphs start clean.
-        copyCurrentToA(figure)
-        writeB(figure, resampleOrbs(next.buildFigure(density), figureBudget))
+
+      const immediate = Boolean(opts?.immediate) || (opts?.duration ?? LIFECYCLE_MORPH_SECONDS) <= 0
+      const morphNow = uniforms.uMorph.value as number
+      if (immediate) {
+        anchorFreeAndFigure()
+        uniforms.uMorph.value = lifecycleTarget
+        animating = false
+        shapeBlendActive = false
+        pendingFigureRestore = false
+        restoreFreeOnArrive = false
         return
       }
-      morph = 0
-      morphElapsed = 0
-      morphDuration = opts?.duration ?? 1.15
-      morphing = true
+      // Still on the free cloud: keep aPos free and retarget bPos. Lifecycle drives uMorph.
+      if (morphNow <= 0.001 && !shapeBlendActive) {
+        writeSlotAttr(figure, freeOrbs, "a")
+        writeSlotAttr(figure, figureOrbs, "b")
+        return
+      }
+      copyCurrentToA(figure)
+      writeSlotAttr(figure, figureOrbs, "b")
+      shapeBlendActive = true
+      pendingFigureRestore = false
+      restoreFreeOnArrive = true
+      animFrom = 0
+      animTo = 1
+      animElapsed = 0
+      animDuration = opts?.duration ?? LIFECYCLE_MORPH_SECONDS
+      animating = true
       uniforms.uMorph.value = 0
     },
     tick(delta) {
-      if (!morphing) return
-      morphElapsed += delta
-      morph = Math.min(1, morphElapsed / Math.max(0.0001, morphDuration))
+      if (!animating) return
+      animElapsed += delta
+      const t = Math.min(1, animElapsed / Math.max(0.0001, animDuration))
+      const morph = animFrom + (animTo - animFrom) * t
       uniforms.uMorph.value = morph
-      if (morph >= 1) morphing = false
+      if (t < 1) return
+      animating = false
+      uniforms.uMorph.value = animTo
+      if (shapeBlendActive || restoreFreeOnArrive) {
+        anchorFreeAndFigure()
+        uniforms.uMorph.value = 1
+        shapeBlendActive = false
+        restoreFreeOnArrive = false
+        return
+      }
+      if (pendingFigureRestore) {
+        writeSlotAttr(figure, figureOrbs, "b")
+        uniforms.uMorph.value = 0
+        pendingFigureRestore = false
+      }
+    },
+    setGalaxy(on) {
+      galaxyStars.points.visible = on
+    },
+    syncStars(time, motion) {
+      galaxyStars.material.uniforms.uTime.value = time
+      galaxyStars.material.uniforms.uMotion.value = motion
+    },
+    setQuality(density) {
+      qualityDensity = THREE.MathUtils.clamp(Number.isFinite(density) ? density : 0.95, Math.min(0.6, maxDensity), maxDensity)
+      applyQuality()
+      return system.sampleCounts()
+    },
+    sampleCounts() {
+      return {
+        figure: figure.geometry.drawRange.count,
+        field: field?.geometry.drawRange.count ?? 0,
+        galaxyStars: galaxyStars.points.geometry.drawRange.count,
+      }
     },
     dispose() {
       figure.geometry.dispose()
       field?.geometry.dispose()
+      galaxyStars.points.geometry.dispose()
+      galaxyStars.material.dispose()
     },
   }
 

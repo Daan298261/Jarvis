@@ -1,6 +1,6 @@
 # RFC-0108: Phone companion offline AI model
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; D2 pack-cache / post-pair popup is a follow-up after this amend lands)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17  
@@ -152,3 +152,7 @@ Product implementation in this PR. RFC-0032 phone-as-swarm-worker. Host TTS/SAPI
 - Linux cloud cannot sign off on-device GGUF load. Implement unit-tests the routing/sync/catalog URL/cache job; physical Android is sign-off.
 - Cross-link: companion port listen / pairing keys / anti-impersonation live in [RFC-0123](0123-companion-reachability-and-anti-impersonation.md) (`:4781`). Offline model does not change those rules.
 - Implement launch (D2): this RFC only for the pack-cache/popup slice; branch from `development`; do not edit Architect spec docs in the implement PR; PR against `development`; do not merge other PRs. Android companion lane owns `android/` (see `.cursor/agents/jarvis-android-companion.md`); do not casually rewrite `backend/app/auth.py` or inference hotswap.
+
+## Implementation note
+
+Landed on `development` via #309 @ `84251235` (llama.cpp JNI / routing / Outbox / sync) + #319 @ `a6977b74` (pack-cache amend, with RFC-0123) + #317 @ `2ffe6c3a` (post-pair UX popup). On-device offline tokens remain device sign-off. Acceptance checkboxes left open for that sign-off and the original specs-only box.

@@ -1,6 +1,6 @@
 # RFC-0055: Social commentary, interruption policy and butler persona
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** P1 — Context-aware social commentary  
 **Author:** ChatGPT design session  
 **Date:** 2026-09-08
@@ -267,3 +267,7 @@ Normal dialogue receives comment intents through the local event/task bus rather
 - Biometric identity matching — RFC-0054.
 - TTS engine/voice design — RFC-0056.
 - General long-term psychological profiling.
+
+## Implementation note
+
+Landed on `development` via #370 @ `002f84cd` (social commentary / butler persona gate). Acceptance checkboxes left as written; this ledger tick does not re-score each product criterion.

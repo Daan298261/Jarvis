@@ -28,6 +28,8 @@ from ..inference.prompt_budget import (
     recover_context_after_overflow,
 )
 from ..inference.vision import messages_need_vision, should_load_vision
+from .durable_execution.repository import get_task_status, last_committed_step_key
+from .durable_execution.runner import run_model_step, run_tool_step
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..policy.authorize import AuthorizationResult, authorize
 from ..policy.computer_permissions import (
@@ -58,6 +60,17 @@ from .coding_workers import (
     route_coding_task,
     route_software_task,
     should_route,
+)
+from .coding_contract import (
+    applies_3d_execution_contract,
+    applies_coding_execution_contract,
+    contract_completion_blocked_message,
+    contract_satisfied,
+    ensure_coding_worktree,
+    evidence_from_working,
+    init_coding_execution,
+    note_contract_tool,
+    persist_execution_evidence,
 )
 from .forensic import professional_prompt_block
 from .escalation import (
@@ -456,13 +469,24 @@ class AgentRuntime:
             task.updated_at = utcnow()
             if not task.started_at and fields.get("status") == "running":
                 task.started_at = utcnow()
-            if _as_utc(task.started_at) and fields.get("status") in {"completed", "failed", "cancelled"}:
+            terminal_status = fields.get("status")
+            if _as_utc(task.started_at) and terminal_status in {"completed", "failed", "cancelled"}:
                 finished = utcnow()
                 task.finished_at = finished
                 started = _as_utc(task.started_at)
                 if started:
                     task.duration_seconds = (finished - started).total_seconds()
             await session.commit()
+            if terminal_status in {"completed", "failed", "cancelled"}:
+                from ..automation.breaker import on_task_terminal
+
+                on_task_terminal(
+                    task_id,
+                    status=str(terminal_status),
+                    verification=task.verification or "",
+                    error=task.error or "",
+                    waiting_for_confirmation=bool(task.waiting_for_confirmation),
+                )
 
     async def _complete(
         self,
@@ -472,7 +496,33 @@ class AgentRuntime:
         verification: str,
         working: WorkingState | None = None,
         metrics: LiveTaskMetrics | None = None,
-    ) -> None:
+    ) -> bool:
+        prompt = content
+        if working is not None:
+            async with SessionLocal() as session:
+                task = await session.get(Task, task_id)
+                if task and task.prompt:
+                    prompt = task.prompt
+            if applies_coding_execution_contract(prompt, working.task_class) or applies_3d_execution_contract(
+                prompt, working.task_class
+            ):
+                if not contract_satisfied(working, prompt, working.task_class):
+                    block = contract_completion_blocked_message(working, prompt, working.task_class)
+                    messages.append(ChatMessage(role="user", content=block))
+                    await self._update(
+                        task_id,
+                        status="running",
+                        stage="act",
+                        result=block,
+                        verification="",
+                        current_action="RFC-0120: real edit/run/verify or DCC required",
+                        conversation_json=serialize_messages(messages),
+                        compact_memory=working.dumps(),
+                        **(metrics.as_fields() if metrics else {}),
+                    )
+                    await BUS.publish(task_id, "progress", "Coding/3D contract blocked chat-only completion", block[:1500], stage="act")
+                    return False
+                persist_execution_evidence(task_id, working)
         fields = {
             "status": "completed",
             "stage": "completed",
@@ -493,6 +543,7 @@ class AgentRuntime:
         await complete_coding_route(task_id, "completed", verification)
         await self._release_lazy_vision()
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+        return True
 
     async def _note_coding_outcome(self, task_id: str, working: WorkingState, outcome: str, verification: str = "") -> None:
         if not working.coding_worker:
@@ -546,7 +597,14 @@ class AgentRuntime:
         if not recovered:
             from ..persona.inference_context import maybe_autoselect_runtime_for_budget
             budget = calculate_prompt_budget(messages, tools, profile=profile, max_tokens=max_tokens, active_context=MANAGER.live_context_size())
-            switched = await maybe_autoselect_runtime_for_budget(budget, profile, settings, user_prompt=working.goal or "", task_id=task_id)
+            switched = await maybe_autoselect_runtime_for_budget(
+                budget,
+                profile,
+                settings,
+                user_prompt=working.goal or "",
+                task_id=task_id,
+                minimum_answer_tier=int(working.minimum_answer_tier or 0),
+            )
             if switched:
                 profile = switched
                 updated, recovered_tools, recovered = await recover_context_after_overflow(messages, tools, profile, max_tokens, settings, manager=MANAGER, working_state_block=working.as_prompt_block(), emit=_emit)
@@ -744,6 +802,28 @@ class AgentRuntime:
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             messages.append(ChatMessage(role="user", content=user_text))
+
+        from ..inference.answer_routing import prepare_answer_route
+        from ..inference.model_escalation import schedule_orchestrator_restore
+
+        warm = ()
+        if MANAGER.state.loaded and MANAGER.state.profile:
+            warm = (MANAGER.state.profile,)
+        profile_name, messages, _route_decision, _switched = await prepare_answer_route(
+            task_id,
+            user_message=user_text,
+            working=working,
+            settings=settings,
+            profile_name=profile.name,
+            history=prior,
+            messages=messages,
+            tools_available=True,
+            vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
+            new_user_turn=True,
+            warm_models=warm,
+        )
+        profile = resolve_profile(profile_name)
+        await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
 
         prefetched_front = await generate_front_reply(
             user_text,
@@ -1020,6 +1100,7 @@ class AgentRuntime:
             task_id=task_id,
         )
         clear_stream_speak_state(stream_key)
+        schedule_orchestrator_restore(settings)
         await BUS.publish(
             task_id,
             "response_timing",
@@ -1214,6 +1295,28 @@ class AgentRuntime:
             prompt=prompt,
             current=MANAGER.state.context_size if MANAGER.state.loaded else None,
         )
+        from ..inference.answer_routing import prepare_answer_route
+        from ..inference.profile_roles import infer_runtime_role_and_tier
+
+        loaded_name = MANAGER.state.profile if MANAGER.state.loaded else profile_name
+        loaded_role, loaded_tier = infer_runtime_role_and_tier(loaded_name or profile_name)
+        if loaded_role == "orchestrator" or loaded_tier <= 1:
+            warm = (loaded_name,) if loaded_name else ()
+            profile_name, _route_messages, _route_decision, _switched = await prepare_answer_route(
+                task_id,
+                user_message=active_prompt,
+                working=working,
+                settings=settings,
+                profile_name=profile_name,
+                history=existing,
+                messages=[ChatMessage(role="user", content=active_prompt)],
+                tools_available=True,
+                vision_requested=need_vision,
+                new_user_turn=bool(not continue_existing or user_turn),
+                warm_models=warm,
+            )
+            profile = resolve_profile(profile_name)
+            await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
             await MANAGER.load(settings, profile_name)
@@ -1246,6 +1349,7 @@ class AgentRuntime:
         last_failed_tool = ""
         last_failed_observation = ""
         tool_rounds = 0
+        model_turn_index = 0
         verify_tool_rounds = 0
         last_tool_name = ""
         last_tool_action = ""
@@ -1255,6 +1359,15 @@ class AgentRuntime:
         awaiting_plan_selection = False
         best_of_n_complete = policy.best_of_n <= 1
         skill_requires_verify = False
+        coding_worktree_path = ensure_coding_worktree(task_id) if (
+            applies_coding_execution_contract(active_prompt, working.task_class)
+            or applies_3d_execution_contract(active_prompt, working.task_class)
+        ) else None
+        if applies_coding_execution_contract(active_prompt, working.task_class) or applies_3d_execution_contract(
+            active_prompt, working.task_class
+        ):
+            init_coding_execution(working)
+            skill_requires_verify = True
         metrics = LiveTaskMetrics()
         already_escalated = bool(getattr(working, "escalated", False))
         critic_rejected = False
@@ -1306,6 +1419,11 @@ class AgentRuntime:
                 working.coding_complexity = int(decision.score or routing.get("complexity") or 0)
                 system_prompt += "\n\n" + format_routing_block(routing)
                 await BUS.publish(task_id, "progress", "Coding worker selected", format_routing_block(routing)[:1500], stage="understand")
+            if coding_worktree_path:
+                system_prompt += (
+                    f"\n\nRFC-0005 coding worktree for this task: {coding_worktree_path}\n"
+                    "Edit and verify inside this worktree via filesystem/git/terminal/python/verify_code."
+                )
             budget_headroom = None
             try:
                 budget_headroom = max(
@@ -1537,7 +1655,7 @@ class AgentRuntime:
                     )
                     turn_max_tokens = 400 if force_final else 1024
 
-                    async def _model_turn() -> ChatResult:
+                    async def _model_turn_inner() -> ChatResult:
                         return await asyncio.wait_for(
                             MANAGER.chat(
                                 messages,
@@ -1551,6 +1669,38 @@ class AgentRuntime:
                                 working_state_block=working.as_prompt_block(),
                             ),
                             timeout=90 if force_final else 180,
+                        )
+
+                    async def _model_turn() -> ChatResult:
+                        nonlocal model_turn_index
+                        model_turn_index += 1
+                        predecessor = await last_committed_step_key(task_id)
+                        predecessors = [predecessor] if predecessor else []
+                        step_key = (
+                            f"model:{model_turn_index}:{int(verifying)}:{int(force_final)}"
+                        )
+                        fingerprint = {
+                            "model_turn": model_turn_index,
+                            "messages_len": len(messages),
+                            "tool_rounds": tool_rounds,
+                            "verifying": verifying,
+                            "force_final": force_final,
+                        }
+
+                        def _model_cost(chat: ChatResult) -> tuple[int, float, float]:
+                            usage = chat.usage or {}
+                            timings = chat.timings or {}
+                            tokens = int(usage.get("total_tokens") or usage.get("completion_tokens") or 0)
+                            ms = float(timings.get("total_ms") or timings.get("generation_ms") or 0.0)
+                            return tokens, ms, 0.0
+
+                        return await run_model_step(
+                            task_id,
+                            step_key,
+                            predecessor_keys=predecessors,
+                            input_fingerprint=fingerprint,
+                            operation=_model_turn_inner,
+                            cost_extractor=_model_cost,
                         )
 
                     think_context = (
@@ -1657,8 +1807,9 @@ class AgentRuntime:
                             "The model timed out while writing the final report. "
                             "Actions already executed are in the activity log; verify files from that log."
                         )
-                        await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics)
-                        return
+                        if await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics):
+                            return
+                        continue
                     content = "The model timed out before verification completed."
                     await self._update(
                         task_id,
@@ -1691,8 +1842,9 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="assistant", content=content, reasoning_content=result.reasoning or None))
                     working.verified = True
                     await self._update(task_id, compact_memory=working.dumps())
-                    await self._complete(task_id, messages, content, content, working, metrics)
-                    return
+                    if await self._complete(task_id, messages, content, content, working, metrics):
+                        return
+                    continue
 
                 parsed = parse_plan_block(result.content or "")
                 if best_of_n_complete and not awaiting_plan_selection:
@@ -1835,6 +1987,7 @@ class AgentRuntime:
                             failures_by_tool.pop(name, None)
                             recovering = False
                             await BUS.publish(task_id, "observation", f"{name} finished", observation[:1500], stage="observe")
+                            note_contract_tool(working, name, arguments, observation, success=True)
                         working.note_tool(name, observation, not failed)
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
@@ -1965,13 +2118,15 @@ class AgentRuntime:
                     messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
                     continue
                 if (policy.require_verify_tools or skill_requires_verify) and verify_tool_rounds == 0:
-                    messages.append(ChatMessage(role="user", content=VERIFY_REQUIRED_PROMPT))
-                    continue
+                    if not evidence_from_working(working).verified:
+                        messages.append(ChatMessage(role="user", content=VERIFY_REQUIRED_PROMPT))
+                        continue
                 working.verified = True
                 verification = content or "Independent verification pass completed; acceptance criteria checked."
                 await self._update(task_id, compact_memory=working.dumps(), verification=verification)
-                await self._complete(task_id, messages, content or verification, verification, working, metrics)
-                return
+                if await self._complete(task_id, messages, content or verification, verification, working, metrics):
+                    return
+                continue
             await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification", **metrics.as_fields())
             await record_trajectory(task_id, working, "failed")
             await complete_coding_route(task_id, "failed", "Step limit reached before verification")
@@ -2041,19 +2196,50 @@ class AgentRuntime:
         consume_once_grants(permission_ids_for_tool(name, arguments))
         started = datetime.now(timezone.utc)
 
-        async def _run_tool():
+        async def _run_tool_inner() -> tuple[str, str | None, bool, str]:
             async with SessionLocal() as session:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
+            REGISTRY._context["task_id"] = task_id
             if security_role:
-                return await REGISTRY.execute(name, arguments, security_role=security_role)
-            return await REGISTRY.execute(name, arguments)
+                result = await REGISTRY.execute(name, arguments, security_role=security_role)
+            else:
+                result = await REGISTRY.execute(name, arguments)
+            attach = None
+            if isinstance(result.data, dict):
+                attach = result.data.get("attach_image")
+                if not attach and result.data.get("path"):
+                    if name == "screenshot" or (name == "browser" and arguments.get("action") == "screenshot"):
+                        attach = result.data.get("path")
+            return result.text(), attach, result.success, result.error
 
-        result = await run_with_think_aloud(
-            task_id,
-            context=f"Running {name}",
-            operation=_run_tool,
-        )
+        arg_digest = hashlib.sha256(
+            f"{name}:{json.dumps(arguments, sort_keys=True)}".encode()
+        ).hexdigest()[:24]
+        step_key = f"tool:{name}:{arg_digest}"
+
+        task_status = await get_task_status(task_id)
+        if task_status is None:
+            text, attach, success, error = await run_with_think_aloud(
+                task_id,
+                context=f"Running {name}",
+                operation=_run_tool_inner,
+            )
+        else:
+            predecessor = await last_committed_step_key(task_id)
+            predecessors = [predecessor] if predecessor else []
+            text, attach = await run_tool_step(
+                task_id,
+                step_key,
+                name,
+                arguments,
+                predecessor_keys=predecessors,
+                operation=_run_tool_inner,
+            )
+            success = not text.startswith("ERROR:")
+            error = ""
+            if text.startswith("ERROR:"):
+                error = text.split("\n", 1)[0].replace("ERROR:", "").strip()
         duration = (datetime.now(timezone.utc) - started).total_seconds() * 1000
         if metrics is not None:
             metrics.note_tool(duration, schema_error=schema_error)
@@ -2063,22 +2249,18 @@ class AgentRuntime:
                     task_id=task_id,
                     tool_name=name,
                     arguments_json=json.dumps(arguments),
-                    output=result.text()[:20000],
-                    success=result.success,
-                    error=result.error,
+                    output=text[:20000],
+                    success=success,
+                    error=error,
                     duration_ms=duration,
                 )
             )
             if name == "git" and arguments.get("action") == "checkpoint":
-                session.add(Checkpoint(task_id=task_id, kind="git", path=arguments.get("path") or "", note=result.output[:500]))
+                session.add(
+                    Checkpoint(task_id=task_id, kind="git", path=arguments.get("path") or "", note=text[:500])
+                )
             await session.commit()
-        attach = None
-        if isinstance(result.data, dict):
-            attach = result.data.get("attach_image")
-            if not attach and result.data.get("path"):
-                if name == "screenshot" or (name == "browser" and arguments.get("action") == "screenshot"):
-                    attach = result.data.get("path")
-        return result.text(), attach
+        return text, attach
 
     async def _maybe_consult_expert(
         self,

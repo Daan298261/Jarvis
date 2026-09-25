@@ -48,6 +48,7 @@ class Task(Base):
     duration_seconds: Mapped[float] = mapped_column(Float, default=0)
     waiting_for_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
     confirmation_payload: Mapped[str] = mapped_column(Text, default="")
+    specialist_persona_ids: Mapped[str] = mapped_column(Text, default="[]")
     model_calls: Mapped[int] = mapped_column(Integer, default=0)
     tool_call_count: Mapped[int] = mapped_column(Integer, default=0)
     schema_errors: Mapped[int] = mapped_column(Integer, default=0)
@@ -90,6 +91,56 @@ class ToolCallRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     task: Mapped[Task] = relationship(back_populates="tool_calls")
+
+
+class ExecutionStep(Base):
+    """RFC-0029 durable execution step bound to a Task run_id."""
+
+    __tablename__ = "execution_steps"
+    __table_args__ = (UniqueConstraint("run_id", "step_key", name="uq_execution_step_run_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(36), index=True)
+    step_key: Mapped[str] = mapped_column(String(128))
+    predecessor_keys_json: Mapped[str] = mapped_column(Text, default="[]")
+    operation_type: Mapped[str] = mapped_column(String(32), default="internal")
+    effect_class: Mapped[str] = mapped_column(String(32), default="internal")
+    replay_policy: Mapped[str] = mapped_column(String(32), default="idempotent")
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    input_hash: Mapped[str] = mapped_column(String(64), default="")
+    idempotency_key: Mapped[str] = mapped_column(String(128), default="")
+    result_json: Mapped[str] = mapped_column(Text, default="")
+    evidence_ref: Mapped[str] = mapped_column(Text, default="")
+    cost_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_ms: Mapped[float] = mapped_column(Float, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0)
+    wake_condition_json: Mapped[str] = mapped_column(Text, default="")
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    attempts: Mapped[list["ExecutionAttempt"]] = relationship(
+        back_populates="step", cascade="all, delete-orphan"
+    )
+
+
+class ExecutionAttempt(Base):
+    """RFC-0029 worker attempt lease for an ExecutionStep."""
+
+    __tablename__ = "execution_attempts"
+    __table_args__ = (UniqueConstraint("attempt_uuid", name="uq_execution_attempt_uuid"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    step_id: Mapped[int] = mapped_column(ForeignKey("execution_steps.id"), index=True)
+    attempt_uuid: Mapped[str] = mapped_column(String(36))
+    worker_id: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    step: Mapped[ExecutionStep] = relationship(back_populates="attempts")
 
 
 class Checkpoint(Base):

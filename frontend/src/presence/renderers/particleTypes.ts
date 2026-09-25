@@ -17,6 +17,14 @@ export type PresenceShapeFraming = {
   /** Bust yaw in radians (¾ profile ≈ 0.95). */
   yaw?: number
   position?: readonly [number, number, number]
+  /** Fraction of the stage viewport reserved for the projected shape (0.5–0.96). */
+  fitMargin?: number
+}
+
+/** Shared shader appearance values; geometry remains owned by each shape. */
+export type DotAppearanceProfile = {
+  pointScale?: number
+  depthSoftness?: number
 }
 
 export type PresenceShapeDefinition = {
@@ -27,6 +35,7 @@ export type PresenceShapeDefinition = {
   /** Optional environment layer (mountains/HUD dust); swapped, not morph-lerped. */
   buildField?: (density: number) => ParticleOrb[]
   framing?: PresenceShapeFraming
+  appearance?: DotAppearanceProfile
 }
 
 export type PresenceShapeCatalog = ReadonlyMap<PresenceShapeId, PresenceShapeDefinition>

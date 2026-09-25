@@ -2,13 +2,17 @@ import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react
 import { NeuralPresence } from "./renderers/NeuralPresence"
 import { supportsHumanoidRuntime } from "./renderers/humanoidRuntime"
 import { PresenceFallback } from "./PresenceFallback"
-import type { EffectivePresence, PresenceSnapshot, PresentationSettings } from "./presenceTypes"
+import type { EffectivePresence, PersonaCloudVisual, PresenceMode, PresenceSnapshot, PresentationSettings } from "./presenceTypes"
 
 const HumanoidPresence = lazy(() => import("./renderers/HumanoidPresence"))
 const ParticleBustPresence = lazy(() => import("./renderers/ParticleBustPresence"))
 
-function resolvePresence(settings: PresentationSettings): EffectivePresence {
-  if ((settings.requestedPresence === "humanoid" || settings.requestedPresence === "particle_bust") && !supportsHumanoidRuntime()) {
+function webglPresence(mode: PresenceMode): boolean {
+  return mode === "humanoid" || mode === "particle_bust" || mode === "galaxy"
+}
+
+export function resolvePresence(settings: PresentationSettings): EffectivePresence {
+  if (webglPresence(settings.requestedPresence) && !supportsHumanoidRuntime()) {
     return {
       requested: settings.requestedPresence,
       effective: "neural",
@@ -19,6 +23,12 @@ function resolvePresence(settings: PresentationSettings): EffectivePresence {
     requested: settings.requestedPresence,
     effective: settings.requestedPresence,
   }
+}
+
+function fallbackPresenceName(mode: PresenceMode): string {
+  if (mode === "particle_bust") return "Particle bust"
+  if (mode === "galaxy") return "Galaxy"
+  return "Humanoid"
 }
 
 type PresenceErrorBoundaryProps = {
@@ -51,14 +61,21 @@ type PresenceHostProps = {
   settings: PresentationSettings
   size?: number
   shapeId?: string
+  personaVisual?: PersonaCloudVisual
 }
 
-export function PresenceHost({ snapshot, settings, size = 540, shapeId }: PresenceHostProps) {
+export function PresenceHost({ snapshot, settings, size = 540, shapeId, personaVisual }: PresenceHostProps) {
   const resolved = resolvePresence(settings)
   const staticFallback = <PresenceFallback snapshot={snapshot} />
   const neuralFallback = (
     <PresenceErrorBoundary fallback={staticFallback}>
-      <NeuralPresence snapshot={snapshot} settings={settings} size={size} />
+      <NeuralPresence
+        snapshot={snapshot}
+        settings={settings}
+        size={size}
+        shapeId={shapeId}
+        personaVisual={personaVisual}
+      />
     </PresenceErrorBoundary>
   )
 
@@ -71,23 +88,29 @@ export function PresenceHost({ snapshot, settings, size = 540, shapeId }: Presen
     >
       {resolved.effective === "none" && staticFallback}
       {resolved.effective === "neural" && neuralFallback}
-      {resolved.effective === "humanoid" && (
+      {(resolved.effective === "humanoid" || resolved.effective === "galaxy") && (
         <PresenceErrorBoundary key="humanoid" fallback={neuralFallback}>
           <Suspense fallback={neuralFallback}>
-            <HumanoidPresence snapshot={snapshot} settings={settings} size={size} shapeId={shapeId} />
+            <HumanoidPresence snapshot={snapshot} settings={settings} size={size} shapeId={shapeId} personaVisual={personaVisual} />
           </Suspense>
         </PresenceErrorBoundary>
       )}
       {resolved.effective === "particle_bust" && (
         <PresenceErrorBoundary key="particle-bust" fallback={neuralFallback}>
           <Suspense fallback={neuralFallback}>
-            <ParticleBustPresence snapshot={snapshot} settings={settings} size={size} />
+            <ParticleBustPresence
+              snapshot={snapshot}
+              settings={settings}
+              size={size}
+              shapeId={shapeId}
+              personaVisual={personaVisual}
+            />
           </Suspense>
         </PresenceErrorBoundary>
       )}
       {resolved.fallbackReason && (
         <span className="jarvis-presence-fallback-note" role="status">
-          {resolved.requested === "particle_bust" ? "Particle bust" : "Humanoid"} selected · Neural active because WebGL is unavailable
+          {fallbackPresenceName(resolved.requested)} selected · Neural active because WebGL is unavailable
         </span>
       )}
     </div>

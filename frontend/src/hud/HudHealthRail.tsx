@@ -79,8 +79,8 @@ export function HudHealthRail({
           title="Decision inbox"
           tone={decisionInboxCount > 0 ? "warn" : "ok"}
           value={decisionInboxCount > 0 ? `${decisionInboxCount} open` : "Clear"}
-          detail="Coding decisions awaiting review"
-          href="/coding"
+          detail="Coding & Skill Forge decisions awaiting review"
+          href={decisionInboxCount > 0 ? "/skills#decision-inbox" : "/coding"}
         />
         <HealthCard
           title="Away Mode"

@@ -30,7 +30,7 @@ TOOL_SETS: dict[str, frozenset[str]] = {
     "shell": frozenset({"filesystem", "terminal", "python", "request_capability"}),
     "system administration": frozenset({"filesystem", "terminal", "python", "desktop", "screenshot", "request_capability"}),
     "software engineering": frozenset(
-        {"filesystem", "terminal", "python", "git", "request_capability", "mcp_call"}
+        {"filesystem", "terminal", "python", "git", "verify_code", "request_capability", "mcp_call"}
     ),
     "research": frozenset({"web_fetch", "browser", "filesystem", "request_capability"}),
     "browser automation": frozenset(

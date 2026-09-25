@@ -1,6 +1,6 @@
 # RFC-0076: Companion APK delivery UX
 
-**Status:** accepted
+**Status:** implemented
 **Author:** Jarvis Architect
 **Date:** 2026-09-11
 **Owner for implement:** UX + D2 (companion build UI / send hooks) after this specs-only land
@@ -84,3 +84,7 @@ Taco 1.2.5 desktop test via CoS → Jarvis Architect (specs-only). Could not gen
 RFC-0059 remains the provisioning/identity contract. This RFC is desktop delivery UX only.
 
 Linux cloud VMs cannot sign off a live Windows Desktop save or WhatsApp send; those are owner-desktop verification after implement.
+
+## Implementation note
+
+Landed on `development` via #189 @ `8ab2c28` (APK build progress / Download to Desktop) + #193 @ `f31d2f2` (WhatsApp/email send when configured). Late ledger catch-up; code landed 2026-09-11.

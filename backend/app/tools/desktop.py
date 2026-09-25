@@ -187,7 +187,18 @@ class DesktopTool(Tool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["screenshot", "apps", "windows", "inspect", "focus", "click", "type", "keys", "wait"],
+                "enum": [
+                    "screenshot",
+                    "apps",
+                    "windows",
+                    "inspect",
+                    "action_frame",
+                    "focus",
+                    "click",
+                    "type",
+                    "keys",
+                    "wait",
+                ],
             },
             "title": {"type": "string", "description": "Window title or substring"},
             "name": {"type": "string", "description": "Visible control name"},
@@ -215,7 +226,16 @@ class DesktopTool(Tool):
 
                 names = sorted({p.info["name"] for p in psutil.process_iter(["name"]) if p.info["name"]})
                 return ToolResult(True, "\n".join(names[:400]))
-            if action not in {"windows", "inspect", "focus", "click", "type", "keys", "wait"}:
+            if action not in {
+                "windows",
+                "inspect",
+                "action_frame",
+                "focus",
+                "click",
+                "type",
+                "keys",
+                "wait",
+            }:
                 return ToolResult(False, "", error=f"Unknown action {action}")
             if not windows_ui_available():
                 return ToolResult(False, "", error=UNAVAILABLE)
@@ -228,7 +248,7 @@ class DesktopTool(Tool):
             if action == "windows":
                 titles = [w.window_text() for w in desktop.windows() if w.window_text()]
                 return ToolResult(True, "\n".join(titles[:200]) or "No windows")
-            if action in {"inspect", "wait"}:
+            if action in {"inspect", "action_frame", "wait"}:
                 return self._uia_action(action, kwargs)
             spec = desktop.window(title_re=f".*{kwargs.get('title') or ''}.*")
             if action == "focus":
@@ -317,6 +337,22 @@ class DesktopTool(Tool):
                 True,
                 f"Window: {spec.window_text()}\n{listing}",
                 data={"title": spec.window_text(), "controls": [c.as_dict() for c in controls[:80]]},
+            )
+        if action == "action_frame":
+            # RFC-0172: atomic ActionFrame from native a11y (no coordinate invented payload).
+            from ..reflex_loop.adapters import build_desktop_action_frame
+
+            controls = _collect_controls(spec)
+            title = spec.window_text()
+            frame = build_desktop_action_frame(
+                controls[:80],
+                app_id=str(kwargs.get("title") or title or ""),
+                window_title=str(title or ""),
+            )
+            return ToolResult(
+                True,
+                f"ActionFrame {frame.frame_id} nodes={len(frame.nodes)} window={title}",
+                data={"action_frame": frame.as_dict(), "title": title},
             )
         if action == "focus":
             spec.set_focus()

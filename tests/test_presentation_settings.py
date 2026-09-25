@@ -61,6 +61,52 @@ def test_requested_particle_bust_round_trips_without_effective_renderer_state():
     assert presentation["requested_presence"] == "particle_bust"
 
 
+def test_galaxy_round_trips_and_default_stays_neural():
+    assert PresentationSettings().requested_presence == "neural"
+    saved = PresentationSettings(shell="hud", requested_presence="galaxy").model_dump()
+    assert saved["requested_presence"] == "galaxy"
+    restored = AppSettings.model_validate({"presentation": saved})
+    assert restored.presentation.requested_presence == "galaxy"
+    assert "effective_presence" not in saved
+
+
+@pytest.mark.parametrize("value", ["none", "neural", "humanoid", "particle_bust"])
+def test_existing_presence_values_still_parse(value: str):
+    presentation = PresentationSettings(requested_presence=value)
+    assert presentation.requested_presence == value
+    assert presentation.requested_presence != "galaxy" or value == "galaxy"
+
+
+def test_unknown_presence_is_rejected_not_coerced_to_galaxy():
+    with pytest.raises(ValidationError):
+        PresentationSettings.model_validate({"requested_presence": "avatar"})
+    with pytest.raises(ValidationError):
+        PresentationSettings.model_validate({"requested_presence": "galaxy "})
+
+
+def test_settings_update_persists_galaxy_without_rewriting_other_modes(monkeypatch):
+    current = AppSettings()
+    assert current.presentation.requested_presence == "neural"
+    saved: list[AppSettings] = []
+
+    monkeypatch.setattr(settings_api, "load_settings", lambda: current)
+    monkeypatch.setattr(settings_api, "save_settings", lambda value: saved.append(value.model_copy(deep=True)))
+    monkeypatch.setattr(settings_api.REGISTRY, "apply_settings", lambda _value: None)
+
+    result = asyncio.run(
+        settings_api.update_settings(
+            settings_api.SettingsUpdate(presentation_requested_presence="galaxy")
+        )
+    )
+
+    assert result["presentation"]["requested_presence"] == "galaxy"
+    assert saved[-1].presentation.requested_presence == "galaxy"
+    assert saved[-1].presentation.shell == "hud"
+
+    neural = AppSettings()
+    assert neural.presentation.requested_presence == "neural"
+
+
 def test_settings_update_validates_presentation_enum_values():
     with pytest.raises(ValidationError):
         settings_api.SettingsUpdate(presentation_requested_presence="unsupported")

@@ -444,6 +444,11 @@ class WorkingState:
     ingress_size_class: str = "small"
     ingress_needs_tools: bool | None = None
     ingress_complexity_hint: int = 1
+    minimum_answer_tier: int = 0
+    active_answer_profile: str = ""
+    model_escalation_count: int = 0
+    router_action: str = ""
+    coding_execution: dict[str, Any] = field(default_factory=dict)
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"

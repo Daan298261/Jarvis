@@ -72,6 +72,8 @@ def _add_missing_columns(sync_conn) -> None:
         statements.append("ALTER TABLE tasks ADD COLUMN human_interventions INTEGER DEFAULT 0")
     if "exposed_tools" not in columns:
         statements.append("ALTER TABLE tasks ADD COLUMN exposed_tools TEXT DEFAULT ''")
+    if "specialist_persona_ids" not in columns:
+        statements.append("ALTER TABLE tasks ADD COLUMN specialist_persona_ids TEXT DEFAULT '[]'")
     if "task_events" in inspector.get_table_names():
         event_cols = {col["name"] for col in inspector.get_columns("task_events")}
         if "source" not in event_cols:
@@ -84,6 +86,13 @@ def _add_missing_columns(sync_conn) -> None:
         conv_cols = {col["name"] for col in inspector.get_columns("conversations")}
         if "project_id" not in conv_cols:
             statements.append("ALTER TABLE conversations ADD COLUMN project_id VARCHAR(36) DEFAULT ''")
+    if statements:
+        try:
+            from ..recovery.hooks import RISK_SCHEMA_MIGRATION, ensure_checkpoint_before_risk
+
+            ensure_checkpoint_before_risk(RISK_SCHEMA_MIGRATION, notes=f"columns:{len(statements)}")
+        except Exception:
+            pass
     for statement in statements:
         sync_conn.execute(text(statement))
 

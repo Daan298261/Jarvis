@@ -1,6 +1,6 @@
 # RFC-0074: Companion pairing streamlining + QR + spoken onboarding
 
-**Status:** accepted
+**Status:** implemented
 **Author:** Jarvis Architect
 **Date:** 2026-09-11
 **Owner for implement:** UX + D1 (desktop pair UI / companion enroll) after this specs-only land
@@ -91,3 +91,7 @@ Taco 1.2.5 desktop test via CoS → Jarvis Architect (specs-only). Pairing faile
 RFC-0059 / 0063 / 0065 / 0067 / 0049 stay authoritative. This RFC owns auto-mint + QR + spoken pair-vs-explore walkthrough and the broken enroll/pair green path.
 
 Linux cloud VMs cannot sign off physical-phone pair; desktop + phone soak remains owner sign-off.
+
+## Implementation note
+
+Landed on `development` via #191 @ `ee643eca` (companion pairing streamline, QR fields, spoken onboarding hooks). Late ledger catch-up; code landed 2026-09-11.

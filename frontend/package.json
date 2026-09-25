@@ -1,12 +1,14 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "1.4.10",
+  "version": "1.4.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test:projects-rail": "node --experimental-strip-types --import ./projects-test-register.mjs --test projects-rail-migration.test.mjs",
+    "test:automation-breaker": "node --experimental-strip-types --test automation-breaker-view.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
