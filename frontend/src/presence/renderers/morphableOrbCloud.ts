@@ -1,6 +1,8 @@
 import * as THREE from "three"
 import { presenceBudgets } from "../galaxyPresence"
+import { LIFECYCLE_MORPH_SECONDS } from "../presenceLifecycle"
 import type { ParticleOrb } from "./particleTypes"
+import { makeRng } from "./shapes/figureKit"
 import {
   presenceShapeIdForAvatar,
   resampleOrbs,
@@ -71,6 +73,18 @@ export const particleVertexShader = `
       p.z += pointerFalloff * loose * uPointerStrength * (0.012 + aSeed * 0.018) * uMotion;
     } else {
       p *= 1.0 + uSpeech * 0.03 * sin(t * 9.5);
+    }
+    // Free-float attract (RFC-0175). Idle orbs are drawn toward uPointer
+    // (pointer, or a live camera face). The pull fades as uMorph reaches the figure.
+    float freeWeight = 1.0 - m;
+    if (freeWeight > 0.001 && uPointerStrength > 0.001) {
+      vec2 towardPointer = uPointer - p.xy;
+      float pointerReach = length(towardPointer);
+      vec2 attractDir = towardPointer / max(pointerReach, 0.04);
+      float attractFalloff = smoothstep(0.02, 1.85, pointerReach);
+      float pull = freeWeight * uPointerStrength * attractFalloff * uMotion;
+      p.xy += attractDir * pull * 0.72;
+      p.z += pull * (0.015 + aSeed * 0.03);
     }
     float working = step(2.5, uPhaseKind) * (1.0 - step(3.5, uPhaseKind));
     float thinking = step(1.5, uPhaseKind) * (1.0 - step(2.5, uPhaseKind));
@@ -210,8 +224,39 @@ function writeSlot(
   }
 }
 
-function geometryFromOrbs(orbs: ParticleOrb[], material: THREE.ShaderMaterial): THREE.Points {
+/**
+ * Idle end of uMorph. Scattered cool orbs — not a head-and-shoulders bust.
+ * Gold stays off so the amber core appears only as the figure wins.
+ */
+export function buildFreeFloatCloud(count: number): ParticleOrb[] {
+  const random = makeRng(1750917)
+  const orbs: ParticleOrb[] = []
+  for (let i = 0; i < count; i++) {
+    const angle = random() * Math.PI * 2
+    const radius = Math.pow(random(), 0.55) * 1.7
+    const y = (random() - 0.42) * 1.55
+    const z = (random() - 0.5) * 1.1
+    const edge = radius / 1.7
+    orbs.push({
+      x: Math.cos(angle) * radius,
+      y,
+      z,
+      gold: 0,
+      light: 0.25 + (1 - edge) * 0.85,
+      flow: 0.34 + random() * 0.28,
+      size: 0.85 + random() * 1.25,
+    })
+  }
+  return orbs
+}
+
+function geometryFromOrbs(
+  orbs: ParticleOrb[],
+  material: THREE.ShaderMaterial,
+  targetOrbs?: ParticleOrb[],
+): THREE.Points {
   const count = orbs.length
+  const bOrbs = targetOrbs && targetOrbs.length === count ? targetOrbs : orbs
   const aPos = new Float32Array(count * 3)
   const bPos = new Float32Array(count * 3)
   const aSize = new Float32Array(count)
@@ -224,7 +269,7 @@ function geometryFromOrbs(orbs: ParticleOrb[], material: THREE.ShaderMaterial): 
   const bFlow = new Float32Array(count)
   const seeds = new Float32Array(count)
   writeSlot(orbs, aPos, aSize, aGold, aLight, aFlow)
-  writeSlot(orbs, bPos, bSize, bGold, bLight, bFlow)
+  writeSlot(bOrbs, bPos, bSize, bGold, bLight, bFlow)
   for (let i = 0; i < count; i++) seeds[i] = (i * 0.618033) % 1
 
   const geometry = new THREE.BufferGeometry()
@@ -330,6 +375,9 @@ export type MorphablePresenceSystem = {
   stars: THREE.Points
   currentShapeId: PresenceShapeId
   morphTo: (shapeId: PresenceShapeId, opts?: { duration?: number; immediate?: boolean }) => void
+  /** 0 = free cloud, 1 = winning figure. One uniform. Does not remount the cloud. */
+  setLifecycleTarget: (target: 0 | 1, opts?: { duration?: number; immediate?: boolean }) => void
+  morphValue: () => number
   tick: (delta: number) => void
   setGalaxy: (on: boolean) => void
   syncStars: (time: number, motion: number) => void
@@ -347,8 +395,10 @@ export function createMorphablePresenceSystem(
   const figureBudget = Math.round(82000 * density)
   const fieldBudget = Math.round(15000 * density)
   let shape = resolvePresenceShape(initialShapeId)
-  const figureOrbs = resampleOrbs(shape.buildFigure(density), figureBudget)
-  const figure = geometryFromOrbs(figureOrbs, material)
+  let figureOrbs = resampleOrbs(shape.buildFigure(density), figureBudget)
+  const freeOrbs = buildFreeFloatCloud(figureBudget)
+  // aPos = free cloud (uMorph 0). bPos = winning figure (uMorph 1).
+  const figure = geometryFromOrbs(freeOrbs, material, figureOrbs)
   let field: THREE.Points | null = null
   if (shape.buildField) {
     field = geometryFromOrbs(resampleOrbs(shape.buildField(density), fieldBudget), material)
@@ -362,13 +412,18 @@ export function createMorphablePresenceSystem(
   if (field) group.add(field)
   group.add(galaxyStars.points)
 
-  let morph = 1
-  let morphDuration = 0
-  let morphElapsed = 0
-  let morphing = false
+  let lifecycleTarget: 0 | 1 = 0
+  let animFrom = 0
+  let animTo = 0
+  let animElapsed = 0
+  let animDuration = 0
+  let animating = false
+  let shapeBlendActive = false
+  let pendingFigureRestore = false
+  let restoreFreeOnArrive = false
   const uniforms = material.uniforms
-  uniforms.uMorph = uniforms.uMorph ?? { value: 1 }
-  uniforms.uMorph.value = 1
+  uniforms.uMorph = uniforms.uMorph ?? { value: 0 }
+  uniforms.uMorph.value = 0
 
   const copyCurrentToA = (points: THREE.Points) => {
     const geo = points.geometry
@@ -400,29 +455,79 @@ export function createMorphablePresenceSystem(
     aFlow.needsUpdate = true
   }
 
-  const writeB = (points: THREE.Points, orbs: ParticleOrb[]) => {
+  const writeSlotAttr = (points: THREE.Points, orbs: ParticleOrb[], slot: "a" | "b") => {
     const geo = points.geometry
-    const bPos = geo.getAttribute("bPos") as THREE.BufferAttribute
-    const bSize = geo.getAttribute("bSize") as THREE.BufferAttribute
-    const bGold = geo.getAttribute("bGold") as THREE.BufferAttribute
-    const bLight = geo.getAttribute("bLight") as THREE.BufferAttribute
-    const bFlow = geo.getAttribute("bFlow") as THREE.BufferAttribute
-    for (let i = 0; i < orbs.length; i++) {
+    const pos = geo.getAttribute(`${slot}Pos`) as THREE.BufferAttribute
+    const size = geo.getAttribute(`${slot}Size`) as THREE.BufferAttribute
+    const gold = geo.getAttribute(`${slot}Gold`) as THREE.BufferAttribute
+    const light = geo.getAttribute(`${slot}Light`) as THREE.BufferAttribute
+    const flow = geo.getAttribute(`${slot}Flow`) as THREE.BufferAttribute
+    const n = Math.min(orbs.length, pos.count)
+    for (let i = 0; i < n; i++) {
       const orb = orbs[i]
       const i3 = i * 3
-      bPos.array[i3] = orb.x
-      bPos.array[i3 + 1] = orb.y
-      bPos.array[i3 + 2] = orb.z
-      bSize.array[i] = orb.size
-      bGold.array[i] = orb.gold
-      bLight.array[i] = orb.light
-      bFlow.array[i] = orb.flow
+      pos.array[i3] = orb.x
+      pos.array[i3 + 1] = orb.y
+      pos.array[i3 + 2] = orb.z
+      size.array[i] = orb.size
+      gold.array[i] = orb.gold
+      light.array[i] = orb.light
+      flow.array[i] = orb.flow
     }
-    bPos.needsUpdate = true
-    bSize.needsUpdate = true
-    bGold.needsUpdate = true
-    bLight.needsUpdate = true
-    bFlow.needsUpdate = true
+    pos.needsUpdate = true
+    size.needsUpdate = true
+    gold.needsUpdate = true
+    light.needsUpdate = true
+    flow.needsUpdate = true
+  }
+
+  const anchorFreeAndFigure = () => {
+    writeSlotAttr(figure, freeOrbs, "a")
+    writeSlotAttr(figure, figureOrbs, "b")
+  }
+
+  const captureDisplayed = (): ParticleOrb[] => {
+    const geo = figure.geometry
+    const aPos = geo.getAttribute("aPos") as THREE.BufferAttribute
+    const bPos = geo.getAttribute("bPos") as THREE.BufferAttribute
+    const aSize = geo.getAttribute("aSize") as THREE.BufferAttribute
+    const bSize = geo.getAttribute("bSize") as THREE.BufferAttribute
+    const aGold = geo.getAttribute("aGold") as THREE.BufferAttribute
+    const bGold = geo.getAttribute("bGold") as THREE.BufferAttribute
+    const aLight = geo.getAttribute("aLight") as THREE.BufferAttribute
+    const bLight = geo.getAttribute("bLight") as THREE.BufferAttribute
+    const aFlow = geo.getAttribute("aFlow") as THREE.BufferAttribute
+    const bFlow = geo.getAttribute("bFlow") as THREE.BufferAttribute
+    const m = uniforms.uMorph.value as number
+    const out: ParticleOrb[] = []
+    for (let i = 0; i < aPos.count; i++) {
+      const i3 = i * 3
+      out.push({
+        x: aPos.array[i3] * (1 - m) + bPos.array[i3] * m,
+        y: aPos.array[i3 + 1] * (1 - m) + bPos.array[i3 + 1] * m,
+        z: aPos.array[i3 + 2] * (1 - m) + bPos.array[i3 + 2] * m,
+        size: aSize.array[i] * (1 - m) + bSize.array[i] * m,
+        gold: aGold.array[i] * (1 - m) + bGold.array[i] * m,
+        light: aLight.array[i] * (1 - m) + bLight.array[i] * m,
+        flow: aFlow.array[i] * (1 - m) + bFlow.array[i] * m,
+      })
+    }
+    return out
+  }
+
+  const beginReturnToFree = (duration: number) => {
+    const current = captureDisplayed()
+    writeSlotAttr(figure, freeOrbs, "a")
+    writeSlotAttr(figure, current, "b")
+    uniforms.uMorph.value = 1
+    animFrom = 1
+    animTo = 0
+    animElapsed = 0
+    animDuration = duration
+    animating = true
+    shapeBlendActive = false
+    pendingFigureRestore = true
+    restoreFreeOnArrive = false
   }
 
   const applyFraming = (target: THREE.Object3D) => {
@@ -440,13 +545,55 @@ export function createMorphablePresenceSystem(
     field,
     stars: galaxyStars.points,
     currentShapeId: shape.id,
+    morphValue() {
+      return uniforms.uMorph.value as number
+    },
+    setLifecycleTarget(target, opts) {
+      const duration = opts?.duration ?? LIFECYCLE_MORPH_SECONDS
+      const immediate = Boolean(opts?.immediate) || duration <= 0
+      const previous = lifecycleTarget
+      lifecycleTarget = target
+      const current = uniforms.uMorph.value as number
+      if (
+        previous === target
+        && !animating
+        && !shapeBlendActive
+        && !pendingFigureRestore
+        && !restoreFreeOnArrive
+        && Math.abs(current - target) < 0.0008
+      ) {
+        return
+      }
+      if (immediate) {
+        anchorFreeAndFigure()
+        uniforms.uMorph.value = target
+        animating = false
+        shapeBlendActive = false
+        pendingFigureRestore = false
+        restoreFreeOnArrive = false
+        return
+      }
+      if (shapeBlendActive && target === 1) return
+      if (shapeBlendActive && target === 0) {
+        beginReturnToFree(duration)
+        return
+      }
+      if (pendingFigureRestore && target === 0) return
+      if (restoreFreeOnArrive && target === 1) return
+      if (animating && animTo === target && !shapeBlendActive) return
+      if (!animating && Math.abs(current - target) < 0.0008) return
+      animFrom = current
+      animTo = target
+      animElapsed = 0
+      animDuration = duration
+      animating = true
+    },
     morphTo(shapeId, opts) {
-      if (shapeId === system.currentShapeId && !morphing) return
+      if (shapeId === system.currentShapeId) return
       const next = resolvePresenceShape(shapeId)
-      copyCurrentToA(figure)
-      writeB(figure, resampleOrbs(next.buildFigure(density), figureBudget))
+      const nextOrbs = resampleOrbs(next.buildFigure(density), figureBudget)
 
-      // Field swaps immediately (environment of the target shape).
+      // Field swaps immediately (environment of the target shape). Figure lerps.
       if (field) {
         group.remove(field)
         field.geometry.dispose()
@@ -461,28 +608,59 @@ export function createMorphablePresenceSystem(
 
       shape = next
       system.currentShapeId = next.id
+      figureOrbs = nextOrbs
       applyFraming(bust)
-      if (opts?.immediate || (opts?.duration ?? 1.15) <= 0) {
-        morph = 1
-        morphing = false
-        uniforms.uMorph.value = 1
-        // Snap A/B to the target so subsequent morphs start clean.
-        copyCurrentToA(figure)
-        writeB(figure, resampleOrbs(next.buildFigure(density), figureBudget))
+
+      const immediate = Boolean(opts?.immediate) || (opts?.duration ?? LIFECYCLE_MORPH_SECONDS) <= 0
+      const morphNow = uniforms.uMorph.value as number
+      if (immediate) {
+        anchorFreeAndFigure()
+        uniforms.uMorph.value = lifecycleTarget
+        animating = false
+        shapeBlendActive = false
+        pendingFigureRestore = false
+        restoreFreeOnArrive = false
         return
       }
-      morph = 0
-      morphElapsed = 0
-      morphDuration = opts?.duration ?? 1.15
-      morphing = true
+      // Still on the free cloud: keep aPos free and retarget bPos. Lifecycle drives uMorph.
+      if (morphNow <= 0.001 && !shapeBlendActive) {
+        writeSlotAttr(figure, freeOrbs, "a")
+        writeSlotAttr(figure, figureOrbs, "b")
+        return
+      }
+      copyCurrentToA(figure)
+      writeSlotAttr(figure, figureOrbs, "b")
+      shapeBlendActive = true
+      pendingFigureRestore = false
+      restoreFreeOnArrive = true
+      animFrom = 0
+      animTo = 1
+      animElapsed = 0
+      animDuration = opts?.duration ?? LIFECYCLE_MORPH_SECONDS
+      animating = true
       uniforms.uMorph.value = 0
     },
     tick(delta) {
-      if (!morphing) return
-      morphElapsed += delta
-      morph = Math.min(1, morphElapsed / Math.max(0.0001, morphDuration))
+      if (!animating) return
+      animElapsed += delta
+      const t = Math.min(1, animElapsed / Math.max(0.0001, animDuration))
+      const morph = animFrom + (animTo - animFrom) * t
       uniforms.uMorph.value = morph
-      if (morph >= 1) morphing = false
+      if (t < 1) return
+      animating = false
+      uniforms.uMorph.value = animTo
+      if (shapeBlendActive || restoreFreeOnArrive) {
+        anchorFreeAndFigure()
+        uniforms.uMorph.value = 1
+        shapeBlendActive = false
+        restoreFreeOnArrive = false
+        return
+      }
+      if (pendingFigureRestore) {
+        writeSlotAttr(figure, figureOrbs, "b")
+        uniforms.uMorph.value = 0
+        pendingFigureRestore = false
+      }
     },
     setGalaxy(on) {
       galaxyStars.points.visible = on

@@ -57,7 +57,7 @@ export function isGalaxyPresenceEffective(input: {
 /**
  * Galaxy does not replace the figure `resolvePresenceShapeId` already chose.
  * Suite hex_aegis, a custom preset, and every persona shape — including Anzu's
- * stormbird — stay. Ref A/B apply only when that winner is `humanoid_bust`.
+ * stormbird — stay. That winner is the engaged clump. The idle end is the free cloud.
  */
 export function galaxyFigureShapeId(input: {
   requestedPresence: PresenceMode
