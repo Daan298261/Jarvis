@@ -1,6 +1,6 @@
 # RFC-0177: Shared dot-persona motion cues
 
-**Status:** accepted
+**Status:** implemented
 **Author:** Codex
 **Date:** 2026-09-25
 
