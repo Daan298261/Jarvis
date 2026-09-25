@@ -52,10 +52,11 @@
   z-index: 30;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 4px;
-  width: auto;
-  max-width: min(420px, calc(100vw - 24px));
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .jarvis-presence-controls {
@@ -64,8 +65,12 @@
   left: auto;
   right: auto;
   z-index: auto;
-  width: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   margin: 0;
   color: rgba(225, 244, 250, 0.82);
   font-size: 12px;
@@ -97,11 +102,14 @@
   top: auto;
   left: auto;
   right: auto;
-  width: min(320px, calc(100vw - 24px));
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin-top: 8px;
   padding: 12px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
   border: 1px solid rgba(103, 220, 255, 0.14);
   border-radius: 12px;
@@ -109,13 +117,23 @@
   backdrop-filter: blur(14px);
 }
 
+.jarvis-presence-controls-body > * {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+}
+
 .jarvis-presence-controls-body-voice {
-  width: min(420px, calc(100vw - 24px));
+  width: 100%;
+  max-width: 100%;
 }
 
 .jarvis-presence-controls-body-persona {
-  display: block;
-  width: min(340px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  max-width: 100%;
   padding: 10px;
 }
 
@@ -142,6 +160,12 @@
   gap: 8px;
 }
 
+.jarvis-presence-controls-body .jarvis-presence-mode-row {
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
+}
+
 .jarvis-presence-mode-row button,
 .jarvis-presence-controls select {
   width: 100%;
@@ -154,6 +178,14 @@
 
 .jarvis-presence-mode-row button {
   cursor: pointer;
+}
+
+.jarvis-presence-controls-body .jarvis-presence-mode-row button {
+  height: auto;
+  white-space: normal;
+  overflow-wrap: break-word;
+  line-height: 1.25;
+  padding: 6px 8px;
 }
 
 .jarvis-presence-mode-row button.active {
@@ -270,7 +302,6 @@
 }
 
 @media (max-width: 720px) {
-  .jarvis-presence-controls-body,
   .jarvis-presence-mode-row {
     grid-template-columns: 1fr;
   }

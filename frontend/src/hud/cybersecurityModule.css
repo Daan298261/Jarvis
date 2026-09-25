@@ -1,30 +1,57 @@
-.jarvis-cyber-module-body {
-  grid-template-columns: 1fr;
-  width: min(380px, calc(100vw - 24px));
-  max-height: min(420px, 52dvh);
+/* Beat the shared menu body even if presence.css loads later. */
+.jarvis-presence-controls-body.jarvis-cyber-module-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  grid-template-columns: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  max-height: min(520px, 62dvh);
   overflow: auto;
+}
+
+.jarvis-cyber-module {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .jarvis-cyber-module-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 8px 10px;
+  width: 100%;
+  min-width: 0;
 }
 
 .jarvis-cyber-module-title {
+  flex: 1 1 12rem;
+  min-width: 0;
   margin: 0;
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: rgba(162, 199, 211, 0.85);
+  line-height: 1.35;
+  overflow-wrap: break-word;
 }
 
 .jarvis-cyber-module-master {
   margin-left: auto;
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
   font-size: 11px;
   color: rgba(196, 228, 237, 0.78);
 }
@@ -89,16 +116,24 @@
   margin: 0;
   padding: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
 .jarvis-cyber-tool-row {
+  position: relative;
   padding: 10px;
   border: 1px solid rgba(103, 220, 255, 0.16);
   border-radius: 10px;
   background: rgba(5, 14, 20, 0.82);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .jarvis-cyber-tool-row.disabled {
@@ -109,6 +144,8 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  min-width: 0;
+  width: 100%;
 }
 
 .jarvis-cyber-tool-name {
@@ -117,6 +154,7 @@
   font-size: 13px;
   font-weight: 600;
   color: rgba(230, 246, 252, 0.92);
+  overflow-wrap: break-word;
 }
 
 .jarvis-cyber-tool-meta {
@@ -161,11 +199,15 @@
 
 .jarvis-cyber-tool-path {
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 10px;
-  line-height: 1.4;
+  line-height: 1.45;
   color: rgba(162, 199, 211, 0.72);
-  word-break: break-all;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .jarvis-cyber-tool-actions {
