@@ -21,6 +21,12 @@
   color: #edf7fb;
 }
 
+html[data-session-mode] .hud-app {
+  --hud-cyan: var(--anzu-persona, #50d8ff);
+  --hud-cyan-dim: color-mix(in srgb, var(--anzu-persona, #50d8ff) 76%, white);
+  --hud-line: color-mix(in srgb, var(--anzu-persona, #50d8ff) 24%, transparent);
+}
+
 .hud-app::before {
   content: "";
   position: absolute;
@@ -123,7 +129,7 @@
   position: relative;
   z-index: 40;
   min-height: 58px;
-  grid-template-columns: minmax(210px, 1fr) auto minmax(210px, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   padding: 10px 18px;
   border-bottom: 1px solid rgba(143, 218, 239, 0.075);
   background: linear-gradient(180deg, rgba(5, 8, 12, 0.88), rgba(5, 8, 12, 0.34));
@@ -133,6 +139,9 @@
 .hud-top-left {
   gap: 12px;
   align-items: center;
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: 5px;
 }
 
 .hud-brand-lockup {
@@ -140,6 +149,7 @@
   align-items: center;
   gap: 9px;
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 .hud-brand-mark {
@@ -161,6 +171,8 @@
   font-size: 12px;
   letter-spacing: 0.19em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hud-top-meta {
@@ -250,6 +262,7 @@
   align-items: center;
   flex-wrap: nowrap;
   max-width: min(52vw, 640px);
+  min-width: 0;
 }
 
 /* When the hotswap menu is open, reflow chrome so the 360px panel does not sit on Admin / Legacy. */
@@ -1555,7 +1568,7 @@
 
 @media (max-width: 900px) {
   .hud-top {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .hud-top-center {
@@ -1566,7 +1579,7 @@
     padding-top: 2px;
   }
 
-  .hud-top-right { justify-self: end; }
+  .hud-top-right { justify-self: end; max-width: min(48vw, 420px); }
   .hud-stage { padding-inline: 0; }
   .hud-orb-zone { min-height: clamp(320px, 58dvh, 720px); }
   .hud-chat { width: min(1000px, calc(100% - 32px)); }

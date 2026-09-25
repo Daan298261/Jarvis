@@ -85,7 +85,7 @@ export function HudTopChrome({
         <div className="hud-brand-lockup">
           <Link to="/" className="hud-brand-link" title="New task">
             <span className={`hud-brand-mark${statusOnline ? "" : " degraded"}`} aria-hidden />
-            <strong>JARVIS</strong>
+            <strong>ANZU</strong>
           </Link>
         </div>
         <HudLocalStatus statusOnline={statusOnline} issues={healthIssues} />

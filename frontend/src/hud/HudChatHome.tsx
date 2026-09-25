@@ -21,8 +21,8 @@ import type { PresencePhase } from "../presence/presenceTypes"
 const MOOD_COPY: Record<OrbMood, { label: string; detail: string }> = {
   idle: { label: "Ready", detail: "Local intelligence standing by" },
   listening: { label: "Listening", detail: "Voice input active" },
-  thinking: { label: "Thinking", detail: "Jarvis is working on the current task" },
-  speaking: { label: "Speaking", detail: "Jarvis is responding" },
+  thinking: { label: "Thinking", detail: "ANZU is working on the current task" },
+  speaking: { label: "Speaking", detail: "ANZU is responding" },
   alert: { label: "Attention", detail: "A decision is waiting for you" },
 }
 
@@ -155,7 +155,7 @@ export function HudChatHome() {
       className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}${hexStrikeActive && !showHexSuite ? " hex-suite-collapsed" : ""}${galaxyEffective ? " galaxy-effective" : ""}`}
     >
       <AppearancePresenceControls settings={presentation} />
-      <section className="hud-orb-zone" aria-label="Jarvis state">
+      <section className="hud-orb-zone" aria-label="ANZU state">
         <PresenceHost
           snapshot={snapshot}
           settings={presenceSettings}

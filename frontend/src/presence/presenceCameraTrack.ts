@@ -1,9 +1,11 @@
-/** Local webcam attention — MediaPipe face landmarks first, FaceDetector fallback. */
+/** Local webcam attention — head, eye and optional hand landmarks stay in-memory only. */
 
 export type CameraTrackSample = {
   x: number
   y: number
   confidence: number
+  /** Open-hand energy from the current frame; never persisted or transmitted. */
+  gesture?: number
 }
 
 export type PresenceCameraTracker = {
@@ -49,7 +51,7 @@ function landmarksToVector(
 
 async function createMediaPipeTracker(video: HTMLVideoElement): Promise<PresenceCameraTracker | null> {
   try {
-    const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision")
+    const { FaceLandmarker, FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision")
     const vision = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm",
     )
@@ -64,6 +66,21 @@ async function createMediaPipeTracker(video: HTMLVideoElement): Promise<Presence
       outputFaceBlendshapes: false,
       outputFacialTransformationMatrixes: false,
     })
+    let handLandmarker: Awaited<ReturnType<typeof HandLandmarker.createFromOptions>> | null = null
+    try {
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+      })
+    } catch {
+      // Face and eye tracking remain available when the optional hand model cannot load.
+      handLandmarker = null
+    }
 
     let last: CameraTrackSample = { x: 0, y: 0, confidence: 0 }
 
@@ -77,12 +94,21 @@ async function createMediaPipeTracker(video: HTMLVideoElement): Promise<Presence
           return
         }
         last = landmarksToVector(face)
+        const hands = handLandmarker?.detectForVideo(video, timestampMs).landmarks || []
+        const hand = hands[0]
+        if (hand?.length) {
+          const wrist = hand[0]
+          const middle = hand[9] || wrist
+          const span = Math.hypot(middle.x - wrist.x, middle.y - wrist.y)
+          last.gesture = clamp(span * 9, 0, 1)
+        }
       },
       read() {
         return last
       },
       dispose() {
         landmarker.close()
+        handLandmarker?.close()
       },
     }
   } catch (error) {
@@ -114,6 +140,7 @@ function createFaceDetectorTracker(video: HTMLVideoElement): PresenceCameraTrack
             x: clamp((0.5 - cx) * 2, -1, 1),
             y: clamp((cy - 0.5) * 2, -1, 1),
             confidence: 0.85,
+            gesture: 0,
           }
         } catch {
           last = { x: 0, y: 0, confidence: 0 }

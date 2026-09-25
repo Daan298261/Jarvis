@@ -214,9 +214,9 @@ export function HudChat({ onMoodChange }: HudChatProps) {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder={voiceSwitching ? "Switching voice…" : id ? "Message…" : "Ask Jarvis anything…"}
+          placeholder={voiceSwitching ? "Switching voice…" : id ? "Message…" : "Ask ANZU anything…"}
           rows={2}
-          aria-label="Message Jarvis"
+          aria-label="Message ANZU"
           aria-disabled={voiceSwitching}
         />
         <div className="hud-composer-actions">
