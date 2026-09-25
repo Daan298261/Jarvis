@@ -374,7 +374,7 @@ export function MorphablePresenceStage({
         uniforms.uGesture.value += (gestureTarget - uniforms.uGesture.value) * Math.min(1, delta * 4)
       }
       try {
-        if (composer) composer.render()
+        if (composer && (current.settings.performancePreset !== "auto" || autoTier > 0)) composer.render()
         else renderer.render(scene, camera)
       } catch (error) {
         window.cancelAnimationFrame(frame)
