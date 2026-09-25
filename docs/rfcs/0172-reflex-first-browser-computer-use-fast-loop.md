@@ -2,9 +2,10 @@
 
 **Status:** implemented — P0  
 **Date:** 2026-09-24  
+**Prior status (main @ `ac18fb32`, #406):** accepted — P0.  
 **Implemented:** #408 @ `8f81e5890a1131a40bc678d165ebcbd4ba95b3ef` (`backend/app/reflex_loop/` + tool/API wires).  
 **Residuals:** D2 tip follow-up wiring forwarder → 0171 `browser_operation_target` / DecisionResult (in flight); soft 0145/0151; live Playwright/CDP + Windows UIA Desktop sign-off.  
-**Depends on:** RFC-0171 (hard). RFC-0145 and RFC-0151 exist on main @ `ac18fb32` but are **not yet ported** to development — soft until a later parity port. Implement may ship a minimal in-ticket `ActionFrame` / sandbox posture if those RFCs are absent; do not block on a full 0145/0151 land.
+**Depends on:** RFC-0171 (hard), RFC-0145, and RFC-0151. The #406 parity drafts are now on this branch as `0145-reliable-computer-use-perception-action-verification.md` and `0151-secure-execution-sandbox-egress-filesystem-and-secrets.md`. They stay soft until a product land. Implement may ship a minimal in-ticket `ActionFrame` / sandbox posture without a full 0145/0151 implementation.
 
 ## Problem
 
