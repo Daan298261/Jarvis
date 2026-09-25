@@ -18,11 +18,11 @@ All 13 named persona shapes, `hex_aegis`, the default bust, and RFC-0138 custom 
 
 ## Acceptance criteria
 
-- [ ] The shape catalog can resolve a typed optional appearance profile independently from figure/field geometry.
-- [ ] Every built-in named persona, suite shape, default bust, and custom preset renders through the shared engine; no persona-specific React renderer or shader branch is introduced.
-- [ ] Existing per-orb attributes (`gold`, `light`, `flow`, `size`) continue to work and retain each persona's silhouette and signature motif.
-- [ ] Shared engine improvements to glow, depth cues, or material quality apply to all catalog shapes without editing each shape implementation.
-- [ ] Unknown/missing profile fields safely use defaults; existing saved persona IDs and custom presets still load.
+- [x] The shape catalog can resolve a typed optional appearance profile independently from figure/field geometry.
+- [x] Every built-in named persona, suite shape, default bust, and custom preset renders through the shared engine; no persona-specific React renderer or shader branch is introduced.
+- [x] Existing per-orb attributes (`gold`, `light`, `flow`, `size`) continue to work and retain each persona's silhouette and signature motif.
+- [x] Shared engine improvements to glow, depth cues, or material quality apply to all catalog shapes without editing each shape implementation.
+- [x] Unknown/missing profile fields safely use defaults; existing saved persona IDs and custom presets still load.
 - [ ] A harness can select each catalog profile and verify geometry, phase, reduced-motion, and WebGL fallback behavior.
 
 ## Likely files

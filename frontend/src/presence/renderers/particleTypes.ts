@@ -19,6 +19,12 @@ export type PresenceShapeFraming = {
   position?: readonly [number, number, number]
 }
 
+/** Shared shader appearance values; geometry remains owned by each shape. */
+export type DotAppearanceProfile = {
+  pointScale?: number
+  depthSoftness?: number
+}
+
 export type PresenceShapeDefinition = {
   id: PresenceShapeId
   label: string
@@ -27,6 +33,7 @@ export type PresenceShapeDefinition = {
   /** Optional environment layer (mountains/HUD dust); swapped, not morph-lerped. */
   buildField?: (density: number) => ParticleOrb[]
   framing?: PresenceShapeFraming
+  appearance?: DotAppearanceProfile
 }
 
 export type PresenceShapeCatalog = ReadonlyMap<PresenceShapeId, PresenceShapeDefinition>

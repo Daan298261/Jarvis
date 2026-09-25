@@ -44,6 +44,12 @@ function phaseIsEngaged(phase: PresencePhase): boolean {
   return lifecycleMorphTarget(phase) === 1
 }
 
+function bounded(value: number | undefined, fallback: number, min: number, max: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? THREE.MathUtils.clamp(value, min, max)
+    : fallback
+}
+
 /**
  * One canvas, one orb cloud, one `uMorph`. Phase drives free-float ↔ winning figure
  * for every avatar that mounts this stage. Galaxy only toggles the star layer.
@@ -118,6 +124,8 @@ export function MorphablePresenceStage({
       uMorph: { value: 0 },
       uPhaseKind: { value: 0 },
       uGlow: { value: 1 },
+      uPointScale: { value: 1 },
+      uDepthSoftness: { value: 0 },
       uPointer: { value: new THREE.Vector2(0, 0) },
       uPointerStrength: { value: 0 },
       uGesture: { value: 0 },
@@ -276,6 +284,9 @@ export function MorphablePresenceStage({
       uniforms.uColor.value.lerp(color, reduced ? 1 : 0.12)
 
       const framing = resolvePresenceShape(system.currentShapeId).framing
+      const appearance = resolvePresenceShape(system.currentShapeId).appearance
+      uniforms.uPointScale.value = bounded(visual?.pointScale, bounded(appearance?.pointScale, 1, 0.5, 1.5), 0.5, 1.5)
+      uniforms.uDepthSoftness.value = bounded(visual?.depthSoftness, bounded(appearance?.depthSoftness, 0, 0, 1), 0, 1)
       const baseYaw = framing?.yaw ?? 0.06
       const basePos = framing?.position ?? [0, 0.08, 0]
       const mode = current.settings.attentionMode

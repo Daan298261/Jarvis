@@ -30,6 +30,8 @@ export const particleVertexShader = `
   uniform float uMorph;
   uniform float uPhaseKind;
   uniform float uGlow;
+  uniform float uPointScale;
+  uniform float uDepthSoftness;
   uniform float uGalaxy;
   uniform float uGalaxyBust;
   uniform float uLattice;
@@ -111,7 +113,7 @@ export const particleVertexShader = `
     }
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = clamp(size * uPixelScale * 6.6 / -mv.z, 0.72, 96.0);
+    gl_PointSize = clamp(size * uPointScale * uPixelScale * 6.6 / -mv.z, 0.72, 96.0);
     if (uGalaxyBust > 0.5) {
       float goldNow = mix(aGold, bGold, m);
       float neck = step(0.45, goldNow) * (1.0 - smoothstep(0.15, 0.45, p.y)) * smoothstep(-1.35, -0.2, p.y);
@@ -144,6 +146,7 @@ export const particleFragmentShader = `
   uniform float uSpeech;
   uniform float uPhaseKind;
   uniform float uGlow;
+  uniform float uDepthSoftness;
   uniform float uGalaxy;
   uniform float uGalaxyBust;
   uniform float uLattice;
@@ -161,7 +164,7 @@ export const particleFragmentShader = `
     float environment = step(0.8, vFlow);
     float core = exp(-r * r * 18.0) * mix(1.0, 0.42, loose);
     float halo = exp(-r * r * 3.6) * mix(0.45, 0.62, loose);
-    float depthWeight = mix(clamp(0.72 + vDepth * 0.52, 0.52, 1.12), 1.0, environment);
+    float depthWeight = mix(mix(clamp(0.72 + vDepth * 0.52, 0.52, 1.12), 1.0, uDepthSoftness), 1.0, environment);
     float alpha = (core + halo) * (1.0 - smoothstep(0.6, 1.0, r))
       * vLight * uOpacity * depthWeight * mix(1.0, 0.72, loose);
     float errorPhase = step(6.5, uPhaseKind) * (1.0 - step(7.5, uPhaseKind)) * step(0.01, uMotion);
