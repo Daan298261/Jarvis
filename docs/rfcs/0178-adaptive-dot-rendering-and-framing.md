@@ -1,7 +1,7 @@
 # RFC-0178: Adaptive dot rendering and persona framing
 
 **Status:** implemented
-**Implemented:** #430 @ `ae582af2d842f436fb69c0345d9c0717a6f66a83` (deterministic spatial LOD, frame-time hysteresis, separate layer budgets, responsive fit, harness summaries), including follow-up #432 @ `f51d5b3edb74bb3533979490b0de7a4e2c32fca1` (auto lowest tier renders through WebGL and bypasses composer, bloom, and post-processing; reduced pixel ratio and sample budgets stay). That bypass is in this RFC's decision, so #432 is part of the implement, not an open residual. Development tip at this ledger is #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83`.
+**Implemented:** #430 @ `ae582af2d842f436fb69c0345d9c0717a6f66a83` (deterministic spatial LOD, frame-time hysteresis, separate layer budgets, responsive fit, harness summaries), including follow-up #432 @ `f51d5b3edb74bb3533979490b0de7a4e2c32fca1` (auto lowest tier renders through WebGL and bypasses composer, bloom, and post-processing; reduced pixel ratio and sample budgets stay). That bypass is in this RFC's decision, so #432 is part of the implement, not an open residual. Development tip at this ledger is the post-#431 reconcile `cbbf2ef5f7c1695bab1134dfa52ebf141ec6d094`.
 **Specs:** #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`.
 **Quality bar:** **Anzu 1.0**. Full intent. No stubs / soft-fail.
 **Residuals:** Windows desktop GPU review of visual clarity and sustained performance stays unchecked. #430 body: desktop GPU sign-off remains pending because measured FPS in that run was low. #432 does not close that sign-off. Cloud VMs cannot sign it off.

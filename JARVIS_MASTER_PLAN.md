@@ -2915,7 +2915,7 @@ Decision: RFC-0176 shared dot appearance profiles implemented
 
 Reason:
 
-CoS assigned Architect a specs-only ledger tick after the GPT product wave for 0176–0178 landed on `development`. Tip at this tick is #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83`, which includes #428, #429, #430, and #432.
+CoS assigned Architect a specs-only ledger tick after the GPT product wave for 0176–0178 landed on `development`. Tip at this tick is the post-#431 reconcile `cbbf2ef5f7c1695bab1134dfa52ebf141ec6d094`, which includes #428, #429, #430, #432, and #433.
 
 ---
 
@@ -2925,17 +2925,17 @@ Decision: RFC-0177 shared dot persona motion cues implemented
 
 Reason:
 
-Same ledger tick as RFC-0176 and RFC-0178. #429 is on tip `a128942`.
+Same ledger tick as RFC-0176 and RFC-0178. #429 is on tip `cbbf2ef5`.
 
 ---
 
 Decision: RFC-0178 adaptive dot rendering and framing implemented
 
-[RFC-0178](docs/rfcs/0178-adaptive-dot-rendering-and-framing.md) is **implemented** on development via #430 @ `ae582af2d842f436fb69c0345d9c0717a6f66a83`, including follow-up #432 @ `f51d5b3edb74bb3533979490b0de7a4e2c32fca1`. #432 is the low-tier WebGL path: auto's lowest tier renders directly and bypasses composer, bloom, and post-processing, with the reduced pixel ratio and sample budgets kept. That behavior is already in this RFC's decision, so #432 is part of the implement, not an open residual. Specs-only land was #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`. Deterministic spatial LOD, frame-time hysteresis, separate figure/field/Galaxy budgets, and responsive fit landed in #430. Development tip at this tick is #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83`. Quality bar is **Anzu 1.0**. Full intent. No stubs / soft-fail. **Residual:** Windows desktop GPU review of visual clarity and sustained performance stays unchecked. #430 body: desktop GPU sign-off remains pending because measured FPS in that run was low. #432 does not close that sign-off. Cloud VMs cannot sign it off. §58 checked. RFC-0175 rows above stay closed. No product code in this ledger PR.
+[RFC-0178](docs/rfcs/0178-adaptive-dot-rendering-and-framing.md) is **implemented** on development via #430 @ `ae582af2d842f436fb69c0345d9c0717a6f66a83`, including follow-up #432 @ `f51d5b3edb74bb3533979490b0de7a4e2c32fca1`. #432 is the low-tier WebGL path: auto's lowest tier renders directly and bypasses composer, bloom, and post-processing, with the reduced pixel ratio and sample budgets kept. That behavior is already in this RFC's decision, so #432 is part of the implement, not an open residual. Specs-only land was #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`. Deterministic spatial LOD, frame-time hysteresis, separate figure/field/Galaxy budgets, and responsive fit landed in #430. Development tip at this tick is the post-#431 reconcile `cbbf2ef5f7c1695bab1134dfa52ebf141ec6d094`. Quality bar is **Anzu 1.0**. Full intent. No stubs / soft-fail. **Residual:** Windows desktop GPU review of visual clarity and sustained performance stays unchecked. #430 body: desktop GPU sign-off remains pending because measured FPS in that run was low. #432 does not close that sign-off. Cloud VMs cannot sign it off. §58 checked. RFC-0175 rows above stay closed. No product code in this ledger PR.
 
 Reason:
 
-Same ledger tick as RFC-0176 and RFC-0177. Tip is #433 @ `a128942`, which includes #428, #429, #430, and the #432 low-tier follow-up.
+Same ledger tick as RFC-0176 and RFC-0177. Tip is the post-#431 reconcile `cbbf2ef5`, which includes #428, #429, #430, #432, and #433.
 
 ---
 
