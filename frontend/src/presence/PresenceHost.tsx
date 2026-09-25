@@ -69,7 +69,13 @@ export function PresenceHost({ snapshot, settings, size = 540, shapeId, personaV
   const staticFallback = <PresenceFallback snapshot={snapshot} />
   const neuralFallback = (
     <PresenceErrorBoundary fallback={staticFallback}>
-      <NeuralPresence snapshot={snapshot} settings={settings} size={size} />
+      <NeuralPresence
+        snapshot={snapshot}
+        settings={settings}
+        size={size}
+        shapeId={shapeId}
+        personaVisual={personaVisual}
+      />
     </PresenceErrorBoundary>
   )
 
@@ -92,7 +98,13 @@ export function PresenceHost({ snapshot, settings, size = 540, shapeId, personaV
       {resolved.effective === "particle_bust" && (
         <PresenceErrorBoundary key="particle-bust" fallback={neuralFallback}>
           <Suspense fallback={neuralFallback}>
-            <ParticleBustPresence snapshot={snapshot} settings={settings} size={size} />
+            <ParticleBustPresence
+              snapshot={snapshot}
+              settings={settings}
+              size={size}
+              shapeId={shapeId}
+              personaVisual={personaVisual}
+            />
           </Suspense>
         </PresenceErrorBoundary>
       )}

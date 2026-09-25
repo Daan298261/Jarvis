@@ -1,4 +1,5 @@
 import type { AttentionMode } from "./presenceTypes"
+import { resolvePresenceAttract } from "./presenceLifecycle"
 import { createPresenceCameraTracker, type PresenceCameraTracker } from "./presenceCameraTrack"
 
 export type AttentionVector = {
@@ -173,19 +174,28 @@ export function createPresenceAttentionController(
       cameraSmooth.confidence = lerp(cameraSmooth.confidence, cameraTarget.confidence, 0.24)
       cameraSmooth.gesture = lerp(cameraSmooth.gesture, cameraTarget.gesture, 0.2)
 
-      if (mode === "camera" && cameraUsable && cameraSmooth.confidence > 0.3) {
+      const attract = resolvePresenceAttract({
+        attentionMode: mode,
+        reduced: false,
+        pointerX: pointerSmooth.x,
+        pointerY: pointerSmooth.y,
+        cameraX: cameraSmooth.x,
+        cameraY: cameraSmooth.y,
+        cameraConfidence: cameraTarget.confidence,
+        cameraAvailable: cameraUsable,
+      })
+      if (attract.source === "camera") {
         return {
-          x: cameraSmooth.x,
-          y: cameraSmooth.y,
-          confidence: cameraSmooth.confidence,
+          x: attract.x,
+          y: attract.y,
+          confidence: Math.max(cameraTarget.confidence, cameraSmooth.confidence),
           gesture: cameraSmooth.gesture,
           source: "camera",
         }
       }
-
       return {
-        x: pointerSmooth.x,
-        y: pointerSmooth.y,
+        x: attract.x,
+        y: attract.y,
         confidence: 1,
         gesture: 0,
         source: "pointer",
