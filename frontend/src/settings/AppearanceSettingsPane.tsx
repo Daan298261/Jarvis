@@ -69,9 +69,15 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           type="button"
           disabled={busy}
           className={selected === "neural" ? "active" : ""}
-          onClick={() => apply({ shell: "hud", requestedPresence: "neural" })}
+          title="The APEX-UI orb and reasoning graph adapted for Jarvis."
+          onClick={() =>
+            apply(
+              { shell: "hud", requestedPresence: "neural" },
+              "APEX orb and reasoning graph active. Jarvis uses its existing Neural HUD renderer.",
+            )
+          }
         >
-          Neural HUD
+          APEX UI · orb + graph
         </button>
         <button
           type="button"
