@@ -1,7 +1,8 @@
 # RFC-0170: Anzu parity program roadmap and definition of done
 
 **Status:** accepted  
-**Date:** 2026-09-24
+**Date:** 2026-09-24  
+**Reconciliation:** These #406 parity drafts (0137–0170) came from main and are kept alongside development’s different documents that reuse 0137–0140: `0137-persona-presence-shape-and-voice-binding.md`, `0138-anzu-orb-custom-ui-generation.md`, `0139-android-companion-fancy-orb-humanoid-ui.md`, and `0140-companion-on-device-voice-models.md`. In this roadmap, “0137” means `0137-capability-parity-matrix-and-continuous-benchmark.md` (Capability Lab), “0138” means the durable-goal draft, “0139” means the skill-forge draft, and “0140” means the agent-rooms draft. Development already implemented Skill Forge and Agent Rooms as RFC-0173 and RFC-0174.
 
 ## Problem
 RFC-0137–0169 define a broad capability program. Implementing them independently would duplicate infrastructure and make “parity” impossible to close systematically.
