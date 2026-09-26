@@ -170,6 +170,7 @@ def _environment_block(settings: AppSettings) -> str:
         f"- Desktop: {home / 'Desktop'}\n"
         f"- Documents: {home / 'Documents'}\n"
         f"- Allowed directories:\n{allowed or '- (defaults)'}\n"
+        "- <local-network-shares> means private LAN SMB paths such as \\\\nas.local\\share; it is not a literal directory.\n"
         "Never use a different username than the profile above.\n"
     )
 

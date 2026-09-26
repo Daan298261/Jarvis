@@ -39,11 +39,6 @@ _PRIVATE_NETS = (
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
 )
-_LOCAL_HOST_RE = re.compile(
-    r"(localhost|127\.0\.0\.1|::1|\.local\b|home\.arpa\b)",
-    re.IGNORECASE,
-)
-
 
 @dataclass(frozen=True)
 class PermissionSpec:
@@ -90,7 +85,7 @@ CATALOG: tuple[PermissionSpec, ...] = (
         "network",
         "Use the local network",
         "Talk to RFC1918 / localhost / .local hosts on networks you control.",
-        "ask",
+        "allow",
     ),
     PermissionSpec(
         "cyber.hexstrike",
@@ -322,8 +317,8 @@ def evaluate_permission(permission_id: str) -> PermissionDecision:
     persisted = persisted_mode(permission_id)
     if persisted == "deny":
         return PermissionDecision(permission_id, "deny", f"{spec.title} is set to Don't allow.", spec)
-    if persisted == "always":
-        return PermissionDecision(permission_id, "allow", f"{spec.title} is Always allowed.", spec)
+    if persisted in {"always", "allow"}:
+        return PermissionDecision(permission_id, "allow", f"{spec.title} is allowed by default." if persisted == "allow" else f"{spec.title} is Always allowed.", spec)
     with _LOCK:
         session_mode = _SESSION_GRANTS.get(permission_id)
     if session_mode in {"allow_session", "allow_once"}:
@@ -381,8 +376,6 @@ def _host_is_local(value: str) -> bool:
     text = (value or "").strip().lower()
     if not text:
         return False
-    if _LOCAL_HOST_RE.search(text):
-        return True
     host = text
     parsed = urlparse(text if "://" in text else f"//{text}", scheme="http")
     if parsed.hostname:
@@ -391,16 +384,13 @@ def _host_is_local(value: str) -> bool:
     try:
         addr = ipaddress.ip_address(host)
     except ValueError:
-        return host.endswith(".local") or host in {"localhost", "host.docker.internal"}
+        return host.endswith((".local", ".home.arpa")) or host in {"localhost", "host.docker.internal"} or (bool(host) and "." not in host)
     return any(addr in net for net in _PRIVATE_NETS)
 
 
 def looks_local_network(arguments: dict[str, Any] | None) -> bool:
-    blob = _blob(arguments)
-    if not blob:
+    if not arguments:
         return False
-    if _LOCAL_HOST_RE.search(blob):
-        return True
     for key in ("url", "uri", "host", "hostname", "address", "target"):
         value = (arguments or {}).get(key)
         if isinstance(value, str) and _host_is_local(value):
@@ -436,6 +426,12 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
             pending.append("computer.this_device")
     if name in INTERNET_TOOLS:
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
+    if any(
+        isinstance((arguments or {}).get(key), str)
+        and str((arguments or {})[key]).startswith("\\\\")
+        for key in ("path", "destination", "working_directory")
+    ):
+        pending.append("network.local")
     if name in {"hexstrike", "hexstrike_suite", "hexstrike_defensive", "hexstrike_operator"}:
         pending.append("cyber.hexstrike")
     if name == "hexstrike_defensive":
