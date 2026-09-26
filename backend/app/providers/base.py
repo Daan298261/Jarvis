@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
+from .tool_call_compat import normalize_tool_calls
 from .completion_text import (
     content_text_from_payload,
     delta_text_channels,
@@ -130,34 +131,42 @@ class ModelProvider:
             kwargs["max_tokens"] = max_tokens
         if extra_body:
             kwargs["extra_body"] = extra_body
-        response = await self.client.chat.completions.create(**kwargs)
-        choice = response.choices[0]
-        message = choice.message
-        tool_calls: list[dict[str, Any]] = []
-        for call in message.tool_calls or []:
-            tool_calls.append(
-                {
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
-                        "name": call.function.name,
-                        "arguments": call.function.arguments or "{}",
-                    },
-                }
+        if tools:
+            # The SDK's typed ChatCompletion rejects llama.cpp builds that return
+            # function.arguments as a JSON object. Keep OpenAI transport/error handling,
+            # but parse this response as a plain dictionary before normalizing calls.
+            body = {key: value for key, value in kwargs.items() if key != "extra_body"}
+            body.update(extra_body)
+            body["parallel_tool_calls"] = False
+            raw = await self.client.post("/chat/completions", cast_to=dict[str, Any], body=body)
+            choices = raw.get("choices") if isinstance(raw, dict) else None
+            if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                raise RuntimeError("Inference server returned no chat completion choice")
+            payload = choices[0].get("message") or {}
+            if not isinstance(payload, dict):
+                raise RuntimeError("Inference server returned an invalid chat message")
+            raw_content = content_text_from_payload(payload)
+            tool_calls = normalize_tool_calls(payload.get("tool_calls"), content=raw_content)
+            usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+            reasoning = reasoning_text_from_payload(payload)
+            content = visible_completion_text(raw_content, reasoning)
+            if tool_calls and "<tool_call>" in raw_content:
+                content = ""
+        else:
+            response = await self.client.chat.completions.create(**kwargs)
+            message = response.choices[0].message
+            usage = response.usage.model_dump() if response.usage else {}
+            raw = response.model_dump() if hasattr(response, "model_dump") else {}
+            if not isinstance(raw, dict):
+                raw = {}
+            payload = message_payload_from_openai(message, raw)
+            reasoning = reasoning_text_from_payload(payload) or getattr(message, "reasoning_content", None) or ""
+            content = visible_completion_text(
+                content_text_from_payload(payload) or getattr(message, "content", None) or "",
+                reasoning,
             )
-        usage = {}
-        if response.usage:
-            usage = response.usage.model_dump()
-        raw = response.model_dump() if hasattr(response, "model_dump") else {}
-        if not isinstance(raw, dict):
-            raw = {}
+            tool_calls = []
         timings = raw.get("timings") if isinstance(raw.get("timings"), dict) else {}
-        payload = message_payload_from_openai(message, raw)
-        reasoning = reasoning_text_from_payload(payload) or getattr(message, "reasoning_content", None) or ""
-        content = visible_completion_text(
-            content_text_from_payload(payload) or getattr(message, "content", None) or "",
-            reasoning,
-        )
         return ChatResult(
             content=content,
             reasoning=reasoning or "",
