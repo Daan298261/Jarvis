@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -62,6 +63,10 @@ def test_owner_home_is_allowed_without_empty_scope_bypass():
     home = Path.home()
     assert str(home) in default_allowed_directories()
     assert resolve_allowed_path(str(home / "AppData"), default_allowed_directories()) == (home / "AppData").resolve()
+    if os.name == "nt":
+        fixed_root = str(home.anchor)
+        assert fixed_root in default_allowed_directories()
+        assert resolve_allowed_path(str(Path(fixed_root) / "Windows"), default_allowed_directories()) == (Path(fixed_root) / "Windows").resolve()
     with pytest.raises(PermissionError):
         resolve_allowed_path(str(home), [])
 
