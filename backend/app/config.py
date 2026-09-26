@@ -501,6 +501,9 @@ def save_settings(settings: AppSettings) -> None:
 def default_allowed_directories() -> list[str]:
     home = Path.home()
     candidates = [
+        # The local owner's signed-in profile is the default workspace, so
+        # AppData and other ordinary owner folders do not fail the sandbox check.
+        home,
         home / "Desktop",
         home / "Documents",
         home / "Downloads",

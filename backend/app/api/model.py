@@ -20,6 +20,8 @@ from ..inference.backends import probe_remote_server
 from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
+from ..inference.tool_capability import capability_status, probe_tool_capability
+from ..inference.live_agent_suite import live_suite_status, start_live_suite
 from ..inference.profiles import available_profiles, declared_profiles, resolve_profile
 from ..runtime_install import component_status_payload, start_component_install
 from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
@@ -48,6 +50,11 @@ class AgentSuiteRunBody(BaseModel):
     simulate_success: bool = False
 
 
+class LiveAgentSuiteBody(BaseModel):
+    profiles: list[str] = ["balanced", "expert"]
+    case_ids: list[str] | None = None
+
+
 @router.get("")
 async def model_status():
     settings = load_settings()
@@ -67,6 +74,7 @@ async def model_status():
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
     snapshot["harness"] = load_last_report()
+    snapshot["tool_capability"] = capability_status(MANAGER.provider)
     return snapshot
 
 
@@ -86,6 +94,14 @@ async def probe_inference():
         "base_url": f"http://{settings.inference.host}:{settings.inference.port}/v1",
         **probe,
     }
+
+
+@router.post("/tool-capability/probe")
+async def probe_loaded_tool_capability():
+    if not MANAGER.provider or not MANAGER.state.loaded:
+        raise HTTPException(409, "Load a model before probing tool calls")
+    profile = resolve_profile(MANAGER.state.profile or load_settings().inference.profile)
+    return await probe_tool_capability(MANAGER.provider, thinking=profile.thinking, force=True)
 
 
 @router.get("/benchmarks")
@@ -139,8 +155,28 @@ async def hardware_gate():
 @router.get("/agent-suite")
 async def agent_suite():
     payload = list_suite()
+    payload["live_comparison_blocked"] = False
+    payload["live_comparison_reason"] = "Live runs use the selected local models and verify each workspace outcome."
     payload["results"] = await list_agent_results(limit=40)
     return payload
+
+
+@router.post("/agent-suite/live")
+async def launch_live_agent_suite(body: LiveAgentSuiteBody):
+    try:
+        return await start_live_suite(profiles=body.profiles, case_ids=body.case_ids)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/agent-suite/live/{job_id}")
+async def get_live_agent_suite(job_id: str):
+    job = live_suite_status(job_id)
+    if job is None:
+        raise HTTPException(404, "Live suite job not found")
+    return job
 
 
 @router.post("/agent-suite/run")

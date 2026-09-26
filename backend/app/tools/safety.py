@@ -89,7 +89,7 @@ def needs_confirmation(
 def resolve_allowed_path(path: str, allowed: list[str]) -> Path:
     target = Path(path).expanduser().resolve()
     if not allowed:
-        return target
+        raise PermissionError("No workspace directories are configured")
     for root in allowed:
         base = Path(root).expanduser().resolve()
         try:
