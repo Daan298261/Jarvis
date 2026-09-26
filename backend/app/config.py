@@ -81,9 +81,9 @@ class FrontResponderSettings(BaseModel):
 
     enabled: bool = True
     model: str = ""
-    max_output_tokens: int = Field(default=128, ge=32, le=256)
+    max_output_tokens: int = Field(default=384, ge=64, le=1024)
     temperature: float = Field(default=0.25, ge=0.0, le=1.0)
-    timeout_ms: int = Field(default=3000, ge=250, le=8000)
+    timeout_ms: int = Field(default=6000, ge=250, le=12000)
     context_turns: int = Field(default=4, ge=0, le=8)
     speak_immediately: bool = True
     parallel_when_distinct_model: bool = True

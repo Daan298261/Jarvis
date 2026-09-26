@@ -27,6 +27,7 @@ from ..agent.front_responder import (
     resolve_front_model_id,
     run_two_lane_chat,
 )
+from ..agent.planning import split_long_owner_prompt, requests_agent_tools
 from .inference_context import ensure_context_for_messages, model_lane_event_payload
 from ..agent.background_verify import schedule_background_verification
 from .slow_turn_feedback import SlowTurnNudger
@@ -170,6 +171,28 @@ async def stream_owner_chat(
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
 
+    if requests_agent_tools(cleaned):
+        from ..agent.loop import AGENT
+
+        try:
+            task = await AGENT.create_task(cleaned)
+        except Exception as exc:
+            yield {"type": "error", "detail": f"Could not start tool run: {exc}"[:500]}
+            return
+        spoken = "Right — I'll run that with the agent harness and tools on this PC."
+        _conversations.setdefault(cid, [])
+        _conversations[cid].append(ChatMessage(role="user", content=cleaned))
+        _conversations[cid].append(ChatMessage(role="assistant", content=spoken))
+        await publish_owner_text(spoken, source="owner_chat", speak=True, user_prompt=cleaned)
+        yield {
+            "type": "task_delegated",
+            "conversation_id": cid,
+            "task_id": task.id,
+            "reply": spoken,
+        }
+        yield {"type": "done", "conversation_id": cid, "reply": spoken}
+        return
+
     from .session_personality import maybe_switch_from_owner_message
 
     switched = maybe_switch_from_owner_message(cleaned)
@@ -253,6 +276,20 @@ async def stream_owner_chat(
         return
 
     worker_messages = _owner_messages(cid, cleaned, briefing)
+    chunks = split_long_owner_prompt(cleaned)
+    harness_insert_at = len(worker_messages) - 1
+    if len(chunks) > 1:
+        plan_lines = "\n".join(f"{index + 1}. {part[:180]}…" if len(part) > 180 else f"{index + 1}. {part}" for index, part in enumerate(chunks))
+        worker_messages.insert(
+            harness_insert_at,
+            ChatMessage(
+                role="system",
+                content=(
+                    "The owner's message was long. Work in internal steps across these parts "
+                    f"before answering ({len(chunks)} segments):\n{plan_lines}"
+                ),
+            ),
+        )
     parts: list[str] = []
     worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
 

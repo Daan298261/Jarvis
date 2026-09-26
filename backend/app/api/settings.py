@@ -105,9 +105,9 @@ class SettingsUpdate(BaseModel):
     tts_prefer_cpu_fallback: bool | None = None
     front_responder_enabled: bool | None = None
     front_responder_model: str | None = Field(default=None, max_length=160)
-    front_responder_max_output_tokens: int | None = Field(default=None, ge=32, le=256)
+    front_responder_max_output_tokens: int | None = Field(default=None, ge=64, le=1024)
     front_responder_temperature: float | None = Field(default=None, ge=0.0, le=1.0)
-    front_responder_timeout_ms: int | None = Field(default=None, ge=250, le=8000)
+    front_responder_timeout_ms: int | None = Field(default=None, ge=250, le=12000)
     front_responder_context_turns: int | None = Field(default=None, ge=0, le=8)
     front_responder_speak_immediately: bool | None = None
     decision_tier: Literal["local", "jev_optional", "jev_plus"] | None = None
