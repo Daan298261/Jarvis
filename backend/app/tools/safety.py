@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import ipaddress
+import ntpath
+import os
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
+from ..config import LOCAL_NETWORK_SCOPE
 from .base import RiskLevel
 
 IRREVERSIBLE_PATTERNS = [
@@ -86,11 +90,40 @@ def needs_confirmation(
     return risk == RiskLevel.IRREVERSIBLE or is_destructive_operation(tool_name, arguments, command)
 
 
+def _private_lan_unc(path: str) -> bool:
+    """Only named LAN shares; never silently send Windows credentials to WAN UNC hosts."""
+    drive = PureWindowsPath(path).drive
+    if not drive.startswith("\\\\"):
+        return False
+    host = drive.lstrip("\\").split("\\", 1)[0].lower()
+    if not host or host in {".", "?"}:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host == "localhost" or host.endswith((".local", ".home.arpa")) or "." not in host
+    return ip.is_loopback or ip.is_link_local or ip in ipaddress.ip_network("10.0.0.0/8") or ip in ipaddress.ip_network("172.16.0.0/12") or ip in ipaddress.ip_network("192.168.0.0/16") or ip in ipaddress.ip_network("fc00::/7")
+
+
 def resolve_allowed_path(path: str, allowed: list[str]) -> Path:
+    if os.name == "nt" and PureWindowsPath(path).drive.startswith("\\\\"):
+        if LOCAL_NETWORK_SCOPE in allowed and _private_lan_unc(path):
+            # Normalize .. lexically within the share; Path.resolve would contact
+            # the remote host before authorization and can stall an offline share.
+            return Path(ntpath.normpath(path))
+        explicit = any(
+            PureWindowsPath(root).drive.startswith("\\\\")
+            and PureWindowsPath(path).is_relative_to(PureWindowsPath(root))
+            for root in allowed
+        )
+        if not explicit:
+            raise PermissionError(f"Path {path} is outside allowed directories")
     target = Path(path).expanduser().resolve()
     if not allowed:
-        return target
+        raise PermissionError("No workspace directories are configured")
     for root in allowed:
+        if root == LOCAL_NETWORK_SCOPE:
+            continue
         base = Path(root).expanduser().resolve()
         try:
             target.relative_to(base)

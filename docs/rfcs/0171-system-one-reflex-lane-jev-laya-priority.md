@@ -2,6 +2,7 @@
 
 **Status:** implemented — P0 / priority accelerator  
 **Date:** 2026-09-24  
+**Prior status (main @ `ac18fb32`, #406):** accepted — P0 / priority accelerator. The spec body matches that draft; the ledger below is the development implementation record.  
 **Implemented:** #409 @ `f7bf66a943b4d365f6a5f6084d8d774f76358f4b` (`backend/app/decision/`, `tests/system_one/`).  
 **Residuals (do not block implemented):** live TypeSafe/Laya GPU soak + latency budgets; production Laya sha256 fills (empty pin still fail-closed / refuses install); release-gate speed claims need reproducible Desktop evidence.  
 **Supersedes/extends:** RFC-0116 implementation assumptions; does not remove local fallback or policy authority.
@@ -89,4 +90,4 @@ Targets are Anzu engineering budgets, not claims about providers: local Reflex p
 - Laya: https://github.com/NandhaKishorM/laya
 - Independent comparison: https://github.com/instax-dutta/sysone-bench
 
-Evidence is dated 2026-09-24 and must be refreshed by RFC-0137 Capability Lab before comparative claims are surfaced.
+Evidence is dated 2026-09-24 and must be refreshed by the RFC-0137 Capability Lab (`0137-capability-parity-matrix-and-continuous-benchmark.md`, the #406 parity draft now on this branch) before comparative claims are surfaced. That draft is a different document from `0137-persona-presence-shape-and-voice-binding.md`.

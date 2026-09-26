@@ -1,11 +1,19 @@
 # RFC-0177: Shared dot-persona motion cues
 
 **Status:** implemented
+**Implemented:** #429 @ `f0ea9e40bb186971bf75119bb966462da900a9da` (breath, listen shimmer, phase energy, real-TTS speech response, transient alert impulse). Status line also set by #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83`.
+**Specs:** #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`.
+**Quality bar:** **Anzu 1.0**. Full intent. No stubs / soft-fail.
+**Residuals:** none. #429 lists no residual. Acceptance rows are checked. Reduced-motion stays static. RFC-0175 lifecycle behavior stays.
 **Author:** Codex
 **Date:** 2026-09-25
 
 **Depends on:** [RFC-0176](0176-shared-dot-appearance-profiles.md)
 **Related (do not rewrite):** [RFC-0050](0050-ui-v3-presence-architecture.md) (canonical presence state and attention); [RFC-0051](0051-humanoid-presence-runtime.md) (reduced motion); [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (`uMorph`); [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) (persona identity); [RFC-0175](0175-galaxy-presence-option-chat-waveform-and-advanced-controls.md) (outer idle/engaged lifecycle).
+
+### Quality bar
+
+The implement is **multibillion-company grade** and the user-facing stretch is **Anzu 1.0**. Cues run on the existing snapshot and the live TTS analyser. A second phase machine, a synthetic speech meter, or cues that only run on one persona shape is a **fail**. Full intent. No stubs / soft-fail.
 
 ## Problem
 
@@ -41,3 +49,5 @@ New persona rows, persona-specific renderers, a new phase/state machine, webcam 
 ## Notes
 
 The APEX source kit documents these visual effect categories but excludes APEX's assistant and voice. Jarvis should implement original cues that respond to its own truthful runtime state.
+
+Product landed on development via #429 @ `f0ea9e40bb186971bf75119bb966462da900a9da`. Specs were #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`. Quality bar stays **Anzu 1.0**. No residual.

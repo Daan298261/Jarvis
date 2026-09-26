@@ -498,16 +498,46 @@ def save_settings(settings: AppSettings) -> None:
         _write()
 
 
+LOCAL_NETWORK_SCOPE = "<local-network-shares>"
+
+
+def _windows_owner_drives() -> list[Path]:
+    """Expose mounted scannable drives to the local owner within OS account ACLs."""
+    if os.name != "nt":
+        return []
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetLogicalDrives.restype = ctypes.c_uint32
+    kernel32.GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
+    kernel32.GetDriveTypeW.restype = ctypes.c_uint32
+    mask = kernel32.GetLogicalDrives()
+    roots: list[Path] = []
+    for index in range(26):
+        if mask & (1 << index):
+            root = f"{chr(65 + index)}:\\"
+            if kernel32.GetDriveTypeW(root) in {2, 3, 4, 5}:  # removable, fixed, mapped, optical
+                roots.append(Path(root))
+    return roots
+
+
 def default_allowed_directories() -> list[str]:
     home = Path.home()
     candidates = [
+        # The local owner's signed-in profile is the default workspace, so
+        # AppData and other ordinary owner folders do not fail the sandbox check.
+        home,
         home / "Desktop",
         home / "Documents",
         home / "Downloads",
         repo_root(),
         data_dir(),
+        *_windows_owner_drives(),
     ]
-    return [str(path) for path in candidates if path.exists()]
+    roots = [str(path) for path in candidates if path.exists()]
+    if os.name == "nt":
+        roots.append(LOCAL_NETWORK_SCOPE)
+    return roots
 
 
 def is_ephemeral_workspace_path(path: str) -> bool:
