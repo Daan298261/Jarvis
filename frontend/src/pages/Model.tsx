@@ -55,6 +55,7 @@ type ModelStatus = {
   vision?: boolean
   outcomes?: { tasks_completed: number; tasks_failed: number; task_success_rate: number | null }
   benchmarks?: Benchmark[]
+  tool_capability?: { status: string; model: string; detail: string; round_trip: boolean }
 }
 
 function pct(value: number | null | undefined) {
@@ -102,6 +103,16 @@ export function ModelPage() {
     }
   }
 
+  async function runToolProbe() {
+    setBusy(true)
+    try {
+      await api("/api/model/tool-capability/probe", { method: "POST" })
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const outcomes = model?.outcomes
   const samples = model?.benchmarks || []
 
@@ -140,6 +151,7 @@ export function ModelPage() {
             <b>Load time</b><span>{model?.load_time_seconds ? `${model.load_time_seconds}s` : "n/a"}</span>
             <b>Vision</b><span>{model?.vision_loaded ? "projector loaded" : (model?.vision ? "enabled" : "lazy")}</span>
             <b>Thinking</b><span>{model?.thinking ? "profile allows (selective per turn)" : "off"}</span>
+            <b>Agent tools</b><span>{model?.tool_capability?.status || "untested"}: {model?.tool_capability?.detail || "Load a model to test tool calling."}</span>
             <b>Task success</b><span>{pct(outcomes?.task_success_rate)} ({outcomes?.tasks_completed || 0} ok / {outcomes?.tasks_failed || 0} failed)</span>
             <b>State</b><span>{model?.loaded ? "loaded" : model?.loading ? "loading" : "unloaded"}</span>
           </div>
@@ -155,6 +167,7 @@ export function ModelPage() {
             <button className="btn secondary" disabled={busy} onClick={() => api("/api/model/unload", { method: "POST" }).then(refresh)}>Unload</button>
             <button className="btn secondary" disabled={busy} onClick={snapshot}>Record snapshot</button>
             <button className="btn secondary" disabled={busy} onClick={runProbe}>Probe server</button>
+            <button className="btn secondary" disabled={busy || !model?.loaded} onClick={runToolProbe}>Test agent tools</button>
           </div>
           {probe && (
             <p className="lede" style={{ marginTop: 12 }}>
@@ -227,7 +240,30 @@ type Gate = {
 
 function AgentSuiteCard() {
   const [report, setReport] = useState<any>(null)
+  const [live, setLive] = useState<any>(null)
+  const [running, setRunning] = useState(false)
+  const [profileChoice, setProfileChoice] = useState("balanced")
   useEffect(() => { api("/api/model/agent-suite").then(setReport).catch(() => undefined) }, [])
+  useEffect(() => {
+    if (!live?.id || live.status !== "running") return
+    const timer = window.setInterval(() => {
+      api(`/api/model/agent-suite/live/${live.id}`).then(setLive).catch(() => undefined)
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [live?.id, live?.status])
+  async function startLive() {
+    setRunning(true)
+    try {
+      const profiles = profileChoice === "compare" ? ["balanced", "expert"] : [profileChoice]
+      setLive(await api("/api/model/agent-suite/live", {
+        method: "POST", body: JSON.stringify({ profiles }),
+      }))
+    } catch (error) {
+      setLive({ status: "failed", error: String(error) })
+    } finally {
+      setRunning(false)
+    }
+  }
   const tasks: SuiteTask[] = report?.suite || report?.cases || []
   const comparison = report?.comparison
   return (
@@ -237,6 +273,24 @@ function AgentSuiteCard() {
         Representative autonomous tasks used to compare models. Primary metric: successful tasks per hour — not tok/s.
         {report?.coverage ? ` Catalog has ${report.coverage.task_count} tasks.` : ""} {report?.live_status}
       </p>
+      <div className="toggle">
+        <select aria-label="Live agent suite model" value={profileChoice} onChange={(event) => setProfileChoice(event.target.value)}>
+          <option value="balanced">9B balanced</option>
+          <option value="fast">9B fast</option>
+          <option value="expert">27B expert</option>
+          <option value="compare">Compare 9B and 27B</option>
+        </select>
+        <button className="btn secondary" disabled={running || live?.status === "running"} onClick={startLive}>
+          Run live suite
+        </button>
+      </div>
+      <p className="lede">{report?.live_comparison_reason}</p>
+      {live && <p className="lede">Live suite: {live.status} · {live.cases_finished || 0}/{live.cases_total || 0} cases
+        {live.current ? ` · ${live.current}` : ""}{live.error ? ` · ${live.error}` : ""}
+      </p>}
+      {live?.summary && Object.entries(live.summary).map(([profile, summary]: [string, any]) => (
+        <p key={profile}>{profile}: {summary.successes}/{summary.cases_run} passed · {summary.successful_tasks_per_minute ?? "n/a"} successful tasks/minute</p>
+      ))}
       {comparison?.winner && (
         <p>Current recorded leader: <strong>{comparison.winner}</strong> ({comparison.primary_metric}).</p>
       )}

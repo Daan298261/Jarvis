@@ -18,6 +18,7 @@ from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.manager import MANAGER
+from ..inference.tool_capability import probe_tool_capability
 from ..inference.profiles import ModelProfile, resolve_profile
 from ..inference.prompt_budget import (
     ModelCapacityExceeded,
@@ -31,6 +32,8 @@ from ..inference.vision import messages_need_vision, should_load_vision
 from .durable_execution.repository import get_task_status, last_committed_step_key
 from .durable_execution.runner import run_model_step, run_tool_step
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
+from ..providers.openai_compat import OpenAICompatProvider
+from ..providers.tool_call_compat import validate_turn_calls
 from ..policy.authorize import AuthorizationResult, authorize
 from ..policy.computer_permissions import (
     confirmation_payload_for_tool,
@@ -138,7 +141,8 @@ from .skills import (
     relevant_skills,
     steps_are_executable,
 )
-from .tooling import apply_capability_request, expose_called_tool, should_enable_thinking
+from .tooling import apply_capability_request, should_enable_thinking
+from .turn_tools import select_turn_schemas
 from .ingress_gate import SAFE_LARGE_PASTE_SPEECH, run_ingress_gate
 from .trajectory import gated_trajectory_lessons, record_trajectory
 from ..memory.ingress_spill import ingress_prompt_segment
@@ -166,6 +170,7 @@ def _environment_block(settings: AppSettings) -> str:
         f"- Desktop: {home / 'Desktop'}\n"
         f"- Documents: {home / 'Documents'}\n"
         f"- Allowed directories:\n{allowed or '- (defaults)'}\n"
+        "- <local-network-shares> means private LAN SMB paths such as \\\\nas.local\\share; it is not a literal directory.\n"
         "Never use a different username than the profile above.\n"
     )
 
@@ -1331,6 +1336,14 @@ class AgentRuntime:
             )
         provider = MANAGER.provider
         assert provider is not None
+        if isinstance(provider, OpenAICompatProvider) and working.ingress_needs_tools is not False and working.task_class != "conversation":
+            capability = await probe_tool_capability(provider, thinking=profile.thinking)
+            if capability["status"] != "ready":
+                detail = capability["detail"]
+                await self._update(task_id, status="failed", stage="failed", error=detail, result=detail,
+                                   current_action="Agent tools unavailable for selected model")
+                await BUS.publish(task_id, "failed", "Model tool-call check failed", detail, stage="model")
+                return
         await BUS.publish(
             task_id,
             "progress",
@@ -1349,6 +1362,7 @@ class AgentRuntime:
         last_failed_tool = ""
         last_failed_observation = ""
         tool_rounds = 0
+        invalid_tool_turns = 0
         model_turn_index = 0
         verify_tool_rounds = 0
         last_tool_name = ""
@@ -1653,6 +1667,11 @@ class AgentRuntime:
                             needs_tools=working.ingress_needs_tools,
                         )
                     )
+                    turn_tools = select_turn_schemas(
+                        turn_tools,
+                        model_family=profile.family,
+                        prompt=_latest_user_text(messages, working.goal or active_prompt),
+                    )
                     turn_max_tokens = 400 if force_final else 1024
 
                     async def _model_turn_inner() -> ChatResult:
@@ -1859,6 +1878,23 @@ class AgentRuntime:
                         )
 
                 if result.tool_calls:
+                    call_error = validate_turn_calls(result.tool_calls, turn_tools)
+                    if call_error:
+                        invalid_tool_turns += 1
+                        metrics.schema_errors += 1
+                        await self._update(task_id, **metrics.as_fields())
+                        await BUS.publish(task_id, "error", "Rejected model tool call", call_error, stage="diagnose")
+                        if invalid_tool_turns >= 3:
+                            await self._update(task_id, status="failed", stage="failed", error=call_error,
+                                               result=call_error, current_action="Failed: invalid model tool calls")
+                            await record_trajectory(task_id, working, "failed")
+                            await complete_coding_route(task_id, "failed", call_error)
+                            return
+                        messages.append(ChatMessage(role="user", content=(
+                            f"Your tool call was rejected: {call_error} Return one valid call using only the offered schemas."
+                        )))
+                        continue
+                    invalid_tool_turns = 0
                     tools_used = True
                     best_of_n_complete = True
                     awaiting_plan_selection = False
@@ -1967,8 +2003,6 @@ class AgentRuntime:
                             attach = None
                             failed = False
                         else:
-                            if name in REGISTRY.tools and name not in exposed_tools:
-                                exposed_tools = expose_called_tool(exposed_tools, name)
                             observation, attach = await self._execute_tool_ex(
                                 task_id, name, arguments, autonomy, settings, metrics=metrics, schema_error=schema_error
                             )
