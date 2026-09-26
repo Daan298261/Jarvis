@@ -198,5 +198,5 @@ def test_optional_tauri_shell_sources():
     assert "pyinstaller" in sidecar_text
     assert "onedir" in sidecar_text or "one-folder" in sidecar_text or "--onedir" in sidecar_text
     conf = _read(tauri_conf)
-    assert "Jarvis" in conf
+    assert "ANZU" in conf or "Jarvis" in conf
     assert "nsis" in conf.lower()

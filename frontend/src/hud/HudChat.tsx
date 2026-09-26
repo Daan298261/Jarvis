@@ -195,6 +195,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
               events={shown.events}
               messages={shown.messages}
               pending={pending}
+              createdAt={shown.created_at}
+              updatedAt={shown.updated_at}
             />
           )}
         </div>

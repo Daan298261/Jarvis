@@ -229,8 +229,51 @@ def classify_task(prompt: str) -> str:
     return scored[0][1]
 
 
+_TOOL_REQUEST = re.compile(
+    r"(?i)\b("
+    r"run\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,4})?tool\b|"
+    r"run\s+(?:the\s+)?(?:command|harness)\b|"
+    r"use\s+(?:the\s+)?[\w.-]+\s+tool\b|"
+    r"execute\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,2})?(?:tool|command)\b|"
+    r"call\s+(?:the\s+)?[\w.-]+\s+tool\b|"
+    r"invoke\s+(?:the\s+)?[\w.-]+\s+tool\b"
+    r")",
+)
+
+
+def requests_agent_tools(prompt: str) -> bool:
+    text = (prompt or "").strip()
+    if not text:
+        return False
+    return bool(_TOOL_REQUEST.search(text))
+
+
+def split_long_owner_prompt(prompt: str, *, max_chars: int = 2200) -> list[str]:
+    """Split very long owner dictation into harness-sized chunks (plan → act)."""
+    text = (prompt or "").strip()
+    if len(text) <= max_chars:
+        return [text] if text else []
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(len(text), start + max_chars)
+        if end < len(text):
+            slice_end = text.rfind("\n\n", start, end)
+            if slice_end <= start + 400:
+                slice_end = text.rfind(". ", start, end)
+            if slice_end > start + 400:
+                end = slice_end + 1
+        piece = text[start:end].strip()
+        if piece:
+            chunks.append(piece)
+        start = end
+    return chunks
+
+
 def route_request(prompt: str) -> RequestRoute:
     """Route before creating a durable agent loop or exposing its tool catalog."""
+    if requests_agent_tools(prompt):
+        return RequestRoute(MANAGED_TASK, classify_task(prompt))
     if is_weather_query(prompt):
         return RequestRoute(DIRECT_LOOKUP, CONVERSATION_CLASS)
     if is_plain_conversation(prompt):

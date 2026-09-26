@@ -17,13 +17,21 @@ from typing import Any
 from ..config import AppSettings, FrontResponderSettings, load_settings
 from ..inference.manager import MANAGER
 from ..providers.base import ChatMessage, ChatResult
-from .planning import MANAGED_TASK, RequestRoute, is_plain_conversation, is_weather_query, route_request
+from .planning import (
+    MANAGED_TASK,
+    RequestRoute,
+    is_plain_conversation,
+    is_weather_query,
+    requests_agent_tools,
+    route_request,
+)
 
 RUNTIME_ROLE = "front_responder"
 ANSWER_TIER = 1
-FRONT_MAX_TOKENS_MIN = 96
-FRONT_MAX_TOKENS_MAX = 160
-FRONT_MAX_TOKENS_DEFAULT = 128
+FRONT_MAX_TOKENS_MIN = 128
+FRONT_MAX_TOKENS_MAX = 1024
+FRONT_MAX_TOKENS_DEFAULT = 384
+FRONT_USER_TEXT_SOFT_LIMIT = 1600
 DEEPER_RESULT_LABEL = "Deeper result"
 
 FRONT_ACTIONS = frozenset(
@@ -292,11 +300,26 @@ def is_safe_front_speech(action: str, text: str) -> bool:
     return True
 
 
+def _front_lane_user_text(user_text: str) -> str:
+    """Keep the fast voice lane inside a small context envelope."""
+    text = (user_text or "").strip()
+    if len(text) <= FRONT_USER_TEXT_SOFT_LIMIT:
+        return text
+    head = text[: int(FRONT_USER_TEXT_SOFT_LIMIT * 0.55)].rstrip()
+    tail = text[-int(FRONT_USER_TEXT_SOFT_LIMIT * 0.35) :].lstrip()
+    return (
+        f"{head}\n…\n[Owner spoke a long message ({len(text)} chars). "
+        f"Acknowledge briefly; the worker lane has the full text.]\n…\n{tail}"
+    )
+
+
 def classify_front_action(user_text: str, *, route: RequestRoute | None = None) -> str:
     text = (user_text or "").strip()
     if not text:
         return "silent_skip"
     lowered = text.lower().strip()
+    if requests_agent_tools(text):
+        return "handoff_notice"
     if _VAGUE_PROMPT.match(lowered):
         return "ask_clarification"
     resolved = route or route_request(text)
@@ -440,7 +463,7 @@ def small_context_envelope(
     ]
     if keep:
         messages.extend(prior[-keep * 2 :])
-    messages.append(ChatMessage(role="user", content=(user_text or "").strip()))
+    messages.append(ChatMessage(role="user", content=_front_lane_user_text(user_text)))
     return messages
 
 
@@ -626,7 +649,7 @@ async def generate_progress_update(
             chat,
             messages,
             temperature=cfg.temperature,
-            max_tokens=min(cfg.max_tokens, 96),
+            max_tokens=min(cfg.max_tokens, 256),
             thinking=False,
         ):
             if time.perf_counter() > deadline:

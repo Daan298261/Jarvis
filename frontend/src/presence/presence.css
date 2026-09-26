@@ -59,6 +59,21 @@
   min-width: 0;
 }
 
+.jarvis-presence-controls-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 2px;
+}
+
+.jarvis-presence-controls-table td {
+  vertical-align: top;
+  padding: 0;
+}
+
+.jarvis-presence-controls-body-row td {
+  padding-bottom: 8px;
+}
+
 .jarvis-presence-controls {
   position: relative;
   top: auto;

@@ -133,11 +133,52 @@ fn attach_portal(app: &AppHandle) {
         PORTAL_ATTACHED.store(false, Ordering::SeqCst);
         return;
     };
-    if let Ok(url) = tauri::Url::parse(PORTAL_URL) {
+    let target = portal_url();
+    if let Ok(url) = tauri::Url::parse(&target) {
         if window.navigate(url).is_err() {
-            let _ = window.eval(&format!("window.location.replace('{PORTAL_URL}')"));
+            let _ = window.eval(&format!("window.location.replace('{target}')"));
         }
     }
+}
+
+fn portal_url() -> String {
+    let base = PORTAL_URL.trim_end_matches('/');
+    if let Ok(path) = std::env::var("JARVIS_OPEN_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            let suffix = if trimmed.starts_with('/') {
+                trimmed.to_string()
+            } else {
+                format!("/{trimmed}")
+            };
+            return format!("{base}{suffix}");
+        }
+    }
+    format!("{base}/")
+}
+
+fn read_api_bind_host(data_root: &Path) -> String {
+    if let Ok(host) = std::env::var("JARVIS_BIND_HOST") {
+        let trimmed = host.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    let settings = data_root.join("settings.json");
+    if let Ok(raw) = std::fs::read_to_string(settings) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if v.get("lan_access").and_then(|x| x.as_bool()) == Some(true) {
+                return "0.0.0.0".into();
+            }
+            if let Some(host) = v.get("bind_host").and_then(|x| x.as_str()) {
+                let trimmed = host.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+    }
+    "127.0.0.1".into()
 }
 
 fn backend_command(root: &Path) -> Option<(PathBuf, Vec<String>)> {
@@ -164,12 +205,13 @@ fn backend_command(root: &Path) -> Option<(PathBuf, Vec<String>)> {
     } else {
         PathBuf::from(if cfg!(windows) { "python" } else { "python3" })
     };
+    let bind_host = read_api_bind_host(&data_dir());
     let args = vec![
         "-m".into(),
         "uvicorn".into(),
         "app.main:app".into(),
         "--host".into(),
-        "127.0.0.1".into(),
+        bind_host,
         "--port".into(),
         "4780".into(),
         "--app-dir".into(),

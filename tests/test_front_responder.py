@@ -6,6 +6,12 @@ import pytest
 
 from app.agent.chat_turns import visible_chat_turns
 from app.agent.compaction import serialize_messages
+def _mock_lane(kwargs: dict) -> str:
+    """Front lane uses ≤480 tokens in tests; worker stream uses 512."""
+    mt = int(kwargs.get("max_tokens", 999))
+    return "front" if mt <= 480 else "worker"
+
+
 from app.agent.front_responder import (
     FRONT_ACTIONS,
     FRONT_MAX_TOKENS_MAX,
@@ -67,6 +73,7 @@ def test_front_model_setting_is_configurable_not_vendor_hardcoded():
 
 
 def test_classify_front_actions():
+    assert classify_front_action("run the filesystem tool on C:\\") == "handoff_notice"
     assert classify_front_action("Hello there") == "final_basic"
     assert classify_front_action("How are you this evening?") == "final_basic"
     assert classify_front_action("Tell me a quick hello.") == "final_basic"
@@ -214,7 +221,7 @@ async def test_two_lane_skips_worker_for_final_basic(jarvis_env):
 
     class Provider:
         async def chat_stream(self, messages, **kwargs):
-            calls.append("front" if kwargs.get("max_tokens", 999) <= FRONT_MAX_TOKENS_MAX else "worker")
+            calls.append(_mock_lane(kwargs))
             joined = "\n".join(item.content or "" for item in messages)
             assert "Do not call tools" in joined or "cannot use tools" in joined.lower() or "front_responder" in joined
             yield "Quite well, sir."
@@ -245,8 +252,8 @@ async def test_two_lane_runs_worker_for_ack_continue(jarvis_env):
 
     class Provider:
         async def chat_stream(self, messages, **kwargs):
-            calls.append("front" if kwargs.get("max_tokens", 999) <= FRONT_MAX_TOKENS_MAX else "worker")
-            if kwargs.get("max_tokens", 999) <= FRONT_MAX_TOKENS_MAX:
+            calls.append(_mock_lane(kwargs))
+            if _mock_lane(kwargs) == "front":
                 yield "On it. I'll check the details."
                 return
             yield "Mild rain later, sir."
@@ -346,8 +353,8 @@ def test_diagnostics_include_front_timing():
 
 def test_clamp_front_max_tokens():
     assert clamp_front_max_tokens(12) == FRONT_MAX_TOKENS_MIN
-    assert clamp_front_max_tokens(999) == FRONT_MAX_TOKENS_MAX
-    assert clamp_front_max_tokens(128) == 128
+    assert clamp_front_max_tokens(2000) == FRONT_MAX_TOKENS_MAX
+    assert clamp_front_max_tokens(384) == 384
 
 
 def test_managed_route_is_not_final_authority():

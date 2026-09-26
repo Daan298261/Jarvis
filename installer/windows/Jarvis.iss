@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.4.15"
+#define MyAppVersion "1.4.16"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -65,11 +65,17 @@ Source: "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"; DestDir: "{app}\mo
 ; Default household butler Kokoro-82M weights (RFC-0070). Staged by stage-voice-default.ps1.
 Source: "payload\models\tts\kokoro-82m\*"; DestDir: "{app}\models\tts\kokoro-82m"; Flags: ignoreversion recursesubdirs createallsubdirs
 #endif
+#ifndef SkipDesktopShell
+; Native Jarvis Desktop (Tauri) + PyInstaller backend sidecar — staged by stage-desktop-shell.ps1.
+Source: "payload\desktop\Jarvis.exe"; DestDir: "{app}\desktop"; Flags: ignoreversion
+Source: "payload\desktop\sidecars\*"; DestDir: "{app}\desktop\sidecars"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 
 [Icons]
-Name: "{group}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start the Jarvis local agent portal"
+Name: "{group}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start Jarvis (desktop shell when installed, else browser portal)"
+Name: "{group}\Jarvis Desktop"; Filename: "{app}\desktop\Jarvis.exe"; WorkingDir: "{app}"; Comment: "Open Jarvis in the native desktop window (Obsidian embed)"; Check: DesktopShellInstalled
 Name: "{group}\Stop Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Comment: "Stop Jarvis backend and llama.cpp"
-Name: "{autodesktop}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Start the Jarvis local agent portal"
+Name: "{autodesktop}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Start Jarvis (desktop shell when installed, else browser portal)"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]

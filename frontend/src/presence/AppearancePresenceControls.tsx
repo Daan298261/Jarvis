@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { Fragment, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { HudCybersecurityModule } from "../hud/HudCybersecurityModule"
@@ -13,30 +13,44 @@ type AppearancePresenceControlsProps = {
 
 type PresenceMenu = "persona" | "voice" | "appearance" | "cybersecurity"
 
-function Menu({
-  id,
-  label,
-  open,
-  onToggle,
-  children,
-}: {
-  id: PresenceMenu
-  label: string
-  open: boolean
-  onToggle: (id: PresenceMenu) => void
-  children: ReactNode
-}) {
+const MENUS: { id: PresenceMenu; label: string }[] = [
+  { id: "persona", label: "Persona" },
+  { id: "voice", label: "Voice" },
+  { id: "appearance", label: "Appearance" },
+  { id: "cybersecurity", label: "Cybersecurity" },
+]
+
+function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNode {
+  if (id === "persona") {
+    return (
+      <div className="jarvis-presence-controls-body jarvis-presence-controls-body-persona">
+        <NamedPersonaControls />
+      </div>
+    )
+  }
+  if (id === "voice") {
+    return (
+      <div className="jarvis-presence-controls-body jarvis-presence-controls-body-voice">
+        <VoiceProfilePicker />
+        <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
+          <Link to={appearanceVoiceSettingsPath("voice")}>Open full Voice settings</Link>
+        </p>
+      </div>
+    )
+  }
+  if (id === "appearance") {
+    return (
+      <div className="jarvis-presence-controls-body">
+        <AppearanceSettingsPane settings={settings} />
+        <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
+          <Link to={appearanceVoiceSettingsPath("appearance")}>Open full Appearance settings</Link>
+        </p>
+      </div>
+    )
+  }
   return (
-    <div className={`jarvis-presence-controls${open ? " open" : ""}`}>
-      <button
-        type="button"
-        className="jarvis-presence-controls-toggle"
-        aria-expanded={open}
-        onClick={() => onToggle(id)}
-      >
-        {label}
-      </button>
-      {open ? children : null}
+    <div className="jarvis-presence-controls-body jarvis-cyber-module-body">
+      <HudCybersecurityModule />
     </div>
   )
 }
@@ -49,36 +63,33 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
   }
 
   return (
-    <div className="jarvis-presence-controls-split" role="toolbar" aria-label="HUD menus">
-      <Menu id="persona" label="Persona" open={openMenu === "persona"} onToggle={toggle}>
-        <div className="jarvis-presence-controls-body jarvis-presence-controls-body-persona">
-          <NamedPersonaControls />
-        </div>
-      </Menu>
-
-      <Menu id="voice" label="Voice" open={openMenu === "voice"} onToggle={toggle}>
-        <div className="jarvis-presence-controls-body jarvis-presence-controls-body-voice">
-          <VoiceProfilePicker />
-          <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
-            <Link to={appearanceVoiceSettingsPath("voice")}>Open full Voice settings</Link>
-          </p>
-        </div>
-      </Menu>
-
-      <Menu id="appearance" label="Appearance" open={openMenu === "appearance"} onToggle={toggle}>
-        <div className="jarvis-presence-controls-body">
-          <AppearanceSettingsPane settings={settings} />
-          <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
-            <Link to={appearanceVoiceSettingsPath("appearance")}>Open full Appearance settings</Link>
-          </p>
-        </div>
-      </Menu>
-
-      <Menu id="cybersecurity" label="Cybersecurity" open={openMenu === "cybersecurity"} onToggle={toggle}>
-        <div className="jarvis-presence-controls-body jarvis-cyber-module-body">
-          <HudCybersecurityModule />
-        </div>
-      </Menu>
-    </div>
+    <table className="jarvis-presence-controls-table" role="presentation" aria-label="HUD menus">
+      <tbody>
+        {MENUS.map((menu) => {
+          const open = openMenu === menu.id
+          return (
+            <Fragment key={menu.id}>
+              <tr className="jarvis-presence-controls-row">
+                <td>
+                  <button
+                    type="button"
+                    className="jarvis-presence-controls-toggle"
+                    aria-expanded={open}
+                    onClick={() => toggle(menu.id)}
+                  >
+                    {open ? "▾" : "▸"} {menu.label}
+                  </button>
+                </td>
+              </tr>
+              {open && (
+                <tr className="jarvis-presence-controls-body-row">
+                  <td>{panelForMenu(menu.id, settings)}</td>
+                </tr>
+              )}
+            </Fragment>
+          )
+        })}
+      </tbody>
+    </table>
   )
 }

@@ -147,6 +147,48 @@ export type ChatTurn = {
   content: string
   internal?: string
   public?: string
+  at?: string
+}
+
+/** Short label for chat bubbles (e.g. "Anzu / Core" → "Anzu"). */
+export function personalityDisplayName(label: string | null | undefined): string {
+  const raw = (label || "").trim()
+  if (!raw) return "Anzu"
+  const short = raw.split("/")[0]?.trim()
+  return short || "Anzu"
+}
+
+export function formatChatTimestamp(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const when = new Date(iso)
+  if (Number.isNaN(when.getTime())) return null
+  return when.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+export function attachThreadTimestamps(
+  turns: ChatTurn[],
+  createdAt?: string | null,
+  updatedAt?: string | null,
+): ChatTurn[] {
+  if (!turns.length) return turns
+  let userIndex = 0
+  let assistantIndex = 0
+  const assistantTotal = turns.filter((t) => t.role === "assistant").length
+  return turns.map((turn) => {
+    if (turn.role === "user") {
+      userIndex += 1
+      const at = userIndex === 1 ? createdAt : updatedAt
+      return at ? { ...turn, at } : turn
+    }
+    assistantIndex += 1
+    const at = assistantIndex === assistantTotal ? updatedAt : createdAt
+    return at ? { ...turn, at } : turn
+  })
 }
 
 const FOLLOW_UP_MARKER = "\n\nFollow-up: "
