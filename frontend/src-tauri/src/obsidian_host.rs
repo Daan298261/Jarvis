@@ -125,7 +125,7 @@ mod win {
     use std::thread;
     use std::time::{Duration, Instant};
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, TRUE};
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, TRUE, WPARAM};
     use windows::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
@@ -189,13 +189,11 @@ mod win {
             return Ok(());
         }
         use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            DefWindowProcW, RegisterClassW, WNDCLASSW,
-        };
+        use windows::Win32::UI::WindowsAndMessaging::{RegisterClassW, WNDCLASSW};
         unsafe {
             let hmodule = GetModuleHandleW(None).map_err(|e| e.to_string())?;
             let wc = WNDCLASSW {
-                lpfnWndProc: Some(DefWindowProcW),
+                lpfnWndProc: Some(host_wnd_proc),
                 hInstance: hmodule.into(),
                 lpszClassName: HOST_CLASS,
                 style: Default::default(),
@@ -214,6 +212,23 @@ mod win {
         Ok(())
     }
 
+    unsafe extern "system" fn host_wnd_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        windows::Win32::UI::WindowsAndMessaging::DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+
+    fn hwnd_from_isize(value: isize) -> HWND {
+        HWND(value as *mut core::ffi::c_void)
+    }
+
+    fn hwnd_to_isize(hwnd: HWND) -> isize {
+        hwnd.0 as isize
+    }
+
     fn create_host_panel(parent: HWND, x: i32, y: i32, width: i32, height: i32) -> Result<HWND, String> {
         register_host_class()?;
         unsafe {
@@ -230,8 +245,9 @@ mod win {
                 None,
                 None,
                 None,
-            );
-            if hwnd.0 == 0 {
+            )
+            .map_err(|e| e.to_string())?;
+            if hwnd.0.is_null() {
                 return Err("Failed to create Obsidian host panel.".into());
             }
             let _ = ShowWindow(hwnd, SW_SHOW);
@@ -364,7 +380,7 @@ mod win {
             };
         }
         let exe = exe.unwrap();
-        let parent = HWND(parent_hwnd as _);
+        let parent = hwnd_from_isize(parent_hwnd);
 
         let host = match create_host_panel(parent, x, y, width, height) {
             Ok(h) => h,
@@ -378,7 +394,7 @@ mod win {
                 };
             }
         };
-        guard.host_hwnd = Some(host.0 as isize);
+        guard.host_hwnd = Some(hwnd_to_isize(host));
 
         if let Err(err) = launch_obsidian(&exe, vault_path) {
             guard.state = ObsidianEmbedState::Failed;
@@ -414,7 +430,7 @@ mod win {
             };
         }
 
-        guard.obsidian_hwnd = Some(obsidian.0 as isize);
+        guard.obsidian_hwnd = Some(hwnd_to_isize(obsidian));
         guard.state = ObsidianEmbedState::Embedded;
         guard.message = "Obsidian is hosted inside Jarvis.".into();
         ObsidianEmbedStatus {
@@ -425,9 +441,9 @@ mod win {
     }
 
     pub fn embed_resize(x: i32, y: i32, width: i32, height: i32) -> ObsidianEmbedStatus {
-        let mut guard = RUNTIME.lock().expect("obsidian runtime");
-        let host = guard.host_hwnd.map(|h| HWND(h as _));
-        let obsidian = guard.obsidian_hwnd.map(|h| HWND(h as _));
+        let guard = RUNTIME.lock().expect("obsidian runtime");
+        let host = guard.host_hwnd.map(hwnd_from_isize);
+        let obsidian = guard.obsidian_hwnd.map(hwnd_from_isize);
         if let (Some(host), Some(obsidian)) = (host, obsidian) {
             unsafe {
                 let _ = MoveWindow(host, x, y, width.max(320), height.max(240), true);
@@ -443,7 +459,7 @@ mod win {
 
     pub fn embed_stop() -> ObsidianEmbedStatus {
         let mut guard = RUNTIME.lock().expect("obsidian runtime");
-        if let Some(obsidian) = guard.obsidian_hwnd.map(|h| HWND(h as _)) {
+        if let Some(obsidian) = guard.obsidian_hwnd.map(hwnd_from_isize) {
             unsafe {
                 let _ = SetParent(obsidian, HWND::default());
             }

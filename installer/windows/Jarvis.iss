@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.4.16"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -39,6 +39,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a &Desktop shortcut to start Jarvis"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDescription: "After installing:"; Flags: checkedonce
+Name: "elevatedlogon"; Description: "Start Jarvis elevated at Windows logon (one UAC prompt)"; GroupDescription: "After installing:"; Flags: checkedonce
+Name: "voicebutler"; Description: "Household butler (Kokoro — Anzu default)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicedry"; Description: "Dry household butler (Nabu, Eir)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicetactical"; Description: "Tactical aide (Mestor, Themis, Heimdall)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicesynthetic"; Description: "Synthetic command (Enki, Veles, Vulcan)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicechatterbox"; Description: "Expressive Chatterbox (Aegir, Bragi, Hermes, Maia — larger download)"; GroupDescription: "Voice models:"; Flags: checkedonce
 
 ; Speech and AI voice systems download options (user flexibility)
 Name: "dl_kokoro"; Description: "Kokoro-82M TTS neural voice (recommended default butler)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
@@ -98,11 +104,13 @@ Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; Work
 #else
 Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model and persona voices (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #endif
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -RegisterLogonTask"; WorkingDir: "{app}"; Description: "Register elevated Jarvis at Windows logon"; Flags: postinstall waituntilterminated skipifsilent; Tasks: elevatedlogon
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -OpenPath ""/setup?step=integrations"""; WorkingDir: "{app}"; Description: "Connect Gmail and WhatsApp in Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 
 [UninstallRun]
 ; Stop backend, llama-server, and tray helper before uninstall.
 Filename: "powershell.exe"; Parameters: "{code:GetUninstallForceStopParameters}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopJarvis"
+Filename: "schtasks.exe"; Parameters: "/Delete /TN JarvisElevatedBackend /F"; Flags: runhidden; RunOnceId: "RemoveJarvisElevatedBackend"
 
 [Code]
 const
@@ -452,10 +460,35 @@ begin
   Result := True;
 end;
 
+function DesktopShellInstalled: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\desktop\Jarvis.exe'));
+end;
+
+function SelectedVoiceProfiles: String;
+begin
+  Result := '';
+  if IsTaskSelected('voicebutler') then
+    Result := Result + 'butler_original_v1,';
+  if IsTaskSelected('voicedry') then
+    Result := Result + 'dry_butler_original_v1,';
+  if IsTaskSelected('voicetactical') then
+    Result := Result + 'tactical_aide_original_v1,';
+  if IsTaskSelected('voicesynthetic') then
+    Result := Result + 'synthetic_command_original_v1,';
+  if IsTaskSelected('voicechatterbox') then
+    Result := Result + 'chatterbox_expressive_en_v1,';
+  if Result = '' then
+    Result := 'none'
+  else
+    Delete(Result, Length(Result), 1);
+end;
+
 function GetBootstrapRunParameters(Param: String): String;
 var
   Wrapper: String;
   Params: String;
+  Voices: String;
 begin
   Wrapper := ExpandConstant('{app}\installer\windows\run-installer-bootstrap.ps1');
   if not FileExists(Wrapper) then
@@ -479,6 +512,12 @@ begin
     Params := Params + ' -InstallLocalLLM';
   if WizardIsTaskSelected('dl_expert27b') then
     Params := Params + ' -InstallExpert27B';
+  if WizardIsTaskSelected('dl_personavoices') then
+  begin
+    Voices := SelectedVoiceProfiles;
+    if Voices <> '' then
+      Params := Params + ' -VoiceProfiles "' + Voices + '"';
+  end;
   Result := Params;
 end;
 

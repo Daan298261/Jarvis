@@ -223,6 +223,10 @@ async def _synthesize_kokoro(
     del model_dir, profile
     state = kokoro_runtime_state()
     if not state.ready:
+        from .kokoro_adapter import verify_kokoro_runtime
+
+        state = await asyncio.to_thread(verify_kokoro_runtime)
+    if not state.ready:
         raise RuntimeError(state.last_error or "Kokoro runtime is not ready")
     return await kokoro_adapter.synthesize_async(
         text,

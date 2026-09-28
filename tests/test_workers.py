@@ -168,6 +168,38 @@ async def test_ufo_and_cua_tools_degrade_when_missing(jarvis_env):
     assert "not installed" in cua.error.lower()
 
 
+def test_ufo2_command_passes_request_flag(monkeypatch):
+    from app.workers.computer import UFOBackend, ufo_task_slug
+
+    backend = UFOBackend()
+    monkeypatch.setattr(backend, "detect_kind", lambda: "python-module:ufo")
+    command = backend.build_command("open notepad", app="Notepad")
+    assert command[1:3] == ["-m", "ufo"]
+    assert "--task" in command
+    assert "-r" in command
+    request = command[command.index("-r") + 1]
+    assert "open notepad" in request
+    assert "Notepad" in request
+    assert command[command.index("--task") + 1] == ufo_task_slug(request)
+    assert "--app" not in command
+
+
+def test_ufo2_detects_checkout_tree(tmp_path, monkeypatch):
+    from app.workers.computer import UFOBackend
+
+    checkout = tmp_path / "UFO"
+    (checkout / "ufo").mkdir(parents=True)
+    (checkout / "ufo" / "__main__.py").write_text("# ufo2\n", encoding="utf-8")
+    monkeypatch.setenv("JARVIS_UFO_ROOT", str(checkout))
+    backend = UFOBackend()
+    kind = backend.detect_kind()
+    assert kind and kind.startswith("checkout:")
+    command = backend.build_command("click File then Save")
+    assert "-m" in command and "ufo" in command
+    assert "-r" in command
+    assert command[command.index("-r") + 1] == "click File then Save"
+
+
 def test_open_interpreter_detects_alternate_module_and_cli(monkeypatch):
     backend = OpenInterpreterBackend()
     monkeypatch.setattr("app.workers.interpreter._module_available", lambda name: name == "open_interpreter")

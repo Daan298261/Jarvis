@@ -19,6 +19,7 @@ from ..tts.engines import (
     engine_availability,
     engine_chain_for_profile,
     is_engine_available,
+    is_system_tts_engine,
     pick_engine_for_profile,
     primary_tts_backend,
     resolve_engine_id,
@@ -571,20 +572,29 @@ async def synthesize_speech_result(
         except Exception:
             profile = None
 
-    requested_engine = resolve_engine_id(profile.tts) if profile else ""
-    engine_id = requested_engine if profile and exact_profile else (pick_engine_for_profile(profile) if profile else tts_backend())
+    requested_engine = resolve_engine_id(profile.tts) if profile else "kokoro"
+    explicit_system = bool(profile) and is_system_tts_engine(requested_engine)
+    if profile and exact_profile:
+        engine_id = requested_engine
+    elif profile:
+        engine_id = pick_engine_for_profile(profile)
+    else:
+        engine_id = tts_backend()
+    if is_system_tts_engine(engine_id) and not explicit_system:
+        engine_id = None
     if profile and not engine_id:
         primary = resolve_engine_id(profile.tts)
-        if primary in {"kokoro", "chatterbox", "piper", "voicestudio", "pocket_tts", "pocket-tts"}:
+        if not is_system_tts_engine(primary):
             engine_id = primary
-    if not engine_id:
-        if profile and profile.tts.resolved_engine_id() != "system":
+    if not engine_id or (is_system_tts_engine(engine_id) and not explicit_system):
+        if profile and not is_system_tts_engine(profile.tts.resolved_engine_id()):
             raise RuntimeError(
                 f"The selected {profile.tts.resolved_engine_id()} voice is not available. "
-                "Install it from Settings and retry."
+                "Windows SAPI will not be used as a fallback. Install the voice from Settings and retry."
             )
         raise RuntimeError(
-            "No local TTS backend is available. Run Jarvis Setup or install a voice from Settings."
+            "The household neural voice is not ready. Windows SAPI will not be used as a fallback. "
+            "Run Jarvis Setup or install a voice from Settings."
         )
     speaker_ref = (profile.tts.speaker_ref if profile else "").strip()
     candidates = [engine_id]
@@ -593,6 +603,12 @@ async def synthesize_speech_result(
             candidate
             for candidate in engine_chain_for_profile(profile)
             if candidate != engine_id and is_engine_available(candidate)
+        )
+    if not explicit_system:
+        candidates = [candidate for candidate in candidates if not is_system_tts_engine(candidate)]
+    if not candidates:
+        raise RuntimeError(
+            "The household neural voice is not ready. Windows SAPI will not be used as a fallback."
         )
     last_error: RuntimeError | None = None
     for candidate in candidates:

@@ -520,7 +520,6 @@ fn obsidian_embed_start(app: AppHandle, bounds: ObsidianEmbedBounds) -> Result<O
 
     #[cfg(target_os = "windows")]
     {
-        use tauri::WebviewWindowExt;
         let window = app
             .get_webview_window("main")
             .ok_or_else(|| "main window missing".to_string())?;

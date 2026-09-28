@@ -30,7 +30,7 @@ New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 $setup = Join-Path $DistDir "JarvisSetup.exe"
 if (-not (Test-Path $setup)) {
-    throw "Missing $setup — run .\installer\windows\build-installer.ps1 first."
+    throw "Missing $setup - run installer\windows\build-installer.ps1 first."
 }
 
 Copy-Item -Force $setup (Join-Path $out "JarvisSetup.exe")
@@ -50,13 +50,13 @@ Jarvis $Version (hotfix)
 git: $git
 built: $stamp
 portal: Start Jarvis opens http://127.0.0.1:4780 (LAN when enabled in Settings)
-desktop: optional — .\start-jarvis.ps1 -Desktop or Start Menu Jarvis Desktop
+desktop: optional - .\start-jarvis.ps1 -Desktop or Start Menu Jarvis Desktop
 payload: JarvisSetup.exe (+ spanning .bin slices if present), unrestricted license when built with -Release
 "@
 Set-Content -Path (Join-Path $out "RELEASE.txt") -Value $releaseTxt -Encoding UTF8
 
 $attestation = @"
-# Functional attestation — Jarvis $Version
+# Functional attestation - Jarvis $Version
 
 ## Verified in CI / dev (automated)
 - python -m pytest (full suite)

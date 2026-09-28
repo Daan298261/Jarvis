@@ -27,7 +27,9 @@ param(
 
     [switch]$InstallVoiceStudio,
 
-    [switch]$InstallPocketTTS
+    [switch]$InstallPocketTTS,
+
+    [string]$VoiceProfiles = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +62,7 @@ if ($SkipPersonaVoices) { $argList += "-SkipPersonaVoices" }
 if ($InstallWhisper) { $argList += "-InstallWhisper" }
 if ($InstallVoiceStudio) { $argList += "-InstallVoiceStudio" }
 if ($InstallPocketTTS) { $argList += "-InstallPocketTTS" }
+if ($VoiceProfiles.Trim()) { $argList += "-VoiceProfiles"; $argList += $VoiceProfiles.Trim() }
 
 Write-BootstrapLog "run-installer-bootstrap start MaxMinutes=$MaxMinutes SkipHeavyPrepare=$SkipHeavyPrepare"
 
