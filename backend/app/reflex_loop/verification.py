@@ -107,18 +107,31 @@ def verify_postcondition(
                 break
 
     if operation == Operation.CLICK:
-        # Click succeeded if frame advanced (url/title) or node still present and enabled.
-        if post_frame.url_or_title and prior_node is not None:
-            # Soft success: page identity may change after navigation click.
-            return PostconditionResult(
-                True,
-                "click accepted — post frame observed",
-                observed={"url_or_title": post_frame.url_or_title},
-            )
+        # Clicks are accepted without a proven effect: re-clicking a non-idempotent control
+        # (Submit, Buy) on a false negative is worse than an honest "unverified" record.
         if post is None:
-            # Control may have been removed by the click (dialog closed) — treat as ok.
-            return PostconditionResult(True, "click target gone — likely consumed")
-        return PostconditionResult(True, "click target still present", observed=post.as_dict())
+            return PostconditionResult(True, "click verified: target consumed (no longer in frame)")
+        if prior_node is not None:
+            changes = [
+                label
+                for label, before, after in (
+                    ("checked", prior_node.state.checked, post.state.checked),
+                    ("expanded", prior_node.state.expanded, post.state.expanded),
+                    ("selected", prior_node.state.selected, post.state.selected),
+                    ("focused", prior_node.state.focused, post.state.focused),
+                    ("value", prior_node.value, post.value),
+                )
+                if before != after
+            ]
+            if changes:
+                return PostconditionResult(
+                    True, f"click verified: {', '.join(changes)} changed", observed=post.as_dict()
+                )
+        return PostconditionResult(
+            True,
+            "click unverified: no observable change on target",
+            observed={"url_or_title": post_frame.url_or_title, "target": post.as_dict()},
+        )
 
     if operation == Operation.TYPE_TEXT:
         if post is None:

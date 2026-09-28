@@ -494,44 +494,15 @@ async def run_reflex_computer_use(
                 ),
             )
         from ..tools.desktop import DesktopTool
+        from ..reflex_loop.runtime import run_reflex_live_desktop
 
-        tool = DesktopTool()
         if app:
-            focused = await tool.execute(action="focus", title=app)
+            focused = await DesktopTool().execute(action="focus", title=app)
             if not focused.success:
                 return ToolResult(False, focused.output or "", error=focused.error or "focus failed")
-        framed = await tool.execute(action="action_frame", title=app or "")
-        if not framed.success:
-            return ToolResult(False, framed.output or "", error=framed.error or "action_frame failed")
-        frame = (framed.data or {}).get("action_frame") or {}
-        resolved_nodes = list(frame.get("nodes") or [])
-        if not resolved_nodes:
-            return ToolResult(
-                False,
-                framed.output or "",
-                error="action_frame produced no actionable nodes — refuse closed",
-                data={"action_frame": frame},
-            )
-        # Convert ActionFrame node dicts back to adapter-friendly control dicts.
-        controls: list[dict[str, Any]] = []
-        for node in resolved_nodes:
-            if not isinstance(node, dict):
-                continue
-            ref = node.get("backend_ref") if isinstance(node.get("backend_ref"), dict) else {}
-            state = node.get("state") if isinstance(node.get("state"), dict) else {}
-            controls.append(
-                {
-                    "name": node.get("name") or "",
-                    "automation_id": ref.get("automation_id") or "",
-                    "control_type": ref.get("control_type") or node.get("role") or "",
-                    "enabled": bool(state.get("enabled", True)),
-                    "value": node.get("value") or "",
-                    "visible": bool(node.get("visible", True)),
-                    "focused": bool(state.get("focused", False)),
-                }
-            )
-        resolved_nodes = controls
+        return await run_reflex_live_desktop(text, app=str(app or ""))
 
+    # Caller-supplied nodes are a description, not the screen: this is a dry run.
     from ..reflex_loop.runtime import run_reflex_with_inmemory_world
     from ..reflex_loop.schema import SurfaceKind
 

@@ -5,6 +5,9 @@ decide(state, questions, decision_class, deadline_ms, privacy)
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -27,6 +30,8 @@ from .types import (
     normalize_questions,
 )
 
+log = logging.getLogger("jarvis.decision.reflex")
+
 DEFAULT_DEADLINE_MS = 100.0
 _ADAPTERS = {
     "rules": rules,
@@ -34,6 +39,54 @@ _ADAPTERS = {
     "jev": jev_adapter,
     "generative": generative,
 }
+
+
+def _bounded_answer(question: Question, answer: Answer | None) -> Answer | None:
+    """Return the answer only if it stays inside the question's typed domain."""
+    if answer is None:
+        return None
+    value = answer.value
+    if question.type == "choice":
+        if not isinstance(value, str) or value not in question.choices:
+            return None
+        return answer
+    if question.type == "score":
+        if isinstance(value, bool):
+            return None
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            return None
+        if score != score or not question.min_score <= score <= question.max_score:
+            return None
+        return Answer(question.id, "score", score, answer.confidence)
+    if question.type == "boolean":
+        if isinstance(value, bool):
+            return answer
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        noul = float(value)
+    except (TypeError, ValueError):
+        return None
+    if noul != noul or not 0.0 <= noul <= 1.0:
+        return None
+    return Answer(question.id, "noul", noul, answer.confidence)
+
+
+def _enforce_bounds(result: DecisionResult, questions: list[Question]) -> list[str]:
+    """Drop out-of-domain provider answers in place; return ids that are now missing."""
+    missing: list[str] = []
+    bounded: dict[str, Answer] = {}
+    for question in questions:
+        answer = _bounded_answer(question, result.answers.get(question.id))
+        if answer is None:
+            missing.append(question.id)
+        else:
+            bounded[question.id] = answer
+    result.answers = bounded
+    return missing
 
 
 def _quality(result: DecisionResult) -> float:
@@ -170,8 +223,7 @@ def decide(
     if not dclass:
         raise ValueError("decision_class is required")
     if dclass not in REFLEX_DECISION_CLASSES:
-        # Still allow with generative/rules but mark meta — callers should use listed classes.
-        pass
+        log.warning("Reflex decide() called with unlisted decision_class %r", dclass)
     qlist = normalize_questions(questions)
     projection = compact_state(state)
 
@@ -288,6 +340,12 @@ def decide(
                 deadline_ms=remaining,
             )
         except TimeoutError as exc:
+            quartermaster.record_outcome(
+                dclass,
+                provider,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                quality=0.0,
+            )
             result = _deadline_fallback(
                 state=projection,
                 questions=qlist,
@@ -301,6 +359,12 @@ def decide(
             return result
         except Exception as exc:  # noqa: BLE001 — must never strand the turn
             last_error = str(exc)
+            quartermaster.record_outcome(
+                dclass,
+                provider,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+                quality=0.0,
+            )
             audit.record_event(
                 "reflex_provider_error",
                 {
@@ -315,7 +379,23 @@ def decide(
 
         result.request_id = rid
         result.latency.total_ms = (time.perf_counter() - started) * 1000.0
+        missing = _enforce_bounds(result, qlist)
+        if missing:
+            last_error = f"{provider} returned out-of-domain or missing answers for: {', '.join(missing)}"
+            quartermaster.record_outcome(dclass, provider, latency_ms=result.latency.total_ms, quality=0.0)
+            audit.record_event(
+                "reflex_provider_error",
+                {
+                    "provider": provider,
+                    "decision_class": dclass,
+                    "error": last_error[:400],
+                    "fallback_used": True,
+                    "request_id": rid,
+                },
+            )
+            continue
         if result.latency.total_ms > deadline:
+            quartermaster.record_outcome(dclass, provider, latency_ms=result.latency.total_ms, quality=0.0)
             result = _deadline_fallback(
                 state=projection,
                 questions=qlist,
@@ -332,6 +412,7 @@ def decide(
         quality = _quality(result)
         if provider in {"laya", "jev"} and quality < 0.35:
             last_error = f"{provider} confidence too low ({quality:.2f})"
+            quartermaster.record_outcome(dclass, provider, latency_ms=result.latency.total_ms, quality=quality)
             continue
 
         # Complexity: rules set a floor — typed providers may raise, never lower.
@@ -425,10 +506,8 @@ def decide_many(
             )
         ]
 
-    # Batch questions that share identical state + class + privacy into one decide().
-    import json
-    import hashlib
-
+    # Jobs sharing state + class + privacy merge into one decide() call, provided their
+    # question ids do not collide with different definitions.
     by_state: dict[str, list[int]] = {}
     for idx, job in enumerate(jobs):
         blob = json.dumps(
@@ -443,69 +522,61 @@ def decide_many(
         group_key = hashlib.sha256(blob.encode("utf-8")).hexdigest()
         by_state.setdefault(group_key, []).append(idx)
 
-    results: list[DecisionResult | None] = [None] * len(jobs)
+    units: list[tuple[list[int], list[Question]]] = []
+    for indexes in by_state.values():
+        merged: dict[str, Question] = {}
+        conflict = False
+        for idx in indexes:
+            for question in normalize_questions(jobs[idx]["questions"]):
+                prior = merged.get(question.id)
+                if prior is not None and prior != question:
+                    conflict = True
+                    break
+                merged[question.id] = question
+            if conflict:
+                break
+        if conflict or len(indexes) == 1:
+            units.extend(([idx], normalize_questions(jobs[idx]["questions"])) for idx in indexes)
+        else:
+            units.append((indexes, list(merged.values())))
 
-    def _run(index: int) -> tuple[int, DecisionResult]:
-        job = jobs[index]
-        return index, decide(
+    def _run(unit: tuple[list[int], list[Question]]) -> tuple[list[int], DecisionResult]:
+        indexes, unit_questions = unit
+        job = jobs[indexes[0]]
+        return indexes, decide(
             job.get("state"),
-            job["questions"],
+            unit_questions,
             job["decision_class"],
             job.get("deadline_ms"),
             job.get("privacy", "local_only"),
         )
 
-    # Same-state + same-class → single batched decide.
-    handled: set[int] = set()
-    for _group, indexes in by_state.items():
-        if len(indexes) < 2:
-            continue
-        # Merge questions into one call.
-        first = jobs[indexes[0]]
-        merged_questions: list[Question] = []
-        seen_ids: set[str] = set()
-        for idx in indexes:
-            for question in normalize_questions(jobs[idx]["questions"]):
-                if question.id in seen_ids:
-                    continue
-                seen_ids.add(question.id)
-                merged_questions.append(question)
-        batched = decide(
-            first.get("state"),
-            merged_questions,
-            first["decision_class"],
-            first.get("deadline_ms"),
-            first.get("privacy", "local_only"),
-        )
-        for idx in indexes:
-            wanted = {q.id for q in normalize_questions(jobs[idx]["questions"])}
-            subset = DecisionResult(
-                answers={qid: ans for qid, ans in batched.answers.items() if qid in wanted},
-                source=batched.source,
-                decision_class=batched.decision_class,
-                provider=batched.provider,
-                provider_version=batched.provider_version,
-                model=batched.model,
-                fallback_used=batched.fallback_used,
-                fallback_reason=batched.fallback_reason,
-                fallback_source=batched.fallback_source,
-                cached=batched.cached,
-                latency=batched.latency,
-                hard_rule=batched.hard_rule,
-                request_id=batched.request_id,
-                fixture=batched.fixture,
-                meta={**batched.meta, "batched": True},
-            )
-            results[idx] = subset
-            handled.add(idx)
-
-    remaining_indexes = [i for i in range(len(jobs)) if i not in handled]
-    if remaining_indexes:
-        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(remaining_indexes)))) as pool:
-            futures = [pool.submit(_run, i) for i in remaining_indexes]
-            for fut in as_completed(futures):
-                idx, result = fut.result()
-                results[idx] = result
+    results: list[DecisionResult | None] = [None] * len(jobs)
+    with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(units)))) as pool:
+        for fut in as_completed([pool.submit(_run, unit) for unit in units]):
+            indexes, batched = fut.result()
+            if len(indexes) == 1:
+                results[indexes[0]] = batched
+                continue
+            for idx in indexes:
+                wanted = {q.id for q in normalize_questions(jobs[idx]["questions"])}
+                results[idx] = DecisionResult(
+                    answers={qid: ans for qid, ans in batched.answers.items() if qid in wanted},
+                    source=batched.source,
+                    decision_class=batched.decision_class,
+                    provider=batched.provider,
+                    provider_version=batched.provider_version,
+                    model=batched.model,
+                    fallback_used=batched.fallback_used,
+                    fallback_reason=batched.fallback_reason,
+                    fallback_source=batched.fallback_source,
+                    cached=batched.cached,
+                    latency=batched.latency,
+                    hard_rule=batched.hard_rule,
+                    request_id=batched.request_id,
+                    fixture=batched.fixture,
+                    meta={**batched.meta, "batched": True},
+                )
 
     return [r if r is not None else _deadline_fallback(
         state={},

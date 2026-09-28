@@ -90,6 +90,23 @@ def put(key: str, result: DecisionResult, *, ttl_s: float = DEFAULT_TTL_S) -> No
     if result.provider == "generative" and not result.hard_rule:
         return
     expires = time.monotonic() + max(0.5, float(ttl_s))
+    # Store a private copy: the caller keeps (and may mutate) the object it returns.
+    stored = DecisionResult(
+        answers=dict(result.answers),
+        source=result.source,
+        decision_class=result.decision_class,
+        provider=result.provider,
+        provider_version=result.provider_version,
+        model=result.model,
+        fallback_used=result.fallback_used,
+        fallback_reason=result.fallback_reason,
+        fallback_source=result.fallback_source,
+        latency=LatencyBreakdown(**result.latency.as_dict()),
+        hard_rule=result.hard_rule,
+        request_id=result.request_id,
+        fixture=result.fixture,
+        meta=dict(result.meta),
+    )
     with _LOCK:
         if len(_CACHE) >= MAX_ENTRIES:
             # Drop expired first, then oldest insertion order.
@@ -99,7 +116,7 @@ def put(key: str, result: DecisionResult, *, ttl_s: float = DEFAULT_TTL_S) -> No
                 _CACHE.pop(k, None)
             while len(_CACHE) >= MAX_ENTRIES and _CACHE:
                 _CACHE.pop(next(iter(_CACHE)))
-        _CACHE[key] = (expires, result)
+        _CACHE[key] = (expires, stored)
 
 
 def clear() -> None:

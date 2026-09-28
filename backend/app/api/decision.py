@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -11,6 +12,7 @@ from ..decision.audit import list_events
 from ..decision.jev_client import reset_http_post, using_labeled_fixture
 from ..decision.laya import pins as laya_pins
 from ..decision.laya import runtime as laya_runtime
+from ..decision import calibration
 from ..decision import metrics as reflex_metrics
 from ..decision import quartermaster
 from ..decision.tier import bind_typesafe_key, probe_jev, resolve_status, set_decision_tier, set_notify_requested
@@ -89,6 +91,7 @@ async def reflex_metrics_snapshot() -> dict[str, Any]:
     return {
         **reflex_metrics.snapshot(),
         "quartermaster": quartermaster.selection_snapshot("default"),
+        "calibration": calibration.snapshot(),
     }
 
 
@@ -105,6 +108,16 @@ async def laya_enable(body: LayaEnableIn | None = None) -> dict[str, Any]:
     warm = True if body is None else bool(body.warm)
     try:
         return laya_runtime.enable(warm=warm, allow_fixture=True)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/laya/install")
+async def laya_install(body: LayaEnableIn | None = None) -> dict[str, Any]:
+    """Download the pinned checkpoint into the data dir, verify digests, then enable and warm."""
+    warm = True if body is None else bool(body.warm)
+    try:
+        return await asyncio.to_thread(laya_runtime.install_and_enable, warm=warm)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

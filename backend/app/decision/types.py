@@ -25,6 +25,7 @@ REFLEX_DECISION_CLASSES: frozenset[str] = frozenset(
         "browser_operation_target",
         "artifact_classification",
         "source_prioritization",
+        "intake_strategy",
         "risk_signal",
         "speak_class",
         "approval_signal",
@@ -52,6 +53,15 @@ class Question:
     choices: tuple[str, ...] = ()
     min_score: float = 0.0
     max_score: float = 1.0
+    # Optional per-choice descriptions (same order as ``choices``); encoder providers
+    # such as Laya score descriptions far better than bare labels.
+    descriptions: tuple[str, ...] = ()
+
+    def choice_criteria(self) -> dict[str, str]:
+        return {
+            choice: (self.descriptions[i] if i < len(self.descriptions) and self.descriptions[i] else choice)
+            for i, choice in enumerate(self.choices)
+        }
 
     def to_provider_dict(self) -> dict[str, Any]:
         if self.type == "choice":
@@ -175,6 +185,7 @@ def normalize_questions(
                 choices=raw.choices,
                 min_score=raw.min_score,
                 max_score=raw.max_score,
+                descriptions=raw.descriptions,
             ))
             continue
         if not isinstance(raw, dict):
@@ -182,7 +193,13 @@ def normalize_questions(
         qtype = str(raw.get("type") or "").strip().lower()
         if qtype not in {"choice", "score", "boolean", "noul"}:
             raise ValueError(f"question {qid!r} has unsupported type {qtype!r}")
-        choices = tuple(str(c) for c in (raw.get("choices") or []) if str(c).strip())
+        criteria = raw.get("criteria")
+        descriptions: tuple[str, ...] = ()
+        if isinstance(criteria, dict) and not raw.get("choices"):
+            choices = tuple(str(c) for c in criteria if str(c).strip())
+            descriptions = tuple(str(criteria[c] or "") for c in criteria if str(c).strip())
+        else:
+            choices = tuple(str(c) for c in (raw.get("choices") or []) if str(c).strip())
         if qtype == "choice" and not choices:
             raise ValueError(f"choice question {qid!r} requires choices")
         prompt = str(raw.get("question") or raw.get("prompt") or qid)
@@ -194,6 +211,7 @@ def normalize_questions(
                 choices=choices,
                 min_score=float(raw.get("min", raw.get("min_score", 0.0))),
                 max_score=float(raw.get("max", raw.get("max_score", 1.0))),
+                descriptions=descriptions,
             )
         )
     return out
@@ -204,7 +222,13 @@ def questions_to_provider_map(questions: list[Question]) -> dict[str, Any]:
 
 
 def compact_state(state: dict[str, Any] | None, *, max_chars: int = 2400) -> dict[str, Any]:
-    """Compact projection — never ship full transcripts or tool catalogs."""
+    """Compact projection — never ship full transcripts or tool catalogs.
+
+    Long string fields are compressed (head + tail + salient spans), not cut, so a
+    large paste still reaches the provider with its closing instruction intact.
+    """
+    from .intake import compress_text
+
     if not state:
         return {}
     out: dict[str, Any] = {}
@@ -212,7 +236,7 @@ def compact_state(state: dict[str, Any] | None, *, max_chars: int = 2400) -> dic
         if key.startswith("_"):
             continue
         if isinstance(value, str):
-            out[key] = value[:800]
+            out[key] = compress_text(value, 800).text if len(value) > 800 else value
         elif isinstance(value, (list, tuple)):
             capped = list(value)[:64]
             out[key] = [
@@ -224,12 +248,13 @@ def compact_state(state: dict[str, Any] | None, *, max_chars: int = 2400) -> dic
             out[key] = compact_state(value, max_chars=max_chars // 2)
         else:
             out[key] = str(value)[:200]
-    encoded = str(out)
-    if len(encoded) > max_chars:
-        # Drop largest string fields until under budget.
+    if len(str(out)) > max_chars:
+        # Shrink the largest string fields (compressing, not cutting) until under budget.
         for key in sorted(out.keys(), key=lambda k: len(str(out[k])), reverse=True):
-            if len(str(out)) <= max_chars:
+            overflow = len(str(out)) - max_chars
+            if overflow <= 0:
                 break
-            if isinstance(out[key], str) and len(out[key]) > 80:
-                out[key] = out[key][:80]
+            value = out[key]
+            if isinstance(value, str) and len(value) > 120:
+                out[key] = compress_text(value, max(120, len(value) - overflow)).text
     return out

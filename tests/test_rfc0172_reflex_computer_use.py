@@ -515,7 +515,30 @@ async def test_reflex_computer_use_tool_with_scripted_lane(monkeypatch):
     )
     assert result.success is True
     assert result.data.get("done") is True
+    # Caller-supplied nodes never touch the screen; the result must say so.
+    assert result.data.get("simulated") is True
+    assert "DRY RUN" in result.output
     set_reflex_decide_client(None)
+
+
+def test_live_desktop_act_escapes_type_keys_and_uses_handles_only():
+    from app.reflex_loop.runtime import _escape_type_keys, _live_desktop_act
+
+    assert _escape_type_keys("50% off (today) {x}+^~") == "50{%} off {(}today{)} {{}x{}}{+}{^}{~}"
+
+    class Handle:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def click_input(self) -> None:
+            self.calls.append("click")
+
+    handle = Handle()
+    node = ActionNode(target_id="t0", role="button", name="Save", backend_ref={"_handle": handle})
+    _live_desktop_act(Operation.CLICK, node, {})
+    assert handle.calls == ["click"]
+    with pytest.raises(RuntimeError):
+        _live_desktop_act(Operation.CLICK, ActionNode(target_id="t1", role="button", name="X"), {})
 
 
 @pytest.mark.asyncio
@@ -553,6 +576,31 @@ def test_api_reflex_benchmark():
         body = response.json()
         assert body["suite"] == "rfc0172_reflex_vs_anzu"
         assert body["summary"]["reflex_successes"] >= 1
+
+
+def test_sandbox_refuses_smuggled_payload_even_on_done():
+    done = ReflexDecision(operation=Operation.DONE, done=True)
+    assert gate_decision_payload(done, extra={"js": "fetch('/steal')"}).ok is False
+
+
+def test_parse_reflex_decision_reads_flags_strictly():
+    from app.reflex_loop.reflex_client import DecisionResult as LoopResult
+
+    parsed = parse_reflex_decision(
+        LoopResult(ok=True, answers={"operation": "CLICK", "target_id": "t0", "done": "false", "block": 0.2})
+    )
+    assert parsed is not None
+    assert parsed.done is False
+    assert parsed.blocked is False
+
+
+@pytest.mark.asyncio
+async def test_sync_generator_returning_none_is_refused_not_typed():
+    from app.reflex_loop.text_gen import generate_bounded_text
+
+    result = await generate_bounded_text("fill the name", field_name="Name", generator=lambda _g, _s: None)
+    assert result.ok is False
+    assert result.text != "None"
 
 
 def test_reflex_decision_done_block():

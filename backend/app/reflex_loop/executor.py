@@ -96,6 +96,17 @@ class ReflexLoopResult:
         }
 
 
+def _flag(value: Any) -> bool:
+    """Terminal flags arrive as bool, probability, or string; only a clear yes counts."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value) >= 0.5
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "1"}
+    return False
+
+
 def parse_reflex_decision(result: DecisionResult) -> ReflexDecision | None:
     """Map a Reflex Lane DecisionResult into a typed ReflexDecision. Fail closed."""
     if not result.ok:
@@ -103,8 +114,8 @@ def parse_reflex_decision(result: DecisionResult) -> ReflexDecision | None:
     answers = result.answers or {}
     op_raw = answers.get("operation") or answers.get("op")
     target_raw = answers.get("target_id") or answers.get("target")
-    done = bool(answers.get("done", False))
-    blocked = bool(answers.get("blocked", False)) or bool(answers.get("block", False))
+    done = _flag(answers.get("done", False))
+    blocked = _flag(answers.get("blocked", False)) or _flag(answers.get("block", False))
     if op_raw is None and done:
         op_raw = Operation.DONE.value
     if op_raw is None and blocked:
@@ -239,7 +250,7 @@ class ReflexLoopExecutor:
                 break
 
             outcome.decisions.append(decision.as_dict())
-            gate = gate_decision_payload(decision, posture=self.sandbox)
+            gate = gate_decision_payload(decision, extra=dict(decide_result.answers or {}), posture=self.sandbox)
             if not gate.ok:
                 outcome.reason = f"sandbox refused decision: {gate.reason}"
                 outcome.blocked = True

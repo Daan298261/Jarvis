@@ -8,6 +8,7 @@ import {
   type DecisionTier,
   type JevDecisionStatus,
 } from "../api"
+import { LayaSettings } from "./LayaSettings"
 
 type DecisionTierSettingsProps = {
   save: (patch: Record<string, unknown>) => Promise<void>
@@ -17,7 +18,7 @@ type DecisionTierSettingsProps = {
 function availabilityLabel(status: JevDecisionStatus | null): string {
   if (!status) return "Loading…"
   if (status.jev_availability === "connected") return "Connected (real TypeSafe probe)"
-  if (status.jev_availability === "waitlisted") return "Waitlisted — not connected"
+  if (status.jev_availability === "waitlisted") return "Opt-in pending — bind TypeSafe key and probe"
   if (status.jev_availability === "error") return "Error — using local decisions"
   return "Unavailable — local Ornith / heuristics"
 }
@@ -93,10 +94,11 @@ export function DecisionTierSettings({ save, setMsg }: DecisionTierSettingsProps
 
   return (
     <div className="card grid settings-pane-card">
-      <h2>Decision accelerator (Jev)</h2>
+      <h2>Decision accelerator (Reflex / Jev / Laya)</h2>
       <p className="lede" style={{ margin: "0 0 12px" }}>
-        Optional TypeSafe System One cloud decisions for tool pick, speak class, complexity, and
-        approval. Local Ornith and heuristics stay the default. Cloud never auto-enables.
+        RFC-0171 Reflex Lane: local rules and optional Laya first, then TypeSafe Jev when you opt in
+        with a real API key and probe. Used for tool pick, routing, memory relevance, and computer-use
+        op+target — not open-ended chat. Cloud never auto-enables.
       </p>
       <label>
         Decision tier
@@ -126,8 +128,13 @@ export function DecisionTierSettings({ save, setMsg }: DecisionTierSettingsProps
           : ""}
       </p>
       <div className="row">
-        <a className="btn" href={status?.waitlist_url || "https://typesafe.ai/"} target="_blank" rel="noreferrer">
-          TypeSafe waitlist
+        <a
+          className="btn"
+          href={status?.waitlist_url || "https://typesafe.ai/"}
+          target="_blank"
+          rel="noreferrer"
+        >
+          TypeSafe / System One
         </a>
         <button type="button" className="btn" disabled={busy} onClick={() => void onNotify()}>
           Notify when ready
@@ -148,6 +155,7 @@ export function DecisionTierSettings({ save, setMsg }: DecisionTierSettingsProps
           onBlur={() => void onSaveKey()}
         />
       </label>
+      <LayaSettings setMsg={setMsg} />
     </div>
   )
 }

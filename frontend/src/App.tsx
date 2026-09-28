@@ -29,6 +29,7 @@ import { TrajectoriesPage } from "./pages/Trajectories"
 import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
 import { SkillForgePage } from "./pages/SkillForge"
+import { CapabilityLabPage } from "./pages/CapabilityLab"
 import { AgentRoomsPage } from "./pages/AgentRooms"
 import {
   api,
@@ -100,6 +101,7 @@ const ADMIN_LINKS = [
   { to: "/environments", label: "Environments" },
   { to: "/coding", label: "Coding" },
   { to: "/skills", label: "Modules / Skills" },
+  { to: "/capability-lab", label: "Capability Lab" },
   { to: "/packs", label: "Packs" },
   { to: "/ads", label: "Amazon Ads" },
   { to: "/delegation", label: "Helpers" },
@@ -489,6 +491,7 @@ function OwnerPortal() {
       <Route path="/coding/:taskId" element={<CodingPage />} />
       <Route path="/skills" element={<SkillForgePage />} />
       <Route path="/skills/:candidateId" element={<SkillForgePage />} />
+      <Route path="/capability-lab" element={<CapabilityLabPage />} />
       <Route path="/packs" element={<PacksPage />} />
       <Route path="/ads" element={<AdsPage />} />
       <Route path="/delegation" element={<DelegationPage />} />

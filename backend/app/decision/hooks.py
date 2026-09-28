@@ -82,22 +82,21 @@ def authorize_with_jev(
     **kwargs: Any,
 ) -> AuthorizationResult:
     result = authorize(tool_name, action=action, arguments=arguments, **kwargs)
-    if not result.allowed and not result.requires_approval:
+    # Deny and required approval are final; the accelerator may only add a confirmation.
+    if result.requires_approval or not result.allowed:
         return result
     decision = decide_turn(
         user_message=str((arguments or {}).get("prompt") or action or tool_name),
         candidate_tools=[tool_name],
-        policy_requires_approval=result.requires_approval,
-        policy_deny=not result.allowed and not result.requires_approval,
+        policy_requires_approval=False,
+        policy_deny=False,
     )
     needed = approval_popup_required(
-        policy_requires=result.requires_approval,
-        policy_deny=not result.allowed and not result.requires_approval,
+        policy_requires=False,
+        policy_deny=False,
         jev_noul=1.0 if decision.get("approval_needed") else 0.0,
     )
-    if result.requires_approval:
-        return result
-    if needed and result.allowed:
+    if needed:
         return AuthorizationResult(
             allowed=False,
             requires_approval=True,

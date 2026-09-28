@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "updated_at": "2026-09-28",
+  "capabilities": [
+    {
+      "id": "reflex_lane_system_one",
+      "title": "System-One Reflex Lane (Jev + Laya)",
+      "rfc_id": "RFC-0171",
+      "user_outcome": "Bounded routing/tool/memory decisions without generative LLM latency.",
+      "anzu_path": "backend/app/decision/",
+      "parity_state": "partial",
+      "lifecycle": "implemented",
+      "support": "hybrid",
+      "security_approval": "Hard policy rules cannot be weakened by Reflex output.",
+      "test_ids": ["tests/system_one/", "tests/test_rfc0116_jev_decision.py", "tests/test_owner_intake.py"],
+      "depends_on": [],
+      "peer_evidence": [
+        {
+          "label": "TypeSafe System One / Jev",
+          "url": "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
+          "observed_at": "2026-09-24"
+        },
+        {
+          "label": "Laya (Apache-2.0)",
+          "url": "https://github.com/NandhaKishorM/laya",
+          "observed_at": "2026-09-24"
+        }
+      ],
+      "license_note": "Laya pins require Apache-2.0 provenance; Jev is opt-in cloud.",
+      "last_verified_at": "2026-09-24"
+    },
+    {
+      "id": "reflex_browser_computer_use",
+      "title": "Reflex-first browser/computer-use fast loop",
+      "rfc_id": "RFC-0172",
+      "user_outcome": "Semantic op+target selection with stale-frame rejection and TYPE_TEXT-only generation.",
+      "anzu_path": "backend/app/reflex_loop/",
+      "parity_state": "partial",
+      "lifecycle": "implemented",
+      "support": "local",
+      "security_approval": "Sandbox gate; approvals stay outside the decision model.",
+      "test_ids": ["tests/test_rfc0172_reflex_computer_use.py"],
+      "depends_on": ["reflex_lane_system_one"],
+      "peer_evidence": [
+        {
+          "label": "Browser Use jev-ultrafast",
+          "url": "https://github.com/browser-use/jev-ultrafast",
+          "observed_at": "2026-09-24"
+        }
+      ],
+      "license_note": "Pattern inspired by public projects; no competitor code copied.",
+      "last_verified_at": "2026-09-24"
+    },
+    {
+      "id": "skill_forge",
+      "title": "Skill Forge (verified trace → skill)",
+      "rfc_id": "RFC-0173",
+      "user_outcome": "Promote verified trajectories into reusable skills with owner approval.",
+      "anzu_path": "backend/app/skills/",
+      "parity_state": "partial",
+      "lifecycle": "implemented",
+      "support": "local",
+      "security_approval": "Owner decision inbox before publish.",
+      "test_ids": ["tests/test_skill_forge_rfc0173.py"],
+      "depends_on": [],
+      "peer_evidence": [],
+      "license_note": "",
+      "last_verified_at": ""
+    },
+    {
+      "id": "agent_rooms",
+      "title": "Multi-agent rooms / blackboard handoff",
+      "rfc_id": "RFC-0174",
+      "user_outcome": "Inspectable specialist collaboration with deadlock/handoff rules.",
+      "anzu_path": "backend/app/agents/rooms/",
+      "parity_state": "partial",
+      "lifecycle": "implemented",
+      "support": "local",
+      "security_approval": "Room policies and approvals enforced outside model output.",
+      "test_ids": ["tests/test_rfc0174_agent_rooms.py", "tests/test_rfc0174_agent_rooms_api.py"],
+      "depends_on": [],
+      "peer_evidence": [],
+      "license_note": "",
+      "last_verified_at": ""
+    },
+    {
+      "id": "capability_lab",
+      "title": "Capability parity matrix and continuous benchmark",
+      "rfc_id": "RFC-0137",
+      "user_outcome": "Measured gaps vs peers with executable evidence links.",
+      "anzu_path": "backend/app/capabilities/ + /api/capability-lab/",
+      "parity_state": "partial",
+      "lifecycle": "implemented",
+      "support": "local",
+      "security_approval": "No unverified superiority claims in UI.",
+      "test_ids": [
+        "tests/test_rfc0137_capability_lab.py::test_registry_loads_and_has_p0_entries",
+        "tests/test_rfc0137_capability_lab.py::test_registry_api_lists_capabilities"
+      ],
+      "depends_on": [],
+      "peer_evidence": [],
+      "license_note": "Peer URLs are citations only.",
+      "last_verified_at": "2026-09-28"
+    },
+    {
+      "id": "control_room_gates",
+      "title": "Control Room observability and release gates",
+      "rfc_id": "RFC-0144",
+      "user_outcome": "Release blocked when required capability gates fail.",
+      "anzu_path": "planned",
+      "parity_state": "missing",
+      "lifecycle": "specified",
+      "support": "local",
+      "security_approval": "Audit trail for gate failures.",
+      "test_ids": [],
+      "depends_on": ["capability_lab"],
+      "peer_evidence": [],
+      "license_note": "",
+      "last_verified_at": ""
+    },
+    {
+      "id": "secure_execution_sandbox",
+      "title": "Secure execution sandbox (egress/FS/secrets)",
+      "rfc_id": "RFC-0151",
+      "user_outcome": "Tool runs with bounded egress and filesystem posture.",
+      "anzu_path": "backend/app/reflex_loop/sandbox.py (minimal); full RFC pending",
+      "parity_state": "partial",
+      "lifecycle": "specified",
+      "support": "local",
+      "security_approval": "Policy authority remains outside models.",
+      "test_ids": ["tests/test_rfc0172_reflex_computer_use.py"],
+      "depends_on": [],
+      "peer_evidence": [],
+      "license_note": "",
+      "last_verified_at": ""
+    },
+    {
+      "id": "computer_use_reliable",
+      "title": "Reliable computer-use perception/action/verification",
+      "rfc_id": "RFC-0145",
+      "user_outcome": "Stable desktop automation with verification loops.",
+      "anzu_path": "backend/app/workers/computer.py",
+      "parity_state": "partial",
+      "lifecycle": "specified",
+      "support": "local",
+      "security_approval": "Windows desktop permissions.",
+      "test_ids": [],
+      "depends_on": ["reflex_browser_computer_use", "secure_execution_sandbox"],
+      "peer_evidence": [],
+      "license_note": "",
+      "last_verified_at": ""
+    },
+    {
+      "id": "quartermaster_arena",
+      "title": "Model Arena / adaptive Quartermaster",
+      "rfc_id": "RFC-0141",
+      "user_outcome": "Per-class provider selection from measured quality/latency.",
+      "anzu_path": "backend/app/decision/quartermaster.py",
+      "parity_state": "partial",
+      "lifecycle": "implemented",
+      "support": "hybrid",
+      "security_approval": "Privacy mode respected per decision class.",
+      "test_ids": ["tests/system_one/test_reflex_lane.py"],
+      "depends_on": ["reflex_lane_system_one"],
+      "peer_evidence": [],
+      "license_note": "",
+      "last_verified_at": "2026-09-24"
+    }
+  ]
+}
