@@ -3,6 +3,7 @@ from app.agent.compaction import (
     WORKING_STATE_MARKER,
     compact_history,
     deserialize_messages,
+    ensure_user_message,
     serialize_messages,
 )
 from app.agent.planning import WorkingState
@@ -66,3 +67,18 @@ def test_serialization_round_trip():
     restored = deserialize_messages(serialize_messages(messages))
     assert [m.role for m in restored] == [m.role for m in messages]
     assert restored[-1].tool_call_id == messages[-1].tool_call_id
+
+
+def test_compaction_reinjects_a_user_message_when_none_remain():
+    history = [
+        ChatMessage(role="system", content="You are Jarvis."),
+        ChatMessage(role="assistant", content="", tool_calls=[_tool_call("apps", "c0")]),
+        ChatMessage(role="tool", name="apps", tool_call_id="c0", content="opened"),
+    ]
+    compacted = compact_history(history, keep_last=2, user_fallback="open steam")
+    assert any(message.role == "user" and "open steam" in str(message.content) for message in compacted)
+
+
+def test_ensure_user_message_is_idempotent_when_a_user_turn_exists():
+    messages = _long_history(rounds=1)
+    assert ensure_user_message(messages, "open steam") is messages

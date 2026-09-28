@@ -92,6 +92,7 @@ def compact_history(
     max_summary_entries: int = 40,
     snippet: int = 400,
     drop_head_injections: bool = False,
+    user_fallback: str | None = None,
 ) -> list[ChatMessage]:
     """Keep the prompt small without dropping what the model needs to continue.
 
@@ -122,7 +123,30 @@ def compact_history(
     if working_state_block:
         extra.append(ChatMessage(role="system", content=working_state_block))
 
-    return head + extra + tail
+    assembled = head + extra + tail
+    if user_fallback is not None:
+        assembled = ensure_user_message(assembled, user_fallback)
+    return assembled
+
+
+def _has_user_query(messages: list[ChatMessage]) -> bool:
+    return any(message.role == "user" and bool(_text_of(message).strip()) for message in messages)
+
+
+def ensure_user_message(messages: list[ChatMessage], fallback: str) -> list[ChatMessage]:
+    """LM Studio / llama.cpp chat templates crash with 'No user query' if none remain."""
+    if _has_user_query(messages):
+        return messages
+    text = (fallback or "").strip() or "Continue the current task."
+    insert_at = 0
+    for index, message in enumerate(messages):
+        if message.role == "system":
+            insert_at = index + 1
+            continue
+        break
+    out = list(messages)
+    out.insert(insert_at, ChatMessage(role="user", content=text))
+    return out
 
 
 def estimate_prompt_tokens(messages: list[ChatMessage]) -> int:

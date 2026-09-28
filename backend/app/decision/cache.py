@@ -86,9 +86,6 @@ def put(key: str, result: DecisionResult, *, ttl_s: float = DEFAULT_TTL_S) -> No
         return
     if not result.answers:
         return
-    # Only cache pure providers (not generative open-ended).
-    if result.provider == "generative" and not result.hard_rule:
-        return
     expires = time.monotonic() + max(0.5, float(ttl_s))
     # Store a private copy: the caller keeps (and may mutate) the object it returns.
     stored = DecisionResult(

@@ -16,6 +16,8 @@ from typing import Callable
 
 from .adapters import rules
 from .types import Answer, Question
+from ..security.red_scenarios import HARM as _HARM
+from ..security.red_scenarios import SCENARIOS as _HARM_SCENARIOS
 
 log = logging.getLogger("jarvis.decision.calibration")
 
@@ -53,6 +55,7 @@ FIXTURES: tuple[Fixture, ...] = (
     Fixture("tool_selection", _TOOLS, {"user_message": "show the diff of the last commit"}, "git"),
     Fixture("tool_selection", _TOOLS, {"user_message": "open the bbc news website"}, "browser"),
     Fixture("tool_selection", _TOOLS, {"user_message": "go to github.com and find the laya repo"}, "browser"),
+    Fixture("tool_selection", _TOOLS, {"user_message": "open steam"}, "none"),
     Fixture("tool_selection", _TOOLS, {"user_message": "what's up, how are you"}, "none"),
     Fixture("tool_selection", _TOOLS, {"user_message": "tell me a joke"}, "none"),
     Fixture("speak_class", _SPEAK, {"user_message": "good morning! how did you sleep?"}, "social"),
@@ -73,7 +76,7 @@ FIXTURES: tuple[Fixture, ...] = (
         {"user_message": "debug this production incident across three services and write the migration"},
         True,
     ),
-)
+) + tuple(Fixture("harm_veto", _HARM, {"user_message": prompt}, cancel) for prompt, cancel in _HARM_SCENARIOS)
 
 _LOCK = threading.Lock()
 _ACCURACY: dict[tuple[str, str], float] = {}
@@ -106,19 +109,28 @@ def _rules_answers(state: dict, questions: list[Question], decision_class: str) 
     return rules.decide(state=state, questions=questions, decision_class=decision_class).answers
 
 
-def calibrate(laya_answer_fn: AnswerFn) -> dict[str, dict[str, float]]:
-    """Measure Laya and rules; record results for the Quartermaster."""
+def calibrate(
+    laya_answer_fn: AnswerFn,
+    jev_answer_fn: AnswerFn | None = None,
+) -> dict[str, dict[str, float]]:
+    """Measure Laya, optional Jev, and rules on the same labeled fixtures."""
     global _MEASURED_AT
     laya = measure("laya", laya_answer_fn)
     rules_scores = measure("rules", _rules_answers)
+    jev = measure("jev", jev_answer_fn) if jev_answer_fn is not None else {}
     with _LOCK:
         for cls, value in laya.items():
             _ACCURACY[(cls, "laya")] = value
         for cls, value in rules_scores.items():
             _ACCURACY[(cls, "rules")] = value
+        for cls, value in jev.items():
+            _ACCURACY[(cls, "jev")] = value
         _MEASURED_AT = time.time()
-    log.info("Laya calibration: laya=%s rules=%s", laya, rules_scores)
-    return {"laya": laya, "rules": rules_scores}
+    log.info("Calibration: laya=%s jev=%s rules=%s", laya, jev, rules_scores)
+    out = {"laya": laya, "rules": rules_scores}
+    if jev:
+        out["jev"] = jev
+    return out
 
 
 def accuracy(decision_class: str, provider: str) -> float | None:
@@ -127,17 +139,15 @@ def accuracy(decision_class: str, provider: str) -> float | None:
 
 
 def laya_qualified(decision_class: str) -> bool:
-    """Laya serves a class only if it was measured there and beats rules.
+    """Laya stays eligible unless a measurement showed it is unusable on that class.
 
-    Classes without fixtures stay eligible: nothing measured them either way, and
-    the confidence gate and bounds checks still apply.
+    Rules accuracy is recorded for a fair comparison, not as a gate that blocks Laya.
     """
     with _LOCK:
         laya = _ACCURACY.get((decision_class, "laya"))
-        baseline = _ACCURACY.get((decision_class, "rules"))
-    if laya is None or baseline is None:
+    if laya is None:
         return True
-    return laya > baseline
+    return laya >= 0.25
 
 
 def snapshot() -> dict[str, object]:

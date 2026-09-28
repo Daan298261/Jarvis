@@ -60,7 +60,8 @@ async function play(item: QueuedSpeech, epoch: number): Promise<void> {
       method: "POST",
       body: JSON.stringify(payload),
     })
-    if (epoch !== playbackEpoch) return
+    // 204 from /api/voice/speak: nothing speakable after sanitizing (e.g. only code).
+    if (epoch !== playbackEpoch || blob.size === 0) return
 
     const url = URL.createObjectURL(blob)
     activeUrl = url
@@ -124,7 +125,9 @@ export function speakChatReply(text: string, opts?: SpeakOpts): Promise<void> {
 export function unspokenRemainder(fullText: string, spokenPrefix: string): string {
   const full = fullText.trim()
   const prefix = spokenPrefix.trim()
+  if (!full) return ""
   if (!prefix) return full
   if (full.startsWith(prefix)) return full.slice(prefix.length).trim()
+  if (prefix.includes(full)) return ""
   return full
 }

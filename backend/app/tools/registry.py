@@ -4,6 +4,7 @@ import time
 from typing import Any, Callable
 
 from ..config import AppSettings, default_allowed_directories
+from .apps import AppsTool
 from .base import Tool, ToolResult
 from .browser import BrowserTool
 from .browser_use import BrowserUseTool
@@ -53,6 +54,7 @@ class ToolRegistry:
             CodeWorkerTool(getter),
             OpenInterpreterTool(getter),
             DesktopTool(),
+            AppsTool(),
             OfficeTool(getter),
             GitTool(getter),
             DockerTool(),

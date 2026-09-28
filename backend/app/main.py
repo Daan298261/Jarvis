@@ -412,7 +412,17 @@ async def _autoload_model(current) -> None:
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True}
+    from .runtime.elevation import snapshot as elevation_snapshot
+    from .workers.computer import NativeWindowsBackend, UFOBackend
+
+    return {
+        "ok": True,
+        **elevation_snapshot(),
+        "computer_use": {
+            "windows_ui": NativeWindowsBackend().probe(),
+            "ufo": UFOBackend().probe(),
+        },
+    }
 
 
 @app.websocket("/api/ws")

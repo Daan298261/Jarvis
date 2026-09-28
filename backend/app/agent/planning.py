@@ -210,10 +210,83 @@ def follow_up_stays_conversation(follow: str | None, *, security_role: str = "")
     return action_hits == 0
 
 
+_PATH_OR_URL = re.compile(r"(?i)(https?://\S+|[a-z]:[\\/]\S*|\\\\\S+|(?<!\w)/(?:[\w.-]+/)+[\w.-]*)")
+_APP_INTENT = re.compile(
+    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
+    r"(?:open|start|launch|fire up|close|quit|exit|kill)\s+(?:up\s+)?(?:the\s+)?(?:app\s+)?"
+    r"(?!(?:a|an|new)\s|file\b|folder\b|directory\b|document\b|website\b|webpage\b|page\b|browser\b|tab\b|url\b|https?:|www\.|[a-z]:[\\/])"
+    r"((?:[\w.+&'-]+)(?:\s+[\w.+&'-]+){0,3}?)"
+    r"(?:\s+(?:for me|please|now|app))*\s*(?:(?:,|\band\b|\bthen\b).*)?[.!?]?\s*$"
+)
+_CLOSE_APP_VERB = re.compile(r"(?i)\b(close|quit|exit|kill)\b")
+_COMPOUND_AFTER_APP = re.compile(r"(?i)(?:,|\band\b|\bthen\b)\s+\S")
+_CODING_SESSION = re.compile(r"(?i)\b(coding session|start coding|code review|pair program|work on (?:the|my) (?:repo|code|project))\b")
+
+
+def intent_text(prompt: str) -> str:
+    """Request text for keyword classification: paths and URLs removed.
+
+    A temp folder named ``pytest-of-owner`` or a repo path must not turn a file task
+    into software engineering.
+    """
+    return _PATH_OR_URL.sub(" ", latest_user_utterance(prompt or ""))
+
+
+_NOT_AN_APP = frozenset(
+    {
+        "file",
+        "folder",
+        "directory",
+        "document",
+        "website",
+        "webpage",
+        "page",
+        "browser",
+        "tab",
+        "url",
+        "site",
+        "link",
+        "window",
+    }
+)
+
+
+def app_control_target(prompt: str) -> str | None:
+    """Program name for 'open steam' / 'close snipping tool' style requests."""
+    match = _APP_INTENT.match(latest_user_utterance(prompt or "").strip())
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    name = re.sub(r"^(?:the|a|an)\s+", "", raw, flags=re.I).strip().lower()
+    first = name.split()[0] if name else ""
+    if not first or first in _NOT_AN_APP:
+        return None
+    return re.sub(r"^(?:the|a|an)\s+", "", raw, flags=re.I).strip() or None
+
+
+def simple_app_control(prompt: str) -> tuple[str, str] | None:
+    """Single open/close with no extra work — safe to run without the language model."""
+    text = latest_user_utterance(prompt or "").strip()
+    match = _APP_INTENT.match(text)
+    if not match:
+        return None
+    name = app_control_target(prompt)
+    if not name:
+        return None
+    if _COMPOUND_AFTER_APP.search(text[match.end(1) :]):
+        return None
+    action = "close" if _CLOSE_APP_VERB.search(text[: match.start(1)]) else "open"
+    return action, name
+
+
 def classify_task(prompt: str) -> str:
+    if _CODING_SESSION.search(intent_text(prompt)):
+        return "software engineering"
+    if app_control_target(prompt):
+        return "windows gui"
     if is_plain_conversation(prompt):
         return CONVERSATION_CLASS
-    text = (prompt or "").lower()
+    text = intent_text(prompt).lower()
     scored: list[tuple[int, str]] = []
     for name, keywords in TASK_CATEGORIES:
         score = sum(1 for keyword in keywords if keyword in text)

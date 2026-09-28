@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
 import platform
 import shutil
 import sys
@@ -305,8 +306,9 @@ class UFOBackend(ComputerUseBackend):
             )
         command = self.build_command(str(goal).strip(), app, kind)
         timeout = timeout_seconds or UFO_TIMEOUT_SECONDS
+        env = self._openai_env()
         try:
-            stdout, stderr, code = await self._invoke(command, timeout)
+            stdout, stderr, code = await self._invoke(command, timeout, env=env)
         except Exception as exc:
             return ToolResult(
                 False,
@@ -325,11 +327,27 @@ class UFOBackend(ComputerUseBackend):
         reminder = "\n\nJarvis must independently inspect the UI (desktop snapshot or named control) after UFO returns."
         return ToolResult(True, (output or "UFO finished.") + reminder, data=data)
 
-    async def _invoke(self, command: list[str], timeout: int) -> tuple[str, str, int]:
+    def _openai_env(self) -> dict[str, str]:
+        """Point UFO² at the local OpenAI-compatible llama.cpp endpoint (>=20k ctx)."""
+        env = os.environ.copy()
+        try:
+            from ..config import load_settings
+
+            inf = load_settings().inference
+            base = f"http://{inf.host}:{int(inf.port)}/v1"
+        except Exception:
+            base = "http://127.0.0.1:8088/v1"
+        env.setdefault("OPENAI_BASE_URL", base)
+        env.setdefault("OPENAI_API_BASE", base)
+        env.setdefault("OPENAI_API_KEY", env.get("OPENAI_API_KEY") or "local")
+        return env
+
+    async def _invoke(self, command: list[str], timeout: int, env: dict[str, str] | None = None) -> tuple[str, str, int]:
         proc = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)

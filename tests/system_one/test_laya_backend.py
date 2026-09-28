@@ -249,15 +249,24 @@ def test_calibration_routes_classes_to_the_measured_better_provider():
             return {question.id: Answer(question.id, question.type, expected, 0.9)}
         return {question.id: Answer(question.id, question.type, "__wrong__", 0.99)}
 
-    scores = calibration.calibrate(laya_answers)
+    def jev_answers(state, questions, decision_class):
+        question = questions[0]
+        if decision_class == "speak_class":
+            expected = next(f.expected for f in calibration.FIXTURES if f.state == state)
+            return {question.id: Answer(question.id, question.type, expected, 0.9)}
+        return {question.id: Answer(question.id, question.type, "__wrong__", 0.99)}
+
+    scores = calibration.calibrate(laya_answers, jev_answers)
     assert scores["laya"]["tool_selection"] == 1.0
+    assert scores["jev"]["speak_class"] == 1.0
     assert calibration.laya_qualified("tool_selection") is True
-    assert calibration.laya_qualified("complexity_escalation") is False
+    assert calibration.laya_qualified("complexity_escalation") is False  # measured 0
     assert calibration.laya_qualified("memory_relevance") is True  # unmeasured stays eligible
     order = quartermaster.select_provider_order(
         "complexity_escalation", privacy="local_only", laya_ready=True, jev_ready=False
     )
-    assert "laya" not in order
+    assert order[0] == "laya"
+    assert "rules" not in order
     assert "laya" in quartermaster.select_provider_order(
         "tool_selection", privacy="local_only", laya_ready=True, jev_ready=False
     )

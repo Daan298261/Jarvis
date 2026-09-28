@@ -9,7 +9,8 @@ param(
     [string]$OpenPath = "/",
     [switch]$LanAccess,
     [switch]$Desktop,
-    [switch]$Wait
+    [switch]$Wait,
+    [switch]$RegisterLogonTask
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +18,29 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
 function Write-Step($message) { Write-Host "`n==> $message" -ForegroundColor Cyan }
+
+function Register-ElevatedLogonTask {
+    $taskName = "JarvisElevatedBackend"
+    $script = Join-Path $Root "start-jarvis.ps1"
+    $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Wait"
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg -WorkingDirectory $Root
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
+    Write-Host "Registered logon task '$taskName' (highest privileges) to start Jarvis." -ForegroundColor Green
+}
+
+function Test-CurrentProcessElevated {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($id)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
 
 function Resolve-BindHost {
     param([switch]$ForceLan)
@@ -79,6 +103,18 @@ function Show-StartupFailure {
 }
 
 try {
+
+if ($RegisterLogonTask) {
+    Write-Step "Registering elevated logon task"
+    Register-ElevatedLogonTask
+    if ($PSBoundParameters.Count -eq 1 -and $PSBoundParameters.ContainsKey("RegisterLogonTask")) {
+        Write-Host "Logon task registered. Start Jarvis normally; it will elevate at the next logon." -ForegroundColor Green
+        exit 0
+    }
+}
+
+$elevated = Test-CurrentProcessElevated
+Write-Host ("Backend elevation: " + $(if ($elevated) { "administrator" } else { "standard user (register -RegisterLogonTask once as admin for logon elevation)" }))
 
 Write-Step "Verifying dependencies"
 $venvPython = Join-Path $Root ".venv\Scripts\python.exe"

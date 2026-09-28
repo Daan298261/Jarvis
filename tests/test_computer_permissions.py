@@ -28,14 +28,32 @@ def permission_store(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_desktop_defaults_to_ask(permission_store):
+def test_owner_operator_defaults_allow_device_and_network(permission_store):
     ids = permission_ids_for_tool("desktop", {"action": "click"})
     assert ids == ["computer.this_device"]
-    decision = evaluate_tool_permissions("desktop", {"action": "click"})
-    assert decision.status == "ask"
+    assert evaluate_tool_permissions("desktop", {"action": "click"}).status == "allow"
+    for permission_id in ("computer.this_device", "computer.worker_nodes", "computer.rdp", "network.internet", "network.local"):
+        assert evaluate_permission(permission_id).status == "allow", permission_id
+    authz = authorize("desktop", action="click", arguments={"action": "click"}, risk=RiskLevel.MEDIUM)
+    assert authz.allowed is True
+    assert authz.requires_approval is False
+
+
+def test_explicit_ask_is_kept_when_default_is_allow(permission_store):
+    apply_grant("computer.this_device", "ask")
+    assert evaluate_permission("computer.this_device").status == "ask"
     authz = authorize("desktop", action="click", arguments={"action": "click"}, risk=RiskLevel.MEDIUM)
     assert authz.allowed is False
     assert authz.requires_approval is True
+    apply_grant("computer.this_device", "always")
+    assert evaluate_permission("computer.this_device").status == "allow"
+
+
+def test_destructive_commands_still_confirm_under_full_control(permission_store):
+    from app.tools.safety import needs_confirmation
+
+    assert needs_confirmation("autonomous", RiskLevel.MEDIUM, "Remove-Item -Recurse C:\\Data") is True
+    assert needs_confirmation("autonomous", RiskLevel.MEDIUM, "start steam://open/main") is False
 
 
 def test_worker_rdp_maps_both_permissions(permission_store):
@@ -51,6 +69,7 @@ def test_computer_permissions_browser_use_local_network(permission_store):
 
 
 def test_allow_once_is_consumed_after_use(permission_store):
+    apply_grant("computer.this_device", "ask")
     apply_grant("computer.this_device", "allow_once", persist=False)
     assert evaluate_permission("computer.this_device").status == "allow"
     consume_once_grants(["computer.this_device"])
@@ -82,6 +101,7 @@ def test_blue_isolate_is_a_playbook_not_an_executor(permission_store):
 
 
 def test_confirmation_payload_is_chatgpt_shaped(permission_store):
+    apply_grant("computer.this_device", "ask")
     payload = confirmation_payload_for_tool(
         call_id="call-1",
         name="desktop",
@@ -97,6 +117,7 @@ def test_confirmation_payload_is_chatgpt_shaped(permission_store):
 
 
 def test_web_fetch_spoken_prompt_asks_to_grant_internet(permission_store):
+    apply_grant("network.internet", "ask")
     payload = confirmation_payload_for_tool(
         call_id="call-web",
         name="web_fetch",
