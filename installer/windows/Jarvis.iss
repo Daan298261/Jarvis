@@ -39,6 +39,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a &Desktop shortcut to start Jarvis"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDescription: "After installing:"; Flags: checkedonce
+Name: "voicebutler"; Description: "Household butler (Kokoro — Anzu default)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicedry"; Description: "Dry household butler (Nabu, Eir)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicetactical"; Description: "Tactical aide (Mestor, Themis, Heimdall)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicesynthetic"; Description: "Synthetic command (Enki, Veles, Vulcan)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicechatterbox"; Description: "Expressive Chatterbox (Aegir, Bragi, Hermes, Maia — larger download)"; GroupDescription: "Voice models:"; Flags: checkedonce
 
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
@@ -441,10 +446,30 @@ begin
   Result := True;
 end;
 
+function SelectedVoiceProfiles: String;
+begin
+  Result := '';
+  if IsTaskSelected('voicebutler') then
+    Result := Result + 'butler_original_v1,';
+  if IsTaskSelected('voicedry') then
+    Result := Result + 'dry_butler_original_v1,';
+  if IsTaskSelected('voicetactical') then
+    Result := Result + 'tactical_aide_original_v1,';
+  if IsTaskSelected('voicesynthetic') then
+    Result := Result + 'synthetic_command_original_v1,';
+  if IsTaskSelected('voicechatterbox') then
+    Result := Result + 'chatterbox_expressive_en_v1,';
+  if Result = '' then
+    Result := 'none'
+  else
+    Delete(Result, Length(Result), 1);
+end;
+
 function GetBootstrapRunParameters(Param: String): String;
 var
   Wrapper: String;
   Params: String;
+  Voices: String;
 begin
   Wrapper := ExpandConstant('{app}\installer\windows\run-installer-bootstrap.ps1');
   if not FileExists(Wrapper) then
@@ -454,6 +479,9 @@ begin
     Params := Params + ' -SkipHeavyPrepare';
   if BootstrapSkipModelDownload then
     Params := Params + ' -SkipModelDownload';
+  Voices := SelectedVoiceProfiles;
+  if Voices <> '' then
+    Params := Params + ' -VoiceProfiles "' + Voices + '"';
   Result := Params;
 end;
 

@@ -15,7 +15,9 @@ param(
 
     [switch]$SkipLlamaDownload,
 
-    [switch]$InstallExpert27B
+    [switch]$InstallExpert27B,
+
+    [string]$VoiceProfiles = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,6 +44,7 @@ if ($SkipHeavyPrepare) { $argList += "-SkipHeavyPrepare" }
 if ($SkipModelDownload) { $argList += "-SkipModelDownload" }
 if ($SkipLlamaDownload) { $argList += "-SkipLlamaDownload" }
 if ($InstallExpert27B) { $argList += "-InstallExpert27B" }
+if ($VoiceProfiles.Trim()) { $argList += "-VoiceProfiles"; $argList += $VoiceProfiles.Trim() }
 
 Write-BootstrapLog "run-installer-bootstrap start MaxMinutes=$MaxMinutes SkipHeavyPrepare=$SkipHeavyPrepare"
 

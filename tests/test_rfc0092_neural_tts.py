@@ -105,6 +105,38 @@ def test_windows_profile_is_explicitly_a_baseline_system_voice():
     assert profile.tts.resolved_engine_id() == "system"
 
 
+def test_primary_tts_backend_never_falls_back_to_sapi(monkeypatch):
+    from app.tts import engines
+
+    monkeypatch.setattr(engines, "is_kokoro_available", lambda: False)
+    monkeypatch.setattr(engines, "is_piper_available", lambda: False)
+    monkeypatch.setattr(engines, "is_chatterbox_available", lambda: False)
+    monkeypatch.setattr(engines, "legacy_system_tts_available", lambda: True)
+    assert engines.primary_tts_backend() is None
+    assert engines.is_system_tts_engine("sapi")
+    assert not engines.is_system_tts_engine("kokoro")
+
+
+@pytest.mark.asyncio
+async def test_unsigned_speech_does_not_fall_back_to_sapi(monkeypatch):
+    from app.workers import voice
+
+    system_calls: list[str] = []
+
+    async def system_synth(text, **_kwargs):
+        system_calls.append(text)
+        return b"RIFFsapi"
+
+    monkeypatch.setattr(voice, "tts_backend", lambda: "sapi")
+    monkeypatch.setattr(voice, "active_voice_profile_id", lambda: "")
+    monkeypatch.setattr("app.tts.synthesize._synthesize_system", system_synth)
+
+    with pytest.raises(RuntimeError, match="SAPI"):
+        await voice.synthesize_speech_result("Jarvis is degraded.")
+
+    assert system_calls == []
+
+
 def test_existing_windows_default_migrates_once_to_kokoro(jarvis_env, monkeypatch):
     settings = jarvis_env["settings"]
     settings.voice.active_profile_id = WINDOWS_NATURAL_VOICE_PROFILE_ID

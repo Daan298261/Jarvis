@@ -25,6 +25,11 @@
 
 .PARAMETER SkipHeavyPrepare
   Upgrade/repair hint only. Missing runtimes, packages, llama.cpp, and models are still installed.
+
+.PARAMETER VoiceProfiles
+  Comma-separated neural voice profile ids to prepare (butler_original_v1, dry_butler_original_v1,
+  tactical_aide_original_v1, synthetic_command_original_v1, chatterbox_expressive_en_v1).
+  Empty keeps the previous default (all five shared packs). Pass "none" to skip extra packs.
 #>
 param(
     [switch]$InstallLocalLLM,
@@ -32,6 +37,7 @@ param(
     [switch]$SkipModelDownload,
     [switch]$SkipLlamaDownload,
     [switch]$SkipHeavyPrepare,
+    [string]$VoiceProfiles = "",
     [int]$StepTimeoutMinutes = 45
 )
 
@@ -508,9 +514,19 @@ function Ensure-KokoroVoice([string]$VenvPython) {
 function Ensure-PersonaVoices([string]$VenvPython) {
     $installer = Join-Path $ScriptDir "install-persona-voices.py"
     if (-not (Test-Path $installer)) { throw "Persona voice installer is missing: $installer" }
-    Write-Host "    Preparing five shared neural voice packs for the 13 personas..."
+    $selected = @()
+    if ($VoiceProfiles.Trim()) {
+        $selected = @($VoiceProfiles -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    if ($selected.Count -eq 1 -and $selected[0].ToLower() -eq "none") {
+        Write-Skip "Persona neural voices (none selected in Setup)"
+        return
+    }
+    $label = if ($selected.Count) { ($selected -join ", ") } else { "all five shared packs" }
+    Write-Host "    Preparing neural voice packs ($label)..."
+    $arguments = @($installer) + $selected
     try {
-        Invoke-ProcessWithTimeout -Label "persona neural voices" -FilePath $VenvPython -Arguments @($installer) -TimeoutMinutes ($StepTimeoutMinutes * 2)
+        Invoke-ProcessWithTimeout -Label "persona neural voices" -FilePath $VenvPython -Arguments $arguments -TimeoutMinutes ($StepTimeoutMinutes * 2)
         Write-Ok "Persona neural voices ready."
     } catch {
         Write-BootstrapLog "persona voices pending: $($_.Exception.Message)"
