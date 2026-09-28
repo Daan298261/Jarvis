@@ -279,11 +279,51 @@ def simple_app_control(prompt: str) -> tuple[str, str] | None:
     return action, name
 
 
+_SIMPLE_WRITE = re.compile(
+    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
+    r"(?:write|save|put)\s+[\"'](.{1,400}?)[\"']\s+(?:to|into|in)\s+"
+    r"(.+?\.(?:txt|md))"
+    r"(?:\s+(?:for me|please|now))*\s*[.!?]?\s*$"
+)
+_SIMPLE_READ = re.compile(
+    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
+    r"(?:read|show(?:\s+me)?)\s+(?:the\s+)?(?:file\s+)?"
+    r"(.+?\.(?:txt|md))"
+    r"(?:\s+(?:to me|aloud|please|now))*\s*[.!?]?\s*$"
+)
+_UNSAFE_FILE_PATH = re.compile(r"(?i)(?:\.\.|system32|windows[/\\]system)")
+
+
+def simple_file_control(prompt: str) -> tuple[str, str, str] | None:
+    """Single quoted write or named-file read — safe to run without the language model."""
+    text = latest_user_utterance(prompt or "").strip()
+    write = _SIMPLE_WRITE.match(text)
+    if write:
+        if _COMPOUND_AFTER_APP.search(text[write.end() :]):
+            return None
+        path = write.group(2).strip().strip("\"'")
+        content = write.group(1)
+        if not path or _UNSAFE_FILE_PATH.search(path):
+            return None
+        return "write", path, content
+    read = _SIMPLE_READ.match(text)
+    if not read:
+        return None
+    if _COMPOUND_AFTER_APP.search(text[read.end() :]):
+        return None
+    path = read.group(1).strip().strip("\"'")
+    if not path or _UNSAFE_FILE_PATH.search(path):
+        return None
+    return "read", path, ""
+
+
 def classify_task(prompt: str) -> str:
     if _CODING_SESSION.search(intent_text(prompt)):
         return "software engineering"
     if app_control_target(prompt):
         return "windows gui"
+    if simple_file_control(prompt):
+        return "filesystem"
     if is_plain_conversation(prompt):
         return CONVERSATION_CLASS
     text = intent_text(prompt).lower()
@@ -346,6 +386,8 @@ def split_long_owner_prompt(prompt: str, *, max_chars: int = 2200) -> list[str]:
 def route_request(prompt: str) -> RequestRoute:
     """Route before creating a durable agent loop or exposing its tool catalog."""
     if requests_agent_tools(prompt):
+        return RequestRoute(MANAGED_TASK, classify_task(prompt))
+    if simple_app_control(prompt) or simple_file_control(prompt):
         return RequestRoute(MANAGED_TASK, classify_task(prompt))
     if is_weather_query(prompt):
         return RequestRoute(DIRECT_LOOKUP, CONVERSATION_CLASS)

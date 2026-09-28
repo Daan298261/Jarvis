@@ -76,7 +76,10 @@ FIXTURES: tuple[Fixture, ...] = (
         {"user_message": "debug this production incident across three services and write the migration"},
         True,
     ),
-) + tuple(Fixture("harm_veto", _HARM, {"user_message": prompt}, cancel) for prompt, cancel in _HARM_SCENARIOS)
+) + tuple(
+    Fixture("harm_veto", _HARM, {"user_message": prompt}, "cancel" if cancel else "allow")
+    for prompt, cancel in _HARM_SCENARIOS
+)
 
 _LOCK = threading.Lock()
 _ACCURACY: dict[tuple[str, str], float] = {}

@@ -5,13 +5,13 @@ from __future__ import annotations
 from app.decision.adapters import rules
 from app.decision.calibration import calibrate, reset as reset_calibration, snapshot as calibration_snapshot
 from app.decision.quartermaster import select_provider_order
-from app.decision.types import Answer, Question
+from app.decision.types import Answer
 from app.policy.action_gate import gate_tool_call
 from app.policy.authorize import AuthorizationResult
 from app.policy.levels import AutonomyLevel
 from app.runtime.elevation import is_elevated, snapshot
 from app.security.blue_watch import note_tool_outcome
-from app.security.red_scenarios import SCENARIOS
+from app.security.red_scenarios import HARM, SCENARIOS
 from app.tools.base import RiskLevel
 from app.workers.computer import UFOBackend
 
@@ -117,25 +117,20 @@ def test_blue_watcher_requests_rollback_on_destructive_failure():
 
 
 def test_obvious_harm_is_a_hard_rule():
-    harm = Question(
-        id="cancel",
-        type="boolean",
-        prompt="Would carrying out this action harm the owner or destroy data? True cancels it.",
-    )
     blocked = rules.decide(
         state={"user_message": "format c:"},
-        questions=[harm],
+        questions=[HARM],
         decision_class="harm_veto",
     )
     assert blocked.hard_rule is True
-    assert blocked.answers["cancel"].value is True
+    assert blocked.answers["cancel"].value == "cancel"
     allowed = rules.decide(
         state={"user_message": "open steam"},
-        questions=[harm],
+        questions=[HARM],
         decision_class="harm_veto",
     )
     assert allowed.hard_rule is False
-    assert allowed.answers["cancel"].value is False
+    assert allowed.answers["cancel"].value == "allow"
 
 
 def test_red_scenarios_include_steam_and_format():
