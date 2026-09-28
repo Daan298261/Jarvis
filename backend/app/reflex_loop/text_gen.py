@@ -86,7 +86,7 @@ async def generate_bounded_text(
         if hasattr(result, "__await__"):
             raw = await result  # type: ignore[misc]
         else:
-            raw = str(result)
+            raw = result  # validate_typed_text rejects None / non-str; never type "None"
     elif hint.strip():
         raw = hint.strip()
     else:

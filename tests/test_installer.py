@@ -1,6 +1,8 @@
 """Cross-platform checks for the Windows installer sources (no Windows required)."""
 
 from pathlib import Path
+import importlib.util
+from types import SimpleNamespace
 import json
 import re
 import tomllib
@@ -22,6 +24,7 @@ def test_installer_files_exist():
     assert ISS.is_file()
     assert BUILD_SCRIPT.is_file()
     assert README.is_file()
+    assert (INSTALLER_DIR / "install-persona-voices.py").is_file()
 
 
 def test_bootstrap_covers_required_steps():
@@ -31,6 +34,8 @@ def test_bootstrap_covers_required_steps():
         "requirements.txt",
         "ensure-ttspythonpackages",
         "ensure-kokorovoice",
+        "ensure-personavoices",
+        "install-persona-voices.py",
         "kokoro",
         "soundfile",
         "playwright",
@@ -44,6 +49,71 @@ def test_bootstrap_covers_required_steps():
         "winget",
     ):
         assert needle in text, f"bootstrap.ps1 should mention {needle!r}"
+
+
+def test_persona_setup_prepares_each_shared_neural_pack(monkeypatch):
+    script = INSTALLER_DIR / "install-persona-voices.py"
+    spec = importlib.util.spec_from_file_location("install_persona_voices", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    installed: list[str] = []
+    profiles = {row.voice_profile_id: object() for row in module.ROSTER}
+    monkeypatch.setattr(module, "get_catalog", lambda: SimpleNamespace(get=profiles.get))
+
+    def install(profile):
+        installed.append(next(key for key, value in profiles.items() if value is profile))
+        return SimpleNamespace(ok=True)
+
+    monkeypatch.setattr(module, "install_voice_pack", install)
+
+    assert module.main() == 0
+    assert installed == list(dict.fromkeys(row.voice_profile_id for row in module.ROSTER))
+
+
+def test_persona_setup_honors_selected_and_none_voice_packs(monkeypatch):
+    script = INSTALLER_DIR / "install-persona-voices.py"
+    spec = importlib.util.spec_from_file_location("install_persona_voices_subset", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    installed: list[str] = []
+    profiles = {row.voice_profile_id: object() for row in module.ROSTER}
+    monkeypatch.setattr(module, "get_catalog", lambda: SimpleNamespace(get=profiles.get))
+    monkeypatch.setattr(
+        module,
+        "install_voice_pack",
+        lambda profile: installed.append(next(key for key, value in profiles.items() if value is profile))
+        or SimpleNamespace(ok=True),
+    )
+    assert module.main(["none"]) == 0
+    assert installed == []
+    assert module.main(["butler_original_v1", "chatterbox_expressive_en_v1"]) == 0
+    assert installed == ["butler_original_v1", "chatterbox_expressive_en_v1"]
+
+
+def test_installer_offers_voice_model_checkboxes():
+    iss = _read(ISS)
+    bootstrap = _read(BOOTSTRAP)
+    wrapper = _read(INSTALLER_DIR / "run-installer-bootstrap.ps1")
+    for needle in (
+        'Name: "voicebutler"',
+        'Name: "voicedry"',
+        'Name: "voicetactical"',
+        'Name: "voicesynthetic"',
+        'Name: "voicechatterbox"',
+        'GroupDescription: "Voice models:"',
+        "SelectedVoiceProfiles",
+        "-VoiceProfiles",
+        "butler_original_v1",
+        "chatterbox_expressive_en_v1",
+    ):
+        assert needle in iss, needle
+    assert "$VoiceProfiles" in bootstrap
+    assert "none selected" in bootstrap.lower()
+    assert "$VoiceProfiles" in wrapper
+    assert "checkboxes" in _read(README).lower()
+    assert "neural voice" in _read(README).lower()
 
 
 def test_bootstrap_27b_is_optional_switch_only():
@@ -78,6 +148,8 @@ def test_jarvis_iss_wiring():
     assert "diskspanning=yes" in lower
     assert "step=integrations" in lower
     assert "runhidden" in lower
+    assert "desktopshellinstalled" in lower.replace("_", "")
+    assert "function DesktopShellInstalled" in text
 
 
 def test_jarvis_iss_code_uses_supported_registry_apis_only():
@@ -198,5 +270,5 @@ def test_optional_tauri_shell_sources():
     assert "pyinstaller" in sidecar_text
     assert "onedir" in sidecar_text or "one-folder" in sidecar_text or "--onedir" in sidecar_text
     conf = _read(tauri_conf)
-    assert "Jarvis" in conf
+    assert "ANZU" in conf or "Jarvis" in conf
     assert "nsis" in conf.lower()

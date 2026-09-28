@@ -6,6 +6,7 @@ from app.inference.backends import (
     LMStudioBackend,
     OllamaBackend,
     RemoteOpenAICompatibleBackend,
+    is_inference_template_error,
     normalize_chat_messages,
     parse_models_payload,
     resolve_backend,
@@ -24,6 +25,12 @@ def _settings(**inference) -> AppSettings:
 
 def test_llama_cpp_is_the_default_backend():
     assert isinstance(resolve_backend(_settings()), LlamaCppBackend)
+
+
+def test_jinja_call_expression_is_a_template_error():
+    assert is_inference_template_error(RuntimeError("While executing CallExpression at line 79"))
+    assert is_inference_template_error(RuntimeError("Jinja Exception: System message must be at the beginning."))
+    assert not is_inference_template_error(RuntimeError("connection reset"))
 
 
 def test_local_llama_alias_uses_managed_llama_cpp():
@@ -255,12 +262,12 @@ async def test_ensure_vision_attaches_then_release_detaches(jarvis_env):
     assert kept.vision_loaded is True
 
 
-async def test_unloaded_snapshot_starts_at_16k_with_selective_thinking():
+async def test_unloaded_snapshot_starts_at_32k_with_selective_thinking():
     from app.config import AppSettings
     from app.inference.manager import InferenceManager
 
     snap = await InferenceManager().snapshot(AppSettings())
-    assert snap["context_size"] == 16384
+    assert snap["context_size"] == 32768
     assert snap["context_cap"] == 32768
     assert snap["thinking_mode"] == "selective"
     assert snap["vision_mode"] == "lazy"

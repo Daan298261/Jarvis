@@ -18,6 +18,22 @@ def _profile_identity(profile: ProfileT) -> str:
         return (profile.model_profile or profile.name or profile.id or "").strip()
     return str(getattr(profile, "name", "") or "").strip()
 
+def _local_weights_ready(profile: ProfileT) -> bool:
+    """Skip catalog rows whose local GGUF is not on disk (bootstrap often is not)."""
+    name = _profile_identity(profile)
+    if not name:
+        return True
+    provider = str(getattr(profile, "provider", "") or "").lower()
+    if provider and provider not in {"local-llama", "llama.cpp", "llamacpp"}:
+        return True
+    from .profiles import PROFILES, profile_gguf
+
+    row = PROFILES.get(name)
+    if row is None:
+        return True
+    return profile_gguf(row).exists()
+
+
 def select_profile_for_context(
     required_tokens: int,
     profiles: Iterable[ProfileT],
@@ -32,6 +48,8 @@ def select_profile_for_context(
     candidates = []
     for item in profiles:
         if not bool(getattr(item, "enabled", True)): continue
+        if not _local_weights_ready(item):
+            continue
         tier = int(getattr(item, "answer_tier", 0) or 0)
         if minimum_answer_tier and tier < minimum_answer_tier:
             continue

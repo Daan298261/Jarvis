@@ -779,7 +779,7 @@ html[data-session-mode] .hud-app {
   padding: 0 0 clamp(12px, 2vh, 28px);
 }
 
-.hud-home:has(.jarvis-presence-controls.open) {
+.hud-home:has(.jarvis-presence-controls-table.open) {
   --hud-menu-track: min(400px, calc(100vw - 28px));
 }
 
@@ -794,7 +794,7 @@ html[data-session-mode] .hud-app {
   pointer-events: auto;
 }
 
-.hud-home:has(.jarvis-presence-controls.open) > .jarvis-presence-controls-split {
+.hud-home:has(.jarvis-presence-controls-table.open) > .jarvis-presence-controls-split {
   width: var(--hud-menu-track);
   max-width: var(--hud-menu-track);
 }
@@ -1629,7 +1629,7 @@ html[data-session-mode] .hud-app {
     max-width: 100%;
   }
 
-  .hud-home:has(.jarvis-presence-controls.open) {
+  .hud-home:has(.jarvis-presence-controls-table.open) {
     --hud-menu-track: 100%;
   }
 

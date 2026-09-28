@@ -154,7 +154,9 @@ export function HudChatHome() {
     <div
       className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}${hexStrikeActive && !showHexSuite ? " hex-suite-collapsed" : ""}${galaxyEffective ? " galaxy-effective" : ""}`}
     >
-      <AppearancePresenceControls settings={presentation} />
+      <div className="jarvis-presence-controls-split">
+        <AppearancePresenceControls settings={presentation} />
+      </div>
       <section className="hud-orb-zone" aria-label="ANZU state">
         <PresenceHost
           snapshot={snapshot}

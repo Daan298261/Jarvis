@@ -1,26 +1,26 @@
 from app.agent.compaction import compact_history, estimate_prompt_tokens
-from app.agent.context_policy import CONTEXT_LONG, CONTEXT_NORMAL, CONTEXT_SIMPLE, initial_context_size, next_context_size
+from app.agent.context_policy import CONTEXT_LONG, CONTEXT_NORMAL, CONTEXT_SIMPLE, initial_context_size, next_context_size, profile_cap
 from app.inference.manager import MANAGER
 from app.inference.profiles import PROFILES, expert_profile, with_context
 from app.providers.base import ChatMessage
 
 
-def test_simple_tasks_start_at_8k():
-    assert initial_context_size("filesystem", PROFILES["balanced"]) == CONTEXT_SIMPLE
-    assert initial_context_size("shell", PROFILES["fast"]) == CONTEXT_SIMPLE
-    assert initial_context_size("office", PROFILES["quality"]) == CONTEXT_SIMPLE
+def test_simple_tasks_start_at_16k_when_available():
+    assert initial_context_size("filesystem", PROFILES["balanced"]) == CONTEXT_NORMAL
+    assert initial_context_size("shell", PROFILES["fast"]) == min(CONTEXT_NORMAL, profile_cap(PROFILES["fast"]))
+    assert initial_context_size("office", PROFILES["quality"]) == CONTEXT_NORMAL
 
 
-def test_long_tasks_start_at_16k_not_profile_cap():
-    assert initial_context_size("software engineering", PROFILES["balanced"]) == CONTEXT_NORMAL
-    assert initial_context_size("long-horizon autonomous", PROFILES["balanced"]) == CONTEXT_NORMAL
-    assert initial_context_size("mixed", PROFILES["balanced"]) == CONTEXT_NORMAL
+def test_long_tasks_start_at_32k_when_available():
+    assert initial_context_size("software engineering", PROFILES["balanced"]) == CONTEXT_LONG
+    assert initial_context_size("long-horizon autonomous", PROFILES["balanced"]) == CONTEXT_LONG
+    assert initial_context_size("mixed", PROFILES["balanced"]) == CONTEXT_LONG
     assert PROFILES["balanced"].context_size == CONTEXT_LONG
     assert PROFILES["quality"].context_size == CONTEXT_LONG
 
 
-def test_fast_profile_cannot_exceed_its_cap():
-    assert initial_context_size("research", PROFILES["fast"]) == min(CONTEXT_NORMAL, PROFILES["fast"].context_size)
+def test_research_context_respects_hardware_cap():
+    assert initial_context_size("research", PROFILES["fast"]) == min(CONTEXT_LONG, profile_cap(PROFILES["fast"]))
 
 
 def test_context_grows_under_pressure_and_never_shrinks():

@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import calibration
 from .types import PrivacyMode, ProviderName
 
 _LOCK = threading.Lock()
@@ -97,6 +98,7 @@ def record_outcome(
 def reset_quartermaster() -> None:
     with _LOCK:
         _CLASS_PROFILES.clear()
+    calibration.reset()
 
 
 def _privacy_allows(profile: ProviderProfile, privacy: PrivacyMode) -> bool:
@@ -116,13 +118,14 @@ def select_provider_order(
     prefer_rules_only: bool = False,
 ) -> list[ProviderName]:
     """
-    Order: hard rules first, then measured Laya (preferred when installed),
-    then opt-in Jev, generative last.
+    Laya first for bounded decisions when it is installed and warm.
+    Unsure answers fall through to Jev (if allowed) then the generative/model lane.
+    Rules are not in this order: the Reflex lane applies them only for hard safety.
     """
     if prefer_rules_only:
         return ["rules", "generative"]
 
-    scored: list[tuple[float, ProviderName]] = []
+    ordered: list[ProviderName] = []
     for profile in profiles_for(decision_class):
         if not profile.enabled or not profile.hardware_ok:
             continue
@@ -132,29 +135,23 @@ def select_provider_order(
             continue
         if profile.name == "jev" and not jev_ready:
             continue
-        # Lower score is better.
-        latency_term = profile.stats.ewma_latency_ms / 100.0
-        quality_term = 1.0 - profile.stats.ewma_quality
-        cost_term = profile.cost_weight
-        # Prefer Laya slightly when available (local low-latency).
-        bias = -0.15 if profile.name == "laya" and laya_ready else 0.0
-        if profile.name == "rules":
-            bias = -1.0  # always try rules first for hard / baseline
-        if profile.name == "generative":
-            bias = 5.0  # last
-        score = latency_term + quality_term + cost_term + bias
-        scored.append((score, profile.name))
+        if profile.name in {"rules"}:
+            continue
+        if profile.name not in ordered:
+            ordered.append(profile.name)
 
-    scored.sort(key=lambda item: (item[0], item[1]))
-    ordered = [name for _score, name in scored]
-    # Guarantee rules first, generative last when present.
-    if "rules" in ordered:
-        ordered = ["rules", *[n for n in ordered if n != "rules"]]
-    if "generative" in ordered:
-        ordered = [*[n for n in ordered if n != "generative"], "generative"]
-    if not ordered:
-        return ["rules", "generative"]
-    return ordered
+    preferred: list[ProviderName] = []
+    for name in ("laya", "jev", "generative"):
+        if name in ordered:
+            preferred.append(name)
+    for name in ordered:
+        if name not in preferred:
+            preferred.append(name)
+    if "generative" not in preferred:
+        preferred.append("generative")
+    if not preferred:
+        return ["generative"]
+    return preferred
 
 
 def selection_snapshot(decision_class: str = "default") -> dict[str, Any]:

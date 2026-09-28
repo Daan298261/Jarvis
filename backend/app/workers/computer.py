@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
 import platform
 import shutil
 import sys
@@ -305,8 +306,9 @@ class UFOBackend(ComputerUseBackend):
             )
         command = self.build_command(str(goal).strip(), app, kind)
         timeout = timeout_seconds or UFO_TIMEOUT_SECONDS
+        env = self._openai_env()
         try:
-            stdout, stderr, code = await self._invoke(command, timeout)
+            stdout, stderr, code = await self._invoke(command, timeout, env=env)
         except Exception as exc:
             return ToolResult(
                 False,
@@ -325,11 +327,27 @@ class UFOBackend(ComputerUseBackend):
         reminder = "\n\nJarvis must independently inspect the UI (desktop snapshot or named control) after UFO returns."
         return ToolResult(True, (output or "UFO finished.") + reminder, data=data)
 
-    async def _invoke(self, command: list[str], timeout: int) -> tuple[str, str, int]:
+    def _openai_env(self) -> dict[str, str]:
+        """Point UFO² at the local OpenAI-compatible llama.cpp endpoint (>=20k ctx)."""
+        env = os.environ.copy()
+        try:
+            from ..config import load_settings
+
+            inf = load_settings().inference
+            base = f"http://{inf.host}:{int(inf.port)}/v1"
+        except Exception:
+            base = "http://127.0.0.1:8088/v1"
+        env.setdefault("OPENAI_BASE_URL", base)
+        env.setdefault("OPENAI_API_BASE", base)
+        env.setdefault("OPENAI_API_KEY", env.get("OPENAI_API_KEY") or "local")
+        return env
+
+    async def _invoke(self, command: list[str], timeout: int, env: dict[str, str] | None = None) -> tuple[str, str, int]:
         proc = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -494,44 +512,15 @@ async def run_reflex_computer_use(
                 ),
             )
         from ..tools.desktop import DesktopTool
+        from ..reflex_loop.runtime import run_reflex_live_desktop
 
-        tool = DesktopTool()
         if app:
-            focused = await tool.execute(action="focus", title=app)
+            focused = await DesktopTool().execute(action="focus", title=app)
             if not focused.success:
                 return ToolResult(False, focused.output or "", error=focused.error or "focus failed")
-        framed = await tool.execute(action="action_frame", title=app or "")
-        if not framed.success:
-            return ToolResult(False, framed.output or "", error=framed.error or "action_frame failed")
-        frame = (framed.data or {}).get("action_frame") or {}
-        resolved_nodes = list(frame.get("nodes") or [])
-        if not resolved_nodes:
-            return ToolResult(
-                False,
-                framed.output or "",
-                error="action_frame produced no actionable nodes — refuse closed",
-                data={"action_frame": frame},
-            )
-        # Convert ActionFrame node dicts back to adapter-friendly control dicts.
-        controls: list[dict[str, Any]] = []
-        for node in resolved_nodes:
-            if not isinstance(node, dict):
-                continue
-            ref = node.get("backend_ref") if isinstance(node.get("backend_ref"), dict) else {}
-            state = node.get("state") if isinstance(node.get("state"), dict) else {}
-            controls.append(
-                {
-                    "name": node.get("name") or "",
-                    "automation_id": ref.get("automation_id") or "",
-                    "control_type": ref.get("control_type") or node.get("role") or "",
-                    "enabled": bool(state.get("enabled", True)),
-                    "value": node.get("value") or "",
-                    "visible": bool(node.get("visible", True)),
-                    "focused": bool(state.get("focused", False)),
-                }
-            )
-        resolved_nodes = controls
+        return await run_reflex_live_desktop(text, app=str(app or ""))
 
+    # Caller-supplied nodes are a description, not the screen: this is a dry run.
     from ..reflex_loop.runtime import run_reflex_with_inmemory_world
     from ..reflex_loop.schema import SurfaceKind
 

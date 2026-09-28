@@ -53,7 +53,7 @@ class InferenceSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8088
     profile: str = "balanced"
-    context_size: int = 16384
+    context_size: int = 32768
     flash_attn: str = "auto"
     fit: bool = True
     fit_target_mib: int = 1024
@@ -81,9 +81,9 @@ class FrontResponderSettings(BaseModel):
 
     enabled: bool = True
     model: str = ""
-    max_output_tokens: int = Field(default=128, ge=32, le=256)
+    max_output_tokens: int = Field(default=512, ge=64, le=1024)
     temperature: float = Field(default=0.25, ge=0.0, le=1.0)
-    timeout_ms: int = Field(default=3000, ge=250, le=8000)
+    timeout_ms: int = Field(default=6000, ge=250, le=12000)
     context_turns: int = Field(default=4, ge=0, le=8)
     speak_immediately: bool = True
     parallel_when_distinct_model: bool = True
@@ -443,6 +443,18 @@ def load_settings() -> AppSettings:
         payload = json.loads(default_config_path().read_text(encoding="utf-8"))
     if settings_path().exists():
         payload = _deep_merge(payload, json.loads(settings_path().read_text(encoding="utf-8")))
+
+    # Older releases saved their defaults into the owner settings file. Lift
+    # that exact legacy combination so an upgrade does not stay at 128 output
+    # tokens and the former 16K target forever.
+    front_payload = payload.get("front_responder")
+    legacy_front = isinstance(front_payload, dict) and front_payload.get("max_output_tokens") == 128 and front_payload.get("timeout_ms") == 3000
+    if legacy_front:
+        front_payload["max_output_tokens"] = 512
+        front_payload["timeout_ms"] = 6000
+        inference_payload = payload.get("inference")
+        if isinstance(inference_payload, dict) and inference_payload.get("context_size") == 16384:
+            inference_payload["context_size"] = 32768
 
     token = (
         os.environ.get("JARVIS_PRIVATE_KEY")

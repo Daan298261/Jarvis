@@ -2,7 +2,8 @@
 
 **Status:** living architect priority list for third-party / reel-sourced integrations  
 **Author:** Jarvis Architect  
-**Date:** 2026-09-17
+**Date:** 2026-09-17  
+**Updated:** 2026-09-28 (reel batch RFC-0183–0191, plus comment-scrape follow-up RFC-0192 — extends this list; does not replace the 0095–0116 ladder)
 
 This file is the Architect priority list for **Instagram Saved → jarvis** reel integrations and Taco’s high-impact adds that were not in the original reel RFC set. It does **not** replace [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) (architecture + queue) or [`docs/rfcs/`](docs/rfcs/) (one-ticket contracts). Implementers take **one** named RFC from this list. Product code is a follow-up ticket; this document and its RFCs are specs.
 
@@ -25,7 +26,7 @@ Architect mines Taco Instagram `@tacotcr` Saved → **jarvis** offline. Clones l
 | Windows owner library | `C:\Users\daanv\projects\jarvis-ig\` |
 | Architect / cloud library | `/workspace/projects/` |
 
-Typical layout (RFC-0095 Download destinations): `…/rfc/<slug>`, `…/persona/<name>`, `…/le-gated/<slug>`, plus RFC-0095 Desktop `%USERPROFILE%\Desktop\projects\<slug>`. Re-fetch uses Module Catalog Download; do not commit clones.
+Typical layout (RFC-0095 Download destinations): `…/rfc/<slug>`, `…/persona/<name>`, `…/le-gated/<slug>`, `…/archive/<slug>`, plus RFC-0095 Desktop `%USERPROFILE%\Desktop\projects\<slug>`. Re-fetch uses Module Catalog Download; do not commit clones. The `le-gated` directory name is a library path, not an authorization policy.
 
 ---
 
@@ -119,6 +120,99 @@ Jarvis **is** the HexStrike operator: Daybreak HUD + owner chat drive the **full
 
 ---
 
+## 2026-09-28 reel batch
+
+Taco’s Instagram Saved → **jarvis** collection was re-scraped **2026-09-28**. The live grid is **36** URLs. The older offline inventory had about **140** linked items; those links are not this batch. **Treat the 36 as the new batch.** This section **adds** child RFCs. It does **not** replace the 0095–0116 ladder, RFC-0095, or the Taco priority pack (0107–0109). Umbrella remains RFC-0095. Quality bar: **Anzu 1.0**, full intent, no stubs or soft-fail. No invented LE / Red / Purple / ATO gates. No vendored third-party trees. `persona_candidate` stays tag-only (no butler or voice merge). No exploit recipes or PoCs in these specs.
+
+**Comment-scrape follow-up (same day):** a later pass on the Git Radar reel (batch n29) found a caption link that was not one of the 36 grid URLs: [strands-agents/harness-sdk](https://github.com/strands-agents/harness-sdk). That link is **RFC-0192**. It does not grow the grid to 37 and it does not renumber 0183–0191.
+
+Clones stay out of git:
+
+| Role | Path |
+| --- | --- |
+| Windows | `C:\Users\daanv\projects\jarvis-ig\{rfc,persona,le-gated,archive}\<slug>` |
+| Architect box | `/workspace/projects/{rfc,persona,le-gated,archive}/<slug>` |
+
+Rows below are **impact order**, not numeric order.
+
+### RFC-0183 — Obsidian agent skills pack
+
+Teach Jarvis the upstream Obsidian skills (Flavored Markdown, Bases, JSON Canvas, official CLI, plus optional Defuddle/Knap) so RFC-0107’s bound vault is operated in Obsidian’s formats. **No custom brain UI.** Does not close the 0107 embed residual. Hermes + Obsidian memory on the reel is **this RFC plus the existing RFC-0104 Hermes hold**, not a new persona. **RFC:** [`docs/rfcs/0183-obsidian-agent-skills-pack.md`](docs/rfcs/0183-obsidian-agent-skills-pack.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/obsidian-skills` · `C:\Users\daanv\projects\jarvis-ig\rfc\obsidian-skills`. Upstream [kepano/obsidian-skills](https://github.com/kepano/obsidian-skills). **Lane:** D1.
+
+### RFC-0184 — Ripwire coding-agent context map
+
+Optional CLI-first (MCP second) sidecar so coding agents get a ranked codebase map without reading every file. Jarvis stays orchestrator. Missing binary leaves git, filesystem, and RFC-0155 Coding Missions working. **RFC:** [`docs/rfcs/0184-ripwire-coding-agent-context-map.md`](docs/rfcs/0184-ripwire-coding-agent-context-map.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/ripwire` · `C:\Users\daanv\projects\jarvis-ig\rfc\ripwire`. Upstream [redhat-et/ripwire](https://github.com/redhat-et/ripwire). **Lane:** D1.
+
+### RFC-0185 — Cross-agent AI memory handoff
+
+Optional loopback sidecar for long-term agent memory and a typed handoff between vendor coding agents. Complements RFC-0099 and RFC-0107. **Obsidian Markdown stays the human canonical vault.** ContextRepo still answers when the sidecar is down. **RFC:** [`docs/rfcs/0185-ai-memory-cross-agent-handoff.md`](docs/rfcs/0185-ai-memory-cross-agent-handoff.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/ai-memory` · `C:\Users\daanv\projects\jarvis-ig\rfc\ai-memory`. Upstream [akitaonrails/ai-memory](https://github.com/akitaonrails/ai-memory). **Lane:** D1.
+
+### RFC-0186 — Mirage Tesseract local video engine
+
+BlackGrid video create/edit sidecar (layered edit, motion, `.tsrct` project, local render). Extends RFC-0097. **No second NLE in the portal.** `studio_capabilities()` is truthful. **RFC:** [`docs/rfcs/0186-tesseract-local-video-engine.md`](docs/rfcs/0186-tesseract-local-video-engine.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/Tesseract` · `C:\Users\daanv\projects\jarvis-ig\rfc\Tesseract`. Upstream [mirage-hq/Tesseract](https://github.com/mirage-hq/Tesseract). **Lane:** D1.
+
+### RFC-0187 — Qwen-Image-2.1 local image gen
+
+BlackGrid image sidecar **beside** ComfyUI/SANA (RFC-0096), not a second studio. Local weights under the upstream license. `studio_capabilities()` reports `image` available only when the chosen backend answers. **RFC:** [`docs/rfcs/0187-qwen-image-2-1-local-image-gen.md`](docs/rfcs/0187-qwen-image-2-1-local-image-gen.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/Qwen-Image-2.1` · `C:\Users\daanv\projects\jarvis-ig\rfc\Qwen-Image-2.1`. Upstream [QwenLM/Qwen-Image-2.1](https://github.com/QwenLM/Qwen-Image-2.1). **Lane:** D1.
+
+### RFC-0188 — TeamAI CLI skill/rules sync
+
+Git-native sync of skills and rules across coding agents. Adjacent to Module Catalog and Skill Forge (RFC-0173). **Does not replace the Jarvis skill store.** No silent push. **RFC:** [`docs/rfcs/0188-teamai-cli-skill-rules-sync.md`](docs/rfcs/0188-teamai-cli-skill-rules-sync.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/teamai-cli` · `C:\Users\daanv\projects\jarvis-ig\rfc\teamai-cli`. Upstream [Tencent/teamai-cli](https://github.com/Tencent/teamai-cli). **Lane:** D1 + UX (sync row only).
+
+### RFC-0192 — Strands Harness SDK evaluation
+
+Optional evaluation of an open-source Python/TypeScript SDK for building and controlling an agent harness (MCP, multi-agent, any model), then an optional Module Catalog **Download** allowlist row. **Jarvis/Anzu stays the product orchestrator.** Do not replace butler, Dual Seat, or the portal. Not a `persona_candidate` (that hold is RFC-0190). **Download ≠ integrate.** Sidecar code waits until the research result is `partial` and CoS names the follow-up. **RFC:** [`docs/rfcs/0192-strands-harness-sdk-evaluation.md`](docs/rfcs/0192-strands-harness-sdk-evaluation.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/harness-sdk` · `C:\Users\daanv\projects\jarvis-ig\rfc\harness-sdk`. Upstream [strands-agents/harness-sdk](https://github.com/strands-agents/harness-sdk). **Lane:** D1 (research, then RFC-0095 Download allowlist).
+
+### RFC-0189 — Impeccable design language
+
+Design-system skill and deterministic detectors for **AI-authored** Daybreak/portal UI. House visual system stays. **No stolen licensed skins.** Does not restyle presence (RFC-0175) and does not edit `PORTAL_UX.md`. **RFC:** [`docs/rfcs/0189-impeccable-design-language.md`](docs/rfcs/0189-impeccable-design-language.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/impeccable` · `C:\Users\daanv\projects\jarvis-ig\rfc\impeccable`. Upstream [pbakaus/impeccable](https://github.com/pbakaus/impeccable). **Lane:** UX.
+
+### RFC-0191 — Pentest-harness catalog sibling
+
+One new member on the RFC-0105 `cybersecurity` Daybreak module: enable, status, path, open folder, Download, and start/stop of the owner-enabled **local web process**. **No** tool bridge into Jarvis. **No** exploit recipes, PoCs, or payloads in specs, help, or tests. **No** new LE/ATO gate (`le-gated` is a library path). HexStrike stays the RFC-0106 sibling suite. **RFC:** [`docs/rfcs/0191-pentest-harness-catalog-sibling.md`](docs/rfcs/0191-pentest-harness-catalog-sibling.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/le-gated/pentest-harness` · `C:\Users\daanv\projects\jarvis-ig\le-gated\pentest-harness`. Upstream [S1N6H/pentest-harness](https://github.com/S1N6H/pentest-harness). **Lane:** UX + D1.
+
+### RFC-0190 — Pi Desktop persona hold
+
+Full desktop agent workspace. Same rule as RFC-0104: tag `persona_candidate`. **Download ≠ integrate.** No butler or voice merge. Catalog badge only until Taco promotes a personality-track RFC. **RFC:** [`docs/rfcs/0190-pi-desktop-persona-hold.md`](docs/rfcs/0190-pi-desktop-persona-hold.md). **Status:** accepted hold (not an implement ticket now). **Local clone:** `/workspace/projects/persona/pi-desktop` · `C:\Users\daanv\projects\jarvis-ig\persona\pi-desktop`. Upstream [DLYZZT/pi-desktop](https://github.com/DLYZZT/pi-desktop). **Lane:** later.
+
+### Implement-first (Taco)
+
+The 2026-09-28 grid scored ten rows. Architect judgment on the comment-scrape follow-up: **strong agent-harness research**, so **RFC-0192** is inserted after **RFC-0188** (and after ripwire/teamai) and before the persona hold — not parked as an optional tail. The list is eleven rows. Do these before bulk catalog work. One RFC per implement PR.
+
+| # | What | Why first |
+| --- | --- | --- |
+| 1 | **RFC-0183** obsidian-skills | Locks the RFC-0107 priority: agents speak Obsidian formats and CLI |
+| 2 | **RFC-0184** ripwire | Coding agents get a map without stuffing the repo into the prompt |
+| 3 | **RFC-0185** ai-memory | Cross-agent handoff without a second human vault |
+| 4 | **RFC-0186** Tesseract | BlackGrid local video create/edit |
+| 5 | **RFC-0187** Qwen-Image-2.1 | BlackGrid local image gen beside ComfyUI/SANA |
+| 6 | **RFC-0188** teamai-cli | Skill/rules sync that leaves the Jarvis skill store in charge |
+| 7 | **RFC-0192** strands harness-sdk | Strong agent-harness research after teamai and before the persona hold. Evaluate, then Download allowlist only. Jarvis stays orchestrator. |
+| 8 | **RFC-0189** impeccable | Higher bar for AI-authored Daybreak/portal UI |
+| 9 | **RFC-0107 embed residual** | Finish in-Jarvis real Obsidian host and prove the vault is used, **before** bulk catalog |
+| 10 | **RFC-0191** pentest-harness | After the RFC-0105 sibling pattern; catalog/process only; no exploits in docs |
+| 11 | **RFC-0190** pi-desktop | Persona hold: catalog badge only until Taco promotes |
+
+### Already covered (do not duplicate)
+
+| Reel signal | Where it lives |
+| --- | --- |
+| Hermes Agent (already cloned) | `persona/hermes-agent` on the RFC-0104 hold. “Hermes + Obsidian memory” → **RFC-0183 + RFC-0104**, not a new persona merge. |
+| Jev / System One | [RFC-0116](docs/rfcs/0116-typesafe-jev-optional-decision-tier.md) and [RFC-0171](docs/rfcs/0171-system-one-reflex-lane-jev-laya-priority.md). Do not open another Jev RFC. |
+| Humanoid AI Assistant, NEXUS, Larpochka, maninalabs J.A.R.V.I.S. demos | `persona_candidate` / **`needs_link`** — no public repo yet. UI morph interest is a **reference for RFC-0175 only**, not a new presence RFC and not a butler merge. |
+
+### Archive clones (2026-09-28)
+
+No implement ticket unless Taco promotes one. **No RFC numbers** (catalog Download allowlist can name the upstream URL later without a child RFC). Keep the clone; do not wire it.
+
+| Slug | What | Upstream | Local clone |
+| --- | --- | --- | --- |
+| `openstock` | Finance / market pack. Not a Jarvis books module. | [Open-Dev-Society/OpenStock](https://github.com/Open-Dev-Society/OpenStock) | `/workspace/projects/archive/openstock` · `C:\Users\daanv\projects\jarvis-ig\archive\openstock` |
+| `matrixone` | Heavy distributed DB. Does not replace Jarvis SQLite. | [matrixorigin/matrixone](https://github.com/matrixorigin/matrixone) | `/workspace/projects/archive/matrixone` · `C:\Users\daanv\projects\jarvis-ig\archive\matrixone` |
+| `spirula-studio` | 3D Gaussian splat trainer (video → splat → mesh). Not a BlackGrid NLE. | [harry7557558/spirula-studio](https://github.com/harry7557558/spirula-studio) | `/workspace/projects/archive/spirula-studio` · `C:\Users\daanv\projects\jarvis-ig\archive\spirula-studio` |
+
+---
+
 ## Numbering
 
 | RFC | Title | Notes |
@@ -132,9 +226,19 @@ Jarvis **is** the HexStrike operator: Daybreak HUD + owner chat drive the **full
 | **0109** | Media/file/video upload (phone + PC) | Taco add — same priority pack / ladder; **in 1.4 interesting set** |
 | **0110** | ChatGPT-style approval / review popup | **Implemented** — Always / Allow this time / Deny + persist + free-text; **not** always-on chat gate; **in 1.4 interesting set** |
 | **0111–0115** | 1.4 core (Kokoro runtime, voice preview, Settings IA deltas, context recovery, Ornith router) | Not integration clones — see [`JARVIS_1.4_SPECS.md`](JARVIS_1.4_SPECS.md). **0095–0104 bulk catalog remains later / out of 1.4 cut.** |
-| **0116** | TypeSafe Jev optional decision tier | Post-1.4 **optional accelerator** — waitlist-gated; does **not** block 1.4.0 |
+| **0116** | TypeSafe Jev optional decision tier | Post-1.4 **optional accelerator** — waitlist-gated; does **not** block 1.4.0. Reel Jev mentions stay here and RFC-0171 — do not duplicate |
+| **0183** | Obsidian agent skills (`kepano/obsidian-skills`) | 2026-09-28 batch — deepens 0107; no custom brain UI |
+| **0184** | Ripwire coding-agent context map | 2026-09-28 batch — optional CLI/MCP; Jarvis stays orchestrator |
+| **0185** | ai-memory cross-agent handoff | 2026-09-28 batch — sidecar; Obsidian Markdown stays human canonical |
+| **0186** | Mirage Tesseract local video | 2026-09-28 batch — extends 0097; no second NLE |
+| **0187** | Qwen-Image-2.1 local image gen | 2026-09-28 batch — beside 0096; truthful `studio_capabilities()` |
+| **0188** | TeamAI CLI skill/rules sync | 2026-09-28 batch — does not replace the Jarvis skill store |
+| **0189** | Impeccable design language | 2026-09-28 batch — AI-authored UI quality; no licensed skins |
+| **0190** | Pi Desktop persona hold | 2026-09-28 batch — RFC-0104 pattern; Download ≠ integrate |
+| **0191** | Pentest-harness catalog sibling | 2026-09-28 batch — RFC-0105 pattern; no exploits; no new LE/ATO gate |
+| **0192** | Strands Harness SDK evaluation | Comment-scrape follow-up (Git Radar reel, batch n29) — not in the 36-URL grid. Research, then RFC-0095 Download allowlist. Jarvis/Anzu stays orchestrator. Not a persona hold. |
 
-If a later tip already occupied 0107+, Architect takes the next free numbers. **0107–0109** landed as specs on `development` via [#280](https://github.com/Daan298261/Jarvis/pull/280). Next free after 0109 was **0110**. **0111–0115** are the 1.4 spec split (not Instagram children). **0116** is the next free after 0115 (Taco 2026-09-17 Jev add).
+If a later tip already occupied 0107+, Architect takes the next free numbers. **0107–0109** landed as specs on `development` via [#280](https://github.com/Daan298261/Jarvis/pull/280). Next free after 0109 was **0110**. **0111–0115** are the 1.4 spec split (not Instagram children). **0116** is the next free after 0115 (Taco 2026-09-17 Jev add). **0182** was the highest RFC on `development` before the reel batch; **0183–0191** are the 2026-09-28 grid children. **0192** is the comment-scrape follow-up. Next free is **0193**. Archive clones (OpenStock, MatrixOne, Spirula Studio) take **no** RFC number unless Taco promotes them.
 
 ---
 

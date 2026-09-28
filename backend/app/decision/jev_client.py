@@ -48,7 +48,7 @@ def _default_http_post(
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             response = client.post(url, headers=headers, json=body)
     except httpx.TimeoutException as exc:
-        raise JevHttpError("TypeSafe Jev probe timed out", status_code=None) from exc
+        raise JevHttpError(f"TypeSafe Jev request timed out after {timeout:.2f}s", status_code=None) from exc
     except httpx.HTTPError as exc:
         raise JevHttpError(f"TypeSafe Jev unreachable: {exc}", status_code=None) from exc
     payload: dict[str, Any] | None = None

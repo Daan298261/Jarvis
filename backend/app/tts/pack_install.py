@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from huggingface_hub import snapshot_download
+from huggingface_hub import hf_hub_download, snapshot_download
 
 from ..config import repo_root
 from ..voice_profiles.catalog import reload_catalog, voice_packs_dir
@@ -18,6 +18,9 @@ from ..voice_profiles.schema import VoiceProfile
 from .engines import (
     KOKORO_HF_REPO,
     KOKORO_MODEL_DIR,
+    CHATTERBOX_HF_REPO,
+    CHATTERBOX_MODEL_FILES,
+    chatterbox_python_ready,
     is_chatterbox_available,
     kokoro_python_ready,
     kokoro_weights_ready,
@@ -84,7 +87,7 @@ OPTIONAL_PACK_INSTALL: dict[str, dict[str, Any]] = {
         "license": "MIT",
         "download_kokoro": False,
         "install_chatterbox": True,
-        "detail": "Chatterbox is installed. Its neural weights are prepared automatically on first preview.",
+        "detail": "Chatterbox and its neural weights are installed.",
     },
     "synthetic_command_original_v1": {
         "engine_id": "kokoro",
@@ -147,7 +150,7 @@ def ensure_kokoro_python(*, force: bool = False) -> None:
 
 def ensure_chatterbox_python(*, force: bool = False) -> None:
     """Install the optional expressive engine into the Jarvis interpreter."""
-    if not force and is_chatterbox_available():
+    if not force and chatterbox_python_ready():
         return
     logger.info("Installing Chatterbox TTS into %s", sys.executable)
     command = [
@@ -170,8 +173,23 @@ def ensure_chatterbox_python(*, force: bool = False) -> None:
     for module_name in tuple(sys.modules):
         if module_name == "perth" or module_name.startswith("perth."):
             sys.modules.pop(module_name, None)
-    if not is_chatterbox_available():
+    if not chatterbox_python_ready():
         raise RuntimeError(CHATTERBOX_RUNTIME_ERROR)
+
+
+def ensure_chatterbox_weights(*, force: bool = False) -> None:
+    """Prefetch exactly the files used by ChatterboxTTS.from_pretrained."""
+    for filename in CHATTERBOX_MODEL_FILES:
+        if not force:
+            try:
+                hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename, local_files_only=True)
+                continue
+            except Exception:
+                pass
+        try:
+            hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename)
+        except Exception as exc:
+            raise RuntimeError(CHATTERBOX_RUNTIME_ERROR) from exc
 
 
 def ensure_kokoro_weights(*, force: bool = False) -> Path:
@@ -224,6 +242,9 @@ def install_voice_pack(profile: VoiceProfile, *, force: bool = False) -> VoicePa
             raise RuntimeError(state.last_error or KOKORO_RUNTIME_ERROR)
     if merged.get("install_chatterbox"):
         ensure_chatterbox_python(force=force)
+        ensure_chatterbox_weights(force=force)
+        if not is_chatterbox_available():
+            raise RuntimeError(CHATTERBOX_RUNTIME_ERROR)
 
     manifest_path = pack_dir / "pack.json"
     manifest_path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")

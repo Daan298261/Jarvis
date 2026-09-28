@@ -3060,6 +3060,103 @@ export async function getJevDecisionAudit(): Promise<{ events: JevAuditEvent[] }
   return api<{ events: JevAuditEvent[] }>("/api/decision/jev/audit")
 }
 
+export type LayaStatus = {
+  installed: boolean
+  install_error: string
+  package_version: string | null
+  enabled: boolean
+  warm: boolean
+  loading: boolean
+  load_error: string
+  fixture: boolean
+  version: string
+  device: string
+  last_infer_ms: number | null
+  load_ms: number | null
+}
+
+export type ReflexCalibration = {
+  measured_at: number | null
+  fixtures: number
+  accuracy: Record<string, Record<string, number>>
+}
+
+export async function getLayaStatus(): Promise<LayaStatus> {
+  return api<LayaStatus>("/api/decision/laya")
+}
+
+export async function installLaya(): Promise<LayaStatus> {
+  return api<LayaStatus>("/api/decision/laya/install", { method: "POST", body: JSON.stringify({ warm: true }) })
+}
+
+export async function enableLaya(): Promise<LayaStatus> {
+  return api<LayaStatus>("/api/decision/laya/enable", { method: "POST", body: JSON.stringify({ warm: true }) })
+}
+
+export async function disableLaya(): Promise<LayaStatus> {
+  return api<LayaStatus>("/api/decision/laya/disable", { method: "POST" })
+}
+
+export async function getReflexCalibration(): Promise<ReflexCalibration | null> {
+  const data = await api<{ calibration?: ReflexCalibration }>("/api/decision/reflex/metrics")
+  return data.calibration ?? null
+}
+
+export type CapabilityLabRecord = {
+  id: string
+  title: string
+  rfc_id: string
+  user_outcome: string
+  anzu_path: string
+  parity_state: "missing" | "partial" | "equivalent"
+  lifecycle: "specified" | "implemented" | "verified" | "parity_demonstrated"
+  support: string
+  security_approval: string
+  test_ids: string[]
+  depends_on: string[]
+  peer_evidence: { label: string; url: string; observed_at: string }[]
+  license_note: string
+  last_verified_at: string
+}
+
+export type CapabilityLabRegistry = {
+  version: number
+  updated_at: string
+  capabilities: CapabilityLabRecord[]
+  summary: {
+    version: number
+    updated_at: string
+    total: number
+    by_parity_state: Record<string, number>
+    by_lifecycle: Record<string, number>
+  }
+}
+
+export type CapabilityLabBenchmarkResult = {
+  ok: boolean
+  mode: string
+  elapsed_ms?: number
+  error?: string
+  message?: string
+  skipped?: boolean
+}
+
+export async function getCapabilityLabRegistry(): Promise<CapabilityLabRegistry> {
+  return api<CapabilityLabRegistry>("/api/capability-lab/registry")
+}
+
+export async function runCapabilityLabBenchmark(
+  capabilityIds?: string[],
+): Promise<CapabilityLabBenchmarkResult> {
+  return api<CapabilityLabBenchmarkResult>("/api/capability-lab/benchmark", {
+    method: "POST",
+    body: JSON.stringify({
+      capability_ids: capabilityIds || [],
+      live: false,
+    }),
+  })
+}
+
 export async function listInferenceCredentials(): Promise<{ credentials: InferenceCredentialPublic[] }> {
   const data = await api<{ credentials?: unknown }>("/api/license/inference-credentials")
   return { credentials: publicInferenceCredentials(data.credentials) }

@@ -3,15 +3,18 @@ import type { AttentionMode, PresenceMode, PresencePhase } from "./presenceTypes
 /** RFC-0069 duration. Non-reduced free↔figure morph. Reduced motion snaps. */
 export const LIFECYCLE_MORPH_SECONDS = 1.2
 
-const IDLE_PHASES = new Set<PresencePhase>(["idle", "waiting", "offline"])
+// Keep the selected persona visible while ANZU is ready. Treating the normal
+// idle state as a fully free cloud erased the humanoid and made every named
+// persona look identical until a task happened to start.
+const FREE_PHASES = new Set<PresencePhase>(["waiting", "offline"])
 
-export function isIdlePresencePhase(phase: PresencePhase): boolean {
-  return IDLE_PHASES.has(phase)
+export function isFreePresencePhase(phase: PresencePhase): boolean {
+  return FREE_PHASES.has(phase)
 }
 
-/** 0 = free-float cloud (Ref A). 1 = winning figure (Ref B, or the shape that won precedence). */
+/** 0 = free-float cloud. 1 = the selected persona / winning figure. */
 export function lifecycleMorphTarget(phase: PresencePhase): 0 | 1 {
-  return isIdlePresencePhase(phase) ? 0 : 1
+  return isFreePresencePhase(phase) ? 0 : 1
 }
 
 /**

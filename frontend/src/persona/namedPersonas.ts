@@ -52,6 +52,29 @@ export const ROSTER_IDS = [
   "bragi", "hermes", "heimdall", "eir", "maia", "vulcan",
 ] as const
 
+export type NamedPersonaId = typeof ROSTER_IDS[number]
+
+/** Lightweight fallback data keeps every RFC-0137 avatar visible while the API loads. */
+export const PERSONA_VISUALS: Record<NamedPersonaId, {
+  shapeId: string
+  orbColor: string
+  accentColor: string
+}> = {
+  anzu: { shapeId: "stormbird", orbColor: "#9B1B30", accentColor: "#D4A017" },
+  mestor: { shapeId: "command_facet", orbColor: "#1E3A8A", accentColor: "#F8FAFC" },
+  nabu: { shapeId: "memory_rings", orbColor: "#D97706", accentColor: "#312E81" },
+  enki: { shapeId: "code_cube", orbColor: "#22D3EE", accentColor: "#2563EB" },
+  veles: { shapeId: "serpent_orbit", orbColor: "#5B21B6", accentColor: "#84CC16" },
+  themis: { shapeId: "twin_shield", orbColor: "#E0F2FE", accentColor: "#FFFFFF" },
+  aegir: { shapeId: "ocean_swell", orbColor: "#0D9488", accentColor: "#0C4A6E" },
+  bragi: { shapeId: "waveform_letters", orbColor: "#C026D3", accentColor: "#EAB308" },
+  hermes: { shapeId: "comet_trail", orbColor: "#FACC15", accentColor: "#06B6D4" },
+  heimdall: { shapeId: "eye_radar", orbColor: "#F97316", accentColor: "#1D4ED8" },
+  eir: { shapeId: "breath_leaf", orbColor: "#6EE7B7", accentColor: "#FDA4AF" },
+  maia: { shapeId: "star_social", orbColor: "#FB7185", accentColor: "#F472B6" },
+  vulcan: { shapeId: "forge_core", orbColor: "#EA580C", accentColor: "#DC2626" },
+}
+
 export const PERSONA_LABELS: Record<string, string> = {
   anzu: "Anzu", mestor: "Mestor", nabu: "Nabu", enki: "Enki", veles: "Veles",
   themis: "Themis", aegir: "Aegir", bragi: "Bragi", hermes: "Hermes",

@@ -57,7 +57,7 @@ def _collect_controls(window: Any) -> list[UiControl]:
 def _find_window(desktop: Any, title: str | None) -> Any:
     needle = (title or "").strip()
     if needle:
-        return desktop.window(title_re=f".*{needle}.*")
+        return desktop.window(title_re=f".*{re.escape(needle)}.*")
     windows = [w for w in desktop.windows() if w.window_text()]
     if not windows:
         raise RuntimeError("No visible windows")

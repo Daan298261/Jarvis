@@ -7,7 +7,7 @@ CONTEXT_NORMAL = 16384
 CONTEXT_LONG = 32768
 CONTEXT_XL = 65536
 
-# Start these classes at 8K. Grow to 16K/32K only if the live prompt is under pressure.
+# Ordinary work starts at 16K; larger tasks have a 32K target when available.
 SIMPLE_CLASSES = {
     "filesystem",
     "shell",
@@ -16,7 +16,7 @@ SIMPLE_CLASSES = {
     "data processing",
 }
 
-# Start at 16K even when the profile cap is 32K. Expand later if compaction is not enough.
+# Start at 32K when the profile and hardware permit it.
 LONG_CLASSES = {
     "long-horizon autonomous",
     "software engineering",
@@ -39,9 +39,9 @@ def initial_context_size(task_class: str | None, profile: Any) -> int:
     cap = profile_cap(profile, None)
     klass = (task_class or "").strip().lower()
     if klass in SIMPLE_CLASSES:
-        return min(CONTEXT_SIMPLE, cap)
-    if klass in LONG_CLASSES:
         return min(CONTEXT_NORMAL, cap)
+    if klass in LONG_CLASSES:
+        return min(CONTEXT_LONG, cap)
     return min(CONTEXT_NORMAL, cap)
 
 

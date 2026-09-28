@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from huggingface_hub import try_to_load_from_cache
+
 from ..config import models_dir, repo_root
 from .kokoro_adapter import (
     KOKORO_HF_REPO,
@@ -17,6 +19,14 @@ from .kokoro_adapter import (
 )
 
 CHATTERBOX_MODEL_DIR = models_dir() / "tts" / "chatterbox-turbo"
+CHATTERBOX_HF_REPO = "ResembleAI/chatterbox"
+CHATTERBOX_MODEL_FILES = (
+    "ve.safetensors",
+    "t3_cfg.safetensors",
+    "s3gen.safetensors",
+    "tokenizer.json",
+    "conds.pt",
+)
 PIPER_VOICES_DIR = models_dir() / "tts" / "piper"
 
 
@@ -56,7 +66,7 @@ def is_piper_available() -> bool:
     return _module_available("piper")
 
 
-def is_chatterbox_available() -> bool:
+def chatterbox_python_ready() -> bool:
     if not _module_available("chatterbox"):
         return False
     try:
@@ -65,6 +75,17 @@ def is_chatterbox_available() -> bool:
         return callable(getattr(perth, "PerthImplicitWatermarker", None))
     except Exception:
         return False
+
+
+def chatterbox_weights_ready() -> bool:
+    return all(
+        isinstance(try_to_load_from_cache(CHATTERBOX_HF_REPO, filename), str)
+        for filename in CHATTERBOX_MODEL_FILES
+    )
+
+
+def is_chatterbox_available() -> bool:
+    return chatterbox_python_ready() and chatterbox_weights_ready()
 
 
 def legacy_system_tts_available() -> bool:
@@ -77,8 +98,13 @@ def legacy_system_tts_available() -> bool:
     return _module_available("pyttsx3")
 
 
+def is_system_tts_engine(engine_id: str | None) -> bool:
+    key = (engine_id or "").strip().lower()
+    return key in {"system", "sapi", "windows", "espeak", "espeak-ng", "pyttsx3"}
+
+
 def is_engine_available(engine_id: str) -> bool:
-    key = (engine_id or "system").strip().lower()
+    key = (engine_id or "").strip().lower()
     if key in {"kokoro"}:
         return is_kokoro_available()
     if key in {"piper"}:
@@ -87,7 +113,7 @@ def is_engine_available(engine_id: str) -> bool:
         return is_chatterbox_available()
     if key in {"orpheus", "qwen3-tts", "qwen3_tts"}:
         return False
-    if key in {"system", "sapi", "windows", "espeak", "espeak-ng", "pyttsx3"}:
+    if is_system_tts_engine(key):
         return legacy_system_tts_available()
     return False
 
@@ -113,22 +139,13 @@ def pick_engine_for_profile(profile: Any) -> str | None:
 
 
 def primary_tts_backend() -> str | None:
+    """Host TTS for unsigned speech. Neural only — never Windows SAPI as a fallback."""
     if is_kokoro_available():
         return "kokoro"
     if is_piper_available():
         return "piper"
-    if legacy_system_tts_available():
-        import sys
-
-        if sys.platform == "win32":
-            return "sapi"
-        if shutil.which("espeak-ng"):
-            return "espeak-ng"
-        if shutil.which("espeak"):
-            return "espeak"
-        if _module_available("pyttsx3"):
-            return "pyttsx3"
-        return "sapi"
+    if is_chatterbox_available():
+        return "chatterbox"
     return None
 
 

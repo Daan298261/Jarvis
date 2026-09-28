@@ -122,7 +122,12 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
         if not probe.get("ok") and provider == "lmstudio" and host in {"127.0.0.1", "localhost", "::1"}:
             from .lmstudio_server import ensure_local_lmstudio
 
-            boot = await ensure_local_lmstudio(host=host, port=port, model=hint)
+            boot = await ensure_local_lmstudio(
+                host=host,
+                port=port,
+                model=hint,
+                context_size=int(runtime.context_limit or settings.inference.context_size),
+            )
             if boot.get("ok"):
                 probe = await probe_remote_server(
                     host,

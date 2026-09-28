@@ -99,7 +99,7 @@ def _default_load_context(profile: ModelProfile) -> int:
     cap = int(profile.context_size or 16384)
     if profile.name == "fast":
         return min(8192, cap)
-    return min(16384, cap)
+    return min(32768, cap)
 
 
 def _message_text(message: ChatMessage) -> str:
@@ -902,6 +902,18 @@ class InferenceManager:
         if self.provider:
             healthy = await self.provider.health()
         profile = resolve_profile(self.state.profile or settings.inference.profile)
+        context_target = min(
+            int(settings.inference.context_size or 32768),
+            int(profile.context_size or 32768),
+        )
+        live_slot = int(self.state.server_n_ctx or 0)
+        context_warning = ""
+        if self.state.loaded and not self.state.manages_process and live_slot and live_slot < context_target:
+            context_warning = (
+                f"The external model server is loaded at {live_slot:,} tokens. "
+                f"Reload that model with at least {context_target:,} context tokens; "
+                "Jarvis cannot enlarge an already running server slot."
+            )
         return {
             "loaded": self.state.loaded,
             "loading": self.state.loading,
@@ -921,6 +933,9 @@ class InferenceManager:
             "profile": self.state.profile or profile.name,
             "context_size": self.state.context_size if self.state.loaded else _default_load_context(profile),
             "server_n_ctx": self.state.server_n_ctx,
+            "context_target": context_target,
+            "context_warning": context_warning,
+            "quick_reply_output_limit": settings.front_responder.max_output_tokens,
             "context_cap": profile.context_size,
             "inference_backend": self.state.backend,
             "manages_process": self.state.manages_process,

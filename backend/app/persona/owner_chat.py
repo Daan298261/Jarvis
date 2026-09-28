@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from collections import defaultdict
 from typing import Any, AsyncIterator
@@ -27,6 +29,8 @@ from ..agent.front_responder import (
     resolve_front_model_id,
     run_two_lane_chat,
 )
+from ..agent.planning import requests_agent_tools
+from ..agent.segmented_input import condense_segments
 from .inference_context import ensure_context_for_messages, model_lane_event_payload
 from ..agent.background_verify import schedule_background_verification
 from .slow_turn_feedback import SlowTurnNudger
@@ -170,6 +174,71 @@ async def stream_owner_chat(
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
 
+    if requests_agent_tools(cleaned):
+        from ..agent.loop import AGENT
+
+        try:
+            task = await AGENT.create_task(cleaned)
+        except Exception as exc:
+            yield {"type": "error", "detail": f"Could not start tool run: {exc}"[:500]}
+            return
+        spoken = "Right — I'll run that with the agent harness and tools on this PC."
+        _conversations.setdefault(cid, [])
+        _conversations[cid].append(ChatMessage(role="user", content=cleaned))
+        _conversations[cid].append(ChatMessage(role="assistant", content=spoken))
+        await publish_owner_text(spoken, source="owner_chat", speak=True, user_prompt=cleaned)
+        yield {
+            "type": "task_delegated",
+            "conversation_id": cid,
+            "task_id": task.id,
+            "reply": spoken,
+        }
+        yield {"type": "done", "conversation_id": cid, "reply": spoken}
+        return
+
+    from ..agent.context_policy import profile_cap
+    from ..agent.intake import plan_owner_intake, start_sequential_chain
+
+    intake = await asyncio.to_thread(
+        plan_owner_intake,
+        cleaned,
+        context_tokens=profile_cap(resolve_profile(load_settings().inference.profile)),
+    )
+    if intake.strategy != "direct":
+        await BUS.publish_ephemeral(
+            OWNER_CHAT_CHANNEL,
+            "stage",
+            "Long message intake",
+            json.dumps(intake.as_dict()),
+            stage="owner_chat",
+        )
+    if intake.strategy == "sequential":
+        try:
+            chain = await start_sequential_chain(intake, conversation_id=cid)
+        except Exception as exc:
+            yield {"type": "error", "detail": f"Could not start the long-message run: {exc}"[:500]}
+            return
+        spoken = (
+            f"That's a long one (about {intake.tokens:,} tokens). I split it into "
+            f"{len(intake.segments)} parts and I'm working through them in order; "
+            "each part picks up the result of the one before."
+        )
+        _conversations.setdefault(cid, [])
+        _conversations[cid].append(ChatMessage(role="user", content=cleaned[:2000]))
+        _conversations[cid].append(ChatMessage(role="assistant", content=spoken))
+        await publish_owner_text(spoken, source="owner_chat", speak=True, user_prompt=cleaned[:2000])
+        yield {
+            "type": "task_delegated",
+            "conversation_id": cid,
+            "task_id": chain["task_ids"][0],
+            "intake_chain_id": chain["id"],
+            "intake": intake.as_dict(),
+            "reply": spoken,
+        }
+        yield {"type": "done", "conversation_id": cid, "reply": spoken}
+        return
+    worker_text = cleaned
+
     from .session_personality import maybe_switch_from_owner_message
 
     switched = maybe_switch_from_owner_message(cleaned)
@@ -253,6 +322,27 @@ async def stream_owner_chat(
         return
 
     worker_messages = _owner_messages(cid, cleaned, briefing)
+    if intake.strategy == "compress":
+        async def _segment_progress(index: int, total: int) -> None:
+            await BUS.publish_ephemeral(
+                OWNER_CHAT_CHANNEL,
+                "stage",
+                f"Reading input part {index}/{total}",
+                "",
+                stage="owner_chat",
+            )
+
+        try:
+            brief = await condense_segments(intake.segments, on_segment=_segment_progress)
+        except Exception as exc:
+            yield {"type": "error", "detail": f"Could not process the full long message: {exc}"[:500]}
+            return
+        worker_text = (
+            f"Owner message (~{intake.tokens:,} tokens) processed in {len(intake.segments)} ordered parts. "
+            f"The full text is saved at {intake.original_path}; read exact passages with the filesystem "
+            f"tool when wording matters. Answer this complete brief:\n{brief}"
+        )
+        worker_messages[-1] = ChatMessage(role="user", content=worker_text)
     parts: list[str] = []
     worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
 
@@ -408,7 +498,8 @@ async def stream_owner_chat(
 
     reply = ((done or {}).get("text") or "".join(parts)).strip()
     if reply:
-        _conversations[cid].append(ChatMessage(role="user", content=cleaned))
+        # History keeps what the worker saw, so a compressed paste stays compressed next turn.
+        _conversations[cid].append(ChatMessage(role="user", content=worker_text))
         _conversations[cid].append(ChatMessage(role="assistant", content=reply))
         from ..projects.portal_store import save_owner_conversation
 

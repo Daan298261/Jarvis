@@ -210,10 +210,123 @@ def follow_up_stays_conversation(follow: str | None, *, security_role: str = "")
     return action_hits == 0
 
 
+_PATH_OR_URL = re.compile(r"(?i)(https?://\S+|[a-z]:[\\/]\S*|\\\\\S+|(?<!\w)/(?:[\w.-]+/)+[\w.-]*)")
+_APP_INTENT = re.compile(
+    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
+    r"(?:open|start|launch|fire up|close|quit|exit|kill)\s+(?:up\s+)?(?:the\s+)?(?:app\s+)?"
+    r"(?!(?:a|an|new)\s|file\b|folder\b|directory\b|document\b|website\b|webpage\b|page\b|browser\b|tab\b|url\b|https?:|www\.|[a-z]:[\\/])"
+    r"((?:[\w.+&'-]+)(?:\s+[\w.+&'-]+){0,3}?)"
+    r"(?:\s+(?:for me|please|now|app))*\s*(?:(?:,|\band\b|\bthen\b).*)?[.!?]?\s*$"
+)
+_CLOSE_APP_VERB = re.compile(r"(?i)\b(close|quit|exit|kill)\b")
+_COMPOUND_AFTER_APP = re.compile(r"(?i)(?:,|\band\b|\bthen\b)\s+\S")
+_CODING_SESSION = re.compile(r"(?i)\b(coding session|start coding|code review|pair program|work on (?:the|my) (?:repo|code|project))\b")
+
+
+def intent_text(prompt: str) -> str:
+    """Request text for keyword classification: paths and URLs removed.
+
+    A temp folder named ``pytest-of-owner`` or a repo path must not turn a file task
+    into software engineering.
+    """
+    return _PATH_OR_URL.sub(" ", latest_user_utterance(prompt or ""))
+
+
+_NOT_AN_APP = frozenset(
+    {
+        "file",
+        "folder",
+        "directory",
+        "document",
+        "website",
+        "webpage",
+        "page",
+        "browser",
+        "tab",
+        "url",
+        "site",
+        "link",
+        "window",
+    }
+)
+
+
+def app_control_target(prompt: str) -> str | None:
+    """Program name for 'open steam' / 'close snipping tool' style requests."""
+    match = _APP_INTENT.match(latest_user_utterance(prompt or "").strip())
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    name = re.sub(r"^(?:the|a|an)\s+", "", raw, flags=re.I).strip().lower()
+    first = name.split()[0] if name else ""
+    if not first or first in _NOT_AN_APP:
+        return None
+    return re.sub(r"^(?:the|a|an)\s+", "", raw, flags=re.I).strip() or None
+
+
+def simple_app_control(prompt: str) -> tuple[str, str] | None:
+    """Single open/close with no extra work — safe to run without the language model."""
+    text = latest_user_utterance(prompt or "").strip()
+    match = _APP_INTENT.match(text)
+    if not match:
+        return None
+    name = app_control_target(prompt)
+    if not name:
+        return None
+    if _COMPOUND_AFTER_APP.search(text[match.end(1) :]):
+        return None
+    action = "close" if _CLOSE_APP_VERB.search(text[: match.start(1)]) else "open"
+    return action, name
+
+
+_SIMPLE_WRITE = re.compile(
+    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
+    r"(?:write|save|put)\s+[\"'](.{1,400}?)[\"']\s+(?:to|into|in)\s+"
+    r"(.+?\.(?:txt|md))"
+    r"(?:\s+(?:for me|please|now))*\s*[.!?]?\s*$"
+)
+_SIMPLE_READ = re.compile(
+    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
+    r"(?:read|show(?:\s+me)?)\s+(?:the\s+)?(?:file\s+)?"
+    r"(.+?\.(?:txt|md))"
+    r"(?:\s+(?:to me|aloud|please|now))*\s*[.!?]?\s*$"
+)
+_UNSAFE_FILE_PATH = re.compile(r"(?i)(?:\.\.|system32|windows[/\\]system)")
+
+
+def simple_file_control(prompt: str) -> tuple[str, str, str] | None:
+    """Single quoted write or named-file read — safe to run without the language model."""
+    text = latest_user_utterance(prompt or "").strip()
+    write = _SIMPLE_WRITE.match(text)
+    if write:
+        if _COMPOUND_AFTER_APP.search(text[write.end() :]):
+            return None
+        path = write.group(2).strip().strip("\"'")
+        content = write.group(1)
+        if not path or _UNSAFE_FILE_PATH.search(path):
+            return None
+        return "write", path, content
+    read = _SIMPLE_READ.match(text)
+    if not read:
+        return None
+    if _COMPOUND_AFTER_APP.search(text[read.end() :]):
+        return None
+    path = read.group(1).strip().strip("\"'")
+    if not path or _UNSAFE_FILE_PATH.search(path):
+        return None
+    return "read", path, ""
+
+
 def classify_task(prompt: str) -> str:
+    if _CODING_SESSION.search(intent_text(prompt)):
+        return "software engineering"
+    if app_control_target(prompt):
+        return "windows gui"
+    if simple_file_control(prompt):
+        return "filesystem"
     if is_plain_conversation(prompt):
         return CONVERSATION_CLASS
-    text = (prompt or "").lower()
+    text = intent_text(prompt).lower()
     scored: list[tuple[int, str]] = []
     for name, keywords in TASK_CATEGORIES:
         score = sum(1 for keyword in keywords if keyword in text)
@@ -229,8 +342,53 @@ def classify_task(prompt: str) -> str:
     return scored[0][1]
 
 
+_TOOL_REQUEST = re.compile(
+    r"(?i)\b("
+    r"run\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,4})?tool\b|"
+    r"run\s+(?:the\s+)?(?:command|harness)\b|"
+    r"use\s+(?:the\s+)?[\w.-]+\s+tool\b|"
+    r"execute\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,2})?(?:tool|command)\b|"
+    r"call\s+(?:the\s+)?[\w.-]+\s+tool\b|"
+    r"invoke\s+(?:the\s+)?[\w.-]+\s+tool\b"
+    r")",
+)
+
+
+def requests_agent_tools(prompt: str) -> bool:
+    text = (prompt or "").strip()
+    if not text:
+        return False
+    return bool(_TOOL_REQUEST.search(text))
+
+
+def split_long_owner_prompt(prompt: str, *, max_chars: int = 2200) -> list[str]:
+    """Split very long owner dictation into harness-sized chunks (plan → act)."""
+    text = (prompt or "").strip()
+    if len(text) <= max_chars:
+        return [text] if text else []
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(len(text), start + max_chars)
+        if end < len(text):
+            slice_end = text.rfind("\n\n", start, end)
+            if slice_end <= start + 400:
+                slice_end = text.rfind(". ", start, end)
+            if slice_end > start + 400:
+                end = slice_end + 1
+        piece = text[start:end].strip()
+        if piece:
+            chunks.append(piece)
+        start = end
+    return chunks
+
+
 def route_request(prompt: str) -> RequestRoute:
     """Route before creating a durable agent loop or exposing its tool catalog."""
+    if requests_agent_tools(prompt):
+        return RequestRoute(MANAGED_TASK, classify_task(prompt))
+    if simple_app_control(prompt) or simple_file_control(prompt):
+        return RequestRoute(MANAGED_TASK, classify_task(prompt))
     if is_weather_query(prompt):
         return RequestRoute(DIRECT_LOOKUP, CONVERSATION_CLASS)
     if is_plain_conversation(prompt):

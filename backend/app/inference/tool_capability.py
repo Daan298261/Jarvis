@@ -76,9 +76,17 @@ async def probe_tool_capability(provider: ModelProvider, *, thinking: bool = Fal
                 ChatMessage(role="tool", name="diagnostic_echo", tool_call_id=call["id"], content=f"Echo result: {token}"),
             ])
             second = await asyncio.wait_for(provider.chat(messages, thinking=thinking, max_tokens=128), timeout=90)
-            if token not in (second.content or ""):
-                raise ValueError("Model did not use the tool result in its answer")
-            result = ToolCapability(status="ready", model=provider.model, detail="Tool call and result round trip passed.", round_trip=True)
+            echoed = token in (second.content or "")
+            result = ToolCapability(
+                status="ready",
+                model=provider.model,
+                detail=(
+                    "Tool call and result round trip passed."
+                    if echoed
+                    else "Tool call passed; the model did not echo the diagnostic token."
+                ),
+                round_trip=echoed,
+            )
         except (Exception, asyncio.TimeoutError) as exc:
             result = ToolCapability(status="failed", model=provider.model, detail=f"Tool-call probe failed: {str(exc)[:240]}")
         _results[provider] = result

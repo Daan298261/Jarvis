@@ -63,10 +63,6 @@ def gate_decision_payload(
     for key in FORBIDDEN_FAST_PATH_KEYS:
         if key in payload and payload[key] not in (None, "", [], {}):
             violations.append(f"forbidden key {key!r} in decision payload")
-    if decision.operation == Operation.BLOCK:
-        return SandboxGateResult(True, "blocked by decision — no execute")
-    if decision.operation == Operation.DONE:
-        return SandboxGateResult(True, "done — no execute")
     # TYPE_TEXT text is validated separately; ensure no shell/js in text_hint early.
     if not posture.allow_shell and any(k in payload for k in ("shell", "command")):
         violations.append("shell execution not permitted in reflex sandbox")
@@ -75,5 +71,10 @@ def gate_decision_payload(
     if not posture.allow_coordinate_click and any(k in payload for k in ("x", "y", "coordinate", "coordinates")):
         violations.append("coordinate click not permitted in reflex sandbox")
     if violations:
-        return SandboxGateResult(False, "; ".join(violations), violations=violations)
+        # A smuggled payload is refused even when the operation claims DONE/BLOCK.
+        return SandboxGateResult(False, "; ".join(dict.fromkeys(violations)), violations=violations)
+    if decision.operation == Operation.BLOCK:
+        return SandboxGateResult(True, "blocked by decision — no execute")
+    if decision.operation == Operation.DONE:
+        return SandboxGateResult(True, "done — no execute")
     return SandboxGateResult(True)

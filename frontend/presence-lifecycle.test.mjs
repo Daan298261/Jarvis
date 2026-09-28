@@ -10,6 +10,7 @@ const attention = await import("./src/presence/presenceAttention.ts")
 const cloud = await import("./src/presence/renderers/morphableOrbCloud.ts")
 const shapes = await import("./src/presence/renderers/shapes/catalog.ts")
 const quality = await import("./src/presence/presenceQuality.ts")
+const personas = await import("./src/persona/namedPersonas.ts")
 const THREE = await import("three")
 
 function meanAxis(attribute, axis) {
@@ -35,7 +36,7 @@ function material() {
   })
 }
 
-test("idle is the free cloud and engage drives uMorph toward the winning figure", () => {
+test("the normal idle state restores the selected figure", () => {
   const system = cloud.createMorphablePresenceSystem(0.02, material(), "humanoid_bust")
   const geo = system.figure.geometry
   const aPos = geo.getAttribute("aPos")
@@ -50,6 +51,7 @@ test("idle is the free cloud and engage drives uMorph toward the winning figure"
   assert.ok(Math.abs(meanGold(aGold)) < 0.001, "free cloud keeps the amber core off")
   assert.ok(meanGold(bGold) > 0.02, "winning figure carries the lattice gold")
   assert.ok(Math.abs(freeY - figureY) > 0.25, `free ${freeY} should not be the bust ${figureY}`)
+  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 1)
 
   system.setLifecycleTarget(1, { duration: 1.2 })
   system.tick(0.6)
@@ -81,12 +83,12 @@ test("reduced motion snaps uMorph and a non-bust winner is the engaged end", () 
   system.dispose()
 })
 
-test("morph is not skipped when requested presence is not galaxy", () => {
+test("the selected persona remains visible when idle in every rendered mode", () => {
   for (const mode of ["neural", "humanoid", "particle_bust", "galaxy"]) {
     assert.equal(lifecycle.presenceLifecycleEnabled(mode), true)
   }
   assert.equal(lifecycle.presenceLifecycleEnabled("none"), false)
-  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 0)
+  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 1)
   assert.equal(lifecycle.lifecycleMorphTarget("waiting"), 0)
   assert.equal(lifecycle.lifecycleMorphTarget("offline"), 0)
   for (const phase of ["thinking", "listening", "speaking", "executing", "alert", "error", "approval"]) {
@@ -105,6 +107,19 @@ test("morph is not skipped when requested presence is not galaxy", () => {
   assert.match(cloud.particleVertexShader, /pointerFalloff \* loose \* uPointerStrength/)
   assert.equal(cloud.particleVertexShader.match(/uniform float uMorph;/g)?.length, 1)
   system.dispose()
+})
+
+test("all named personas expose their own registered visual avatar", async () => {
+  const shapeIds = personas.ROSTER_IDS.map((id) => personas.PERSONA_VISUALS[id].shapeId)
+  assert.equal(shapeIds.length, 13)
+  assert.equal(new Set(shapeIds).size, 13)
+  for (const shapeId of shapeIds) {
+    assert.equal(shapes.resolvePresenceShape(shapeId).id, shapeId)
+  }
+
+  const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
+  assert.match(controls, /Named persona avatars/)
+  assert.match(controls, /SpecialistShapeMark/)
 })
 
 test("camera-unavailable attract stays on the pointer and does not invent a face", () => {

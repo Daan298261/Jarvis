@@ -344,6 +344,48 @@ h2 { font-size: 18px; margin: 0 0 12px; }
   padding: 16px 24px 8px;
   min-height: 0;
 }
+
+.chat-thread-messages,
+.hud-chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.chat-bubble-row {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+}
+
+.chat-bubble-row-assistant {
+  justify-content: flex-start;
+}
+
+.chat-bubble-row-user {
+  justify-content: flex-end;
+}
+
+.chat-bubble-row-assistant .bubble,
+.chat-bubble-row-assistant .hud-bubble {
+  max-width: min(92%, 720px);
+}
+
+.chat-bubble-row-user .bubble,
+.chat-bubble-row-user .hud-bubble {
+  max-width: min(88%, 640px);
+  margin-left: auto;
+}
+
+.bubble-time,
+.hud-bubble-time {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
 .chat-empty {
   justify-content: center;
 }

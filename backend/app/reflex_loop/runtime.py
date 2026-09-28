@@ -93,6 +93,98 @@ async def run_reflex_with_inmemory_world(
     result = await executor.run(goal)
     data = result.as_dict()
     data["surface"] = surface.value
+    # The world here is the caller's node list: nothing on screen was touched.
+    data["simulated"] = True
+    if result.success:
+        return ToolResult(
+            True,
+            f"DRY RUN — no UI actions were executed on this device. Planned outcome: {result.reason or 'done'}",
+            data=data,
+        )
+    return ToolResult(False, result.reason, data=data, error=result.reason or "reflex loop failed")
+
+
+_TYPE_KEYS_SPECIAL = set("{}+^%~()")
+
+
+def _escape_type_keys(text: str) -> str:
+    """pywinauto type_keys treats +^%~(){} as modifiers/groups; brace them to type literally."""
+    return "".join(f"{{{ch}}}" if ch in _TYPE_KEYS_SPECIAL else ch for ch in text)
+
+
+def _live_desktop_act(operation: Operation, node: ActionNode, payload: dict[str, Any]) -> dict[str, Any]:
+    handle = node.backend_ref.get("_handle")
+    if handle is None:
+        raise RuntimeError(f"target {node.target_id} has no live UI Automation handle")
+    if operation == Operation.CLICK:
+        handle.click_input()
+    elif operation == Operation.FOCUS:
+        handle.set_focus()
+    elif operation == Operation.TYPE_TEXT:
+        text = str(payload.get("text") or "")
+        try:
+            handle.set_focus()
+        except Exception:  # noqa: BLE001 — focus is best effort before typing
+            pass
+        if hasattr(handle, "set_edit_text"):
+            handle.set_edit_text(text)
+        else:
+            handle.type_keys(_escape_type_keys(text), with_spaces=True)
+    elif operation == Operation.CLEAR:
+        if not hasattr(handle, "set_edit_text"):
+            raise RuntimeError(f"target {node.target_id} does not support CLEAR")
+        handle.set_edit_text("")
+    elif operation == Operation.TOGGLE:
+        (handle.toggle if hasattr(handle, "toggle") else handle.click_input)()
+    elif operation == Operation.SELECT:
+        (handle.select if hasattr(handle, "select") else handle.click_input)()
+    else:
+        raise RuntimeError(f"{operation.value} is not supported on the live desktop fast path")
+    return {"protocol_calls": 1, "ok": True}
+
+
+async def run_reflex_live_desktop(
+    goal: str,
+    *,
+    app: str = "",
+    decide_client: Any | None = None,
+    text_generator: Any | None = None,
+) -> ToolResult:
+    """Execute the Reflex loop against the live Windows UI Automation tree."""
+    from ..tools.desktop import _collect_controls, _find_window, windows_ui_available
+
+    if not windows_ui_available():
+        return ToolResult(False, "", error="Live reflex computer-use requires Windows UI Automation")
+    try:
+        from pywinauto import Desktop
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(False, "", error=f"pywinauto is unavailable: {exc}")
+    desktop = Desktop(backend="uia")
+
+    def observe() -> ActionFrame:
+        window = _find_window(desktop, app or None)
+        title = str(window.window_text() or "")
+        return build_desktop_action_frame(
+            _collect_controls(window)[:80],
+            app_id=app or title,
+            window_title=title,
+        )
+
+    executor = ReflexLoopExecutor(
+        observe=observe,
+        act=_live_desktop_act,
+        decide_client=decide_client or get_reflex_decide_client(),
+        text_generator=text_generator,
+        sandbox=DEFAULT_SANDBOX,
+        permission_gate=permission_gate_for_surface(SurfaceKind.DESKTOP),
+    )
+    try:
+        result = await executor.run(goal)
+    except Exception as exc:  # noqa: BLE001 — UIA errors must surface as a failed step
+        return ToolResult(False, "", error=f"live reflex loop failed: {exc}")
+    data = result.as_dict()
+    data["surface"] = SurfaceKind.DESKTOP.value
+    data["simulated"] = False
     if result.success:
         return ToolResult(True, result.reason or "reflex loop done", data=data)
     return ToolResult(False, result.reason, data=data, error=result.reason or "reflex loop failed")
@@ -121,6 +213,7 @@ __all__ = [
     "action_frame_from_desktop_controls",
     "permission_gate_for_surface",
     "run_reflex_benchmark",
+    "run_reflex_live_desktop",
     "run_reflex_with_inmemory_world",
     "set_reflex_decide_client",
 ]

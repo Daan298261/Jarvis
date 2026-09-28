@@ -22,10 +22,14 @@
   Product release cut. Creates gitignored `.vendor/license-issuer` keys if
   needed and writes Jarvis-unrestricted.jarvis-license beside JarvisSetup.exe.
   1.4.6 shipped without this file; later releases must not.
+
+.PARAMETER SkipDesktopShell
+  Skip building/staging Jarvis Desktop (Tauri). Release cuts require the desktop shell.
 #>
 param(
     [switch]$SkipBootstrapModel,
     [switch]$SkipVoicePack,
+    [switch]$SkipDesktopShell,
     [switch]$Release
 )
 
@@ -83,11 +87,28 @@ if (-not $SkipVoicePack) {
     Write-Warning "Building without bundled default Kokoro voice pack (-SkipVoicePack)."
 }
 
+$DesktopMarker = Join-Path $ScriptDir "payload\desktop\.jarvis_desktop_staged_ok"
+if (-not $SkipDesktopShell) {
+    Write-Host "==> Staging Jarvis Desktop shell (Tauri)" -ForegroundColor Cyan
+    $stageArgs = @()
+    if ($Release) { $stageArgs += "-Require" }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "stage-desktop-shell.ps1") @stageArgs
+    if ($LASTEXITCODE -ne 0) { throw "Desktop shell staging failed with exit code $LASTEXITCODE" }
+    if (-not (Test-Path $DesktopMarker)) {
+        throw "Desktop payload marker missing: $DesktopMarker"
+    }
+} elseif ($Release) {
+    throw "Release cuts cannot use -SkipDesktopShell. The installer must ship Jarvis Desktop."
+} else {
+    Write-Warning "Building without Jarvis Desktop (-SkipDesktopShell). Obsidian embed requires the desktop shell."
+}
+
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Write-Host "Compiling $Iss ..."
 $defines = @()
 if ($SkipBootstrapModel) { $defines += "/DSkipBootstrapModel=1" }
 if ($SkipVoicePack) { $defines += "/DSkipVoicePack=1" }
+if ($SkipDesktopShell) { $defines += "/DSkipDesktopShell=1" }
 & $iscc @defines "/O$OutDir" $Iss
 if ($LASTEXITCODE -ne 0) { throw "iscc failed with exit code $LASTEXITCODE" }
 
@@ -100,6 +121,9 @@ if (-not $SkipBootstrapModel) {
 }
 if (-not $SkipVoicePack) {
     Write-Host "Includes: Kokoro-82M default household butler voice" -ForegroundColor Green
+}
+if (-not $SkipDesktopShell) {
+    Write-Host "Includes: Jarvis Desktop (Tauri) + backend sidecar" -ForegroundColor Green
 }
 
 Write-Host "==> Vendor license manager JarvisLicenseManager (vendor machine only; skipped on the public tree)" -ForegroundColor Cyan
@@ -123,4 +147,10 @@ if ($LASTEXITCODE -ne 0) {
 $unrestricted = Join-Path $OutDir "Jarvis-unrestricted.jarvis-license"
 if ($Release -and (-not (Test-Path $unrestricted) -or (Get-Item $unrestricted).Length -le 0)) {
     throw "Release cut must write $unrestricted. 1.4.6 shipped without a generated license file; following releases must issue it as a build step."
+}
+
+if ($Release) {
+    Write-Host "==> Staging Releases/r* deliverable folder" -ForegroundColor Cyan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "stage-release-folder.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "stage-release-folder.ps1 failed with exit code $LASTEXITCODE" }
 }

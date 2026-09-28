@@ -1,12 +1,16 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { refreshSessionPersonality } from "../hud/sessionPersonality"
 import { parseConfirmationPayload, PermissionPrompt } from "./PermissionPrompt"
 import { useOptionalPendingApprovals } from "./pendingApprovals"
 import {
+  attachThreadTimestamps,
   filterModelLaneEvents,
   filterThoughtEvents,
   filterWorkEvents,
+  formatChatTimestamp,
   formatModelAttribution,
   parseModelLaneDetail,
+  personalityDisplayName,
   thoughtEventLabel,
   isTaskRunning,
   splitAssistantContent,
@@ -32,6 +36,8 @@ type OwnerChatTranscriptProps = {
   messages?: { role: string; content: string }[] | null
   pending?: string[]
   variant: "hud" | "classic"
+  createdAt?: string | null
+  updatedAt?: string | null
 }
 
 export function OwnerChatTranscript({
@@ -49,7 +55,10 @@ export function OwnerChatTranscript({
   messages,
   pending,
   variant,
+  createdAt,
+  updatedAt,
 }: OwnerChatTranscriptProps) {
+  const [personalityLabel, setPersonalityLabel] = useState("Anzu / Core")
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [thoughtOpen, setThoughtOpen] = useState(false)
   const [internalOpen, setInternalOpen] = useState(false)
@@ -59,10 +68,22 @@ export function OwnerChatTranscript({
   const workEvents = useMemo(() => filterWorkEvents(events), [events])
   const thoughtEvents = useMemo(() => filterThoughtEvents(events), [events])
   const modelLaneLines = useMemo(() => filterModelLaneEvents(events), [events])
+  useEffect(() => {
+    void refreshSessionPersonality().then((mode) => {
+      if (mode?.label) setPersonalityLabel(mode.label)
+    })
+  }, [])
+
   const turns = useMemo(
-    () => visibleChatTurns({ prompt, result, error, messages, pending, liveAssistant }),
-    [prompt, result, error, messages, pending, liveAssistant],
+    () =>
+      attachThreadTimestamps(
+        visibleChatTurns({ prompt, result, error, messages, pending, liveAssistant }),
+        createdAt,
+        updatedAt,
+      ),
+    [prompt, result, error, messages, pending, liveAssistant, createdAt, updatedAt],
   )
+  const assistantName = personalityDisplayName(personalityLabel)
   const internalBlocks = useMemo(() => {
     const blocks: string[] = []
     for (const turn of turns) {
@@ -94,17 +115,28 @@ export function OwnerChatTranscript({
   const userBubbleClass = isHud ? "hud-bubble hud-bubble-user" : "bubble bubble-user"
   const assistantBubbleClass = isHud ? "hud-bubble hud-bubble-assistant" : "bubble bubble-assistant"
   const internalBubbleClass = isHud ? "hud-bubble hud-bubble-internal" : "bubble bubble-internal"
-  const userLabel = isHud ? <span className="hud-bubble-label">You</span> : <strong>You</strong>
-  const assistantLabel = isHud ? <span className="hud-bubble-label">Jarvis</span> : <strong>Jarvis</strong>
+  const threadClass = isHud ? "hud-chat-thread" : "chat-thread-messages"
+
+  function bubbleMeta(turn: (typeof turns)[number], side: "user" | "assistant") {
+    const stamp = formatChatTimestamp(turn.at)
+    if (!stamp) return null
+    return (
+      <span className={isHud ? "hud-bubble-time" : "bubble-time"}>
+        {side === "user" ? "You" : assistantName} · {stamp}
+      </span>
+    )
+  }
 
   return (
-    <>
+    <div className={threadClass}>
       {turns.map((turn, index) => {
         if (turn.role === "user") {
           return (
-            <div className={userBubbleClass} key={`${turn.role}-${index}-${turn.content.slice(0, 24)}`}>
-              {userLabel}
-              <p>{turn.content}</p>
+            <div className={`chat-bubble-row chat-bubble-row-user`} key={`${turn.role}-${index}-${turn.content.slice(0, 24)}`}>
+              <div className={userBubbleClass}>
+                {bubbleMeta(turn, "user")}
+                <p>{turn.content}</p>
+              </div>
             </div>
           )
         }
@@ -112,9 +144,11 @@ export function OwnerChatTranscript({
         const publicText = turn.public ?? split.public
         if (!publicText && !turn.internal && !split.internal) return null
         return (
-          <div className={assistantBubbleClass} key={`${turn.role}-${index}-${publicText.slice(0, 24)}`}>
-            {assistantLabel}
-            {publicText ? <div className="report">{publicText}</div> : null}
+          <div className="chat-bubble-row chat-bubble-row-assistant" key={`${turn.role}-${index}-${publicText.slice(0, 24)}`}>
+            <div className={assistantBubbleClass}>
+              {bubbleMeta(turn, "assistant")}
+              {publicText ? <div className="report">{publicText}</div> : null}
+            </div>
           </div>
         )
       })}
@@ -236,6 +270,6 @@ export function OwnerChatTranscript({
           </div>
         )}
       </div>
-    </>
+    </div>
   )
 }

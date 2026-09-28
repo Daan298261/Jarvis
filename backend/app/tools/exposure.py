@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Iterable
 
@@ -7,22 +7,22 @@ REQUEST_CAPABILITY = "request_capability"
 # Always available so the model can ask for a missing capability.
 CORE_TOOLS = frozenset({"filesystem", REQUEST_CAPABILITY})
 
-# Task class → native tools Jarvis should send on each inference call.
+# Task class â†’ native tools Jarvis should send on each inference call.
 # Keep these small: the point is fewer definitions, less confusion, lower latency.
 TASK_TOOL_SETS: dict[str, frozenset[str]] = {
     "filesystem": frozenset({"filesystem", "python"}),
     "shell": frozenset({"filesystem", "terminal", "python"}),
-    "system administration": frozenset({"filesystem", "terminal", "python", "desktop", "screenshot"}),
+    "system administration": frozenset({"filesystem", "terminal", "python", "desktop", "screenshot", "apps"}),
     "software engineering": frozenset({"filesystem", "terminal", "python", "git", "verify_code"}),
     "research": frozenset({"filesystem", "web_fetch", "browser", "python"}),
     "browser automation": frozenset({"filesystem", "browser", "web_fetch"}),
-    "windows gui": frozenset({"filesystem", "desktop", "screenshot", "terminal", "reflex_computer_use"}),
+    "windows gui": frozenset({"filesystem", "apps", "desktop", "screenshot", "terminal", "reflex_computer_use"}),
     "office": frozenset({"filesystem", "office", "python"}),
     "document processing": frozenset({"filesystem", "office", "python"}),
     "data processing": frozenset({"filesystem", "python", "terminal"}),
     "multimodal": frozenset({"filesystem", "screenshot", "desktop", "browser", "reflex_computer_use"}),
     "mixed": frozenset(
-        {"filesystem", "terminal", "python", "git", "web_fetch", "browser", "desktop", "screenshot", "reflex_computer_use"}
+        {"filesystem", "apps", "terminal", "python", "git", "web_fetch", "browser", "desktop", "screenshot", "reflex_computer_use"}
     ),
     "long-horizon autonomous": frozenset(
         {
@@ -33,6 +33,7 @@ TASK_TOOL_SETS: dict[str, frozenset[str]] = {
             "web_fetch",
             "browser",
             "desktop",
+            "apps",
             "screenshot",
             "office",
             "reflex_computer_use",
@@ -53,6 +54,8 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "web": "web_fetch",
     "http": "web_fetch",
     "http_get": "web_fetch",
+    "app": "apps",
+    "launcher": "apps",
     "uia": "desktop",
     "windows_ui": "desktop",
     "ui": "desktop",
@@ -79,6 +82,7 @@ NATIVE_TOOLS = (
     "python",
     "browser",
     "desktop",
+    "apps",
     "office",
     "git",
     "docker",
@@ -92,6 +96,7 @@ NATIVE_TOOLS = (
     "ufo",
     "cua",
     "reflex_computer_use",
+    "read_ingress",
 )
 
 

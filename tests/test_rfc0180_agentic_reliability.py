@@ -105,3 +105,25 @@ async def test_probe_requires_tool_result_round_trip():
     result = await probe_tool_capability(provider)
     assert result["status"] == "ready"
     assert result["round_trip"] is True
+
+
+@pytest.mark.asyncio
+async def test_probe_allows_tool_call_without_echoing_the_token():
+    class ScriptedProvider(ModelProvider):
+        async def chat(self, messages, tools=None, **kwargs):
+            if tools:
+                token = messages[-1].content.split()[-1].rstrip(".")
+                return ChatResult(
+                    tool_calls=[
+                        {
+                            "id": "c1",
+                            "function": {"name": "diagnostic_echo", "arguments": json.dumps({"token": token})},
+                        }
+                    ]
+                )
+            return ChatResult(content="Acknowledged.")
+
+    provider = ScriptedProvider("http://localhost:8088/v1")
+    result = await probe_tool_capability(provider)
+    assert result["status"] == "ready"
+    assert result["round_trip"] is False

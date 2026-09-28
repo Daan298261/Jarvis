@@ -5,7 +5,7 @@ Ships **sources** that produce `JarvisSetup.exe` on a Windows machine. The cloud
 ## What it does
 
 1. **JarvisSetup.exe** (Inno Setup) copies the repo into `%LOCALAPPDATA%\Jarvis` (default), excluding `.venv`, `node_modules`, `models/`, `runtime/`, `data/`, `logs/`, local `release/` bundles, `_release_upload/`, and `.git`.
-2. Runs **`bootstrap.ps1`** once: installs Python/Node via `winget` if needed, creates `.venv`, `pip install -r backend/requirements.txt`, Playwright Chromium, `npm run build`, downloads llama.cpp CUDA 13.3 binaries and default **Qwen3.5-9B** GGUFs.
+2. Runs **`bootstrap.ps1`** once: installs Python/Node via `winget` if needed, creates `.venv`, installs backend packages, Playwright Chromium, builds the portal, and prepares llama.cpp, the bootstrap GGUF, and the voice models you checked in Setup (household butler is bundled; the other four shared neural packs are optional).
 3. Adds **Start Jarvis** / **Stop Jarvis** shortcuts (Desktop + Start Menu) that call `start-jarvis.ps1` and `stop-jarvis.ps1`.
 4. Uninstall removes shortcuts; **does not** delete `data/` by default.
 
@@ -58,6 +58,8 @@ Release builds run `stage-voice-default.ps1` to bundle **Kokoro-82M** under `mod
 ```powershell
 .\installer\windows\build-installer.ps1 -SkipVoicePack
 ```
+
+On the target PC, Setup shows checkboxes for the five shared neural voices. All five are checked by default so an upgrade still prepares every persona pack. Uncheck Chatterbox (or any other pack) to skip that download; you can install it later from the Persona or Voice menu. If a selected voice download fails, setup logs it and the menu can retry that pack later.
 
 One-liner after Inno Setup is installed:
 

@@ -135,6 +135,9 @@ export function VoiceProfilePicker() {
       if (result.installed && unlocked?.available) {
         await setActiveVoiceProfile(profile.id)
         setActiveId(profile.id)
+        if (named?.active?.id) {
+          await savePersonaAppearance(named.active.id, { voice_profile_id: profile.id })
+        }
         setMsg(`${profile.display_name} is ready.`)
         try {
           const status = await api<VoiceEngineStatus>("/api/voice/status")

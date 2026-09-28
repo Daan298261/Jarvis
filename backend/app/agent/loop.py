@@ -14,9 +14,12 @@ from openai import APIConnectionError, APIStatusError
 
 from ..coding.usage import record_task_usage
 from ..config import AppSettings, load_settings
+from sqlalchemy import func, select
+
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
+from ..inference.backends import is_inference_template_error
 from ..inference.manager import MANAGER
 from ..inference.tool_capability import probe_tool_capability
 from ..inference.profiles import ModelProfile, resolve_profile
@@ -34,7 +37,8 @@ from .durable_execution.runner import run_model_step, run_tool_step
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..providers.openai_compat import OpenAICompatProvider
 from ..providers.tool_call_compat import validate_turn_calls
-from ..policy.authorize import AuthorizationResult, authorize
+from ..policy.authorize import AuthorizationResult
+from ..policy.action_gate import gate_tool_call
 from ..policy.computer_permissions import (
     confirmation_payload_for_tool,
     consume_once_grants,
@@ -94,6 +98,8 @@ from .planning import (
     classify_task,
     route_request,
     follow_up_stays_conversation,
+    simple_app_control,
+    simple_file_control,
     format_selected_plan,
     is_plain_conversation,
     parse_plan_block,
@@ -108,6 +114,7 @@ from ..persona.chat_delivery import (
     stream_speak_offset,
 )
 from ..persona.acknowledgements import task_acknowledgement
+from ..persona.narrator import forget_task, plain_failure, speak_outcome, speak_progress
 from ..persona.owner_chat import OWNER_CHAT_SYSTEM, owner_chat_max_tokens
 from ..persona.think_aloud import run_with_think_aloud
 from ..persona.weather import weather_system_message
@@ -145,7 +152,8 @@ from .tooling import apply_capability_request, should_enable_thinking
 from .turn_tools import select_turn_schemas
 from .ingress_gate import SAFE_LARGE_PASTE_SPEECH, run_ingress_gate
 from .trajectory import gated_trajectory_lessons, record_trajectory
-from ..memory.ingress_spill import ingress_prompt_segment
+from ..memory.ingress_spill import ingress_prompt_segment, list_ingress_chunks
+from .segmented_input import condense_text
 from .policy import policy_guidance
 from .prompts import (
     CONTINUE_PROMPT,
@@ -240,7 +248,7 @@ def _tool_authorization(
     action = arguments.get("action") if isinstance(arguments, dict) else None
     if is_destructive_operation(name, arguments, command):
         risk = RiskLevel.IRREVERSIBLE
-    return authorize(
+    return gate_tool_call(
         name,
         action=action,
         arguments=arguments if isinstance(arguments, dict) else None,
@@ -484,6 +492,7 @@ class AgentRuntime:
             await session.commit()
             if terminal_status in {"completed", "failed", "cancelled"}:
                 from ..automation.breaker import on_task_terminal
+                from .intake import on_task_terminal as advance_intake_chain
 
                 on_task_terminal(
                     task_id,
@@ -492,6 +501,23 @@ class AgentRuntime:
                     error=task.error or "",
                     waiting_for_confirmation=bool(task.waiting_for_confirmation),
                 )
+                advance_intake_chain(task_id, status=str(terminal_status), result=task.result or "")
+                route = str(getattr(task, "response_route", "") or "")
+                task_class = str(getattr(task, "task_class", "") or "")
+                # Conversation replies are already spoken; managed tasks need a
+                # natural outcome, and every failure/cancel is spoken in plain language.
+                if terminal_status in {"failed", "cancelled"} or route == MANAGED_TASK or (
+                    task_class and task_class != CONVERSATION_CLASS
+                ):
+                    await speak_outcome(
+                        task_id,
+                        success=terminal_status == "completed",
+                        result=task.result or "",
+                        error=task.error or "",
+                        cancelled=terminal_status == "cancelled",
+                    )
+                else:
+                    forget_task(task_id)
 
     async def _complete(
         self,
@@ -549,6 +575,34 @@ class AgentRuntime:
         await self._release_lazy_vision()
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
         return True
+
+    async def _fail_task(
+        self,
+        task_id: str,
+        error: str,
+        working: WorkingState | None = None,
+        metrics: LiveTaskMetrics | None = None,
+        *,
+        current_action: str = "Failed",
+        stage: str = "failed",
+    ) -> None:
+        spoken = plain_failure(error)
+        fields: dict[str, Any] = {
+            "status": "failed",
+            "stage": "failed",
+            "error": error,
+            "result": spoken,
+            "current_action": current_action,
+            "current_tool": "",
+        }
+        if metrics is not None:
+            fields.update(metrics.as_fields())
+        await self._update(task_id, **fields)
+        if working is not None:
+            await record_trajectory(task_id, working, "failed")
+        await complete_coding_route(task_id, "failed", error)
+        await self._release_lazy_vision()
+        await BUS.publish(task_id, "failed", spoken, error[:1500], stage=stage)
 
     async def _note_coding_outcome(self, task_id: str, working: WorkingState, outcome: str, verification: str = "") -> None:
         if not working.coding_worker:
@@ -865,6 +919,21 @@ class AgentRuntime:
                 else "Replying",
             )
 
+        from ..tts.speech_safe import speech_safe
+
+        spoken_front = speech_safe(prefetched_front.text or "")
+        model_ready = bool(MANAGER.provider and MANAGER.state.loaded)
+        if spoken_front and not model_ready and prefetched_front.action == "final_basic":
+            await self._complete(
+                task_id,
+                [*messages, ChatMessage(role="assistant", content=spoken_front)],
+                spoken_front,
+                spoken_front,
+                working,
+                metrics,
+            )
+            return
+
         progress_watch = asyncio.create_task(
             run_worker_progress_watchdog(
                 task_id,
@@ -1131,6 +1200,92 @@ class AgentRuntime:
         working.verified = True
         await self._complete(task_id, messages, content, content, working, metrics)
 
+    async def _run_simple_app_control(
+        self,
+        task_id: str,
+        *,
+        action: str,
+        name: str,
+        working: WorkingState,
+        metrics: LiveTaskMetrics,
+        settings: AppSettings,
+        autonomy: str,
+        profile_id: str | None,
+    ) -> None:
+        """Open or close a named app without waiting for the language model."""
+        arguments = {"action": action, "name": name}
+        await self._update(task_id, stage="act", current_action=f"{action} {name}", current_tool="apps")
+        await BUS.publish(task_id, "stage", "Acting", stage="act")
+        await speak_progress(task_id, "apps", arguments)
+        observation, _ = await self._execute_tool_ex(
+            task_id,
+            "apps",
+            arguments,
+            autonomy,
+            settings,
+            metrics=metrics,
+            profile_id=profile_id,
+        )
+        lowered = observation.lower()
+        failed = observation.startswith("ERROR:") or any(
+            marker in lowered
+            for marker in ("did not start", "no installed app", "authorization denied", "could not start")
+        )
+        display = " ".join(word.capitalize() if word.islower() else word for word in name.split()) or name
+        if failed:
+            await self._fail_task(task_id, observation, working, metrics)
+            return
+        content = f"{display} is open." if action == "open" else f"{display} is closed."
+        messages = [
+            ChatMessage(role="user", content=f"{action} {name}"),
+            ChatMessage(role="assistant", content=content),
+        ]
+        await self._complete(task_id, messages, content, observation[:1500], working, metrics)
+
+    async def _run_simple_file_control(
+        self,
+        task_id: str,
+        *,
+        action: str,
+        path: str,
+        content: str,
+        working: WorkingState,
+        metrics: LiveTaskMetrics,
+        settings: AppSettings,
+        autonomy: str,
+        profile_id: str | None,
+    ) -> None:
+        """Read or write one named text file without waiting for the language model."""
+        arguments: dict[str, Any] = {"action": action, "path": path}
+        if action == "write":
+            arguments["content"] = content
+        await self._update(task_id, stage="act", current_action=f"{action} {path}", current_tool="filesystem")
+        await BUS.publish(task_id, "stage", "Acting", stage="act")
+        await speak_progress(task_id, "filesystem", arguments)
+        observation, _ = await self._execute_tool_ex(
+            task_id,
+            "filesystem",
+            arguments,
+            autonomy,
+            settings,
+            metrics=metrics,
+            profile_id=profile_id,
+        )
+        lowered = observation.lower()
+        failed = observation.startswith("ERROR:") or any(
+            marker in lowered
+            for marker in ("authorization denied", "not allowed", "permission denied", "path is outside")
+        )
+        if failed:
+            await self._fail_task(task_id, observation, working, metrics)
+            return
+        spoken = "The file is saved." if action == "write" else "I read the file."
+        messages = [
+            ChatMessage(role="user", content=f"{action} {path}"),
+            ChatMessage(role="assistant", content=spoken),
+        ]
+        await self._complete(task_id, messages, spoken, observation[:1500], working, metrics)
+
     async def _run(
         self,
         task_id: str,
@@ -1245,6 +1400,34 @@ class AgentRuntime:
                 )
                 return
             working.task_class = (follow_route.task_class if follow_route else classify_task(extra_prompt or prompt))
+        if not pending_tool:
+            app_job = simple_app_control(extra_prompt or prompt)
+            if app_job:
+                await self._run_simple_app_control(
+                    task_id,
+                    action=app_job[0],
+                    name=app_job[1],
+                    working=working,
+                    metrics=metrics,
+                    settings=settings,
+                    autonomy=autonomy,
+                    profile_id=profile_name,
+                )
+                return
+            file_job = simple_file_control(extra_prompt or prompt)
+            if file_job:
+                await self._run_simple_file_control(
+                    task_id,
+                    action=file_job[0],
+                    path=file_job[1],
+                    content=file_job[2],
+                    working=working,
+                    metrics=metrics,
+                    settings=settings,
+                    autonomy=autonomy,
+                    profile_id=profile_name,
+                )
+                return
         user_turn = (extra_prompt or "").strip()
         if not pending_tool and (not continue_existing or user_turn):
             progress_watch = asyncio.create_task(
@@ -1324,7 +1507,20 @@ class AgentRuntime:
             await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-            await MANAGER.load(settings, profile_name)
+            await publish_owner_text("Loading the model now.", source="progress", speak=True)
+            try:
+                await MANAGER.load(settings, profile_name)
+            except Exception as exc:
+                await self._fail_task(
+                    task_id,
+                    f"The language model could not be loaded: {exc}",
+                    working,
+                    metrics,
+                )
+                return
+        if MANAGER.provider is None or not MANAGER.state.loaded:
+            await self._fail_task(task_id, "The language model is not loaded.", working, metrics)
+            return
         target_ctx = initial_context_size(working.task_class, profile)
         live_ctx = await MANAGER.apply_context(settings, target_ctx, allow_shrink=True)
         if live_ctx != effective_cap:
@@ -1335,7 +1531,39 @@ class AgentRuntime:
                 stage="model",
             )
         provider = MANAGER.provider
-        assert provider is not None
+        if working.ingress_blob_id and working.ingress_size_class == "big" and not existing:
+            stored_chunks = await list_ingress_chunks(working.ingress_blob_id)
+            if not stored_chunks:
+                detail = "The stored long message could not be read. No input segments were skipped."
+                await self._update(task_id, status="failed", stage="failed", error=detail, result=detail)
+                await BUS.publish(task_id, "failed", "Long input unavailable", detail, stage="understand")
+                return
+
+            async def _segment_progress(index: int, total: int) -> None:
+                await BUS.publish(
+                    task_id,
+                    "progress",
+                    f"Reading input part {index}/{total}",
+                    stage="understand",
+                )
+
+            try:
+                brief, segment_count = await condense_text(
+                    "".join(row.body or "" for row in stored_chunks),
+                    on_segment=_segment_progress,
+                )
+            except Exception as exc:
+                detail = f"Could not process every part of the long message: {exc}"
+                await self._update(task_id, status="failed", stage="failed", error=detail, result=detail)
+                await BUS.publish(task_id, "failed", "Long input processing failed", detail[:1500], stage="understand")
+                return
+            active_prompt = (
+                f"Owner request, processed in {segment_count} ordered parts. "
+                f"Original input id: {working.ingress_blob_id}. "
+                "Use read_ingress with that id and a character offset for exact details. "
+                "Form an internal plan; use tools when the owner requested action, then observe and verify.\n\n"
+                f"Working brief:\n{brief}"
+            )
         if isinstance(provider, OpenAICompatProvider) and working.ingress_needs_tools is not False and working.task_class != "conversation":
             capability = await probe_tool_capability(provider, thinking=profile.thinking)
             if capability["status"] != "ready":
@@ -1424,10 +1652,10 @@ class AgentRuntime:
             if skills:
                 system_prompt += "\n\n" + skills
                 await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
-            if should_route(working.task_class, prompt):
-                decision = route_software_task(prompt, task_class=working.task_class)
+            if should_route(working.task_class, active_prompt):
+                decision = route_software_task(active_prompt, task_class=working.task_class)
                 await record_coding_route(task_id, decision)
-                routing = await route_coding_task(prompt, task_class=working.task_class)
+                routing = await route_coding_task(active_prompt, task_class=working.task_class)
                 working.coding_worker = decision.selected_worker or routing.get("execute_worker") or ""
                 working.coding_tier = decision.tier_name or ""
                 working.coding_complexity = int(decision.score or routing.get("complexity") or 0)
@@ -1489,7 +1717,7 @@ class AgentRuntime:
                     stage="understand",
                 )
             system_prompt = apply_working_set_to_system(system_prompt, turn_ws)
-            audit = professional_prompt_block(prompt)
+            audit = professional_prompt_block(active_prompt)
             if audit:
                 # Append after tool exposure so context fitting keeps this block in the tail.
                 system_prompt += "\n\n" + audit
@@ -1549,6 +1777,7 @@ class AgentRuntime:
                     )
                     await self._update(task_id, current_tool=name, current_action=f"Skill {skill.name}: {name}")
                     await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
+                    await speak_progress(task_id, name, arguments)
                     observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
                     failed = "ERROR:" in observation or observation.lower().startswith("error")
                     working.note_tool(name, observation, not failed)
@@ -1579,10 +1808,13 @@ class AgentRuntime:
                     break
 
         if pending_tool:
+            pending_name = pending_tool["name"]
+            pending_args = pending_tool["arguments"] if isinstance(pending_tool.get("arguments"), dict) else {}
+            await speak_progress(task_id, pending_name, pending_args)
             result_text = await self._execute_tool(
                 task_id,
-                pending_tool["name"],
-                pending_tool["arguments"],
+                pending_name,
+                pending_args,
                 autonomy,
                 settings,
                 approved=True,
@@ -1598,6 +1830,8 @@ class AgentRuntime:
             tools_used = True
 
         context_recovery_attempts = 0
+        template_retries = 0
+        work_wrap_retries = 0
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel or kill_switch_active():
@@ -1635,7 +1869,11 @@ class AgentRuntime:
                     "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if think else "Model is responding")),
                     stage="verify" if verifying else "act",
                 )
-                messages = compact_history(messages, working_state_block=working.as_prompt_block())
+                messages = compact_history(
+                    messages,
+                    working_state_block=working.as_prompt_block(),
+                    user_fallback=working.goal or extra_prompt or prompt,
+                )
                 compacted = any(
                     isinstance(message.content, str) and message.content.startswith(SUMMARY_MARKER)
                     for message in messages
@@ -1672,6 +1910,13 @@ class AgentRuntime:
                         model_family=profile.family,
                         prompt=_latest_user_text(messages, working.goal or active_prompt),
                     )
+                    if working.ingress_blob_id and not force_final:
+                        ingress_tool = REGISTRY.tools.get("read_ingress")
+                        if ingress_tool is not None and ingress_tool.enabled:
+                            selected = list(turn_tools or [])
+                            if not any(item.get("function", {}).get("name") == "read_ingress" for item in selected):
+                                selected.append(ingress_tool.schema())
+                            turn_tools = selected
                     turn_max_tokens = 400 if force_final else 1024
 
                     async def _model_turn_inner() -> ChatResult:
@@ -1802,6 +2047,24 @@ class AgentRuntime:
                         return
                     if isinstance(exc, APIStatusError):
                         detail = getattr(exc, "message", None) or str(exc)
+                        if is_inference_template_error(exc) and template_retries < 1:
+                            template_retries += 1
+                            if messages and messages[-1].role == "user":
+                                messages = messages[:-1]
+                            continue
+                        if tools_used and work_wrap_retries < 1:
+                            work_wrap_retries += 1
+                            wrap = "The requested work already ran on disk."
+                            if await self._complete(
+                                task_id,
+                                messages,
+                                wrap,
+                                wrap,
+                                working,
+                                metrics,
+                            ):
+                                return
+                            continue
                         err = f"Inference server error ({exc.status_code}): {detail}"
                     else:
                         err = f"Inference server unreachable: {exc}"
@@ -1950,6 +2213,8 @@ class AgentRuntime:
                             await BUS.publish(task_id, "retry", "Blocked identical retry", observation, stage="diagnose")
                             messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                             working.note_tool(name, observation, False)
+                            consecutive_failures += 1
+                            last_failed_observation = observation
                             continue
                         recent_hashes.append(signature)
                         tool_meta = REGISTRY.tools.get(name)
@@ -1991,6 +2256,7 @@ class AgentRuntime:
                             return
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
+                        await speak_progress(task_id, name, arguments)
                         if name == "request_capability":
                             exposed_tools, _added, observation = apply_capability_request(exposed_tools, arguments)
                             granted = grant_requested_tools(arguments)
@@ -2016,6 +2282,9 @@ class AgentRuntime:
                             last_failed_observation = observation
                             hints.append(recovery_hint(name, observation, failures_by_tool[name]))
                             await BUS.publish(task_id, "error", f"{name} failed", observation[:1500], stage="diagnose")
+                            from ..security.blue_watch import note_tool_outcome
+
+                            note_tool_outcome(task_id, name, arguments, observation, failed=True)
                         else:
                             consecutive_failures = 0
                             failures_by_tool.pop(name, None)
@@ -2027,6 +2296,15 @@ class AgentRuntime:
                         if attach:
                             messages.append(_image_message(attach))
                             working.vision_requested = True
+                    if consecutive_failures >= 5:
+                        await self._fail_task(
+                            task_id,
+                            last_failed_observation or "I kept running into the same problem.",
+                            working,
+                            metrics,
+                            current_action="Failed: no progress",
+                        )
+                        return
                     if hints:
                         guidance = "\n\n".join(hints)
                         working.next_action = "recover with a different strategy"
@@ -2161,22 +2439,20 @@ class AgentRuntime:
                 if await self._complete(task_id, messages, content or verification, verification, working, metrics):
                     return
                 continue
-            await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification", **metrics.as_fields())
-            await record_trajectory(task_id, working, "failed")
-            await complete_coding_route(task_id, "failed", "Step limit reached before verification")
-            await self._release_lazy_vision()
-            await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
+            await self._fail_task(
+                task_id,
+                "Step limit reached before verification",
+                working,
+                metrics,
+                current_action="Failed: step limit",
+            )
         except asyncio.CancelledError:
             await self._update(task_id, status="cancelled", stage="cancelled", **metrics.as_fields())
             await complete_coding_route(task_id, "cancelled")
             await self._release_lazy_vision()
             raise
         except Exception as exc:
-            await self._update(task_id, status="failed", stage="failed", error=str(exc), **metrics.as_fields())
-            await record_trajectory(task_id, working, "failed")
-            await complete_coding_route(task_id, "failed", str(exc))
-            await self._release_lazy_vision()
-            await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
+            await self._fail_task(task_id, str(exc), working, metrics)
         finally:
             if progress_watch is not None:
                 progress_watch.cancel()
@@ -2235,7 +2511,10 @@ class AgentRuntime:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
             REGISTRY._context["task_id"] = task_id
-            if security_role:
+            REGISTRY._context["approved"] = approved
+            if name == "read_ingress":
+                result = await REGISTRY.execute(name, arguments, task_id=task_id)
+            elif security_role:
                 result = await REGISTRY.execute(name, arguments, security_role=security_role)
             else:
                 result = await REGISTRY.execute(name, arguments)
@@ -2250,7 +2529,15 @@ class AgentRuntime:
         arg_digest = hashlib.sha256(
             f"{name}:{json.dumps(arguments, sort_keys=True)}".encode()
         ).hexdigest()[:24]
-        step_key = f"tool:{name}:{arg_digest}"
+        # Position makes the key a *step*, not a command: a crash resumes at the same
+        # ordinal (records are written after execution) and reuses the committed
+        # effect, while a live repeat — e.g. re-checking whether an app is running —
+        # executes again instead of returning a stale observation.
+        async with SessionLocal() as session:
+            ordinal = await session.scalar(
+                select(func.count()).select_from(ToolCallRecord).where(ToolCallRecord.task_id == task_id)
+            )
+        step_key = f"tool:{name}:{arg_digest}:{int(ordinal or 0)}"
 
         task_status = await get_task_status(task_id)
         if task_status is None:

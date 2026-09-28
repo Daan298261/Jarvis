@@ -46,13 +46,22 @@ def to_openai_messages(
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for message in messages:
-        item: dict[str, Any] = {"role": message.role, "content": message.content}
+        content: str | list[dict[str, Any]] = message.content
+        if content is None:
+            content = ""
+        item: dict[str, Any] = {"role": message.role, "content": content}
         if message.name:
             item["name"] = message.name
         if message.tool_call_id:
             item["tool_call_id"] = message.tool_call_id
         if message.tool_calls:
-            item["tool_calls"] = message.tool_calls
+            wired = normalize_tool_calls(message.tool_calls)
+            if wired:
+                item["tool_calls"] = wired
+                if item["content"] is None:
+                    item["content"] = ""
+        if message.role == "tool" and not item.get("tool_call_id"):
+            item["tool_call_id"] = "missing"
         if not for_inference and message.reasoning_content:
             item["reasoning_content"] = message.reasoning_content
         out.append(item)

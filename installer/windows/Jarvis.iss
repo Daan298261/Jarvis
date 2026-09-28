@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.4.15"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -39,6 +39,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a &Desktop shortcut to start Jarvis"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDescription: "After installing:"; Flags: checkedonce
+Name: "voicebutler"; Description: "Household butler (Kokoro — Anzu default)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicedry"; Description: "Dry household butler (Nabu, Eir)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicetactical"; Description: "Tactical aide (Mestor, Themis, Heimdall)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicesynthetic"; Description: "Synthetic command (Enki, Veles, Vulcan)"; GroupDescription: "Voice models:"; Flags: checkedonce
+Name: "voicechatterbox"; Description: "Expressive Chatterbox (Aegir, Bragi, Hermes, Maia — larger download)"; GroupDescription: "Voice models:"; Flags: checkedonce
 
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
@@ -65,11 +70,17 @@ Source: "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"; DestDir: "{app}\mo
 ; Default household butler Kokoro-82M weights (RFC-0070). Staged by stage-voice-default.ps1.
 Source: "payload\models\tts\kokoro-82m\*"; DestDir: "{app}\models\tts\kokoro-82m"; Flags: ignoreversion recursesubdirs createallsubdirs
 #endif
+#ifndef SkipDesktopShell
+; Native Jarvis Desktop (Tauri) + PyInstaller backend sidecar — staged by stage-desktop-shell.ps1.
+Source: "payload\desktop\Jarvis.exe"; DestDir: "{app}\desktop"; Flags: ignoreversion
+Source: "payload\desktop\sidecars\*"; DestDir: "{app}\desktop\sidecars"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 
 [Icons]
-Name: "{group}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start the Jarvis local agent portal"
+Name: "{group}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start Jarvis (desktop shell when installed, else browser portal)"
+Name: "{group}\Jarvis Desktop"; Filename: "{app}\desktop\Jarvis.exe"; WorkingDir: "{app}"; Comment: "Open Jarvis in the native desktop window (Obsidian embed)"; Check: DesktopShellInstalled
 Name: "{group}\Stop Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Comment: "Stop Jarvis backend and llama.cpp"
-Name: "{autodesktop}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Start the Jarvis local agent portal"
+Name: "{autodesktop}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Start Jarvis (desktop shell when installed, else browser portal)"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
@@ -77,9 +88,9 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 ; Normal release installers already contain the bootstrap GGUF and therefore skip
 ; model downloads entirely during target-machine bootstrap.
 #ifndef SkipBootstrapModel
-Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, Gmail and WhatsApp..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
+Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, persona voices, Gmail and WhatsApp..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #else
-Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model, Gmail and WhatsApp (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
+Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model and persona voices (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #endif
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -OpenPath ""/setup?step=integrations"""; WorkingDir: "{app}"; Description: "Connect Gmail and WhatsApp in Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 
@@ -435,10 +446,35 @@ begin
   Result := True;
 end;
 
+function DesktopShellInstalled: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\desktop\Jarvis.exe'));
+end;
+
+function SelectedVoiceProfiles: String;
+begin
+  Result := '';
+  if IsTaskSelected('voicebutler') then
+    Result := Result + 'butler_original_v1,';
+  if IsTaskSelected('voicedry') then
+    Result := Result + 'dry_butler_original_v1,';
+  if IsTaskSelected('voicetactical') then
+    Result := Result + 'tactical_aide_original_v1,';
+  if IsTaskSelected('voicesynthetic') then
+    Result := Result + 'synthetic_command_original_v1,';
+  if IsTaskSelected('voicechatterbox') then
+    Result := Result + 'chatterbox_expressive_en_v1,';
+  if Result = '' then
+    Result := 'none'
+  else
+    Delete(Result, Length(Result), 1);
+end;
+
 function GetBootstrapRunParameters(Param: String): String;
 var
   Wrapper: String;
   Params: String;
+  Voices: String;
 begin
   Wrapper := ExpandConstant('{app}\installer\windows\run-installer-bootstrap.ps1');
   if not FileExists(Wrapper) then
@@ -448,6 +484,9 @@ begin
     Params := Params + ' -SkipHeavyPrepare';
   if BootstrapSkipModelDownload then
     Params := Params + ' -SkipModelDownload';
+  Voices := SelectedVoiceProfiles;
+  if Voices <> '' then
+    Params := Params + ' -VoiceProfiles "' + Voices + '"';
   Result := Params;
 end;
 

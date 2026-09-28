@@ -8,7 +8,9 @@ param(
     [string]$ExecutionMode = "balanced",
     [string]$OpenPath = "/",
     [switch]$LanAccess,
-    [switch]$Wait
+    [switch]$Desktop,
+    [switch]$Wait,
+    [switch]$RegisterLogonTask
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +18,71 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
 function Write-Step($message) { Write-Host "`n==> $message" -ForegroundColor Cyan }
+
+function Register-ElevatedLogonTask {
+    $taskName = "JarvisElevatedBackend"
+    $script = Join-Path $Root "start-jarvis.ps1"
+    $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Wait"
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg -WorkingDirectory $Root
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
+    Write-Host "Registered logon task '$taskName' (highest privileges) to start Jarvis." -ForegroundColor Green
+}
+
+function Test-CurrentProcessElevated {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($id)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+function Resolve-BindHost {
+    param([switch]$ForceLan)
+    if ($ForceLan) { return "0.0.0.0" }
+    if ($env:JARVIS_BIND_HOST) { return $env:JARVIS_BIND_HOST.Trim() }
+    $settingsFile = Join-Path $Root "data\settings.json"
+    if (Test-Path $settingsFile) {
+        try {
+            $raw = Get-Content $settingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($raw.lan_access -eq $true) { return "0.0.0.0" }
+            if ($raw.bind_host) {
+                $bind = [string]$raw.bind_host
+                if ($bind.Trim()) { return $bind.Trim() }
+            }
+        } catch {
+            Write-Warning "Could not read bind host from data\settings.json; using 127.0.0.1"
+        }
+    }
+    return "127.0.0.1"
+}
+
+function Write-LanPortalHints {
+    param([string]$Port = "4780")
+    try {
+        $addrs = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+            Where-Object {
+                $_.IPAddress -and
+                $_.IPAddress -notmatch '^127\.' -and
+                $_.IPAddress -notmatch '^169\.254\.' -and
+                $_.PrefixOrigin -ne 'WellKnown'
+            } |
+            Select-Object -ExpandProperty IPAddress -Unique
+        if ($addrs) {
+            Write-Host "LAN portal (use private key on /api from other devices):" -ForegroundColor Cyan
+            foreach ($ip in $addrs) {
+                Write-Host "  http://${ip}:$Port" -ForegroundColor Green
+            }
+        }
+    } catch {
+        Write-Host "LAN portal: bound on all interfaces — open http://<this-pc-ip>:$Port from the network." -ForegroundColor Cyan
+    }
+}
 
 function Show-StartupFailure {
     param($ErrorRecord)
@@ -36,6 +103,18 @@ function Show-StartupFailure {
 }
 
 try {
+
+if ($RegisterLogonTask) {
+    Write-Step "Registering elevated logon task"
+    Register-ElevatedLogonTask
+    if ($PSBoundParameters.Count -eq 1 -and $PSBoundParameters.ContainsKey("RegisterLogonTask")) {
+        Write-Host "Logon task registered. Start Jarvis normally; it will elevate at the next logon." -ForegroundColor Green
+        exit 0
+    }
+}
+
+$elevated = Test-CurrentProcessElevated
+Write-Host ("Backend elevation: " + $(if ($elevated) { "administrator" } else { "standard user (register -RegisterLogonTask once as admin for logon elevation)" }))
 
 Write-Step "Verifying dependencies"
 $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
@@ -116,7 +195,10 @@ Write-Step "Starting Jarvis API"
 $env:PYTHONPATH = Join-Path $Root "backend"
 if ($SkipModelLoad) { $env:JARVIS_SKIP_MODEL = "1" }
 if ($PrivateKey) { $env:JARVIS_PRIVATE_KEY = $PrivateKey }
-$bindHost = if ($LanAccess) { "0.0.0.0" } else { "127.0.0.1" }
+$bindHost = Resolve-BindHost -ForceLan:$LanAccess
+if ($LanAccess) {
+    $env:JARVIS_BIND_HOST = $bindHost
+}
 $log = Join-Path $Root "logs\backend.log"
 
 function Test-JarvisBackendHealthy {
@@ -163,8 +245,9 @@ if (-not $ok) {
 }
 
 Write-Host "Jarvis is running at http://127.0.0.1:4780" -ForegroundColor Green
-if ($LanAccess) {
-    Write-Host "LAN Access is enabled (bound to 0.0.0.0). Private Key is required for API requests." -ForegroundColor Yellow
+if ($bindHost -eq "0.0.0.0") {
+    Write-Host "LAN access is on (listening on all interfaces). Authorized clients need the private key on /api." -ForegroundColor Yellow
+    Write-LanPortalHints -Port "4780"
 }
 
 function Start-TrayHelper {
@@ -228,7 +311,16 @@ if ($Wait -and ($Prompt -or $PromptFile)) {
 }
 elseif (-not $NoBrowser) {
     if (-not $OpenPath.StartsWith("/")) { $OpenPath = "/" }
-    Start-Process "http://127.0.0.1:4780$OpenPath"
+    $portalUrl = "http://127.0.0.1:4780$OpenPath"
+    Start-Process $portalUrl
+    Write-Host "Opened web portal: $portalUrl" -ForegroundColor Green
+    $desktopExe = Join-Path $Root "desktop\Jarvis.exe"
+    if ($Desktop -and (Test-Path $desktopExe)) {
+        $env:JARVIS_ROOT = $Root
+        $env:JARVIS_OPEN_PATH = $OpenPath
+        Start-Process -FilePath $desktopExe -WorkingDirectory $Root
+        Write-Host "Also opened Jarvis Desktop (optional native shell; same backend)." -ForegroundColor DarkGray
+    }
 }
 
 Write-Host "Stop with .\stop-jarvis.ps1 or use the system tray icon (Stop / Quit)."

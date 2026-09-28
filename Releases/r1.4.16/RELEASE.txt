@@ -1,0 +1,6 @@
+Jarvis / ANZU 1.4.16
+release: merges RFC-0181 (1.4.15 LAN + owner drives) with UX hotfix (voice lane, chat layout, HUD menus, web-first start)
+git: (see tag after merge)
+built: run installer\windows\build-installer.ps1 -Release on Windows
+portal: http://127.0.0.1:4780 — LAN when enabled in Settings
+desktop: optional start-jarvis.ps1 -Desktop

@@ -70,7 +70,8 @@ class ReflexComputerUseTool(Tool):
         "Reflex-first desktop computer-use fast loop (RFC-0172). "
         "Observes an ActionFrame of named UI Automation controls, asks the Reflex Lane for one "
         "typed operation+target, executes by target_id only (no model selectors/coordinates/JS/shell), "
-        "and verifies postconditions. Actions: run. Provide goal and nodes (or rely on prior action_frame)."
+        "and verifies postconditions. Actions: run. Provide goal and app to act on the live window. "
+        "Passing nodes runs a dry run against those nodes only; nothing on screen changes."
     )
     risk = RiskLevel.HIGH
     parameters = {
@@ -81,7 +82,7 @@ class ReflexComputerUseTool(Tool):
             "app": {"type": "string"},
             "nodes": {
                 "type": "array",
-                "description": "ActionFrame nodes from desktop action_frame / inspect",
+                "description": "Optional. Dry run only: ActionFrame nodes to plan against without touching the screen",
                 "items": {"type": "object"},
             },
         },
@@ -97,14 +98,9 @@ class ReflexComputerUseTool(Tool):
             return ToolResult(False, "", error="goal is required")
         nodes = kwargs.get("nodes")
         if not isinstance(nodes, list) or not nodes:
-            return ToolResult(
-                False,
-                "",
-                error=(
-                    "reflex_computer_use requires ActionFrame nodes from desktop action_frame; "
-                    "refusing to invent controls or coordinates"
-                ),
-            )
+            from ..workers.computer import run_reflex_computer_use
+
+            return await run_reflex_computer_use(goal, app=kwargs.get("app"))
         from ..reflex_loop.runtime import run_reflex_with_inmemory_world
 
         return await run_reflex_with_inmemory_world(
