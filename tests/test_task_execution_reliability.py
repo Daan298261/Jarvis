@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.coding_contract import applies_coding_execution_contract
-from app.agent.planning import app_control_target, classify_task, simple_app_control
+from app.agent.planning import app_control_target, classify_task, simple_app_control, simple_file_control
 from app.agent.skills import sanitize_steps, skill_grounded_in_goal
 from app.tools.apps import _score, normalize_app_name
 
@@ -36,6 +36,14 @@ def test_simple_open_steam_does_not_need_the_model():
     assert simple_app_control("please close Spotify now") == ("close", "Spotify")
     assert simple_app_control("open notepad and type hello") is None
     assert simple_app_control("open the website and save the page title") is None
+    assert simple_file_control('write "hello from jarvis" to jarvis_probe.txt') == (
+        "write",
+        "jarvis_probe.txt",
+        "hello from jarvis",
+    )
+    assert simple_file_control("read notes.txt") == ("read", "notes.txt", "")
+    assert simple_file_control("read notes.txt and then open steam") is None
+    assert simple_file_control("delete C:\\Windows\\System32\\foo.txt") is None
 
 
 @pytest.mark.asyncio
@@ -64,6 +72,36 @@ async def test_open_steam_task_skips_the_language_model(jarvis_env, monkeypatch)
         REGISTRY.execute = original  # type: ignore[assignment]
     assert finished.status == "completed"
     assert "Steam is open" in (finished.result or "")
+    assert jarvis_env["manager"].provider is None
+
+
+@pytest.mark.asyncio
+async def test_simple_file_write_skips_the_language_model(jarvis_env, monkeypatch):
+    from app.agent.loop import AGENT
+    from app.tools.base import ToolResult
+    from app.tools.registry import REGISTRY
+    from tests.test_verification_loop import _finished
+
+    async def fake_execute(name, arguments, **_kw):
+        assert name == "filesystem"
+        assert arguments.get("action") == "write"
+        assert arguments.get("path") == "jarvis_probe.txt"
+        assert arguments.get("content") == "hello from jarvis"
+        return ToolResult(True, "Wrote jarvis_probe.txt (18 bytes).")
+
+    original = REGISTRY.execute
+    REGISTRY.execute = fake_execute  # type: ignore[assignment]
+    monkeypatch.setattr(
+        "app.policy.action_gate.decide",
+        lambda *a, **k: type("R", (), {"answers": {}, "fallback_used": True, "provider": "generative"})(),
+    )
+    try:
+        task = await AGENT.create_task('write "hello from jarvis" to jarvis_probe.txt')
+        finished = await _finished(task.id)
+    finally:
+        REGISTRY.execute = original  # type: ignore[assignment]
+    assert finished.status == "completed"
+    assert "file is saved" in (finished.result or "").lower()
     assert jarvis_env["manager"].provider is None
 
 

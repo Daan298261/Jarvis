@@ -98,6 +98,7 @@ from .planning import (
     route_request,
     follow_up_stays_conversation,
     simple_app_control,
+    simple_file_control,
     format_selected_plan,
     is_plain_conversation,
     parse_plan_block,
@@ -1240,6 +1241,50 @@ class AgentRuntime:
         ]
         await self._complete(task_id, messages, content, observation[:1500], working, metrics)
 
+    async def _run_simple_file_control(
+        self,
+        task_id: str,
+        *,
+        action: str,
+        path: str,
+        content: str,
+        working: WorkingState,
+        metrics: LiveTaskMetrics,
+        settings: AppSettings,
+        autonomy: str,
+        profile_id: str | None,
+    ) -> None:
+        """Read or write one named text file without waiting for the language model."""
+        arguments: dict[str, Any] = {"action": action, "path": path}
+        if action == "write":
+            arguments["content"] = content
+        await self._update(task_id, stage="act", current_action=f"{action} {path}", current_tool="filesystem")
+        await BUS.publish(task_id, "stage", "Acting", stage="act")
+        await speak_progress(task_id, "filesystem", arguments)
+        observation, _ = await self._execute_tool_ex(
+            task_id,
+            "filesystem",
+            arguments,
+            autonomy,
+            settings,
+            metrics=metrics,
+            profile_id=profile_id,
+        )
+        lowered = observation.lower()
+        failed = observation.startswith("ERROR:") or any(
+            marker in lowered
+            for marker in ("authorization denied", "not allowed", "permission denied", "path is outside")
+        )
+        if failed:
+            await self._fail_task(task_id, observation, working, metrics)
+            return
+        spoken = "The file is saved." if action == "write" else "I read the file."
+        messages = [
+            ChatMessage(role="user", content=f"{action} {path}"),
+            ChatMessage(role="assistant", content=spoken),
+        ]
+        await self._complete(task_id, messages, spoken, observation[:1500], working, metrics)
+
     async def _run(
         self,
         task_id: str,
@@ -1361,6 +1406,20 @@ class AgentRuntime:
                     task_id,
                     action=app_job[0],
                     name=app_job[1],
+                    working=working,
+                    metrics=metrics,
+                    settings=settings,
+                    autonomy=autonomy,
+                    profile_id=profile_name,
+                )
+                return
+            file_job = simple_file_control(extra_prompt or prompt)
+            if file_job:
+                await self._run_simple_file_control(
+                    task_id,
+                    action=file_job[0],
+                    path=file_job[1],
+                    content=file_job[2],
                     working=working,
                     metrics=metrics,
                     settings=settings,

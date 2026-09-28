@@ -134,6 +134,13 @@ def decide(
                     hard_rule = hard_rule or bool(state.get("target_locked"))
                 else:
                     answers[qid] = _answer_choice(qid, question.choices[0], 0.45)
+            elif qid == "cancel" or decision_class == "harm_veto":
+                obvious = bool(_OBVIOUS_HARM.search(prompt))
+                pick = "cancel" if obvious else "allow"
+                if pick not in question.choices:
+                    pick = question.choices[0]
+                answers[qid] = _answer_choice(qid, pick, 1.0 if obvious else 0.4)
+                hard_rule = obvious
             else:
                 answers[qid] = _answer_choice(qid, question.choices[0], 0.4)
         elif question.type == "score":

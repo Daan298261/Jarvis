@@ -6,26 +6,24 @@ import logging
 from typing import Any
 
 from ..decision.reflex import decide
-from ..decision.types import Question
+from ..security.red_scenarios import HARM as HARM_QUESTION
 from ..tools.base import RiskLevel
 from ..tools.safety import is_destructive_operation
 from .authorize import AuthorizationResult, authorize
 
 log = logging.getLogger("jarvis.policy.action_gate")
 
-HARM_QUESTION = Question(
-    id="cancel",
-    type="boolean",
-    prompt=(
-        "Would carrying out this action harm the owner, destroy data, or clearly "
-        "violate what they asked for? Answer true only to cancel it."
-    ),
-)
-
 
 def _as_cancel(value: object) -> bool | None:
     if isinstance(value, bool):
         return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"cancel", "yes", "true", "harm"}:
+            return True
+        if lowered in {"allow", "no", "false", "safe"}:
+            return False
+        return None
     try:
         score = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
