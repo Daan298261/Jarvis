@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from huggingface_hub import try_to_load_from_cache
+
 from ..config import models_dir, repo_root
 from .kokoro_adapter import (
     KOKORO_HF_REPO,
@@ -17,6 +19,14 @@ from .kokoro_adapter import (
 )
 
 CHATTERBOX_MODEL_DIR = models_dir() / "tts" / "chatterbox-turbo"
+CHATTERBOX_HF_REPO = "ResembleAI/chatterbox"
+CHATTERBOX_MODEL_FILES = (
+    "ve.safetensors",
+    "t3_cfg.safetensors",
+    "s3gen.safetensors",
+    "tokenizer.json",
+    "conds.pt",
+)
 PIPER_VOICES_DIR = models_dir() / "tts" / "piper"
 
 
@@ -56,7 +66,7 @@ def is_piper_available() -> bool:
     return _module_available("piper")
 
 
-def is_chatterbox_available() -> bool:
+def chatterbox_python_ready() -> bool:
     if not _module_available("chatterbox"):
         return False
     try:
@@ -65,6 +75,17 @@ def is_chatterbox_available() -> bool:
         return callable(getattr(perth, "PerthImplicitWatermarker", None))
     except Exception:
         return False
+
+
+def chatterbox_weights_ready() -> bool:
+    return all(
+        isinstance(try_to_load_from_cache(CHATTERBOX_HF_REPO, filename), str)
+        for filename in CHATTERBOX_MODEL_FILES
+    )
+
+
+def is_chatterbox_available() -> bool:
+    return chatterbox_python_ready() and chatterbox_weights_ready()
 
 
 def legacy_system_tts_available() -> bool:

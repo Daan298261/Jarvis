@@ -18,6 +18,9 @@ FALLBACK_VOICE_PROFILE_ID = KOKORO_BUTLER_VOICE_PROFILE_ID
 # Neural voices lead the picker; SAPI remains an explicit baseline choice.
 CURATED_VOICE_PROFILE_IDS: tuple[str, ...] = (
     "butler_original_v1",
+    "tactical_aide_original_v1",
+    "dry_butler_original_v1",
+    "synthetic_command_original_v1",
     "chatterbox_expressive_en_v1",
     "windows_natural_en_v1",
 )

@@ -127,10 +127,13 @@ def test_chatterbox_readiness_requires_working_perth_watermarker(monkeypatch):
     fake_perth.PerthImplicitWatermarker = None
     monkeypatch.setitem(sys.modules, "perth", fake_perth)
     monkeypatch.setattr(engines, "_module_available", lambda name: name == "chatterbox")
+    monkeypatch.setattr(engines, "chatterbox_weights_ready", lambda: True)
     assert engines.is_chatterbox_available() is False
 
     fake_perth.PerthImplicitWatermarker = type("Watermarker", (), {})
     assert engines.is_chatterbox_available() is True
+    monkeypatch.setattr(engines, "chatterbox_weights_ready", lambda: False)
+    assert engines.is_chatterbox_available() is False
 
 
 def test_chatterbox_repair_pins_compatible_runtime_and_reloads_perth(monkeypatch):
@@ -140,7 +143,7 @@ def test_chatterbox_repair_pins_compatible_runtime_and_reloads_perth(monkeypatch
     fake_perth = ModuleType("perth")
     fake_perth.PerthImplicitWatermarker = None
     monkeypatch.setitem(sys.modules, "perth", fake_perth)
-    monkeypatch.setattr(pack_install, "is_chatterbox_available", lambda: "perth" not in sys.modules)
+    monkeypatch.setattr(pack_install, "chatterbox_python_ready", lambda: "perth" not in sys.modules)
     monkeypatch.setattr(
         pack_install.subprocess,
         "run",

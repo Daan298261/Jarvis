@@ -41,12 +41,14 @@ def test_butler_profile_uses_kokoro_engine():
     assert (Path("voice_packs/butler_original_v1/pack.json")).is_file()
 
 
-def test_voice_picker_lists_curated_profiles_only():
+def test_voice_picker_lists_all_persona_packs_for_later_install():
     reload_catalog()
     items = reload_catalog().list_profiles("butler_original_v1")
     ids = [item.id for item in items]
-    assert ids == ["butler_original_v1", "chatterbox_expressive_en_v1", "windows_natural_en_v1"]
-    assert "dry_butler_original_v1" not in ids
+    assert ids == [
+        "butler_original_v1", "tactical_aide_original_v1", "dry_butler_original_v1",
+        "synthetic_command_original_v1", "chatterbox_expressive_en_v1", "windows_natural_en_v1",
+    ]
 
 
 def test_speak_filter_strips_urls_code_and_plan_boards():

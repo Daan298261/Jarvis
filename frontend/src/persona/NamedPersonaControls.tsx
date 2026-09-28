@@ -1,4 +1,6 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { isApiError } from "../api"
+import { installVoiceProfile, loadVoiceProfileCatalog, type VoiceProfileCatalog } from "../tts/voiceProfiles"
 import {
   PERSONA_LABELS,
   resetNamedPersona,
@@ -16,11 +18,53 @@ export function NamedPersonaControls() {
   const state = useNamedPersonas()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  const [progress, setProgress] = useState("")
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  const [voiceCatalog, setVoiceCatalog] = useState<VoiceProfileCatalog | null>(null)
   const active = state?.active
   const appearance = active?.appearance
   const options = state?.personas?.length
     ? state.personas
     : ROSTER_IDS.map((id) => ({ id, label: PERSONA_LABELS[id] || id }))
+
+  useEffect(() => {
+    let cancelled = false
+    void loadVoiceProfileCatalog().then((catalog) => {
+      if (!cancelled) setVoiceCatalog(catalog)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  async function choose(id: string) {
+    setBusy(true)
+    setPendingId(id)
+    setError("")
+    setProgress("")
+    try {
+      try {
+        await selectNamedPersona(id)
+      } catch (err) {
+        if (!isApiError(err) || err.status !== 409) throw err
+        const detail = (err.body as { detail?: { error?: string; profile_id?: string } } | null)?.detail
+        if (detail?.error !== "install_required" && detail?.error !== "tts_unavailable") throw err
+        const profileId = detail.profile_id
+        if (!profileId) throw err
+        setProgress(`Downloading the neural voice for ${PERSONA_LABELS[id] || id}…`)
+        const result = await installVoiceProfile(profileId)
+        if (!result.installed) throw new Error(result.detail || `Could not install ${profileId}.`)
+        await selectNamedPersona(id)
+      }
+      setVoiceCatalog(await loadVoiceProfileCatalog())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update the named persona.")
+    } finally {
+      setPendingId(null)
+      setProgress("")
+      setBusy(false)
+    }
+  }
+
+  const activeVoice = voiceCatalog?.profiles.find((profile) => profile.id === active?.voice_profile_id)
 
   async function run(task: () => Promise<unknown>) {
     setBusy(true)
@@ -50,10 +94,10 @@ export function NamedPersonaControls() {
         <select
           aria-label="Named persona"
           disabled={busy}
-          value={active?.id || "anzu"}
+          value={pendingId || active?.id || "anzu"}
           onChange={(event) => {
             const id = event.target.value
-            void run(() => selectNamedPersona(id))
+            void choose(id)
           }}
         >
           {options.map((persona) => (
@@ -64,6 +108,12 @@ export function NamedPersonaControls() {
         </select>
       </label>
       <p className="settings-note">Shape and voice travel together.</p>
+      {active?.id && activeVoice && !activeVoice.available && (
+        <button type="button" className="btn secondary" disabled={busy} onClick={() => void choose(active.id)}>
+          Get {active.label} neural voice
+        </button>
+      )}
+      {progress && <p className="settings-note" role="status">{progress}</p>}
       {appearance && active && (
         <div className="named-persona-overrides">
           <label>

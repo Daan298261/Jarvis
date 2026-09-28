@@ -5,6 +5,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 from ..voice_profiles.catalog import (
     get_active_voice_profile,
@@ -79,7 +80,7 @@ async def install_voice_profile_pack(profile_id: str):
     if profile is None:
         raise HTTPException(status_code=404, detail=f"Unknown voice profile: {profile_id}")
     try:
-        result = install_voice_pack(profile)
+        result = await run_in_threadpool(install_voice_pack, profile)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not result.ok:
