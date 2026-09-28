@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
+from ..inference.backends import is_inference_template_error
 from ..inference.manager import MANAGER
 from ..inference.tool_capability import probe_tool_capability
 from ..inference.profiles import ModelProfile, resolve_profile
@@ -1829,6 +1830,8 @@ class AgentRuntime:
             tools_used = True
 
         context_recovery_attempts = 0
+        template_retries = 0
+        work_wrap_retries = 0
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel or kill_switch_active():
@@ -2044,6 +2047,24 @@ class AgentRuntime:
                         return
                     if isinstance(exc, APIStatusError):
                         detail = getattr(exc, "message", None) or str(exc)
+                        if is_inference_template_error(exc) and template_retries < 1:
+                            template_retries += 1
+                            if messages and messages[-1].role == "user":
+                                messages = messages[:-1]
+                            continue
+                        if tools_used and work_wrap_retries < 1:
+                            work_wrap_retries += 1
+                            wrap = "The requested work already ran on disk."
+                            if await self._complete(
+                                task_id,
+                                messages,
+                                wrap,
+                                wrap,
+                                working,
+                                metrics,
+                            ):
+                                return
+                            continue
                         err = f"Inference server error ({exc.status_code}): {detail}"
                     else:
                         err = f"Inference server unreachable: {exc}"

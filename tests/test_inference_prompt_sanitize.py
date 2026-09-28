@@ -98,6 +98,24 @@ def test_to_openai_messages_can_include_reasoning_for_ui_paths():
     assert ui[0].get("reasoning_content") == "hidden"
 
 
+def test_to_openai_messages_stringifies_tool_call_arguments():
+    message = ChatMessage(
+        role="assistant",
+        content="",
+        tool_calls=[
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "filesystem", "arguments": {"action": "write", "path": "a.py"}},
+            }
+        ],
+    )
+    item = to_openai_messages([message])[0]
+    encoded = item["tool_calls"][0]["function"]["arguments"]
+    assert isinstance(encoded, str)
+    assert "write" in encoded
+
+
 def test_token_estimate_ignores_reasoning_channel_and_plan_lines():
     from app.inference.prompt_budget import estimate_messages_tokens
 
