@@ -52,7 +52,7 @@ async def test_execute_tool_ex_denies_before_registry_execute(monkeypatch, setti
     execute_mock = AsyncMock(return_value=ToolResult(True, "should not run"))
     monkeypatch.setattr("app.agent.loop.REGISTRY.execute", execute_mock)
     monkeypatch.setattr(
-        "app.agent.loop.authorize",
+        "app.agent.loop.gate_tool_call",
         lambda *args, **kwargs: _denied_result(),
     )
 
@@ -77,7 +77,7 @@ async def test_execute_tool_denies_before_registry_execute(monkeypatch, settings
     execute_mock = AsyncMock(return_value=ToolResult(True, "should not run"))
     monkeypatch.setattr("app.agent.loop.REGISTRY.execute", execute_mock)
     monkeypatch.setattr(
-        "app.agent.loop.authorize",
+        "app.agent.loop.gate_tool_call",
         lambda *args, **kwargs: _denied_result(),
     )
 
@@ -98,7 +98,7 @@ async def test_execute_tool_ex_allows_and_runs_tool(monkeypatch, settings):
     execute_mock = AsyncMock(return_value=ToolResult(True, "ok"))
     monkeypatch.setattr("app.agent.loop.REGISTRY.execute", execute_mock)
     monkeypatch.setattr(
-        "app.agent.loop.authorize",
+        "app.agent.loop.gate_tool_call",
         lambda *args, **kwargs: _allowed_result(),
     )
 
@@ -120,7 +120,7 @@ async def test_execute_tool_ex_requires_approval_without_execute(monkeypatch, se
     execute_mock = AsyncMock(return_value=ToolResult(True, "should not run"))
     monkeypatch.setattr("app.agent.loop.REGISTRY.execute", execute_mock)
     monkeypatch.setattr(
-        "app.agent.loop.authorize",
+        "app.agent.loop.gate_tool_call",
         lambda *args, **kwargs: _approval_required_result(),
     )
 
@@ -155,7 +155,7 @@ async def test_execute_tool_ex_approved_high_risk_runs_tool(monkeypatch, setting
             )
         return _approval_required_result()
 
-    monkeypatch.setattr("app.agent.loop.authorize", _authorize)
+    monkeypatch.setattr("app.agent.loop.gate_tool_call", _authorize)
 
     observation, attach = await AGENT._execute_tool_ex(
         "task-approved",

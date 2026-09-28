@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
+import re
 import shutil
 import sys
 import time
@@ -12,7 +13,7 @@ from typing import Any
 import psutil
 
 from .base import RiskLevel, Tool, ToolResult
-from .safety import classify_command
+from .safety import classify_command, is_protected_process
 
 
 @dataclass
@@ -35,6 +36,40 @@ def _default_shell() -> str:
 
 
 _JOBS: dict[int, BackgroundJob] = {}
+
+_SEARCH_COMMAND = re.compile(
+    r"(?i)\b(?:findstr\b|find\.exe\b|find\s+/[aicnv]|grep\b|\brg\b|select-string\b|where\.exe\b)\b"
+)
+_POWERSHELL_MARKERS = re.compile(
+    r"(?i)(?:Get-|Set-|Select-|Where-Object|ForEach-Object|Out-File|\$\w+|`-| -[ie][a-z]+ )"
+)
+_CMD_IDIOMS = re.compile(
+    r"(?i)\b(?:findstr\b|find\s+/[a-z]|dir\s+/[a-z]|tasklist\b|where\.exe\b|"
+    r"wmic\b|netstat\b|type\s+[A-Za-z]:|copy\s+\S+\s+\S+|del\s+/|rmdir\s+/)"
+)
+
+
+def search_miss_ok(command: str, code: int) -> bool:
+    """Exit 1 from findstr/grep means 'not found', not a broken command."""
+    return int(code or 0) == 1 and bool(_SEARCH_COMMAND.search(command or ""))
+
+
+def adapt_shell(command: str, shell: str) -> str:
+    """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
+    chosen = (shell or default_shell()).strip().lower()
+    if chosen != "powershell":
+        return chosen
+    if _POWERSHELL_MARKERS.search(command or ""):
+        return chosen
+    if _CMD_IDIOMS.search(command or ""):
+        return "cmd"
+    return chosen
+
+
+def _approved_from_context() -> bool:
+    from .registry import REGISTRY
+
+    return bool(REGISTRY._context.get("approved"))
 
 
 def _decode(data: bytes | bytearray) -> str:
@@ -176,20 +211,21 @@ class TerminalTool(Tool):
         command = kwargs.get("command") or ""
         if not command.strip():
             return ToolResult(False, "", error="command is required for run/start")
-        shell = (kwargs.get("shell") or default_shell()).lower()
+        shell = adapt_shell(command, (kwargs.get("shell") or default_shell()).lower())
         cwd = kwargs.get("working_directory") or os.getcwd()
         timeout = int(kwargs.get("timeout_seconds") or 120)
         risk = classify_command(command)
-        if risk == RiskLevel.IRREVERSIBLE:
+        approved = bool(kwargs.get("_approved")) or _approved_from_context()
+        if risk == RiskLevel.IRREVERSIBLE and not approved:
             return ToolResult(False, "", error="Blocked irreversible command. Ask the user explicitly if this is required.")
         args = _command_args(command, shell)
         if isinstance(args, ToolResult):
             return args
         if action == "start":
             return await self._start(args, command, cwd)
-        return await self._run(args, cwd, timeout)
+        return await self._run(args, cwd, timeout, command=command)
 
-    async def _run(self, args: list[str], cwd: str, timeout: int) -> ToolResult:
+    async def _run(self, args: list[str], cwd: str, timeout: int, command: str = "") -> ToolResult:
         started = time.time()
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -207,16 +243,17 @@ class TerminalTool(Tool):
             duration = round((time.time() - started) * 1000, 1)
             out = stdout.decode("utf-8", errors="replace")
             err = stderr.decode("utf-8", errors="replace")
-            code = proc.returncode or 0
+            code = 0 if proc.returncode is None else int(proc.returncode)
             text = (
                 f"exit_code={code}\nduration_ms={duration}\npid={proc.pid}\n"
                 f"--- stdout ---\n{out}\n--- stderr ---\n{err}"
             )
+            ok = code == 0 or search_miss_ok(command, code)
             return ToolResult(
-                code == 0,
+                ok,
                 text,
                 data={"exit_code": code, "duration_ms": duration, "pid": proc.pid, "alive": False},
-                error="" if code == 0 else err[-2000:],
+                error="" if ok else err[-2000:],
             )
         except Exception as exc:
             return ToolResult(False, "", error=str(exc))
@@ -317,9 +354,26 @@ class TerminalTool(Tool):
             proc = psutil.Process(pid_i)
         except psutil.NoSuchProcess:
             return ToolResult(False, "", error=f"PID {pid_i} is not running")
-        # Only kill processes Jarvis started, or their remaining children tracked here.
-        return ToolResult(
-            False,
-            "",
-            error=f"Refusing to kill PID {pid_i} ({proc.name()}) because Jarvis did not start it.",
-        )
+        try:
+            name = proc.name()
+        except psutil.Error:
+            name = f"pid {pid_i}"
+        if is_protected_process(name, pid_i):
+            return ToolResult(False, "", error=f"Refusing to kill protected process {name} ({pid_i}).")
+        try:
+            proc.terminate()
+            gone, alive = psutil.wait_procs([proc], timeout=3)
+            if alive:
+                for leftover in alive:
+                    leftover.kill()
+                psutil.wait_procs(alive, timeout=2)
+        except psutil.AccessDenied:
+            return ToolResult(
+                False,
+                "",
+                error=f"Access denied killing {name} ({pid_i}) — needs the elevated backend.",
+            )
+        except psutil.NoSuchProcess:
+            pass
+        payload = {"pid": pid_i, "killed": True, "alive": False, "command": name}
+        return ToolResult(True, f"Stopped {name} (pid {pid_i}).", data=payload)

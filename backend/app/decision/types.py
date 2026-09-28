@@ -31,6 +31,7 @@ REFLEX_DECISION_CLASSES: frozenset[str] = frozenset(
         "approval_signal",
         "turn_batch",
         "probe",
+        "harm_veto",
     }
 )
 

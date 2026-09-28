@@ -211,8 +211,9 @@ def decide(
     """
     Provider-neutral Reflex entrypoint.
 
-    Order: deterministic hard rules → Laya (if installed/warm) → Jev (opt-in+probe)
-    → generative last. Hard deadline falls back without stranding the turn.
+    Laya answers bounded decisions first when it is warm. Low confidence hands
+    the question to Jev (if allowed) then the generative/model lane. Deterministic
+    rules run only for hard safety (policy deny/approval, technical-speak fence).
     """
     started = time.perf_counter()
     rid = request_id or uuid4().hex
@@ -227,7 +228,7 @@ def decide(
     qlist = normalize_questions(questions)
     projection = compact_state(state)
 
-    # 1) Rules first — hard policy / technical speak fences are authoritative.
+    # Hard safety only: policy deny/approval and the technical-speak fence.
     rules_result = rules.decide(
         state=projection,
         questions=qlist,
@@ -239,7 +240,10 @@ def decide(
         a.value == "technical" and a.confidence is not None and a.confidence >= 0.85
         for a in rules_result.answers.values()
     )
-    if rules_result.hard_rule and (dclass in POLICY_HARDENED_CLASSES or speak_fence):
+    hard_safety = dclass in POLICY_HARDENED_CLASSES or bool(projection.get("policy_deny")) or bool(
+        projection.get("policy_requires_approval")
+    )
+    if rules_result.hard_rule and (hard_safety or speak_fence):
         guarded = _apply_policy_guard(state=projection, decision_class=dclass, result=rules_result)
         metrics.record(guarded)
         audit.record_event("reflex_decision", guarded.as_dict())
@@ -272,41 +276,7 @@ def decide(
             return result
 
         if provider == "rules":
-            # Already computed; use as candidate unless we can improve via Laya/Jev.
-            candidate = rules_result
-            if use_cache:
-                key = cache.cache_key(
-                    provider="rules",
-                    provider_version=candidate.provider_version,
-                    decision_class=dclass,
-                    state=projection,
-                    questions=qlist,
-                )
-                cached = cache.get(key)
-                if cached:
-                    cached.request_id = rid
-                    metrics.record(cached)
-                    return cached
-            # Prefer stronger local/cloud when available; keep rules as fallback baseline.
-            if any(p in order for p in ("laya", "jev")) and (laya_ready or jev_ready):
-                continue
-            guarded = _apply_policy_guard(state=projection, decision_class=dclass, result=candidate)
-            guarded.latency.total_ms = (time.perf_counter() - started) * 1000.0
-            if use_cache:
-                cache.put(
-                    cache.cache_key(
-                        provider="rules",
-                        provider_version=guarded.provider_version,
-                        decision_class=dclass,
-                        state=projection,
-                        questions=qlist,
-                    ),
-                    guarded,
-                )
-            metrics.record(guarded)
-            audit.record_event("reflex_decision", guarded.as_dict())
-            quartermaster.record_outcome(dclass, "rules", latency_ms=guarded.latency.total_ms, quality=_quality(guarded))
-            return guarded
+            continue
 
         adapter = _ADAPTERS.get(provider)
         if adapter is None:
@@ -431,7 +401,7 @@ def decide(
                     result.answers["complexity_tier"] = floor
 
         guarded = _apply_policy_guard(state=projection, decision_class=dclass, result=result)
-        if use_cache and not guarded.fallback_used:
+        if use_cache:
             cache.put(
                 cache.cache_key(
                     provider=guarded.provider,

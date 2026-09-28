@@ -214,7 +214,7 @@ _PATH_OR_URL = re.compile(r"(?i)(https?://\S+|[a-z]:[\\/]\S*|\\\\\S+|(?<!\w)/(?:
 _APP_INTENT = re.compile(
     r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
     r"(?:open|start|launch|fire up|close|quit|exit|kill)\s+(?:up\s+)?(?:the\s+)?(?:app\s+)?"
-    r"(?!(?:a|an|new)\s|file\b|folder\b|directory\b|document\b|https?:|www\.|[a-z]:[\\/])"
+    r"(?!(?:a|an|new)\s|file\b|folder\b|directory\b|document\b|website\b|webpage\b|page\b|browser\b|tab\b|url\b|https?:|www\.|[a-z]:[\\/])"
     r"((?:[\w.+&'-]+)(?:\s+[\w.+&'-]+){0,3}?)"
     r"(?:\s+(?:for me|please|now|app))*\s*(?:(?:,|\band\b|\bthen\b).*)?[.!?]?\s*$"
 )
@@ -230,10 +230,36 @@ def intent_text(prompt: str) -> str:
     return _PATH_OR_URL.sub(" ", latest_user_utterance(prompt or ""))
 
 
+_NOT_AN_APP = frozenset(
+    {
+        "file",
+        "folder",
+        "directory",
+        "document",
+        "website",
+        "webpage",
+        "page",
+        "browser",
+        "tab",
+        "url",
+        "site",
+        "link",
+        "window",
+    }
+)
+
+
 def app_control_target(prompt: str) -> str | None:
     """Program name for 'open steam' / 'close snipping tool' style requests."""
     match = _APP_INTENT.match(latest_user_utterance(prompt or "").strip())
-    return match.group(1).strip() if match else None
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    name = re.sub(r"^(?:the|a|an)\s+", "", raw, flags=re.I).strip().lower()
+    first = name.split()[0] if name else ""
+    if not first or first in _NOT_AN_APP:
+        return None
+    return re.sub(r"^(?:the|a|an)\s+", "", raw, flags=re.I).strip() or None
 
 
 def classify_task(prompt: str) -> str:

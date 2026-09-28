@@ -33,7 +33,7 @@ def test_app_requests_route_to_desktop_control(prompt, target):
 
 @pytest.mark.parametrize(
     "prompt",
-    ["open the file C:/notes/todo.txt", "open https://example.com", "run the tests", "start a new document"],
+    ["open the file C:/notes/todo.txt", "open https://example.com", "run the tests", "start a new document", "open the website and save the page title"],
 )
 def test_non_app_requests_are_not_app_control(prompt):
     assert app_control_target(prompt) is None
@@ -125,3 +125,65 @@ async def test_repeated_identical_tool_call_runs_again(jarvis_env):
     assert len(calls) == 2
     assert first != second
     assert json.dumps(first)
+
+
+def test_cmd_search_idioms_are_adapted_and_exit_one_is_ok():
+    from app.tools.terminal import adapt_shell, search_miss_ok
+
+    assert adapt_shell("tasklist | findstr steam", "powershell") == "cmd"
+    assert adapt_shell("Get-Process | Where-Object {$_.Name -eq 'steam'}", "powershell") == "powershell"
+    assert search_miss_ok("tasklist | findstr steam", 1)
+    assert not search_miss_ok("python -c 'raise SystemExit(1)'", 1)
+    assert not search_miss_ok("findstr steam", 2)
+
+
+@pytest.mark.asyncio
+async def test_search_miss_is_not_a_tool_failure():
+    from app.tools.terminal import TerminalTool
+
+    tool = TerminalTool()
+    if os.name == "nt":
+        result = await tool.execute(
+            command="findstr /c:ZZZNOMATCHNOWHERE C:\\Windows\\win.ini",
+            shell="cmd",
+        )
+    else:
+        result = await tool.execute(command="grep ZZZNOMATCHNOWHERE /etc/hosts", shell="bash")
+    assert result.success, result.error
+    assert result.data.get("exit_code") == 1
+    assert not result.text().startswith("ERROR:")
+
+
+@pytest.mark.asyncio
+async def test_irreversible_runs_only_after_owner_approval(monkeypatch):
+    from app.tools.base import ToolResult
+    from app.tools.registry import REGISTRY
+    from app.tools.terminal import TerminalTool
+
+    tool = TerminalTool()
+    ran: list[int] = []
+
+    async def fake_run(*_a, **_k):
+        ran.append(1)
+        return ToolResult(True, "ok")
+
+    monkeypatch.setattr(tool, "_run", fake_run)
+    REGISTRY._context["approved"] = False
+    blocked = await tool.execute(command="rm -rf scratch-dir")
+    assert blocked.success is False
+    assert "irreversible" in blocked.error.lower()
+    assert not ran
+    REGISTRY._context["approved"] = True
+    allowed = await tool.execute(command="rm -rf scratch-dir")
+    assert allowed.success is True
+    assert ran
+    REGISTRY._context["approved"] = False
+
+
+@pytest.mark.asyncio
+async def test_kill_refuses_protected_process():
+    from app.tools.terminal import TerminalTool
+
+    result = await TerminalTool().execute(action="kill", pid=os.getpid())
+    assert result.success is False
+    assert "protected" in result.error.lower()

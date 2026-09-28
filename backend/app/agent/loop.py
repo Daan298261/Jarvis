@@ -36,7 +36,8 @@ from .durable_execution.runner import run_model_step, run_tool_step
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..providers.openai_compat import OpenAICompatProvider
 from ..providers.tool_call_compat import validate_turn_calls
-from ..policy.authorize import AuthorizationResult, authorize
+from ..policy.authorize import AuthorizationResult
+from ..policy.action_gate import gate_tool_call
 from ..policy.computer_permissions import (
     confirmation_payload_for_tool,
     consume_once_grants,
@@ -110,6 +111,7 @@ from ..persona.chat_delivery import (
     stream_speak_offset,
 )
 from ..persona.acknowledgements import task_acknowledgement
+from ..persona.narrator import forget_task, plain_failure, speak_outcome, speak_progress
 from ..persona.owner_chat import OWNER_CHAT_SYSTEM, owner_chat_max_tokens
 from ..persona.think_aloud import run_with_think_aloud
 from ..persona.weather import weather_system_message
@@ -243,7 +245,7 @@ def _tool_authorization(
     action = arguments.get("action") if isinstance(arguments, dict) else None
     if is_destructive_operation(name, arguments, command):
         risk = RiskLevel.IRREVERSIBLE
-    return authorize(
+    return gate_tool_call(
         name,
         action=action,
         arguments=arguments if isinstance(arguments, dict) else None,
@@ -497,6 +499,22 @@ class AgentRuntime:
                     waiting_for_confirmation=bool(task.waiting_for_confirmation),
                 )
                 advance_intake_chain(task_id, status=str(terminal_status), result=task.result or "")
+                route = str(getattr(task, "response_route", "") or "")
+                task_class = str(getattr(task, "task_class", "") or "")
+                # Conversation replies are already spoken; managed tasks need a
+                # natural outcome, and every failure/cancel is spoken in plain language.
+                if terminal_status in {"failed", "cancelled"} or route == MANAGED_TASK or (
+                    task_class and task_class != CONVERSATION_CLASS
+                ):
+                    await speak_outcome(
+                        task_id,
+                        success=terminal_status == "completed",
+                        result=task.result or "",
+                        error=task.error or "",
+                        cancelled=terminal_status == "cancelled",
+                    )
+                else:
+                    forget_task(task_id)
 
     async def _complete(
         self,
@@ -554,6 +572,34 @@ class AgentRuntime:
         await self._release_lazy_vision()
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
         return True
+
+    async def _fail_task(
+        self,
+        task_id: str,
+        error: str,
+        working: WorkingState | None = None,
+        metrics: LiveTaskMetrics | None = None,
+        *,
+        current_action: str = "Failed",
+        stage: str = "failed",
+    ) -> None:
+        spoken = plain_failure(error)
+        fields: dict[str, Any] = {
+            "status": "failed",
+            "stage": "failed",
+            "error": error,
+            "result": spoken,
+            "current_action": current_action,
+            "current_tool": "",
+        }
+        if metrics is not None:
+            fields.update(metrics.as_fields())
+        await self._update(task_id, **fields)
+        if working is not None:
+            await record_trajectory(task_id, working, "failed")
+        await complete_coding_route(task_id, "failed", error)
+        await self._release_lazy_vision()
+        await BUS.publish(task_id, "failed", spoken, error[:1500], stage=stage)
 
     async def _note_coding_outcome(self, task_id: str, working: WorkingState, outcome: str, verification: str = "") -> None:
         if not working.coding_worker:
@@ -1587,6 +1633,7 @@ class AgentRuntime:
                     )
                     await self._update(task_id, current_tool=name, current_action=f"Skill {skill.name}: {name}")
                     await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
+                    await speak_progress(task_id, name, arguments)
                     observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
                     failed = "ERROR:" in observation or observation.lower().startswith("error")
                     working.note_tool(name, observation, not failed)
@@ -1617,10 +1664,13 @@ class AgentRuntime:
                     break
 
         if pending_tool:
+            pending_name = pending_tool["name"]
+            pending_args = pending_tool["arguments"] if isinstance(pending_tool.get("arguments"), dict) else {}
+            await speak_progress(task_id, pending_name, pending_args)
             result_text = await self._execute_tool(
                 task_id,
-                pending_tool["name"],
-                pending_tool["arguments"],
+                pending_name,
+                pending_args,
                 autonomy,
                 settings,
                 approved=True,
@@ -1673,7 +1723,11 @@ class AgentRuntime:
                     "Writing final report" if force_final else ("Verifying result" if verifying else ("Model is thinking" if think else "Model is responding")),
                     stage="verify" if verifying else "act",
                 )
-                messages = compact_history(messages, working_state_block=working.as_prompt_block())
+                messages = compact_history(
+                    messages,
+                    working_state_block=working.as_prompt_block(),
+                    user_fallback=working.goal or extra_prompt or prompt,
+                )
                 compacted = any(
                     isinstance(message.content, str) and message.content.startswith(SUMMARY_MARKER)
                     for message in messages
@@ -1995,6 +2049,8 @@ class AgentRuntime:
                             await BUS.publish(task_id, "retry", "Blocked identical retry", observation, stage="diagnose")
                             messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                             working.note_tool(name, observation, False)
+                            consecutive_failures += 1
+                            last_failed_observation = observation
                             continue
                         recent_hashes.append(signature)
                         tool_meta = REGISTRY.tools.get(name)
@@ -2036,6 +2092,7 @@ class AgentRuntime:
                             return
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
+                        await speak_progress(task_id, name, arguments)
                         if name == "request_capability":
                             exposed_tools, _added, observation = apply_capability_request(exposed_tools, arguments)
                             granted = grant_requested_tools(arguments)
@@ -2061,6 +2118,9 @@ class AgentRuntime:
                             last_failed_observation = observation
                             hints.append(recovery_hint(name, observation, failures_by_tool[name]))
                             await BUS.publish(task_id, "error", f"{name} failed", observation[:1500], stage="diagnose")
+                            from ..security.blue_watch import note_tool_outcome
+
+                            note_tool_outcome(task_id, name, arguments, observation, failed=True)
                         else:
                             consecutive_failures = 0
                             failures_by_tool.pop(name, None)
@@ -2072,6 +2132,15 @@ class AgentRuntime:
                         if attach:
                             messages.append(_image_message(attach))
                             working.vision_requested = True
+                    if consecutive_failures >= 5:
+                        await self._fail_task(
+                            task_id,
+                            last_failed_observation or "I kept running into the same problem.",
+                            working,
+                            metrics,
+                            current_action="Failed: no progress",
+                        )
+                        return
                     if hints:
                         guidance = "\n\n".join(hints)
                         working.next_action = "recover with a different strategy"
@@ -2206,22 +2275,20 @@ class AgentRuntime:
                 if await self._complete(task_id, messages, content or verification, verification, working, metrics):
                     return
                 continue
-            await self._update(task_id, status="failed", stage="failed", error="Step limit reached before verification", **metrics.as_fields())
-            await record_trajectory(task_id, working, "failed")
-            await complete_coding_route(task_id, "failed", "Step limit reached before verification")
-            await self._release_lazy_vision()
-            await BUS.publish(task_id, "failed", "Step limit reached", stage="failed")
+            await self._fail_task(
+                task_id,
+                "Step limit reached before verification",
+                working,
+                metrics,
+                current_action="Failed: step limit",
+            )
         except asyncio.CancelledError:
             await self._update(task_id, status="cancelled", stage="cancelled", **metrics.as_fields())
             await complete_coding_route(task_id, "cancelled")
             await self._release_lazy_vision()
             raise
         except Exception as exc:
-            await self._update(task_id, status="failed", stage="failed", error=str(exc), **metrics.as_fields())
-            await record_trajectory(task_id, working, "failed")
-            await complete_coding_route(task_id, "failed", str(exc))
-            await self._release_lazy_vision()
-            await BUS.publish(task_id, "failed", "Task failed", str(exc), stage="failed")
+            await self._fail_task(task_id, str(exc), working, metrics)
         finally:
             if progress_watch is not None:
                 progress_watch.cancel()
@@ -2280,6 +2347,7 @@ class AgentRuntime:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
             REGISTRY._context["task_id"] = task_id
+            REGISTRY._context["approved"] = approved
             if name == "read_ingress":
                 result = await REGISTRY.execute(name, arguments, task_id=task_id)
             elif security_role:
