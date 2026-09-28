@@ -11,8 +11,10 @@ import asyncio
 import importlib.util
 import os
 import platform
+import re
 import shutil
 import sys
+from pathlib import Path
 from typing import Any
 
 from ..tools.base import ToolResult
@@ -23,6 +25,46 @@ CUA_TIMEOUT_SECONDS = 180
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
+
+
+def ufo_checkout_root() -> Path | None:
+    """Microsoft UFO2 clone: JARVIS_UFO_ROOT, or data/modules/ufo[2]."""
+    candidates: list[Path] = []
+    env = (os.environ.get("JARVIS_UFO_ROOT") or "").strip()
+    if env:
+        candidates.append(Path(env))
+    try:
+        from ..config import data_dir
+
+        root = data_dir()
+        candidates.extend(
+            [
+                root / "modules" / "ufo",
+                root / "modules" / "ufo2",
+                root / "modules" / "UFO",
+            ]
+        )
+    except Exception:
+        pass
+    for path in candidates:
+        if (path / "ufo" / "__main__.py").is_file() or (path / "ufo" / "__init__.py").is_file():
+            return path.resolve()
+    return None
+
+
+def ufo_python(checkout: Path | None = None) -> str:
+    root = checkout or ufo_checkout_root()
+    if root is not None:
+        for rel in (Path(".venv") / "Scripts" / "python.exe", Path(".venv") / "bin" / "python"):
+            candidate = root / rel
+            if candidate.is_file():
+                return str(candidate)
+    return sys.executable
+
+
+def ufo_task_slug(goal: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (goal or "").strip().lower()).strip("-")[:40]
+    return f"jarvis-{slug or 'task'}"
 
 
 class ComputerUseBackend:
@@ -243,6 +285,9 @@ class UFOBackend(ComputerUseBackend):
     clis = ("ufo", "ufo2")
 
     def detect_kind(self) -> str | None:
+        checkout = ufo_checkout_root()
+        if checkout is not None:
+            return f"checkout:{checkout}"
         for name in self.modules:
             if _module_available(name):
                 return f"python-module:{name}"
@@ -264,7 +309,7 @@ class UFOBackend(ComputerUseBackend):
                 "available": True,
                 "status": "ready",
                 "detail": (
-                    f"UFO {kind} is available as a Windows HostAgent/AppAgent worker. "
+                    f"UFO2 {kind} is available as a Windows HostAgent/AppAgent worker. "
                     "Native UI Automation remains the deterministic default."
                 ),
             }
@@ -275,21 +320,25 @@ class UFOBackend(ComputerUseBackend):
             "available": False,
             "status": "missing",
             "detail": (
-                "Adapter is integrated. Install Microsoft UFO locally to enable HostAgent/AppAgent "
-                "Windows control. Until then Jarvis uses the native desktop tool."
+                "UFO2 is not installed. Clone https://github.com/microsoft/UFO into "
+                "data/modules/ufo (or set JARVIS_UFO_ROOT) and pip-install its requirements "
+                "in that tree. Until then Jarvis uses the native desktop tool."
             ),
         }
 
     def build_command(self, goal: str, app: str | None = None, kind: str | None = None) -> list[str]:
         resolved = kind or self.detect_kind() or "python-module:ufo"
-        if resolved.startswith("cli:"):
-            command = [resolved.split(":", 1)[1], "--task", goal]
-        else:
-            module = resolved.split(":", 1)[1]
-            command = [sys.executable, "-m", module, "--task", goal]
+        request = str(goal or "").strip()
         if app:
-            command.extend(["--app", app])
-        return command
+            request = f"{request} (app: {app})"
+        task = ufo_task_slug(request)
+        if resolved.startswith("cli:"):
+            return [resolved.split(":", 1)[1], "--task", task, "-r", request]
+        if resolved.startswith("checkout:"):
+            checkout = Path(resolved.split(":", 1)[1])
+            return [ufo_python(checkout), "-m", "ufo", "--task", task, "-r", request]
+        module = resolved.split(":", 1)[1]
+        return [sys.executable, "-m", module, "--task", task, "-r", request]
 
     async def run(self, goal: str, app: str | None = None, timeout_seconds: int | None = None) -> ToolResult:
         if not str(goal or "").strip():
@@ -300,15 +349,19 @@ class UFOBackend(ComputerUseBackend):
                 False,
                 "",
                 error=(
-                    "Microsoft UFO is not installed on this machine. "
+                    "Microsoft UFO2 is not installed on this machine. "
                     "Use the native desktop tool (UI Automation) instead."
                 ),
             )
         command = self.build_command(str(goal).strip(), app, kind)
         timeout = timeout_seconds or UFO_TIMEOUT_SECONDS
         env = self._openai_env()
+        cwd = None
+        if kind.startswith("checkout:"):
+            cwd = kind.split(":", 1)[1]
+            env["PYTHONPATH"] = cwd + os.pathsep + env.get("PYTHONPATH", "")
         try:
-            stdout, stderr, code = await self._invoke(command, timeout, env=env)
+            stdout, stderr, code = await self._invoke(command, timeout, env=env, cwd=cwd)
         except Exception as exc:
             return ToolResult(
                 False,
@@ -342,12 +395,19 @@ class UFOBackend(ComputerUseBackend):
         env.setdefault("OPENAI_API_KEY", env.get("OPENAI_API_KEY") or "local")
         return env
 
-    async def _invoke(self, command: list[str], timeout: int, env: dict[str, str] | None = None) -> tuple[str, str, int]:
+    async def _invoke(
+        self,
+        command: list[str],
+        timeout: int,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> tuple[str, str, int]:
         proc = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            cwd=cwd or None,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
