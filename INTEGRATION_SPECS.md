@@ -3,7 +3,7 @@
 **Status:** living architect priority list for third-party / reel-sourced integrations  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17  
-**Updated:** 2026-09-28 (reel batch RFC-0183–0191 — extends this list; does not replace the 0095–0116 ladder)
+**Updated:** 2026-09-28 (reel batch RFC-0183–0191, plus comment-scrape follow-up RFC-0192 — extends this list; does not replace the 0095–0116 ladder)
 
 This file is the Architect priority list for **Instagram Saved → jarvis** reel integrations and Taco’s high-impact adds that were not in the original reel RFC set. It does **not** replace [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) (architecture + queue) or [`docs/rfcs/`](docs/rfcs/) (one-ticket contracts). Implementers take **one** named RFC from this list. Product code is a follow-up ticket; this document and its RFCs are specs.
 
@@ -124,6 +124,8 @@ Jarvis **is** the HexStrike operator: Daybreak HUD + owner chat drive the **full
 
 Taco’s Instagram Saved → **jarvis** collection was re-scraped **2026-09-28**. The live grid is **36** URLs. The older offline inventory had about **140** linked items; those links are not this batch. **Treat the 36 as the new batch.** This section **adds** child RFCs. It does **not** replace the 0095–0116 ladder, RFC-0095, or the Taco priority pack (0107–0109). Umbrella remains RFC-0095. Quality bar: **Anzu 1.0**, full intent, no stubs or soft-fail. No invented LE / Red / Purple / ATO gates. No vendored third-party trees. `persona_candidate` stays tag-only (no butler or voice merge). No exploit recipes or PoCs in these specs.
 
+**Comment-scrape follow-up (same day):** a later pass on the Git Radar reel (batch n29) found a caption link that was not one of the 36 grid URLs: [strands-agents/harness-sdk](https://github.com/strands-agents/harness-sdk). That link is **RFC-0192**. It does not grow the grid to 37 and it does not renumber 0183–0191.
+
 Clones stay out of git:
 
 | Role | Path |
@@ -157,6 +159,10 @@ BlackGrid image sidecar **beside** ComfyUI/SANA (RFC-0096), not a second studio.
 
 Git-native sync of skills and rules across coding agents. Adjacent to Module Catalog and Skill Forge (RFC-0173). **Does not replace the Jarvis skill store.** No silent push. **RFC:** [`docs/rfcs/0188-teamai-cli-skill-rules-sync.md`](docs/rfcs/0188-teamai-cli-skill-rules-sync.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/teamai-cli` · `C:\Users\daanv\projects\jarvis-ig\rfc\teamai-cli`. Upstream [Tencent/teamai-cli](https://github.com/Tencent/teamai-cli). **Lane:** D1 + UX (sync row only).
 
+### RFC-0192 — Strands Harness SDK evaluation
+
+Optional evaluation of an open-source Python/TypeScript SDK for building and controlling an agent harness (MCP, multi-agent, any model), then an optional Module Catalog **Download** allowlist row. **Jarvis/Anzu stays the product orchestrator.** Do not replace butler, Dual Seat, or the portal. Not a `persona_candidate` (that hold is RFC-0190). **Download ≠ integrate.** Sidecar code waits until the research result is `partial` and CoS names the follow-up. **RFC:** [`docs/rfcs/0192-strands-harness-sdk-evaluation.md`](docs/rfcs/0192-strands-harness-sdk-evaluation.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/harness-sdk` · `C:\Users\daanv\projects\jarvis-ig\rfc\harness-sdk`. Upstream [strands-agents/harness-sdk](https://github.com/strands-agents/harness-sdk). **Lane:** D1 (research, then RFC-0095 Download allowlist).
+
 ### RFC-0189 — Impeccable design language
 
 Design-system skill and deterministic detectors for **AI-authored** Daybreak/portal UI. House visual system stays. **No stolen licensed skins.** Does not restyle presence (RFC-0175) and does not edit `PORTAL_UX.md`. **RFC:** [`docs/rfcs/0189-impeccable-design-language.md`](docs/rfcs/0189-impeccable-design-language.md). **Status:** accepted (specs-only). **Local clone:** `/workspace/projects/rfc/impeccable` · `C:\Users\daanv\projects\jarvis-ig\rfc\impeccable`. Upstream [pbakaus/impeccable](https://github.com/pbakaus/impeccable). **Lane:** UX.
@@ -169,9 +175,9 @@ One new member on the RFC-0105 `cybersecurity` Daybreak module: enable, status, 
 
 Full desktop agent workspace. Same rule as RFC-0104: tag `persona_candidate`. **Download ≠ integrate.** No butler or voice merge. Catalog badge only until Taco promotes a personality-track RFC. **RFC:** [`docs/rfcs/0190-pi-desktop-persona-hold.md`](docs/rfcs/0190-pi-desktop-persona-hold.md). **Status:** accepted hold (not an implement ticket now). **Local clone:** `/workspace/projects/persona/pi-desktop` · `C:\Users\daanv\projects\jarvis-ig\persona\pi-desktop`. Upstream [DLYZZT/pi-desktop](https://github.com/DLYZZT/pi-desktop). **Lane:** later.
 
-### Top 10 implement-first (Taco)
+### Implement-first (Taco)
 
-Do these before bulk catalog work. One RFC per implement PR.
+The 2026-09-28 grid scored ten rows. Architect judgment on the comment-scrape follow-up: **strong agent-harness research**, so **RFC-0192** is inserted after **RFC-0188** (and after ripwire/teamai) and before the persona hold — not parked as an optional tail. The list is eleven rows. Do these before bulk catalog work. One RFC per implement PR.
 
 | # | What | Why first |
 | --- | --- | --- |
@@ -181,10 +187,11 @@ Do these before bulk catalog work. One RFC per implement PR.
 | 4 | **RFC-0186** Tesseract | BlackGrid local video create/edit |
 | 5 | **RFC-0187** Qwen-Image-2.1 | BlackGrid local image gen beside ComfyUI/SANA |
 | 6 | **RFC-0188** teamai-cli | Skill/rules sync that leaves the Jarvis skill store in charge |
-| 7 | **RFC-0189** impeccable | Higher bar for AI-authored Daybreak/portal UI |
-| 8 | **RFC-0107 embed residual** | Finish in-Jarvis real Obsidian host and prove the vault is used, **before** bulk catalog |
-| 9 | **RFC-0191** pentest-harness | After the RFC-0105 sibling pattern; catalog/process only; no exploits in docs |
-| 10 | **RFC-0190** pi-desktop | Persona hold: catalog badge only until Taco promotes |
+| 7 | **RFC-0192** strands harness-sdk | Strong agent-harness research after teamai and before the persona hold. Evaluate, then Download allowlist only. Jarvis stays orchestrator. |
+| 8 | **RFC-0189** impeccable | Higher bar for AI-authored Daybreak/portal UI |
+| 9 | **RFC-0107 embed residual** | Finish in-Jarvis real Obsidian host and prove the vault is used, **before** bulk catalog |
+| 10 | **RFC-0191** pentest-harness | After the RFC-0105 sibling pattern; catalog/process only; no exploits in docs |
+| 11 | **RFC-0190** pi-desktop | Persona hold: catalog badge only until Taco promotes |
 
 ### Already covered (do not duplicate)
 
@@ -229,8 +236,9 @@ No implement ticket unless Taco promotes one. **No RFC numbers** (catalog Downlo
 | **0189** | Impeccable design language | 2026-09-28 batch — AI-authored UI quality; no licensed skins |
 | **0190** | Pi Desktop persona hold | 2026-09-28 batch — RFC-0104 pattern; Download ≠ integrate |
 | **0191** | Pentest-harness catalog sibling | 2026-09-28 batch — RFC-0105 pattern; no exploits; no new LE/ATO gate |
+| **0192** | Strands Harness SDK evaluation | Comment-scrape follow-up (Git Radar reel, batch n29) — not in the 36-URL grid. Research, then RFC-0095 Download allowlist. Jarvis/Anzu stays orchestrator. Not a persona hold. |
 
-If a later tip already occupied 0107+, Architect takes the next free numbers. **0107–0109** landed as specs on `development` via [#280](https://github.com/Daan298261/Jarvis/pull/280). Next free after 0109 was **0110**. **0111–0115** are the 1.4 spec split (not Instagram children). **0116** is the next free after 0115 (Taco 2026-09-17 Jev add). **0182** was the highest RFC on `development` before this batch; **0183–0191** are the 2026-09-28 children. Archive clones (OpenStock, MatrixOne, Spirula Studio) take **no** RFC number unless Taco promotes them.
+If a later tip already occupied 0107+, Architect takes the next free numbers. **0107–0109** landed as specs on `development` via [#280](https://github.com/Daan298261/Jarvis/pull/280). Next free after 0109 was **0110**. **0111–0115** are the 1.4 spec split (not Instagram children). **0116** is the next free after 0115 (Taco 2026-09-17 Jev add). **0182** was the highest RFC on `development` before the reel batch; **0183–0191** are the 2026-09-28 grid children. **0192** is the comment-scrape follow-up. Next free is **0193**. Archive clones (OpenStock, MatrixOne, Spirula Studio) take **no** RFC number unless Taco promotes them.
 
 ---
 

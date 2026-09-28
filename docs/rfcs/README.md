@@ -61,4 +61,4 @@ Taco goals memo (decision, not an implement ticket): [0118](0118-taco-goals-high
 
 Memory recall follow-up: [0132](0132-supermemory-semantic-recall-sidecar.md) adds an optional self-hosted Supermemory semantic sidecar while keeping ContextRepo authoritative, native fallback mandatory, and Obsidian as the owner-editable linked vault.
 
-**2026-09-28 Instagram batch** (next free after [0182](0182-context-and-segmented-agentic-tasks.md) was **0183**): [0183](0183-obsidian-agent-skills-pack.md)–[0191](0191-pentest-harness-catalog-sibling.md). Living impact order and Top 10: [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md). Does not replace the 0095–0116 ladder.
+**2026-09-28 Instagram batch** (next free after [0182](0182-context-and-segmented-agentic-tasks.md) was **0183**): [0183](0183-obsidian-agent-skills-pack.md)–[0191](0191-pentest-harness-catalog-sibling.md). Comment-scrape follow-up: [0192](0192-strands-harness-sdk-evaluation.md) (Strands Harness SDK; not in the 36-URL grid). Living impact order: [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md). Does not replace the 0095–0116 ladder. Next free is **0193**.

@@ -6,7 +6,7 @@
 **Date:** 2026-09-28
 
 **Parent:** [RFC-0104](0104-persona-candidates-pack.md) persona-candidate pattern. Umbrella: [RFC-0095](0095-instagram-jarvis-collection-module-catalog.md).  
-**Living index:** [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md) § 2026-09-28 reel batch (implement-first #10 — catalog badge only).  
+**Living index:** [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md) § 2026-09-28 reel batch (implement-first #11 — catalog badge only).  
 **Related (do not rewrite):** RFC-0055 butler. RFC-0092 voice. RFC-0137 named persona presence. RFC-0175 presence morph (reference only if a later UX ticket wants motion notes).
 
 This file is **specs-only**. Tag only. **Download ≠ integrate.** No butler / voice merge. Do not vendor `DLYZZT/pi-desktop`.
