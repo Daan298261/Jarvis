@@ -84,3 +84,4 @@ Pipeline steps below are **spec’d**, not implemented.
 - Parent RFC-0095 reserved this number and the name list. This child **writes the scored hold**; it does not open a personality implementation ticket.
 - Implement (when named): personality track only; do not fold into RFC-0092 or 0055; PR against `development`.
 - **2026-09-28:** [RFC-0190](0190-pi-desktop-persona-hold.md) adds Pi Desktop to this same hold (catalog badge only). The Hermes reel (“Hermes + Obsidian memory”) stays this hold plus [RFC-0183](0183-obsidian-agent-skills-pack.md) — not a butler merge. Unlinked humanoid / NEXUS / Larpochka / maninalabs demos stay `persona_candidate` / `needs_link` on [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md).
+- **2026-09-28 follow-up:** [RFC-0192](0192-strands-harness-sdk-evaluation.md) (`strands-agents/harness-sdk`) is an SDK evaluation, not a member of this hold. Do not tag it `persona_candidate`.

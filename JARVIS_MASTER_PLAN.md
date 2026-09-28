@@ -2949,6 +2949,16 @@ The re-scraped collection needed scored child tickets so implementers do not ren
 
 ---
 
+Decision: RFC-0192 Strands Harness SDK evaluation (accepted)
+
+Comment-scrape follow-up on the Git Radar reel (batch n29) resolved a caption link that was not in the 2026-09-28 36-URL grid: [strands-agents/harness-sdk](https://github.com/strands-agents/harness-sdk). [RFC-0192](docs/rfcs/0192-strands-harness-sdk-evaluation.md) is **accepted** (specs-only). Optional evaluation and optional sidecar pattern for coding-agent or multi-agent missions. Jarvis/Anzu stays the product orchestrator. Do not replace butler, Dual Seat, or the portal. Download ≠ integrate. No vendoring. Lane: D1 research, then an optional Module Catalog Download allowlist under RFC-0095. Living index [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md) inserts 0192 after 0188 and before the RFC-0190 persona hold. No new §58 checkbox. No product code in this ledger line.
+
+Reason:
+
+The caption link is a real agent-harness SDK. Leaving it unscored, or filing it as a persona, would either drop the research or stand up a second orchestrator.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:

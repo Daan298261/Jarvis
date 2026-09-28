@@ -5,7 +5,7 @@
 **Author:** Jarvis Architect  
 **Date:** 2026-09-28
 
-**Parent:** [RFC-0095](0095-instagram-jarvis-collection-module-catalog.md). Living index: [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md) § 2026-09-28 reel batch (implement-first #7).  
+**Parent:** [RFC-0095](0095-instagram-jarvis-collection-module-catalog.md). Living index: [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md) § 2026-09-28 reel batch (implement-first #8).  
 **Related (do not rewrite):** `PORTAL_UX.md` (Architect-owned shell). RFC-0069 / RFC-0137 / RFC-0175 presence (orb and morph stay those RFCs). RFC-0138 custom UI presets. Daybreak visual system already in the portal.
 
 This file is **specs-only**. Do not vendor `pbakaus/impeccable`. Do not copy licensed third-party skins. Full intent. **No stubs / soft-fail.**
