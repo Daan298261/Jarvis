@@ -42,11 +42,19 @@ def logon_task_registered() -> bool:
 
 
 def snapshot() -> dict[str, object]:
+    registered = logon_task_registered()
+    elevated = is_elevated()
+    hint = ""
+    if not registered:
+        hint = "Run .\\start-jarvis.ps1 -RegisterLogonTask as administrator once, then log on again."
+    elif not elevated:
+        hint = "Logon task is registered; this process is not elevated yet (restart after logon or start from the task)."
     return {
-        "elevated": is_elevated(),
+        "elevated": elevated,
         "pid": os.getpid(),
         "executable": sys.executable,
         "platform": os.name,
         "logon_task": LOGON_TASK_NAME,
-        "logon_task_registered": logon_task_registered(),
+        "logon_task_registered": registered,
+        "logon_task_hint": hint,
     }

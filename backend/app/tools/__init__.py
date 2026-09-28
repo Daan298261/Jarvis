@@ -1,3 +1,1 @@
-from .registry import REGISTRY, ToolRegistry
-
-__all__ = ["REGISTRY", "ToolRegistry"]
+"""Jarvis tools. Import ``REGISTRY`` from ``app.tools.registry`` so worker modules can import ``ToolResult`` without a cycle."""

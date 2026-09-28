@@ -42,6 +42,9 @@ def test_start_jarvis_allows_voice_only_without_gguf():
     assert "throw \"llama-server.exe missing" not in text
     assert "Show-StartupFailure" in text
     assert "Press Enter to close" in text
+    assert "RegisterLogonTask" in text
+    assert "Register-ScheduledTask" in text
+    assert "-ErrorAction Stop" in text
 
 
 def test_stop_jarvis_still_mentions_llama_server():

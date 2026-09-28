@@ -28,7 +28,7 @@ function Register-ElevatedLogonTask {
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType Interactive
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
     Write-Host "Registered logon task '$taskName' (highest privileges) to start Jarvis." -ForegroundColor Green
 }
 
@@ -107,6 +107,10 @@ try {
 if ($RegisterLogonTask) {
     Write-Step "Registering elevated logon task"
     Register-ElevatedLogonTask
+    if ($PSBoundParameters.Count -eq 1 -and $PSBoundParameters.ContainsKey("RegisterLogonTask")) {
+        Write-Host "Logon task registered. Start Jarvis normally; it will elevate at the next logon." -ForegroundColor Green
+        exit 0
+    }
 }
 
 $elevated = Test-CurrentProcessElevated

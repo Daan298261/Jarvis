@@ -177,3 +177,6 @@ def test_elevation_snapshot_has_pid():
     assert is_elevated() in {True, False}
     assert snap["logon_task"] == "JarvisElevatedBackend"
     assert snap["logon_task_registered"] in {True, False}
+    assert "logon_task_hint" in snap
+    if not snap["logon_task_registered"]:
+        assert "RegisterLogonTask" in str(snap["logon_task_hint"])
