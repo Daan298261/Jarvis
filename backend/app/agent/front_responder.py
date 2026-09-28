@@ -479,6 +479,8 @@ def front_provider(settings: AppSettings | None = None):
         return loaded
     if loaded and not configured:
         return loaded
+    if not MANAGER.state.loaded:
+        return None
     from ..providers.openai_compat import OpenAICompatProvider
 
     timeout = max(1.0, front_lane_config(app).timeout_ms / 1000.0)
@@ -566,25 +568,26 @@ async def generate_front_reply(
     raw = "".join(parts).strip()
     if not raw:
         complete_ms = max(0.0, (time.perf_counter() - started) * 1000)
-        if worker_required(heuristic):
-            fb = fallback_text_for_action(heuristic)
-            action, text, rejected = enforce_front_safety(heuristic, fb, user_text=user_text, heuristic=heuristic)
+        if heuristic == "silent_skip":
             return FrontReply(
-                action=action,
-                text=text,
+                action="silent_skip",
+                text="",
                 model=model_id,
                 complete_ms=complete_ms,
                 skipped=True,
-                safety_rejected=rejected,
                 max_tokens=cfg.max_tokens,
             )
+        fb = fallback_text_for_action(heuristic)
+        action, text, rejected = enforce_front_safety(heuristic, fb, user_text=user_text, heuristic=heuristic)
         return FrontReply(
-            action=heuristic if heuristic in FRONT_ACTIONS else "silent_skip",
-            text="",
+            action=action,
+            text=text,
             model=model_id,
             complete_ms=complete_ms,
             skipped=True,
+            safety_rejected=rejected,
             max_tokens=cfg.max_tokens,
+            first_text_ms=complete_ms,
         )
     parsed_action, parsed_text = parse_front_payload(raw, fallback_action=heuristic)
     action, text, rejected = enforce_front_safety(

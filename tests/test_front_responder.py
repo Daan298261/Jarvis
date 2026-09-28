@@ -18,6 +18,7 @@ from app.agent.front_responder import (
     FRONT_MAX_TOKENS_MIN,
     RUNTIME_ROLE,
     SAFE_ACK,
+    SAFE_HELLO,
     classify_front_action,
     clamp_front_max_tokens,
     enforce_front_safety,
@@ -186,6 +187,26 @@ async def test_generate_front_reply_final_basic_no_tools_no_thinking():
     assert reply.tools_enabled is False
     assert worker_required(reply.action) is False
     assert seen and "tools" not in seen[0]
+
+
+@pytest.mark.asyncio
+async def test_empty_front_stream_still_says_hello():
+    class Empty:
+        async def chat_stream(self, messages, **kwargs):
+            del messages, kwargs
+            if False:
+                yield ""
+
+    from app.inference.manager import MANAGER
+
+    MANAGER.provider = Empty()
+    try:
+        reply = await generate_front_reply("how are you", settings=AppSettings())
+        assert reply.action == "final_basic"
+        assert reply.text == SAFE_HELLO
+    finally:
+        MANAGER.provider = None
+
 
 
 @pytest.mark.asyncio
