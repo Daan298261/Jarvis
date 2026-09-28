@@ -97,6 +97,7 @@ from .planning import (
     classify_task,
     route_request,
     follow_up_stays_conversation,
+    simple_app_control,
     format_selected_plan,
     is_plain_conversation,
     parse_plan_block,
@@ -1182,6 +1183,48 @@ class AgentRuntime:
         working.verified = True
         await self._complete(task_id, messages, content, content, working, metrics)
 
+    async def _run_simple_app_control(
+        self,
+        task_id: str,
+        *,
+        action: str,
+        name: str,
+        working: WorkingState,
+        metrics: LiveTaskMetrics,
+        settings: AppSettings,
+        autonomy: str,
+        profile_id: str | None,
+    ) -> None:
+        """Open or close a named app without waiting for the language model."""
+        arguments = {"action": action, "name": name}
+        await self._update(task_id, stage="act", current_action=f"{action} {name}", current_tool="apps")
+        await BUS.publish(task_id, "stage", "Acting", stage="act")
+        await speak_progress(task_id, "apps", arguments)
+        observation, _ = await self._execute_tool_ex(
+            task_id,
+            "apps",
+            arguments,
+            autonomy,
+            settings,
+            metrics=metrics,
+            profile_id=profile_id,
+        )
+        lowered = observation.lower()
+        failed = observation.startswith("ERROR:") or any(
+            marker in lowered
+            for marker in ("did not start", "no installed app", "authorization denied", "could not start")
+        )
+        display = " ".join(word.capitalize() if word.islower() else word for word in name.split()) or name
+        if failed:
+            await self._fail_task(task_id, observation, working, metrics)
+            return
+        content = f"{display} is open." if action == "open" else f"{display} is closed."
+        messages = [
+            ChatMessage(role="user", content=f"{action} {name}"),
+            ChatMessage(role="assistant", content=content),
+        ]
+        await self._complete(task_id, messages, content, observation[:1500], working, metrics)
+
     async def _run(
         self,
         task_id: str,
@@ -1296,6 +1339,20 @@ class AgentRuntime:
                 )
                 return
             working.task_class = (follow_route.task_class if follow_route else classify_task(extra_prompt or prompt))
+        if not pending_tool:
+            app_job = simple_app_control(extra_prompt or prompt)
+            if app_job:
+                await self._run_simple_app_control(
+                    task_id,
+                    action=app_job[0],
+                    name=app_job[1],
+                    working=working,
+                    metrics=metrics,
+                    settings=settings,
+                    autonomy=autonomy,
+                    profile_id=profile_name,
+                )
+                return
         user_turn = (extra_prompt or "").strip()
         if not pending_tool and (not continue_existing or user_turn):
             progress_watch = asyncio.create_task(

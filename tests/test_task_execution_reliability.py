@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.agent.coding_contract import applies_coding_execution_contract
-from app.agent.planning import app_control_target, classify_task
+from app.agent.planning import app_control_target, classify_task, simple_app_control
 from app.agent.skills import sanitize_steps, skill_grounded_in_goal
 from app.tools.apps import _score, normalize_app_name
 
@@ -29,6 +29,50 @@ from app.tools.apps import _score, normalize_app_name
 def test_app_requests_route_to_desktop_control(prompt, target):
     assert app_control_target(prompt) == target
     assert classify_task(prompt) == "windows gui"
+
+
+def test_simple_open_steam_does_not_need_the_model():
+    assert simple_app_control("open steam") == ("open", "steam")
+    assert simple_app_control("please close Spotify now") == ("close", "Spotify")
+    assert simple_app_control("open notepad and type hello") is None
+    assert simple_app_control("open the website and save the page title") is None
+
+
+@pytest.mark.asyncio
+async def test_open_steam_task_skips_the_language_model(jarvis_env, monkeypatch):
+    from app.agent.loop import AGENT
+    from app.tools.base import ToolResult
+    from app.tools.registry import REGISTRY
+    from tests.test_verification_loop import _finished
+
+    async def fake_execute(name, arguments, **_kw):
+        assert name == "apps"
+        assert arguments.get("action") == "open"
+        assert str(arguments.get("name") or "").lower() == "steam"
+        return ToolResult(True, "Started Steam (pid 1).", data={"name": "Steam"})
+
+    original = REGISTRY.execute
+    REGISTRY.execute = fake_execute  # type: ignore[assignment]
+    monkeypatch.setattr(
+        "app.policy.action_gate.decide",
+        lambda *a, **k: type("R", (), {"answers": {}, "fallback_used": True, "provider": "generative"})(),
+    )
+    try:
+        task = await AGENT.create_task("open steam")
+        finished = await _finished(task.id)
+    finally:
+        REGISTRY.execute = original  # type: ignore[assignment]
+    assert finished.status == "completed"
+    assert "Steam is open" in (finished.result or "")
+    assert jarvis_env["manager"].provider is None
+
+
+def test_windows_gui_exposes_the_apps_launcher():
+    from app.agent.tool_exposure import tool_names_for
+
+    names = tool_names_for("windows gui", prompt="open steam")
+    assert "apps" in names
+
 
 
 @pytest.mark.parametrize(

@@ -218,6 +218,8 @@ _APP_INTENT = re.compile(
     r"((?:[\w.+&'-]+)(?:\s+[\w.+&'-]+){0,3}?)"
     r"(?:\s+(?:for me|please|now|app))*\s*(?:(?:,|\band\b|\bthen\b).*)?[.!?]?\s*$"
 )
+_CLOSE_APP_VERB = re.compile(r"(?i)\b(close|quit|exit|kill)\b")
+_COMPOUND_AFTER_APP = re.compile(r"(?i)(?:,|\band\b|\bthen\b)\s+\S")
 _CODING_SESSION = re.compile(r"(?i)\b(coding session|start coding|code review|pair program|work on (?:the|my) (?:repo|code|project))\b")
 
 
@@ -260,6 +262,21 @@ def app_control_target(prompt: str) -> str | None:
     if not first or first in _NOT_AN_APP:
         return None
     return re.sub(r"^(?:the|a|an)\s+", "", raw, flags=re.I).strip() or None
+
+
+def simple_app_control(prompt: str) -> tuple[str, str] | None:
+    """Single open/close with no extra work — safe to run without the language model."""
+    text = latest_user_utterance(prompt or "").strip()
+    match = _APP_INTENT.match(text)
+    if not match:
+        return None
+    name = app_control_target(prompt)
+    if not name:
+        return None
+    if _COMPOUND_AFTER_APP.search(text[match.end(1) :]):
+        return None
+    action = "close" if _CLOSE_APP_VERB.search(text[: match.start(1)]) else "open"
+    return action, name
 
 
 def classify_task(prompt: str) -> str:
