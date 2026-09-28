@@ -243,7 +243,8 @@ def decide(
     hard_safety = dclass in POLICY_HARDENED_CLASSES or bool(projection.get("policy_deny")) or bool(
         projection.get("policy_requires_approval")
     )
-    if rules_result.hard_rule and (hard_safety or speak_fence):
+    harm_fence = dclass == "harm_veto" and rules_result.hard_rule
+    if rules_result.hard_rule and (hard_safety or speak_fence or harm_fence):
         guarded = _apply_policy_guard(state=projection, decision_class=dclass, result=rules_result)
         metrics.record(guarded)
         audit.record_event("reflex_decision", guarded.as_dict())

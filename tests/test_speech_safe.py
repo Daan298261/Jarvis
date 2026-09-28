@@ -27,6 +27,10 @@ def test_reasoning_trace_is_never_spoken():
     assert speech_safe(leak) == ""
 
 
+def test_jinja_and_prompt_errors_are_never_spoken():
+    assert speech_safe("Error rendering prompt with jinja template: No user query found in messages.") == ""
+
+
 def test_code_block_alone_is_not_spoken():
     assert speech_safe("```python\nprint(1)\n```") == ""
 

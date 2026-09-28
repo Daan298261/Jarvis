@@ -11,6 +11,8 @@ from .base import RiskLevel
 
 IRREVERSIBLE_PATTERNS = [
     r"\bformat\s+[a-z]:",
+    r"\bdelete\s+\S.*(?:system32|windows\\system)",
+    r"\bwipe\b.*\b(?:disk|drive|volume|backup)",
     r"\bdiskpart\b",
     r"\bcipher\s+/w",
     r"remove-item\s+.*-recurse.*(c:\\|windows|system32)",

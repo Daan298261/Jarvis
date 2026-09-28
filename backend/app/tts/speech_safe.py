@@ -31,6 +31,14 @@ _TABLE_RULE = re.compile(r"(?m)^\s*\|?[\s:|-]{3,}\|?\s*$")
 _EMPHASIS = re.compile(r"(\*{1,3}|_{2,3}|~~)(\S(?:.*?\S)?)\1")
 _SYMBOLS = re.compile(r"[\\*_#~^|<>{}\[\]=`]+")
 _FILE_EXT = re.compile(r"\.(?:exe|lnk|url|py|ts|tsx|js|json|ps1|bat|cmd|md|txt|log|dll|msi)$", re.IGNORECASE)
+_TECHNICAL_DUMP = re.compile(
+    r"(?is)("
+    r"error rendering prompt"
+    r"|jinja template"
+    r"|no user query found"
+    r"|traceback \(most recent call last\)"
+    r")"
+)
 
 
 def _path_name(match: re.Match[str]) -> str:
@@ -60,7 +68,7 @@ def name_paths_and_links(text: str) -> str:
 def speech_safe(text: str) -> str:
     """Return text a person would say aloud; empty if nothing speakable remains."""
     cleaned = strip_reasoning_preamble(text or "")
-    if not cleaned:
+    if not cleaned or _TECHNICAL_DUMP.search(cleaned):
         return ""
     cleaned = _FENCED.sub(" ", cleaned)
     cleaned = _INLINE_CODE.sub(lambda m: m.group(1) if len(m.group(1)) <= 40 and " " not in m.group(1).strip() else " ", cleaned)

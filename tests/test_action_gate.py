@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from app.decision.adapters import rules
 from app.decision.quartermaster import select_provider_order
+from app.decision.types import Question
 from app.policy.action_gate import gate_tool_call
 from app.policy.authorize import AuthorizationResult
 from app.policy.levels import AutonomyLevel
@@ -53,7 +55,31 @@ def test_gate_fail_closed_on_destructive_when_unsure(monkeypatch):
     )
     result = gate_tool_call("terminal", action="run", arguments={"command": "rm -rf scratch"}, risk=RiskLevel.IRREVERSIBLE)
     assert result.allowed is False
-    assert "fail closed" in result.reason.lower() or "harm" in result.reason.lower()
+    assert "approve" in result.reason.lower() or "harm" in result.reason.lower() or "fail closed" in result.reason.lower()
+
+
+def test_gate_blocks_destructive_even_when_laya_says_safe(monkeypatch):
+    monkeypatch.setattr("app.policy.action_gate.authorize", lambda *a, **k: _allow())
+    safe = type(
+        "A",
+        (),
+        {"value": False, "confidence": 0.95},
+    )()
+    monkeypatch.setattr(
+        "app.policy.action_gate.decide",
+        lambda *a, **k: type(
+            "R",
+            (),
+            {"answers": {"cancel": safe}, "fallback_used": False, "provider": "laya"},
+        )(),
+    )
+    result = gate_tool_call(
+        "terminal",
+        action="run",
+        arguments={"command": "format c:"},
+        risk=RiskLevel.IRREVERSIBLE,
+    )
+    assert result.allowed is False
 
 
 def test_gate_skips_veto_after_owner_approval(monkeypatch):
@@ -87,6 +113,28 @@ def test_blue_watcher_requests_rollback_on_destructive_failure():
     assert event is not None
     assert event["action"] == "rollback_requested"
     assert note_tool_outcome("t1", "apps", {"action": "open", "name": "steam"}, "Started Steam", failed=False) is None
+
+
+def test_obvious_harm_is_a_hard_rule():
+    harm = Question(
+        id="cancel",
+        type="boolean",
+        prompt="Would carrying out this action harm the owner or destroy data? True cancels it.",
+    )
+    blocked = rules.decide(
+        state={"user_message": "format c:"},
+        questions=[harm],
+        decision_class="harm_veto",
+    )
+    assert blocked.hard_rule is True
+    assert blocked.answers["cancel"].value is True
+    allowed = rules.decide(
+        state={"user_message": "open steam"},
+        questions=[harm],
+        decision_class="harm_veto",
+    )
+    assert allowed.hard_rule is False
+    assert allowed.answers["cancel"].value is False
 
 
 def test_red_scenarios_include_steam_and_format():

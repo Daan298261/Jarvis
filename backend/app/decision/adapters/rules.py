@@ -13,6 +13,17 @@ VERSION = "rules-1.0"
 
 _SOCIAL = re.compile(r"(?i)\b(hello|hi\b|hey\b|thanks|thank you|good (morning|evening)|joke)\b")
 _TECH = re.compile(r"(?i)\b(traceback|exception|pytest|refactor|api|bug|error|stack|code|file)\b")
+# Hard-safety only. Laya decides first on everything else; these never wait for the model.
+_OBVIOUS_HARM = re.compile(
+    r"(?i)("
+    r"format\s+[a-z]:"
+    r"|rm\s+-rf\s+[/\\~]"
+    r"|del(?:ete)?\s+\S.*(?:system32|windows\\system)"
+    r"|wipe\b.*\b(?:disk|drive|volume|backup)"
+    r"|diskpart\b"
+    r"|cipher\s+/w"
+    r")"
+)
 
 
 def available(*, privacy: str = "local_only", decision_class: str = "") -> tuple[bool, str]:
@@ -154,6 +165,12 @@ def decide(
                 answers[qid] = _answer_bool(qid, local_complexity_tier(prompt) >= 3, 0.75)
             elif qid in {"done", "block"}:
                 answers[qid] = _answer_bool(qid, bool(state.get(qid)), 0.7)
+            elif qid == "cancel" or decision_class == "harm_veto":
+                if _OBVIOUS_HARM.search(prompt):
+                    answers[qid] = _answer_bool(qid, True, 1.0)
+                    hard_rule = True
+                else:
+                    answers[qid] = _answer_bool(qid, False, 0.4)
             else:
                 answers[qid] = _answer_bool(qid, False, 0.5)
         else:  # noul
@@ -168,6 +185,12 @@ def decide(
                     answers[qid] = _answer_noul(qid, 0.2, 0.6)
             elif qid in {"escalate"}:
                 answers[qid] = _answer_noul(qid, 1.0 if local_complexity_tier(prompt) >= 3 else 0.15, 0.75)
+            elif qid == "cancel" or decision_class == "harm_veto":
+                if _OBVIOUS_HARM.search(prompt):
+                    answers[qid] = _answer_noul(qid, 1.0, 1.0)
+                    hard_rule = True
+                else:
+                    answers[qid] = _answer_noul(qid, 0.0, 0.4)
             else:
                 answers[qid] = _answer_noul(qid, 0.5, 0.4)
 

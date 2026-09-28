@@ -84,12 +84,17 @@ def gate_tool_call(
 
     if cancel is True:
         return _veto(hard, f"Laya cancelled this {tool_name} step.")
-    if destructive and (cancel is True or unsure):
+    if destructive:
+        # Laya was confidently wrong on format/rm/system32 in live measure.
+        # Destructive never proceeds without an explicit owner approval.
         return _veto(
             hard,
-            "Destructive action blocked: harm check was unsure or unavailable (fail closed).",
+            "Destructive action blocked until you approve it.",
         )
-    log.debug("action gate allowed %s via %s", tool_name, source)
+    if unsure:
+        log.debug("action gate allowed %s with unsure harm check via %s", tool_name, source)
+    else:
+        log.debug("action gate allowed %s via %s", tool_name, source)
     return hard
 
 
