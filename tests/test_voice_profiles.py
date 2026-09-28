@@ -68,7 +68,7 @@ def test_catalog_lists_stub_profiles_as_unavailable(monkeypatch):
     items = catalog.list_profiles(DEFAULT_VOICE_PROFILE_ID)
     by_id = {item.id: item for item in items}
     assert by_id[DEFAULT_VOICE_PROFILE_ID].available is True
-    assert "tactical_aide_original_v1" not in by_id
+    assert by_id["tactical_aide_original_v1"].unavailable_reason == "install_required"
     stub = by_id["chatterbox_expressive_en_v1"]
     assert stub.available is False
     assert stub.unavailable_reason == "tts_unavailable"

@@ -5,7 +5,7 @@
 
 .DESCRIPTION
   Installs or verifies Python, Node.js, llama.cpp CUDA binaries, Python packages,
-  Playwright Chromium, the portal build, bootstrap GGUF, and household voice.
+  Playwright Chromium, the portal build, bootstrap GGUF, and persona voices.
   Safe to re-run: present files are skipped; anything missing is downloaded and installed.
   -SkipHeavyPrepare no longer bails out of setup.
 
@@ -18,7 +18,7 @@
 
 .PARAMETER SkipModelDownload
   Skip extra Qwen GGUF downloads when those files already exist. Missing bootstrap
-  or Kokoro weights are still downloaded.
+  or neural voice packs are still downloaded.
 
 .PARAMETER SkipLlamaDownload
   Ignored when llama-server.exe is missing; the runtime is downloaded and installed.
@@ -505,6 +505,19 @@ function Ensure-KokoroVoice([string]$VenvPython) {
     Write-Ok "Household voice ready."
 }
 
+function Ensure-PersonaVoices([string]$VenvPython) {
+    $installer = Join-Path $ScriptDir "install-persona-voices.py"
+    if (-not (Test-Path $installer)) { throw "Persona voice installer is missing: $installer" }
+    Write-Host "    Preparing five shared neural voice packs for the 13 personas..."
+    try {
+        Invoke-ProcessWithTimeout -Label "persona neural voices" -FilePath $VenvPython -Arguments @($installer) -TimeoutMinutes ($StepTimeoutMinutes * 2)
+        Write-Ok "Persona neural voices ready."
+    } catch {
+        Write-BootstrapLog "persona voices pending: $($_.Exception.Message)"
+        Write-Warning "Some persona voices could not be prepared. Download them later from the Persona or Voice menu."
+    }
+}
+
 function Test-NvidiaDriver {
     if (-not (Test-Command nvidia-smi)) {
         Write-Host "    WARNING: nvidia-smi not found. Install an NVIDIA CUDA 13-capable driver for GPU inference." -ForegroundColor Yellow
@@ -555,6 +568,7 @@ Ensure-LlamaCpp
 Write-Step "AI model weights"
 Ensure-DefaultModels -VenvPython $venvPython
 Ensure-KokoroVoice -VenvPython $venvPython
+Ensure-PersonaVoices -VenvPython $venvPython
 
 Write-Step "Finishing"
 New-Item -ItemType Directory -Force -Path `

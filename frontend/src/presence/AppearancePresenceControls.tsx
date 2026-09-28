@@ -63,7 +63,7 @@ export function AppearancePresenceControls({ settings }: AppearancePresenceContr
   }
 
   return (
-    <table className="jarvis-presence-controls-table" role="presentation" aria-label="HUD menus">
+    <table className={`jarvis-presence-controls-table${openMenu ? " open" : ""}`} role="presentation" aria-label="HUD menus">
       <tbody>
         {MENUS.map((menu) => {
           const open = openMenu === menu.id

@@ -131,13 +131,36 @@ def test_chatterbox_pack_is_one_click_installable(monkeypatch, tmp_path):
     calls: list[bool] = []
     monkeypatch.setattr(pack_install, "_pack_dir", lambda _profile: pack_dir)
     monkeypatch.setattr(pack_install, "ensure_chatterbox_python", lambda *, force=False: calls.append(force))
+    monkeypatch.setattr(pack_install, "ensure_chatterbox_weights", lambda *, force=False: calls.append(force))
+    monkeypatch.setattr(pack_install, "is_chatterbox_available", lambda: True)
     monkeypatch.setattr(pack_install, "reload_catalog", lambda: None)
 
     result = pack_install.install_voice_pack(profile)
 
     assert result.ok is True
-    assert calls == [False]
+    assert calls == [False, False]
     manifest = json.loads((pack_dir / "pack.json").read_text(encoding="utf-8"))
     assert manifest["engine_id"] == "chatterbox"
     assert manifest["model_id"] == "chatterbox"
     assert manifest["speaker_ref"] == ""
+
+
+def test_chatterbox_downloads_only_missing_model_files(monkeypatch):
+    from app.tts import pack_install
+
+    calls: list[tuple[str, bool]] = []
+    cached = {"ve.safetensors", "tokenizer.json"}
+
+    def download(*, repo_id, filename, local_files_only=False):
+        assert repo_id == "ResembleAI/chatterbox"
+        calls.append((filename, local_files_only))
+        if local_files_only and filename not in cached:
+            raise FileNotFoundError(filename)
+        return filename
+
+    monkeypatch.setattr(pack_install, "hf_hub_download", download)
+    pack_install.ensure_chatterbox_weights()
+
+    assert {name for name, _ in calls} == set(pack_install.CHATTERBOX_MODEL_FILES)
+    assert {(name, False) for name in pack_install.CHATTERBOX_MODEL_FILES if name not in cached} <= set(calls)
+    assert not any(name in cached and not local for name, local in calls)

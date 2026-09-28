@@ -83,9 +83,9 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 ; Normal release installers already contain the bootstrap GGUF and therefore skip
 ; model downloads entirely during target-machine bootstrap.
 #ifndef SkipBootstrapModel
-Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, Gmail and WhatsApp..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
+Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, persona voices, Gmail and WhatsApp..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #else
-Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model, Gmail and WhatsApp (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
+Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model and persona voices (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #endif
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -OpenPath ""/setup?step=integrations"""; WorkingDir: "{app}"; Description: "Connect Gmail and WhatsApp in Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 
