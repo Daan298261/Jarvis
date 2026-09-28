@@ -22,6 +22,22 @@ function Write-Step($message) { Write-Host "`n==> $message" -ForegroundColor Cya
 function Register-ElevatedLogonTask {
     $taskName = "JarvisElevatedBackend"
     $script = Join-Path $Root "start-jarvis.ps1"
+    if (-not (Test-CurrentProcessElevated)) {
+        Write-Host "Administrator approval is required once to register the JarvisElevatedBackend logon task." -ForegroundColor Yellow
+        $elevatedArgs = @(
+            "-NoProfile"
+            "-ExecutionPolicy"
+            "Bypass"
+            "-File"
+            $script
+            "-RegisterLogonTask"
+        )
+        $proc = Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $elevatedArgs -Wait -PassThru
+        if (-not $proc -or $proc.ExitCode -ne 0) {
+            throw "Could not register the elevated logon task. UAC was cancelled or the task failed."
+        }
+        return
+    }
     $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Wait"
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg -WorkingDirectory $Root
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
@@ -80,7 +96,7 @@ function Write-LanPortalHints {
             }
         }
     } catch {
-        Write-Host "LAN portal: bound on all interfaces — open http://<this-pc-ip>:$Port from the network." -ForegroundColor Cyan
+        Write-Host "LAN portal: bound on all interfaces - open http://<this-pc-ip>:$Port from the network." -ForegroundColor Cyan
     }
 }
 

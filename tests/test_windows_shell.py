@@ -44,6 +44,8 @@ def test_start_jarvis_allows_voice_only_without_gguf():
     assert "Press Enter to close" in text
     assert "RegisterLogonTask" in text
     assert "Register-ScheduledTask" in text
+    assert "Verb RunAs" in text
+    assert "JarvisElevatedBackend" in text
     assert "-ErrorAction Stop" in text
 
 
@@ -64,6 +66,7 @@ def test_jarvis_iss_uninstall_stops_processes():
     lower = text.lower()
     assert "stop-jarvis.ps1" in lower
     assert "includetray" in lower.replace("-", "")
+    assert "JarvisElevatedBackend" in text
 
 
 def test_jarvis_iss_modify_stops_processes_via_prepare_to_install():
