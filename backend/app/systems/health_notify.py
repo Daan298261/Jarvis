@@ -68,12 +68,14 @@ async def maybe_notify_health(*, force: bool = False) -> dict[str, Any]:
     if not force and state.get("fingerprint") == fingerprint:
         return {"notified": False, "overall": snapshot.get("overall"), "fingerprint": fingerprint}
     text = spoken_health_summary(checks)
+    # Status stays on-screen and in owner chat. Never speak it — SAPI fallback
+    # was announcing "Jarvis is degraded" in the Windows voice.
     delivery = await publish_owner_text(
         text,
         title="System status",
         kind="system",
         source="health",
-        speak=True,
+        speak=False,
     )
     _save_state({"fingerprint": fingerprint, "text": text})
     return {

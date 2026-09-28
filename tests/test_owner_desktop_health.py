@@ -62,3 +62,32 @@ def test_health_summary_lists_problems():
     ]
     assert "Owner workspace" in spoken_health_summary(checks)
     assert "workspace:degraded" in issue_fingerprint(checks)
+
+
+@pytest.mark.asyncio
+async def test_health_notify_does_not_speak_degraded_status(jarvis_env, monkeypatch):
+    from app.persona.chat_delivery import pending_chat_tts, reset_chat_delivery
+    from app.systems import health_notify
+
+    reset_chat_delivery()
+    monkeypatch.setattr(health_notify, "_load_state", lambda: {})
+    monkeypatch.setattr(health_notify, "_save_state", lambda _state: None)
+
+    async def fake_check():
+        return {
+            "overall": "degraded",
+            "checks": [
+                {
+                    "id": "household_voice",
+                    "label": "Household voice",
+                    "status": "degraded",
+                    "detail": "Kokoro failed. Windows SAPI is available.",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(health_notify, "run_self_check", fake_check)
+    result = await health_notify.maybe_notify_health(force=True)
+    assert result["notified"] is True
+    assert "degraded" in result["text"].lower()
+    assert pending_chat_tts() == []

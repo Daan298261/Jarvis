@@ -37,6 +37,8 @@ _TECHNICAL_DUMP = re.compile(
     r"|jinja template"
     r"|no user query found"
     r"|traceback \(most recent call last\)"
+    r"|independent verification"
+    r"|final report:"
     r")"
 )
 

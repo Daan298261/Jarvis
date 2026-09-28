@@ -31,6 +31,14 @@ def test_jinja_and_prompt_errors_are_never_spoken():
     assert speech_safe("Error rendering prompt with jinja template: No user query found in messages.") == ""
 
 
+def test_independent_verification_dump_is_never_spoken():
+    dump = (
+        "INDEPENDENT VERIFICATION:\n- Read `data/jarvis_sum.py`\n\n"
+        "FINAL REPORT:\nTask completed successfully."
+    )
+    assert speech_safe(dump) == ""
+
+
 def test_code_block_alone_is_not_spoken():
     assert speech_safe("```python\nprint(1)\n```") == ""
 

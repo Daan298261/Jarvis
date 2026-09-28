@@ -1,7 +1,6 @@
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { Link } from "react-router-dom"
-import { speakChatReply } from "../tts/chatTtsPlayer"
-import { healthSpokenSummary, type HealthIssue } from "./systemHealth"
+import type { HealthIssue } from "./systemHealth"
 
 type HudLocalStatusProps = {
   statusOnline: boolean
@@ -11,19 +10,13 @@ type HudLocalStatusProps = {
 export function HudLocalStatus({ statusOnline, issues }: HudLocalStatusProps) {
   const [open, setOpen] = useState(false)
   const panelId = useId()
-  const lastSpoken = useRef("")
 
   useEffect(() => {
     if (!issues.length) {
-      lastSpoken.current = ""
       setOpen(false)
       return
     }
-    const spoken = healthSpokenSummary(issues)
-    if (!spoken || spoken === lastSpoken.current) return
-    lastSpoken.current = spoken
     setOpen(true)
-    void speakChatReply(spoken)
   }, [issues])
 
   const label = statusOnline ? "LOCAL · ONLINE" : "LOCAL · DEGRADED"
