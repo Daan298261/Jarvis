@@ -24,6 +24,7 @@ from ..tts.engines import (
 )
 from ..tts.synthesize import synthesize_with_engine
 from ..tts.kokoro_adapter import kokoro_runtime_state
+from ..tts.voicestudio_adapter import is_voicestudio_available, voicestudio_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,29 @@ def _temp_path(suffix: str = ".wav") -> Path:
 
 
 def stt_backend() -> str | None:
+    pref = os.environ.get("JARVIS_STT_BACKEND", "").strip().lower()
+    if not pref:
+        try:
+            from ..config import load_settings
+
+            cfg_pref = load_settings().voice.stt_backend
+            if cfg_pref and cfg_pref != "auto":
+                pref = cfg_pref.strip().lower()
+        except Exception:
+            pass
+    if pref in {"voicestudio", "voice_studio"} and is_voicestudio_available():
+        return "voicestudio"
+    if pref in {"faster-whisper", "faster_whisper"} and _module_available("faster_whisper"):
+        return "faster-whisper"
+    if pref in {"whisper.cpp", "whisper-cli", "whisper_cpp"} and (shutil.which("whisper-cli") or shutil.which("whisper.cpp")):
+        return "whisper.cpp"
+    if pref in {"openai-whisper", "whisper"} and _module_available("whisper"):
+        return "openai-whisper"
+    if pref in {"windows-sapi", "sapi", "windows"} and sys.platform == "win32":
+        return "windows-sapi"
+
+    if is_voicestudio_available():
+        return "voicestudio"
     if local_whisper_model() is not None and _module_available("faster_whisper"):
         return "faster-whisper"
     if sys.platform == "win32":
@@ -125,6 +149,11 @@ def tts_backend() -> str | None:
 
 def stt_install_hint(backend: str | None = None) -> str:
     chosen = backend or stt_backend() or "faster-whisper"
+    if chosen == "voicestudio":
+        return (
+            "VoiceStudio server provides Whisper STT via local API (http://127.0.0.1:3900). "
+            "Ensure VoiceStudio is running or switch to faster-whisper."
+        )
     if chosen == "windows-sapi":
         return (
             "Windows speech recognition is built in. If transcription fails, install optional "
@@ -176,7 +205,9 @@ def voice_status() -> dict[str, Any]:
     model = local_whisper_model()
     ffmpeg = _find_ffmpeg()
     stt_ready = False
-    if stt == "faster-whisper":
+    if stt == "voicestudio":
+        stt_ready = True
+    elif stt == "faster-whisper":
         stt_ready = True
     elif stt == "windows-sapi":
         stt_ready = True
@@ -305,6 +336,10 @@ async def transcribe_audio(data: bytes, filename: str = "audio.webm") -> str:
     converted: Path | None = None
     try:
         backend = status["stt"]
+        if backend == "voicestudio":
+            converted = await _convert_to_wav(path)
+            wav_bytes = converted.read_bytes()
+            return await voicestudio_adapter.transcribe_async(wav_bytes, filename="audio.wav")
         if backend == "faster-whisper":
             return _transcribe_faster_whisper(path, status.get("model_path") or None)
         if backend == "windows-sapi":

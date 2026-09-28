@@ -35,6 +35,9 @@ def test_bootstrap_covers_required_steps():
         "ensure-ttspythonpackages",
         "ensure-kokorovoice",
         "ensure-personavoices",
+        "ensure-whispermodel",
+        "ensure-voicestudio",
+        "ensure-pockettts",
         "install-persona-voices.py",
         "kokoro",
         "soundfile",
@@ -91,6 +94,14 @@ def test_jarvis_iss_wiring():
     assert "force-stop-jarvis.ps1" in text
     assert "Start Jarvis" in text
     assert "Stop Jarvis" in text
+    assert "dl_kokoro" in text
+    assert "dl_personavoices" in text
+    assert "dl_whisper" in text
+    assert "dl_voicestudio" in text
+    assert "dl_pockettts" in text
+    assert "-InstallWhisper" in text
+    assert "-InstallVoiceStudio" in text
+    assert "-InstallPocketTTS" in text
     lower = text.lower()
     assert "models" in lower and "excludes" in lower
     assert "release\\" in lower or "release\\*" in lower

@@ -13,10 +13,14 @@ from ..voice_profiles.schema import VoiceProfile
 from .engines import (
     is_chatterbox_available,
     is_piper_available,
+    is_pocket_tts_available,
+    is_voicestudio_available,
     legacy_system_tts_available,
 )
 from .kokoro_adapter import kokoro_adapter, kokoro_runtime_state
+from .pocket_tts_adapter import pocket_tts_adapter, pocket_tts_runtime_state
 from .system_sapi import legacy_tts_backend, speak_espeak, speak_pyttsx3, speak_sapi
+from .voicestudio_adapter import voicestudio_adapter, voicestudio_runtime_state
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +149,38 @@ async def synthesize_with_engine(
         except Exception as exc:
             logger.exception("Kokoro synthesis failed for profile=%s; SAPI fallback is disabled", profile_id)
             raise TtsSynthesisError("kokoro", profile_id, str(exc)) from exc
+    if engine in {"voicestudio", "voice_studio", "omni_voice", "omnivoice"}:
+        try:
+            speed = playback[0] if playback is not None else speaking_rate
+            audio = await _synthesize_voicestudio(
+                text,
+                voice=voice,
+                profile=profile,
+                speaking_rate=speed,
+            )
+            if playback is None:
+                return audio
+            _rate, pitch, volume = playback
+            return apply_neural_pcm_adjustments(audio, pitch_semitones=pitch, speaking_rate=None, volume=volume)
+        except Exception as exc:
+            logger.exception("VoiceStudio synthesis failed for profile=%s", profile_id)
+            raise TtsSynthesisError("voicestudio", profile_id, str(exc)) from exc
+    if engine in {"pocket_tts", "pocket-tts", "pockettts"}:
+        try:
+            speed = playback[0] if playback is not None else speaking_rate
+            audio = await _synthesize_pocket_tts(
+                text,
+                voice=voice,
+                profile=profile,
+                speaking_rate=speed,
+            )
+            if playback is None:
+                return audio
+            _rate, pitch, volume = playback
+            return apply_neural_pcm_adjustments(audio, pitch_semitones=pitch, speaking_rate=None, volume=volume)
+        except Exception as exc:
+            logger.exception("Pocket TTS synthesis failed for profile=%s", profile_id)
+            raise TtsSynthesisError("pocket_tts", profile_id, str(exc)) from exc
     if engine in {"chatterbox", "chatterbox_turbo", "chatterbox-turbo"}:
         try:
             audio = await _synthesize_chatterbox(text, voice=voice)
@@ -191,6 +227,40 @@ async def _synthesize_kokoro(
     return await kokoro_adapter.synthesize_async(
         text,
         voice=voice or "bm_daniel",
+        speed=speaking_rate,
+    )
+
+
+async def _synthesize_voicestudio(
+    text: str,
+    *,
+    voice: str,
+    profile: VoiceProfile | None,
+    speaking_rate: float,
+) -> bytes:
+    del profile
+    if not is_voicestudio_available():
+        raise RuntimeError("VoiceStudio server is not running or available.")
+    return await voicestudio_adapter.synthesize_async(
+        text,
+        voice=voice or "default",
+        speed=speaking_rate,
+    )
+
+
+async def _synthesize_pocket_tts(
+    text: str,
+    *,
+    voice: str,
+    profile: VoiceProfile | None,
+    speaking_rate: float,
+) -> bytes:
+    del profile
+    if not is_pocket_tts_available():
+        raise RuntimeError("Pocket TTS is not installed (pip install pocket-tts).")
+    return await pocket_tts_adapter.synthesize_async(
+        text,
+        voice=voice or "alba",
         speed=speaking_rate,
     )
 

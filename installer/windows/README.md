@@ -82,6 +82,19 @@ Optional Expert 27B (large download):
 
 A public git clone without GGUFs starts as a **household voice chatbot** (Kokoro only). Pass `-InstallLocalLLM` to download llama.cpp + 9B.
 
+Optional speech and voice systems:
+
+```powershell
+# Whisper STT base model + faster-whisper
+.\installer\windows\bootstrap.ps1 -InstallWhisper
+
+# debpalash/voicestudio clone and local integration
+.\installer\windows\bootstrap.ps1 -InstallVoiceStudio
+
+# Pocket TTS lightweight CPU neural voice
+.\installer\windows\bootstrap.ps1 -InstallPocketTTS
+```
+
 ## Desktop sign-off
 
 - Compile `JarvisSetup.exe` on Windows.

@@ -25,6 +25,21 @@
 
 .PARAMETER SkipHeavyPrepare
   Upgrade/repair hint only. Missing runtimes, packages, llama.cpp, and models are still installed.
+
+.PARAMETER SkipKokoro
+  Skip downloading Kokoro-82M neural voice weights.
+
+.PARAMETER SkipPersonaVoices
+  Skip preparing the 5 shared persona neural voice packs.
+
+.PARAMETER InstallWhisper
+  Ensure faster-whisper package and download Whisper base model into models/whisper/.
+
+.PARAMETER InstallVoiceStudio
+  Configure VoiceStudio integration and clone debpalash/voicestudio repo if requested.
+
+.PARAMETER InstallPocketTTS
+  Install pocket-tts lightweight CPU neural TTS package into the venv.
 #>
 param(
     [switch]$InstallLocalLLM,
@@ -32,6 +47,11 @@ param(
     [switch]$SkipModelDownload,
     [switch]$SkipLlamaDownload,
     [switch]$SkipHeavyPrepare,
+    [switch]$SkipKokoro,
+    [switch]$SkipPersonaVoices,
+    [switch]$InstallWhisper,
+    [switch]$InstallVoiceStudio,
+    [switch]$InstallPocketTTS,
     [int]$StepTimeoutMinutes = 45
 )
 
@@ -518,6 +538,61 @@ function Ensure-PersonaVoices([string]$VenvPython) {
     }
 }
 
+function Ensure-WhisperModel([string]$VenvPython) {
+    Write-Host "    Ensuring Whisper STT (faster-whisper and base model)..."
+    try {
+        Invoke-ProcessWithTimeout -Label "pip faster-whisper" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "faster-whisper", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
+        $whisperDir = Join-Path $Root "models\whisper"
+        New-Item -ItemType Directory -Force -Path $whisperDir | Out-Null
+        $baseBin = Join-Path $whisperDir "base"
+        if (-not (Test-Path $baseBin)) {
+            Write-Host "    Downloading faster-whisper base model..."
+            Invoke-HfDownload -VenvPython $VenvPython `
+                -RepoId "Systran/faster-whisper-base" `
+                -Includes @() `
+                -LocalDir $baseBin
+            Write-Ok "Whisper base model downloaded."
+        } else {
+            Write-Skip "Whisper base model"
+        }
+    } catch {
+        Write-BootstrapLog "whisper setup pending: $($_.Exception.Message)"
+        Write-Warning "Whisper setup failed or was skipped: $($_.Exception.Message)"
+    }
+}
+
+function Ensure-VoiceStudio([string]$VenvPython) {
+    Write-Host "    Ensuring debpalash/voicestudio integration..."
+    $vsDir = Join-Path $Root "tools\voicestudio"
+    if (Test-Path $vsDir) {
+        Write-Skip "debpalash/voicestudio directory"
+        return
+    }
+    if (Test-Command git) {
+        Write-Host "    Cloning debpalash/voicestudio into tools\voicestudio..."
+        try {
+            Invoke-ProcessWithTimeout -Label "git clone voicestudio" -FilePath "git" -Arguments @("clone", "--depth", "1", "https://github.com/debpalash/voicestudio.git", $vsDir) -TimeoutMinutes $StepTimeoutMinutes
+            Write-Ok "VoiceStudio repository cloned."
+        } catch {
+            Write-BootstrapLog "VoiceStudio clone failed: $($_.Exception.Message)"
+            Write-Warning "VoiceStudio clone failed: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Warning "git is not installed; VoiceStudio can be downloaded manually from https://github.com/debpalash/voicestudio"
+    }
+}
+
+function Ensure-PocketTTS([string]$VenvPython) {
+    Write-Host "    Ensuring Pocket TTS (pip install pocket-tts)..."
+    try {
+        Invoke-ProcessWithTimeout -Label "pip pocket-tts" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "pocket-tts", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
+        Write-Ok "Pocket TTS installed."
+    } catch {
+        Write-BootstrapLog "Pocket TTS install failed: $($_.Exception.Message)"
+        Write-Warning "Pocket TTS install failed: $($_.Exception.Message)"
+    }
+}
+
 function Test-NvidiaDriver {
     if (-not (Test-Command nvidia-smi)) {
         Write-Host "    WARNING: nvidia-smi not found. Install an NVIDIA CUDA 13-capable driver for GPU inference." -ForegroundColor Yellow
@@ -567,8 +642,33 @@ Ensure-LlamaCpp
 
 Write-Step "AI model weights"
 Ensure-DefaultModels -VenvPython $venvPython
-Ensure-KokoroVoice -VenvPython $venvPython
-Ensure-PersonaVoices -VenvPython $venvPython
+
+if (-not $SkipKokoro) {
+    Ensure-KokoroVoice -VenvPython $venvPython
+} else {
+    Write-Skip "Household voice (Kokoro-82M skipped by user option)"
+}
+
+if (-not $SkipPersonaVoices) {
+    Ensure-PersonaVoices -VenvPython $venvPython
+} else {
+    Write-Skip "Persona neural voices (skipped by user option)"
+}
+
+if ($InstallWhisper) {
+    Write-Step "Whisper speech-to-text"
+    Ensure-WhisperModel -VenvPython $venvPython
+}
+
+if ($InstallVoiceStudio) {
+    Write-Step "VoiceStudio integration"
+    Ensure-VoiceStudio -VenvPython $venvPython
+}
+
+if ($InstallPocketTTS) {
+    Write-Step "Pocket TTS lightweight speech"
+    Ensure-PocketTTS -VenvPython $venvPython
+}
 
 Write-Step "Finishing"
 New-Item -ItemType Directory -Force -Path `

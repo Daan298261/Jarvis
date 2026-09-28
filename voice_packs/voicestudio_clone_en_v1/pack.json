@@ -1,0 +1,12 @@
+{
+  "pack_id": "voicestudio_clone_en_v1",
+  "engine_id": "voicestudio",
+  "model_id": "voicestudio-local",
+  "model_rel_path": "",
+  "speaker_ref": "default",
+  "license": "MIT",
+  "offline": true,
+  "quality_tier": "expressive",
+  "speaking_rate": 1.0,
+  "bundled": true
+}

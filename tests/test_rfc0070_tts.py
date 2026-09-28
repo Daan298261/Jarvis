@@ -46,7 +46,8 @@ def test_voice_picker_lists_all_persona_packs_for_later_install():
     items = reload_catalog().list_profiles("butler_original_v1")
     ids = [item.id for item in items]
     assert ids == [
-        "butler_original_v1", "tactical_aide_original_v1", "dry_butler_original_v1",
+        "butler_original_v1", "voicestudio_clone_en_v1", "pocket_tts_alba_en_v1",
+        "tactical_aide_original_v1", "dry_butler_original_v1",
         "synthetic_command_original_v1", "chatterbox_expressive_en_v1", "windows_natural_en_v1",
     ]
 
