@@ -188,9 +188,31 @@ def _calibrate(agent: Any) -> None:
         return _from_laya_answers(agent.predict(state, payload).get("answers") or {}, effective)
 
     try:
-        calibration.calibrate(_answer)
+        calibration.calibrate(_answer, _jev_answers_if_available())
     except Exception as exc:  # noqa: BLE001 — uncalibrated Laya stays gated by confidence/bounds
         log.warning("Laya calibration failed: %s", exc)
+
+
+def _jev_answers_if_available():
+    """Same labeled fixtures as Laya, only when cloud Jev is actually callable."""
+    try:
+        from .adapters import jev_adapter
+
+        ok, _reason = jev_adapter.available(privacy="allow_cloud")
+        if not ok:
+            return None
+
+        def _answer(state: dict[str, Any], questions: list[Question], decision_class: str) -> dict[str, Answer]:
+            return jev_adapter.decide(
+                state=state,
+                questions=questions,
+                decision_class=decision_class,
+                deadline_ms=800.0,
+            ).answers
+
+        return _answer
+    except Exception:
+        return None
 
 
 def _start_load() -> None:

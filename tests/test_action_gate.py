@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from app.decision.adapters import rules
+from app.decision.calibration import calibrate, reset as reset_calibration, snapshot as calibration_snapshot
 from app.decision.quartermaster import select_provider_order
-from app.decision.types import Question
+from app.decision.types import Answer, Question
 from app.policy.action_gate import gate_tool_call
 from app.policy.authorize import AuthorizationResult
 from app.policy.levels import AutonomyLevel
@@ -149,8 +150,30 @@ def test_ufo_points_at_local_openai_endpoint():
     assert env["OPENAI_API_KEY"]
 
 
+def test_calibrate_scores_jev_on_the_same_fixtures():
+    reset_calibration()
+
+    def _stub(state, questions, _cls):
+        question = questions[0]
+        if question.type == "boolean":
+            value: object = False
+        elif question.type == "choice":
+            value = question.choices[0] if question.choices else "none"
+        else:
+            value = 0.0
+        return {question.id: Answer(question.id, question.type, value, 0.8)}
+
+    scores = calibrate(_stub, _stub)
+    assert "laya" in scores and "jev" in scores and "rules" in scores
+    assert set(scores["laya"]) == set(scores["jev"])
+    snap = calibration_snapshot()
+    assert "jev" in (snap.get("accuracy") or {}).get("harm_veto", {})
+
+
 def test_elevation_snapshot_has_pid():
     snap = snapshot()
     assert "elevated" in snap
     assert snap["pid"]
     assert is_elevated() in {True, False}
+    assert snap["logon_task"] == "JarvisElevatedBackend"
+    assert snap["logon_task_registered"] in {True, False}

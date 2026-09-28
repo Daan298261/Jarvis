@@ -72,6 +72,8 @@ def test_windows_gui_exposes_the_apps_launcher():
 
     names = tool_names_for("windows gui", prompt="open steam")
     assert "apps" in names
+    assert "ufo" in names
+    assert "reflex_computer_use" in names
 
 
 
@@ -231,3 +233,27 @@ async def test_kill_refuses_protected_process():
     result = await TerminalTool().execute(action="kill", pid=os.getpid())
     assert result.success is False
     assert "protected" in result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_hello_completes_without_the_language_model(jarvis_env, monkeypatch):
+    from app.agent.front_responder import FrontReply
+    from app.agent.loop import AGENT
+    from tests.test_verification_loop import _finished
+
+    monkeypatch.setenv("JARVIS_SKIP_MODEL", "1")
+    manager = jarvis_env["manager"]
+    manager.provider = None
+    manager.state.loaded = False
+
+    async def hello(*_a, **_k):
+        return FrontReply(action="final_basic", text="Hello, sir.", model="front", first_text_ms=1.0, complete_ms=1.0)
+
+    monkeypatch.setattr("app.agent.loop.generate_front_reply", hello)
+    task = await AGENT.create_task("how are you")
+    finished = await _finished(task.id)
+    assert finished.status == "completed"
+    assert "Hello" in (finished.result or "")
+    assert "\\" not in (finished.result or "")
+    assert "*" not in (finished.result or "")
+    assert manager.provider is None

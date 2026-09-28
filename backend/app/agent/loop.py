@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -917,6 +918,26 @@ class AgentRuntime:
                 else "Replying",
             )
 
+        from ..tts.speech_safe import speech_safe
+        from ..agent.front_responder import worker_required
+
+        spoken_front = speech_safe(prefetched_front.text or "")
+        skip_model = os.environ.get("JARVIS_SKIP_MODEL", "").strip().lower() in {"1", "true", "yes"}
+        model_ready = bool(MANAGER.provider and MANAGER.state.loaded)
+        if spoken_front and (
+            (prefetched_front.action == "final_basic" and not model_ready)
+            or (skip_model and not worker_required(prefetched_front.action))
+        ):
+            await self._complete(
+                task_id,
+                [*messages, ChatMessage(role="assistant", content=spoken_front)],
+                spoken_front,
+                spoken_front,
+                working,
+                metrics,
+            )
+            return
+
         progress_watch = asyncio.create_task(
             run_worker_progress_watchdog(
                 task_id,
@@ -927,6 +948,24 @@ class AgentRuntime:
         )
 
         if not MANAGER.provider or not MANAGER.state.loaded:
+            if skip_model:
+                if spoken_front:
+                    await self._complete(
+                        task_id,
+                        [*messages, ChatMessage(role="assistant", content=spoken_front)],
+                        spoken_front,
+                        spoken_front,
+                        working,
+                        metrics,
+                    )
+                    return
+                await self._fail_task(
+                    task_id,
+                    "The language model is not loaded, so I couldn't finish that.",
+                    working,
+                    metrics,
+                )
+                return
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
             await MANAGER.load(settings, profile_name)
         first_response_ms = prefetched_front.first_text_ms or 0.0

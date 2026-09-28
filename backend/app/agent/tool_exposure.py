@@ -16,7 +16,7 @@ CLASS_TOOLS: dict[str, tuple[str, ...]] = {
     "software engineering": ("filesystem", "terminal", "python", "git", "verify_code"),
     "research": ("web_fetch", "browser", "filesystem", "python", "mcp_call"),
     "browser automation": ("browser", "web_fetch", "filesystem", "screenshot"),
-    "windows gui": ("apps", "desktop", "screenshot", "filesystem", "terminal"),
+    "windows gui": ("apps", "desktop", "ufo", "reflex_computer_use", "screenshot", "filesystem", "terminal"),
     "office": ("office", "filesystem", "python"),
     "document processing": ("office", "filesystem", "python", "web_fetch"),
     "data processing": ("filesystem", "python", "terminal"),
