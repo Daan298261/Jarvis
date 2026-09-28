@@ -26,6 +26,10 @@ type ModelStatus = {
   family?: string
   quantization?: string
   context_size?: number
+  server_n_ctx?: number
+  context_target?: number
+  context_warning?: string
+  quick_reply_output_limit?: number
   context_cap?: number
   context_effective_cap?: number
   ram_offload?: {
@@ -121,7 +125,7 @@ export function ModelPage() {
       <h1>Model</h1>
       <p className="lede">
         Local Qwen3.5 served by llama.cpp, or any OpenAI-compatible server on this machine or the LAN.
-        Tasks start at 8K or 16K and expand only when the live prompt is under pressure. Expert is a compact 27B consult.
+        Tasks target 16K or 32K when the selected model can support it. Expert is a compact 27B consult.
         Named runtimes let you save and pick which model, address, privacy, and spend ceiling Jarvis should prefer.
       </p>
       <div className="grid two">
@@ -131,7 +135,9 @@ export function ModelPage() {
             <span>{model?.loaded ? (model.active_model || (model.advertised_models || []).join(", ") || "runtime ready") : model?.loading ? "loading…" : "unloaded"}</span>
             <b>Family</b><span>{model?.family || "—"}</span>
             <b>Quantization</b><span>{model?.quantization}</span>
-            <b>Context</b><span>{model?.context_size}</span>
+            <b>Live context</b><span>{model?.loaded ? `${model.server_n_ctx || model.context_size || "n/a"} tokens` : "n/a"}</span>
+            <b>Configured target</b><span>{model?.context_target ?? "n/a"} tokens</span>
+            <b>Quick reply output cap</b><span>{model?.quick_reply_output_limit ?? "n/a"} tokens (separate from context)</span>
             <b>Context cap</b><span>{model?.context_cap ?? "n/a"}</span>
             <b>RAM-aware cap</b><span>{model?.context_effective_cap ?? model?.context_policy?.effective_cap ?? "n/a"}</span>
             <b>RAM context ceiling</b><span>{model?.ram_offload?.ram_context_ceiling ?? "n/a"}</span>
@@ -156,6 +162,7 @@ export function ModelPage() {
             <b>State</b><span>{model?.loaded ? "loaded" : model?.loading ? "loading" : "unloaded"}</span>
           </div>
           {model?.last_error ? <p className="lede" style={{ marginTop: 12 }}>{model.last_error}</p> : null}
+          {model?.context_warning ? <p className="lede" style={{ marginTop: 12 }}>{model.context_warning}</p> : null}
         </div>
         <div className="card">
           <h2>Profiles</h2>

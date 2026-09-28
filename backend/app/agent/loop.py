@@ -145,7 +145,8 @@ from .tooling import apply_capability_request, should_enable_thinking
 from .turn_tools import select_turn_schemas
 from .ingress_gate import SAFE_LARGE_PASTE_SPEECH, run_ingress_gate
 from .trajectory import gated_trajectory_lessons, record_trajectory
-from ..memory.ingress_spill import ingress_prompt_segment
+from ..memory.ingress_spill import ingress_prompt_segment, list_ingress_chunks
+from .segmented_input import condense_text
 from .policy import policy_guidance
 from .prompts import (
     CONTINUE_PROMPT,
@@ -1336,6 +1337,39 @@ class AgentRuntime:
             )
         provider = MANAGER.provider
         assert provider is not None
+        if working.ingress_blob_id and working.ingress_size_class == "big" and not existing:
+            stored_chunks = await list_ingress_chunks(working.ingress_blob_id)
+            if not stored_chunks:
+                detail = "The stored long message could not be read. No input segments were skipped."
+                await self._update(task_id, status="failed", stage="failed", error=detail, result=detail)
+                await BUS.publish(task_id, "failed", "Long input unavailable", detail, stage="understand")
+                return
+
+            async def _segment_progress(index: int, total: int) -> None:
+                await BUS.publish(
+                    task_id,
+                    "progress",
+                    f"Reading input part {index}/{total}",
+                    stage="understand",
+                )
+
+            try:
+                brief, segment_count = await condense_text(
+                    "".join(row.body or "" for row in stored_chunks),
+                    on_segment=_segment_progress,
+                )
+            except Exception as exc:
+                detail = f"Could not process every part of the long message: {exc}"
+                await self._update(task_id, status="failed", stage="failed", error=detail, result=detail)
+                await BUS.publish(task_id, "failed", "Long input processing failed", detail[:1500], stage="understand")
+                return
+            active_prompt = (
+                f"Owner request, processed in {segment_count} ordered parts. "
+                f"Original input id: {working.ingress_blob_id}. "
+                "Use read_ingress with that id and a character offset for exact details. "
+                "Form an internal plan; use tools when the owner requested action, then observe and verify.\n\n"
+                f"Working brief:\n{brief}"
+            )
         if isinstance(provider, OpenAICompatProvider) and working.ingress_needs_tools is not False and working.task_class != "conversation":
             capability = await probe_tool_capability(provider, thinking=profile.thinking)
             if capability["status"] != "ready":
@@ -1424,10 +1458,10 @@ class AgentRuntime:
             if skills:
                 system_prompt += "\n\n" + skills
                 await BUS.publish(task_id, "progress", "Applying a known skill", skills[:1500], stage="understand")
-            if should_route(working.task_class, prompt):
-                decision = route_software_task(prompt, task_class=working.task_class)
+            if should_route(working.task_class, active_prompt):
+                decision = route_software_task(active_prompt, task_class=working.task_class)
                 await record_coding_route(task_id, decision)
-                routing = await route_coding_task(prompt, task_class=working.task_class)
+                routing = await route_coding_task(active_prompt, task_class=working.task_class)
                 working.coding_worker = decision.selected_worker or routing.get("execute_worker") or ""
                 working.coding_tier = decision.tier_name or ""
                 working.coding_complexity = int(decision.score or routing.get("complexity") or 0)
@@ -1489,7 +1523,7 @@ class AgentRuntime:
                     stage="understand",
                 )
             system_prompt = apply_working_set_to_system(system_prompt, turn_ws)
-            audit = professional_prompt_block(prompt)
+            audit = professional_prompt_block(active_prompt)
             if audit:
                 # Append after tool exposure so context fitting keeps this block in the tail.
                 system_prompt += "\n\n" + audit
@@ -1672,6 +1706,13 @@ class AgentRuntime:
                         model_family=profile.family,
                         prompt=_latest_user_text(messages, working.goal or active_prompt),
                     )
+                    if working.ingress_blob_id and not force_final:
+                        ingress_tool = REGISTRY.tools.get("read_ingress")
+                        if ingress_tool is not None and ingress_tool.enabled:
+                            selected = list(turn_tools or [])
+                            if not any(item.get("function", {}).get("name") == "read_ingress" for item in selected):
+                                selected.append(ingress_tool.schema())
+                            turn_tools = selected
                     turn_max_tokens = 400 if force_final else 1024
 
                     async def _model_turn_inner() -> ChatResult:
@@ -2235,7 +2276,9 @@ class AgentRuntime:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
             REGISTRY._context["task_id"] = task_id
-            if security_role:
+            if name == "read_ingress":
+                result = await REGISTRY.execute(name, arguments, task_id=task_id)
+            elif security_role:
                 result = await REGISTRY.execute(name, arguments, security_role=security_role)
             else:
                 result = await REGISTRY.execute(name, arguments)

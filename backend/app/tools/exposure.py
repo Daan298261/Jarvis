@@ -92,6 +92,7 @@ NATIVE_TOOLS = (
     "ufo",
     "cua",
     "reflex_computer_use",
+    "read_ingress",
 )
 
 

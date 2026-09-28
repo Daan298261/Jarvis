@@ -28,6 +28,7 @@ from ..agent.front_responder import (
     run_two_lane_chat,
 )
 from ..agent.planning import split_long_owner_prompt, requests_agent_tools
+from ..agent.segmented_input import condense_segments
 from .inference_context import ensure_context_for_messages, model_lane_event_payload
 from ..agent.background_verify import schedule_background_verification
 from .slow_turn_feedback import SlowTurnNudger
@@ -277,18 +278,24 @@ async def stream_owner_chat(
 
     worker_messages = _owner_messages(cid, cleaned, briefing)
     chunks = split_long_owner_prompt(cleaned)
-    harness_insert_at = len(worker_messages) - 1
     if len(chunks) > 1:
-        plan_lines = "\n".join(f"{index + 1}. {part[:180]}…" if len(part) > 180 else f"{index + 1}. {part}" for index, part in enumerate(chunks))
-        worker_messages.insert(
-            harness_insert_at,
-            ChatMessage(
-                role="system",
-                content=(
-                    "The owner's message was long. Work in internal steps across these parts "
-                    f"before answering ({len(chunks)} segments):\n{plan_lines}"
-                ),
-            ),
+        async def _segment_progress(index: int, total: int) -> None:
+            await BUS.publish_ephemeral(
+                OWNER_CHAT_CHANNEL,
+                "stage",
+                f"Reading input part {index}/{total}",
+                "",
+                stage="owner_chat",
+            )
+
+        try:
+            brief = await condense_segments(chunks, on_segment=_segment_progress)
+        except Exception as exc:
+            yield {"type": "error", "detail": f"Could not process the full long message: {exc}"[:500]}
+            return
+        worker_messages[-1] = ChatMessage(
+            role="user",
+            content=f"Owner message processed in {len(chunks)} ordered parts. Answer this complete brief:\n{brief}",
         )
     parts: list[str] = []
     worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)

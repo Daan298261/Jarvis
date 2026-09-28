@@ -118,7 +118,7 @@ def test_unloaded_snapshot_uses_profile_context():
         assert snap["loaded"] is False
         assert snap["family"] == "9b-abliterated"
         assert snap["thinking_mode"] == "selective"
-        assert snap["context_size"] == 16384
+        assert snap["context_size"] == 32768
         assert snap["vision"] is False
         assert {p["name"] for p in snap["profiles"]} == EXPECTED_PROFILES
 
