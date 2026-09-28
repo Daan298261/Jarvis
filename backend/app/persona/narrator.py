@@ -108,7 +108,10 @@ _FAILURE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"step limit|same problem|identical .*blocked", re.I),
      "I couldn't finish that; I kept running into the same problem."),
     (re.compile(r"timed out|timeout|took too long", re.I), "That took too long, so I stopped."),
-    (re.compile(r"jinja|prompt template|no user query|returned no text|model is not loaded|inference|context", re.I),
+    (re.compile(
+        r"(?i)(?:language |inference )?model (?:is not|could not be) loaded|gguf missing|llama-server",
+    ), "The language model isn't ready."),
+    (re.compile(r"jinja|prompt template|no user query|returned no text|inference|context", re.I),
      "The language model stopped responding properly, so I couldn't finish that."),
     (re.compile(r"laya cancelled|harm check was unsure", re.I),
      "I stopped that because it looked harmful."),

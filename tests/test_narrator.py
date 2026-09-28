@@ -22,6 +22,7 @@ def test_plain_failure_maps_tool_errors():
     assert "Steam" in plain_failure("No installed app matches 'Steam'")
     assert "administrator" in plain_failure("Access denied — needs the elevated backend")
     assert "same problem" in plain_failure("Step limit reached before verification")
+    assert "language model" in plain_failure("The language model could not be loaded: gguf missing").lower()
     assert plain_failure("exit_code=1\n--- stdout ---\n") == "I couldn't finish that."
 
 

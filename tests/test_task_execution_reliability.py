@@ -127,6 +127,25 @@ def test_coding_session_is_software_engineering():
     assert classify_task("start a coding session on the jarvis repo") == "software engineering"
 
 
+@pytest.mark.asyncio
+async def test_coding_session_fails_plainly_when_the_model_cannot_load(jarvis_env, monkeypatch):
+    from app.agent.loop import AGENT
+    from app.inference.manager import MANAGER
+    from tests.test_verification_loop import _finished
+
+    MANAGER.provider = None
+    MANAGER.state.loaded = False
+
+    async def boom(*_a, **_k):
+        raise RuntimeError("gguf missing")
+
+    monkeypatch.setattr("app.agent.loop.MANAGER.load", boom)
+    task = await AGENT.create_task("start a coding session on the jarvis repo")
+    finished = await _finished(task.id)
+    assert finished.status == "failed"
+    assert "language model" in (finished.result or "").lower()
+
+
 def test_paths_do_not_decide_the_task_class():
     prompt = r"Write C:\Temp\pytest-of-owner\run1\verified.txt containing VERIFIED and make sure it is there."
     assert classify_task(prompt) != "software engineering"

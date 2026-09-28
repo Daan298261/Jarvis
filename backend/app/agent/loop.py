@@ -1506,7 +1506,20 @@ class AgentRuntime:
             await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-            await MANAGER.load(settings, profile_name)
+            await publish_owner_text("Loading the model now.", source="progress", speak=True)
+            try:
+                await MANAGER.load(settings, profile_name)
+            except Exception as exc:
+                await self._fail_task(
+                    task_id,
+                    f"The language model could not be loaded: {exc}",
+                    working,
+                    metrics,
+                )
+                return
+        if MANAGER.provider is None or not MANAGER.state.loaded:
+            await self._fail_task(task_id, "The language model is not loaded.", working, metrics)
+            return
         target_ctx = initial_context_size(working.task_class, profile)
         live_ctx = await MANAGER.apply_context(settings, target_ctx, allow_shrink=True)
         if live_ctx != effective_cap:
@@ -1517,7 +1530,6 @@ class AgentRuntime:
                 stage="model",
             )
         provider = MANAGER.provider
-        assert provider is not None
         if working.ingress_blob_id and working.ingress_size_class == "big" and not existing:
             stored_chunks = await list_ingress_chunks(working.ingress_blob_id)
             if not stored_chunks:
