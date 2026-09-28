@@ -152,10 +152,6 @@ def pick_engine_for_profile(profile: Any) -> str | None:
 def primary_tts_backend() -> str | None:
     if is_kokoro_available():
         return "kokoro"
-    if is_voicestudio_available():
-        return "voicestudio"
-    if is_pocket_tts_available():
-        return "pocket_tts"
     if is_piper_available():
         return "piper"
     if legacy_system_tts_available():

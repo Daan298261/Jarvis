@@ -8,22 +8,15 @@ import os
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
-from pathlib import Path
 from typing import Any
 
 from .runtime_state import TtsRuntimeState
+from .voice_runtime_config import voicestudio_auth_headers, voicestudio_base_url
 
-VOICESTUDIO_DEFAULT_URL = "http://127.0.0.1:3900"
 VOICESTUDIO_PROBE_VOICE = "default"
 
 logger = logging.getLogger(__name__)
-
-
-def voicestudio_base_url() -> str:
-    url = os.environ.get("JARVIS_VOICESTUDIO_URL") or os.environ.get("VOICESTUDIO_URL") or VOICESTUDIO_DEFAULT_URL
-    return url.rstrip("/")
 
 
 def voicestudio_probe_endpoint(timeout: float = 2.0) -> bool:
@@ -35,7 +28,7 @@ def voicestudio_probe_endpoint(timeout: float = 2.0) -> bool:
     candidates = [f"{base}/health", f"{base}/v1/models", f"{base}/v1/audio/voices", f"{base}/docs"]
     for url in candidates:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Jarvis-TTS/1.0"})
+            req = urllib.request.Request(url, headers=voicestudio_auth_headers())
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 if 200 <= resp.status < 400:
                     return True
@@ -101,7 +94,7 @@ class VoiceStudioAdapter:
     def list_voices(self, timeout: float = 3.0) -> list[dict[str, Any]]:
         url = f"{self.base_url}/v1/audio/voices"
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Jarvis-TTS/1.0"})
+            req = urllib.request.Request(url, headers=voicestudio_auth_headers())
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if isinstance(data, list):
@@ -132,12 +125,9 @@ class VoiceStudioAdapter:
             "response_format": response_format,
         }
         data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json", "User-Agent": "Jarvis-TTS/1.0"},
-            method="POST",
-        )
+        headers = voicestudio_auth_headers()
+        headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read()
@@ -200,15 +190,9 @@ class VoiceStudioAdapter:
         lines.append(b"")
 
         body = b"\r\n".join(lines)
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                "User-Agent": "Jarvis-STT/1.0",
-            },
-            method="POST",
-        )
+        headers = voicestudio_auth_headers()
+        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
@@ -295,4 +279,11 @@ def reset_voicestudio_runtime_state() -> TtsRuntimeState:
 def is_voicestudio_available() -> bool:
     if os.environ.get("JARVIS_DISABLE_VOICESTUDIO", "").strip().lower() in {"1", "true", "yes"}:
         return False
+    state = voicestudio_adapter.runtime_state()
+    if state.ready:
+        return True
     return voicestudio_adapter.is_available()
+
+
+def verify_voicestudio_runtime(*, force: bool = False) -> TtsRuntimeState:
+    return voicestudio_adapter.verify(force=force)

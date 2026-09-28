@@ -1,6 +1,6 @@
 # RFC-0193: Voice Alternatives (VoiceStudio, Pocket TTS, Whisper) and Installer Choices
 
-**Status:** implemented  
+**Status:** implemented (settings wired, portal UI, Whisper marker, VoiceStudio auth)  
 **Queue item:** Voice / STT / TTS flexibility and installer download options  
 **Author:** cloud agent  
 **Date:** 2026-09-28

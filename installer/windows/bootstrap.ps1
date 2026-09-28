@@ -555,6 +555,9 @@ function Ensure-WhisperModel([string]$VenvPython) {
         } else {
             Write-Skip "Whisper base model"
         }
+        if (Test-Path $baseBin) {
+            Set-Content -Encoding ascii -Path (Join-Path $whisperDir ".jarvis_faster_whisper_dir") -Value $baseBin
+        }
     } catch {
         Write-BootstrapLog "whisper setup pending: $($_.Exception.Message)"
         Write-Warning "Whisper setup failed or was skipped: $($_.Exception.Message)"
@@ -571,7 +574,7 @@ function Ensure-VoiceStudio([string]$VenvPython) {
     if (Test-Command git) {
         Write-Host "    Cloning debpalash/voicestudio into tools\voicestudio..."
         try {
-            Invoke-ProcessWithTimeout -Label "git clone voicestudio" -FilePath "git" -Arguments @("clone", "--depth", "1", "https://github.com/debpalash/voicestudio.git", $vsDir) -TimeoutMinutes $StepTimeoutMinutes
+            Invoke-ProcessWithTimeout -Label "git clone voicestudio" -FilePath "git" -Arguments @("clone", "--depth", "1", "https://github.com/debpalash/VoiceStudio.git", $vsDir) -TimeoutMinutes $StepTimeoutMinutes
             Write-Ok "VoiceStudio repository cloned."
         } catch {
             Write-BootstrapLog "VoiceStudio clone failed: $($_.Exception.Message)"

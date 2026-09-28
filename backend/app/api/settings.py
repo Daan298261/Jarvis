@@ -107,6 +107,7 @@ class SettingsUpdate(BaseModel):
     voice_stt_backend: Literal["auto", "faster-whisper", "whisper.cpp", "openai-whisper", "voicestudio", "windows-sapi"] | None = None
     voice_whisper_model: str | None = Field(default=None, max_length=120)
     voice_voicestudio_url: str | None = Field(default=None, max_length=200)
+    voice_voicestudio_api_key: str | None = Field(default=None, max_length=512)
     front_responder_enabled: bool | None = None
     front_responder_model: str | None = Field(default=None, max_length=160)
     front_responder_max_output_tokens: int | None = Field(default=None, ge=64, le=1024)
@@ -125,6 +126,11 @@ async def get_settings():
         vault = dict(vault)
         vault["vault_path"] = "[configured]"
         payload["knowledge_vault"] = vault
+    voice = payload.get("voice")
+    if isinstance(voice, dict) and voice.get("voicestudio_api_key"):
+        voice = dict(voice)
+        voice["voicestudio_api_key"] = "[configured]"
+        payload["voice"] = voice
     return payload
 
 
@@ -313,6 +319,7 @@ async def update_settings(body: SettingsUpdate):
         "stt_backend": body.voice_stt_backend,
         "whisper_model": body.voice_whisper_model,
         "voicestudio_url": body.voice_voicestudio_url,
+        "voicestudio_api_key": body.voice_voicestudio_api_key,
     }
     for key, value in voice_updates.items():
         if value is not None:

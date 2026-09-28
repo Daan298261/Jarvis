@@ -108,8 +108,9 @@ class VoiceSettings(BaseModel):
         pattern=r"^[a-z0-9_]+$",
     )
     stt_backend: Literal["auto", "faster-whisper", "whisper.cpp", "openai-whisper", "voicestudio", "windows-sapi"] = "auto"
-    whisper_model: str = Field(default="", max_length=120)
+    whisper_model: str = Field(default="", max_length=260)
     voicestudio_url: str = Field(default="http://127.0.0.1:3900", max_length=200)
+    voicestudio_api_key: str = Field(default="", max_length=512)
 
 
 class CodingSettings(BaseModel):

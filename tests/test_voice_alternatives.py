@@ -103,6 +103,12 @@ def test_pocket_tts_adapter_state_and_availability(monkeypatch):
     assert state.ready is False
 
     monkeypatch.setattr("app.tts.pocket_tts_adapter.pocket_tts_package_ready", lambda: True)
+    monkeypatch.setattr(
+        pocket_tts_adapter,
+        "synthesize",
+        lambda *args, **kwargs: b"RIFF" + (b"\0" * 128),
+    )
+    pocket_tts_adapter.verify(force=True)
     assert is_pocket_tts_available() is True
 
 
@@ -129,7 +135,7 @@ def test_stt_backend_selection(monkeypatch, jarvis_env):
     assert "VoiceStudio" in stt_install_hint("voicestudio")
 
     monkeypatch.setenv("JARVIS_STT_BACKEND", "faster-whisper")
-    monkeypatch.setattr("app.workers.voice._module_available", lambda name: name == "faster_whisper")
+    monkeypatch.setattr("app.workers.voice.faster_whisper_ready", lambda: True)
     assert stt_backend() == "faster-whisper"
 
 

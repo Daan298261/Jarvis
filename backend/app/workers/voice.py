@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import models_dir
+from ..config import load_settings, models_dir, repo_root
+from ..tts.voice_runtime_config import resolved_faster_whisper_model
 from ..tts.engines import (
     engine_availability,
     engine_chain_for_profile,
@@ -57,6 +58,10 @@ def _module_available(name: str) -> bool:
 
 
 def whisper_model_candidates() -> list[Path]:
+    out: list[Path] = []
+    resolved = resolved_faster_whisper_model()
+    if resolved:
+        out.append(Path(resolved).expanduser())
     env = os.environ.get("JARVIS_WHISPER_MODEL") or ""
     root = models_dir() / "whisper"
     names = [
@@ -66,19 +71,44 @@ def whisper_model_candidates() -> list[Path]:
         "tiny.pt",
         "small.pt",
     ]
-    out: list[Path] = []
     if env:
         out.append(Path(env).expanduser())
+    try:
+        configured = (load_settings().voice.whisper_model or "").strip()
+        if configured:
+            path = Path(configured).expanduser()
+            if not path.is_absolute():
+                path = repo_root() / configured
+            out.append(path)
+    except Exception:
+        pass
     for name in names:
         out.append(root / name)
-    return [path for path in out if str(path).strip()]
+    base_dir = root / "base"
+    if base_dir.is_dir():
+        out.append(base_dir)
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for path in out:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(path)
+    return deduped
 
 
 def local_whisper_model() -> Path | None:
     for path in whisper_model_candidates():
         if path.is_file():
             return path
+        if path.is_dir() and any(path.iterdir()):
+            return path
     return None
+
+
+def faster_whisper_ready() -> bool:
+    return _module_available("faster_whisper") and resolved_faster_whisper_model() is not None
 
 
 def _find_ffmpeg() -> str | None:
@@ -118,7 +148,7 @@ def stt_backend() -> str | None:
             pass
     if pref in {"voicestudio", "voice_studio"} and is_voicestudio_available():
         return "voicestudio"
-    if pref in {"faster-whisper", "faster_whisper"} and _module_available("faster_whisper"):
+    if pref in {"faster-whisper", "faster_whisper"} and faster_whisper_ready():
         return "faster-whisper"
     if pref in {"whisper.cpp", "whisper-cli", "whisper_cpp"} and (shutil.which("whisper-cli") or shutil.which("whisper.cpp")):
         return "whisper.cpp"
@@ -127,18 +157,14 @@ def stt_backend() -> str | None:
     if pref in {"windows-sapi", "sapi", "windows"} and sys.platform == "win32":
         return "windows-sapi"
 
-    if is_voicestudio_available():
-        return "voicestudio"
-    if local_whisper_model() is not None and _module_available("faster_whisper"):
+    if faster_whisper_ready():
         return "faster-whisper"
     if sys.platform == "win32":
         return "windows-sapi"
     if shutil.which("whisper-cli") or shutil.which("whisper.cpp"):
         return "whisper.cpp"
-    if _module_available("whisper"):
+    if _module_available("whisper") and local_whisper_model() is not None:
         return "openai-whisper"
-    if _module_available("faster_whisper"):
-        return "faster-whisper"
     return None
 
 
@@ -208,7 +234,7 @@ def voice_status() -> dict[str, Any]:
     if stt == "voicestudio":
         stt_ready = True
     elif stt == "faster-whisper":
-        stt_ready = True
+        stt_ready = faster_whisper_ready()
     elif stt == "windows-sapi":
         stt_ready = True
     elif stt in {"openai-whisper", "whisper.cpp"}:
@@ -217,7 +243,7 @@ def voice_status() -> dict[str, Any]:
     if stt_ready:
         detail_parts.append(f"STT={stt}")
         if model:
-            detail_parts.append(f"model={model.name}")
+            detail_parts.append(f"model={model.name if model.is_file() else model}")
         elif stt == "windows-sapi":
             detail_parts.append("engine=Windows.Speech")
             if ffmpeg:
@@ -238,6 +264,8 @@ def voice_status() -> dict[str, Any]:
                 key
                 for key, ready in (
                     ("kokoro", engines.get("kokoro")),
+                    ("voicestudio", engines.get("voicestudio")),
+                    ("pocket_tts", engines.get("pocket_tts")),
                     ("piper", engines.get("piper")),
                     ("chatterbox", engines.get("chatterbox")),
                 )
@@ -368,7 +396,7 @@ async def transcribe_audio(data: bytes, filename: str = "audio.webm") -> str:
 def _transcribe_faster_whisper(path: Path, model_path: str | None) -> str:
     from faster_whisper import WhisperModel
 
-    name = model_path or "base"
+    name = model_path or resolved_faster_whisper_model() or "base"
     try:
         model = WhisperModel(name, local_files_only=True)
     except Exception as exc:
@@ -547,7 +575,7 @@ async def synthesize_speech_result(
     engine_id = requested_engine if profile and exact_profile else (pick_engine_for_profile(profile) if profile else tts_backend())
     if profile and not engine_id:
         primary = resolve_engine_id(profile.tts)
-        if primary in {"kokoro", "chatterbox", "piper"}:
+        if primary in {"kokoro", "chatterbox", "piper", "voicestudio", "pocket_tts", "pocket-tts"}:
             engine_id = primary
     if not engine_id:
         if profile and profile.tts.resolved_engine_id() != "system":

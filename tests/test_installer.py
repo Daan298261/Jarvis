@@ -36,6 +36,7 @@ def test_bootstrap_covers_required_steps():
         "ensure-kokorovoice",
         "ensure-personavoices",
         "ensure-whispermodel",
+        ".jarvis_faster_whisper_dir",
         "ensure-voicestudio",
         "ensure-pockettts",
         "install-persona-voices.py",
