@@ -148,6 +148,8 @@ def test_jarvis_iss_wiring():
     assert "diskspanning=yes" in lower
     assert "step=integrations" in lower
     assert "runhidden" in lower
+    assert "desktopshellinstalled" in lower.replace("_", "")
+    assert "function DesktopShellInstalled" in text
 
 
 def test_jarvis_iss_code_uses_supported_registry_apis_only():

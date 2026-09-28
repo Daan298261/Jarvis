@@ -446,6 +446,11 @@ begin
   Result := True;
 end;
 
+function DesktopShellInstalled: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\desktop\Jarvis.exe'));
+end;
+
 function SelectedVoiceProfiles: String;
 begin
   Result := '';
