@@ -8,7 +8,7 @@
     "host": "127.0.0.1",
     "port": 8088,
     "profile": "balanced",
-    "context_size": 16384,
+    "context_size": 32768,
     "vision": false,
     "vision_mode": "lazy",
     "flash_attn": "auto",
@@ -24,9 +24,9 @@
   "front_responder": {
     "enabled": true,
     "model": "",
-    "max_output_tokens": 128,
+    "max_output_tokens": 512,
     "temperature": 0.25,
-    "timeout_ms": 3000,
+    "timeout_ms": 6000,
     "context_turns": 4,
     "speak_immediately": true,
     "parallel_when_distinct_model": true

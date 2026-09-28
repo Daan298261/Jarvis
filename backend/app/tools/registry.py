@@ -20,6 +20,7 @@ from .mcp_runtime import MCP, MCPProxyTool
 from .office import OfficeTool
 from .python_exec import PythonTool
 from .request_tools import RequestToolsTool
+from .read_ingress import ReadIngressTool
 from .screenshot import ScreenshotTool
 from .terminal import TerminalTool
 from .verify_code import VerifyCodeTool
@@ -61,6 +62,7 @@ class ToolRegistry:
             ScreenshotTool(),
             VerifyCodeTool(getter),
             RequestToolsTool(),
+            ReadIngressTool(),
             RequestCapabilityTool(),
             MCPProxyTool(),
             UFOTool(),
@@ -131,6 +133,7 @@ class ToolRegistry:
         arguments: dict[str, Any],
         *,
         security_role: str | None = None,
+        task_id: str | None = None,
     ) -> ToolResult:
         self._context["security_role"] = security_role or ""
         exposure = self._context.get("exposure")
@@ -161,7 +164,10 @@ class ToolRegistry:
                 elif not tool.enabled:
                     result = ToolResult(False, "", error=f"Tool {name} is disabled")
                 else:
-                    result = await tool.execute(**arguments)
+                    if name == "read_ingress":
+                        result = await tool.execute(**arguments, _task_id=task_id)
+                    else:
+                        result = await tool.execute(**arguments)
         except Exception as exc:
             duration_ms = (time.perf_counter() - started) * 1000.0
             record_tool_call(

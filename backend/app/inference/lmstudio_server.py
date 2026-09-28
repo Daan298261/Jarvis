@@ -88,6 +88,7 @@ async def ensure_local_lmstudio(
     host: str,
     port: int,
     model: str = "",
+    context_size: int = 16384,
     timeout: float = SERVER_WAIT_SECONDS,
 ) -> dict[str, Any]:
     """Bring up loopback LM Studio so Play can continue without a manual start."""
@@ -140,7 +141,12 @@ async def ensure_local_lmstudio(
     hint = (model or "").strip()
     if hint and cli:
         try:
-            loaded = await asyncio.to_thread(_run_cli, [cli, "load", hint, "-y"], min(timeout, 90.0))
+            requested_context = max(4096, min(65536, int(context_size or 16384)))
+            loaded = await asyncio.to_thread(
+                _run_cli,
+                [cli, "load", hint, "-c", str(requested_context), "-y"],
+                min(timeout, 90.0),
+            )
             if loaded.returncode != 0:
                 _log.warning("lms load failed: %s", (loaded.stderr or loaded.stdout or "")[:400])
         except Exception as exc:

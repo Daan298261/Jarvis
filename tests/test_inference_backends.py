@@ -255,12 +255,12 @@ async def test_ensure_vision_attaches_then_release_detaches(jarvis_env):
     assert kept.vision_loaded is True
 
 
-async def test_unloaded_snapshot_starts_at_16k_with_selective_thinking():
+async def test_unloaded_snapshot_starts_at_32k_with_selective_thinking():
     from app.config import AppSettings
     from app.inference.manager import InferenceManager
 
     snap = await InferenceManager().snapshot(AppSettings())
-    assert snap["context_size"] == 16384
+    assert snap["context_size"] == 32768
     assert snap["context_cap"] == 32768
     assert snap["thinking_mode"] == "selective"
     assert snap["vision_mode"] == "lazy"
