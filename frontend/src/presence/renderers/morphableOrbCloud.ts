@@ -243,7 +243,7 @@ function writeSlot(
 }
 
 /**
- * Idle end of uMorph. Scattered cool orbs — not a head-and-shoulders bust.
+ * Free end of uMorph. Scattered cool orbs — not a head-and-shoulders bust.
  * Gold stays off so the amber core appears only as the figure wins.
  */
 export function buildFreeFloatCloud(count: number): ParticleOrb[] {
