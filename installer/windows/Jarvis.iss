@@ -39,6 +39,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a &Desktop shortcut to start Jarvis"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDescription: "After installing:"; Flags: checkedonce
+Name: "elevatedlogon"; Description: "Start Jarvis elevated at Windows logon (one UAC prompt)"; GroupDescription: "After installing:"; Flags: checkedonce
 Name: "voicebutler"; Description: "Household butler (Kokoro — Anzu default)"; GroupDescription: "Voice models:"; Flags: checkedonce
 Name: "voicedry"; Description: "Dry household butler (Nabu, Eir)"; GroupDescription: "Voice models:"; Flags: checkedonce
 Name: "voicetactical"; Description: "Tactical aide (Mestor, Themis, Heimdall)"; GroupDescription: "Voice models:"; Flags: checkedonce
@@ -92,11 +93,13 @@ Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; Work
 #else
 Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model and persona voices (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #endif
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -RegisterLogonTask"; WorkingDir: "{app}"; Description: "Register elevated Jarvis at Windows logon"; Flags: postinstall waituntilterminated skipifsilent; Tasks: elevatedlogon
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -OpenPath ""/setup?step=integrations"""; WorkingDir: "{app}"; Description: "Connect Gmail and WhatsApp in Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 
 [UninstallRun]
 ; Stop backend, llama-server, and tray helper before uninstall.
 Filename: "powershell.exe"; Parameters: "{code:GetUninstallForceStopParameters}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopJarvis"
+Filename: "schtasks.exe"; Parameters: "/Delete /TN JarvisElevatedBackend /F"; Flags: runhidden; RunOnceId: "RemoveJarvisElevatedBackend"
 
 [Code]
 const

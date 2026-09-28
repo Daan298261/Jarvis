@@ -116,6 +116,18 @@ def test_installer_offers_voice_model_checkboxes():
     assert "neural voice" in _read(README).lower()
 
 
+def test_installer_registers_elevated_logon_task():
+    iss = _read(ISS)
+    assert 'Name: "elevatedlogon"' in iss
+    assert "RegisterLogonTask" in iss
+    assert "JarvisElevatedBackend" in iss
+    assert "Tasks: elevatedlogon" in iss
+    assert 'Flags: checkedonce' in iss
+    start = (REPO_ROOT / "start-jarvis.ps1").read_text(encoding="utf-8")
+    assert "Verb RunAs" in start
+    assert "JarvisElevatedBackend" in start
+
+
 def test_bootstrap_27b_is_optional_switch_only():
     text = _read(BOOTSTRAP)
     assert "InstallExpert27B" in text
