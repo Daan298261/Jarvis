@@ -2939,6 +2939,16 @@ Same ledger tick as RFC-0176 and RFC-0177. Tip is the post-#431 reconcile `cbbf2
 
 ---
 
+Decision: IG jarvis 2026-09-28 batch — RFC-0183–0191 (accepted)
+
+Taco Instagram `@tacotcr` Saved→jarvis was re-scraped 2026-09-28. The live grid is **36** URLs; the older offline inventory (~140 linked) is not this batch. Living priority list stays root [`INTEGRATION_SPECS.md`](INTEGRATION_SPECS.md). RFC-0095 remains the umbrella. The 0095–0116 ladder is not replaced. Accepted specs-only children: **0183** obsidian-skills (deepens 0107; no custom brain UI), **0184** ripwire, **0185** ai-memory, **0186** Tesseract, **0187** Qwen-Image-2.1, **0188** teamai-cli, **0189** impeccable, **0190** pi-desktop persona hold (RFC-0104 pattern; Download ≠ integrate; no butler merge), **0191** pentest-harness (RFC-0105 Daybreak sibling; managed process/status/Download only; no exploit recipes; no new LE/ATO gate). Archive-only, no RFC numbers: OpenStock, MatrixOne, Spirula Studio. Hermes reel wires through 0183 plus the existing 0104 hold. Jev stays RFC-0116 / RFC-0171. Unlinked humanoid / NEXUS / Larpochka / maninalabs demos are `persona_candidate` / `needs_link` (RFC-0175 morph reference only). No new §58 checkbox. No product code in this ledger line.
+
+Reason:
+
+The re-scraped collection needed scored child tickets so implementers do not renumber the ladder, merge personas, or invent authorization gates.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
