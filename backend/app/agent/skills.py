@@ -25,6 +25,18 @@ _FILE_RE = re.compile(r"\b[\w.-]+\.[A-Za-z0-9]{1,5}\b")
 _URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.I)
 _EPHEMERAL_SELECTOR = re.compile(r"^#?e\d+$", re.I)
 _SECRET_KEYS = ("password", "passwd", "secret", "token", "api_key", "apikey", "credential", "auth")
+# Argument keys that name *what* a step acts on; constant values here must be grounded in the goal.
+_TARGET_KEYS = ("command", "path", "url", "name", "title", "app", "file", "filename", "target", "query")
+# Plumbing words that appear in commands but never identify the target of a request.
+_GENERIC_TOKENS = frozenset(
+    {
+        "cmd", "cmd.exe", "powershell", "pwsh", "bash", "start", "start-process", "run", "open", "launch",
+        "wait", "tasklist", "findstr", "grep", "select-string", "get-process", "echo", "exe", "the", "and",
+        "for", "with", "true", "false", "none", "null", "program", "files", "x86", "users", "windows",
+    }
+)
+# Arguments that bind a step to one process instance; such steps cannot be replayed.
+_EPHEMERAL_ARG_KEYS = ("pid", "process_id", "handle", "session_id")
 
 
 @dataclass
@@ -330,12 +342,93 @@ def placeholders_in(value: Any) -> set[str]:
     return found
 
 
+def _step_key(step: dict[str, Any]) -> str:
+    return json.dumps({"tool": step.get("tool"), "arguments": step.get("arguments")}, sort_keys=True, default=str)
+
+
+def sanitize_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Make a recorded tool sequence replayable.
+
+    Drops steps bound to one process instance (a recorded pid is dead by the next
+    run), then collapses repeated blocks: a trajectory that looped ``A B C A B C …``
+    replays as ``A B C`` once.
+    """
+    kept = [
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and step.get("tool")
+        and not any(
+            key in step.get("arguments", {}) for key in _EPHEMERAL_ARG_KEYS
+        )
+    ]
+    keys = [_step_key(step) for step in kept]
+    out: list[dict[str, Any]] = []
+    out_keys: list[str] = []
+    index = 0
+    while index < len(kept):
+        collapsed = False
+        for period in range(1, len(out_keys) + 1):
+            if index + period <= len(keys) and keys[index : index + period] == out_keys[-period:]:
+                index += period
+                collapsed = True
+                break
+        if not collapsed:
+            out.append(kept[index])
+            out_keys.append(keys[index])
+            index += 1
+    return out
+
+
 def instantiate_steps(skill: Skill, bound: dict[str, str] | None) -> list[dict[str, Any]]:
     steps = parse_steps(skill.steps_json)
-    templated = [step for step in steps if isinstance(step, dict) and step.get("tool")]
+    templated = sanitize_steps([step for step in steps if isinstance(step, dict) and step.get("tool")])
     if not templated:
         return []
     return substitute(templated, bound or {})
+
+
+def _target_tokens(value: Any) -> set[str]:
+    if isinstance(value, dict):
+        tokens: set[str] = set()
+        for item in value.values():
+            tokens |= _target_tokens(item)
+        return tokens
+    if isinstance(value, list):
+        tokens = set()
+        for item in value:
+            tokens |= _target_tokens(item)
+        return tokens
+    if not isinstance(value, str):
+        return set()
+    value = _PLACEHOLDER.sub(" ", value)  # unbound {params} are filled from the goal later
+    return {
+        token.removesuffix(".exe")
+        for token in keywords(value.replace("\\", " ").replace("/", " "))
+        if token not in _GENERIC_TOKENS and not token.isdigit()
+    }
+
+
+def skill_grounded_in_goal(steps: list[dict[str, Any]], bound: dict[str, str], goal: str) -> bool:
+    """A skill may run only if what its fixed steps act on is named in the goal.
+
+    A Notepad skill carries ``notepad`` as a constant command; it must not run for
+    "open steam". Values that came from binding the goal are grounded by definition.
+    """
+    bound_tokens: set[str] = set()
+    for value in bound.values():
+        bound_tokens |= _target_tokens(value)
+    constant: set[str] = set()
+    for step in steps:
+        args = step.get("arguments") if isinstance(step.get("arguments"), dict) else {}
+        for key in _TARGET_KEYS:
+            if key in args:
+                constant |= _target_tokens(args[key])
+    constant -= bound_tokens
+    if not constant:
+        return True
+    goal_tokens = _target_tokens(goal) | {t.removesuffix(".exe") for t in keywords(goal)}
+    return bool(constant & goal_tokens)
 
 
 def steps_are_executable(steps: list[dict[str, Any]]) -> bool:
@@ -403,7 +496,7 @@ async def _successful_calls(session, task_id: str) -> list[dict[str, Any]]:
         if not isinstance(arguments, dict):
             arguments = {}
         out.append({"tool": row.tool_name, "arguments": arguments})
-    return out
+    return sanitize_steps(out)
 
 
 async def promote_from_trajectories(min_repeats: int = MIN_REPEATS) -> list[Skill]:
@@ -500,9 +593,13 @@ async def relevant_skills(task_class: str, goal: str, limit: int = MAX_PROMPT_SK
     async with SessionLocal() as session:
         rows = (await session.execute(select(Skill).where(Skill.enabled.is_(True)))).scalars().all()
         scored: list[tuple[Skill, float]] = []
+        specific_goal = {word for word in goal_keywords if word not in _GENERIC_TOKENS}
         for row in rows:
-            score = 2.0 if row.task_class and row.task_class == task_class else 0.0
-            score += float(len(keywords(f"{row.name} {row.description}") & goal_keywords))
+            # A shared task class alone is not relevance; the skill must share a specific word.
+            overlap = len(keywords(f"{row.name} {row.description}") & specific_goal)
+            if overlap < 1:
+                continue
+            score = float(overlap) + (1.0 if row.task_class and row.task_class == task_class else 0.0)
             if score >= 2.0:
                 scored.append((row, score))
         picked = [row for row, _ in sorted(scored, key=lambda item: item[1], reverse=True)][:limit]

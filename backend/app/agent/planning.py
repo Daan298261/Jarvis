@@ -210,10 +210,40 @@ def follow_up_stays_conversation(follow: str | None, *, security_role: str = "")
     return action_hits == 0
 
 
+_PATH_OR_URL = re.compile(r"(?i)(https?://\S+|[a-z]:[\\/]\S*|\\\\\S+|(?<!\w)/(?:[\w.-]+/)+[\w.-]*)")
+_APP_INTENT = re.compile(
+    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
+    r"(?:open|start|launch|fire up|close|quit|exit|kill)\s+(?:up\s+)?(?:the\s+)?(?:app\s+)?"
+    r"(?!(?:a|an|new)\s|file\b|folder\b|directory\b|document\b|https?:|www\.|[a-z]:[\\/])"
+    r"((?:[\w.+&'-]+)(?:\s+[\w.+&'-]+){0,3}?)"
+    r"(?:\s+(?:for me|please|now|app))*\s*(?:(?:,|\band\b|\bthen\b).*)?[.!?]?\s*$"
+)
+_CODING_SESSION = re.compile(r"(?i)\b(coding session|start coding|code review|pair program|work on (?:the|my) (?:repo|code|project))\b")
+
+
+def intent_text(prompt: str) -> str:
+    """Request text for keyword classification: paths and URLs removed.
+
+    A temp folder named ``pytest-of-owner`` or a repo path must not turn a file task
+    into software engineering.
+    """
+    return _PATH_OR_URL.sub(" ", latest_user_utterance(prompt or ""))
+
+
+def app_control_target(prompt: str) -> str | None:
+    """Program name for 'open steam' / 'close snipping tool' style requests."""
+    match = _APP_INTENT.match(latest_user_utterance(prompt or "").strip())
+    return match.group(1).strip() if match else None
+
+
 def classify_task(prompt: str) -> str:
+    if _CODING_SESSION.search(intent_text(prompt)):
+        return "software engineering"
+    if app_control_target(prompt):
+        return "windows gui"
     if is_plain_conversation(prompt):
         return CONVERSATION_CLASS
-    text = (prompt or "").lower()
+    text = intent_text(prompt).lower()
     scored: list[tuple[int, str]] = []
     for name, keywords in TASK_CATEGORIES:
         score = sum(1 for keyword in keywords if keyword in text)

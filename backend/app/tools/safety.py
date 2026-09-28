@@ -46,6 +46,29 @@ EXTERNAL_COMMS = [
 ]
 
 
+# Windows processes whose termination crashes or locks the session. Jarvis may close
+# any other process on the owner's machine.
+PROTECTED_PROCESS_NAMES = frozenset(
+    {
+        "system", "system idle process", "idle", "registry", "memory compression", "secure system",
+        "smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "services.exe", "lsass.exe", "lsaiso.exe",
+        "svchost.exe", "dwm.exe", "fontdrvhost.exe", "sihost.exe", "ctfmon.exe", "explorer.exe",
+        "audiodg.exe", "spoolsv.exe", "wudfhost.exe", "conhost.exe",
+    }
+)
+
+
+def is_protected_process(name: str, pid: int, *, own_pids: set[int] | None = None) -> bool:
+    """True for session-critical processes and for Jarvis itself (and its parent)."""
+    if pid in (0, 4):
+        return True
+    if own_pids is None:
+        own_pids = {os.getpid(), os.getppid()}
+    if pid in own_pids:
+        return True
+    return (name or "").strip().lower() in PROTECTED_PROCESS_NAMES
+
+
 def classify_command(command: str) -> RiskLevel:
     text = command.lower()
     for pattern in IRREVERSIBLE_PATTERNS:

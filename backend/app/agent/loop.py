@@ -14,6 +14,8 @@ from openai import APIConnectionError, APIStatusError
 
 from ..coding.usage import record_task_usage
 from ..config import AppSettings, load_settings
+from sqlalchemy import func, select
+
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
@@ -2295,7 +2297,15 @@ class AgentRuntime:
         arg_digest = hashlib.sha256(
             f"{name}:{json.dumps(arguments, sort_keys=True)}".encode()
         ).hexdigest()[:24]
-        step_key = f"tool:{name}:{arg_digest}"
+        # Position makes the key a *step*, not a command: a crash resumes at the same
+        # ordinal (records are written after execution) and reuses the committed
+        # effect, while a live repeat — e.g. re-checking whether an app is running —
+        # executes again instead of returning a stale observation.
+        async with SessionLocal() as session:
+            ordinal = await session.scalar(
+                select(func.count()).select_from(ToolCallRecord).where(ToolCallRecord.task_id == task_id)
+            )
+        step_key = f"tool:{name}:{arg_digest}:{int(ordinal or 0)}"
 
         task_status = await get_task_status(task_id)
         if task_status is None:

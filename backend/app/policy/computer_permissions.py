@@ -25,7 +25,7 @@ _SESSION_GRANTS: dict[str, str] = {}
 GRANT_MODES = frozenset({"ask", "allow_once", "allow_session", "always", "deny"})
 PROMPT_OPTIONS = ("allow_once", "allow_session", "always", "deny")
 
-COMPUTER_TOOLS = frozenset({"desktop", "ufo", "cua", "reflex_computer_use"})
+COMPUTER_TOOLS = frozenset({"desktop", "apps", "ufo", "cua", "reflex_computer_use"})
 INTERNET_TOOLS = frozenset({"browser", "browser_use", "web_fetch"})
 RDP_MARKERS = ("rdp", "mstsc", "remote desktop", "xfreerdp")
 NODE_KEYS = ("node_id", "hostname", "worker_node", "target_node", "rdp_host")
@@ -51,34 +51,37 @@ class PermissionSpec:
     offensive: bool = False
 
 
+# Jarvis is the owner's operator for this PC and network: device, node, RDP and
+# network control default to allowed. Owners can still set any of them to Ask or
+# Don't allow; destructive operations keep their own confirmation (tools.safety).
 CATALOG: tuple[PermissionSpec, ...] = (
     PermissionSpec(
         "computer.this_device",
         "computer",
         "Use this computer",
         "Control the screen, keyboard, and apps on the machine running this Jarvis leader.",
-        "ask",
+        "allow",
     ),
     PermissionSpec(
         "computer.worker_nodes",
         "computer",
         "Use worker-node computers",
         "Delegate computer use to a swarm node that advertises desktop control.",
-        "ask",
+        "allow",
     ),
     PermissionSpec(
         "computer.rdp",
         "computer",
         "Open Remote Desktop",
         "From this Jarvis, launch an RDP client to a permitted worker node (mstsc). Not a new remote-control protocol.",
-        "ask",
+        "allow",
     ),
     PermissionSpec(
         "network.internet",
         "network",
         "Use the internet",
         "Browse or fetch public websites and WAN endpoints.",
-        "ask",
+        "allow",
     ),
     PermissionSpec(
         "network.local",
@@ -267,7 +270,9 @@ def apply_grant(permission_id: str, mode: str, *, persist: bool | None = None) -
             del _SESSION_GRANTS[permission_id]
         if persist:
             store = _load_store_unlocked()
-            if normalized == "ask":
+            if normalized == spec.default:
+                # Choosing the default clears the override; any other choice (including
+                # Ask on an allow-by-default permission) is stored explicitly.
                 store["grants"].pop(permission_id, None)
             else:
                 store["grants"][permission_id] = {"mode": normalized, "updated_at": _utcnow()}

@@ -91,6 +91,64 @@ def strip_think_blocks(text: str, *, trim: bool = True) -> str:
     return cleaned.strip() if trim else cleaned
 
 
+# A reasoning trace, as opposed to an answer: Qwen-style "Thinking Process:",
+# "The user wants…", numbered "**Analyze the Request**" plans.
+_TRACE_START_RE = re.compile(
+    r"(?is)^\s*(?:\*\*|#+\s*)?(?:thinking process|thought process|reasoning|analysis|my thoughts|internal monologue)\b"
+    r"|^\s*(?:okay|ok|alright|hmm|so|let me|let's|i need to|i should|the user(?:'s)?)\b[^.\n]{0,160}"
+    r"(?:user|request|ask|wants|asking|respond|think|figure|check)\b"
+    r"|^\s*1\.\s*\*\*\s*(?:analy[sz]e|understand|identify)"
+)
+_FINAL_MARKER_RE = re.compile(
+    r"(?im)^\s*(?:\*\*|#+\s*)?(?:final (?:answer|response|reply|output)|draft (?:response|reply)|response to (?:the )?user|answer)\s*[:：]\s*(?:\*\*)?"
+)
+_TRACE_BODY_RE = re.compile(
+    r"(?i)\b(?:the user (?:wants|is asking|asked|said)|analy[sz]e the request|role:|constraints?:|let me (?:think|check|draft)|i should (?:respond|answer|say)|self-correction|draft\s*\d*:)"
+)
+
+
+def _after_final_marker(text: str) -> str:
+    matches = list(_FINAL_MARKER_RE.finditer(text))
+    if not matches:
+        return ""
+    tail = text[matches[-1].end():].strip()
+    tail = re.sub(r"^\s*[\"'“”*>]+|[\"'“”*]+\s*$", "", tail).strip()
+    return tail
+
+
+def looks_like_reasoning_trace(text: str) -> bool:
+    sample = (text or "").strip()
+    if not sample:
+        return False
+    if _TRACE_START_RE.search(sample):
+        return True
+    return len(_TRACE_BODY_RE.findall(sample)) >= 2
+
+
+def answer_from_reasoning(text: str) -> str:
+    """Use reasoning text as the reply only when it is (or contains) a final answer."""
+    cleaned = strip_think_blocks(text or "")
+    if not cleaned:
+        return ""
+    marked = _after_final_marker(cleaned)
+    if marked and not looks_like_reasoning_trace(marked):
+        return marked
+    if looks_like_reasoning_trace(cleaned):
+        return ""
+    sentences = [part for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
+    if len(cleaned) <= 400 and len(sentences) <= 3:
+        return cleaned
+    return ""
+
+
+def strip_reasoning_preamble(text: str) -> str:
+    """Remove a reasoning trace that leaked into the answer channel."""
+    cleaned = strip_think_blocks(text or "")
+    if not looks_like_reasoning_trace(cleaned):
+        return cleaned
+    return answer_from_reasoning(cleaned)
+
+
 def reasoning_text_from_payload(payload: dict[str, Any] | None) -> str:
     if not payload:
         return ""
@@ -138,18 +196,19 @@ def message_payload_from_openai(message: Any, raw: dict[str, Any] | None = None)
 
 
 def visible_completion_text(content: Any, reasoning: Any = None) -> str:
-    """Prefer the public answer channel; use thinking/reasoning text if that is all we got."""
-    main = strip_think_blocks(_stringify(content, include_reasoning=False))
+    """Prefer the public answer channel; fall back to reasoning only when it is an answer.
+
+    A reasoning trace is never returned as the reply: it would be shown, stored as the
+    task result and read aloud ("Thinking Process: 1. **Analyze the Request** …").
+    An empty string lets callers report an empty generation instead.
+    """
+    main = strip_reasoning_preamble(_stringify(content, include_reasoning=False))
     if main:
         return main
-    mixed = strip_think_blocks(_stringify(content, include_reasoning=True))
+    mixed = answer_from_reasoning(_stringify(content, include_reasoning=True))
     if mixed:
         return mixed
-    reason_raw = _stringify(reasoning, include_reasoning=True)
-    reason_stripped = strip_think_blocks(reason_raw)
-    if reason_stripped:
-        return reason_stripped
-    return (reason_raw or "").strip()
+    return answer_from_reasoning(_stringify(reasoning, include_reasoning=True))
 
 
 def empty_generation_error(finish_reason: str | None = None) -> str:

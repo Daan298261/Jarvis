@@ -278,6 +278,10 @@ def filter_text_for_speech(
     cleaned = _STACK_LINE_RE.sub("", cleaned)
     cleaned = _FENCED_CODE_RE.sub("", cleaned)
     cleaned = _INLINE_CODE_RE.sub("", cleaned)
+    from .speech_safe import name_paths_and_links
+
+    # Name paths/links before sentence checks, so "opened C:\...\steam.exe" keeps its sentence.
+    cleaned = name_paths_and_links(cleaned)
     cleaned = _MD_LINK_RE.sub(lambda m: m.group(1), cleaned)
     cleaned = _URL_RE.sub("", cleaned)
     cleaned = _ORPHAN_MD_RESIDUE_RE.sub("", cleaned)
@@ -306,4 +310,6 @@ def filter_text_for_speech(
     if not cleaned:
         return ""
 
-    return rewrite_for_speech(cleaned, reply_class=speech_class)
+    from .speech_safe import speech_safe
+
+    return speech_safe(rewrite_for_speech(cleaned, reply_class=speech_class))

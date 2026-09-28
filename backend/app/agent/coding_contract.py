@@ -83,8 +83,8 @@ def is_3d_modelling_task(prompt: str, task_class: str | None = None) -> bool:
 
 
 def applies_coding_execution_contract(prompt: str, task_class: str | None = None) -> bool:
-    if (task_class or "").strip().lower() in {"software engineering", "long-horizon autonomous"}:
-        return True
+    # Long-horizon tasks are held to the coding contract only when they are software work;
+    # otherwise a file or app task can never satisfy "run tests" and loops to the step limit.
     return is_software_task(prompt, task_class)
 
 

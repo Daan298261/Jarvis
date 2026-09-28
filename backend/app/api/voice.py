@@ -113,8 +113,14 @@ async def voice_transcribe(audio: UploadFile = File(...)):
 @router.post("/speak")
 async def voice_speak(body: SpeakIn):
     started = time.perf_counter()
+    from ..tts.speech_safe import speech_safe
+
+    # Every caller is sanitized here: a raw task result or error must never be read aloud.
+    text = speech_safe(body.text)
+    if not text:
+        return Response(status_code=204)
     try:
-        result = await synthesize_speech_result(body.text, voice_profile_id=body.voice_profile_id)
+        result = await synthesize_speech_result(text, voice_profile_id=body.voice_profile_id)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     duration_ms = (time.perf_counter() - started) * 1000

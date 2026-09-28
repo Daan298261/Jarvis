@@ -319,9 +319,13 @@ def format_route_prompt(decision: CodingRouteDecision) -> str:
 
 
 def should_route(task_class: str, prompt: str) -> bool:
-    if (task_class or "") in {"software engineering", "long-horizon autonomous"}:
+    from .planning import intent_text
+
+    if (task_class or "") == "software engineering":
         return True
-    text = (prompt or "").lower()
+    # Keyword evidence only from the request itself, never from paths inside it; a
+    # long-horizon task is software work only when the request says so.
+    text = intent_text(prompt).lower()
     markers = ("pytest", "refactor", "source code", "repository", "pull request", "unit test", "implement")
     return any(marker in text for marker in markers)
 
