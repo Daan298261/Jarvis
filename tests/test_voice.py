@@ -56,6 +56,7 @@ def test_voice_status_includes_install_hint(monkeypatch):
     monkeypatch.setattr(voice_worker, "stt_backend", lambda: "faster-whisper")
     monkeypatch.setattr(voice_worker, "tts_backend", lambda: "sapi")
     monkeypatch.setattr(voice_worker, "local_whisper_model", lambda: None)
+    monkeypatch.setattr(voice_worker, "faster_whisper_ready", lambda: True)
     status = voice_worker.voice_status()
     assert status["stt_ready"] is True
     assert "faster-whisper" in status["install_hint"]
@@ -77,21 +78,20 @@ def test_voice_status_windows_sapi_ready(monkeypatch):
 def test_stt_backend_falls_back_to_windows_sapi_without_whisper_model(monkeypatch, tmp_path):
     voice_worker = _voice_worker()
 
-    def module_available(name: str) -> bool:
-        return name == "faster_whisper"
-
     monkeypatch.setattr(voice_worker, "local_whisper_model", lambda: None)
-    monkeypatch.setattr(voice_worker, "_module_available", module_available)
+    monkeypatch.setattr(voice_worker, "faster_whisper_ready", lambda: False)
     monkeypatch.setattr(voice_worker.sys, "platform", "win32")
     assert voice_worker.stt_backend() == "windows-sapi"
 
     model = tmp_path / "ggml-base.bin"
     model.write_bytes(b"fake")
     monkeypatch.setattr(voice_worker, "local_whisper_model", lambda: model)
+    monkeypatch.setattr(voice_worker, "faster_whisper_ready", lambda: True)
     assert voice_worker.stt_backend() == "faster-whisper"
 
     monkeypatch.setattr(voice_worker, "local_whisper_model", lambda: None)
     monkeypatch.setattr(voice_worker.sys, "platform", "linux")
+    monkeypatch.setattr(voice_worker, "faster_whisper_ready", lambda: True)
     assert voice_worker.stt_backend() == "faster-whisper"
 
 

@@ -46,6 +46,17 @@ Name: "voicetactical"; Description: "Tactical aide (Mestor, Themis, Heimdall)"; 
 Name: "voicesynthetic"; Description: "Synthetic command (Enki, Veles, Vulcan)"; GroupDescription: "Voice models:"; Flags: checkedonce
 Name: "voicechatterbox"; Description: "Expressive Chatterbox (Aegir, Bragi, Hermes, Maia — larger download)"; GroupDescription: "Voice models:"; Flags: checkedonce
 
+; Speech and AI voice systems download options (user flexibility)
+Name: "dl_kokoro"; Description: "Kokoro-82M TTS neural voice (recommended default butler)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
+Name: "dl_personavoices"; Description: "Persona neural voices (5 shared voice packs for 13 personas)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
+Name: "dl_whisper"; Description: "Whisper speech-to-text base model (faster-whisper local STT)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
+Name: "dl_voicestudio"; Description: "VoiceStudio local multi-engine voice suite integration (debpalash/voicestudio)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
+Name: "dl_pockettts"; Description: "Pocket TTS lightweight CPU neural voice (Kyutai Labs)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
+
+; Local LLM weights
+Name: "dl_localllm"; Description: "Qwen3.5-9B GGUF weights (recommended local agent model)"; GroupDescription: "AI models to download:"; Flags: checkedonce
+Name: "dl_expert27b"; Description: "Qwen3.5-27B Expert weights (high VRAM/RAM required; ~17 GB)"; GroupDescription: "AI models to download:"; Flags: unchecked
+
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
 ; Exclude heavy or machine-local dirs — bootstrap recreates them on first run.
@@ -487,9 +498,26 @@ begin
     Params := Params + ' -SkipHeavyPrepare';
   if BootstrapSkipModelDownload then
     Params := Params + ' -SkipModelDownload';
-  Voices := SelectedVoiceProfiles;
-  if Voices <> '' then
-    Params := Params + ' -VoiceProfiles "' + Voices + '"';
+  if not WizardIsTaskSelected('dl_kokoro') then
+    Params := Params + ' -SkipKokoro';
+  if not WizardIsTaskSelected('dl_personavoices') then
+    Params := Params + ' -SkipPersonaVoices';
+  if WizardIsTaskSelected('dl_whisper') then
+    Params := Params + ' -InstallWhisper';
+  if WizardIsTaskSelected('dl_voicestudio') then
+    Params := Params + ' -InstallVoiceStudio';
+  if WizardIsTaskSelected('dl_pockettts') then
+    Params := Params + ' -InstallPocketTTS';
+  if WizardIsTaskSelected('dl_localllm') then
+    Params := Params + ' -InstallLocalLLM';
+  if WizardIsTaskSelected('dl_expert27b') then
+    Params := Params + ' -InstallExpert27B';
+  if WizardIsTaskSelected('dl_personavoices') then
+  begin
+    Voices := SelectedVoiceProfiles;
+    if Voices <> '' then
+      Params := Params + ' -VoiceProfiles "' + Voices + '"';
+  end;
   Result := Params;
 end;
 

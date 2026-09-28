@@ -97,7 +97,7 @@ class BrowserSettings(BaseModel):
 
 
 class VoiceSettings(BaseModel):
-    """Persisted active voice profile selection (RFC-0062)."""
+    """Persisted active voice profile and STT selection (RFC-0062)."""
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -107,6 +107,10 @@ class VoiceSettings(BaseModel):
         max_length=80,
         pattern=r"^[a-z0-9_]+$",
     )
+    stt_backend: Literal["auto", "faster-whisper", "whisper.cpp", "openai-whisper", "voicestudio", "windows-sapi"] = "auto"
+    whisper_model: str = Field(default="", max_length=260)
+    voicestudio_url: str = Field(default="http://127.0.0.1:3900", max_length=200)
+    voicestudio_api_key: str = Field(default="", max_length=512)
 
 
 class CodingSettings(BaseModel):
@@ -228,8 +232,8 @@ class TtsSettings(BaseModel):
 
     speak_chat_replies: bool = True
     voice_profile_id: str = ""
-    engine: Literal["auto", "chatterbox_multilingual_v3", "kokoro", "chatterbox_turbo", "external"] = "auto"
-    quality_engine: str = "chatterbox_multilingual_v3"
+    engine: Literal["auto", "kokoro", "voicestudio", "pocket_tts", "chatterbox_multilingual_v3", "chatterbox_turbo", "external"] = "auto"
+    quality_engine: str = "kokoro"
     fallback_engine: str = "kokoro"
     loading_policy: Literal["resident", "lazy", "cpu-preferred"] = "lazy"
     language: str = "auto"

@@ -50,6 +50,9 @@ async def get_voice_status():
     tts_backend = status.get("tts")
     runtime = status.get("tts_runtime") or {}
     status["engines"] = engine_availability()
+    status["stt_backend_preference"] = settings.voice.stt_backend
+    status["voicestudio_url"] = settings.voice.voicestudio_url
+    status["whisper_model"] = settings.voice.whisper_model or None
     status["tts"] = {
         "speak_chat_replies": settings.tts.speak_chat_replies,
         "voice_profile_id": settings.tts.voice_profile_id or None,

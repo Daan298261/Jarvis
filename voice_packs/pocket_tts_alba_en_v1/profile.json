@@ -1,0 +1,27 @@
+{
+  "id": "pocket_tts_alba_en_v1",
+  "archetype": "household_butler",
+  "display_name": "Pocket TTS lightweight (CPU)",
+  "license": "permissive_stock",
+  "provenance": "Kyutai Labs Pocket TTS lightweight CPU neural voice.",
+  "tts": {
+    "engine_id": "pocket_tts",
+    "engine_hint": "pocket_tts",
+    "model_id": "pocket-tts",
+    "speaker_ref": "alba",
+    "pack_path": "voice_packs/pocket_tts_alba_en_v1",
+    "vram_class": "edge",
+    "latency_class": "interactive",
+    "license": "CC-BY-4.0",
+    "offline": true,
+    "quality_tier": "natural",
+    "speaking_rate": 1.0
+  },
+  "persona_hooks": {
+    "register": "british_understated",
+    "humour": "dry"
+  },
+  "sample_utterance": "Pocket speech online and standing by.",
+  "vram_class": "edge",
+  "builtin": true
+}

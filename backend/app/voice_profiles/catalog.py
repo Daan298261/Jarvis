@@ -18,6 +18,8 @@ FALLBACK_VOICE_PROFILE_ID = KOKORO_BUTLER_VOICE_PROFILE_ID
 # Neural voices lead the picker; SAPI remains an explicit baseline choice.
 CURATED_VOICE_PROFILE_IDS: tuple[str, ...] = (
     "butler_original_v1",
+    "voicestudio_clone_en_v1",
+    "pocket_tts_alba_en_v1",
     "tactical_aide_original_v1",
     "dry_butler_original_v1",
     "synthetic_command_original_v1",
@@ -66,6 +68,14 @@ def _profile_is_available(profile: VoiceProfile) -> tuple[bool, str | None, str 
         if profile.tts.resolved_engine_id() == "chatterbox":
             hint = (
                 "Install the expressive local voice from Settings. Jarvis will prepare Chatterbox automatically."
+            )
+        elif profile.tts.resolved_engine_id() in {"voicestudio", "voice_studio"}:
+            hint = (
+                "Ensure debpalash/voicestudio is running locally on http://127.0.0.1:3900 or set JARVIS_VOICESTUDIO_URL."
+            )
+        elif profile.tts.resolved_engine_id() in {"pocket_tts", "pocket-tts"}:
+            hint = (
+                "Install Pocket TTS into Jarvis: pip install pocket-tts."
             )
         return (
             False,

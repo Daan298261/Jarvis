@@ -95,7 +95,7 @@ class SettingsUpdate(BaseModel):
     identity_recognition_expose_identity_to_dialogue: bool | None = None
     tts_speak_chat_replies: bool | None = None
     tts_voice_profile_id: str | None = Field(default=None, min_length=1, max_length=80)
-    tts_engine: Literal["auto", "chatterbox_multilingual_v3", "kokoro", "chatterbox_turbo", "external"] | None = None
+    tts_engine: Literal["auto", "kokoro", "voicestudio", "pocket_tts", "chatterbox_multilingual_v3", "chatterbox_turbo", "external"] | None = None
     tts_quality_engine: str | None = Field(default=None, min_length=1, max_length=120)
     tts_fallback_engine: str | None = Field(default=None, min_length=1, max_length=120)
     tts_loading_policy: Literal["resident", "lazy", "cpu-preferred"] | None = None
@@ -103,6 +103,11 @@ class SettingsUpdate(BaseModel):
     tts_speed: float | None = Field(default=None, ge=0.5, le=2.0)
     tts_expressiveness: float | None = Field(default=None, ge=0.0, le=1.0)
     tts_prefer_cpu_fallback: bool | None = None
+    voice_active_profile_id: str | None = Field(default=None, min_length=1, max_length=80)
+    voice_stt_backend: Literal["auto", "faster-whisper", "whisper.cpp", "openai-whisper", "voicestudio", "windows-sapi"] | None = None
+    voice_whisper_model: str | None = Field(default=None, max_length=120)
+    voice_voicestudio_url: str | None = Field(default=None, max_length=200)
+    voice_voicestudio_api_key: str | None = Field(default=None, max_length=512)
     front_responder_enabled: bool | None = None
     front_responder_model: str | None = Field(default=None, max_length=160)
     front_responder_max_output_tokens: int | None = Field(default=None, ge=64, le=1024)
@@ -121,6 +126,11 @@ async def get_settings():
         vault = dict(vault)
         vault["vault_path"] = "[configured]"
         payload["knowledge_vault"] = vault
+    voice = payload.get("voice")
+    if isinstance(voice, dict) and voice.get("voicestudio_api_key"):
+        voice = dict(voice)
+        voice["voicestudio_api_key"] = "[configured]"
+        payload["voice"] = voice
     return payload
 
 
@@ -302,6 +312,19 @@ async def update_settings(body: SettingsUpdate):
         if value is not None:
             tts_values[key] = value
     settings.tts = type(settings.tts).model_validate(tts_values)
+
+    voice_values = settings.voice.model_dump()
+    voice_updates = {
+        "active_profile_id": body.voice_active_profile_id,
+        "stt_backend": body.voice_stt_backend,
+        "whisper_model": body.voice_whisper_model,
+        "voicestudio_url": body.voice_voicestudio_url,
+        "voicestudio_api_key": body.voice_voicestudio_api_key,
+    }
+    for key, value in voice_updates.items():
+        if value is not None:
+            voice_values[key] = value
+    settings.voice = type(settings.voice).model_validate(voice_values)
 
     front_values = settings.front_responder.model_dump()
     front_updates = {
