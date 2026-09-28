@@ -120,7 +120,7 @@ def decide(
                 target = str(state.get("suggested_target_id") or "")
                 if target and target in question.choices:
                     answers[qid] = _answer_choice(qid, target, 0.85)
-                    hard_rule = bool(state.get("target_locked"))
+                    hard_rule = hard_rule or bool(state.get("target_locked"))
                 else:
                     answers[qid] = _answer_choice(qid, question.choices[0], 0.45)
             else:

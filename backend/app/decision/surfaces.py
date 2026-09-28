@@ -42,23 +42,44 @@ def route_persona_model(
     )
 
 
+NO_TOOL_DESCRIPTION = "no tool: greeting, small talk, opinion or a question answered from knowledge"
+
+
+def _tool_description(name: str) -> str:
+    try:
+        from ..tools.registry import REGISTRY
+
+        tool = REGISTRY.tools.get(name)
+    except Exception:  # noqa: BLE001 — descriptions are an accuracy aid, never required
+        tool = None
+    text = str(getattr(tool, "description", "") or "").strip()
+    return f"{name}: {text.split('. ')[0][:160]}" if text else name
+
+
 def select_tools(
     *,
     user_message: str,
     candidates: list[str],
     deadline_ms: float = 80.0,
     privacy: PrivacyMode = "local_only",
+    descriptions: dict[str, str] | None = None,
 ) -> DecisionResult:
     tools = [name for name in candidates if name][:64]
     choices = tuple([*tools, "none"]) if tools else ("none",)
+    described = descriptions or {}
+    # Candidates live in the question; repeating them in the state biases encoders toward them.
     return decide(
-        {"user_message": user_message, "candidate_tools": tools},
+        {"user_message": user_message},
         [
             Question(
                 id="tool_select",
                 type="choice",
-                prompt="Which retrieved tool should this turn use? none if chat-only.",
+                prompt="Which tool does this request need?",
                 choices=choices,
+                descriptions=tuple(
+                    NO_TOOL_DESCRIPTION if name == "none" else described.get(name) or _tool_description(name)
+                    for name in choices
+                ),
             )
         ],
         "tool_selection",
@@ -118,21 +139,41 @@ def browser_operation_target(
     suggested_operation: str = "",
     suggested_target_id: str = "",
     frame_id: str = "",
+    frame_nodes: list[dict[str, Any]] | None = None,
     deadline_ms: float = 80.0,
     privacy: PrivacyMode = "local_only",
 ) -> DecisionResult:
     """
     One batched Reflex call for operation + target_id (+ optional done/block).
     Executor must resolve target_id against the current ActionFrame (RFC-0172).
+
+    ``frame_nodes`` is the semantic snapshot (target_id, role, name, value, ops);
+    without it a provider would be choosing among opaque ids like ``t3``.
     """
-    ops = tuple(dict.fromkeys([*(o for o in operations if o), "NOOP"]))
+    ops = tuple(dict.fromkeys(o for o in operations if o)) or ("DONE",)
     targets = tuple(dict.fromkeys([*(t for t in target_ids if t), "none"]))
+    labels = {
+        str(node.get("target_id")): " ".join(
+            part for part in (str(node.get("role") or ""), repr(str(node.get("name") or ""))) if part
+        )
+        for node in (frame_nodes or [])
+        if isinstance(node, dict) and node.get("target_id")
+    }
+    target_descriptions = tuple(
+        labels.get(t, "no target (for DONE/BLOCK)" if t == "none" else t) for t in targets
+    )
     return decide(
         {
             "user_message": goal,
             "suggested_operation": suggested_operation,
             "suggested_target_id": suggested_target_id,
             "frame_id": frame_id,
+            "nodes": [
+                f"{node.get('target_id')}: {node.get('role')} {str(node.get('name') or '')!r}"
+                f" value={str(node.get('value') or '')[:60]!r} ops={','.join(node.get('ops') or [])}"
+                for node in (frame_nodes or [])
+                if isinstance(node, dict)
+            ],
         },
         [
             Question(
@@ -144,8 +185,9 @@ def browser_operation_target(
             Question(
                 id="target_id",
                 type="choice",
-                prompt="Which actionable target id from the current frame?",
+                prompt="Which actionable target from the current frame?",
                 choices=targets,
+                descriptions=target_descriptions,
             ),
             Question(
                 id="done",

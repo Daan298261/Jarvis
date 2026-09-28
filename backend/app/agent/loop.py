@@ -485,6 +485,7 @@ class AgentRuntime:
             await session.commit()
             if terminal_status in {"completed", "failed", "cancelled"}:
                 from ..automation.breaker import on_task_terminal
+                from .intake import on_task_terminal as advance_intake_chain
 
                 on_task_terminal(
                     task_id,
@@ -493,6 +494,7 @@ class AgentRuntime:
                     error=task.error or "",
                     waiting_for_confirmation=bool(task.waiting_for_confirmation),
                 )
+                advance_intake_chain(task_id, status=str(terminal_status), result=task.result or "")
 
     async def _complete(
         self,

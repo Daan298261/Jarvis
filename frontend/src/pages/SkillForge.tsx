@@ -406,7 +406,8 @@ export function SkillForgePage() {
       <header className="luxury-page-head">
         <h1>Modules / Skills</h1>
         <p className="lede">
-          Anzu 1.0 Skill Forge. Verified traces become candidates — never auto-published. Review purpose,
+          <Link to="/capability-lab">Capability Lab</Link> (RFC-0137 parity ledger) · Anzu 1.0 Skill Forge.
+          Verified traces become candidates — never auto-published. Review purpose,
           provenance, eval status, and permissions, then <strong>Approve</strong> and separately{" "}
           <strong>Activate</strong>. Coding merge conflicts stay on{" "}
           <Link to="/coding">Coding → Decision Inbox</Link>. Memory guides live on{" "}

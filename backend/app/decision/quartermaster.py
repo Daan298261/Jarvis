@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import calibration
 from .types import PrivacyMode, ProviderName
 
 _LOCK = threading.Lock()
@@ -97,6 +98,7 @@ def record_outcome(
 def reset_quartermaster() -> None:
     with _LOCK:
         _CLASS_PROFILES.clear()
+    calibration.reset()
 
 
 def _privacy_allows(profile: ProviderProfile, privacy: PrivacyMode) -> bool:
@@ -128,7 +130,7 @@ def select_provider_order(
             continue
         if not _privacy_allows(profile, privacy):
             continue
-        if profile.name == "laya" and not laya_ready:
+        if profile.name == "laya" and (not laya_ready or not calibration.laya_qualified(decision_class)):
             continue
         if profile.name == "jev" and not jev_ready:
             continue

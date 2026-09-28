@@ -310,6 +310,8 @@ class DecisionPackageForwarder:
         if klass == BROWSER_OP_TARGET_CLASS and callable(self._browser_op_target):
             ops, targets = _ops_targets_from_questions(questions)
             goal, suggested_op, suggested_tid, frame_id = _goal_and_frame_from_state(state)
+            frame = state.get("frame") if isinstance(state.get("frame"), dict) else {}
+            frame_nodes = [node for node in (frame.get("nodes") or []) if isinstance(node, dict)]
             try:
                 raw = self._browser_op_target(
                     goal=goal,
@@ -318,6 +320,7 @@ class DecisionPackageForwarder:
                     suggested_operation=suggested_op,
                     suggested_target_id=suggested_tid,
                     frame_id=frame_id,
+                    frame_nodes=frame_nodes,
                     deadline_ms=float(deadline_ms),
                     privacy=privacy_mode,
                 )
