@@ -6,6 +6,7 @@ from app.inference.backends import (
     LMStudioBackend,
     OllamaBackend,
     RemoteOpenAICompatibleBackend,
+    is_inference_template_error,
     normalize_chat_messages,
     parse_models_payload,
     resolve_backend,
@@ -24,6 +25,12 @@ def _settings(**inference) -> AppSettings:
 
 def test_llama_cpp_is_the_default_backend():
     assert isinstance(resolve_backend(_settings()), LlamaCppBackend)
+
+
+def test_jinja_call_expression_is_a_template_error():
+    assert is_inference_template_error(RuntimeError("While executing CallExpression at line 79"))
+    assert is_inference_template_error(RuntimeError("Jinja Exception: System message must be at the beginning."))
+    assert not is_inference_template_error(RuntimeError("connection reset"))
 
 
 def test_local_llama_alias_uses_managed_llama_cpp():

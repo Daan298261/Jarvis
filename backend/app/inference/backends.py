@@ -82,6 +82,21 @@ def normalize_chat_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
     return [merged, *ordered]
 
 
+def is_inference_template_error(exc: BaseException) -> bool:
+    """llama.cpp --jinja crashes that must not wipe a task that already used tools."""
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "jinja",
+            "callexpression",
+            "prompt template",
+            "system message must be at the beginning",
+            "no user query",
+        )
+    )
+
+
 def inference_headers(api_key: str | None) -> dict[str, str]:
     key = (api_key or "").strip()
     if not key:

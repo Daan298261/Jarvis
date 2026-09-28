@@ -161,7 +161,17 @@ async def execute_visible_model_switch(
             source="model_switch",
             speak=True,
         )
-    await MANAGER.load(settings, to_profile, force=True)
+    try:
+        await MANAGER.load(settings, to_profile, force=True)
+    except FileNotFoundError:
+        await BUS.publish(
+            task_id,
+            "model_switch_skipped",
+            "Kept the loaded model",
+            f"{to_profile} weights are not installed; staying on {from_profile}.",
+            stage="model",
+        )
+        return
     working.model_escalation_count = int(working.model_escalation_count or 0) + 1
     working.active_answer_profile = to_profile
     working.escalated = True

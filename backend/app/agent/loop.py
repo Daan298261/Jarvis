@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
+from ..inference.backends import is_inference_template_error
 from ..inference.manager import MANAGER
 from ..inference.tool_capability import probe_tool_capability
 from ..inference.profiles import ModelProfile, resolve_profile
@@ -1506,7 +1507,20 @@ class AgentRuntime:
             await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
         if not MANAGER.provider or not MANAGER.state.loaded:
             await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-            await MANAGER.load(settings, profile_name)
+            await publish_owner_text("Loading the model now.", source="progress", speak=True)
+            try:
+                await MANAGER.load(settings, profile_name)
+            except Exception as exc:
+                await self._fail_task(
+                    task_id,
+                    f"The language model could not be loaded: {exc}",
+                    working,
+                    metrics,
+                )
+                return
+        if MANAGER.provider is None or not MANAGER.state.loaded:
+            await self._fail_task(task_id, "The language model is not loaded.", working, metrics)
+            return
         target_ctx = initial_context_size(working.task_class, profile)
         live_ctx = await MANAGER.apply_context(settings, target_ctx, allow_shrink=True)
         if live_ctx != effective_cap:
@@ -1517,7 +1531,6 @@ class AgentRuntime:
                 stage="model",
             )
         provider = MANAGER.provider
-        assert provider is not None
         if working.ingress_blob_id and working.ingress_size_class == "big" and not existing:
             stored_chunks = await list_ingress_chunks(working.ingress_blob_id)
             if not stored_chunks:
@@ -1817,6 +1830,8 @@ class AgentRuntime:
             tools_used = True
 
         context_recovery_attempts = 0
+        template_retries = 0
+        work_wrap_retries = 0
         try:
             for _step in range(max_steps):
                 if task_id in self._cancel or kill_switch_active():
@@ -2032,6 +2047,24 @@ class AgentRuntime:
                         return
                     if isinstance(exc, APIStatusError):
                         detail = getattr(exc, "message", None) or str(exc)
+                        if is_inference_template_error(exc) and template_retries < 1:
+                            template_retries += 1
+                            if messages and messages[-1].role == "user":
+                                messages = messages[:-1]
+                            continue
+                        if tools_used and work_wrap_retries < 1:
+                            work_wrap_retries += 1
+                            wrap = "The requested work already ran on disk."
+                            if await self._complete(
+                                task_id,
+                                messages,
+                                wrap,
+                                wrap,
+                                working,
+                                metrics,
+                            ):
+                                return
+                            continue
                         err = f"Inference server error ({exc.status_code}): {detail}"
                     else:
                         err = f"Inference server unreachable: {exc}"

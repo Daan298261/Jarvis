@@ -197,5 +197,10 @@ async def maybe_autoselect_runtime_for_budget(
     spawn_context_switch_keep_busy(settings=settings, user_text=user_prompt, on_spoken=_publish_keep_busy)
     from ..inference.hotswap import activate_runtime_profile
 
-    await activate_runtime_profile(chosen, force=True)
+    try:
+        await activate_runtime_profile(chosen, force=True)
+    except RuntimeError as exc:
+        if "missing model files" not in str(exc).lower():
+            raise
+        return None
     return resolve_profile((chosen.model_profile or chosen.name or profile.name).strip())
