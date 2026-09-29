@@ -84,6 +84,17 @@ def test_enable_without_install_refuses():
         laya_runtime.enable(warm=True, allow_fixture=False)
 
 
+def test_ensure_package_does_not_pip_under_pytest(monkeypatch):
+    monkeypatch.setattr(laya_pins, "package_version", lambda: None)
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("ensure_package must not pip install during pytest")
+
+    monkeypatch.setattr("subprocess.check_call", boom)
+    with pytest.raises(RuntimeError, match="not installed"):
+        laya_pins.ensure_package()
+
+
 def test_choice_shortlist_keeps_hints_and_none_within_option_budget():
     choices = tuple(f"tool_{i}" for i in range(40)) + ("none",)
     question = Question(id="tool_select", type="choice", prompt="Which tool?", choices=choices)

@@ -346,6 +346,36 @@ if wrong:
     Write-Ok "Kokoro TTS Python packages ready."
 }
 
+function Ensure-LayaPythonPackage([string]$VenvPython) {
+    # RFC-0171: always-on harm veto needs the pinned laya wheel in the post-install venv.
+    $marker = Join-Path $Root ".venv\.jarvis-laya-python-ready"
+    $check = @"
+import importlib.metadata
+expected = '0.3.21'
+try:
+    actual = importlib.metadata.version('laya')
+except importlib.metadata.PackageNotFoundError:
+    actual = 'missing'
+if actual != expected:
+    raise SystemExit(f'laya={actual} (expected {expected})')
+"@
+    if (Test-PythonImport -VenvPython $VenvPython -Code $check) {
+        if (-not (Test-Path $marker)) {
+            New-Item -ItemType File -Force -Path $marker | Out-Null
+        }
+        Write-Skip "Laya decision package (laya==0.3.21)"
+        return
+    }
+    Write-Host "    Ensuring Laya decision package (laya==0.3.21)..."
+    Invoke-ProcessWithTimeout -Label "pip laya" -FilePath $VenvPython -Arguments @(
+        "-m", "pip", "install", "laya==0.3.21"
+    ) -TimeoutMinutes ($StepTimeoutMinutes * 2)
+    & $VenvPython -c $check
+    if ($LASTEXITCODE -ne 0) { throw "Laya package is still missing after pip install." }
+    New-Item -ItemType File -Force -Path $marker | Out-Null
+    Write-Ok "Laya decision package ready."
+}
+
 function Ensure-Playwright([string]$VenvPython) {
     $marker = Join-Path $Root ".venv\.playwright-chromium-ready"
     if (Test-Path $marker) {
@@ -705,6 +735,7 @@ Write-Step "Python environment and packages"
 $venvPython = Ensure-Venv -PythonExe $pythonExe
 Ensure-PipPackages -VenvPython $venvPython
 Ensure-TtsPythonPackages -VenvPython $venvPython
+Ensure-LayaPythonPackage -VenvPython $venvPython
 Ensure-Playwright -VenvPython $venvPython
 
 Write-Step "Web portal"

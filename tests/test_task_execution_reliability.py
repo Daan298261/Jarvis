@@ -31,6 +31,13 @@ def test_app_requests_route_to_desktop_control(prompt, target):
     assert classify_task(prompt) == "windows gui"
 
 
+def test_open_steam_hedges_still_use_the_launcher():
+    prompt = "Open Steam. If it is already running, say so and stop. Do not install anything."
+    assert app_control_target(prompt) == "Steam"
+    assert classify_task(prompt) == "windows gui"
+    assert simple_app_control(prompt) == ("open", "Steam")
+
+
 def test_simple_open_steam_does_not_need_the_model():
     assert simple_app_control("open steam") == ("open", "steam")
     assert simple_app_control("please close Spotify now") == ("close", "Spotify")

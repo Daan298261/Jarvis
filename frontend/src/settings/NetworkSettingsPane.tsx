@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
+import { api } from "../api"
 import { settingsSubmenuPath } from "./settingsSubmenus"
 
 type NetworkSettingsPaneProps = {
@@ -26,8 +28,63 @@ export function NetworkSettingsPane({
   generateKey,
   setMsg,
 }: NetworkSettingsPaneProps) {
+  const [elevation, setElevation] = useState<{
+    elevated?: boolean
+    logon_task_registered?: boolean
+    logon_task_hint?: string
+    needs_uac?: boolean
+  } | null>(null)
+  const [elevationMsg, setElevationMsg] = useState("")
+
+  async function loadElevation() {
+    const snap = await api<{
+      elevated?: boolean
+      logon_task_registered?: boolean
+      logon_task_hint?: string
+      needs_uac?: boolean
+    }>("/api/system/elevation").catch(() => null)
+    if (snap) setElevation(snap)
+  }
+
+  useEffect(() => {
+    void loadElevation()
+  }, [])
+
+  async function askWindowsForAdmin() {
+    setElevationMsg("Asking Windows…")
+    const result = await api<{ detail?: string; prompted?: boolean; elevated?: boolean }>(
+      "/api/system/elevation/prompt",
+      { method: "POST" },
+    ).catch((err: Error) => {
+      setElevationMsg(err.message || "Windows did not show a prompt.")
+      return null
+    })
+    if (result) {
+      setElevationMsg(result.detail || "Approve the Windows prompt if it is on screen.")
+      await loadElevation()
+    }
+  }
+
   return (
     <>
+      <div className="card grid settings-pane-card">
+        <h2>This PC</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          {elevation?.elevated
+            ? "Jarvis is running with administrator on this session."
+            : "Jarvis asks Windows for administrator itself. Approve the prompt — do not run a command."}
+        </p>
+        {elevation?.logon_task_hint ? <p className="lede">{elevation.logon_task_hint}</p> : null}
+        {!elevation?.elevated ? (
+          <div className="row">
+            <button className="btn" type="button" onClick={() => void askWindowsForAdmin()}>
+              Allow full PC control
+            </button>
+          </div>
+        ) : null}
+        {elevationMsg ? <p className="lede">{elevationMsg}</p> : null}
+      </div>
+
       <div className="card grid settings-pane-card">
         <h2>Security &amp; remote access</h2>
         <p className="lede" style={{ margin: "0 0 12px" }}>
