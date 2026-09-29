@@ -16,6 +16,7 @@ from .chat_delivery import (
     OWNER_CHAT_CHANNEL,
     clear_stream_speak_state,
     maybe_enqueue_streaming_social_tts,
+    pending_chat_tts_text,
     publish_owner_text,
     stream_speak_offset,
 )
@@ -297,7 +298,7 @@ async def stream_owner_chat(
                 OWNER_CHAT_CHANNEL,
                 "chat_tts",
                 "Speak reply",
-                prefetched_front.text,
+                pending_chat_tts_text(early_id) or spoken,
                 stage="owner_chat",
             )
         note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
@@ -482,7 +483,7 @@ async def stream_owner_chat(
                             OWNER_CHAT_CHANNEL,
                             "chat_tts",
                             "Speak reply",
-                            front.text,
+                            pending_chat_tts_text(early_id) or front.text,
                             stage="owner_chat",
                         )
                     note_front_audio(None, (time.perf_counter() - turn_started) * 1000)

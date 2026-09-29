@@ -136,19 +136,21 @@ export function NamedPersonaControls() {
                   className={`named-persona-icon-btn${isDefault ? " on" : ""}`}
                   title={isDefault ? "Default persona on startup" : "Make default on startup"}
                   aria-pressed={isDefault}
+                  aria-label={isDefault ? "Default persona on startup" : "Make default on startup"}
                   disabled={busy || isDefault}
                   onClick={(event) => {
                     event.stopPropagation()
                     void run(() => updateNamedPersonaPrefs(persona.id, { setAsDefault: true }))
                   }}
                 >
-                  Def
+                  Default
                 </button>
                 <button
                   type="button"
                   className={`named-persona-icon-btn${isPinned ? " on" : ""}`}
-                  title={isPinned ? "Unpin from HUD top bar" : "Pin to HUD top bar"}
+                  title={isPinned ? "Unpin from HUD bar" : "Pin to HUD bar"}
                   aria-pressed={isPinned}
+                  aria-label={isPinned ? "Unpin from HUD bar" : "Pin to HUD bar"}
                   disabled={busy}
                   onClick={(event) => {
                     event.stopPropagation()
@@ -163,7 +165,7 @@ export function NamedPersonaControls() {
         })}
       </div>
       <p className="settings-note">
-        Shape and voice travel together. Def sets who loads on startup; Pin puts up to{" "}
+        Default sets who loads on startup; Pin puts up to{" "}
         {state?.max_pinned ?? 5} personas on the HUD top bar.
       </p>
       {active?.id && (

@@ -2,7 +2,7 @@ export type UiMode = "classic" | "hud"
 
 // Version the preference when the primary HUD changes materially so an old
 // fallback choice does not hide the new experience after upgrade. Users can
-// still switch to Legacy UI and that choice persists from this version onward.
+// still switch to the Classic portal and that choice persists from this version onward.
 const STORAGE_KEY = "jarvis.uiMode.v2"
 export const LEGACY_UI_MODE_CHANGED_EVENT = "jarvis:legacy-ui-mode-changed"
 

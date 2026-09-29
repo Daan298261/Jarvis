@@ -110,6 +110,7 @@ from .planning import (
 from ..persona.chat_delivery import (
     clear_stream_speak_state,
     maybe_enqueue_streaming_social_tts,
+    pending_chat_tts_text,
     publish_owner_text,
     stream_speak_offset,
 )
@@ -696,7 +697,13 @@ class AgentRuntime:
         )
         audio_ms = max(0.0, (time.perf_counter() - turn_started) * 1000)
         if early_id:
-            await BUS.publish(task_id, "chat_tts", "Speak reply", front.text, stage="chat")
+            await BUS.publish(
+                task_id,
+                "chat_tts",
+                "Speak reply",
+                pending_chat_tts_text(early_id) or spoken,
+                stage="chat",
+            )
             note_front_audio(None, audio_ms)
             front.first_audio_ms = audio_ms
             return

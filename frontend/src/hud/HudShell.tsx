@@ -144,9 +144,10 @@ export function HudTopChrome({
         <button
           type="button"
           className="hud-icon-btn hud-mode-toggle"
+          title="Switch to classic portal"
           onClick={() => onUiModeChange(uiMode === "hud" ? "classic" : "hud")}
         >
-          Legacy UI
+          Classic
         </button>
         <HudModelSelector model={model} onOpenChange={onModelMenuOpenChange} />
       </div>

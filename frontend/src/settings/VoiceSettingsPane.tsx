@@ -68,7 +68,6 @@ export function VoiceSettingsPane() {
 
   return (
     <div className="card grid settings-pane-card">
-      <h2>Voice</h2>
       <p className="lede" style={{ margin: "0 0 12px" }}>
         Jarvis speaks with local engines (Kokoro by default). You can also route speech through VoiceStudio or
         Pocket TTS, and choose a speech-to-text backend for microphone uploads.

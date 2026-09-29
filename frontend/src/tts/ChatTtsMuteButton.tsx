@@ -11,7 +11,6 @@ export function ChatTtsMuteButton({
   variant = "classic",
   className = "",
 }: ChatTtsMuteButtonProps) {
-  const label = enabled ? "Mute speech" : "Unmute speech"
   const title = enabled
     ? "Mute spoken chat replies (text still shows)"
     : "Unmute spoken chat replies"
@@ -23,8 +22,8 @@ export function ChatTtsMuteButton({
         className={`btn secondary hud-tts-mute${enabled ? "" : " muted"}${className ? ` ${className}` : ""}`}
         onClick={() => onToggle(!enabled)}
         title={title}
-        aria-pressed={!enabled}
-        aria-label={label}
+        aria-pressed={enabled}
+        aria-label="Spoken chat replies"
       >
         {enabled ? "Speech on" : "Muted"}
       </button>
@@ -37,8 +36,8 @@ export function ChatTtsMuteButton({
       className={`btn secondary chat-tts-mute${enabled ? "" : " muted"}${className ? ` ${className}` : ""}`}
       onClick={() => onToggle(!enabled)}
       title={title}
-      aria-pressed={!enabled}
-      aria-label={label}
+      aria-pressed={enabled}
+      aria-label="Spoken chat replies"
     >
       {enabled ? "Speech on" : "Muted"}
     </button>

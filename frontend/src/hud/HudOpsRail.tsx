@@ -75,7 +75,7 @@ export function HudOpsRail({ tasks, activeTaskId }: HudOpsRailProps) {
 
   return (
     <aside className="hud-rail hud-rail-left" aria-label="Operations log">
-      <div className="hud-rail-head">OPS / ACTIVITY</div>
+      <div className="hud-rail-head">Activity</div>
       <div className="hud-log">
         {rows.length === 0 && <p className="hud-log-empty">No recent tasks. Start from the composer.</p>}
         {rows.map((row) => (

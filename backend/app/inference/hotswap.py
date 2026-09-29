@@ -144,8 +144,6 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
             advertised_now = list(probe.get("models") or [])
             needs_model = bool(hint) and not advertised_now
             if hint and advertised_now:
-                from .backends import resolve_advertised_model
-
                 resolved_now = resolve_advertised_model(hint, advertised_now)
                 needs_model = resolved_now not in advertised_now and not any(
                     hint.lower() in name.lower() for name in advertised_now
@@ -193,7 +191,7 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
     save_settings(settings)
 
 
-async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = True):
+async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = False):
     from ..security.hexstrike import HEXSTRIKE, is_hexstrike_suite, is_suite_runtime
 
     if is_hexstrike_suite(runtime) or is_suite_runtime(runtime):

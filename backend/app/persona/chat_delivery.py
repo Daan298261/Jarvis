@@ -212,6 +212,14 @@ def pending_chat_tts(limit: int = 10) -> list[dict[str, Any]]:
     return [item.as_dict() for item in items]
 
 
+def pending_chat_tts_text(item_id: str) -> str:
+    """Return the queued speak text for an early TTS id (first sentence, not the full front line)."""
+    for item in _pending_tts:
+        if item.id == item_id:
+            return item.text
+    return ""
+
+
 def pop_chat_tts(item_id: str) -> dict[str, Any] | None:
     for index, item in enumerate(_pending_tts):
         if item.id == item_id:

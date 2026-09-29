@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import logging
+import threading
 import wave
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,29 @@ from .system_sapi import legacy_tts_backend, speak_espeak, speak_pyttsx3, speak_
 from .voicestudio_adapter import voicestudio_adapter, voicestudio_runtime_state
 
 logger = logging.getLogger(__name__)
+
+_chatterbox_lock = threading.Lock()
+_chatterbox_models: dict[str, Any] = {}
+
+
+def reset_chatterbox_cache() -> None:
+    with _chatterbox_lock:
+        _chatterbox_models.clear()
+
+
+def _load_chatterbox_model(device: str):
+    from chatterbox.tts import ChatterboxTTS  # type: ignore[import-not-found]
+
+    return ChatterboxTTS.from_pretrained(device=device)
+
+
+def _cached_chatterbox_model(device: str):
+    with _chatterbox_lock:
+        model = _chatterbox_models.get(device)
+        if model is None:
+            model = _load_chatterbox_model(device)
+            _chatterbox_models[device] = model
+        return model
 
 
 class TtsSynthesisError(RuntimeError):
@@ -277,10 +301,9 @@ async def _synthesize_chatterbox(text: str, *, voice: str) -> bytes:
 
     def _run() -> bytes:
         import torch
-        from chatterbox.tts import ChatterboxTTS  # type: ignore[import-not-found]
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = ChatterboxTTS.from_pretrained(device=device)
+        model = _cached_chatterbox_model(device)
         kwargs = {"audio_prompt_path": voice} if voice and Path(voice).is_file() else {}
         wav = model.generate(text, **kwargs)
         if isinstance(wav, bytes):

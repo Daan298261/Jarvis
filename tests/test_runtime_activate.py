@@ -242,6 +242,37 @@ async def test_activate_runtime_profile_wraps_load_errors(jarvis_env, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_activate_runtime_profile_does_not_force_reload_by_default(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.config.data_dir", lambda: jarvis_env["tmp"])
+
+    profile = create_runtime_profile(
+        name="reuse-loaded-runtime",
+        label="Reuse",
+        model="stem-model",
+        provider="llama.cpp",
+        endpoint="127.0.0.1:8088",
+        is_local=True,
+    )
+    seen = {}
+
+    async def fake_apply_settings(_runtime):
+        return None
+
+    async def fake_load(*_args, **kwargs):
+        seen["force"] = kwargs.get("force")
+        return type("State", (), {"loaded": True})()
+
+    monkeypatch.setattr("app.inference.hotswap.apply_runtime_profile_to_settings", fake_apply_settings)
+    monkeypatch.setattr("app.inference.hotswap.MANAGER.load", fake_load)
+
+    from app.inference.hotswap import activate_runtime_profile
+
+    await activate_runtime_profile(profile)
+    assert seen["force"] is False
+
+
+@pytest.mark.asyncio
 async def test_local_llama_slot_clears_mismatched_lmstudio_remote_model(jarvis_env, monkeypatch):
     settings = jarvis_env["settings"]
     settings.inference.backend = "lmstudio"

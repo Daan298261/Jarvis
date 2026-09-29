@@ -10,9 +10,11 @@ import type { PresentationSettings } from "../presence/presenceTypes"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
+  /** HUD Appearance menu hides persona editors (those live under Persona). */
+  showPersona?: boolean
 }
 
-export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps) {
+export function AppearanceSettingsPane({ settings, showPersona = true }: AppearanceSettingsPaneProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
   const { active: hexStrikeActive, profile: hexstrikeProfile } = useHexStrikeSuiteActive()
@@ -63,7 +65,7 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           className={selected === "classic" ? "active" : ""}
           onClick={() => apply({ shell: "classic", requestedPresence: "none" })}
         >
-          Classic
+          Classic portal
         </button>
         <button
           type="button"
@@ -129,8 +131,12 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
         </button>
       </div>
 
-      <SessionPersonalityControls />
-      <NamedPersonaControls />
+      {showPersona && (
+        <>
+          <SessionPersonalityControls />
+          <NamedPersonaControls />
+        </>
+      )}
       <CustomPresencePanel settings={settings} />
 
       <label>

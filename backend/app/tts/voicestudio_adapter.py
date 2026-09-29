@@ -113,7 +113,7 @@ class VoiceStudioAdapter:
         model: str = "tts-1",
         speed: float = 1.0,
         response_format: str = "wav",
-        timeout: float = 30.0,
+        timeout: float = 8.0,
     ) -> bytes:
         """Call VoiceStudio /v1/audio/speech endpoint to generate speech audio."""
         url = f"{self.base_url}/v1/audio/speech"
@@ -145,7 +145,7 @@ class VoiceStudioAdapter:
         model: str = "tts-1",
         speed: float = 1.0,
         response_format: str = "wav",
-        timeout: float = 30.0,
+        timeout: float = 8.0,
     ) -> bytes:
         return await asyncio.to_thread(
             self.synthesize,

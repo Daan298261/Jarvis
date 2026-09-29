@@ -296,3 +296,30 @@ def test_ensure_kokoro_runtime_prepares_python_and_weights(monkeypatch, tmp_path
     monkeypatch.setattr(pack_install, "reset_kokoro_runtime_state", lambda: steps.append("reset"))
     assert pack_install.ensure_kokoro_runtime() == tmp_path
     assert steps == ["python", "weights", "reset"]
+
+
+def test_chatterbox_model_is_cached(monkeypatch):
+    from app.tts import synthesize as syn
+
+    syn.reset_chatterbox_cache()
+    calls = {"n": 0}
+    sentinel = object()
+
+    def fake_load(device: str):
+        calls["n"] += 1
+        assert device == "cpu"
+        return sentinel
+
+    monkeypatch.setattr(syn, "_load_chatterbox_model", fake_load)
+    assert syn._cached_chatterbox_model("cpu") is sentinel
+    assert syn._cached_chatterbox_model("cpu") is sentinel
+    assert calls["n"] == 1
+
+
+def test_voicestudio_synthesize_timeout_is_short():
+    import inspect
+
+    from app.tts.voicestudio_adapter import VoiceStudioAdapter
+
+    params = inspect.signature(VoiceStudioAdapter.synthesize).parameters
+    assert params["timeout"].default == 8.0
