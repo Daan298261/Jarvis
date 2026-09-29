@@ -33,6 +33,8 @@ function Enable-FullControl {
         "-NoBrowser"
     ) -WorkingDirectory $Root
 }
+
+function Start-Jarvis {
     Start-Process -FilePath "powershell.exe" -ArgumentList @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",

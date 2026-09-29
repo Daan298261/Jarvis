@@ -13,6 +13,24 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def test_tray_defines_start_jarvis_and_full_control():
+    """Start stays a normal launch; full control is the separate UAC path."""
+    text = _read(TRAY_SCRIPT)
+    start = text.split("function Start-Jarvis", 1)
+    full = text.split("function Enable-FullControl", 1)
+    assert len(start) == 2, "jarvis-tray.ps1 must define function Start-Jarvis"
+    assert len(full) == 2, "jarvis-tray.ps1 must define function Enable-FullControl"
+    start_body = start[1].split("\nfunction ", 1)[0]
+    full_body = full[1].split("\nfunction ", 1)[0]
+    assert "Verb RunAs" not in start_body
+    assert "-NoBrowser" in start_body
+    assert "start-jarvis.ps1" in text
+    assert "Verb RunAs" in full_body
+    assert "RegisterLogonTask" in full_body
+    assert "{ Start-Jarvis }" in text
+    assert "{ Enable-FullControl }" in text
+
+
 def test_tray_helper_exists_with_required_menu():
     assert TRAY_SCRIPT.is_file()
     text = _read(TRAY_SCRIPT)

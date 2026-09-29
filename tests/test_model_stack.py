@@ -51,8 +51,11 @@ def test_authorized_red_team_role_builds_preferences_only_after_external_gate():
 
 
 def test_orchestrator_role_prefers_ornith():
+    """Umi is the installed orchestrator brain; Ornith stays the local fallback."""
     prefs = routing_preferences_for_role("orchestrator")
-    assert prefs.preferred_profiles[0] == "ornith_9b"
+    assert prefs.preferred_profiles[0] == "umi-opus-9b"
+    assert "ornith_9b" in prefs.preferred_profiles
+    assert prefs.preferred_profiles.index("umi-opus-9b") < prefs.preferred_profiles.index("ornith_9b")
     assert prefs.required_capabilities == ("llm_inference", "text")
     assert prefs.task_specialization == "orchestration"
 
