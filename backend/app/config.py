@@ -368,6 +368,8 @@ class NamedPersonaSettings(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     active_id: str = "anzu"
+    default_id: str = "anzu"
+    pinned_ids: list[str] = Field(default_factory=list)
     # Legacy #376 shape id, migrated on read (abzu_flow / root_coil). Not a live override.
     presence_shape_id: str = ""
     activated_voice_profile_id: str = ""

@@ -13,6 +13,7 @@ import pytest
 
 from app.config import AppSettings
 from app.persona.named_persona import (
+    MAX_PINNED_PERSONAS,
     NamedPersonaBindError,
     ROSTER,
     ROSTER_IDS,
@@ -21,6 +22,8 @@ from app.persona.named_persona import (
     card_sentence,
     public_state,
     reapply_stored_main_persona,
+    set_default_persona,
+    set_persona_pinned,
     update_appearance,
 )
 from app.persona.session_personality import maybe_switch_from_owner_message, set_active_mode
@@ -274,3 +277,30 @@ def test_named_persona_route_is_registered():
 
     paths = set(app.openapi()["paths"])
     assert "/api/named-personas" in paths
+
+
+def test_default_and_pinned_personas(persona_box):
+    set_default_persona("umi")
+    state = public_state()
+    assert state["default_id"] == "umi"
+    assert any(row["id"] == "umi" and row["is_default"] for row in state["personas"])
+
+    set_persona_pinned("enki", pinned=True)
+    set_persona_pinned("nabu", pinned=True)
+    state = public_state()
+    assert set(state["pinned_ids"][:2]) == {"enki", "nabu"}
+
+    for pid in ("mestor", "veles", "themis"):
+        set_persona_pinned(pid, pinned=True)
+    with pytest.raises(NamedPersonaBindError):
+        set_persona_pinned("aegir", pinned=True)
+    assert len(public_state()["pinned_ids"]) <= MAX_PINNED_PERSONAS
+
+
+def test_reapply_uses_default_persona(persona_box):
+    box, _calls, available = persona_box
+    available.add("pocket_tts_alba_en_v1")
+    set_default_persona("umi")
+    box["settings"].named_personas.active_id = "enki"
+    reapply_stored_main_persona()
+    assert box["settings"].named_personas.active_id == "umi"

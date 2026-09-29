@@ -10,6 +10,7 @@ import { parseConfirmationPayload } from "../chat/PermissionPrompt"
 import { AppearancePresenceControls } from "../presence/AppearancePresenceControls"
 import { getActiveCustomComposition, useCustomPresence } from "../presence/customPresence"
 import { PresenceHost } from "../presence/PresenceHost"
+import { PinnedPersonaDock } from "../persona/PinnedPersonaDock"
 import { personaCardSentence, useNamedPersonas } from "../persona/namedPersonas"
 import { derivePresenceSnapshot } from "../presence/presenceState"
 import { usePresentationSettings } from "../presence/presentationSettings"
@@ -154,6 +155,7 @@ export function HudChatHome() {
     <div
       className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}${hexStrikeActive && !showHexSuite ? " hex-suite-collapsed" : ""}${galaxyEffective ? " galaxy-effective" : ""}`}
     >
+      <PinnedPersonaDock />
       <div className="jarvis-presence-controls-split">
         <AppearancePresenceControls settings={presentation} />
       </div>

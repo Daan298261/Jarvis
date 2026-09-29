@@ -23,11 +23,16 @@ export type NamedPersona = {
   voice_profile_requested?: string | null
   default_colors: { orb: string; accent: string }
   appearance: PersonaAppearance
+  is_default?: boolean
+  is_pinned?: boolean
 }
 
 export type NamedPersonaState = {
   active: NamedPersona
   personas: NamedPersona[]
+  default_id?: string
+  pinned_ids?: string[]
+  max_pinned?: number
 }
 
 const PHRASE: Record<string, string> = {
@@ -121,6 +126,21 @@ export async function selectNamedPersona(id: string): Promise<NamedPersonaState>
   const state = await api<NamedPersonaState>("/api/named-personas", {
     method: "PUT",
     body: JSON.stringify({ id }),
+  })
+  publish(state)
+  return state
+}
+
+export async function updateNamedPersonaPrefs(
+  id: string,
+  prefs: { setAsDefault?: boolean; pin?: boolean; apply?: boolean },
+): Promise<NamedPersonaState> {
+  const body: Record<string, unknown> = { id, apply: prefs.apply ?? false }
+  if (prefs.setAsDefault) body.set_as_default = true
+  if (prefs.pin !== undefined) body.pin = prefs.pin
+  const state = await api<NamedPersonaState>("/api/named-personas", {
+    method: "PUT",
+    body: JSON.stringify(body),
   })
   publish(state)
   return state

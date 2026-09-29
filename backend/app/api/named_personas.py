@@ -15,6 +15,8 @@ from ..persona.named_persona import (
     attach_specialist,
     public_state,
     resolve_persona_id,
+    set_default_persona,
+    set_persona_pinned,
     update_appearance,
 )
 from ..inference.ollama_runtime import ensure_local_ollama
@@ -45,6 +47,9 @@ class NamedPersonaPut(BaseModel):
     reset: bool = False
     appearance: AppearanceIn | None = None
     activate_brain: bool = True
+    apply: bool = True
+    set_as_default: bool = False
+    pin: bool | None = None
 
 
 async def _maybe_activate_persona_brain(raw_persona_id: str) -> None:
@@ -109,11 +114,18 @@ async def put_named_personas(body: NamedPersonaPut) -> dict:
             if body.reset or patch:
                 update_appearance(body.id, patch, reset=body.reset)
             return await attach_specialist(body.id, body.task_id or "")
-        apply_main_persona(body.id, reset=body.reset)
-        if patch:
-            update_appearance(body.id, patch, reset=False)
-        if body.activate_brain:
-            await _maybe_activate_persona_brain(body.id)
+        if body.set_as_default:
+            set_default_persona(body.id)
+        if body.pin is not None:
+            set_persona_pinned(body.id, pinned=body.pin)
+        if body.apply:
+            apply_main_persona(body.id, reset=body.reset)
+            if patch:
+                update_appearance(body.id, patch, reset=False)
+            if body.activate_brain:
+                await _maybe_activate_persona_brain(body.id)
+        elif patch:
+            update_appearance(body.id, patch, reset=body.reset)
         return public_state()
     except NamedPersonaBindError as exc:
         raise _http(exc) from exc

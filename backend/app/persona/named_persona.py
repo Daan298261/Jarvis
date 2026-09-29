@@ -24,6 +24,8 @@ from ..voice_profiles.ip_guard import contains_forbidden_ip_term
 
 logger = logging.getLogger(__name__)
 
+MAX_PINNED_PERSONAS = 5
+
 _SYSTEM_ENGINES = frozenset({"system", "sapi", "windows", "espeak", "espeak-ng", "pyttsx3"})
 _ID_ALIASES = {"eagir": "aegir", "ægir": "aegir"}
 _SHAPE_MIGRATION = {"abzu_flow": "code_cube", "root_coil": "serpent_orbit"}
@@ -207,6 +209,24 @@ def migrate_named_persona_store(settings: AppSettings) -> bool:
         existing = store.profiles.pop("eagir")
         store.profiles.setdefault("aegir", existing)
         changed = True
+    default_raw = (store.default_id or "").strip()
+    default_key = _ID_ALIASES.get(default_raw.lower(), default_raw.lower()) if default_raw else ""
+    if default_key in CATALOG and default_key != store.default_id:
+        store.default_id = default_key
+        changed = True
+    elif not default_key or default_key not in CATALOG:
+        fallback = store.active_id if store.active_id in CATALOG else "anzu"
+        if store.default_id != fallback:
+            store.default_id = fallback
+            changed = True
+    cleaned_pins: list[str] = []
+    for raw in store.pinned_ids or []:
+        key = _ID_ALIASES.get(str(raw).lower(), str(raw).lower())
+        if key in CATALOG and key not in cleaned_pins:
+            cleaned_pins.append(key)
+    if cleaned_pins != list(store.pinned_ids or []):
+        store.pinned_ids = cleaned_pins[:MAX_PINNED_PERSONAS]
+        changed = True
     return changed
 
 
@@ -271,6 +291,34 @@ def _activate(profile_id: str) -> None:
         raise NamedPersonaBindError(code, "Neural voice pack is not available.", profile_id) from exc
     except LookupError as exc:
         raise NamedPersonaBindError("install_required", "Unknown voice profile.", profile_id) from exc
+
+
+def set_default_persona(raw_id: str) -> dict:
+    persona_id = resolve_persona_id(raw_id, required=True)
+    settings, _changed = _load()
+    settings.named_personas.default_id = persona_id
+    save_settings(settings)
+    return public_state()
+
+
+def set_persona_pinned(raw_id: str, *, pinned: bool) -> dict:
+    persona_id = resolve_persona_id(raw_id, required=True)
+    settings, _changed = _load()
+    store = settings.named_personas
+    pins = [item for item in (store.pinned_ids or []) if item in CATALOG]
+    if pinned:
+        if persona_id not in pins:
+            if len(pins) >= MAX_PINNED_PERSONAS:
+                raise NamedPersonaBindError(
+                    "invalid",
+                    f"You can pin at most {MAX_PINNED_PERSONAS} personas on the HUD.",
+                )
+            pins.insert(0, persona_id)
+    else:
+        pins = [item for item in pins if item != persona_id]
+    store.pinned_ids = pins
+    save_settings(settings)
+    return public_state()
 
 
 def apply_main_persona(raw_id: str, *, reset: bool = False) -> dict:
@@ -405,9 +453,13 @@ def public_state() -> dict:
                 activated=store.activated_voice_profile_id,
                 requested=store.voice_profile_requested,
             )
+            payload["is_default"] = row.id == (store.default_id if store.default_id in CATALOG else "anzu")
+            payload["is_pinned"] = row.id in (store.pinned_ids or [])
             active_payload = payload
         else:
             payload = _persona_payload(row, appearance)
+        payload["is_default"] = row.id == (store.default_id if store.default_id in CATALOG else "anzu")
+        payload["is_pinned"] = row.id in (store.pinned_ids or [])
         personas.append(payload)
     if active_payload is None:
         active_payload = {
@@ -420,7 +472,15 @@ def public_state() -> dict:
             "default_colors": {"orb": "", "accent": ""},
             "appearance": {},
         }
-    return {"active": active_payload, "personas": personas}
+    default_id = store.default_id if store.default_id in CATALOG else "anzu"
+    pinned_ids = [item for item in (store.pinned_ids or []) if item in CATALOG][:MAX_PINNED_PERSONAS]
+    return {
+        "active": active_payload,
+        "personas": personas,
+        "default_id": default_id,
+        "pinned_ids": pinned_ids,
+        "max_pinned": MAX_PINNED_PERSONAS,
+    }
 
 
 def active_persona_id() -> str:
@@ -472,10 +532,11 @@ def card_sentence(main_id: str, specialist_ids: list[str] | tuple[str, ...]) -> 
 
 
 def reapply_stored_main_persona() -> dict | None:
-    """Process start: pair the stored persona's shape and neural voice again."""
+    """Process start: apply the default persona (startup main), shape + neural voice."""
     try:
         settings, _changed = _load()
-        persona_id = settings.named_personas.active_id or "anzu"
+        store = settings.named_personas
+        persona_id = store.default_id if store.default_id in CATALOG else (store.active_id or "anzu")
         if persona_id not in CATALOG:
             return None
         return apply_main_persona(persona_id, reset=False)
