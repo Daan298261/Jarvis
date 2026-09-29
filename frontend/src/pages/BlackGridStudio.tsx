@@ -6,6 +6,7 @@ import {
   type BlackGridOutput,
   type BlackGridStatus,
 } from "../api"
+import { BlackGridProjectStack } from "../vendor/shipnotes/BlackGridProjectStack"
 import { ShipNotesSignalOrb } from "../vendor/shipnotes/ShipNotesSignalOrb"
 import { ensureShipNotesScripts } from "../vendor/shipnotes/loadShipNotesScripts"
 
@@ -201,6 +202,8 @@ export function BlackGridStudioPage() {
           </ul>
         )}
       </section>
+
+      <BlackGridProjectStack />
 
       <section className="card">
         <h2>Output — rendered media</h2>

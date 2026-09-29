@@ -17,6 +17,7 @@ import {
   LEGACY_HUMANOID_AVATAR_ID,
   MYTHIC_LIVE_B_AVATAR_ID,
 } from "../presence/mythicPersonaVariant"
+import { PullLampThemeToggle } from "../vendor/shipnotes/PullLampThemeToggle"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
@@ -260,6 +261,8 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       </label>
 
       </CollapsibleSection>
+      <PullLampThemeToggle />
+
       {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
     </div>
   )
