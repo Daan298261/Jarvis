@@ -7,6 +7,7 @@ import { SessionPersonalityControls } from "../personality/SessionPersonalityCon
 import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
+import { PullLampThemeToggle } from "../vendor/shipnotes/PullLampThemeToggle"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
@@ -199,6 +200,8 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           <option value="full">Full motion</option>
         </select>
       </label>
+
+      <PullLampThemeToggle />
 
       {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
     </div>
