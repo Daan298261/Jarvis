@@ -57,26 +57,35 @@ def select_runtime_for_decision(
         from ..decision.tier import resolve_status
 
         catalog = profiles if profiles is not None else list_runtime_profiles()
-        candidates = [
-            (row.model_profile or row.name)
-            for row in catalog
-            if row.enabled and profile_meets_minimum_tier(row.model_profile or row.name, minimum, runtime_row=row)
-        ]
+        candidates: list[str] = []
+        for row in catalog:
+            if not row.enabled:
+                continue
+            profile_key = (row.model_profile or row.name or "").strip()
+            if not profile_key:
+                continue
+            if not profile_meets_minimum_tier(profile_key, minimum, runtime_row=row):
+                continue
+            for key in (row.name, row.model_profile):
+                cleaned = (key or "").strip()
+                if cleaned and cleaned not in candidates:
+                    candidates.append(cleaned)
         if len(candidates) >= 2 and user_message:
             from ..persona.named_persona import active_persona_id
 
             status = resolve_status()
             persona = active_persona_id()
             preferred = selected or current_profile
-            bound = None
             try:
                 from ..persona.persona_brain import brain_runtime_name_for_persona
 
                 bound = brain_runtime_name_for_persona(persona)
-                if bound and bound in candidates:
+                if bound:
+                    if bound not in candidates:
+                        candidates.append(bound)
                     preferred = bound
             except Exception:
-                bound = None
+                pass
             reflex = route_persona_model(
                 user_message=user_message,
                 candidates=candidates,

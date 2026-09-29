@@ -138,20 +138,30 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
                 )
             elif not probe.get("error"):
                 probe = {**probe, "error": boot.get("detail") or probe.get("error")}
-        elif provider == "ollama" and host in {"127.0.0.1", "localhost", "::1"}:
+        if provider == "ollama" and host in {"127.0.0.1", "localhost", "::1"}:
             from .ollama_runtime import ensure_local_ollama
 
-            boot = await ensure_local_ollama(host=host, port=port, model=hint)
-            if boot.get("ok"):
-                probe = await probe_remote_server(
-                    host,
-                    port,
-                    settings.inference.api_key,
-                    timeout=8.0,
-                    retry=True,
+            advertised_now = list(probe.get("models") or [])
+            needs_model = bool(hint) and not advertised_now
+            if hint and advertised_now:
+                from .backends import resolve_advertised_model
+
+                resolved_now = resolve_advertised_model(hint, advertised_now)
+                needs_model = resolved_now not in advertised_now and not any(
+                    hint.lower() in name.lower() for name in advertised_now
                 )
-            elif not probe.get("ok") and not probe.get("error"):
-                probe = {**probe, "error": boot.get("detail") or probe.get("error")}
+            if not probe.get("ok") or needs_model:
+                boot = await ensure_local_ollama(host=host, port=port, model=hint)
+                if boot.get("ok"):
+                    probe = await probe_remote_server(
+                        host,
+                        port,
+                        settings.inference.api_key,
+                        timeout=8.0,
+                        retry=True,
+                    )
+                elif not probe.get("ok") and not probe.get("error"):
+                    probe = {**probe, "error": boot.get("detail") or probe.get("error")}
         if not probe.get("ok"):
             detail = probe.get("error") or "inference server did not respond"
             server = provider or "inference server"

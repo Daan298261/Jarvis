@@ -293,31 +293,53 @@ def _activate(profile_id: str) -> None:
         raise NamedPersonaBindError("install_required", "Unknown voice profile.", profile_id) from exc
 
 
-def set_default_persona(raw_id: str) -> dict:
+def mutate_persona_preferences(
+    settings: AppSettings,
+    persona_id: str,
+    *,
+    set_as_default: bool = False,
+    pin: bool | None = None,
+) -> None:
+    """Update default/pin fields on an already-loaded settings object (single save by caller)."""
+    if persona_id not in CATALOG:
+        raise NamedPersonaBindError("unknown", f"Unknown persona id: {persona_id}")
+    store = settings.named_personas
+    if set_as_default:
+        store.default_id = persona_id
+    if pin is not None:
+        pins = [item for item in (store.pinned_ids or []) if item in CATALOG]
+        if pin:
+            if persona_id not in pins:
+                if len(pins) >= MAX_PINNED_PERSONAS:
+                    raise NamedPersonaBindError(
+                        "invalid",
+                        f"You can pin at most {MAX_PINNED_PERSONAS} personas on the HUD.",
+                    )
+                pins.insert(0, persona_id)
+        else:
+            pins = [item for item in pins if item != persona_id]
+        store.pinned_ids = pins
+
+
+def persist_persona_preferences(
+    raw_id: str,
+    *,
+    set_as_default: bool = False,
+    pin: bool | None = None,
+) -> None:
     persona_id = resolve_persona_id(raw_id, required=True)
     settings, _changed = _load()
-    settings.named_personas.default_id = persona_id
+    mutate_persona_preferences(settings, persona_id, set_as_default=set_as_default, pin=pin)
     save_settings(settings)
+
+
+def set_default_persona(raw_id: str) -> dict:
+    persist_persona_preferences(raw_id, set_as_default=True)
     return public_state()
 
 
 def set_persona_pinned(raw_id: str, *, pinned: bool) -> dict:
-    persona_id = resolve_persona_id(raw_id, required=True)
-    settings, _changed = _load()
-    store = settings.named_personas
-    pins = [item for item in (store.pinned_ids or []) if item in CATALOG]
-    if pinned:
-        if persona_id not in pins:
-            if len(pins) >= MAX_PINNED_PERSONAS:
-                raise NamedPersonaBindError(
-                    "invalid",
-                    f"You can pin at most {MAX_PINNED_PERSONAS} personas on the HUD.",
-                )
-            pins.insert(0, persona_id)
-    else:
-        pins = [item for item in pins if item != persona_id]
-    store.pinned_ids = pins
-    save_settings(settings)
+    persist_persona_preferences(raw_id, pin=pinned)
     return public_state()
 
 

@@ -49,12 +49,35 @@
   cursor: not-allowed;
 }
 
-.pinned-persona-dock {
+.pinned-persona-dock-wrap {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 52px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 120;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.pinned-persona-dock-wrap .pinned-persona-dock,
+.pinned-persona-dock-wrap .pinned-persona-dock-error {
+  pointer-events: auto;
+}
+
+.pinned-persona-dock-error {
+  margin: 0;
+  font-size: 11px;
+  color: #fecaca;
+  max-width: min(96vw, 720px);
+  text-align: center;
+}
+
+.pinned-persona-dock {
+  position: static;
+  transform: none;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;

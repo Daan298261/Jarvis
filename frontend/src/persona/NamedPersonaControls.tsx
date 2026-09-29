@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react"
-import { isApiError } from "../api"
-import { installVoiceProfile, loadVoiceProfileCatalog, type VoiceProfileCatalog } from "../tts/voiceProfiles"
+import { loadVoiceProfileCatalog, type VoiceProfileCatalog } from "../tts/voiceProfiles"
+import { activateNamedPersona } from "./activateNamedPersona"
 import {
   PERSONA_LABELS,
   PERSONA_VISUALS,
   resetNamedPersona,
   ROSTER_IDS,
   savePersonaAppearance,
-  selectNamedPersona,
   updateNamedPersonaPrefs,
   useNamedPersonas,
   type PersonaAppearance,
@@ -53,19 +52,7 @@ export function NamedPersonaControls() {
     setError("")
     setProgress("")
     try {
-      try {
-        await selectNamedPersona(id)
-      } catch (err) {
-        if (!isApiError(err) || err.status !== 409) throw err
-        const detail = (err.body as { detail?: { error?: string; profile_id?: string } } | null)?.detail
-        if (detail?.error !== "install_required" && detail?.error !== "tts_unavailable") throw err
-        const profileId = detail.profile_id
-        if (!profileId) throw err
-        setProgress(`Downloading the neural voice for ${PERSONA_LABELS[id] || id}…`)
-        const result = await installVoiceProfile(profileId)
-        if (!result.installed) throw new Error(result.detail || `Could not install ${profileId}.`)
-        await selectNamedPersona(id)
-      }
+      await activateNamedPersona(id, { onProgress: setProgress })
       setVoiceCatalog(await loadVoiceProfileCatalog())
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update the named persona.")
@@ -150,7 +137,10 @@ export function NamedPersonaControls() {
                   title={isDefault ? "Default persona on startup" : "Make default on startup"}
                   aria-pressed={isDefault}
                   disabled={busy || isDefault}
-                  onClick={() => void run(() => updateNamedPersonaPrefs(persona.id, { setAsDefault: true }))}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void run(() => updateNamedPersonaPrefs(persona.id, { setAsDefault: true }))
+                  }}
                 >
                   Def
                 </button>
@@ -160,7 +150,10 @@ export function NamedPersonaControls() {
                   title={isPinned ? "Unpin from HUD top bar" : "Pin to HUD top bar"}
                   aria-pressed={isPinned}
                   disabled={busy}
-                  onClick={() => void run(() => updateNamedPersonaPrefs(persona.id, { pin: !isPinned }))}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void run(() => updateNamedPersonaPrefs(persona.id, { pin: !isPinned }))
+                  }}
                 >
                   Pin
                 </button>
@@ -177,10 +170,12 @@ export function NamedPersonaControls() {
         <button
           type="button"
           className="btn secondary"
-          disabled={busy || active.is_default}
+          disabled={busy || (active.is_default ?? active.id === (state?.default_id || "anzu"))}
           onClick={() => void run(() => updateNamedPersonaPrefs(active.id, { setAsDefault: true }))}
         >
-          {active.is_default ? `${active.label} is the default persona` : `Make ${active.label} the default`}
+          {(active.is_default ?? active.id === (state?.default_id || "anzu"))
+            ? `${active.label} is the default persona`
+            : `Make ${active.label} the default`}
         </button>
       )}
       {active?.id && activeVoice && !activeVoice.available && (

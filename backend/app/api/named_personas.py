@@ -13,10 +13,9 @@ from ..persona.named_persona import (
     NamedPersonaBindError,
     apply_main_persona,
     attach_specialist,
+    persist_persona_preferences,
     public_state,
     resolve_persona_id,
-    set_default_persona,
-    set_persona_pinned,
     update_appearance,
 )
 from ..inference.ollama_runtime import ensure_local_ollama
@@ -114,10 +113,12 @@ async def put_named_personas(body: NamedPersonaPut) -> dict:
             if body.reset or patch:
                 update_appearance(body.id, patch, reset=body.reset)
             return await attach_specialist(body.id, body.task_id or "")
-        if body.set_as_default:
-            set_default_persona(body.id)
-        if body.pin is not None:
-            set_persona_pinned(body.id, pinned=body.pin)
+        if body.set_as_default or body.pin is not None:
+            persist_persona_preferences(
+                body.id,
+                set_as_default=body.set_as_default,
+                pin=body.pin,
+            )
         if body.apply:
             apply_main_persona(body.id, reset=body.reset)
             if patch:

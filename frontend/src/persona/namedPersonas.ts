@@ -152,7 +152,7 @@ export async function savePersonaAppearance(
 ): Promise<NamedPersonaState> {
   const state = await api<NamedPersonaState>("/api/named-personas", {
     method: "PUT",
-    body: JSON.stringify({ id, appearance }),
+    body: JSON.stringify({ id, appearance, apply: false }),
   })
   publish(state)
   return state
