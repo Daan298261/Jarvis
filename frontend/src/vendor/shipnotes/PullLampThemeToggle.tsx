@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react"
+import { useEffect, useRef } from "react"
 import { ensureShipNotesScripts } from "./loadShipNotesScripts"
 
 /** Ship Notes pull-lamp — toggles document data-theme for quick light/dark preview. */
