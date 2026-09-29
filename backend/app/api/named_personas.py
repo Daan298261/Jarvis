@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ..inference.hotswap import activate_runtime_profile
+from ..inference.hotswap import activate_runtime_profile, parse_runtime_endpoint
 from ..inference.runtime_profiles import get_runtime_profile
 from ..persona.named_persona import (
     NamedPersonaBindError,
@@ -17,7 +17,8 @@ from ..persona.named_persona import (
     resolve_persona_id,
     update_appearance,
 )
-from ..persona.persona_brain import brain_runtime_name_for_persona
+from ..inference.ollama_runtime import ensure_local_ollama
+from ..persona.persona_brain import brain_runtime_name_for_persona, reflex_verify_brain_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,23 @@ async def _maybe_activate_persona_brain(raw_persona_id: str) -> None:
     profile = get_runtime_profile(runtime_name) or get_runtime_profile(f"recommended-{runtime_name}")
     if profile is None or not profile.enabled:
         return
+    if not reflex_verify_brain_runtime(persona_id=persona_id, runtime_name=runtime_name):
+        logger.info(
+            "persona_brain_reflex_declined persona=%s runtime=%s",
+            persona_id,
+            runtime_name,
+        )
+        return
+    if (profile.provider or "").strip().lower() == "ollama":
+        host, port = parse_runtime_endpoint(profile.endpoint)
+        boot = await ensure_local_ollama(host=host, port=port, model=profile.model)
+        if not boot.get("ok"):
+            logger.warning(
+                "persona_brain_ollama_prepare_failed persona=%s detail=%s",
+                persona_id,
+                boot.get("detail"),
+            )
+            return
     try:
         await activate_runtime_profile(profile, force=True)
     except Exception as exc:

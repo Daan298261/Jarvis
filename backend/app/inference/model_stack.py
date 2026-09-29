@@ -99,9 +99,8 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
         privacy_class=PRIVACY_LOCAL_ONLY,
         enabled_by_default=True,
         description=(
-            "Main brain for the Umi persona via Ollama. Pull once with "
-            "`ollama run hf.co/TheCidSama/Qwen3.5-9b-Claude-4.8-Opus-reasoning` "
-            "then activate this runtime or select Umi as the main persona."
+            "Main brain for the Umi persona via loopback Ollama. "
+            "Install with the Jarvis installer Umi brain option; Jarvis pulls and probes the model automatically."
         ),
         ship_runtime_template=True,
         manual_gate=False,

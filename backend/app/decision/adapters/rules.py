@@ -114,7 +114,11 @@ def decide(
             ):
                 # Prefer explicit state hint, else first non-empty choice.
                 hinted = str(state.get("preferred_profile") or state.get("active_persona") or "")
-                if hinted and hinted in question.choices:
+                persona = str(state.get("active_persona") or "").strip().lower()
+                if persona == "umi" and "umi-opus-9b" in question.choices:
+                    answers[qid] = _answer_choice(qid, "umi-opus-9b", 0.92)
+                    hard_rule = True
+                elif hinted and hinted in question.choices:
                     answers[qid] = _answer_choice(qid, hinted, 0.9)
                     hard_rule = True
                 else:

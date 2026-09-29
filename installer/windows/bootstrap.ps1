@@ -41,6 +41,9 @@
 .PARAMETER InstallPocketTTS
   Install pocket-tts lightweight CPU neural TTS package into the venv.
 
+.PARAMETER InstallUmiBrain
+  Install Ollama (when missing), pull the Umi Opus-reasoning brain, Pocket TTS, and Alba voice pack.
+
 .PARAMETER VoiceProfiles
   Comma-separated neural voice profile ids to prepare (butler_original_v1, dry_butler_original_v1,
   tactical_aide_original_v1, synthetic_command_original_v1, chatterbox_expressive_en_v1).
@@ -57,6 +60,7 @@ param(
     [switch]$InstallWhisper,
     [switch]$InstallVoiceStudio,
     [switch]$InstallPocketTTS,
+    [switch]$InstallUmiBrain,
     [string]$VoiceProfiles = "",
     [int]$StepTimeoutMinutes = 45
 )
@@ -612,6 +616,56 @@ function Ensure-PocketTTS([string]$VenvPython) {
     }
 }
 
+function Ensure-OllamaCli {
+    if (Test-Command ollama) {
+        Write-Ok "Ollama CLI present."
+        return $true
+    }
+    if (Test-Command winget) {
+        Write-Host "    Installing Ollama via winget..."
+        try {
+            Invoke-ProcessWithTimeout -Label "winget ollama" -FilePath "winget" -Arguments @(
+                "install", "--id", "Ollama.Ollama", "-e",
+                "--accept-source-agreements", "--accept-package-agreements"
+            ) -TimeoutMinutes $StepTimeoutMinutes
+        } catch {
+            Write-BootstrapLog "Ollama winget install failed: $($_.Exception.Message)"
+        }
+    }
+    if (Test-Command ollama) {
+        Write-Ok "Ollama installed."
+        return $true
+    }
+    Write-Warning "Ollama is not available. Install it from https://ollama.com/download then re-run setup."
+    return $false
+}
+
+function Ensure-UmiOllamaBrain([string]$VenvPython) {
+    $model = "hf.co/TheCidSama/Qwen3.5-9b-Claude-4.8-Opus-reasoning"
+    Write-Host "    Umi brain: Ollama + Pocket TTS + Alba voice pack..."
+    if (-not (Ensure-OllamaCli)) {
+        return
+    }
+    Ensure-PocketTTS -VenvPython $VenvPython
+    $voiceScript = Join-Path $ScriptDir "install-persona-voices.py"
+    if (Test-Path $voiceScript) {
+        try {
+            Invoke-ProcessWithTimeout -Label "umi pocket voice pack" -FilePath $VenvPython -Arguments @($voiceScript, "pocket_tts_alba_en_v1") -TimeoutMinutes $StepTimeoutMinutes
+        } catch {
+            Write-BootstrapLog "Umi voice pack failed: $($_.Exception.Message)"
+            Write-Warning "Umi voice pack could not be prepared; download it later from Persona settings."
+        }
+    }
+    Write-Host "    Pulling Umi brain weights into Ollama (one-time; may take several minutes)..."
+    try {
+        Invoke-ProcessWithTimeout -Label "ollama pull umi brain" -FilePath "ollama" -Arguments @("pull", $model) -TimeoutMinutes 120
+        Write-Ok "Umi Ollama brain ready."
+    } catch {
+        Write-BootstrapLog "Umi Ollama pull failed: $($_.Exception.Message)"
+        Write-Warning "Umi brain pull did not finish. Jarvis will retry when you select the Umi persona."
+    }
+}
+
 function Test-NvidiaDriver {
     if (-not (Test-Command nvidia-smi)) {
         Write-Host "    WARNING: nvidia-smi not found. Install an NVIDIA CUDA 13-capable driver for GPU inference." -ForegroundColor Yellow
@@ -687,6 +741,11 @@ if ($InstallVoiceStudio) {
 if ($InstallPocketTTS) {
     Write-Step "Pocket TTS lightweight speech"
     Ensure-PocketTTS -VenvPython $venvPython
+}
+
+if ($InstallUmiBrain) {
+    Write-Step "Umi persona brain (Ollama + Pocket TTS)"
+    Ensure-UmiOllamaBrain -VenvPython $venvPython
 }
 
 Write-Step "Finishing"

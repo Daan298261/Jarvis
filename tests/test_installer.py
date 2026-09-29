@@ -39,6 +39,8 @@ def test_bootstrap_covers_required_steps():
         ".jarvis_faster_whisper_dir",
         "ensure-voicestudio",
         "ensure-pockettts",
+        "ensure-umiollamabrain",
+        "ensure-ollamacli",
         "install-persona-voices.py",
         "kokoro",
         "soundfile",
@@ -157,9 +159,11 @@ def test_jarvis_iss_wiring():
     assert "dl_whisper" in text
     assert "dl_voicestudio" in text
     assert "dl_pockettts" in text
+    assert "dl_umi_brain" in text
     assert "-InstallWhisper" in text
     assert "-InstallVoiceStudio" in text
     assert "-InstallPocketTTS" in text
+    assert "-InstallUmiBrain" in text
     lower = text.lower()
     assert "models" in lower and "excludes" in lower
     assert "release\\" in lower or "release\\*" in lower

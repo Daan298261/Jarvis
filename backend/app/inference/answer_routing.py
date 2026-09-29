@@ -63,11 +63,25 @@ def select_runtime_for_decision(
             if row.enabled and profile_meets_minimum_tier(row.model_profile or row.name, minimum, runtime_row=row)
         ]
         if len(candidates) >= 2 and user_message:
+            from ..persona.named_persona import active_persona_id
+
             status = resolve_status()
+            persona = active_persona_id()
+            preferred = selected or current_profile
+            bound = None
+            try:
+                from ..persona.persona_brain import brain_runtime_name_for_persona
+
+                bound = brain_runtime_name_for_persona(persona)
+                if bound and bound in candidates:
+                    preferred = bound
+            except Exception:
+                bound = None
             reflex = route_persona_model(
                 user_message=user_message,
                 candidates=candidates,
-                preferred_profile=selected or current_profile,
+                preferred_profile=preferred,
+                active_persona=persona,
                 privacy=privacy_for_tier(str(status.get("decision_tier") or "local")),
             )
             pick = answer_value(reflex, "route_profile")

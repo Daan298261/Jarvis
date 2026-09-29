@@ -52,6 +52,7 @@ Name: "dl_personavoices"; Description: "Persona neural voices (5 shared voice pa
 Name: "dl_whisper"; Description: "Whisper speech-to-text base model (faster-whisper local STT)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
 Name: "dl_voicestudio"; Description: "VoiceStudio local multi-engine voice suite integration (debpalash/voicestudio)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
 Name: "dl_pockettts"; Description: "Pocket TTS lightweight CPU neural voice (Kyutai Labs)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
+Name: "dl_umi_brain"; Description: "Umi persona brain (Ollama Qwen3.5 9B Opus reasoning + Pocket TTS voice)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
 
 ; Local LLM weights
 Name: "dl_localllm"; Description: "Qwen3.5-9B GGUF weights (recommended local agent model)"; GroupDescription: "AI models to download:"; Flags: checkedonce
@@ -508,6 +509,8 @@ begin
     Params := Params + ' -InstallVoiceStudio';
   if WizardIsTaskSelected('dl_pockettts') then
     Params := Params + ' -InstallPocketTTS';
+  if WizardIsTaskSelected('dl_umi_brain') then
+    Params := Params + ' -InstallUmiBrain';
   if WizardIsTaskSelected('dl_localllm') then
     Params := Params + ' -InstallLocalLLM';
   if WizardIsTaskSelected('dl_expert27b') then
