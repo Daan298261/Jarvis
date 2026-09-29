@@ -3,10 +3,12 @@ export type PresenceMode = "none" | "neural" | "humanoid" | "particle_bust" | "g
 export type PresencePerformancePreset = "auto" | "efficient" | "balanced" | "cinematic"
 export type AttentionMode = "off" | "pointer" | "camera"
 export type ReducedMotionMode = "system" | "reduce" | "full"
+export type OrbVisual = "apex" | "shipnotes_voice" | "shipnotes_signal"
 
 export type PresentationSettings = {
   shell: ShellMode
   requestedPresence: PresenceMode
+  orbVisual: OrbVisual
   performancePreset: PresencePerformancePreset
   attentionMode: AttentionMode
   reducedMotion: ReducedMotionMode
@@ -68,6 +70,7 @@ export type EffectivePresence = {
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   shell: "hud",
   requestedPresence: "neural",
+  orbVisual: "apex",
   performancePreset: "auto",
   attentionMode: "pointer",
   reducedMotion: "system",

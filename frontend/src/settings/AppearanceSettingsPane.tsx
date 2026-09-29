@@ -134,6 +134,24 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
       <CustomPresencePanel settings={settings} />
 
       <label>
+        HUD orb (Ship Notes)
+        <select
+          disabled={busy}
+          value={settings.orbVisual}
+          onChange={(event) =>
+            apply(
+              { orbVisual: event.target.value as PresentationSettings["orbVisual"] },
+              "Ship Notes orbs load from /vendor/shipnotes (MIT). Voice orb reacts to TTS when connected.",
+            )
+          }
+        >
+          <option value="apex">Jarvis APEX orb (default)</option>
+          <option value="shipnotes_voice">Ship Notes voice orb</option>
+          <option value="shipnotes_signal">Ship Notes signal orb (status only)</option>
+        </select>
+      </label>
+
+      <label>
         Rendering
         <select
           disabled={busy}

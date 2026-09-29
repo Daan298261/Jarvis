@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..modules import catalog_download, cybersecurity, supermemory_runtime, crucix_runtime
+from ..studio import blackgrid_runtime
 from ..swarm.capabilities import register_localhost_capabilities
 from ..swarm.nodes import register_localhost_node
 from ..swarm.workers import bind_workers_to_node
@@ -44,7 +45,14 @@ class DownloadBody(BaseModel):
 
 @router.get("/catalog")
 async def list_catalog() -> dict[str, Any]:
-    return {"entries": [cybersecurity.catalog_list_row(), supermemory_runtime.catalog_list_row(), crucix_runtime.catalog_list_row()]}
+    return {
+        "entries": [
+            blackgrid_runtime.catalog_list_row(),
+            cybersecurity.catalog_list_row(),
+            supermemory_runtime.catalog_list_row(),
+            crucix_runtime.catalog_list_row(),
+        ]
+    }
 
 
 @router.get("/catalog/{entry_id}")
@@ -57,6 +65,9 @@ async def get_catalog_entry(entry_id: str) -> dict[str, Any]:
         return {"module": module, **module}
     if entry_id == crucix_runtime.MODULE_ID:
         module = await crucix_runtime.status()
+        return {"module": module, **module}
+    if entry_id == blackgrid_runtime.MODULE_ID:
+        module = await blackgrid_runtime.status()
         return {"module": module, **module}
     source = catalog_download.allowlisted_source(entry_id)
     if source is None:

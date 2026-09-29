@@ -164,4 +164,5 @@ async def test_studio_honest_when_not_connected(media_env, media_app):
         upload_id = created.json()["id"]
         studio = await client.post(f"/api/media/uploads/{upload_id}/studio", json={})
         assert studio.status_code == 503
-        assert "not connected" in studio.json()["detail"].lower()
+        detail = studio.json()["detail"].lower()
+        assert "not connected" in detail or "install blackgrid" in detail

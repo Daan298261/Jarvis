@@ -122,6 +122,48 @@ MODEL_MANIFEST: dict[str, dict[str, Any]] = {
     },
 }
 
+STUDIO_MANIFEST: dict[str, dict[str, Any]] = {
+    "blackgrid_comfyui": {
+        "id": "blackgrid_comfyui",
+        "label": "BlackGrid · ComfyUI runtime",
+        "role": "Multimedia sidecar",
+        "downloadable": True,
+        "bundled": False,
+        "estimated_disk_gb": 2.5,
+        "why": "Local node-graph runtime for BlackGrid Multimedia Studio.",
+        "limitations": "Requires Git and Python; GPU strongly recommended for generation.",
+    },
+    "hr_endless_sampler": {
+        "id": "hr_endless_sampler",
+        "label": "HR Endless Sampler (MiniMax H3)",
+        "role": "Primary long-form video engine",
+        "downloadable": True,
+        "bundled": False,
+        "estimated_disk_gb": 0.2,
+        "why": "Chunked ComfyUI sampler for unlimited-length MiniMax H3 video with Gemma4 chunk prompts.",
+        "limitations": "Requires ComfyUI, MiniMax H3 weights, and sufficient VRAM per chunk_frames setting.",
+    },
+    "minimax_h3_weights": {
+        "id": "minimax_h3_weights",
+        "label": "MiniMax H3 model weights",
+        "role": "Video diffusion stack",
+        "downloadable": True,
+        "bundled": False,
+        "estimated_disk_gb": 45.0,
+        "why": "Reference-to-video weights for HR Endless Sampler workflows.",
+        "limitations": "Download from Hugging Face Comfy-Org/MiniMax-H3 into ComfyUI models folders.",
+    },
+}
+
+
+def _studio_row(studio_id: str, *, status: str, selected: bool, reason: str = "") -> dict[str, Any]:
+    row = dict(STUDIO_MANIFEST[studio_id])
+    row["status"] = status
+    row["selected"] = selected
+    if reason:
+        row["reason"] = reason
+    return row
+
 
 def interview_questions() -> list[dict[str, Any]]:
     return [dict(row) for row in QUESTIONS]
@@ -139,6 +181,7 @@ def _normalize_use(value: Any) -> list[str]:
         "research": ("research", "write", "writing", "book", "document", "analyse", "analyze"),
         "security": ("security", "cyber", "soc", "blue team", "red team", "pentest", "monitor"),
         "assistant": ("assistant", "automation", "everyday", "general", "personal", "home"),
+        "multimedia": ("multimedia", "video", "creative", "comfy", "blackgrid", "studio", "film"),
         "everything": ("everything", "all", "bit of everything", "anything"),
     }
     for intent, words in aliases.items():
@@ -323,6 +366,30 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
             ]
         )
 
+    want_multimedia = "multimedia" in intents or "research" in intents
+    multimedia_fit = has_gpu and vram_gb >= 8
+    install_blackgrid = bool(want_multimedia and multimedia_fit)
+    studio_components: list[dict[str, Any]] = [
+        _studio_row(
+            "blackgrid_comfyui",
+            status="recommended install" if install_blackgrid else "optional",
+            selected=install_blackgrid,
+            reason="BlackGrid Multimedia Studio sidecar for local creative pipelines.",
+        ),
+        _studio_row(
+            "hr_endless_sampler",
+            status="primary video engine" if install_blackgrid else "optional",
+            selected=install_blackgrid,
+            reason="HR Endless Sampler is the default long-form MiniMax H3 tool in BlackGrid.",
+        ),
+        _studio_row(
+            "minimax_h3_weights",
+            status="owner download" if install_blackgrid else "optional",
+            selected=install_blackgrid,
+            reason="Required model weights for HR Endless / MiniMax H3 workflows in ComfyUI.",
+        ),
+    ]
+
     recommended_class = str(hardware_rec.get("recommended_class") or "")
     role_policies = dict(hardware_rec.get("role_policies") or {})
     inference_choice = "local"
@@ -350,7 +417,9 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
         "inference_profile": "bootstrap",
         "install_expert_27b": install_expert,
         "install_playwright": True,
+        "install_blackgrid_studio": install_blackgrid,
         "selected_models": [row["id"] for row in models if row.get("selected")],
+        "selected_studio_components": [row["id"] for row in studio_components if row.get("selected")],
     }
 
     download_models = [
@@ -385,6 +454,10 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
         reasoning.append("Security specialists are prepared as gated roles; onboarding does not unlock Red or Blue Team access.")
     if voice:
         reasoning.append("Voice is enabled as a preference; typing remains available everywhere.")
+    if install_blackgrid:
+        reasoning.append(
+            "BlackGrid Multimedia Studio with HR Endless Sampler is selected as the primary creative video stack."
+        )
 
     return {
         "version": ONBOARDING_VERSION,
@@ -392,6 +465,7 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
         "hardware": _hardware_summary(info),
         "setup_state_patch": setup_patch,
         "recommended_models": models,
+        "recommended_studio_components": studio_components,
         "download_models": download_models,
         "keep_loaded": ["bootstrap_ornith"],
         "routing_policy": policy,

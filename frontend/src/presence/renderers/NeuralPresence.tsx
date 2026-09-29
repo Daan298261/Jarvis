@@ -1,7 +1,10 @@
-import { lazy, Suspense, useCallback, useRef, type CSSProperties } from "react"
+import { lazy, Suspense, useCallback, useEffect, useRef, type CSSProperties } from "react"
 import { useNavigate } from "react-router-dom"
 import type { ApexSelection } from "../../vendor/apex-ui/ReasoningWeb"
 import ApexOrb, { type ApexOrbState } from "../../vendor/apex-ui/ApexOrb"
+import { ensureShipNotesScripts } from "../../vendor/shipnotes/loadShipNotesScripts"
+import { ShipNotesVoiceOrb } from "../../vendor/shipnotes/ShipNotesVoiceOrb"
+import { ShipNotesSignalOrb, type SignalOrbState } from "../../vendor/shipnotes/ShipNotesSignalOrb"
 import { usePresenceAttentionLoop } from "../usePresenceAttentionLoop"
 import { supportsHumanoidRuntime } from "./humanoidRuntime"
 import { NeuralChrome, neuralSpecialistRoute, type NeuralPresenceProps } from "./neuralChrome"
@@ -24,10 +27,23 @@ function orbState(phase: NeuralPresenceProps["snapshot"]["phase"]): ApexOrbState
   }
 }
 
+function signalOrbState(phase: NeuralPresenceProps["snapshot"]["phase"]): SignalOrbState {
+  if (phase === "listening") return "listening"
+  if (phase === "executing") return "searching"
+  if (phase === "thinking" || phase === "alert") return "thinking"
+  if (phase === "speaking") return "done"
+  return "done"
+}
+
 function LegacyNeuralPresence({ snapshot, settings, size = 540 }: NeuralPresenceProps) {
   const navigate = useNavigate()
   const orbRef = useRef<HTMLDivElement>(null)
   const reduced = settings.reducedMotion === "reduce"
+  const shipNotesVoice = settings.orbVisual === "shipnotes_voice"
+  const shipNotesSignal = settings.orbVisual === "shipnotes_signal"
+  useEffect(() => {
+    if (shipNotesVoice || shipNotesSignal) void ensureShipNotesScripts()
+  }, [shipNotesVoice, shipNotesSignal])
   usePresenceAttentionLoop({ settings, cssTargetRef: orbRef, cssScale: 1.35 })
   const onSelect = useCallback((selection: ApexSelection) => {
     const route = neuralSpecialistRoute(selection.key)
@@ -46,7 +62,13 @@ function LegacyNeuralPresence({ snapshot, settings, size = 540 }: NeuralPresence
     >
       <NeuralChrome snapshot={snapshot} settings={settings} onSelect={onSelect} />
       <div ref={orbRef} className="jarvis-apex-vendored-orb" aria-hidden="true">
-        <ApexOrb state={orbState(snapshot.phase)} />
+        {shipNotesVoice ? (
+          <ShipNotesVoiceOrb state={orbState(snapshot.phase)} size={Math.min(size, 520)} />
+        ) : shipNotesSignal ? (
+          <ShipNotesSignalOrb state={signalOrbState(snapshot.phase)} size={Math.min(size, 320)} />
+        ) : (
+          <ApexOrb state={orbState(snapshot.phase)} />
+        )}
       </div>
     </div>
   )

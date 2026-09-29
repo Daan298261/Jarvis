@@ -145,6 +145,7 @@ class PresentationSettings(BaseModel):
 
     shell: Literal["classic", "hud"] = "hud"
     requested_presence: Literal["none", "neural", "humanoid", "particle_bust", "galaxy"] = "neural"
+    orb_visual: Literal["apex", "shipnotes_voice", "shipnotes_signal"] = "apex"
     performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] = "auto"
     attention_mode: Literal["off", "pointer", "camera"] = "pointer"
     reduced_motion: Literal["system", "reduce", "full"] = "system"
@@ -279,6 +280,19 @@ class CrucixSettings(BaseModel):
     auto_start: bool = True
     base_url: str = "http://127.0.0.1:3117"
     timeout_ms: int = Field(default=8000, ge=500, le=30000)
+
+
+class BlackGridSettings(BaseModel):
+    """BlackGrid Multimedia Studio — local ComfyUI + HR Endless Sampler sidecar."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = False
+    auto_start: bool = True
+    host: str = "127.0.0.1"
+    port: int = Field(default=8188, ge=1, le=65535)
+    request_timeout_s: float = Field(default=300.0, ge=30.0, le=3600.0)
+    primary_engine: str = "hr-endless-sampler"
 
 
 class HexStrikeSettings(BaseModel):
@@ -421,6 +435,7 @@ class AppSettings(BaseModel):
     knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
     supermemory: SupermemorySettings = Field(default_factory=SupermemorySettings)
     crucix: CrucixSettings = Field(default_factory=CrucixSettings)
+    blackgrid: BlackGridSettings = Field(default_factory=BlackGridSettings)
     decision: DecisionSettings = Field(default_factory=DecisionSettings)
     named_personas: NamedPersonaSettings = Field(default_factory=NamedPersonaSettings)
     custom_presence: CustomPresenceSettings = Field(default_factory=CustomPresenceSettings)

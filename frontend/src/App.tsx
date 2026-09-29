@@ -30,6 +30,7 @@ import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
 import { SkillForgePage } from "./pages/SkillForge"
 import { CapabilityLabPage } from "./pages/CapabilityLab"
+import { BlackGridStudioPage } from "./pages/BlackGridStudio"
 import { AgentRoomsPage } from "./pages/AgentRooms"
 import {
   api,
@@ -85,6 +86,7 @@ const WORK_LINKS = [
   { to: "/workflows", label: "Guide & Workflows" },
   { to: "/obsidian", label: "Obsidian" },
   { to: "/memory", label: "Memory" },
+  { to: "/studio/blackgrid", label: "BlackGrid Studio" },
   { to: "/phone", label: "Phone" },
 ] as const
 
@@ -466,6 +468,7 @@ function OwnerPortal() {
       <Route path="/history" element={<HistoryPage />} />
       <Route path="/workflows" element={<WorkflowsPage />} />
       <Route path="/memory" element={<MemoryPage />} />
+      <Route path="/studio/blackgrid" element={<BlackGridStudioPage />} />
       <Route path="/obsidian" element={<ObsidianPage />} />
       <Route path="/model" element={<ModelPage />} />
       <Route path="/tools" element={<ToolsPage />} />

@@ -191,6 +191,8 @@ async def events(after: int, limit: int = 100):
 
 
 def studio_capabilities():
-    return {"provider": "blackgrid", "available": False,
-            "detail": "BlackGrid Multimedia Studio integration is planned. Generation is not connected yet.",
-            "contract_version": 1, "operations": ["projects", "image", "video", "audio", "takes", "timeline", "stitch", "artifacts"]}
+    from ..studio.blackgrid_runtime import studio_capabilities as blackgrid_caps
+
+    caps = blackgrid_caps()
+    caps["contract_version"] = 1
+    return caps

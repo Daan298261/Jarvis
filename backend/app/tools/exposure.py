@@ -20,9 +20,22 @@ TASK_TOOL_SETS: dict[str, frozenset[str]] = {
     "office": frozenset({"filesystem", "office", "python"}),
     "document processing": frozenset({"filesystem", "office", "python"}),
     "data processing": frozenset({"filesystem", "python", "terminal"}),
-    "multimodal": frozenset({"filesystem", "screenshot", "desktop", "browser", "reflex_computer_use"}),
+    "multimodal": frozenset({"filesystem", "screenshot", "desktop", "browser", "reflex_computer_use", "blackgrid_studio"}),
+    "multimedia": frozenset({"filesystem", "blackgrid_studio", "screenshot"}),
     "mixed": frozenset(
-        {"filesystem", "apps", "terminal", "python", "git", "web_fetch", "browser", "desktop", "screenshot", "reflex_computer_use"}
+        {
+            "filesystem",
+            "apps",
+            "terminal",
+            "python",
+            "git",
+            "web_fetch",
+            "browser",
+            "desktop",
+            "screenshot",
+            "reflex_computer_use",
+            "blackgrid_studio",
+        }
     ),
     "long-horizon autonomous": frozenset(
         {
@@ -74,6 +87,10 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "browseruse": "browser_use",
     "reflex": "reflex_computer_use",
     "reflex_loop": "reflex_computer_use",
+    "blackgrid": "blackgrid_studio",
+    "multimedia_studio": "blackgrid_studio",
+    "comfyui": "blackgrid_studio",
+    "hr_endless": "blackgrid_studio",
 }
 
 NATIVE_TOOLS = (
@@ -97,6 +114,7 @@ NATIVE_TOOLS = (
     "cua",
     "reflex_computer_use",
     "read_ingress",
+    "blackgrid_studio",
 )
 
 

@@ -6,6 +6,7 @@ import {
   DEFAULT_PRESENTATION_SETTINGS,
   type AttentionMode,
   type PresencePerformancePreset,
+  type OrbVisual,
   type PresentationSettings,
   type ReducedMotionMode,
   type ShellMode,
@@ -18,6 +19,7 @@ const SHELLS = new Set<ShellMode>(["classic", "hud"])
 const PRESETS = new Set<PresencePerformancePreset>(["auto", "efficient", "balanced", "cinematic"])
 const ATTENTION = new Set<AttentionMode>(["off", "pointer", "camera"])
 const MOTION = new Set<ReducedMotionMode>(["system", "reduce", "full"])
+const ORB_VISUALS = new Set<OrbVisual>(["apex", "shipnotes_voice", "shipnotes_signal"])
 
 function safeAvatarId(value: unknown): string {
   if (typeof value !== "string") return DEFAULT_PRESENTATION_SETTINGS.avatarId
@@ -34,12 +36,16 @@ export function normalizePresentation(value: unknown): PresentationSettings {
   const attentionRaw = raw.attentionMode ?? raw.attention_mode
   const motionRaw = raw.reducedMotion ?? raw.reduced_motion
   const avatarRaw = raw.avatarId ?? raw.avatar_id
+  const orbRaw = raw.orbVisual ?? raw.orb_visual
 
   return {
     shell: typeof shellRaw === "string" && SHELLS.has(shellRaw as ShellMode)
       ? shellRaw as ShellMode
       : DEFAULT_PRESENTATION_SETTINGS.shell,
     requestedPresence: parseRequestedPresence(presenceRaw),
+    orbVisual: typeof orbRaw === "string" && ORB_VISUALS.has(orbRaw as OrbVisual)
+      ? orbRaw as OrbVisual
+      : DEFAULT_PRESENTATION_SETTINGS.orbVisual,
     performancePreset: typeof presetRaw === "string" && PRESETS.has(presetRaw as PresencePerformancePreset)
       ? presetRaw as PresencePerformancePreset
       : DEFAULT_PRESENTATION_SETTINGS.performancePreset,
@@ -107,6 +113,7 @@ export async function updatePresentation(
 
   if (patch.shell !== undefined) body.presentation_shell = requested.shell
   if (patch.requestedPresence !== undefined) body.presentation_requested_presence = requested.requestedPresence
+  if (patch.orbVisual !== undefined) body.presentation_orb_visual = requested.orbVisual
   if (patch.performancePreset !== undefined) body.presentation_performance_preset = requested.performancePreset
   if (patch.attentionMode !== undefined) body.presentation_attention_mode = requested.attentionMode
   if (patch.reducedMotion !== undefined) body.presentation_reduced_motion = requested.reducedMotion

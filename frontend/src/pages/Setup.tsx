@@ -386,6 +386,27 @@ export function SetupPage() {
             </div>
           </div>
 
+          {"recommended_studio_components" in plan && Array.isArray((plan as { recommended_studio_components?: unknown[] }).recommended_studio_components) ? (
+            <>
+              <h3 className="setup-model-title">Creative studio (BlackGrid)</h3>
+              <div className="setup-model-list">
+                {((plan as { recommended_studio_components: { id: string; label: string; role: string; reason?: string; status: string; selected?: boolean; estimated_disk_gb?: number }[] }).recommended_studio_components).map((row) => (
+                  <article key={row.id} className={`setup-model-row${row.selected ? " selected" : ""}`}>
+                    <div>
+                      <strong>{row.label}</strong>
+                      <span>{row.role}</span>
+                    </div>
+                    <p>{row.reason}</p>
+                    <span className="setup-model-status">
+                      {row.status}
+                      {row.estimated_disk_gb ? ` · ~${row.estimated_disk_gb} GB` : ""}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : null}
+
           <h3 className="setup-model-title">Models</h3>
           <div className="setup-model-list">
             {plan.recommended_models.map((model) => (

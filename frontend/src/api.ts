@@ -4527,7 +4527,44 @@ export type CompanionStudioCapabilities = {
   available: boolean
   detail?: string
   contract_version?: number
-  operations?: string[]
+  operations?: string[] | Record<string, boolean>
+  workbench_path?: string
+  creative_tools?: { id: string; label: string; workbench_path?: string; open_url?: string }[]
+}
+
+export type BlackGridModule = {
+  id: string
+  name: string
+  provider: string
+  enabled: boolean
+  installed: boolean
+  running: boolean
+  healthy: boolean
+  install_status: string
+  install_error?: string
+  comfy_ui_url: string
+  portal_workbench_url?: string
+}
+
+export type BlackGridStatus = {
+  module: BlackGridModule
+  capabilities: CompanionStudioCapabilities
+}
+
+export type BlackGridJob = {
+  id: string
+  prompt_id?: string
+  status: string
+  prompt_excerpt?: string
+  chunk_frames?: number
+  created_at?: string
+}
+
+export type BlackGridOutput = {
+  path: string
+  name: string
+  size_bytes: number
+  modified_at?: string
 }
 
 export type CompanionPairingApiResult =

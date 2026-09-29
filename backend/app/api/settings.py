@@ -41,6 +41,7 @@ class SettingsUpdate(BaseModel):
     self_dev_experimental_port: int | None = None
     presentation_shell: Literal["classic", "hud"] | None = None
     presentation_requested_presence: Literal["none", "neural", "humanoid", "particle_bust", "galaxy"] | None = None
+    presentation_orb_visual: Literal["apex", "shipnotes_voice", "shipnotes_signal"] | None = None
     presentation_performance_preset: Literal["auto", "efficient", "balanced", "cinematic"] | None = None
     presentation_attention_mode: Literal["off", "pointer", "camera"] | None = None
     presentation_reduced_motion: Literal["system", "reduce", "full"] | None = None
@@ -206,6 +207,7 @@ async def update_settings(body: SettingsUpdate):
     presentation_updates = {
         "shell": body.presentation_shell,
         "requested_presence": body.presentation_requested_presence,
+        "orb_visual": body.presentation_orb_visual,
         "performance_preset": body.presentation_performance_preset,
         "attention_mode": body.presentation_attention_mode,
         "reduced_motion": body.presentation_reduced_motion,
