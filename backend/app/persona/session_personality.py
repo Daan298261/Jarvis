@@ -104,6 +104,16 @@ MODES: dict[str, SessionMode] = {
         "mixed",
         "Session mode: concise. Answer in the fewest clear sentences that still help.",
     ),
+    "openmuse": SessionMode(
+        "openmuse",
+        "OpenMuse",
+        "openmuse",
+        "friendly",
+        "mixed",
+        "Session mode: OpenMuse — creative, personal agent tone with visible work and rich results. "
+        "Prefer structured cards, follow-ups, and warm collaboration; keep risky actions approval-gated.",
+        None,
+    ),
 }
 
 _ALIASES = {"default": "core", "jarvis": "core", "anzu": "core"}

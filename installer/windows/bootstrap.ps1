@@ -51,6 +51,8 @@
 param(
     [switch]$InstallLocalLLM,
     [switch]$InstallLegacyQwen9b,
+    [switch]$InstallMimo9b,
+    [switch]$ScanLocalModels,
     [switch]$InstallExpert27B,
     [switch]$SkipModelDownload,
     [switch]$SkipLlamaDownload,
@@ -512,6 +514,21 @@ function Ensure-DefaultModels([string]$VenvPython) {
         }
     }
 
+    if ($InstallMimo9b) {
+        $mimoDir = Join-Path $Root "models\MiMo-V2.6-Distill-Qwen-9B-GGUF"
+        $mimoFile = Join-Path $mimoDir "MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf"
+        if (-not (Test-Path $mimoFile)) {
+            Write-Host "    Downloading optional MiMo-V2.6-Distill-Qwen-9B Q4_K_M..."
+            Invoke-HfDownload -VenvPython $VenvPython `
+                -RepoId "bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF" `
+                -Includes @("MiMo-V2.6-Distill-Qwen-9B-Q4_K_M.gguf") `
+                -LocalDir $mimoDir
+            Write-Ok "MiMo 9B distill downloaded."
+        } else {
+            Write-Skip "MiMo-V2.6-Distill-Qwen-9B Q4_K_M"
+        }
+    }
+
     if ($InstallExpert27B) {
         $dir27 = Join-Path $Root "models\Qwen3.5-27B-GGUF"
         $q4 = Join-Path $dir27 "Qwen3.5-27B-Q4_K_M.gguf"
@@ -736,6 +753,21 @@ if ($InstallVoiceStudio) {
 if ($InstallPocketTTS) {
     Write-Step "Pocket TTS lightweight speech"
     Ensure-PocketTTS -VenvPython $venvPython
+}
+
+if ($ScanLocalModels) {
+    Write-Step "Scanning for local GGUF models"
+    $discover = Join-Path $Root "tools\discover_local_models.py"
+    if (Test-Path $discover) {
+        try {
+            Invoke-ProcessWithTimeout -Label "discover local gguf" -FilePath $venvPython -Arguments @($discover, "--deep", "--import") -TimeoutMinutes $StepTimeoutMinutes
+            Write-Ok "Local model scan finished (see logs for registered paths)."
+        } catch {
+            Write-Warning "Local model scan failed or was skipped: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Warning "discover_local_models.py missing; skip GGUF scan."
+    }
 }
 
 Write-Step "Finishing"

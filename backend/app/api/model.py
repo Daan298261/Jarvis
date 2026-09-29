@@ -33,6 +33,12 @@ class LoadBody(BaseModel):
     profile: str | None = None
 
 
+class DiscoverLocalBody(BaseModel):
+    deep: bool = False
+    import_new: bool = False
+    paths: list[str] | None = None
+
+
 class HarnessBody(BaseModel):
     live: bool = False
     background: bool = False
@@ -199,6 +205,54 @@ async def run_agent_suite_case(body: AgentSuiteRunBody | None = None):
     metrics = {**empty_metrics(), "success": ok, "verification_result": notes}
     await record_case_result(case=case, metrics=metrics, source="unsolved", workspace=str(workspace), notes=notes)
     return {"success": ok, "prompt": prompt, "notes": notes, "case_id": case.id}
+
+
+@router.get("/discover-local")
+async def discover_local_models(deep: bool = False):
+    from ..inference.model_discovery import scan_local_ggufs
+
+    return scan_local_ggufs(deep=deep)
+
+
+@router.post("/discover-local")
+async def discover_local_models_action(body: DiscoverLocalBody):
+    from ..inference.model_discovery import register_all_from_scan, register_discovered_paths, scan_local_ggufs
+
+    if body.paths:
+        registered = register_discovered_paths(body.paths)
+        return {"registered": registered, "scan": scan_local_ggufs(deep=body.deep)}
+    if body.import_new:
+        return register_all_from_scan(deep=body.deep)
+    return scan_local_ggufs(deep=body.deep)
+
+
+@router.get("/integrations/research")
+async def model_integrations_research():
+    """Owner-facing summary of optional harness / model integrations (RFC-0195)."""
+    return {
+        "harness_api": {
+            "jarvis": "POST /api/model/harness/run runs the local tok/s + resource harness (not Strands SDK).",
+            "strands_sdk": "RFC-0192: optional sidecar only; not wired into owner chat.",
+            "doc": "docs/rfcs/0192-strands-harness-sdk-evaluation.md",
+        },
+        "mimo_v26_pro": {
+            "local_feasible": False,
+            "note": "MiMo-V2.6-Pro-RL is a 1T MoE; needs multi-GPU SGLang/vLLM. Use MiMo-V2.6-Distill-Qwen-9B GGUF locally.",
+            "gguf_repo": "bartowski/MiMo-V2.6-Distill-Qwen-9B-GGUF",
+        },
+        "hyimage": {
+            "hyimage_25": "No public local HyImage 2.5 weights; Hy Image 3.5 Preview is API/cloud only (Sept 2026).",
+            "local_option": "hunyuanimage-v2.1 via pip hyimage / Tencent HunyuanImage-3.0 for self-hosted gen.",
+        },
+        "openmuse": {
+            "personality_mode": "openmuse",
+            "upstream": "https://github.com/CopilotKit/openmuse",
+        },
+        "shipnotes_ui": {
+            "reference": "https://aqualang89.github.io/shipnotes-components/",
+            "wired": "Signal-style orb presence when OpenMuse session mode is active.",
+        },
+    }
 
 
 @router.get("/harness")

@@ -163,6 +163,8 @@ def test_jarvis_iss_wiring():
     assert "ModelInstallPage" in text
     assert "InstallLocalLLM" in text
     assert "InstallLegacyQwen9b" in text
+    assert "ScanLocalModels" in text
+    assert "discover_local_models.py" in _read(BOOTSTRAP)
     assert "lukey03" in text.lower()
     assert "-InstallWhisper" in text
     assert "-InstallVoiceStudio" in text

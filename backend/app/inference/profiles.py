@@ -356,7 +356,12 @@ def qwen38_27b_heretic_profile() -> ModelProfile | None:
 
 
 def available_profiles() -> list[ModelProfile]:
+    from .model_discovery import discovered_model_profiles
+
     installed = [profile for profile in PROFILES.values() if profile_gguf(profile).exists()]
+    for profile in discovered_model_profiles().values():
+        if profile_gguf(profile).exists():
+            installed.append(profile)
     heretic = qwen38_27b_heretic_profile()
     if heretic is not None:
         installed = [heretic, *installed]
@@ -383,6 +388,11 @@ def _with_alt_weights(requested: ModelProfile, alt: ModelProfile) -> ModelProfil
 
 def resolve_profile(name: str) -> ModelProfile:
     key = (name or "bootstrap").lower()
+    from .model_discovery import resolve_discovered_profile
+
+    discovered = resolve_discovered_profile(key)
+    if discovered is not None:
+        return discovered
     if key == "reliable":
         key = "quality"
     if key in {"qwen38_9b", "qwen3.8-9b", "qwen38-9b"}:

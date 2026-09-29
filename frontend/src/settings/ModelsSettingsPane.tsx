@@ -1,4 +1,6 @@
+import { useState } from "react"
 import { Link } from "react-router-dom"
+import { api } from "../api"
 import { DecisionTierSettings } from "./DecisionTierSettings"
 
 type ModelsSettingsPaneProps = {
@@ -18,9 +20,36 @@ export function ModelsSettingsPane({
   save,
   setMsg,
 }: ModelsSettingsPaneProps) {
+  const [discoverBusy, setDiscoverBusy] = useState(false)
+  const [discoverSummary, setDiscoverSummary] = useState("")
   const inference = (settings.inference && typeof settings.inference === "object"
     ? settings.inference
     : {}) as Record<string, unknown>
+  const imageGen =
+    (settings.image_generation && typeof settings.image_generation === "object"
+      ? settings.image_generation
+      : {}) as Record<string, unknown>
+
+  async function discoverLocalModels() {
+    setDiscoverBusy(true)
+    setDiscoverSummary("")
+    try {
+      const payload = await api<Record<string, unknown>>("/api/model/discover-local", {
+        method: "POST",
+        body: JSON.stringify({ deep: true, import_new: true }),
+      })
+      const registered = (payload.registered || {}) as Record<string, unknown>
+      const scan = (payload.scan || registered.scan || {}) as Record<string, unknown>
+      const added = Array.isArray(registered.added) ? registered.added.length : 0
+      const scanned = typeof scan.count === "number" ? scan.count : 0
+      setDiscoverSummary(`Scan found ${scanned} GGUF file(s); registered ${added} new model(s) in Jarvis.`)
+      setMsg("Local model discovery finished.")
+    } catch (err) {
+      setDiscoverSummary(err instanceof Error ? err.message : "Discovery failed")
+    } finally {
+      setDiscoverBusy(false)
+    }
+  }
 
   return (
     <>
@@ -143,6 +172,37 @@ export function ModelsSettingsPane({
       </div>
 
       <DecisionTierSettings save={save} setMsg={setMsg} />
+
+      <div className="card grid settings-pane-card">
+        <h2>Discover local models</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          Scan standard folders (Jarvis <code>models/</code>, LM Studio, Downloads, and bounded drive paths on Windows)
+          for <code>.gguf</code> files and register new weights as loadable profiles.
+        </p>
+        <button type="button" disabled={discoverBusy} onClick={() => void discoverLocalModels()}>
+          {discoverBusy ? "Scanning…" : "Discover models on this PC"}
+        </button>
+        {discoverSummary && <p className="settings-note">{discoverSummary}</p>}
+      </div>
+
+      <div className="card grid settings-pane-card">
+        <h2>Image generation</h2>
+        <p className="lede" style={{ margin: "0 0 12px" }}>
+          HyImage 2.5 is not shipped as local weights; Hy Image 3.5 Preview is cloud/API only. Local options use
+          Hunyuan Image 2.1/3.0 when installed on this PC.
+        </p>
+        <label>Backend
+          <select
+            value={String(imageGen.backend || "off")}
+            onChange={(e) => save({ image_generation_backend: e.target.value })}
+          >
+            <option value="off">Off</option>
+            <option value="hunyuan_2_1">Hunyuan Image 2.1 (local pip hyimage)</option>
+            <option value="hunyuan_3_local">Hunyuan Image 3.0 (local vLLM server)</option>
+            <option value="hyimage_35_api">Hy Image 3.5 Preview (Tencent Cloud API)</option>
+          </select>
+        </label>
+      </div>
 
       <div className="card grid settings-pane-card">
         <h2>Model profile &amp; vision</h2>

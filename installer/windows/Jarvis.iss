@@ -270,7 +270,10 @@ begin
   ModelInstallPage.Add('Qwen 3.5 9B abliterated (lukey03) Q4_K_M — recommended default agent');
   ModelInstallPage.Add('Legacy 9B Abiray Q8_0 + Q6_K (optional, higher RAM)');
   ModelInstallPage.Add('Qwen 3.5 27B Expert Q4_K_M (optional escalation, ~17 GB)');
+  ModelInstallPage.Add('MiMo-V2.6-Distill-Qwen-9B Q4_K_M (optional coding agent)');
+  ModelInstallPage.Add('Scan this PC for existing GGUF files and register them in Jarvis');
   ModelInstallPage.CheckListBox.Checked[0] := True;
+  ModelInstallPage.CheckListBox.Checked[4] := True;
 end;
 
 function ModelInstallOptionChecked(Index: Integer): Boolean;
@@ -531,6 +534,10 @@ begin
     Params := Params + ' -InstallLegacyQwen9b';
   if ModelInstallOptionChecked(2) then
     Params := Params + ' -InstallExpert27B';
+  if ModelInstallOptionChecked(3) then
+    Params := Params + ' -InstallMimo9b';
+  if ModelInstallOptionChecked(4) then
+    Params := Params + ' -ScanLocalModels';
   if WizardIsTaskSelected('dl_personavoices') then
   begin
     Voices := SelectedVoiceProfiles;

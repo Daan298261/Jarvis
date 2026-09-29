@@ -27,6 +27,7 @@ class SettingsUpdate(BaseModel):
     profile: str | None = None
     execution_mode: str | None = None
     inference_backend: str | None = None
+    image_generation_backend: Literal["off", "hunyuan_2_1", "hunyuan_3_local", "hyimage_35_api"] | None = None
     inference_host: str | None = None
     inference_port: int | None = None
     inference_vision: bool | None = None
@@ -187,6 +188,8 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.remote_model = body.inference_remote_model
     if body.inference_api_key is not None:
         settings.inference.api_key = body.inference_api_key
+    if body.image_generation_backend is not None:
+        settings.image_generation.backend = body.image_generation_backend
     if body.vision_mode is not None:
         settings.inference.vision_mode = body.vision_mode
         settings.inference.vision = body.vision_mode in {"always", "on"}

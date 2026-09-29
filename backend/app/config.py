@@ -48,6 +48,22 @@ def default_config_path() -> Path:
     return repo_root() / "config" / "default.json"
 
 
+class ImageGenerationSettings(BaseModel):
+    """Local or API image generation backend selection."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    backend: Literal[
+        "off",
+        "hunyuan_2_1",
+        "hunyuan_3_local",
+        "hyimage_35_api",
+    ] = "off"
+    default_width: int = Field(default=1024, ge=512, le=4096)
+    default_height: int = Field(default=1024, ge=512, le=4096)
+    api_base_url: str = Field(default="", max_length=300)
+
+
 class InferenceSettings(BaseModel):
     backend: str = "llama.cpp"
     host: str = "127.0.0.1"
@@ -414,6 +430,7 @@ class AppSettings(BaseModel):
     presentation: PresentationSettings = Field(default_factory=PresentationSettings)
     dialogue: DialogueSettings = Field(default_factory=DialogueSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    image_generation: ImageGenerationSettings = Field(default_factory=ImageGenerationSettings)
     social_perception: SocialPerceptionSettings = Field(default_factory=SocialPerceptionSettings)
     social_commentary: SocialCommentarySettings = Field(default_factory=SocialCommentarySettings)
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)

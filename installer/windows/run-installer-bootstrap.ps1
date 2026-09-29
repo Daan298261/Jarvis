@@ -19,6 +19,10 @@ param(
 
     [switch]$InstallLegacyQwen9b,
 
+    [switch]$InstallMimo9b,
+
+    [switch]$ScanLocalModels,
+
     [switch]$InstallExpert27B,
 
     [switch]$SkipKokoro,
@@ -59,6 +63,8 @@ if ($SkipModelDownload) { $argList += "-SkipModelDownload" }
 if ($SkipLlamaDownload) { $argList += "-SkipLlamaDownload" }
 if ($InstallLocalLLM) { $argList += "-InstallLocalLLM" }
 if ($InstallLegacyQwen9b) { $argList += "-InstallLegacyQwen9b" }
+if ($InstallMimo9b) { $argList += "-InstallMimo9b" }
+if ($ScanLocalModels) { $argList += "-ScanLocalModels" }
 if ($InstallExpert27B) { $argList += "-InstallExpert27B" }
 if ($SkipKokoro) { $argList += "-SkipKokoro" }
 if ($SkipPersonaVoices) { $argList += "-SkipPersonaVoices" }

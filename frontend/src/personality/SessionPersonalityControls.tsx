@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { api } from "../api"
 import { applySessionTheme, refreshSessionPersonality, type SessionMode } from "../hud/sessionPersonality"
+import { ShipnotesSignalOrb } from "../presence/ShipnotesSignalOrb"
 
 export function SessionPersonalityControls() {
   const [modes, setModes] = useState<SessionMode[]>([])
@@ -61,10 +62,19 @@ export function SessionPersonalityControls() {
           ))}
         </select>
       </label>
+      {activeId === "openmuse" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+          <ShipnotesSignalOrb state="idle" size={72} />
+          <p className="settings-note" style={{ margin: 0 }}>
+            OpenMuse mode uses Ship Notes–style signal orb accents. Creative, personal-agent tone; risky actions stay
+            approval-gated.
+          </p>
+        </div>
+      )}
       {error && <p className="settings-note">{error}</p>}
       <p className="settings-note">
-        Say “start a coding session” in chat, or pick a mode here. HUD accents update; full presence reskin is not in
-        scope.
+        Say “start a coding session” in chat, or pick a mode here. HUD accents update; OpenMuse adds the signal orb
+        presence.
       </p>
     </div>
   )
