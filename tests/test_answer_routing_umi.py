@@ -22,4 +22,4 @@ def test_umi_brain_runtime_name_is_routing_candidate(monkeypatch):
         profiles=list_runtime_profiles(),
         user_message="help me plan",
     )
-    assert picked in {"umi-opus-9b", "balanced", "fast", "bootstrap", "ornith_9b", None} or picked
+    assert picked == "umi-opus-9b"
