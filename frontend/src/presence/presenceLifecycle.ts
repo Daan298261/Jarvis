@@ -3,10 +3,8 @@ import type { AttentionMode, PresenceMode, PresencePhase } from "./presenceTypes
 /** RFC-0069 duration. Non-reduced free↔figure morph. Reduced motion snaps. */
 export const LIFECYCLE_MORPH_SECONDS = 1.2
 
-// Keep the selected persona visible while ANZU is ready. Treating the normal
-// idle state as a fully free cloud erased the humanoid and made every named
-// persona look identical until a task happened to start.
-const FREE_PHASES = new Set<PresencePhase>(["waiting", "offline"])
+/** RFC-0175 / RFC-0194: idle, waiting, offline stay free-float (Ref A). */
+const FREE_PHASES = new Set<PresencePhase>(["idle", "waiting", "offline"])
 
 export function isFreePresencePhase(phase: PresencePhase): boolean {
   return FREE_PHASES.has(phase)

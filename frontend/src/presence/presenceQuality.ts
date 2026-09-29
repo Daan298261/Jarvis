@@ -1,7 +1,18 @@
 export const PRESENCE_QUALITY_DENSITIES = [0.6, 0.95, 1.15] as const
 export type PresenceQualityTier = 0 | 1 | 2
 
-/** Fit sampled shape bounds inside the stage frustum with a safe edge margin. */
+/** AABB fit: scale into the frustum plus geometric center for framing offset. */
+export type PresenceFitFrame = {
+  scale: number
+  centerX: number
+  centerY: number
+}
+
+/**
+ * Fit sampled shape bounds inside the stage frustum with a safe edge margin.
+ * Uses AABB span (not origin-symmetric extent) so off-center busts are not
+ * over-shrunk, and returns the geometric center for stage offset (RFC-0194).
+ */
 export function normalizedPresenceFitScale(
   positions: ArrayLike<number>,
   aspect: number,
@@ -9,7 +20,7 @@ export function normalizedPresenceFitScale(
   cameraDistance: number,
   yaw = 0,
   safeMargin = 0.88,
-): number {
+): PresenceFitFrame {
   let minX = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
   let minY = Number.POSITIVE_INFINITY
@@ -24,12 +35,21 @@ export function normalizedPresenceFitScale(
     minY = Math.min(minY, y)
     maxY = Math.max(maxY, y)
   }
-  const height = Math.max(0.001, 2 * Math.max(Math.abs(minY), Math.abs(maxY)))
-  const width = Math.max(0.001, 2 * Math.max(Math.abs(minX), Math.abs(maxX)))
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+    return { scale: 1, centerX: 0, centerY: 0 }
+  }
+  const height = Math.max(0.001, maxY - minY)
+  const width = Math.max(0.001, maxX - minX)
+  const centerX = (minX + maxX) * 0.5
+  const centerY = (minY + maxY) * 0.5
   const visibleHeight = 2 * cameraDistance * Math.tan((fovDegrees * Math.PI) / 360)
   const visibleWidth = visibleHeight * Math.max(0.1, aspect)
   const margin = Number.isFinite(safeMargin) ? Math.max(0.5, Math.min(0.96, safeMargin)) : 0.88
-  return Math.max(0.45, Math.min(1.35, margin * Math.min(visibleHeight / height, visibleWidth / width)))
+  const scale = Math.max(
+    0.45,
+    Math.min(1.35, margin * Math.min(visibleHeight / height, visibleWidth / width)),
+  )
+  return { scale, centerX, centerY }
 }
 
 /** Auto quality controller with sustained frame-time thresholds and cooldown. */
