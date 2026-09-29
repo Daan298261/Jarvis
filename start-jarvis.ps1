@@ -48,6 +48,30 @@ function Register-ElevatedLogonTask {
     Write-Host "Registered logon task '$taskName' (highest privileges) to start Jarvis." -ForegroundColor Green
 }
 
+function Test-LogonTaskRegistered {
+    cmd /c "schtasks /Query /TN JarvisElevatedBackend >NUL 2>&1" | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Start-ElevatedJarvisCopy {
+    if ($env:JARVIS_SKIP_ELEVATION_PROMPT -eq "1") { return }
+    $script = Join-Path $Root "start-jarvis.ps1"
+    $launchArgs = @(
+        "-NoProfile"
+        "-ExecutionPolicy"
+        "Bypass"
+        "-File"
+        $script
+        "-RegisterLogonTask"
+        "-NoBrowser"
+    )
+    if ($Wait) { $launchArgs += "-Wait" }
+    if ($LanAccess) { $launchArgs += "-LanAccess" }
+    if ($Desktop) { $launchArgs += "-Desktop" }
+    Write-Host "Windows will ask once so Jarvis can run with full control of this PC." -ForegroundColor Yellow
+    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $launchArgs -WorkingDirectory $Root | Out-Null
+}
+
 function Test-CurrentProcessElevated {
     try {
         $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -130,7 +154,14 @@ if ($RegisterLogonTask) {
 }
 
 $elevated = Test-CurrentProcessElevated
-Write-Host ("Backend elevation: " + $(if ($elevated) { "administrator" } else { "standard user (register -RegisterLogonTask once as admin for logon elevation)" }))
+if (-not $elevated -and -not $RegisterLogonTask) {
+    try {
+        Start-ElevatedJarvisCopy
+    } catch {
+        Write-Host "Jarvis will keep running with standard permissions until Windows grants administrator." -ForegroundColor Yellow
+    }
+}
+Write-Host ("Backend elevation: " + $(if ($elevated) { "administrator" } else { "standard user (Windows asks for administrator; nothing to type)" }))
 
 Write-Step "Verifying dependencies"
 $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
@@ -209,7 +240,12 @@ elseif ($PromptFile) {
 
 Write-Step "Starting Jarvis API"
 $env:PYTHONPATH = Join-Path $Root "backend"
-if ($SkipModelLoad) { $env:JARVIS_SKIP_MODEL = "1" }
+if ($SkipModelLoad) {
+    $env:JARVIS_SKIP_MODEL = "1"
+} else {
+    # Inherited skip (Cursor shells, prior voice-only runs) must not block a GGUF host.
+    Remove-Item Env:JARVIS_SKIP_MODEL -ErrorAction SilentlyContinue
+}
 if ($PrivateKey) { $env:JARVIS_PRIVATE_KEY = $PrivateKey }
 $bindHost = Resolve-BindHost -ForceLan:$LanAccess
 if ($LanAccess) {

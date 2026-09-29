@@ -159,6 +159,7 @@ def _load_agent() -> None:
     global _AGENT
     started = time.perf_counter()
     try:
+        pins.ensure_package()
         import laya  # type: ignore[import-not-found]
 
         directory = pins.model_dir()

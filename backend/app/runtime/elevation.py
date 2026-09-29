@@ -46,9 +46,9 @@ def snapshot() -> dict[str, object]:
     elevated = is_elevated()
     hint = ""
     if not registered:
-        hint = "Run .\\start-jarvis.ps1 -RegisterLogonTask as administrator once, then log on again."
+        hint = "Approve the Windows administrator prompt so Jarvis can control this PC. There is nothing to type."
     elif not elevated:
-        hint = "Logon task is registered; this process is not elevated yet (restart after logon or start from the task)."
+        hint = "Administrator at logon is set. Approve the Windows prompt if this session is still a standard user."
     return {
         "elevated": elevated,
         "pid": os.getpid(),
@@ -57,4 +57,39 @@ def snapshot() -> dict[str, object]:
         "logon_task": LOGON_TASK_NAME,
         "logon_task_registered": registered,
         "logon_task_hint": hint,
+        "needs_uac": (not elevated) or (not registered),
+    }
+
+
+def prompt_windows_uac() -> dict[str, object]:
+    """Ask Windows for administrator. The owner only clicks Yes or No — no command to run."""
+    snap = snapshot()
+    if os.name != "nt":
+        return {**snap, "ok": False, "prompted": False, "detail": "Full PC control uses a Windows logon task."}
+    if is_elevated() and logon_task_registered():
+        return {**snap, "ok": True, "prompted": False, "detail": "Jarvis already has administrator on this session."}
+    from ..config import repo_root
+
+    root = repo_root()
+    script = root / "start-jarvis.ps1"
+    params = (
+        "-NoProfile -ExecutionPolicy Bypass -File "
+        f'"{script}" -RegisterLogonTask -NoBrowser'
+    )
+    try:
+        import ctypes
+
+        rc = int(ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", params, str(root), 1))
+    except Exception as exc:  # noqa: BLE001 — UAC UI is best-effort
+        return {**snapshot(), "ok": False, "prompted": False, "detail": str(exc)[:240]}
+    prompted = rc > 32
+    return {
+        **snapshot(),
+        "ok": prompted,
+        "prompted": prompted,
+        "detail": (
+            "Windows will ask once. Approve it so Jarvis can control this PC."
+            if prompted
+            else "Windows did not show the administrator prompt."
+        ),
     }

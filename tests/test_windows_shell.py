@@ -18,6 +18,7 @@ def test_tray_helper_exists_with_required_menu():
     text = _read(TRAY_SCRIPT)
     for needle in (
         "Open portal",
+        "Allow full PC control",
         "Start",
         "Stop",
         "Quit",
@@ -47,6 +48,11 @@ def test_start_jarvis_allows_voice_only_without_gguf():
     assert "Verb RunAs" in text
     assert "JarvisElevatedBackend" in text
     assert "-ErrorAction Stop" in text
+    assert "Remove-Item Env:JARVIS_SKIP_MODEL" in text
+    assert "Start-ElevatedJarvisCopy" in text
+    assert "JARVIS_SKIP_ELEVATION_PROMPT" in text
+    assert "Windows will ask once" in text
+    assert "Allow full PC control" in _read(TRAY_SCRIPT)
 
 
 def test_stop_jarvis_still_mentions_llama_server():
