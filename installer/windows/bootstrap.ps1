@@ -10,11 +10,13 @@
   -SkipHeavyPrepare no longer bails out of setup.
 
 .PARAMETER InstallLocalLLM
-  Also download Qwen3.5-9B GGUF weights. llama.cpp is installed whenever llama-server.exe is missing.
+  Download lukey03/Qwen3.5-9B-abliterated Q4_K_M (default agent brain).
+
+.PARAMETER InstallLegacyQwen9b
+  Optional Abiray Q8_0 and Q6_K legacy 9B mirrors (higher RAM).
 
 .PARAMETER InstallExpert27B
   Also download the optional Expert 27B Q4_K_M model (large; not required).
-  Implies -InstallLocalLLM.
 
 .PARAMETER SkipModelDownload
   Skip extra Qwen GGUF downloads when those files already exist. Missing bootstrap
@@ -33,10 +35,10 @@
   Skip preparing persona neural voice packs entirely.
 
 .PARAMETER InstallWhisper
-  Ensure faster-whisper package and download Whisper base model into models/whisper/.
+  Download faster-whisper base model weights into models/whisper/ (pip package is always installed).
 
 .PARAMETER InstallVoiceStudio
-  Configure VoiceStudio integration and clone debpalash/voicestudio repo if requested.
+  VoiceStudio integration: clone repo, optional Docker image pull, and STT/TTS API on port 3900.
 
 .PARAMETER InstallPocketTTS
   Install pocket-tts lightweight CPU neural TTS package into the venv.
@@ -48,6 +50,7 @@
 #>
 param(
     [switch]$InstallLocalLLM,
+    [switch]$InstallLegacyQwen9b,
     [switch]$InstallExpert27B,
     [switch]$SkipModelDownload,
     [switch]$SkipLlamaDownload,
@@ -473,28 +476,40 @@ function Ensure-BootstrapGguf([string]$VenvPython) {
 
 function Ensure-DefaultModels([string]$VenvPython) {
     Ensure-BootstrapGguf -VenvPython $VenvPython
-    if (-not $InstallLocalLLM) {
-        Write-Host "    Skipping extra Qwen GGUF download (bootstrap model is enough). Re-run with -InstallLocalLLM to fetch 9B."
-        return
-    }
 
     $modelDir = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF"
-    $q8 = Join-Path $modelDir "Qwen3.5-9B-abliterated-Q8_0.gguf"
-    $q6 = Join-Path $modelDir "Qwen3.5-9B-abliterated-Q6_K.gguf"
+    $q4 = Join-Path $modelDir "Qwen3.5-9B-abliterated-Q4_K_M.gguf"
+    if ($InstallLocalLLM) {
+        if (-not (Test-Path $q4)) {
+            Write-Host "    Downloading Qwen3.5-9B abliterated (lukey03) Q4_K_M default brain..."
+            Invoke-HfDownload -VenvPython $VenvPython `
+                -RepoId "lukey03/Qwen3.5-9B-abliterated-GGUF" `
+                -Includes @("Qwen3.5-9B-abliterated-Q4_K_M.gguf") `
+                -LocalDir $modelDir
+            Write-Ok "Default 9B brain downloaded."
+        } else {
+            Write-Skip "Qwen3.5-9B lukey03 Q4_K_M"
+        }
+    } else {
+        Write-Skip "Qwen3.5-9B lukey03 (Ornith bootstrap remains the offline fallback)"
+    }
 
-    $need9b = (-not (Test-Path $q8)) -or (-not (Test-Path $q6))
-    if ($need9b) {
-        Write-Host "    Downloading Qwen3.5-9B Abliterated weights (several GB; one-time)..."
+    if ($InstallLegacyQwen9b) {
+        $q8 = Join-Path $modelDir "Qwen3.5-9B-abliterated-Q8_0.gguf"
+        $q6 = Join-Path $modelDir "Qwen3.5-9B-abliterated-Q6_K.gguf"
         $includes = @()
         if (-not (Test-Path $q8)) { $includes += "Qwen3.5-9B-abliterated-Q8_0.gguf" }
         if (-not (Test-Path $q6)) { $includes += "Qwen3.5-9B-abliterated-Q6_K.gguf" }
-        Invoke-HfDownload -VenvPython $VenvPython `
-            -RepoId "Abiray/Qwen3.5-9B-abliterated-GGUF" `
-            -Includes $includes `
-            -LocalDir $modelDir
-        Write-Ok "9B model weights downloaded."
-    } else {
-        Write-Skip "Qwen3.5-9B GGUF weights"
+        if ($includes.Count -gt 0) {
+            Write-Host "    Downloading optional legacy 9B Q8/Q6 mirrors..."
+            Invoke-HfDownload -VenvPython $VenvPython `
+                -RepoId "Abiray/Qwen3.5-9B-abliterated-GGUF" `
+                -Includes $includes `
+                -LocalDir $modelDir
+            Write-Ok "Legacy 9B mirrors downloaded."
+        } else {
+            Write-Skip "Legacy 9B Q8/Q6 mirrors"
+        }
     }
 
     if ($InstallExpert27B) {
@@ -554,10 +569,29 @@ function Ensure-PersonaVoices([string]$VenvPython) {
     }
 }
 
-function Ensure-WhisperModel([string]$VenvPython) {
-    Write-Host "    Ensuring Whisper STT (faster-whisper and base model)..."
+function Ensure-FasterWhisperPackage([string]$VenvPython) {
+    $check = @"
+import importlib.util
+raise SystemExit(0 if importlib.util.find_spec('faster_whisper') else 1)
+"@
+    if (Test-PythonImport -VenvPython $VenvPython -Code $check) {
+        Write-Skip "faster-whisper Python package"
+        return
+    }
+    Write-Host "    Installing faster-whisper (local STT package)..."
     try {
         Invoke-ProcessWithTimeout -Label "pip faster-whisper" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "faster-whisper", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
+        Write-Ok "faster-whisper installed."
+    } catch {
+        Write-BootstrapLog "faster-whisper pip install pending: $($_.Exception.Message)"
+        Write-Warning "faster-whisper install failed: $($_.Exception.Message)"
+    }
+}
+
+function Ensure-WhisperModel([string]$VenvPython) {
+    Ensure-FasterWhisperPackage -VenvPython $VenvPython
+    Write-Host "    Ensuring Whisper STT base model weights..."
+    try {
         $whisperDir = Join-Path $Root "models\whisper"
         New-Item -ItemType Directory -Force -Path $whisperDir | Out-Null
         $baseBin = Join-Path $whisperDir "base"
@@ -581,24 +615,38 @@ function Ensure-WhisperModel([string]$VenvPython) {
 }
 
 function Ensure-VoiceStudio([string]$VenvPython) {
-    Write-Host "    Ensuring debpalash/voicestudio integration..."
+    Write-Host "    Ensuring VoiceStudio integration (STT/TTS API on port 3900)..."
     $vsDir = Join-Path $Root "tools\voicestudio"
-    if (Test-Path $vsDir) {
-        Write-Skip "debpalash/voicestudio directory"
-        return
-    }
-    if (Test-Command git) {
-        Write-Host "    Cloning debpalash/voicestudio into tools\voicestudio..."
-        try {
-            Invoke-ProcessWithTimeout -Label "git clone voicestudio" -FilePath "git" -Arguments @("clone", "--depth", "1", "https://github.com/debpalash/VoiceStudio.git", $vsDir) -TimeoutMinutes $StepTimeoutMinutes
-            Write-Ok "VoiceStudio repository cloned."
-        } catch {
-            Write-BootstrapLog "VoiceStudio clone failed: $($_.Exception.Message)"
-            Write-Warning "VoiceStudio clone failed: $($_.Exception.Message)"
+    if (-not (Test-Path $vsDir)) {
+        if (Test-Command git) {
+            Write-Host "    Cloning debpalash/VoiceStudio into tools\voicestudio..."
+            try {
+                Invoke-ProcessWithTimeout -Label "git clone voicestudio" -FilePath "git" -Arguments @("clone", "--depth", "1", "https://github.com/debpalash/VoiceStudio.git", $vsDir) -TimeoutMinutes $StepTimeoutMinutes
+                Write-Ok "VoiceStudio repository cloned."
+            } catch {
+                Write-BootstrapLog "VoiceStudio clone failed: $($_.Exception.Message)"
+                Write-Warning "VoiceStudio clone failed: $($_.Exception.Message)"
+            }
+        } else {
+            Write-Warning "git is not installed; VoiceStudio can be installed from https://github.com/debpalash/voicestudio"
         }
     } else {
-        Write-Warning "git is not installed; VoiceStudio can be downloaded manually from https://github.com/debpalash/voicestudio"
+        Write-Skip "VoiceStudio source directory"
     }
+    if (Test-Command docker) {
+        Write-Host "    Pulling VoiceStudio Docker image (ghcr.io/debpalash/voicestudio:stable)..."
+        try {
+            Invoke-ProcessWithTimeout -Label "docker pull voicestudio" -FilePath "docker" -Arguments @("pull", "ghcr.io/debpalash/voicestudio:stable") -TimeoutMinutes ($StepTimeoutMinutes * 3)
+            Write-Ok "VoiceStudio Docker image ready for Jarvis autostart."
+        } catch {
+            Write-BootstrapLog "VoiceStudio docker pull pending: $($_.Exception.Message)"
+            Write-Warning "VoiceStudio docker pull failed or was skipped: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Host "    Docker not found; install VoiceStudio desktop or Docker to use STT on port 3900."
+    }
+    New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
+    "installed" | Set-Content -Encoding ascii -Path (Join-Path $Root "data\.jarvis_voicestudio_setup")
 }
 
 function Ensure-PocketTTS([string]$VenvPython) {
@@ -651,6 +699,7 @@ Write-Step "Python environment and packages"
 $venvPython = Ensure-Venv -PythonExe $pythonExe
 Ensure-PipPackages -VenvPython $venvPython
 Ensure-TtsPythonPackages -VenvPython $venvPython
+Ensure-FasterWhisperPackage -VenvPython $venvPython
 Ensure-Playwright -VenvPython $venvPython
 
 Write-Step "Web portal"
@@ -675,7 +724,7 @@ if (-not $SkipPersonaVoices) {
 }
 
 if ($InstallWhisper) {
-    Write-Step "Whisper speech-to-text"
+    Write-Step "Whisper speech-to-text model"
     Ensure-WhisperModel -VenvPython $venvPython
 }
 

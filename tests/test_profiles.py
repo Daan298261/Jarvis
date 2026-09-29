@@ -100,7 +100,7 @@ def test_profile_gguf_lives_under_family_directory():
     balanced = PROFILES["balanced"]
     path = profile_gguf(balanced)
     assert isinstance(path, Path)
-    assert path.name == "Qwen3.5-9B-abliterated-Q8_0.gguf"
+    assert path.name == "Qwen3.5-9B-abliterated-Q4_K_M.gguf"
     assert "Qwen3.5-9B-abliterated-GGUF" in str(path)
 
 

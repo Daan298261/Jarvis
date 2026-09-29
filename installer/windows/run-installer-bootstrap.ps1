@@ -17,6 +17,8 @@ param(
 
     [switch]$InstallLocalLLM,
 
+    [switch]$InstallLegacyQwen9b,
+
     [switch]$InstallExpert27B,
 
     [switch]$SkipKokoro,
@@ -56,6 +58,7 @@ if ($SkipHeavyPrepare) { $argList += "-SkipHeavyPrepare" }
 if ($SkipModelDownload) { $argList += "-SkipModelDownload" }
 if ($SkipLlamaDownload) { $argList += "-SkipLlamaDownload" }
 if ($InstallLocalLLM) { $argList += "-InstallLocalLLM" }
+if ($InstallLegacyQwen9b) { $argList += "-InstallLegacyQwen9b" }
 if ($InstallExpert27B) { $argList += "-InstallExpert27B" }
 if ($SkipKokoro) { $argList += "-SkipKokoro" }
 if ($SkipPersonaVoices) { $argList += "-SkipPersonaVoices" }

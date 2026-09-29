@@ -53,10 +53,6 @@ Name: "dl_whisper"; Description: "Whisper speech-to-text base model (faster-whis
 Name: "dl_voicestudio"; Description: "VoiceStudio local multi-engine voice suite integration (debpalash/voicestudio)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
 Name: "dl_pockettts"; Description: "Pocket TTS lightweight CPU neural voice (Kyutai Labs)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
 
-; Local LLM weights
-Name: "dl_localllm"; Description: "Qwen3.5-9B GGUF weights (recommended local agent model)"; GroupDescription: "AI models to download:"; Flags: checkedonce
-Name: "dl_expert27b"; Description: "Qwen3.5-27B Expert weights (high VRAM/RAM required; ~17 GB)"; GroupDescription: "AI models to download:"; Flags: unchecked
-
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
 ; Exclude heavy or machine-local dirs — bootstrap recreates them on first run.
@@ -119,6 +115,7 @@ const
 
 var
   ExistingInstallPage: TInputOptionWizardPage;
+  ModelInstallPage: TInputOptionWizardPage;
   ExistingInstallDetected: Boolean;
   ExistingInstallDir: String;
   ExistingVersion: String;
@@ -263,6 +260,26 @@ begin
   ExistingInstallPage.Add('&Semi-clean reinstall - reset chats, routines, memory, and logs; keep models');
   ExistingInstallPage.Add('&Clean reinstall - remove Jarvis and all custom files');
   ExistingInstallPage.SelectedValueIndex := 0;
+
+  ModelInstallPage := CreateInputOptionPage(
+    wpSelectTasks,
+    'Local AI models',
+    'Ornith 1.5 9B Q4_K_M is bundled with this installer as the offline backup brain.',
+    'Select additional weights to download during setup (you can add more later from Jarvis):',
+    False, False);
+  ModelInstallPage.Add('Qwen 3.5 9B abliterated (lukey03) Q4_K_M — recommended default agent');
+  ModelInstallPage.Add('Legacy 9B Abiray Q8_0 + Q6_K (optional, higher RAM)');
+  ModelInstallPage.Add('Qwen 3.5 27B Expert Q4_K_M (optional escalation, ~17 GB)');
+  ModelInstallPage.CheckListBox.Checked[0] := True;
+end;
+
+function ModelInstallOptionChecked(Index: Integer): Boolean;
+begin
+  Result := False;
+  if ModelInstallPage = nil then
+    Exit;
+  if (Index >= 0) and (Index < ModelInstallPage.CheckListBox.Items.Count) then
+    Result := ModelInstallPage.CheckListBox.Checked[Index];
 end;
 
 function ResolveForceStopScript(const AppDir: String): String;
@@ -508,9 +525,11 @@ begin
     Params := Params + ' -InstallVoiceStudio';
   if WizardIsTaskSelected('dl_pockettts') then
     Params := Params + ' -InstallPocketTTS';
-  if WizardIsTaskSelected('dl_localllm') then
+  if ModelInstallOptionChecked(0) then
     Params := Params + ' -InstallLocalLLM';
-  if WizardIsTaskSelected('dl_expert27b') then
+  if ModelInstallOptionChecked(1) then
+    Params := Params + ' -InstallLegacyQwen9b';
+  if ModelInstallOptionChecked(2) then
     Params := Params + ' -InstallExpert27B';
   if WizardIsTaskSelected('dl_personavoices') then
   begin

@@ -30,10 +30,13 @@ class ModelProfile:
     absolute_path: str = ""
 
 
-# Community GGUF of wangzhang/Qwen3.5-9B-abliterated (legacy primary model).
-PRIMARY_SOURCE = "wangzhang/Qwen3.5-9B-abliterated"
-PRIMARY_GGUF_REPO = "Abiray/Qwen3.5-9B-abliterated-GGUF"
+# Default agent brain: lukey03 community GGUF of Qwen3.5-9B-abliterated (Q4_K_M).
+PRIMARY_SOURCE = "lukey03/Qwen3.5-9B-abliterated"
+PRIMARY_GGUF_REPO = "lukey03/Qwen3.5-9B-abliterated-GGUF"
 PRIMARY_DIR = "Qwen3.5-9B-abliterated-GGUF"
+PRIMARY_FILENAME = "Qwen3.5-9B-abliterated-Q4_K_M.gguf"
+# Optional legacy higher-quant mirrors (installer opt-in).
+LEGACY_GGUF_REPO = "Abiray/Qwen3.5-9B-abliterated-GGUF"
 PRIMARY_MMPROJ = "mmproj-f16.gguf"
 
 EXPERT_SOURCE = "Qwen/Qwen3.5-27B"
@@ -98,8 +101,8 @@ PROFILES: dict[str, ModelProfile] = {
     "fast": ModelProfile(
         name="fast",
         label="Fast",
-        quant="Q6_K",
-        filename="Qwen3.5-9B-abliterated-Q6_K.gguf",
+        quant="Q4_K_M",
+        filename=PRIMARY_FILENAME,
         family="9b-abliterated",
         alias="Qwen3.5-9B",
         repo=PRIMARY_GGUF_REPO,
@@ -118,8 +121,8 @@ PROFILES: dict[str, ModelProfile] = {
     "balanced": ModelProfile(
         name="balanced",
         label="Balanced",
-        quant="Q8_0",
-        filename="Qwen3.5-9B-abliterated-Q8_0.gguf",
+        quant="Q4_K_M",
+        filename=PRIMARY_FILENAME,
         family="9b-abliterated",
         alias="Qwen3.5-9B",
         repo=PRIMARY_GGUF_REPO,
@@ -132,14 +135,14 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.95,
         top_k=20,
         presence_penalty=0.0,
-        description="Legacy 9B Q8_0 primary profile with selective thinking.",
+        description="Default 9B lukey03 abliterated Q4_K_M with selective thinking.",
         fallbacks=("bootstrap", "fast", "expert"),
     ),
     "quality": ModelProfile(
         name="quality",
         label="Quality",
-        quant="Q8_0",
-        filename="Qwen3.5-9B-abliterated-Q8_0.gguf",
+        quant="Q4_K_M",
+        filename=PRIMARY_FILENAME,
         family="9b-abliterated",
         alias="Qwen3.5-9B",
         repo=PRIMARY_GGUF_REPO,
@@ -152,7 +155,7 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.95,
         top_k=20,
         presence_penalty=0.0,
-        description="9B Abliterated Q8_0 with thinking on and 32K context.",
+        description="9B lukey03 abliterated Q4_K_M with thinking on and 32K context.",
         fallbacks=("bootstrap", "balanced", "fast", "expert"),
     ),
     "expert": ModelProfile(
@@ -276,6 +279,7 @@ def model_paths() -> dict[str, Path]:
         "q4": expert_root / "Qwen3.5-27B-Q4_K_M.gguf",
         "q5": expert_root / "Qwen3.5-27B-Q5_K_M.gguf",
         "mmproj": expert_root / EXPERT_MMPROJ,
+        "q4_9b": primary_root / PRIMARY_FILENAME,
         "q8_9b": primary_root / "Qwen3.5-9B-abliterated-Q8_0.gguf",
         "q6_9b": primary_root / "Qwen3.5-9B-abliterated-Q6_K.gguf",
         "mmproj_9b": primary_root / PRIMARY_MMPROJ,

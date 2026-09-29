@@ -126,10 +126,19 @@ export function VoiceSettingsPane() {
           onBlur={() => void persistSpeech({ voicestudio_url: speech.voicestudio_url.trim() })}
         />
       </label>
+      <label className="row" style={{ marginTop: 10 }}>
+        <input
+          type="checkbox"
+          checked={speech.voicestudio_autostart}
+          disabled={saving}
+          onChange={(e) => void persistSpeech({ voicestudio_autostart: e.target.checked })}
+        />
+        <span>Start VoiceStudio local API when Jarvis starts (Docker or desktop app)</span>
+      </label>
       <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
         Run debpalash/VoiceStudio locally (default port 3900). Jarvis uses OpenAI-compatible{" "}
-        <code>/v1/audio/speech</code> and <code>/v1/audio/transcriptions</code>. Set{" "}
-        <code>JARVIS_VOICESTUDIO_API_KEY</code> when the server requires a bearer token.
+        <code>/v1/audio/speech</code> and <code>/v1/audio/transcriptions</code>. Jarvis can launch the
+        official Docker image on <code>127.0.0.1:3900</code> when autostart is enabled.
       </p>
 
       <h3 style={{ marginTop: 20, marginBottom: 8 }}>TTS engine preference</h3>

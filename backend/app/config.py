@@ -111,6 +111,7 @@ class VoiceSettings(BaseModel):
     whisper_model: str = Field(default="", max_length=260)
     voicestudio_url: str = Field(default="http://127.0.0.1:3900", max_length=200)
     voicestudio_api_key: str = Field(default="", max_length=512)
+    voicestudio_autostart: bool = False
 
 
 class CodingSettings(BaseModel):

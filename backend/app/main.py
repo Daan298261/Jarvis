@@ -309,6 +309,12 @@ async def startup() -> None:
         schedule_tts_warm_start()
     except Exception:
         logging.debug("TTS warm-start scheduling skipped", exc_info=True)
+    try:
+        from .tts.voicestudio_supervisor import schedule_voicestudio_autostart
+
+        schedule_voicestudio_autostart()
+    except Exception:
+        logging.debug("VoiceStudio autostart scheduling skipped", exc_info=True)
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         try:
             from .persona.named_persona import reapply_stored_main_persona

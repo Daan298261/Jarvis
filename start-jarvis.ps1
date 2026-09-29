@@ -144,16 +144,18 @@ if (Test-Path $venvPython) {
     $python = $pythonCmd.Source
 }
 $llama = Join-Path $Root "runtime\llama.cpp\llama-server.exe"
+$q4Brain = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF\Qwen3.5-9B-abliterated-Q4_K_M.gguf"
 $q8 = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF\Qwen3.5-9B-abliterated-Q8_0.gguf"
 $q6 = Join-Path $Root "models\Qwen3.5-9B-abliterated-GGUF\Qwen3.5-9B-abliterated-Q6_K.gguf"
-$q4 = Join-Path $Root "models\Qwen3.5-27B-GGUF\Qwen3.5-27B-Q4_K_M.gguf"
+$q4Expert = Join-Path $Root "models\Qwen3.5-27B-GGUF\Qwen3.5-27B-Q4_K_M.gguf"
 $bootstrapGguf = Join-Path $Root "models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"
 
 $model = $null
-if (Test-Path $q8) { $model = $q8 }
+if (Test-Path $q4Brain) { $model = $q4Brain }
+elseif (Test-Path $q8) { $model = $q8 }
 elseif (Test-Path $q6) { $model = $q6 }
-elseif (Test-Path $q4) { $model = $q4 }
 elseif (Test-Path $bootstrapGguf) { $model = $bootstrapGguf }
+elseif (Test-Path $q4Expert) { $model = $q4Expert }
 $voiceOnly = -not $model
 if ($voiceOnly) {
     Write-Host "No local GGUF found. Starting as a household voice chatbot (Kokoro). Desktop/LLM tools stay off until you add a model or re-run bootstrap.ps1 -InstallLocalLLM." -ForegroundColor Yellow

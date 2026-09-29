@@ -35,6 +35,7 @@ def test_bootstrap_covers_required_steps():
         "ensure-ttspythonpackages",
         "ensure-kokorovoice",
         "ensure-personavoices",
+        "ensure-fasterwhisperpackage",
         "ensure-whispermodel",
         ".jarvis_faster_whisper_dir",
         "ensure-voicestudio",
@@ -48,6 +49,7 @@ def test_bootstrap_covers_required_steps():
         "ensure-mcpconnectors",
         "llama-server",
         "downloading and installing llama.cpp",
+        "lukey03",
         "qwen3.5-9b",
         "start-jarvis",
         "winget",
@@ -142,7 +144,8 @@ def test_bootstrap_27b_is_optional_switch_only():
     assert "install by default" not in lower
     # 27B download should be gated behind the switch.
     assert text.index("if ($InstallExpert27B)") < text.index("Qwen3.5-27B")
-    assert "if (-not $InstallLocalLLM)" in text
+    assert "if ($InstallLocalLLM)" in text
+    assert "lukey03/Qwen3.5-9B-abliterated-GGUF" in text
 
 
 def test_jarvis_iss_wiring():
@@ -157,6 +160,10 @@ def test_jarvis_iss_wiring():
     assert "dl_whisper" in text
     assert "dl_voicestudio" in text
     assert "dl_pockettts" in text
+    assert "ModelInstallPage" in text
+    assert "InstallLocalLLM" in text
+    assert "InstallLegacyQwen9b" in text
+    assert "lukey03" in text.lower()
     assert "-InstallWhisper" in text
     assert "-InstallVoiceStudio" in text
     assert "-InstallPocketTTS" in text

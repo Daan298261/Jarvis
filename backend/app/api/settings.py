@@ -108,6 +108,7 @@ class SettingsUpdate(BaseModel):
     voice_whisper_model: str | None = Field(default=None, max_length=120)
     voice_voicestudio_url: str | None = Field(default=None, max_length=200)
     voice_voicestudio_api_key: str | None = Field(default=None, max_length=512)
+    voice_voicestudio_autostart: bool | None = None
     front_responder_enabled: bool | None = None
     front_responder_model: str | None = Field(default=None, max_length=160)
     front_responder_max_output_tokens: int | None = Field(default=None, ge=64, le=1024)
@@ -320,6 +321,7 @@ async def update_settings(body: SettingsUpdate):
         "whisper_model": body.voice_whisper_model,
         "voicestudio_url": body.voice_voicestudio_url,
         "voicestudio_api_key": body.voice_voicestudio_api_key,
+        "voicestudio_autostart": body.voice_voicestudio_autostart,
     }
     for key, value in voice_updates.items():
         if value is not None:
