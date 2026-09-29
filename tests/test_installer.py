@@ -33,6 +33,8 @@ def test_bootstrap_covers_required_steps():
         ".venv",
         "requirements.txt",
         "ensure-ttspythonpackages",
+        "ensure-layapythonpackage",
+        "laya==0.3.21",
         "ensure-kokorovoice",
         "ensure-personavoices",
         "ensure-whispermodel",

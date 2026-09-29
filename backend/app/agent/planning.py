@@ -229,7 +229,32 @@ def intent_text(prompt: str) -> str:
     A temp folder named ``pytest-of-owner`` or a repo path must not turn a file task
     into software engineering.
     """
-    return _PATH_OR_URL.sub(" ", latest_user_utterance(prompt or ""))
+    text = _PATH_OR_URL.sub(" ", latest_user_utterance(prompt or ""))
+    # "Do not install anything" is a safety hedge, not a shell/install job.
+    return re.sub(r"(?i)\b(?:do not|don't|do not)\s+install\b[^.!?]*", " ", text)
+
+
+def _first_sentence(text: str) -> str:
+    stripped = (text or "").strip()
+    if not stripped:
+        return ""
+    return re.split(r"(?<=[.!?])\s+", stripped, maxsplit=1)[0].strip()
+
+
+def _remainder_after_first_sentence(text: str) -> str:
+    stripped = (text or "").strip()
+    parts = re.split(r"(?<=[.!?])\s+", stripped, maxsplit=1)
+    return parts[1].strip() if len(parts) > 1 else ""
+
+
+_APP_HEDGE_FOLLOWUP = re.compile(
+    r"(?i)^\s*(?:(?:"
+    r"if(?:\s+\w+){0,6}\s+already\s+(?:running|open)[^.!?]*"
+    r"|(?:please\s+)?(?:just\s+)?(?:say so|tell me)[^.!?]*"
+    r"|(?:and\s+)?(?:then\s+)?stop[^.!?]*"
+    r"|(?:do not|don't)\s+install[^.!?]*"
+    r")(?:[.!?]|\s)+)+$"
+)
 
 
 _NOT_AN_APP = frozenset(
@@ -253,10 +278,11 @@ _NOT_AN_APP = frozenset(
 
 def app_control_target(prompt: str) -> str | None:
     """Program name for 'open steam' / 'close snipping tool' style requests."""
-    match = _APP_INTENT.match(latest_user_utterance(prompt or "").strip())
+    text = latest_user_utterance(prompt or "").strip()
+    match = _APP_INTENT.match(_first_sentence(text)) or _APP_INTENT.match(text)
     if not match:
         return None
-    raw = match.group(1).strip()
+    raw = match.group(1).strip().rstrip(".,!?")
     name = re.sub(r"^(?:the|a|an)\s+", "", raw, flags=re.I).strip().lower()
     first = name.split()[0] if name else ""
     if not first or first in _NOT_AN_APP:
@@ -267,13 +293,17 @@ def app_control_target(prompt: str) -> str | None:
 def simple_app_control(prompt: str) -> tuple[str, str] | None:
     """Single open/close with no extra work — safe to run without the language model."""
     text = latest_user_utterance(prompt or "").strip()
-    match = _APP_INTENT.match(text)
+    first = _first_sentence(text)
+    match = _APP_INTENT.match(first) or _APP_INTENT.match(text)
     if not match:
         return None
     name = app_control_target(prompt)
     if not name:
         return None
-    if _COMPOUND_AFTER_APP.search(text[match.end(1) :]):
+    if _COMPOUND_AFTER_APP.search((first or text)[match.end(1) :]):
+        return None
+    rest = _remainder_after_first_sentence(text)
+    if rest and not _APP_HEDGE_FOLLOWUP.match(rest if rest.endswith((".", "!", "?")) else rest + "."):
         return None
     action = "close" if _CLOSE_APP_VERB.search(text[: match.start(1)]) else "open"
     return action, name
