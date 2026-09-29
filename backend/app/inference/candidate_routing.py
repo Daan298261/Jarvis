@@ -27,6 +27,7 @@ CANDIDATE_ROUTES: dict[ModelRole, CandidateRoute] = {
     "primary": CandidateRoute(
         role="primary",
         candidate_keys=(
+            "umi-opus-9b-ollama",
             "qwen38-9b-heretic-q6",
             "qwen38-9b-heretic-q8",
             "lfm25-8b-a1b-uncensored-q6",

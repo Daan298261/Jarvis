@@ -44,12 +44,13 @@ const PHRASE: Record<string, string> = {
   eir: "looking after the house",
   maia: "growing the audience",
   vulcan: "working the systems",
+  umi: "reasoning deeply",
 
 }
 
 export const ROSTER_IDS = [
   "anzu", "mestor", "nabu", "enki", "veles", "themis", "aegir",
-  "bragi", "hermes", "heimdall", "eir", "maia", "vulcan",
+  "bragi", "hermes", "heimdall", "eir", "maia", "vulcan", "umi",
 ] as const
 
 export type NamedPersonaId = typeof ROSTER_IDS[number]
@@ -73,12 +74,13 @@ export const PERSONA_VISUALS: Record<NamedPersonaId, {
   eir: { shapeId: "breath_leaf", orbColor: "#6EE7B7", accentColor: "#FDA4AF" },
   maia: { shapeId: "star_social", orbColor: "#FB7185", accentColor: "#F472B6" },
   vulcan: { shapeId: "forge_core", orbColor: "#EA580C", accentColor: "#DC2626" },
+  umi: { shapeId: "memory_rings", orbColor: "#7C3AED", accentColor: "#A78BFA" },
 }
 
 export const PERSONA_LABELS: Record<string, string> = {
   anzu: "Anzu", mestor: "Mestor", nabu: "Nabu", enki: "Enki", veles: "Veles",
   themis: "Themis", aegir: "Aegir", bragi: "Bragi", hermes: "Hermes",
-  heimdall: "Heimdall", eir: "Eir", maia: "Maia", vulcan: "Vulcan",
+  heimdall: "Heimdall", eir: "Eir", maia: "Maia", vulcan: "Vulcan", umi: "Umi",
 }
 
 export function canonicalizePersonaId(raw: string): string {

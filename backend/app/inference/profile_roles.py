@@ -4,7 +4,7 @@ from __future__ import annotations
 
 RUNTIME_ROLES = ("orchestrator", "general", "reasoner", "expert", "specialist")
 
-_ORCHESTRATOR = frozenset({"bootstrap", "ornith_9b"})
+_ORCHESTRATOR = frozenset({"bootstrap", "ornith_9b", "umi-opus-9b"})
 _REASONER = frozenset({"quality"})
 _EXPERT = frozenset(
     {

@@ -31,6 +31,7 @@ NEURAL = {
     "dry_butler_original_v1",
     "tactical_aide_original_v1",
     "synthetic_command_original_v1",
+    "pocket_tts_alba_en_v1",
 }
 SAPI = "windows_natural_en_v1"
 LOCKED = "Anzu is coordinating. Enki is coding. Themis is verifying security."
@@ -67,9 +68,10 @@ def persona_box(monkeypatch):
     return box, calls, available
 
 
-def test_catalog_is_the_thirteen_roster(persona_box):
+def test_catalog_matches_roster(persona_box):
     state = public_state()
     assert [row["id"] for row in state["personas"]] == list(ROSTER_IDS)
+    assert "umi" in ROSTER_IDS
     assert "eagir" not in [row["id"] for row in state["personas"]]
     assert state["active"]["id"] == "anzu"
     assert state["active"]["presence_shape_id"] == "stormbird"

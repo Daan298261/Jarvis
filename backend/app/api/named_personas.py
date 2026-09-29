@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..inference.hotswap import activate_runtime_profile
+from ..inference.runtime_profiles import get_runtime_profile
 from ..persona.named_persona import (
     NamedPersonaBindError,
     apply_main_persona,
     attach_specialist,
     public_state,
+    resolve_persona_id,
     update_appearance,
 )
+from ..persona.persona_brain import brain_runtime_name_for_persona
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/named-personas", tags=["named-personas"])
 
@@ -35,6 +43,29 @@ class NamedPersonaPut(BaseModel):
     as_specialist: bool = False
     reset: bool = False
     appearance: AppearanceIn | None = None
+    activate_brain: bool = True
+
+
+async def _maybe_activate_persona_brain(raw_persona_id: str) -> None:
+    try:
+        persona_id = resolve_persona_id(raw_persona_id, required=True)
+    except NamedPersonaBindError:
+        return
+    runtime_name = brain_runtime_name_for_persona(persona_id)
+    if not runtime_name:
+        return
+    profile = get_runtime_profile(runtime_name) or get_runtime_profile(f"recommended-{runtime_name}")
+    if profile is None or not profile.enabled:
+        return
+    try:
+        await activate_runtime_profile(profile, force=True)
+    except Exception as exc:
+        logger.warning(
+            "persona_brain_activate_failed persona=%s runtime=%s detail=%s",
+            persona_id,
+            runtime_name,
+            str(exc)[:240],
+        )
 
 
 def _http(exc: NamedPersonaBindError) -> HTTPException:
@@ -63,6 +94,8 @@ async def put_named_personas(body: NamedPersonaPut) -> dict:
         apply_main_persona(body.id, reset=body.reset)
         if patch:
             update_appearance(body.id, patch, reset=False)
+        if body.activate_brain:
+            await _maybe_activate_persona_brain(body.id)
         return public_state()
     except NamedPersonaBindError as exc:
         raise _http(exc) from exc

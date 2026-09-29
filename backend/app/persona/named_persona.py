@@ -44,6 +44,7 @@ _PHRASES = (
     "looking after the house",
     "growing the audience",
     "working the systems",
+    "reasoning deeply",
 )
 
 
@@ -111,6 +112,20 @@ ROSTER: tuple[PersonaRow, ...] = (
     _row("eir", "Eir", "Wellbeing, routines and household care", "breath_leaf", "dry_butler_original_v1", "#6EE7B7", "#FDA4AF", 0.80, -1, _PHRASES[10], glow=0.50, animation=0.35),
     _row("maia", "Maia", "Marketing, social media and audience growth", "star_social", "chatterbox_expressive_en_v1", "#FB7185", "#F472B6", 1.12, 1, _PHRASES[11]),
     _row("vulcan", "Vulcan", "Hardware, infrastructure and physical systems", "forge_core", "synthetic_command_original_v1", "#EA580C", "#DC2626", 0.90, -2, _PHRASES[12], scale=1.05),
+    _row(
+        "umi",
+        "Umi",
+        "Main assistant — Opus-style reasoning, tools and Pocket TTS voice",
+        "memory_rings",
+        "pocket_tts_alba_en_v1",
+        "#7C3AED",
+        "#A78BFA",
+        0.94,
+        0,
+        _PHRASES[13],
+        glow=0.78,
+        animation=0.72,
+    ),
 )
 
 CATALOG: dict[str, PersonaRow] = {row.id: row for row in ROSTER}
