@@ -67,9 +67,16 @@ def adapt_shell(command: str, shell: str) -> str:
 
 
 def _approved_from_context() -> bool:
+    """True only when a validated ApprovalGrant (or legacy owner resume) is in context.
+
+    Model tool args never populate this — only the agent loop after an ApprovalGrant.
+    """
     from .registry import REGISTRY
 
-    return bool(REGISTRY._context.get("approved"))
+    ctx = REGISTRY._context
+    if ctx.get("approval_grant_id"):
+        return True
+    return bool(ctx.get("approved"))
 
 
 def _decode(data: bytes | bytearray) -> str:
