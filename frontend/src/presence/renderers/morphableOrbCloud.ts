@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import { presenceBudgets } from "../galaxyPresence"
-import { LIFECYCLE_MORPH_SECONDS } from "../presenceLifecycle"
+import { LIFECYCLE_MORPH_SECONDS, REST_TIGHTNESS, clampLifecycleMorph } from "../presenceLifecycle"
 import type { ParticleOrb } from "./particleTypes"
 import { makeRng } from "./shapes/figureKit"
 import {
@@ -80,8 +80,9 @@ export const particleVertexShader = `
     } else {
       p *= 1.0 + uSpeech * 0.03 * sin(t * 9.5);
     }
-    // Free-float attract (RFC-0175). Idle orbs are drawn toward uPointer
-    // (pointer, or a live camera face). The pull fades as uMorph reaches the figure.
+    // Rest-weight attract (RFC-0175 as amended by RFC-0195). Rest keeps a
+    // readable silhouette (uMorph at rest tightness, not 0). Residual free
+    // weight may bias toward uPointer without erasing identity.
     float freeWeight = 1.0 - m;
     if (freeWeight > 0.001 && uPointerStrength > 0.001) {
       vec2 towardPointer = uPointer - p.xy;
@@ -217,7 +218,10 @@ export const particleFragmentShader = `
       color = mix(color, uAccent, highlight * 0.7);
     }
     float hot = smoothstep(2.4, 4.5, vLight);
-    gl_FragColor = vec4(color + vec3(core * (0.18 + hot * 0.42)), alpha);
+    // RFC-0195: keep edge contrast — a white-hot additive core must not blow
+    // the silhouette into a slab even when glow/bloom are high.
+    float coreHot = core * (0.18 + hot * 0.42) * mix(1.0, 0.62, smoothstep(1.15, 1.9, vLight) * uGlow);
+    gl_FragColor = vec4(color + vec3(coreHot), alpha);
   }
 `
 
@@ -243,8 +247,8 @@ function writeSlot(
 }
 
 /**
- * Free end of uMorph. Scattered cool orbs — not a head-and-shoulders bust.
- * Gold stays off so the amber core appears only as the figure wins.
+ * Loose end of uMorph. Mixed at rest tightness (RFC-0195), never shown alone
+ * as the product rest. Gold stays off so the amber core belongs to the figure.
  */
 export function buildFreeFloatCloud(count: number): ParticleOrb[] {
   const random = makeRng(1750917)
@@ -393,8 +397,8 @@ export type MorphablePresenceSystem = {
   stars: THREE.Points
   currentShapeId: PresenceShapeId
   morphTo: (shapeId: PresenceShapeId, opts?: { duration?: number; immediate?: boolean }) => void
-  /** 0 = free cloud, 1 = winning figure. One uniform. Does not remount the cloud. */
-  setLifecycleTarget: (target: 0 | 1, opts?: { duration?: number; immediate?: boolean }) => void
+  /** Rest tightness..1 = winning figure. One uniform. Does not remount the cloud. Never 0 as product rest. */
+  setLifecycleTarget: (target: number, opts?: { duration?: number; immediate?: boolean }) => void
   morphValue: () => number
   tick: (delta: number) => void
   setGalaxy: (on: boolean) => void
@@ -441,9 +445,9 @@ export function createMorphablePresenceSystem(
   if (field) group.add(field)
   group.add(galaxyStars.points)
 
-  let lifecycleTarget: 0 | 1 = 0
-  let animFrom = 0
-  let animTo = 0
+  let lifecycleTarget = REST_TIGHTNESS
+  let animFrom = REST_TIGHTNESS
+  let animTo = REST_TIGHTNESS
   let animElapsed = 0
   let animDuration = 0
   let animating = false
@@ -451,8 +455,8 @@ export function createMorphablePresenceSystem(
   let pendingFigureRestore = false
   let restoreFreeOnArrive = false
   const uniforms = material.uniforms
-  uniforms.uMorph = uniforms.uMorph ?? { value: 0 }
-  uniforms.uMorph.value = 0
+  uniforms.uMorph = uniforms.uMorph ?? { value: REST_TIGHTNESS }
+  uniforms.uMorph.value = REST_TIGHTNESS
 
   const copyCurrentToA = (points: THREE.Points) => {
     const geo = points.geometry
@@ -544,13 +548,13 @@ export function createMorphablePresenceSystem(
     return out
   }
 
-  const beginReturnToFree = (duration: number) => {
+  const beginReturnToRest = (duration: number, target: number) => {
     const current = captureDisplayed()
     writeSlotAttr(figure, freeOrbs, "a")
     writeSlotAttr(figure, current, "b")
     uniforms.uMorph.value = 1
     animFrom = 1
-    animTo = 0
+    animTo = target
     animElapsed = 0
     animDuration = duration
     animating = true
@@ -581,38 +585,38 @@ export function createMorphablePresenceSystem(
       const duration = opts?.duration ?? LIFECYCLE_MORPH_SECONDS
       const immediate = Boolean(opts?.immediate) || duration <= 0
       const previous = lifecycleTarget
-      lifecycleTarget = target
+      lifecycleTarget = clampLifecycleMorph(target)
       const current = uniforms.uMorph.value as number
       if (
-        previous === target
+        previous === lifecycleTarget
         && !animating
         && !shapeBlendActive
         && !pendingFigureRestore
         && !restoreFreeOnArrive
-        && Math.abs(current - target) < 0.0008
+        && Math.abs(current - lifecycleTarget) < 0.0008
       ) {
         return
       }
       if (immediate) {
         anchorFreeAndFigure()
-        uniforms.uMorph.value = target
+        uniforms.uMorph.value = lifecycleTarget
         animating = false
         shapeBlendActive = false
         pendingFigureRestore = false
         restoreFreeOnArrive = false
         return
       }
-      if (shapeBlendActive && target === 1) return
-      if (shapeBlendActive && target === 0) {
-        beginReturnToFree(duration)
+      if (shapeBlendActive && lifecycleTarget >= 0.999) return
+      if (shapeBlendActive && lifecycleTarget < 0.999) {
+        beginReturnToRest(duration, lifecycleTarget)
         return
       }
-      if (pendingFigureRestore && target === 0) return
-      if (restoreFreeOnArrive && target === 1) return
-      if (animating && animTo === target && !shapeBlendActive) return
-      if (!animating && Math.abs(current - target) < 0.0008) return
+      if (pendingFigureRestore && lifecycleTarget < 0.999) return
+      if (restoreFreeOnArrive && lifecycleTarget >= 0.999) return
+      if (animating && Math.abs(animTo - lifecycleTarget) < 0.0008 && !shapeBlendActive) return
+      if (!animating && Math.abs(current - lifecycleTarget) < 0.0008) return
       animFrom = current
-      animTo = target
+      animTo = lifecycleTarget
       animElapsed = 0
       animDuration = duration
       animating = true
@@ -652,8 +656,8 @@ export function createMorphablePresenceSystem(
         restoreFreeOnArrive = false
         return
       }
-      // Still on the free cloud: keep aPos free and retarget bPos. Lifecycle drives uMorph.
-      if (morphNow <= 0.001 && !shapeBlendActive) {
+      // Still fully loose: keep aPos as the rest mix source and retarget bPos.
+      if (morphNow <= REST_TIGHTNESS * 0.15 && !shapeBlendActive) {
         writeSlotAttr(figure, freeOrbs, "a")
         writeSlotAttr(figure, figureOrbs, "b")
         return
@@ -681,14 +685,15 @@ export function createMorphablePresenceSystem(
       uniforms.uMorph.value = animTo
       if (shapeBlendActive || restoreFreeOnArrive) {
         anchorFreeAndFigure()
-        uniforms.uMorph.value = 1
+        uniforms.uMorph.value = lifecycleTarget
         shapeBlendActive = false
         restoreFreeOnArrive = false
         return
       }
       if (pendingFigureRestore) {
+        writeSlotAttr(figure, freeOrbs, "a")
         writeSlotAttr(figure, figureOrbs, "b")
-        uniforms.uMorph.value = 0
+        uniforms.uMorph.value = lifecycleTarget
         pendingFigureRestore = false
       }
     },

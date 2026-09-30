@@ -27,7 +27,9 @@ function Check() {
     const timer = window.setInterval(() => {
       const stage = document.querySelector<HTMLElement>("[data-presence-samples]")
       if (!stage) return
-      setSummary(`${stage.dataset.presenceFps ?? "—"} fps · ${stage.dataset.presenceFrameMs ?? "—"} ms avg · ${stage.dataset.presenceSamples ?? "—"} points`)
+      setSummary(
+        `${stage.dataset.presenceFps ?? "—"} fps · ${stage.dataset.presenceFrameMs ?? "—"} ms avg · ${stage.dataset.presenceSamples ?? "—"} points · morph ${stage.dataset.morph ?? "—"} · rest ${stage.dataset.restTightness ?? "—"}`,
+      )
     }, 500)
     return () => window.clearInterval(timer)
   }, [])
