@@ -34,6 +34,25 @@ _SECRET_KEYS = frozenset(
         "blob",
     }
 )
+# Restore references must survive journal redaction (payloads live on disk).
+_RESTORE_SAFE_KEYS = frozenset(
+    {
+        "kind",
+        "path",
+        "existed",
+        "was_directory",
+        "snapshot_path",
+        "sha256",
+        "encoding",
+        "size",
+        "key",
+        "previous_value",
+        "restorable",
+        "tool_name",
+        "action",
+        "target",
+    }
+)
 
 
 def _utcnow() -> str:
@@ -91,6 +110,18 @@ def _redact_state(state: dict[str, Any] | None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in state.items():
         lowered = str(key).lower()
+        if lowered in _RESTORE_SAFE_KEYS:
+            # Keep restore references / small settings previous_value for apply_undo.
+            if lowered == "previous_value" and isinstance(value, str) and len(value) > _MAX_STATE_CHARS:
+                out[key] = {
+                    "ref": True,
+                    "sha256": hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest(),
+                    "chars": len(value),
+                    "preview": value[:120] + "…",
+                }
+            else:
+                out[key] = value
+            continue
         if lowered in _SECRET_KEYS or any(part in lowered for part in ("password", "secret", "token")):
             out[key] = {"redacted": True, "kind": "secret"}
             continue
@@ -368,7 +399,16 @@ def apply_undo(
     world_checker: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
     executor: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Re-validate preconditions and apply undo; conflict when unsafe."""
+    """Re-validate preconditions and apply undo; never mark undone without reverse.
+
+    When ``executor`` is omitted, the default restore executor runs. Missing reverse
+    payloads yield ``not_implemented`` (record stays ``ready``). Unsafe world state
+    yields ``conflict``.
+    """
+    from .undo_restore import UndoConflictError, UndoNotImplementedError, default_undo_executor
+
+    run_exec = executor or default_undo_executor
+
     with _LOCK:
         store = _load()
         by_id = {r["id"]: r for r in store["records"]}
@@ -409,8 +449,50 @@ def apply_undo(
                         "children": results,
                         "preview": describe_undo(record_id),
                     }
-                if executor:
-                    executor(child)
+                try:
+                    run_exec(child)
+                except UndoNotImplementedError as exc:
+                    store["audit"].append(
+                        {
+                            "id": uuid.uuid4().hex,
+                            "timestamp": _utcnow(),
+                            "kind": "undo_not_implemented",
+                            "record_id": record_id,
+                            "child_id": child["id"],
+                            "reason": str(exc),
+                        }
+                    )
+                    _save(store)
+                    return {
+                        "status": "not_implemented",
+                        "record_id": record_id,
+                        "reason": str(exc),
+                        "children": results,
+                        "preview": describe_undo(record_id),
+                    }
+                except UndoConflictError as exc:
+                    child["status"] = "conflict"
+                    child["conflict"] = str(exc)
+                    record["status"] = "conflict"
+                    record["conflict"] = str(exc)
+                    store["audit"].append(
+                        {
+                            "id": uuid.uuid4().hex,
+                            "timestamp": _utcnow(),
+                            "kind": "undo_conflict",
+                            "record_id": record_id,
+                            "child_id": child["id"],
+                            "reason": str(exc),
+                        }
+                    )
+                    _save(store)
+                    return {
+                        "status": "conflict",
+                        "record_id": record_id,
+                        "reason": str(exc),
+                        "children": results,
+                        "preview": describe_undo(record_id),
+                    }
                 child["status"] = "undone"
                 child["undone_at"] = _utcnow()
                 results.append({"id": child["id"], "status": "undone", "undo_operation": child.get("undo_operation")})
@@ -455,8 +537,46 @@ def apply_undo(
                 "reason": reason,
                 "preview": describe_undo(record_id),
             }
-        if executor:
-            executor(record)
+        try:
+            exec_result = run_exec(record)
+        except UndoNotImplementedError as exc:
+            store["audit"].append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "timestamp": _utcnow(),
+                    "kind": "undo_not_implemented",
+                    "record_id": record_id,
+                    "reason": str(exc),
+                    "undo_operation": record.get("undo_operation"),
+                    "target": record.get("target"),
+                }
+            )
+            _save(store)
+            return {
+                "status": "not_implemented",
+                "record_id": record_id,
+                "reason": str(exc),
+                "preview": describe_undo(record_id),
+            }
+        except UndoConflictError as exc:
+            record["status"] = "conflict"
+            record["conflict"] = str(exc)
+            store["audit"].append(
+                {
+                    "id": uuid.uuid4().hex,
+                    "timestamp": _utcnow(),
+                    "kind": "undo_conflict",
+                    "record_id": record_id,
+                    "reason": str(exc),
+                }
+            )
+            _save(store)
+            return {
+                "status": "conflict",
+                "record_id": record_id,
+                "reason": str(exc),
+                "preview": describe_undo(record_id),
+            }
         record["status"] = "undone"
         record["undone_at"] = _utcnow()
         store["audit"].append(
@@ -467,6 +587,7 @@ def apply_undo(
                 "record_id": record_id,
                 "undo_operation": record.get("undo_operation"),
                 "target": record.get("target"),
+                "detail": (exec_result or {}).get("detail") if isinstance(exec_result, dict) else None,
             }
         )
         _save(store)
@@ -475,6 +596,7 @@ def apply_undo(
             "record_id": record_id,
             "undo_operation": record.get("undo_operation"),
             "target": record.get("target"),
+            "detail": (exec_result or {}).get("detail") if isinstance(exec_result, dict) else None,
             "preview": describe_undo(record_id),
         }
 

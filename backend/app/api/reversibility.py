@@ -159,9 +159,28 @@ async def undo_preview(record_id: str):
 @router.post("/undo/{record_id}/apply")
 async def undo_apply(record_id: str):
     try:
-        return apply_undo(record_id)
+        outcome = apply_undo(record_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="Unknown undo record") from None
+    if outcome.get("status") == "not_implemented":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "status": "not_implemented",
+                "reason": outcome.get("reason"),
+                "record_id": record_id,
+            },
+        )
+    if outcome.get("status") == "conflict":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "conflict",
+                "reason": outcome.get("reason"),
+                "record_id": record_id,
+            },
+        )
+    return outcome
 
 
 @router.get("/audit")

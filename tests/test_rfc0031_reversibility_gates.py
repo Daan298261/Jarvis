@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.policy.approval_grant import (
     decide_approval_request,
     list_grant_audit,
-    park_approval_request,
     reject_timeout_pending,
     reset_approval_grants,
     validate_grant_for_action,
@@ -29,6 +32,7 @@ from app.policy.undo_journal import (
     apply_undo,
     configure_undo_bound,
     describe_undo,
+    get_undo_record,
     list_undo_audit,
     list_undo_records,
     mark_post_state_stale,
@@ -36,7 +40,12 @@ from app.policy.undo_journal import (
     register_undo_record,
     reset_undo_journal,
 )
-from app.tools.base import RiskLevel
+from app.policy.undo_restore import (
+    capture_filesystem_prior,
+    capture_prior_for_effect,
+    reset_undo_snapshots,
+)
+from app.tools.base import RiskLevel, ToolResult
 
 
 @pytest.fixture(autouse=True)
@@ -44,11 +53,14 @@ def _rfc0031_isolation(tmp_path, monkeypatch):
     monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
     monkeypatch.setattr("app.policy.approval_grant.data_dir", lambda: tmp_path)
     monkeypatch.setattr("app.policy.undo_journal.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.policy.undo_restore.data_dir", lambda: tmp_path)
     reset_approval_grants()
     reset_undo_journal()
+    reset_undo_snapshots()
     yield
     reset_approval_grants()
     reset_undo_journal()
+    reset_undo_snapshots()
 
 
 def _allow_auth(*_a, **_k) -> AuthorizationResult:
@@ -94,20 +106,30 @@ def test_unknown_never_treated_as_safely_reversible():
     assert meta.safely_reversible is False
 
 
-def test_reversible_filesystem_write_auto_exec_and_undo(monkeypatch):
+def test_reversible_filesystem_write_auto_exec_and_undo(monkeypatch, tmp_path):
     monkeypatch.setattr("app.policy.reversibility_gate.authorize", _allow_auth)
+    target = tmp_path / "notes.txt"
+    target.write_text("old-content", encoding="utf-8")
     decision = evaluate_side_effect(
         "filesystem",
         action="write",
-        arguments={"action": "write", "path": "/workspace/notes.txt", "content": "hello"},
+        arguments={"action": "write", "path": str(target), "content": "hello"},
         park_if_needed=False,
     )
     assert decision.allowed is True
     assert decision.requires_approval is False
     assert decision.effect.reversibility == ReversibilityClass.REVERSIBLE
+    assert decision.effect.snapshot_required is True
+
+    prior = capture_filesystem_prior(str(target))
+    assert prior["kind"] == "filesystem_bytes"
+    assert prior["existed"] is True
+    assert prior["snapshot_path"]
+    target.write_text("hello", encoding="utf-8")
+
     record = register_post_success_undo(
         decision,
-        prior_state={"bytes": "old"},
+        prior_state=prior,
         post_state={"expected_digest": "abc", "current_digest": "abc"},
         task_id="task-1",
         run_id="run-1",
@@ -115,16 +137,28 @@ def test_reversible_filesystem_write_auto_exec_and_undo(monkeypatch):
     )
     assert record is not None
     assert record["task_id"] == "task-1"
-    assert record["run_id"] == "run-1"
-    assert record["step_id"] == "step-1"
+    assert record["prior_state"]["snapshot_path"]
     preview = describe_undo(record["id"])
     assert "undo" in preview["will_reverse"].lower() or "filesystem" in preview["will_reverse"].lower()
+
     applied = apply_undo(record["id"])
     assert applied["status"] == "undone"
+    assert target.read_text(encoding="utf-8") == "old-content"
 
 
-def test_settings_path_reversible(monkeypatch):
+def test_settings_path_reversible_restores_previous(monkeypatch):
     monkeypatch.setattr("app.policy.reversibility_gate.authorize", _allow_auth)
+    saved = {"autonomy": "assist"}
+
+    def _load():
+        return SimpleNamespace(autonomy=saved["autonomy"])
+
+    def _save(settings):
+        saved["autonomy"] = settings.autonomy
+
+    monkeypatch.setattr("app.config.load_settings", _load)
+    monkeypatch.setattr("app.config.save_settings", _save)
+
     decision = evaluate_side_effect(
         "settings",
         action="update",
@@ -133,13 +167,72 @@ def test_settings_path_reversible(monkeypatch):
     )
     assert decision.allowed is True
     assert decision.effect.reversibility == ReversibilityClass.REVERSIBLE
+    prior = {"kind": "settings_value", "key": "autonomy", "previous_value": "autonomous", "existed": True}
+    saved["autonomy"] = "assist"
     record = register_post_success_undo(
         decision,
-        prior_state={"value": "autonomous"},
+        prior_state=prior,
         post_state={"expected_digest": "v1", "current_digest": "v1"},
         task_id="t-settings",
     )
     assert record["undo_operation"]
+    applied = apply_undo(record["id"])
+    assert applied["status"] == "undone"
+    assert saved["autonomy"] == "autonomous"
+
+
+def test_apply_undo_refuses_without_restorable_prior():
+    """Never mark undone when reverse cannot run."""
+    record = register_undo_record(
+        tool_name="filesystem",
+        action="write",
+        target="/tmp/fake.txt",
+        reversibility="REVERSIBLE",
+        undo_operation="filesystem.undo_write",
+        preconditions=[],
+        prior_state={"kind": "metadata_only", "restorable": False, "target": "/tmp/fake.txt"},
+        post_state={"expected_digest": "x", "current_digest": "x"},
+    )
+    result = apply_undo(record["id"])
+    assert result["status"] == "not_implemented"
+    assert "refuse" in result["reason"].lower() or "restorable" in result["reason"].lower()
+    still = get_undo_record(record["id"])
+    assert still["status"] == "ready"
+    assert still.get("undone_at") is None
+
+
+def test_snapshot_required_refuses_fake_undo_registration(monkeypatch):
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", _allow_auth)
+    decision = evaluate_side_effect(
+        "filesystem",
+        action="write",
+        arguments={"action": "write", "path": "/workspace/x.txt", "content": "n"},
+        park_if_needed=False,
+    )
+    assert decision.effect.snapshot_required is True
+    with pytest.raises(ValueError, match="snapshot_required"):
+        register_post_success_undo(
+            decision,
+            prior_state={"target": "/workspace/x.txt", "tool_name": "filesystem"},
+            post_state={},
+        )
+
+
+def test_snapshot_required_captures_prior_bytes_before_mutation(tmp_path):
+    target = tmp_path / "doc.txt"
+    target.write_text("before", encoding="utf-8")
+    prior = capture_prior_for_effect(
+        "filesystem",
+        action="write",
+        arguments={"action": "write", "path": str(target), "content": "after"},
+        snapshot_required=True,
+    )
+    assert prior["kind"] == "filesystem_bytes"
+    assert prior["existed"] is True
+    assert Path(prior["snapshot_path"]).read_text(encoding="utf-8") == "before"
+    # Mutate after capture — snapshot must still hold prior bytes.
+    target.write_text("after", encoding="utf-8")
+    assert Path(prior["snapshot_path"]).read_text(encoding="utf-8") == "before"
 
 
 def test_destructive_requires_real_approval_grant(monkeypatch):
@@ -400,12 +493,15 @@ def test_audit_records_without_secrets(monkeypatch):
         preconditions=[],
         prior_state={"token": "abc"},
     )
-    apply_undo(list_undo_records()[0]["id"])
+    outcome = apply_undo(list_undo_records()[0]["id"])
+    # Non-restorable prior must refuse — never fake undone.
+    assert outcome["status"] == "not_implemented"
     grant_events = list_grant_audit()
     undo_events = list_undo_audit()
     blob = str(grant_events) + str(undo_events)
     assert "nope" not in blob
     assert "abc" not in blob or "redacted" in str(list_undo_records())
+    assert any(e.get("kind") == "undo_not_implemented" for e in undo_events)
 
 
 def test_grant_validation_rejects_wrong_scope(monkeypatch):
@@ -442,3 +538,114 @@ def test_tool_effect_metadata_exposed():
     assert meta["reversibility"] == "REVERSIBLE"
     delete_meta = tool.effect_metadata(action="delete", arguments={"action": "delete", "path": "/x"})
     assert delete_meta["reversibility"] == "IRREVERSIBLE"
+
+
+@pytest.mark.asyncio
+async def test_loop_snapshot_required_fail_closed_when_capture_fails(jarvis_env, monkeypatch):
+    from app.agent.loop import AGENT
+    from app.policy.authorize import AuthorizationResult
+    from app.policy.levels import AutonomyLevel
+
+    monkeypatch.setattr(
+        "app.agent.loop.gate_tool_call",
+        lambda *a, **k: AuthorizationResult(
+            True, False, "ok", AutonomyLevel.L3_EXECUTE_WITH_GATES, "filesystem.write"
+        ),
+    )
+    monkeypatch.setattr(
+        "app.agent.loop.capture_prior_for_effect",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    execute_mock = AsyncMock(return_value=ToolResult(True, "should not run"))
+    monkeypatch.setattr("app.agent.loop.REGISTRY.execute", execute_mock)
+
+    observation, _ = await AGENT._execute_tool_ex(
+        "task-snap-fail",
+        "filesystem",
+        {"action": "write", "path": str(jarvis_env["tmp"] / "x.txt"), "content": "n"},
+        "autonomous",
+        jarvis_env["settings"],
+    )
+    execute_mock.assert_not_awaited()
+    assert observation.startswith("ERROR:")
+    assert "snapshot" in observation.lower()
+    assert "snapshot_capture_failed" in observation
+
+
+@pytest.mark.asyncio
+async def test_loop_undo_registration_failure_is_not_swallowed(jarvis_env, monkeypatch):
+    from app.agent.loop import AGENT
+    from app.policy.authorize import AuthorizationResult
+    from app.policy.levels import AutonomyLevel
+
+    monkeypatch.setattr(
+        "app.agent.loop.gate_tool_call",
+        lambda *a, **k: AuthorizationResult(
+            True, False, "ok", AutonomyLevel.L3_EXECUTE_WITH_GATES, "filesystem.write"
+        ),
+    )
+    target = jarvis_env["tmp"] / "reg.txt"
+    target.write_text("prior", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.agent.loop.register_post_success_undo",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("journal write failed")),
+    )
+    execute_mock = AsyncMock(return_value=ToolResult(True, "Wrote file"))
+    monkeypatch.setattr("app.agent.loop.REGISTRY.execute", execute_mock)
+    published: list[tuple] = []
+
+    async def _pub(task_id, kind, title, detail="", **kw):
+        published.append((kind, title, detail))
+
+    monkeypatch.setattr("app.agent.loop.BUS.publish", _pub)
+
+    observation, _ = await AGENT._execute_tool_ex(
+        "task-undo-reg-fail",
+        "filesystem",
+        {"action": "write", "path": str(target), "content": "new"},
+        "autonomous",
+        jarvis_env["settings"],
+    )
+    execute_mock.assert_awaited()
+    assert "Undo registration failed" in observation
+    assert "undo_registration_failed" in observation
+    assert any(item[0] == "error" and "Undo registration failed" in item[1] for item in published)
+
+
+@pytest.mark.asyncio
+async def test_loop_filesystem_write_registers_restorable_undo_and_apply(jarvis_env, monkeypatch):
+    from app.agent.loop import AGENT
+    from app.policy.authorize import AuthorizationResult
+    from app.policy.levels import AutonomyLevel
+
+    monkeypatch.setattr(
+        "app.agent.loop.gate_tool_call",
+        lambda *a, **k: AuthorizationResult(
+            True, False, "ok", AutonomyLevel.L3_EXECUTE_WITH_GATES, "filesystem.write"
+        ),
+    )
+    target = jarvis_env["tmp"] / "live.txt"
+    target.write_text("alpha", encoding="utf-8")
+
+    async def _execute(name, arguments, **_kw):
+        assert name == "filesystem"
+        Path(arguments["path"]).write_text(arguments["content"], encoding="utf-8")
+        return ToolResult(True, f"Wrote {arguments['path']}")
+
+    monkeypatch.setattr("app.agent.loop.REGISTRY.execute", _execute)
+    observation, _ = await AGENT._execute_tool_ex(
+        "task-live-undo",
+        "filesystem",
+        {"action": "write", "path": str(target), "content": "beta"},
+        "autonomous",
+        jarvis_env["settings"],
+    )
+    assert "ERROR:" not in observation
+    assert target.read_text(encoding="utf-8") == "beta"
+    rows = list_undo_records(task_id="task-live-undo", ready_only=True)
+    assert rows
+    assert rows[0]["prior_state"]["kind"] == "filesystem_bytes"
+    assert rows[0]["prior_state"]["snapshot_path"]
+    applied = apply_undo(rows[0]["id"])
+    assert applied["status"] == "undone"
+    assert target.read_text(encoding="utf-8") == "alpha"

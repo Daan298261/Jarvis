@@ -4,11 +4,14 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("jarvis.agent.loop")
 
 from openai import APIConnectionError, APIStatusError
 
@@ -47,6 +50,7 @@ from ..policy.computer_permissions import (
     permission_ids_for_tool,
 )
 from ..policy.reversibility_gate import register_post_success_undo
+from ..policy.undo_restore import capture_prior_for_effect
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, classify_command, is_destructive_operation, needs_confirmation
@@ -2746,11 +2750,69 @@ class AgentRuntime:
                 pass
         consume_once_grants(permission_ids_for_tool(name, arguments))
         started = datetime.now(timezone.utc)
-        prior_state = {
+
+        # RFC-0031: capture restorable prior_state BEFORE mutation when required.
+        prior_state: dict[str, Any] = {
+            "kind": "metadata_only",
             "target": decision.effect.target,
             "tool_name": name,
             "action": decision.effect.action,
+            "restorable": False,
         }
+        needs_snapshot = bool(decision.effect.snapshot_required) or (
+            decision.effect.side_effecting
+            and decision.effect.reversibility.value in {"REVERSIBLE", "COMPENSATABLE"}
+            and name in {"filesystem", "settings", "config"}
+        )
+        if needs_snapshot and decision.allowed:
+            try:
+                prior_state = capture_prior_for_effect(
+                    name,
+                    action=decision.effect.action,
+                    arguments=arguments if isinstance(arguments, dict) else {},
+                    snapshot_required=bool(decision.effect.snapshot_required),
+                )
+            except Exception as exc:  # noqa: BLE001 — fail closed when snapshot required
+                if decision.effect.snapshot_required:
+                    log.error(
+                        "rfc0031 snapshot_required capture failed tool=%s action=%s task=%s: %s",
+                        name,
+                        decision.effect.action,
+                        task_id,
+                        exc,
+                    )
+                    try:
+                        await BUS.publish(
+                            task_id,
+                            "error",
+                            "Undo snapshot capture failed",
+                            str(exc)[:1500],
+                            stage="act",
+                        )
+                    except Exception:
+                        pass
+                    REGISTRY._context.pop("approval_grant_id", None)
+                    return (
+                        "ERROR: Reversible action blocked — could not capture undo snapshot: "
+                        f"{exc}\n"
+                        + json.dumps(
+                            {
+                                "rfc0031": {
+                                    "code": "snapshot_capture_failed",
+                                    "tool": name,
+                                    "action": decision.effect.action,
+                                    "snapshot_required": True,
+                                }
+                            }
+                        ),
+                        None,
+                    )
+                log.warning(
+                    "rfc0031 prior capture skipped tool=%s action=%s: %s",
+                    name,
+                    decision.effect.action,
+                    exc,
+                )
 
         async def _run_tool_inner() -> tuple[str, str | None, bool, str]:
             async with SessionLocal() as session:
@@ -2829,25 +2891,73 @@ class AgentRuntime:
                 )
             await session.commit()
         if success and decision.allowed:
+            undo_note = ""
             try:
-                register_post_success_undo(
+                post_digest = hashlib.sha256(
+                    f"{name}:{decision.effect.action}:{decision.effect.target}:{text[:200]}".encode()
+                ).hexdigest()[:32]
+                target_path = str(
+                    (arguments or {}).get("path") or decision.effect.target or ""
+                ).strip()
+                if target_path:
+                    try:
+                        p = Path(target_path).expanduser()
+                        if p.is_file():
+                            post_digest = hashlib.sha256(p.read_bytes()).hexdigest()
+                    except OSError:
+                        pass
+                record = register_post_success_undo(
                     decision,
                     prior_state=prior_state,
                     post_state={
                         "target": decision.effect.target,
-                        "expected_digest": hashlib.sha256(
-                            f"{name}:{decision.effect.action}:{decision.effect.target}:{text[:200]}".encode()
-                        ).hexdigest()[:32],
-                        "current_digest": hashlib.sha256(
-                            f"{name}:{decision.effect.action}:{decision.effect.target}:{text[:200]}".encode()
-                        ).hexdigest()[:32],
+                        "kind": prior_state.get("kind"),
+                        "expected_digest": post_digest,
+                        "current_digest": post_digest,
                     },
                     task_id=task_id,
                     run_id=task_id,
                     step_key=step_key,
                 )
-            except Exception:
-                pass
+                if record is None and decision.effect.snapshot_required:
+                    raise RuntimeError("snapshot_required action produced no undo record")
+            except Exception as exc:  # noqa: BLE001 — never silent swallow
+                log.exception(
+                    "rfc0031 undo registration failed tool=%s action=%s task=%s step=%s",
+                    name,
+                    decision.effect.action,
+                    task_id,
+                    step_key,
+                )
+                try:
+                    await BUS.publish(
+                        task_id,
+                        "error",
+                        "Undo registration failed",
+                        str(exc)[:1500],
+                        stage="act",
+                    )
+                except Exception:
+                    pass
+                undo_note = (
+                    "\nERROR: Undo registration failed after successful side effect: "
+                    f"{exc}\n"
+                    + json.dumps(
+                        {
+                            "rfc0031": {
+                                "code": "undo_registration_failed",
+                                "tool": name,
+                                "action": decision.effect.action,
+                                "snapshot_required": bool(decision.effect.snapshot_required),
+                                "step_key": step_key,
+                            }
+                        }
+                    )
+                )
+                # Surface into the tool observation so the owner/agent sees it.
+                text = f"{text}{undo_note}"
+                success = False if decision.effect.snapshot_required else success
+                error = str(exc) if decision.effect.snapshot_required else error
         REGISTRY._context.pop("approval_grant_id", None)
         return text, attach
 

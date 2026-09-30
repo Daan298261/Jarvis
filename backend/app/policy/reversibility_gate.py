@@ -345,6 +345,22 @@ def _safe_arg_digest(args: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
 
+def _prior_state_is_restorable(prior_state: dict[str, Any] | None, *, snapshot_required: bool) -> bool:
+    if not isinstance(prior_state, dict) or not prior_state:
+        return False
+    kind = str(prior_state.get("kind") or "")
+    if kind == "filesystem_bytes":
+        # New path (existed=False) is restorable via delete; existing needs snapshot_path.
+        if prior_state.get("existed") is False:
+            return True
+        return bool(prior_state.get("snapshot_path"))
+    if kind == "settings_value":
+        return "previous_value" in prior_state and bool(prior_state.get("key"))
+    if snapshot_required:
+        return False
+    return kind not in {"", "metadata_only"}
+
+
 def register_post_success_undo(
     decision: SideEffectDecision,
     *,
@@ -355,7 +371,11 @@ def register_post_success_undo(
     step_id: str | None = None,
     step_key: str | None = None,
 ) -> dict[str, Any] | None:
-    """Create durable undo record after a successful reversible/compensatable action."""
+    """Create durable undo record after a successful reversible/compensatable action.
+
+    When ``snapshot_required``, refuses to register a non-restorable prior_state
+    (raises ``ValueError``) so callers cannot claim reversible success with a fake undo.
+    """
     if not decision.allowed:
         return None
     effect = decision.effect
@@ -366,6 +386,13 @@ def register_post_success_undo(
         ReversibilityClass.COMPENSATABLE,
     }:
         return None
+    if effect.snapshot_required and not _prior_state_is_restorable(
+        prior_state, snapshot_required=True
+    ):
+        raise ValueError(
+            "snapshot_required: refusing to register undo without restorable prior_state "
+            "(filesystem snapshot or settings previous_value)"
+        )
     undo_op = (
         effect.compensation.operation
         if effect.compensation and effect.compensation.operation
