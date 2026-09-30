@@ -96,16 +96,10 @@ def normalize_health_url(url: str) -> str:
     if not is_loopback_url(raw):
         return ""
     parsed = urlparse(raw)
-    host = DEFAULT_LOOPBACK if (parsed.hostname or "").lower() in {"localhost", "::1", "127.0.0.1"} else parsed.hostname
-    if (parsed.hostname or "").lower() == "localhost":
-        host = DEFAULT_LOOPBACK
-    elif (parsed.hostname or "").lower() == "::1":
-        host = "::1"
-    else:
-        host = DEFAULT_LOOPBACK
-    netloc = host
-    if parsed.port:
-        netloc = f"{host}:{parsed.port}"
+    hostname = (parsed.hostname or "").lower()
+    # Prefer IPv4 loopback for localhost; keep ::1 when explicitly used.
+    host = "::1" if hostname == "::1" else DEFAULT_LOOPBACK
+    netloc = f"{host}:{parsed.port}" if parsed.port else host
     path = parsed.path or "/"
     return f"{parsed.scheme}://{netloc}{path}"
 
