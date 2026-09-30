@@ -301,3 +301,173 @@ async def test_managed_front_lane_fallback_ack_when_front_skipped(jarvis_env, mo
         row = await session.get(Task, task_id)
         assert row is not None
         assert (row.result or "").strip()
+
+
+@pytest.mark.asyncio
+async def test_managed_front_lane_exception_still_publishes_ack(jarvis_env, monkeypatch):
+    """Exception in managed front must enqueue TTS via publish_owner_text, not BUS-only."""
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    task_id = "managed-front-exc"
+    prompt = "Please refactor the auth module and run pytest."
+    async with SessionLocal() as session:
+        session.add(
+            Task(
+                id=task_id,
+                title=prompt[:80],
+                prompt=prompt,
+                status="running",
+                stage="understand",
+                task_class="software engineering",
+                response_route="managed_task",
+            )
+        )
+        await session.commit()
+
+    monkeypatch.setattr(
+        "app.agent.loop.generate_front_reply",
+        AsyncMock(side_effect=RuntimeError("front provider down")),
+    )
+
+    published: list[tuple[str, dict]] = []
+
+    async def capture_publish(text, **kwargs):
+        published.append((text, kwargs))
+        return {"tts_id": "exc-ack"}
+
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", capture_publish)
+
+    await AGENT._run_managed_front_lane(
+        task_id,
+        prompt,
+        jarvis_env["settings"],
+        turn_started=time.perf_counter(),
+    )
+
+    assert published
+    assert published[0][1].get("source") == "task_chat"
+    assert (published[0][0] or "").strip()
+
+
+@pytest.mark.asyncio
+async def test_conversation_progress_watchdog_starts_before_prepare_route(jarvis_env, monkeypatch):
+    """After hard-bypass miss, progress must arm before prepare_answer_route."""
+    from app.agent.task_fastpath import FastpathDecision
+
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    order: list[str] = []
+    MANAGER.provider = None
+    MANAGER.state.loaded = False
+
+    task_id = "conv-progress-before-prepare"
+    prompt = "Please dig into the auth architecture and summarize trade-offs."
+    async with SessionLocal() as session:
+        session.add(
+            Task(
+                id=task_id,
+                title=prompt[:80],
+                prompt=prompt,
+                status="running",
+                stage="act",
+                task_class=CONVERSATION_CLASS,
+                response_route="direct_reply",
+            )
+        )
+        await session.commit()
+
+    prefetched = FrontReply(
+        action="ack_continue",
+        text="On it, sir.",
+        model="front",
+        first_text_ms=3.0,
+        complete_ms=3.0,
+    )
+
+    class StreamProvider:
+        async def chat_stream(self, messages, **kwargs):
+            del messages, kwargs
+            yield "Here is a deeper answer."
+
+        async def chat(self, messages, **kwargs):
+            del messages, kwargs
+            from app.providers.base import ChatResult
+
+            return ChatResult(content="Here is a deeper answer.")
+
+    async def track_front(*args, **kwargs):
+        return prefetched
+
+    async def track_load(settings, profile_name=None):
+        order.append("load")
+        MANAGER.provider = StreamProvider()
+        MANAGER.state.loaded = True
+        MANAGER.state.context_size = 16384
+
+    async def track_prepare(*args, **kwargs):
+        order.append("prepare")
+        return kwargs.get("profile_name") or "balanced", kwargs.get("messages") or [], object(), False
+
+    def track_progress(*args, **kwargs):
+        # Sync wrapper: append at create_task(...) evaluation time, not after yield.
+        order.append("progress")
+
+        async def _noop():
+            return None
+
+        return _noop()
+
+    miss = FastpathDecision(
+        admitted=False,
+        reason="needs_worker",
+        route_kind="direct_reply",
+        front_action="ack_continue",
+    )
+    monkeypatch.setattr("app.agent.loop.generate_front_reply", track_front)
+    monkeypatch.setattr("app.agent.loop.MANAGER.load", track_load)
+    monkeypatch.setattr("app.inference.answer_routing.prepare_answer_route", track_prepare)
+    monkeypatch.setattr("app.agent.loop.run_worker_progress_watchdog", track_progress)
+    monkeypatch.setattr("app.agent.loop.admit_fastpath", lambda *a, **k: miss)
+    monkeypatch.setattr("app.agent.loop.admit_lookup_fastpath", lambda *a, **k: miss)
+    monkeypatch.setattr("app.agent.loop.note_fastpath_decision", lambda *a, **k: None)
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", AsyncMock(return_value={"tts_id": "t1"}))
+    monkeypatch.setattr("app.agent.loop.maybe_enqueue_streaming_social_tts", lambda *a, **k: "early-1")
+    monkeypatch.setattr("app.agent.loop.should_skip_background_verify", lambda *a, **k: True)
+
+    await AGENT._run_conversation(
+        task_id,
+        prompt,
+        None,
+        jarvis_env["settings"],
+        WorkingState(goal=prompt, task_class=CONVERSATION_CLASS),
+        LiveTaskMetrics(),
+    )
+
+    assert "progress" in order and "prepare" in order
+    assert order.index("progress") < order.index("prepare")
+    assert order.index("progress") < order.index("load")
+
+
+@pytest.mark.asyncio
+async def test_speak_front_reply_marks_stream_to_avoid_double_speak(jarvis_env, monkeypatch):
+    """publish_owner_text front path must advance stream cursor for final merge TTS."""
+    from app.persona.chat_delivery import clear_stream_speak_state, stream_speak_offset
+
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    stream_key = "task:double-speak-guard"
+    clear_stream_speak_state(stream_key)
+
+    front = FrontReply(action="ack_continue", text="On it, sir.", model="front")
+    monkeypatch.setattr("app.agent.loop.maybe_enqueue_streaming_social_tts", lambda *a, **k: None)
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", AsyncMock(return_value={"tts_id": "front-tts"}))
+    monkeypatch.setattr("app.agent.loop.BUS.publish", AsyncMock())
+    monkeypatch.setattr("app.agent.loop.note_front_audio", lambda *a, **k: None)
+
+    spoken = await AGENT._speak_front_reply(
+        "double-speak-guard",
+        front,
+        prompt="Please dig deeper.",
+        stream_key=stream_key,
+        turn_started=time.perf_counter(),
+    )
+    assert spoken is True
+    assert stream_speak_offset(stream_key) >= len(front.text)
+    clear_stream_speak_state(stream_key)
