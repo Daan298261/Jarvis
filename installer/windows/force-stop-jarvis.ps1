@@ -353,10 +353,10 @@ function Invoke-ForceStopSingleRoot {
     }
 
     function Get-ProcessByIdFromList {
-        param([int]$Pid, [array]$Procs)
+        param([int]$ProcessId, [array]$Procs)
         foreach ($p in $Procs) {
             try {
-                if ([int]$p.ProcessId -eq $Pid) { return $p }
+                if ([int]$p.ProcessId -eq $ProcessId) { return $p }
             } catch { }
         }
         return $null
