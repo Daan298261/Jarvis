@@ -154,22 +154,29 @@ def ensure_automation(
     automation_id: str,
     *,
     failure_threshold: int | None = None,
-    kind: str = "generic",
+    kind: str | None = None,
     ref_id: str = "",
 ) -> AutomationBreakerRecord:
+    """Register or update an automation breaker record.
+
+    ``kind`` is only written when explicitly provided (non-empty). Call sites that
+    omit kind — threshold saves, admission, finalize — preserve any prior kind
+    (e.g. scheduler ``schedule``). New records default to ``generic``.
+    """
     if not automation_id.strip():
         raise AutomationBreakerError("automation_id is required")
     threshold = int(failure_threshold or DEFAULT_FAILURE_THRESHOLD)
     if threshold < 1:
         raise AutomationBreakerError("failure_threshold must be at least 1")
+    kind_norm = (kind or "").strip() or None
     with _lock:
         state = _load_state_unlocked()
         existing = state.get(automation_id)
         if existing is not None:
             if failure_threshold is not None:
                 existing.failure_threshold = threshold
-            if kind:
-                existing.kind = kind
+            if kind_norm is not None:
+                existing.kind = kind_norm
             if ref_id:
                 existing.ref_id = ref_id
             existing.breaker_state = _derive_breaker_state(
@@ -185,7 +192,7 @@ def ensure_automation(
         record = AutomationBreakerRecord(
             automation_id=automation_id,
             failure_threshold=threshold,
-            kind=kind,
+            kind=kind_norm or "generic",
             ref_id=ref_id,
             updated_at=now,
         )
@@ -215,13 +222,29 @@ def set_failure_threshold(automation_id: str, threshold: int, *, actor: str = "o
     return record
 
 
+def _in_flight_run_count(runs: dict[str, dict[str, Any]], automation_id: str) -> int:
+    """Count non-finalized admitted runs for one automation (excludes index keys)."""
+    count = 0
+    for run_id, row in runs.items():
+        if run_id.startswith("_") or not isinstance(row, dict):
+            continue
+        if row.get("automation_id") == automation_id and not row.get("finalized"):
+            count += 1
+    return count
+
+
 def admit_automatic_trigger(
     automation_id: str,
     *,
     run_id: str,
     trigger: str = "schedule",
 ) -> AdmissionResult:
-    """Gate scheduled/event automatic wakeups. Fails closed when disabled."""
+    """Gate scheduled/event automatic wakeups. Fails closed when disabled.
+
+    At the threshold boundary, in-flight (admitted, not yet terminal) runs consume
+    the remaining failure budget so concurrent delivery cannot admit more than one
+    run past the trip point before disable takes effect.
+    """
     ensure_automation(automation_id)
     with _lock:
         state = _load_state_unlocked()
@@ -253,6 +276,31 @@ def admit_automatic_trigger(
                 automation_id=automation_id,
                 breaker_state=record.breaker_state,
                 reason="duplicate idempotent run suppressed",
+                suppressed=True,
+            )
+        # Reserve remaining failure budget for in-flight admits so a concurrent
+        # wave cannot slip past the trip before finalize disables the breaker.
+        remaining = max(0, int(record.failure_threshold) - int(record.consecutive_failure_count))
+        in_flight = _in_flight_run_count(runs, automation_id)
+        if remaining == 0 or in_flight >= remaining:
+            record_breaker_audit(
+                event_type="trigger_suppressed",
+                automation_id=automation_id,
+                detail={
+                    "trigger": trigger,
+                    "run_id": run_id,
+                    "reason": "failure_budget_exhausted",
+                    "in_flight": in_flight,
+                    "remaining": remaining,
+                    "consecutive_failure_count": record.consecutive_failure_count,
+                    "failure_threshold": record.failure_threshold,
+                },
+            )
+            return AdmissionResult(
+                allowed=False,
+                automation_id=automation_id,
+                breaker_state=record.breaker_state,
+                reason="automation failure budget exhausted pending in-flight runs",
                 suppressed=True,
             )
         runs[run_id] = {

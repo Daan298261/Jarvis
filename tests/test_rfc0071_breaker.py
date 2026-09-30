@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 
+from app.automation.audit import list_breaker_audit
 from app.automation.breaker import (
     BREAKER_ACTIVE,
     BREAKER_DEGRADED,
@@ -19,6 +20,7 @@ from app.automation.breaker import (
     on_task_terminal,
     reenable_automation,
     reset_automation_breaker_store,
+    set_failure_threshold,
 )
 from app.automation.ids import automation_actor_id, schedule_automation_id
 from app.automation.outcomes import TerminalOutcome
@@ -42,6 +44,19 @@ def _fail_run(automation_id: str, run_id: str, n: int = 1) -> None:
         finalize_run_outcome(automation_id, f"{run_id}-{_}", TerminalOutcome.FAILURE, summary="boom")
 
 
+def _audit_types(automation_id: str) -> list[str]:
+    return [event["event_type"] for event in list_breaker_audit(automation_id=automation_id, limit=200)]
+
+
+def _owner_client(monkeypatch) -> tuple[TestClient, str]:
+    key = generate_private_key()
+    settings = load_settings()
+    settings.auth_token = key
+    monkeypatch.setattr("app.config.load_settings", lambda: settings)
+    monkeypatch.setattr("app.auth.load_settings", lambda: settings)
+    return TestClient(app), key
+
+
 def test_repeated_failures_persist_across_reload(breaker_env):
     automation_id = "schedule:sched-1"
     ensure_automation(automation_id, failure_threshold=3)
@@ -60,6 +75,7 @@ def test_repeated_failures_persist_across_reload(breaker_env):
     assert tripped is not None
     assert tripped.breaker_state == BREAKER_DISABLED_BY_FAILURE
     assert tripped.disabled_at
+    assert "breaker_tripped" in _audit_types(automation_id)
 
 
 def test_verified_success_resets_counter(breaker_env):
@@ -74,6 +90,7 @@ def test_verified_success_resets_counter(breaker_env):
     record = get_automation_breaker(automation_id)
     assert record.consecutive_failure_count == 0
     assert record.breaker_state == BREAKER_ACTIVE
+    assert "failure_counter_reset" in _audit_types(automation_id)
 
 
 def test_concurrent_triggers_at_threshold_boundary(breaker_env):
@@ -96,8 +113,13 @@ def test_concurrent_triggers_at_threshold_boundary(breaker_env):
     record = get_automation_breaker(automation_id)
     assert record.breaker_state == BREAKER_DISABLED_BY_FAILURE
     assert record.consecutive_failure_count >= 2
+    allowed = [item for item in results if item]
     suppressed = [item for item in results if not item]
+    # One failure away from trip: at most one admit past the remaining budget.
+    assert len(allowed) <= 1
     assert suppressed, "expected later triggers to be suppressed once disabled"
+    assert "breaker_tripped" in _audit_types(automation_id)
+    assert "trigger_suppressed" in _audit_types(automation_id)
 
 
 def test_one_terminal_outcome_per_run_retries(breaker_env):
@@ -146,6 +168,9 @@ def test_disabled_blocks_admission(breaker_env):
     blocked = admit_automatic_trigger(automation_id, run_id="after", trigger="schedule")
     assert not blocked.allowed
     assert blocked.suppressed
+    types = _audit_types(automation_id)
+    assert "breaker_tripped" in types
+    assert "trigger_suppressed" in types
 
 
 def test_unauthorized_self_reenable_blocked(breaker_env):
@@ -174,6 +199,10 @@ def test_operator_reenable_recovery(breaker_env, monkeypatch):
     admission = admit_automatic_trigger(automation_id, run_id="after-reenable", trigger="schedule")
     assert admission.allowed
 
+    types = _audit_types(automation_id)
+    assert "reenable" in types
+    assert "reenable_idempotent" in types
+
 
 def test_task_hook_links_binding(breaker_env):
     automation_id = schedule_automation_id("hook-1")
@@ -189,17 +218,12 @@ def test_task_hook_links_binding(breaker_env):
 
 
 def test_api_reenable_requires_owner_key(breaker_env, monkeypatch):
-    key = generate_private_key()
-    settings = load_settings()
-    settings.auth_token = key
-    monkeypatch.setattr("app.config.load_settings", lambda: settings)
-    monkeypatch.setattr("app.auth.load_settings", lambda: settings)
+    client, key = _owner_client(monkeypatch)
 
     automation_id = "schedule:api"
     ensure_automation(automation_id, failure_threshold=1)
     finalize_run_outcome(automation_id, "x", TerminalOutcome.FAILURE)
 
-    client = TestClient(app)
     denied = client.post(f"/api/automation-breaker/{automation_id}/reenable", json={"actor": "owner"})
     assert denied.status_code == 401
 
@@ -219,10 +243,71 @@ def test_api_reenable_requires_owner_key(breaker_env, monkeypatch):
     assert self_actor.status_code == 403
 
 
+def test_api_get_list_detail_audit_require_owner_key(breaker_env, monkeypatch):
+    client, key = _owner_client(monkeypatch)
+    automation_id = "schedule:get-gate"
+    ensure_automation(automation_id, kind="schedule", failure_threshold=2)
+    finalize_run_outcome(automation_id, "g1", TerminalOutcome.FAILURE, summary="x")
+
+    for path in (
+        "/api/automation-breaker",
+        f"/api/automation-breaker/{automation_id}",
+        "/api/automation-breaker/audit",
+        f"/api/automation-breaker/audit?automation_id={automation_id}",
+    ):
+        denied = client.get(path)
+        assert denied.status_code == 401, path
+
+    headers = {"Authorization": f"Bearer {key}"}
+    listed = client.get("/api/automation-breaker", headers=headers)
+    assert listed.status_code == 200
+    assert any(row["automation_id"] == automation_id for row in listed.json()["automations"])
+
+    detail = client.get(f"/api/automation-breaker/{automation_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["automation_id"] == automation_id
+    assert detail.json()["kind"] == "schedule"
+
+    audit = client.get(
+        f"/api/automation-breaker/audit?automation_id={automation_id}",
+        headers=headers,
+    )
+    assert audit.status_code == 200
+    assert isinstance(audit.json()["events"], list)
+
+
+def test_threshold_and_admission_preserve_kind(breaker_env, monkeypatch):
+    automation_id = "schedule:kind-preserve"
+    ensure_automation(automation_id, kind="schedule", failure_threshold=3)
+    assert get_automation_breaker(automation_id).kind == "schedule"
+
+    # Admission without kind must not rewrite to generic.
+    admit_automatic_trigger(automation_id, run_id="kind-admit", trigger="schedule")
+    assert get_automation_breaker(automation_id).kind == "schedule"
+
+    # Threshold helper (same path as owner PUT) must preserve kind.
+    set_failure_threshold(automation_id, 5, actor="owner")
+    assert get_automation_breaker(automation_id).kind == "schedule"
+    assert get_automation_breaker(automation_id).failure_threshold == 5
+    assert "threshold_updated" in _audit_types(automation_id)
+
+    client, key = _owner_client(monkeypatch)
+    via_api = client.put(
+        f"/api/automation-breaker/{automation_id}/threshold",
+        json={"failure_threshold": 4},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert via_api.status_code == 200
+    assert via_api.json()["kind"] == "schedule"
+    assert via_api.json()["failure_threshold"] == 4
+
+
 def test_admission_race_disables_before_new_run(breaker_env):
+    """At most one admit past the remaining failure budget; then fail closed."""
     automation_id = "schedule:race"
     ensure_automation(automation_id, failure_threshold=2)
-    barrier = threading.Barrier(2)
+    _fail_run(automation_id, "pre", 1)  # one away from trip
+    barrier = threading.Barrier(4)
 
     def worker(run_id: str) -> bool:
         barrier.wait()
@@ -231,10 +316,21 @@ def test_admission_race_disables_before_new_run(breaker_env):
             finalize_run_outcome(automation_id, run_id, TerminalOutcome.FAILURE, summary="f")
         return admission.allowed
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(worker, f"race-{i}") for i in range(2)]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(worker, f"race-{i}") for i in range(4)]
         allowed = [f.result() for f in futures]
 
     record = get_automation_breaker(automation_id)
     assert record.breaker_state == BREAKER_DISABLED_BY_FAILURE
-    assert sum(1 for item in allowed if item) <= 2
+    # Real invariant: only one run may be admitted past the threshold boundary.
+    assert sum(1 for item in allowed if item) <= 1
+    assert sum(1 for item in allowed if item) == 1
+
+    # After trip, further automatic triggers stay suppressed.
+    blocked = admit_automatic_trigger(automation_id, run_id="post-trip", trigger="schedule")
+    assert not blocked.allowed
+    assert blocked.suppressed
+
+    types = _audit_types(automation_id)
+    assert "breaker_tripped" in types
+    assert "trigger_suppressed" in types
