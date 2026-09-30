@@ -50,7 +50,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       settings={settings}
       shapeId={shapeId}
       personaVisual={personaVisual}
-      className={`jarvis-presence jarvis-presence-humanoid${galaxy ? " galaxy" : ""}`}
+      className={`jarvis-presence jarvis-presence-stage jarvis-presence-humanoid${galaxy ? " galaxy" : ""}`}
       ariaLabel={`ANZU particle presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
     >
       {snapshot.phase === "offline" && <span className="jarvis-presence-broken-ring" aria-hidden="true" />}
