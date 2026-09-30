@@ -105,7 +105,9 @@ async def select_profile(profile_id: str):
         raise HTTPException(status_code=500, detail=str(exc)[:500]) from exc
     settings = load_settings()
     payload = profile.as_dict()
-    payload["load"] = await MANAGER.snapshot(settings)
+    from ..inference.status_monitor import STATUS_MONITOR
+
+    payload["load"] = await STATUS_MONITOR.get_snapshot(settings, force_refresh=True)
     return payload
 
 

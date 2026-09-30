@@ -236,11 +236,15 @@ async def load_model(body: LoadBody | None = None):
         int(MANAGER.state.context_size or target_context),
         previous_context_limit=previous_context if previous_context > 0 else None,
     )
-    return await MANAGER.snapshot(settings)
+    from ..inference.status_monitor import STATUS_MONITOR
+
+    return await STATUS_MONITOR.get_snapshot(settings, force_refresh=True)
 
 
 @router.post("/unload")
 async def unload_model():
     await MANAGER.unload()
     settings = load_settings()
-    return await MANAGER.snapshot(settings)
+    from ..inference.status_monitor import STATUS_MONITOR
+
+    return await STATUS_MONITOR.get_snapshot(settings, force_refresh=True)
