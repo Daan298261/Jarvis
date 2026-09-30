@@ -233,7 +233,7 @@ async def test_owner_chat_final_basic_skips_worker_model_load(jarvis_env, monkey
     class StreamProvider:
         async def chat_stream(self, messages, **kwargs):
             del messages, kwargs
-            yield "Hello, sir."
+            yield "Quite well, sir."
 
     async def boom_load(*_a, **_k):
         load_calls.append("load")
@@ -256,9 +256,10 @@ async def test_owner_chat_final_basic_skips_worker_model_load(jarvis_env, monkey
     assert done["type"] == "done"
     assert done["front_action"] == "final_basic"
     assert done["front_terminal"] is True
-    assert "Hello" in done["text"]
+    assert "well" in done["text"].lower()
     assert done.get("timing", {}).get("front_action") == "final_basic"
     assert pending_chat_tts()
+    assert done.get("early_tts_ids") or done.get("tts_id")
 
 
 @pytest.mark.asyncio
