@@ -1,6 +1,8 @@
 # RFC-0117: Tiny front-chat responder
 
 **Status:** implemented  
+**Implemented:** #481 @ `c50a65341fc6f3522b3d58a681a107bedd321e0a` on `development` (squash; pre-squash head `fc198f64093d56bc05e204248a07a69a7abaed5f`, D2 peer APPROVE). Terminal owner-chat `final_basic` / `ask_clarification` complete without `MANAGER.load` / `ensure_context` / two-lane worker; first text + safe TTS leave immediately; ack/handoff emit before the worker; `record_front_timing` preserves early `front_first_audio_ms` / `tts_first_audio_ms`; double-speak guard (`mark_stream_spoken`). Prior lane: specs #303 @ `49f6af4`, implement #305 @ `4eb25d9`.  
+**Residuals (do not claim done):** Windows Desktop first-visible / first-audible soak across ≥2 larger models (cloud cannot sign). Stale #479 task-loop residual was scrubbed before #481 land — do not reopen it. Colliding file `0117-durable-state-journal-rollback.md` is a different ticket (implemented via #380) and is not this tick.  
 **Queue item:** Universal low-latency reply while larger model/tool work continues  
 **Author:** Taco request via Codex  
 **Date:** 2026-09-18
@@ -180,15 +182,20 @@ Implement follow-up (landed):
 
 - [x] A configured tiny front responder lane exists with tools disabled, thinking disabled, and a small token cap — #305 `backend/app/agent/front_responder.py` (`runtime_role = front_responder`, tools/thinking off, 96–160 token cap; configurable `front_responder.model`, no vendor name hard-coded)
 - [x] Owner chat starts the front responder before or in parallel with the normal router/worker path — #305 two-lane owner chat (`test_two_lane_skips_worker_for_final_basic` / `test_two_lane_runs_worker_for_ack_continue`)
-- [x] Trivial greetings and basic chat can complete through `final_basic` without invoking a larger worker — #305 `classify_front_action` + `test_two_lane_skips_worker_for_final_basic`
-- [x] Non-trivial requests emit a safe `ack_continue` or `handoff_notice` quickly while the larger model/tool path continues — #305 `ack_continue` / `handoff_notice` / `ask_clarification` while the conversation worker or managed loop continues
+- [x] Trivial greetings and basic chat can complete through `final_basic` without invoking a larger worker — #305 `classify_front_action` + `test_two_lane_skips_worker_for_final_basic`; **#481** owner-chat terminal `final_basic` / `ask_clarification` return before `MANAGER.load` / `ensure_context` / two-lane worker
+- [x] Non-trivial requests emit a safe `ack_continue` or `handoff_notice` quickly while the larger model/tool path continues — #305 `ack_continue` / `handoff_notice` / `ask_clarification` while the conversation worker or managed loop continues; **#481** those deltas + speak emit before worker load (no second front emit/speak)
 - [x] The front responder cannot make unverified success claims, perform tools, expose hidden reasoning, or answer tier-2+ requests as final — #305 `is_safe_front_speech` rejects “Done, I fixed it.”; tools/thinking disabled in the front envelope
 - [x] Transcript rendering treats the front and worker output as one Jarvis turn, without duplicate reply cards — #305 `merge_front_and_worker` + `test_merge_front_and_worker_is_one_turn`; portal poll 400ms + live SSE preview
-- [x] Speech can begin from a safe front response without waiting for the larger model — #305 `front_responder.speak_immediately`
-- [x] Diagnostics record queue, front first text, front first audio, router, worker first text, worker completion, and TTS/audio timings — #305 `GET /api/diagnostics` → `front_responder.last_turn`
-- [x] Unit tests cover `final_basic`, `ack_continue`, `ask_clarification`, safety rejection, no-tools/no-thinking config, and transcript merge behavior — #305 `tests/test_front_responder.py` (+ `tests/test_owner_chat_greeting.py` / `tests/test_chat_turns.py`)
-- [x] `python -m pytest` passes for focused tests; `npm --prefix frontend run build` passes if transcript UI changes — #305 focused pytest + frontend build
-- [ ] Windows desktop sign-off measures first visible and first audible response across at least two larger backend models, proving the fix is not 27B-specific. Cloud VMs cannot sign this off.
+- [x] Speech can begin from a safe front response without waiting for the larger model — #305 `front_responder.speak_immediately`; **#481** first text + TTS leave immediately; `mark_stream_spoken` when falling back to `publish_owner_text` (double-speak guard)
+- [x] Diagnostics record queue, front first text, front first audio, router, worker first text, worker completion, and TTS/audio timings — #305 `GET /api/diagnostics` → `front_responder.last_turn`; **#481** `record_front_timing` keeps early `front_first_audio_ms` / `tts_first_audio_ms` so a later done write cannot zero them
+- [x] Unit tests cover `final_basic`, `ack_continue`, `ask_clarification`, safety rejection, no-tools/no-thinking config, and transcript merge behavior — #305 `tests/test_front_responder.py` (+ `tests/test_owner_chat_greeting.py` / `tests/test_chat_turns.py`); **#481** terminal early-exit + audio-preserve coverage (`_mock_lane` no longer mislabels front as worker)
+- [x] `python -m pytest` passes for focused tests; `npm --prefix frontend run build` passes if transcript UI changes — #305 focused pytest + frontend build; **#481** focused pytest green (no `frontend/src` in that PR)
+- [ ] Windows desktop sign-off measures first visible and first audible response across at least two larger backend models, proving the fix is not 27B-specific. Cloud VMs cannot sign this off. **Residual — unchecked.** #481 did not measure this.
+
+### Residual notes (unchecked — do not mark implemented)
+
+- Windows Desktop first-visible / first-audible soak across at least two larger backend models. Cloud VMs cannot sign this off.
+- Stale #479 task-loop warm-model residual was scrubbed before #481 land. Do not reopen it. Hard bypass of the task conversation path is RFC-0085 / #479, not this RFC.
 
 ## Still missing to actually fix speed
 
@@ -219,4 +226,4 @@ The owner explicitly reported that the delay occurs across models, not only with
 
 ## Implementation note
 
-Landed on `development` via specs **#303** @ `49f6af4` (tiny front-chat responder RFC + README pointer) + implement **#305** @ `4eb25d9` (`front_responder` lane; tools/thinking disabled; 96–160 token cap; two-lane owner chat; one-transcript merge; immediate safe TTS; `front_responder.last_turn` diagnostics). **#304** is a **different** colliding RFC number (`docs/rfcs/0117-durable-state-journal-rollback.md`) and stays **accepted** — not this ticket. Post-1.4 optional accelerator; does **not** block 1.4.0. Windows first-visible / first-audible measurement across two larger models remains desktop sign-off. No new §58 checkbox.
+Landed on `development` via specs **#303** @ `49f6af4` (tiny front-chat responder RFC + README pointer) + implement **#305** @ `4eb25d9` (`front_responder` lane; tools/thinking disabled; 96–160 token cap; two-lane owner chat; one-transcript merge; immediate safe TTS; `front_responder.last_turn` diagnostics) + harden **#481** @ `c50a65341fc6f3522b3d58a681a107bedd321e0a` (squash; pre-squash `fc198f64093d56bc05e204248a07a69a7abaed5f`, D2 peer APPROVE). #481 closes the owner-chat terminal path: `final_basic` / `ask_clarification` finish without `MANAGER.load` / `ensure_context` / two-lane worker; first text + TTS leave immediately; ack/handoff emit before the worker; diagnostics preserve early audio timings; double-speak guard. **Colliding number:** `docs/rfcs/0117-durable-state-journal-rollback.md` is a different ticket (implemented via #380) and is unchanged by this tick. The earlier note that #304 left that file **accepted** is stale — #380 implemented it; this ledger does not retick it. Post-1.4 optional accelerator; does **not** block 1.4.0. Windows first-visible / first-audible measurement across two larger models remains desktop sign-off (unchecked). No new §58 checkbox.

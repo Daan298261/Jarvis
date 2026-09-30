@@ -2989,6 +2989,26 @@ CoS asked Architect to ledger-tick after #476 squash-landed on `development` tip
 
 ---
 
+Decision: RFC-0117 tiny front-chat responder hardened (#481)
+
+[RFC-0117](docs/rfcs/0117-tiny-front-chat-responder.md) (tiny front-chat responder — Wave B speed) stays **implemented**. Harden landed on `development` via #481 @ `c50a65341fc6f3522b3d58a681a107bedd321e0a` (squash; pre-squash head `fc198f64093d56bc05e204248a07a69a7abaed5f`, D2 peer APPROVE). Owner-chat terminal `final_basic` / `ask_clarification` complete without `MANAGER.load` / `ensure_context` / two-lane worker; first text + safe TTS leave immediately; ack/handoff emit before the worker; `record_front_timing` preserves early audio timings; double-speak guard. Prior lane remains specs #303 (`49f6af4`) + implement #305 (`4eb25d9`). **Number collision:** `docs/rfcs/0117-durable-state-journal-rollback.md` is a different RFC (durable mutation journal), already implemented via #380 (`049874c7`). This tick does not retick that file. **Residual (AC unchecked):** Windows Desktop first-visible / first-audible soak across ≥2 larger models (cloud cannot sign). Stale #479 task-loop residual was scrubbed before #481 land — do not reopen it (that hard bypass is RFC-0085). No §57 rewrite. No new §58 checkbox. No product code in this ledger PR. RFC-0195 and RFC-0107 are not flipped.
+
+Reason:
+
+CoS asked Architect to ledger-tick the tiny front-chat responder after #481 squash-landed on `development` tip `c50a653`; Desktop soak stays residual.
+
+---
+
+Decision: RFC-0085 universal task fast path hard bypass (#479)
+
+[RFC-0085](docs/rfcs/0085-universal-task-fastpath.md) stays **implemented**. Hard bypass landed on `development` via #479 @ `f2c150b127d76260e0d030a44c44948d24f298ea` (squash; pre-squash head `e0612996148e63c747de9105523d7b737e56b012`, D1 peer APPROVE). Warm-model terminal `final_basic` / `ask_clarification` on `direct_reply`, and lean `direct_lookup`, skip heavy route / watchdog / verify / tool catalog; misses fail closed. `task_fastpath.py`, diagnostics hit/miss, `tests/test_rfc0085_fastpath_hard_bypass.py`. Original stage remains #235 (`954e01f`). **Residuals (AC unchecked):** interactive budget for the whole direct reply (front `timeout_ms` is not that budget); full task-record timing (no queue-delay or verifier-timing columns — row still has `response_route`, `first_response_ms`, `model_ms`, `tool_ms`); direct-lookup weather briefing is still awaited before the front acknowledgement (weather stays the only `direct_lookup`, conversational under RFC-0084). Desktop first-useful-response soak is unsigned (no desktop checkbox was filed; do not invent one). The 2026-09-23 catch-up in this log (warm direct replies still pay a worker + background verify) is superseded for terminal fronts only. No §57 rewrite. No new §58 checkbox. No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #479 squash-landed on `development`; interactive budget, full timing, and Desktop soak stay honest.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
