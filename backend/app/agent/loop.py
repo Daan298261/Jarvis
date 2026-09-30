@@ -2053,6 +2053,27 @@ class AgentRuntime:
         if existing and continue_existing:
             messages = existing
             if extra_prompt:
+                # RFC-0107 Wave B: refresh vault working set for the follow-up ask —
+                # continue_existing must not keep a stale or empty vault block.
+                follow_ws = await compose_turn_working_set(
+                    extra_prompt,
+                    task_class=working.task_class,
+                    extra_capabilities=working.requested_tools,
+                    security_role=working.security_role,
+                    agent_id="owner",
+                    recent_messages=existing,
+                    needs_tools=working.ingress_needs_tools,
+                )
+                from .turn_working_set import replace_vault_block_in_system
+
+                for idx, message in enumerate(messages):
+                    if message.role == "system":
+                        refreshed = replace_vault_block_in_system(
+                            message.content if isinstance(message.content, str) else "",
+                            follow_ws.vault_block,
+                        )
+                        messages[idx] = ChatMessage(role="system", content=refreshed)
+                        break
                 follow_up_grounding = maybe_docs_first(DocsFirstContext(user_message=extra_prompt))
                 if follow_up_grounding and follow_up_grounding.prompt_block():
                     for idx, message in enumerate(messages):

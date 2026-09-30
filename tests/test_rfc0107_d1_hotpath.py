@@ -8,6 +8,7 @@ from app.agent.tool_retrieval import suggest_installable_catalog, suggest_tools_
 from app.agent.turn_working_set import (
     MAX_RECENT_TURNS,
     MAX_WORKING_SET_TOOLS,
+    VAULT_RETRIEVAL_HITS,
     compose_turn_working_set,
 )
 from app.memory.obsidian_vault import (
@@ -82,6 +83,7 @@ async def test_vault_relevant_ask_includes_path_heading_hash_provenance(vault_pr
         needs_tools=False,
     )
     assert ws.vault_block, "empty-by-construction is a fail for vault-relevant asks"
+    assert ws.vault_retrieval == VAULT_RETRIEVAL_HITS
     assert ws.vault_hits, "structured provenance hits required"
     hit = next(h for h in ws.vault_hits if "deploy" in h.rel_path.lower())
     assert hit.rel_path.endswith("deploy.md")

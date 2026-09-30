@@ -959,6 +959,27 @@ def query_looks_vault_relevant(query: str) -> bool:
     return bool(tokens & _VAULT_RELEVANCE_TERMS)
 
 
+def vault_ask_requires_working_set(prompt: str) -> bool:
+    """RFC-0107 Wave B: bound + vault-relevant asks must compose the turn working set.
+
+    Terminal front / fast-path completions that skip compose are décor fails when
+    the ask is about vault content and a vault is bound.
+    """
+    if not public_binding_status().get("bound"):
+        return False
+    return query_looks_vault_relevant(prompt)
+
+
+_ORIENTATION_PROVENANCE = frozenset({"vault_router", "vault_recent"})
+
+
+def hits_are_orientation_only(hits: list[VaultHit]) -> bool:
+    """True when every hit is a router/recent fallback, not a lexical match."""
+    if not hits:
+        return False
+    return all((h.provenance or "") in _ORIENTATION_PROVENANCE for h in hits)
+
+
 def _router_orientation_excerpt() -> VaultHit | None:
     root = vault_root()
     if root is None:
@@ -1028,7 +1049,8 @@ def vault_turn_hits(query: str, *, limit: int = 6) -> list[VaultHit]:
                 continue
             hits = search_vault(tok, limit=limit)
             if hits:
-                return hits
+                # Same ranking path as primary hits — no soft skip of reflex rerank.
+                return _reflex_rerank_memory_hits(cleaned, hits, limit=limit)
     if not query_looks_vault_relevant(cleaned):
         return []
     router = _router_orientation_excerpt()
@@ -1154,13 +1176,23 @@ def vault_hits_to_prompt_block(hits: list[VaultHit], *, hop_cap: int = MAX_NEIGH
     """Compact vault hits for the turn working set — never the full vault."""
     if not hits:
         return ""
-    lines = [
-        "Linked vault memory (RFC-0107): use only these excerpts; the full vault is not in context.",
-    ]
+    if hits_are_orientation_only(hits):
+        lines = [
+            "Linked vault memory (RFC-0107): bound-vault orientation only — not a lexical "
+            "match for this ask; use vault_memory search/resolve for precise notes. "
+            "The full vault is not in context.",
+        ]
+    else:
+        lines = [
+            "Linked vault memory (RFC-0107): use only these excerpts; the full vault is not in context.",
+        ]
     seen_paths: set[str] = set()
     for hit in hits:
         lines.append(format_vault_hit_line(hit))
         seen_paths.add(hit.rel_path)
+        # Orientation fallbacks do not expand hop neighborhoods (that would look like hits).
+        if hit.provenance in _ORIENTATION_PROVENANCE:
+            continue
         for neighbor in neighborhood(hit.rel_path, hops=hop_cap):
             if neighbor.rel_path in seen_paths:
                 continue

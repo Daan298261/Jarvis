@@ -86,6 +86,7 @@ async def vault_search(body: VaultSearchIn) -> dict[str, Any]:
                 "excerpt": h.excerpt,
                 "content_hash": h.content_hash,
                 "score": h.score,
+                "provenance": h.provenance,
             }
             for h in hits
         ],

@@ -8,6 +8,7 @@ from typing import Any
 
 from ..memory.obsidian_vault import (
     VaultHit,
+    hits_are_orientation_only,
     public_binding_status,
     query_looks_vault_relevant,
     vault_hits_to_prompt_block,
@@ -15,6 +16,7 @@ from ..memory.obsidian_vault import (
 )
 from ..persona.pack import compact_identity_instructions
 from ..providers.base import ChatMessage
+from .compaction import VAULT_MARKER
 from .tool_exposure import describe_exposure, schemas_for, tool_names_for
 from .tool_retrieval import MAX_RETRIEVED_TOOLS
 
@@ -23,6 +25,14 @@ MAX_RECENT_TURNS = 8
 MAX_RECENT_CHARS = 6000
 # Hard cap on schemas that enter the turn (CLASS_TOOLS may seed; unused catalog stays out).
 MAX_WORKING_SET_TOOLS = max(8, MAX_RETRIEVED_TOOLS + 2)
+
+# vault_retrieval values — structured status so tests never rely on soft string checks alone.
+VAULT_RETRIEVAL_SKIPPED = "skipped"
+VAULT_RETRIEVAL_UNBOUND = "unbound"
+VAULT_RETRIEVAL_HITS = "hits"
+VAULT_RETRIEVAL_ORIENTATION = "orientation"
+VAULT_RETRIEVAL_MISS = "miss"
+VAULT_RETRIEVAL_IDLE = "idle"
 
 
 @dataclass
@@ -73,6 +83,8 @@ class TurnWorkingSet:
     vault_hits: list[VaultHitProvenance] = field(default_factory=list)
     # Always filled by per-ask search (even when schemas are withheld for Q&A).
     searched_tool_names: list[str] = field(default_factory=list)
+    # RFC-0107 Wave B: structured retrieve outcome (not décor / skip-if-empty prose).
+    vault_retrieval: str = VAULT_RETRIEVAL_SKIPPED
 
     def serialized_prompt_text(self) -> str:
         """Concatenated text that enters the model (for acceptance tests)."""
@@ -90,6 +102,9 @@ class TurnWorkingSet:
 
     def vault_provenance_dicts(self) -> list[dict[str, Any]]:
         return [asdict(hit) for hit in self.vault_hits]
+
+    def has_vault_hits(self) -> bool:
+        return self.vault_retrieval == VAULT_RETRIEVAL_HITS and bool(self.vault_hits)
 
 
 def bound_recent_turns(messages: list[ChatMessage]) -> list[ChatMessage]:
@@ -217,15 +232,22 @@ def _cap_schemas(schemas: list[dict[str, Any]], allowed_names: set[str]) -> list
     return out
 
 
-def _compose_vault_working_set(prompt: str) -> tuple[str, list[VaultHitProvenance]]:
-    """Bound vault → retrieve with provenance; vault-relevant asks must not be empty-by-construction."""
+def _compose_vault_working_set(prompt: str) -> tuple[str, list[VaultHitProvenance], str]:
+    """Bound vault → retrieve with provenance; vault-relevant asks must not be empty-by-construction.
+
+    Returns ``(block, provenanced_hits, vault_retrieval_status)``.
+    """
     status = public_binding_status()
     if not status.get("bound"):
-        return "", []
+        return "", [], VAULT_RETRIEVAL_UNBOUND
     hits = vault_turn_hits(prompt, limit=6)
     provenanced = [VaultHitProvenance.from_hit(hit) for hit in hits]
     block = vault_hits_to_prompt_block(hits)
-    if query_looks_vault_relevant(prompt) and not provenanced:
+    if provenanced:
+        if hits_are_orientation_only(hits):
+            return block, provenanced, VAULT_RETRIEVAL_ORIENTATION
+        return block, provenanced, VAULT_RETRIEVAL_HITS
+    if query_looks_vault_relevant(prompt):
         # Soft-fail empty retrieval is a product fail: surface an explicit miss with bind status
         # so the orchestrator cannot pretend the vault was unused because compose skipped it.
         block = (
@@ -233,7 +255,8 @@ def _compose_vault_working_set(prompt: str) -> tuple[str, list[VaultHitProvenanc
             f"but no indexed excerpts matched (notes={status.get('note_count', 0)}). "
             "Use vault_memory search/resolve — do not invent vault content."
         )
-    return block, provenanced
+        return block, [], VAULT_RETRIEVAL_MISS
+    return "", [], VAULT_RETRIEVAL_IDLE
 
 
 async def compose_turn_working_set(
@@ -303,8 +326,9 @@ async def compose_turn_working_set(
 
     vault_block = ""
     vault_hits: list[VaultHitProvenance] = []
+    vault_retrieval = VAULT_RETRIEVAL_SKIPPED
     if include_vault:
-        vault_block, vault_hits = _compose_vault_working_set(prompt)
+        vault_block, vault_hits, vault_retrieval = _compose_vault_working_set(prompt)
 
     memory_block = ""
     if include_memory:
@@ -323,6 +347,7 @@ async def compose_turn_working_set(
         installable_offers=offers,
         vault_hits=vault_hits,
         searched_tool_names=searched,
+        vault_retrieval=vault_retrieval,
     )
 
 
@@ -338,6 +363,20 @@ def apply_working_set_to_system(system_prompt: str, working: TurnWorkingSet) -> 
     if not prefix.strip():
         return system_prompt
     return prefix + "\n\n" + system_prompt
+
+
+def replace_vault_block_in_system(system_prompt: str, vault_block: str) -> str:
+    """Swap the Linked vault memory paragraph(s) for a freshly composed block (agent continue)."""
+    parts = [p for p in (system_prompt or "").split("\n\n") if p.strip()]
+    kept = [p for p in parts if not p.strip().startswith(VAULT_MARKER)]
+    cleaned = "\n\n".join(kept).strip()
+    block = (vault_block or "").strip()
+    if not block:
+        return cleaned
+    if not cleaned:
+        return block
+    # Keep vault near the head so follow-ups see it before long task body text.
+    return block + "\n\n" + cleaned
 
 
 def working_set_chat_messages(working: TurnWorkingSet) -> list[ChatMessage]:
