@@ -352,65 +352,70 @@ async def stream_owner_chat(
             prefetched_front.first_audio_ms = audio_ms
             front_spoken_early = True
 
-        # final_basic / ask_clarification: complete without loading the worker.
+        # final_basic / ask_clarification: complete without loading the worker —
+        # unless RFC-0107 requires the vault working set (bound + vault-relevant).
         if terminal_front_completes_turn(prefetched_front.action):
-            reply = prefetched_front.text.strip()
-            timing = TwoLaneTiming(
-                front_model=prefetched_front.model or resolve_front_model_id(settings),
-                front_action=prefetched_front.action,
-                queue_ms=max(0.0, (time.perf_counter() - turn_started) * 1000),
-                front_first_text_ms=prefetched_front.first_text_ms,
-                front_complete_ms=prefetched_front.complete_ms,
-                front_first_audio_ms=prefetched_front.first_audio_ms,
-                tts_first_audio_ms=prefetched_front.first_audio_ms,
-            )
-            recorded = record_front_timing(timing.as_dict())
-            _conversations[cid].append(ChatMessage(role="user", content=worker_text))
-            _conversations[cid].append(ChatMessage(role="assistant", content=reply))
-            from ..projects.portal_store import save_owner_conversation
+            from ..memory.obsidian_vault import vault_ask_requires_working_set
 
-            await save_owner_conversation(
-                cid,
-                _conversations[cid],
-                title=cleaned[:120],
-            )
-            try:
-                from ..memory.obsidian_vault import mirror_owner_chat_turn
-
-                mirror_owner_chat_turn(
-                    conversation_id=cid,
-                    user_text=cleaned,
-                    assistant_text=reply,
+            if not vault_ask_requires_working_set(cleaned):
+                reply = prefetched_front.text.strip()
+                timing = TwoLaneTiming(
+                    front_model=prefetched_front.model or resolve_front_model_id(settings),
+                    front_action=prefetched_front.action,
+                    queue_ms=max(0.0, (time.perf_counter() - turn_started) * 1000),
+                    front_first_text_ms=prefetched_front.first_text_ms,
+                    front_complete_ms=prefetched_front.complete_ms,
+                    front_first_audio_ms=prefetched_front.first_audio_ms,
+                    tts_first_audio_ms=prefetched_front.first_audio_ms,
                 )
-            except Exception:
-                pass
-            # Already spoken above when speak_immediately; only fill remainder.
-            delivery = await publish_owner_text(
-                reply,
-                source="owner_chat",
-                speak=True,
-                user_prompt=cleaned,
-                tts_char_offset=stream_speak_offset(stream_key),
-            )
-            clear_stream_speak_state(stream_key)
-            tts_id = (
-                early_tts_ids[0]
-                if early_tts_ids and not delivery.get("tts_id")
-                else delivery.get("tts_id")
-            )
-            yield {
-                "type": "done",
-                "conversation_id": cid,
-                "text": reply,
-                "tts_id": tts_id,
-                "early_tts_ids": early_tts_ids,
-                "front_action": prefetched_front.action,
-                "timing": recorded,
-                "slow_nudges": 0,
-                "background_verify": False,
-                "front_terminal": True,
-            }
-            return
+                recorded = record_front_timing(timing.as_dict())
+                _conversations[cid].append(ChatMessage(role="user", content=worker_text))
+                _conversations[cid].append(ChatMessage(role="assistant", content=reply))
+                from ..projects.portal_store import save_owner_conversation
+
+                await save_owner_conversation(
+                    cid,
+                    _conversations[cid],
+                    title=cleaned[:120],
+                )
+                try:
+                    from ..memory.obsidian_vault import mirror_owner_chat_turn
+
+                    mirror_owner_chat_turn(
+                        conversation_id=cid,
+                        user_text=worker_text,
+                        assistant_text=reply,
+                    )
+                except Exception:
+                    pass
+                # Already spoken above when speak_immediately; only fill remainder.
+                delivery = await publish_owner_text(
+                    reply,
+                    source="owner_chat",
+                    speak=True,
+                    user_prompt=cleaned,
+                    tts_char_offset=stream_speak_offset(stream_key),
+                )
+                clear_stream_speak_state(stream_key)
+                tts_id = (
+                    early_tts_ids[0]
+                    if early_tts_ids and not delivery.get("tts_id")
+                    else delivery.get("tts_id")
+                )
+                yield {
+                    "type": "done",
+                    "conversation_id": cid,
+                    "text": reply,
+                    "tts_id": tts_id,
+                    "early_tts_ids": early_tts_ids,
+                    "front_action": prefetched_front.action,
+                    "timing": recorded,
+                    "slow_nudges": 0,
+                    "background_verify": False,
+                    "front_terminal": True,
+                }
+                return
+            # Fall through to worker so compose_turn_working_set runs with vault hits.
 
     if not MANAGER.provider or not MANAGER.state.loaded:
         try:
@@ -631,9 +636,10 @@ async def stream_owner_chat(
         try:
             from ..memory.obsidian_vault import mirror_owner_chat_turn
 
+            # Mirror what the worker (and next-turn composer) actually saw.
             mirror_owner_chat_turn(
                 conversation_id=cid,
-                user_text=cleaned,
+                user_text=worker_text,
                 assistant_text=reply,
             )
         except Exception:

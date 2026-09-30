@@ -63,7 +63,10 @@ async def test_owner_chat_path_uses_compose_turn_working_set(bound_vault):
         "cid-owner",
         "what is our project kubernetes deploy decision about the obsidian brain vault",
     )
+    from app.agent.turn_working_set import VAULT_RETRIEVAL_HITS
+
     assert working.vault_block, "empty-by-construction is a fail on the owner path"
+    assert working.vault_retrieval == VAULT_RETRIEVAL_HITS
     assert working.vault_hits
     hit = working.vault_hits[0]
     assert hit.rel_path and hit.content_hash and hit.heading
@@ -81,6 +84,8 @@ async def test_owner_chat_path_uses_compose_turn_working_set(bound_vault):
 @pytest.mark.asyncio
 async def test_owner_chat_vault_relevant_miss_is_not_skip_if_empty(tmp_path, monkeypatch):
     """Bound + vault-relevant with no lexical hits must still surface a composer miss block."""
+    from app.agent.turn_working_set import VAULT_RETRIEVAL_MISS
+
     data_root = tmp_path / "obsidian-meta"
     vault_root = tmp_path / "vault"
     data_root.mkdir(parents=True, exist_ok=True)
@@ -96,7 +101,10 @@ async def test_owner_chat_vault_relevant_miss_is_not_skip_if_empty(tmp_path, mon
         "remember our project decision notes",
     )
     assert working.vault_block
-    assert "vault is bound" in working.vault_block.lower() or "Linked vault memory" in working.vault_block
+    assert working.vault_retrieval == VAULT_RETRIEVAL_MISS
+    assert working.vault_hits == []
+    assert "vault is bound" in working.vault_block.lower()
+    assert "no indexed excerpts matched" in working.vault_block.lower()
     stop_watch()
     unbind_vault()
     reset_vault_store()

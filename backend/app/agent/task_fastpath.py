@@ -161,6 +161,17 @@ def admit_fastpath(
             route_kind=kind,
             front_action=action,
         )
+    # RFC-0107 Wave B: bound + vault-relevant asks must reach the worker with
+    # compose_turn_working_set — terminal front never sees vault excerpts.
+    from ..memory.obsidian_vault import vault_ask_requires_working_set
+
+    if vault_ask_requires_working_set(prompt):
+        return FastpathDecision(
+            admitted=False,
+            reason="vault_relevant_bound",
+            route_kind=kind,
+            front_action=action,
+        )
     return FastpathDecision(
         admitted=True,
         reason="direct_reply_terminal_front",
