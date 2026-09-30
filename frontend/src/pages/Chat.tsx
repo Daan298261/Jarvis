@@ -11,6 +11,7 @@ import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 import { useTaskSpeech } from "../tts/useTaskSpeech"
 import { AdvancedDisclosure } from "../components/AdvancedDisclosure"
 import { TaskActivityPanel } from "../components/TaskActivity"
+import { TaskStatusMeta } from "../components/TaskStatusMeta"
 import { MediaComposerBar } from "../components/MediaComposerBar"
 import { useMediaUploads } from "../chat/useMediaUploads"
 import { DelegationPanel } from "./Delegation"
@@ -180,13 +181,12 @@ export function ChatPage() {
           <>
             <div className="chat-head-title">
               <h1>{shown.title || "Task"}</h1>
-              <span className={`badge ${shown.state || shown.status}`}>{shown.state || shown.status}</span>
+              <span className={`badge ${shown.state || shown.status}`} title="Lifecycle state">
+                {shown.state || shown.status}
+              </span>
             </div>
             <p className="chat-head-meta">
-              {shown.current_action || shown.stage || "Working"}
-              {shown.current_tool ? ` · ${shown.current_tool}` : ""}
-              {" · "}
-              <span className="stat">{elapsed || Math.round(shown.duration_seconds || 0)}s</span>
+              <TaskStatusMeta task={shown} />
             </p>
           </>
         ) : empty ? (
@@ -226,8 +226,10 @@ export function ChatPage() {
             prompt={shown.prompt}
             status={shown.status}
             stage={shown.stage}
+            current_activity={shown.current_activity}
             current_action={shown.current_action}
             current_tool={shown.current_tool}
+            execution_phase={shown.execution_phase}
             waiting_for_confirmation={shown.waiting_for_confirmation}
             confirmation_payload={shown.confirmation_payload}
             result={shown.result}

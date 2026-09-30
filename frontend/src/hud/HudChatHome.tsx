@@ -53,7 +53,12 @@ function taskDetail(
   if (threadActive) return MOOD_COPY[mood].detail
   if (!task) return MOOD_COPY[mood].detail
   if (task.status === "failed") return task.error || "The current task needs attention"
+  const activity = task.current_activity || task.current_action
+  const phase = task.execution_phase
   const title = task.title || task.prompt?.slice(0, 72)
+  if (activity && title) return `${title} · ${activity}`
+  if (activity) return activity
+  if (title && phase) return `${title} · ${phase.toLowerCase().replaceAll("_", " ")}`
   if (title) return `${title} · ${task.status}`
   return MOOD_COPY[mood].detail
 }
