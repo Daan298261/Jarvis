@@ -97,12 +97,12 @@ export function McpPage() {
           <h2>Obsidian vault</h2>
           <p className="lede">
             {usability?.vault?.bound
-              ? `Bound · ${usability.vault.note_count ?? 0} notes indexed. Agent tool: vault_memory.`
-              : "Not bound. Bind a folder in Settings → Integrations."}
+              ? `Bound · ${usability.vault.note_count ?? 0} notes indexed. Agent tool: vault_memory. Edit in the Obsidian pane (real Obsidian in Jarvis Desktop).`
+              : "Not bound. Bind a folder in Settings → Integrations, then open the Obsidian pane."}
           </p>
           <div className="row">
             <Link className="btn secondary" to="/settings/integrations">Vault settings</Link>
-            <Link className="btn secondary" to="/obsidian">Open Obsidian pane</Link>
+            <Link className="btn" to="/obsidian">Open Obsidian pane</Link>
           </div>
         </div>
         <div className="card">
