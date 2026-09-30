@@ -6,10 +6,15 @@ import pytest
 
 from app.agent.chat_turns import visible_chat_turns
 from app.agent.compaction import serialize_messages
-def _mock_lane(kwargs: dict) -> str:
-    """Front lane uses ≤480 tokens in tests; worker stream uses 512."""
-    mt = int(kwargs.get("max_tokens", 999))
-    return "front" if mt <= 480 else "worker"
+
+
+def _mock_lane(messages, kwargs: dict) -> str:
+    """Distinguish front vs worker by envelope, not token count (default front cap is 512)."""
+    del kwargs
+    joined = "\n".join(getattr(item, "content", "") or "" for item in (messages or []))
+    if "front_responder" in joined.lower() or "Hint front_action" in joined:
+        return "front"
+    return "worker"
 
 
 from app.agent.front_responder import (
@@ -29,12 +34,14 @@ from app.agent.front_responder import (
     last_front_timing,
     merge_consecutive_assistant_turns,
     merge_front_and_worker,
+    note_front_audio,
     parse_front_payload,
     record_front_timing,
     reset_front_responder,
     resolve_front_model_id,
     run_two_lane_chat,
     small_context_envelope,
+    terminal_front_completes_turn,
     worker_required,
 )
 from app.agent.loop import AGENT
@@ -242,7 +249,7 @@ async def test_two_lane_skips_worker_for_final_basic(jarvis_env):
 
     class Provider:
         async def chat_stream(self, messages, **kwargs):
-            calls.append(_mock_lane(kwargs))
+            calls.append(_mock_lane(messages, kwargs))
             joined = "\n".join(item.content or "" for item in messages)
             assert "Do not call tools" in joined or "cannot use tools" in joined.lower() or "front_responder" in joined
             yield "Quite well, sir."
@@ -273,8 +280,8 @@ async def test_two_lane_runs_worker_for_ack_continue(jarvis_env):
 
     class Provider:
         async def chat_stream(self, messages, **kwargs):
-            calls.append(_mock_lane(kwargs))
-            if _mock_lane(kwargs) == "front":
+            calls.append(_mock_lane(messages, kwargs))
+            if _mock_lane(messages, kwargs) == "front":
                 yield "On it. I'll check the details."
                 return
             yield "Mild rain later, sir."
@@ -370,6 +377,36 @@ def test_diagnostics_include_front_timing():
     assert front["last_turn"]["front_action"] == "ack_continue"
     assert front["last_turn"]["front_first_text_ms"] == 640
     assert last_front_timing()["front_model"] == "local-front-chat"
+
+
+def test_record_front_timing_preserves_early_audio_marks():
+    note_front_audio({"front_action": "final_basic", "front_first_text_ms": 12}, 180.0)
+    assert last_front_timing()["front_first_audio_ms"] == 180.0
+    assert last_front_timing()["tts_first_audio_ms"] == 180.0
+    # Later done payload often zeros audio until worker finishes — must not wipe.
+    record_front_timing(
+        {
+            "front_model": "local-front-chat",
+            "front_action": "final_basic",
+            "front_first_text_ms": 12,
+            "front_first_audio_ms": 0.0,
+            "tts_first_audio_ms": 0.0,
+            "worker_complete_ms": 40,
+        }
+    )
+    assert last_front_timing()["front_first_audio_ms"] == 180.0
+    assert last_front_timing()["tts_first_audio_ms"] == 180.0
+    assert last_front_timing()["worker_complete_ms"] == 40
+
+
+def test_terminal_front_completes_turn_actions():
+    assert terminal_front_completes_turn("final_basic") is True
+    assert terminal_front_completes_turn("ask_clarification") is True
+    assert terminal_front_completes_turn("ack_continue") is False
+    assert terminal_front_completes_turn("handoff_notice") is False
+    assert terminal_front_completes_turn("silent_skip") is False
+    assert worker_required("ack_continue") is True
+    assert worker_required("final_basic") is False
 
 
 def test_clamp_front_max_tokens():

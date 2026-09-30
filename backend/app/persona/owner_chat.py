@@ -15,6 +15,7 @@ from ..providers.completion_text import empty_generation_error
 from .chat_delivery import (
     OWNER_CHAT_CHANNEL,
     clear_stream_speak_state,
+    mark_stream_spoken,
     maybe_enqueue_streaming_social_tts,
     pending_chat_tts_text,
     publish_owner_text,
@@ -23,12 +24,15 @@ from .chat_delivery import (
 from .weather import weather_system_message
 from ..events import BUS
 from ..agent.front_responder import (
+    TwoLaneTiming,
     generate_front_reply,
     is_safe_front_speech,
     last_front_timing,
     note_front_audio,
+    record_front_timing,
     resolve_front_model_id,
     run_two_lane_chat,
+    terminal_front_completes_turn,
 )
 from ..agent.planning import requests_agent_tools
 from ..agent.segmented_input import condense_segments
@@ -281,6 +285,7 @@ async def stream_owner_chat(
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
     front_spoken_early = False
+    front_text_emitted = False
 
     prefetched_front = await generate_front_reply(
         cleaned,
@@ -288,43 +293,124 @@ async def stream_owner_chat(
         settings=settings,
         turn_started=turn_started,
     )
-    if (
+    front_safe = bool(
         prefetched_front.text
         and prefetched_front.action != "silent_skip"
-        and settings.front_responder.speak_immediately
         and is_safe_front_speech(prefetched_front.action, prefetched_front.text)
-    ):
-        spoken = (
-            prefetched_front.text
-            if prefetched_front.text.endswith((".", "!", "?"))
-            else f"{prefetched_front.text}."
-        )
-        early_id = maybe_enqueue_streaming_social_tts(
-            spoken,
-            source="owner_chat",
-            stream_key=stream_key,
-            user_prompt=cleaned,
-        )
-        if not early_id:
+    )
+    if front_safe:
+        # Surface first text immediately — do not wait for worker model load.
+        chunks = prefetched_front.chunks or [prefetched_front.text]
+        for chunk in chunks:
+            if not chunk:
+                continue
+            front_text_emitted = True
+            yield {
+                "type": "delta",
+                "conversation_id": cid,
+                "text": chunk,
+                "lane": "front",
+            }
+        if (
+            settings.front_responder.speak_immediately
+            and not front_spoken_early
+        ):
+            spoken = (
+                prefetched_front.text
+                if prefetched_front.text.endswith((".", "!", "?"))
+                else f"{prefetched_front.text}."
+            )
+            early_id = maybe_enqueue_streaming_social_tts(
+                spoken,
+                source="owner_chat",
+                stream_key=stream_key,
+                user_prompt=cleaned,
+            )
+            if not early_id:
+                delivery = await publish_owner_text(
+                    prefetched_front.text,
+                    source="owner_chat",
+                    speak=True,
+                    user_prompt=cleaned,
+                )
+                if delivery.get("tts_id"):
+                    early_tts_ids.append(str(delivery["tts_id"]))
+                    # publish_owner_text does not advance the stream cursor;
+                    # mark it so the final reply path cannot re-speak.
+                    mark_stream_spoken(stream_key, len(prefetched_front.text))
+            else:
+                early_tts_ids.append(early_id)
+                await BUS.publish_ephemeral(
+                    OWNER_CHAT_CHANNEL,
+                    "chat_tts",
+                    "Speak reply",
+                    pending_chat_tts_text(early_id) or spoken,
+                    stage="owner_chat",
+                )
+            audio_ms = (time.perf_counter() - turn_started) * 1000
+            note_front_audio(None, audio_ms)
+            prefetched_front.first_audio_ms = audio_ms
+            front_spoken_early = True
+
+        # final_basic / ask_clarification: complete without loading the worker.
+        if terminal_front_completes_turn(prefetched_front.action):
+            reply = prefetched_front.text.strip()
+            timing = TwoLaneTiming(
+                front_model=prefetched_front.model or resolve_front_model_id(settings),
+                front_action=prefetched_front.action,
+                queue_ms=max(0.0, (time.perf_counter() - turn_started) * 1000),
+                front_first_text_ms=prefetched_front.first_text_ms,
+                front_complete_ms=prefetched_front.complete_ms,
+                front_first_audio_ms=prefetched_front.first_audio_ms,
+                tts_first_audio_ms=prefetched_front.first_audio_ms,
+            )
+            recorded = record_front_timing(timing.as_dict())
+            _conversations[cid].append(ChatMessage(role="user", content=worker_text))
+            _conversations[cid].append(ChatMessage(role="assistant", content=reply))
+            from ..projects.portal_store import save_owner_conversation
+
+            await save_owner_conversation(
+                cid,
+                _conversations[cid],
+                title=cleaned[:120],
+            )
+            try:
+                from ..memory.obsidian_vault import mirror_owner_chat_turn
+
+                mirror_owner_chat_turn(
+                    conversation_id=cid,
+                    user_text=cleaned,
+                    assistant_text=reply,
+                )
+            except Exception:
+                pass
+            # Already spoken above when speak_immediately; only fill remainder.
             delivery = await publish_owner_text(
-                prefetched_front.text,
+                reply,
                 source="owner_chat",
                 speak=True,
                 user_prompt=cleaned,
+                tts_char_offset=stream_speak_offset(stream_key),
             )
-            if delivery.get("tts_id"):
-                early_tts_ids.append(str(delivery["tts_id"]))
-        else:
-            early_tts_ids.append(early_id)
-            await BUS.publish_ephemeral(
-                OWNER_CHAT_CHANNEL,
-                "chat_tts",
-                "Speak reply",
-                pending_chat_tts_text(early_id) or spoken,
-                stage="owner_chat",
+            clear_stream_speak_state(stream_key)
+            tts_id = (
+                early_tts_ids[0]
+                if early_tts_ids and not delivery.get("tts_id")
+                else delivery.get("tts_id")
             )
-        note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
-        front_spoken_early = True
+            yield {
+                "type": "done",
+                "conversation_id": cid,
+                "text": reply,
+                "tts_id": tts_id,
+                "early_tts_ids": early_tts_ids,
+                "front_action": prefetched_front.action,
+                "timing": recorded,
+                "slow_nudges": 0,
+                "background_verify": False,
+                "front_terminal": True,
+            }
+            return
 
     if not MANAGER.provider or not MANAGER.state.loaded:
         try:
@@ -429,6 +515,9 @@ async def stream_owner_chat(
             yield delta
 
     async def on_delta(lane: str, delta: str) -> None:
+        # Front text/TTS already left the gate; do not re-append or re-speak it.
+        if lane == "front" and (front_text_emitted or front_spoken_early):
+            return
         parts.append(delta)
         model_id = resolve_front_model_id(settings) if lane == "front" else worker_model
         await BUS.publish_ephemeral(
@@ -471,11 +560,13 @@ async def stream_owner_chat(
         ):
             kind = event.get("type")
             if kind == "delta":
+                if event.get("lane") == "front" and front_text_emitted:
+                    continue
                 yield {"type": "delta", "conversation_id": cid, "text": event.get("text") or "", "lane": event.get("lane")}
             elif kind == "front_response_completed":
                 front = event.get("reply")
                 text = getattr(front, "text", "") or ""
-                if text and not parts:
+                if text and not parts and not front_text_emitted:
                     yield {"type": "delta", "conversation_id": cid, "text": text, "lane": "front"}
                 if (
                     front
@@ -499,6 +590,7 @@ async def stream_owner_chat(
                         )
                         if delivery.get("tts_id"):
                             early_tts_ids.append(str(delivery["tts_id"]))
+                            mark_stream_spoken(stream_key, len(front.text or ""))
                     elif early_id:
                         early_tts_ids.append(early_id)
                         await BUS.publish_ephemeral(
@@ -509,6 +601,11 @@ async def stream_owner_chat(
                             stage="owner_chat",
                         )
                     note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
+                    if front:
+                        front.first_audio_ms = max(
+                            float(getattr(front, "first_audio_ms", 0.0) or 0.0),
+                            (time.perf_counter() - turn_started) * 1000,
+                        )
             elif kind == "done":
                 done = event
     except Exception as exc:
@@ -550,23 +647,26 @@ async def stream_owner_chat(
         )
         clear_stream_speak_state(stream_key)
         tts_id = early_tts_ids[0] if early_tts_ids and not delivery.get("tts_id") else delivery.get("tts_id")
-        schedule_background_verification(
-            cleaned,
-            reply,
-            source="owner_chat",
-            speak=True,
-            conversation_id=cid,
-        )
+        # Direct front terminal turns skip verify; ack/handoff still verify the worker merge.
+        front_action = (done or {}).get("front_action") or prefetched_front.action
+        if not terminal_front_completes_turn(str(front_action or "")):
+            schedule_background_verification(
+                cleaned,
+                reply,
+                source="owner_chat",
+                speak=True,
+                conversation_id=cid,
+            )
         yield {
             "type": "done",
             "conversation_id": cid,
             "text": reply,
             "tts_id": tts_id,
             "early_tts_ids": early_tts_ids,
-            "front_action": (done or {}).get("front_action"),
+            "front_action": front_action,
             "timing": (done or {}).get("timing") or last_front_timing(),
             "slow_nudges": nudge_meta.get("nudges", 0),
-            "background_verify": True,
+            "background_verify": not terminal_front_completes_turn(str(front_action or "")),
         }
     else:
         clear_stream_speak_state(stream_key)
