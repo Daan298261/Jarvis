@@ -37,17 +37,17 @@ def _public_view(record) -> dict[str, Any]:
     return payload
 
 
-@router.get("")
+@router.get("", dependencies=[Owner])
 async def list_breakers():
     return {"automations": [_public_view(item) for item in list_automation_breakers()]}
 
 
-@router.get("/audit")
+@router.get("/audit", dependencies=[Owner])
 async def breaker_audit(automation_id: str | None = None, limit: int = 100):
     return {"events": list_breaker_audit(automation_id=automation_id, limit=limit)}
 
 
-@router.get("/{automation_id}")
+@router.get("/{automation_id}", dependencies=[Owner])
 async def get_breaker(automation_id: str):
     record = get_automation_breaker(automation_id)
     if record is None:
@@ -57,6 +57,7 @@ async def get_breaker(automation_id: str):
 
 @router.put("/{automation_id}/threshold", dependencies=[Owner])
 async def update_threshold(automation_id: str, body: ThresholdIn):
+    # Do not pass kind — preserve scheduler/event kind on existing records.
     ensure_automation(automation_id)
     record = set_failure_threshold(automation_id, body.failure_threshold, actor="owner")
     return _public_view(record)
