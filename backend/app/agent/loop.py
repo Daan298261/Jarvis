@@ -117,6 +117,7 @@ from .planning import (
 )
 from ..persona.chat_delivery import (
     clear_stream_speak_state,
+    mark_stream_spoken,
     maybe_enqueue_streaming_social_tts,
     pending_chat_tts_text,
     publish_owner_text,
@@ -822,12 +823,13 @@ class AgentRuntime:
         stream_key: str,
         turn_started: float,
         source: str = "task_chat",
-    ) -> None:
+    ) -> bool:
+        """Speak a front ack immediately. Returns True when TTS was actually enqueued."""
         settings = load_settings()
         if not settings.front_responder.speak_immediately:
-            return
+            return False
         if not front or not is_safe_front_speech(front.action, front.text):
-            return
+            return False
         spoken = front.text if front.text.endswith((".", "!", "?")) else f"{front.text}."
         early_id = maybe_enqueue_streaming_social_tts(
             spoken,
@@ -846,7 +848,7 @@ class AgentRuntime:
             )
             note_front_audio(None, audio_ms)
             front.first_audio_ms = audio_ms
-            return
+            return True
         delivery = await publish_owner_text(
             front.text,
             source=source,
@@ -854,9 +856,14 @@ class AgentRuntime:
             user_prompt=prompt,
         )
         if delivery.get("tts_id"):
+            # Advance the stream cursor so the final merged reply cannot re-speak
+            # this front prefix (publish_owner_text does not do it itself).
+            mark_stream_spoken(stream_key, len(front.text or ""))
             await BUS.publish(task_id, "chat_tts", "Speak reply", front.text, stage="chat")
             note_front_audio(None, audio_ms)
             front.first_audio_ms = audio_ms
+            return True
+        return False
 
     async def _persist_front_partial(
         self,
@@ -963,13 +970,24 @@ class AgentRuntime:
                         current_action=front.text[:120],
                     )
         except Exception:
+            # BUS chat_tts alone does not enqueue speech — publish_owner_text does.
+            ack_text = task_acknowledgement(prompt)
             await BUS.publish(
                 task_id,
                 "chat_tts",
                 "Acknowledged",
-                task_acknowledgement(prompt),
+                ack_text,
                 stage="understand",
             )
+            try:
+                await publish_owner_text(
+                    ack_text,
+                    source="task_chat",
+                    speak=True,
+                    user_prompt=prompt,
+                )
+            except Exception:
+                log.debug("Managed front fallback ack failed for %s", task_id, exc_info=True)
 
     async def _run_conversation(
         self,
@@ -1063,14 +1081,13 @@ class AgentRuntime:
                 "Front response",
                 json.dumps(prefetched_front.as_dict(), ensure_ascii=False)[:4000],
             )
-            await self._speak_front_reply(
+            front_spoken_early = await self._speak_front_reply(
                 task_id,
                 prefetched_front,
                 prompt=prompt,
                 stream_key=stream_key,
                 turn_started=turn_started,
             )
-            front_spoken_early = True
             await self._persist_front_partial(
                 task_id,
                 messages,
@@ -1177,25 +1194,9 @@ class AgentRuntime:
             prefetched_front.text = ""
             front_spoken_early = False
 
-        warm = ()
-        if MANAGER.state.loaded and MANAGER.state.profile:
-            warm = (MANAGER.state.profile,)
-        profile_name, messages, _route_decision, _switched = await prepare_answer_route(
-            task_id,
-            user_message=user_text,
-            working=working,
-            settings=settings,
-            profile_name=profile.name,
-            history=prior,
-            messages=messages,
-            tools_available=True,
-            vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
-            new_user_turn=True,
-            warm_models=warm,
-        )
-        profile = resolve_profile(profile_name)
-        await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
-
+        # RFC-0127: start the 60s progress watchdog before heavy answer routing /
+        # model load so slow prepare_answer_route (e.g. hotswap after hard-bypass
+        # miss) cannot leave the owner silent past the first progress deadline.
         progress_watch = asyncio.create_task(
             run_worker_progress_watchdog(
                 task_id,
@@ -1204,120 +1205,140 @@ class AgentRuntime:
                 should_continue=lambda: task_still_running(task_id),
             )
         )
-
-        if not MANAGER.provider or not MANAGER.state.loaded:
-            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-            await MANAGER.load(settings, profile_name)
+        done: dict[str, Any] | None = None
         first_response_ms = prefetched_front.first_text_ms or 0.0
-        model_started = time.perf_counter()
+        model_started = turn_started
         front_text = prefetched_front.text or ""
         front_action = prefetched_front.action or ""
         worker_started = False
         spoken_parts: list[str] = []
 
-        from ..persona.inference_context import ensure_context_for_messages, model_lane_event_payload
-        from ..agent.front_responder import resolve_front_model_id
-
-        async def _expand_notice(before: int, after: int) -> None:
-            front = await generate_front_reply(
-                user_text,
-                history=prior,
-                settings=settings,
-                turn_started=turn_started or model_started,
-            )
-            if front.text:
-                await self._speak_front_reply(
-                    task_id,
-                    front,
-                    prompt=prompt,
-                    stream_key=stream_key,
-                    turn_started=turn_started or model_started,
-                )
-            await BUS.publish(
+        try:
+            warm = ()
+            if MANAGER.state.loaded and MANAGER.state.profile:
+                warm = (MANAGER.state.profile,)
+            profile_name, messages, _route_decision, _switched = await prepare_answer_route(
                 task_id,
-                "model_lane",
-                "Context resize",
-                model_lane_event_payload(
-                    lane="system",
-                    model=resolve_front_model_id(settings),
-                    text=f"Expanding context {before} → {after}",
-                ),
-                stage="model",
-                persist=False,
+                user_message=user_text,
+                working=working,
+                settings=settings,
+                profile_name=profile.name,
+                history=prior,
+                messages=messages,
+                tools_available=True,
+                vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
+                new_user_turn=True,
+                warm_models=warm,
             )
+            profile = resolve_profile(profile_name)
+            await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
 
-        await ensure_context_for_messages(
-            messages,
-            settings=settings,
-            profile_name=profile.name,
-            on_expanding=_expand_notice,
-            task_id=task_id,
-        )
-        profile = resolve_profile(MANAGER.state.profile or profile.name)
+            if not MANAGER.provider or not MANAGER.state.loaded:
+                await BUS.publish(task_id, "stage", "Loading local model", stage="model")
+                await MANAGER.load(settings, profile_name)
+            model_started = time.perf_counter()
 
-        async def worker_stream():
-            async for delta in MANAGER.chat_stream(
-                messages,
-                temperature=profile.temperature,
-                top_p=profile.top_p,
-                top_k=profile.top_k,
-                max_tokens=owner_chat_max_tokens(profile),
-                thinking=False,
-            ):
-                yield delta
-
-        async def on_delta(lane: str, delta: str) -> None:
-            nonlocal first_response_ms
-            if not delta:
-                return
-            if lane == "worker":
-                mark_worker_useful_owner_text(task_id)
-            spoken_parts.append(delta)
-            elapsed = max(0.0, (time.perf_counter() - (turn_started or model_started)) * 1000)
-            if not first_response_ms:
-                first_response_ms = elapsed
-                await self._update(task_id, first_response_ms=round(first_response_ms, 1))
-            accumulated = "".join(spoken_parts)
-            early_id = maybe_enqueue_streaming_social_tts(
-                accumulated,
-                source="task_chat",
-                stream_key=stream_key,
-                user_prompt=prompt,
-            )
-            if early_id:
-                await BUS.publish(
-                    task_id,
-                    "chat_tts",
-                    "Speak reply",
-                    accumulated[: stream_speak_offset(stream_key)],
-                    stage="chat",
-                )
-                note_front_audio(None, elapsed)
-            from ..persona.inference_context import model_lane_event_payload
+            from ..persona.inference_context import ensure_context_for_messages, model_lane_event_payload
             from ..agent.front_responder import resolve_front_model_id
 
-            lane_model = resolve_front_model_id(settings) if lane == "front" else str(
-                getattr(MANAGER.provider, "model", "") or profile.name
-            )
-            await BUS.publish(
-                task_id,
-                "assistant_delta",
-                "Reply",
-                delta,
-                stage="chat",
-                persist=False,
-            )
-            await BUS.publish(
-                task_id,
-                "model_lane",
-                f"{lane} output",
-                model_lane_event_payload(lane=lane, model=lane_model, text=delta[:240]),
-                stage="chat",
-                persist=False,
-            )
+            async def _expand_notice(before: int, after: int) -> None:
+                front = await generate_front_reply(
+                    user_text,
+                    history=prior,
+                    settings=settings,
+                    turn_started=turn_started or model_started,
+                )
+                if front.text:
+                    await self._speak_front_reply(
+                        task_id,
+                        front,
+                        prompt=prompt,
+                        stream_key=stream_key,
+                        turn_started=turn_started or model_started,
+                    )
+                await BUS.publish(
+                    task_id,
+                    "model_lane",
+                    "Context resize",
+                    model_lane_event_payload(
+                        lane="system",
+                        model=resolve_front_model_id(settings),
+                        text=f"Expanding context {before} → {after}",
+                    ),
+                    stage="model",
+                    persist=False,
+                )
 
-        try:
-            done: dict[str, Any] | None = None
+            await ensure_context_for_messages(
+                messages,
+                settings=settings,
+                profile_name=profile.name,
+                on_expanding=_expand_notice,
+                task_id=task_id,
+            )
+            profile = resolve_profile(MANAGER.state.profile or profile.name)
+
+            async def worker_stream():
+                async for delta in MANAGER.chat_stream(
+                    messages,
+                    temperature=profile.temperature,
+                    top_p=profile.top_p,
+                    top_k=profile.top_k,
+                    max_tokens=owner_chat_max_tokens(profile),
+                    thinking=False,
+                ):
+                    yield delta
+
+            async def on_delta(lane: str, delta: str) -> None:
+                nonlocal first_response_ms
+                if not delta:
+                    return
+                if lane == "worker":
+                    mark_worker_useful_owner_text(task_id)
+                spoken_parts.append(delta)
+                elapsed = max(0.0, (time.perf_counter() - (turn_started or model_started)) * 1000)
+                if not first_response_ms:
+                    first_response_ms = elapsed
+                    await self._update(task_id, first_response_ms=round(first_response_ms, 1))
+                accumulated = "".join(spoken_parts)
+                early_id = maybe_enqueue_streaming_social_tts(
+                    accumulated,
+                    source="task_chat",
+                    stream_key=stream_key,
+                    user_prompt=prompt,
+                )
+                if early_id:
+                    await BUS.publish(
+                        task_id,
+                        "chat_tts",
+                        "Speak reply",
+                        accumulated[: stream_speak_offset(stream_key)],
+                        stage="chat",
+                    )
+                    note_front_audio(None, elapsed)
+                from ..persona.inference_context import model_lane_event_payload
+                from ..agent.front_responder import resolve_front_model_id
+
+                lane_model = resolve_front_model_id(settings) if lane == "front" else str(
+                    getattr(MANAGER.provider, "model", "") or profile.name
+                )
+                await BUS.publish(
+                    task_id,
+                    "assistant_delta",
+                    "Reply",
+                    delta,
+                    stage="chat",
+                    persist=False,
+                )
+                await BUS.publish(
+                    task_id,
+                    "model_lane",
+                    f"{lane} output",
+                    model_lane_event_payload(lane=lane, model=lane_model, text=delta[:240]),
+                    stage="chat",
+                    persist=False,
+                )
+
             async for event in run_two_lane_chat(
                 user_text,
                 history=prior,
@@ -1352,7 +1373,7 @@ class AgentRuntime:
                                 current_action="Checking details…" if front.action in {"ack_continue", "handoff_notice"} else "Replying",
                             )
                         if not front_spoken_early:
-                            await self._speak_front_reply(
+                            front_spoken_early = await self._speak_front_reply(
                                 task_id,
                                 front,
                                 prompt=prompt,
@@ -1844,12 +1865,19 @@ class AgentRuntime:
                     )
                 )
             elif not continue_existing:
+                ack_text = task_acknowledgement(extra_prompt or prompt)
                 await BUS.publish(
                     task_id,
                     "chat_tts",
                     "Acknowledged",
-                    task_acknowledgement(extra_prompt or prompt),
+                    ack_text,
                     stage="understand",
+                )
+                await publish_owner_text(
+                    ack_text,
+                    source="task_chat",
+                    speak=True,
+                    user_prompt=extra_prompt or prompt,
                 )
         await self._update(task_id, exposed_tools=_exposed_csv(working, extra_prompt or prompt))
         policy = resolve_execution_policy(execution_mode)
