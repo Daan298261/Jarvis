@@ -7,13 +7,13 @@ from app.memory.obsidian_vault import (
     append_note,
     bind_vault,
     create_note,
-    edit_note,
     index_file,
     neighborhood,
     public_binding_status,
     reset_vault_store,
     resolve_wiki_link,
     search_vault,
+    stop_watch,
     unbind_vault,
     vault_health,
     repair_vault_index,
@@ -21,10 +21,16 @@ from app.memory.obsidian_vault import (
 
 
 @pytest.fixture
-def temp_vault(tmp_path):
+def temp_vault(tmp_path, monkeypatch):
+    data_root = tmp_path / "obsidian-meta"
+    vault_root = tmp_path / "vault"
+    data_root.mkdir(parents=True, exist_ok=True)
+    vault_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: data_root)
     reset_vault_store()
-    bind_vault(str(tmp_path), init_layout=True)
-    yield tmp_path
+    bind_vault(str(vault_root), init_layout=True)
+    stop_watch()
+    yield vault_root
     unbind_vault()
     reset_vault_store()
 
