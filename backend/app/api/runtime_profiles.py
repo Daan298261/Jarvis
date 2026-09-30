@@ -10,7 +10,6 @@ from ..inference.model_stack import (
 )
 from ..config import load_settings
 from ..inference.hotswap import activate_runtime_profile
-from ..inference.manager import MANAGER
 from ..inference.runtime_profiles import (
     create_runtime_profile,
     delete_runtime_profile,
@@ -406,10 +405,12 @@ async def activate_profile(profile_id: str):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:500]) from exc
     settings = load_settings()
+    from ..inference.status_monitor import STATUS_MONITOR
+
     return {
         "ok": True,
         "profile": profile.as_dict(),
-        "load": await MANAGER.snapshot(settings),
+        "load": await STATUS_MONITOR.get_snapshot(settings, force_refresh=True),
     }
 
 

@@ -302,6 +302,12 @@ async def startup() -> None:
 
     QUEUE_WATCHER.start()
     mobile_runtime.start()
+    try:
+        from .inference.status_monitor import STATUS_MONITOR
+
+        STATUS_MONITOR.start()
+    except Exception:
+        logging.debug("Model status monitor start skipped", exc_info=True)
     await QUEUE_WATCHER.process_pending()
     try:
         from .tts.warm_start import schedule_tts_warm_start
@@ -368,6 +374,12 @@ async def _auto_start_crucix() -> None:
 @app.on_event("shutdown")
 async def shutdown() -> None:
     QUEUE_WATCHER.stop()
+    try:
+        from .inference.status_monitor import STATUS_MONITOR
+
+        STATUS_MONITOR.stop()
+    except Exception:
+        logging.debug("Model status monitor stop skipped", exc_info=True)
     await WHATSAPP_PAIRING.close()
     await mobile_runtime.stop()
     try:
