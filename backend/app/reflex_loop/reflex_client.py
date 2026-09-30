@@ -1,9 +1,12 @@
 """Thin typed client for the RFC-0171 Reflex Lane decide() contract.
 
-Does not reimplement Jev/Laya. When ``app.decision`` exposes the provider-neutral
-API, this module forwards to it (preferring ``surfaces.browser_operation_target``
-for the op+target path). Otherwise callers get a fail-closed stub that honestly
-refuses decisions (tests inject FakeDecideClient).
+Does not reimplement Jev/Laya. Production tip always forwards to ``app.decision``
+(preferring ``surfaces.browser_operation_target`` for the op+target path, with
+generic ``decide()`` for other classes).
+
+``FailClosedDecideClient`` is test-injection only via ``set_reflex_decide_client``.
+A broken install that cannot import the live lane raises
+``ReflexLaneUnavailableError`` — it does not silently install a refuse stub.
 """
 
 from __future__ import annotations
@@ -27,6 +30,15 @@ _PRIVACY_MAP = {
     "allow_cloud": "allow_cloud",
     "require_local": "require_local",
 }
+
+
+class ReflexLaneUnavailableError(RuntimeError):
+    """RFC-0171 Reflex Lane cannot be bound on this tip.
+
+    Raised instead of installing a silent refuse stub. Tests that need an
+    always-refuse client must inject ``FailClosedDecideClient`` via
+    ``set_reflex_decide_client``.
+    """
 
 
 class DecisionClass(str, Enum):
@@ -259,7 +271,14 @@ def _goal_and_frame_from_state(state: dict[str, Any]) -> tuple[str, str, str, st
 
 
 class FailClosedDecideClient:
-    """Honest refuse when RFC-0171 Reflex Lane is not wired on this tip."""
+    """Test-only always-refuse client.
+
+    Not selected by ``get_reflex_decide_client``. Inject explicitly with
+    ``set_reflex_decide_client(FailClosedDecideClient())`` when a test needs
+    fail-closed *behavior* (lane refuses) without the live 0171 wire.
+    Production tips that cannot bind ``app.decision`` raise
+    ``ReflexLaneUnavailableError`` instead.
+    """
 
     def decide(
         self,
@@ -376,12 +395,19 @@ class DecisionPackageForwarder:
         return adapt_decision_result(raw)
 
 
-def _try_import_decision_api() -> tuple[Any | None, Any | None]:
-    """Return ``(decide_fn, browser_operation_target_fn)`` when app.decision imports."""
+def _bind_decision_api() -> tuple[Any, Any]:
+    """Return ``(decide_fn, browser_operation_target_fn)`` from live RFC-0171.
+
+    Raises ``ReflexLaneUnavailableError`` when ``app.decision`` cannot be
+    imported or the tip wire is incomplete (missing decide or
+    browser_operation_target). Never returns a soft ``(None, None)``.
+    """
     try:
         mod = importlib.import_module("app.decision")
-    except Exception:
-        return None, None
+    except Exception as exc:
+        raise ReflexLaneUnavailableError(
+            f"RFC-0171 app.decision import failed: {exc}"
+        ) from exc
 
     decide_fn = getattr(mod, "decide", None)
     surface_fn = getattr(mod, "browser_operation_target", None)
@@ -390,8 +416,10 @@ def _try_import_decision_api() -> tuple[Any | None, Any | None]:
         try:
             surfaces = importlib.import_module("app.decision.surfaces")
             surface_fn = getattr(surfaces, "browser_operation_target", None)
-        except Exception:
-            surface_fn = None
+        except Exception as exc:
+            raise ReflexLaneUnavailableError(
+                f"RFC-0171 app.decision.surfaces import failed: {exc}"
+            ) from exc
 
     if not callable(decide_fn):
         for sub in ("reflex", "api", "lane"):
@@ -405,33 +433,39 @@ def _try_import_decision_api() -> tuple[Any | None, Any | None]:
         else:
             decide_fn = None
 
-    return (
-        decide_fn if callable(decide_fn) else None,
-        surface_fn if callable(surface_fn) else None,
-    )
+    if not callable(decide_fn) or not callable(surface_fn):
+        raise ReflexLaneUnavailableError(
+            "RFC-0171 tip wire incomplete: need both decide() and "
+            f"browser_operation_target "
+            f"(decide={callable(decide_fn)}, "
+            f"browser_operation_target={callable(surface_fn)})"
+        )
+
+    return decide_fn, surface_fn
 
 
 _CLIENT: ReflexDecideClient | None = None
 
 
 def get_reflex_decide_client(*, force_reload: bool = False) -> ReflexDecideClient:
-    """Return the live 0171 client when present, else fail-closed stub."""
+    """Return the live RFC-0171 ``DecisionPackageForwarder``.
+
+    Never installs ``FailClosedDecideClient``. A broken tip raises
+    ``ReflexLaneUnavailableError``. Tests inject refuse/stub clients only
+    via ``set_reflex_decide_client``.
+    """
     global _CLIENT
     if _CLIENT is not None and not force_reload:
         return _CLIENT
-    decide_fn, surface_fn = _try_import_decision_api()
-    if decide_fn is not None or surface_fn is not None:
-        log.info(
-            "RFC-0172 using app.decision%s for Reflex Lane",
-            " surfaces.browser_operation_target" if surface_fn else " decide()",
-        )
-        _CLIENT = DecisionPackageForwarder(
-            decide_fn=decide_fn,
-            browser_op_target_fn=surface_fn,
-        )
-    else:
-        log.info("RFC-0172 Reflex Lane unavailable — fail-closed decide stub active")
-        _CLIENT = FailClosedDecideClient()
+    decide_fn, surface_fn = _bind_decision_api()
+    log.info(
+        "RFC-0172 tip wire bound to app.decision "
+        "(decide + surfaces.browser_operation_target)"
+    )
+    _CLIENT = DecisionPackageForwarder(
+        decide_fn=decide_fn,
+        browser_op_target_fn=surface_fn,
+    )
     return _CLIENT
 
 
