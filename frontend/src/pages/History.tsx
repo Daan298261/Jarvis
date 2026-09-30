@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { api, type Task } from "../api"
-import { TaskHeartbeat } from "../components/TaskActivity"
-import { phaseLabel } from "../taskStatus"
+import { TaskStatusMeta, TaskVerificationBadge } from "../components/TaskStatusMeta"
+import { formatElapsedSeconds } from "../taskStatus"
 
 export function HistoryPage() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -19,16 +19,23 @@ export function HistoryPage() {
       <div className="card">
         <table>
           <thead>
-            <tr><th>Title</th><th>State</th><th>Current activity</th><th>Started</th><th>Elapsed</th><th>Worker</th></tr>
+            <tr>
+              <th>Title</th>
+              <th>Phase / activity</th>
+              <th>Verification</th>
+              <th>Started</th>
+              <th>Elapsed</th>
+              <th>Worker</th>
+            </tr>
           </thead>
           <tbody>
             {tasks.map((task) => (
               <tr key={task.id}>
                 <td><Link to={`/tasks/${task.id}`}>{task.title}</Link></td>
-                <td><span className={`badge ${task.state || task.status}`}>{phaseLabel(task)}</span> <TaskHeartbeat task={task} /></td>
-                <td>{task.current_action || task.stage || "—"}</td>
+                <td><TaskStatusMeta task={task} showElapsed={false} /></td>
+                <td><TaskVerificationBadge task={task} /></td>
                 <td>{(task.started_at || task.created_at)?.replace("T", " ").slice(0, 19)}</td>
-                <td>{Math.round(task.elapsed_seconds ?? task.duration_seconds ?? 0)}s</td>
+                <td>{formatElapsedSeconds(task.elapsed_seconds ?? task.duration_seconds) || "—"}</td>
                 <td>{task.active_worker || "Jarvis agent"}</td>
               </tr>
             ))}

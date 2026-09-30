@@ -2,6 +2,14 @@ import { useNavigate } from "react-router-dom"
 import type { Task } from "../api"
 import { SpecialistShapeMark } from "../persona/SpecialistShapeMark"
 import { personaCardSentence, useNamedPersonas } from "../persona/namedPersonas"
+import {
+  activityLabel,
+  childAggregationLabel,
+  compactStatusLine,
+  phaseLabel,
+  shouldShowVerification,
+  verificationLabel,
+} from "../taskStatus"
 import "../persona/named-persona.css"
 
 function taskLabel(task: Task): string {
@@ -16,6 +24,26 @@ function formatTime(iso?: string): string {
   } catch {
     return ""
   }
+}
+
+function rowTone(task: Task): string {
+  const state = task.state || task.status
+  if (state === "failed" || (task.execution_phase || "").toUpperCase() === "FAILED") return "bad"
+  if (["running", "queued", "waiting"].includes(state || "")) return "active"
+  return "muted"
+}
+
+function headDetail(task: Task): string {
+  const activity = activityLabel(task)
+  const phase = phaseLabel(task)
+  const children = childAggregationLabel(task.child_execution)
+  const verification = shouldShowVerification(task) ? verificationLabel(task.verification_summary) : ""
+  const bits = [phase]
+  if (activity) bits.push(activity)
+  else if (task.current_tool) bits.push(task.current_tool)
+  if (children) bits.push(children)
+  if (verification) bits.push(verification)
+  return bits.join(" · ") || compactStatusLine(task)
 }
 
 type HudOpsRailProps = {
@@ -47,8 +75,8 @@ export function HudOpsRail({ tasks, activeTaskId }: HudOpsRailProps) {
       key: `${task.id}-head`,
       taskId: task.id,
       label: taskLabel(task),
-      detail: `${task.status}${task.current_tool ? ` · ${task.current_tool}` : ""}`,
-      tone: task.status === "failed" ? "bad" : task.status === "running" ? "active" : "muted",
+      detail: headDetail(task),
+      tone: rowTone(task),
       sentence: sentence || undefined,
       marks: specialists.map((id) => {
         const persona = byId.get(id)

@@ -14,6 +14,8 @@ import { usePendingApprovals } from "../chat/pendingApprovals"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 import { SETUP_PROBLEM_WORKING, isAuthFailureMessage } from "../setup/ownerFacing"
 import { MediaComposerBar } from "../components/MediaComposerBar"
+import { TaskActivityPanel } from "../components/TaskActivity"
+import { TaskStatusMeta } from "../components/TaskStatusMeta"
 import { useMediaUploads } from "../chat/useMediaUploads"
 
 type HudChatProps = {
@@ -179,25 +181,39 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         <div className="hud-thread" ref={threadRef} aria-live="polite">
           {!shown && <p className="hud-thread-empty">Loading task…</p>}
           {shown && (
-            <OwnerChatTranscript
-              key={shown.id}
-              variant="hud"
-              taskId={shown.id}
-              prompt={shown.prompt}
-              status={shown.status}
-              stage={shown.stage}
-              current_action={shown.current_action}
-              current_tool={shown.current_tool}
-            waiting_for_confirmation={shown.waiting_for_confirmation}
-            confirmation_payload={shown.confirmation_payload}
-            result={shown.result}
-              error={shown.error}
-              events={shown.events}
-              messages={shown.messages}
-              pending={pending}
-              createdAt={shown.created_at}
-              updatedAt={shown.updated_at}
-            />
+            <>
+              <div className="hud-task-status">
+                <TaskStatusMeta task={shown} />
+              </div>
+              <details className="hud-task-activity">
+                <summary>Execution detail</summary>
+                <TaskActivityPanel
+                  task={shown}
+                  elapsed={Math.round(shown.elapsed_seconds || shown.duration_seconds || 0)}
+                />
+              </details>
+              <OwnerChatTranscript
+                key={shown.id}
+                variant="hud"
+                taskId={shown.id}
+                prompt={shown.prompt}
+                status={shown.status}
+                stage={shown.stage}
+                current_activity={shown.current_activity}
+                current_action={shown.current_action}
+                current_tool={shown.current_tool}
+                execution_phase={shown.execution_phase}
+                waiting_for_confirmation={shown.waiting_for_confirmation}
+                confirmation_payload={shown.confirmation_payload}
+                result={shown.result}
+                error={shown.error}
+                events={shown.events}
+                messages={shown.messages}
+                pending={pending}
+                createdAt={shown.created_at}
+                updatedAt={shown.updated_at}
+              />
+            </>
           )}
         </div>
       )}

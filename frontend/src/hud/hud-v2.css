@@ -1179,6 +1179,40 @@ html[data-session-mode] .hud-app {
   mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 12px), transparent 100%);
 }
 
+.hud-task-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 5px 8px;
+  border: 1px solid rgba(142, 219, 241, 0.1);
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.72);
+}
+
+.hud-task-activity {
+  margin: 0 0 6px;
+  border: 1px solid rgba(142, 219, 241, 0.08);
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.55);
+  overflow: hidden;
+}
+
+.hud-task-activity > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: rgba(170, 190, 210, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hud-task-activity .task-activity {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .hud-bubble {
   max-width: 92%;
   margin: 0 0 7px;
