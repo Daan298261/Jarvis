@@ -149,9 +149,7 @@ async def test_one_ask_hits_installed_tool_and_installable_pack():
     assert any(row["entry_id"] == "obsidian-brain" for row in catalog)
     assert any("/api/modules/catalog/" in (o.download_api or "") for o in ws.installable_offers)
     assert any("obsidian-brain" in o.entry_id for o in ws.installable_offers)
-    assert "git" in ws.tool_names or "git" in suggest_tools_for_prompt(
-        "organize my obsidian brain vault router taxonomy and run git status"
-    )
+    assert "git" in ws.tool_names
 
 
 @pytest.mark.asyncio

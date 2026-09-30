@@ -143,23 +143,43 @@ def _ensure_conversation(conversation_id: str | None) -> str:
     return cid
 
 
-def _owner_messages(conversation_id: str, user_text: str, briefing: str | None = None) -> list[ChatMessage]:
-    history = _conversations[conversation_id]
-    from ..agent.turn_working_set import bound_recent_turns
-    from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
+async def compose_owner_turn_messages(
+    conversation_id: str,
+    user_text: str,
+    briefing: str | None = None,
+) -> tuple[list[ChatMessage], "TurnWorkingSet"]:
+    """Build the owner-chat inference prompt via RFC-0107 turn working set (no skip-if-empty)."""
+    from ..agent.turn_working_set import TurnWorkingSet, apply_working_set_to_system, compose_turn_working_set
 
-    messages = [
-        ChatMessage(role="system", content=OWNER_CHAT_SYSTEM),
-    ]
+    history = list(_conversations.get(conversation_id, []))
+    prompt = (user_text or "").strip()
+    # Same composer as the agent loop: vault provenance, empty-miss surface, installable search.
+    # needs_tools=False keeps dialogue from advertising executable tool schemas; installable
+    # offers and vault hits still enter the system prefix via compose_turn_working_set.
+    turn_ws = await compose_turn_working_set(
+        prompt,
+        task_class="conversation",
+        agent_id="owner",
+        recent_messages=history,
+        needs_tools=False,
+        include_vault=True,
+        include_memory=True,
+    )
+    system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws)
+    messages: list[ChatMessage] = [ChatMessage(role="system", content=system)]
     if briefing:
         messages.append(ChatMessage(role="system", content=briefing))
-    if public_binding_status().get("bound"):
-        vault_block = vault_prompt_block(user_text.strip())
-        if vault_block:
-            messages.append(ChatMessage(role="system", content=vault_block))
-    # Bound recent turns — history dumps must not enter the prompt (RFC-0107).
-    messages.extend(bound_recent_turns(list(history)))
-    messages.append(ChatMessage(role="user", content=user_text.strip()))
+    messages.extend(turn_ws.recent_turns)
+    messages.append(ChatMessage(role="user", content=prompt))
+    return messages, turn_ws
+
+
+async def _owner_messages(
+    conversation_id: str,
+    user_text: str,
+    briefing: str | None = None,
+) -> list[ChatMessage]:
+    messages, _working = await compose_owner_turn_messages(conversation_id, user_text, briefing)
     return messages
 
 
@@ -324,7 +344,7 @@ async def stream_owner_chat(
         yield {"type": "error", "detail": "Inference model is not loaded"}
         return
 
-    worker_messages = _owner_messages(cid, cleaned, briefing)
+    worker_messages = await _owner_messages(cid, cleaned, briefing)
     if intake.strategy == "compress":
         async def _segment_progress(index: int, total: int) -> None:
             await BUS.publish_ephemeral(

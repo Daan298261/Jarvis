@@ -71,6 +71,8 @@ class TurnWorkingSet:
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
     installable_offers: list[InstallableToolOffer] = field(default_factory=list)
     vault_hits: list[VaultHitProvenance] = field(default_factory=list)
+    # Always filled by per-ask search (even when schemas are withheld for Q&A).
+    searched_tool_names: list[str] = field(default_factory=list)
 
     def serialized_prompt_text(self) -> str:
         """Concatenated text that enters the model (for acceptance tests)."""
@@ -246,7 +248,12 @@ async def compose_turn_working_set(
     include_memory: bool = True,
     needs_tools: bool | None = None,
 ) -> TurnWorkingSet:
+    from .tool_retrieval import suggest_tools_for_prompt
+
     prompt = (user_message or "").strip()
+    # RFC-0107 §7: every owner ask runs internal search over installed tools,
+    # even when this turn withholds executable schemas (factual Q&A / conversation).
+    searched = suggest_tools_for_prompt(prompt, security_role=security_role)
     names = tool_names_for(
         task_class,
         extra_capabilities,
@@ -283,6 +290,13 @@ async def compose_turn_working_set(
             ]
             + ([line for line in exposure.splitlines() if line.startswith("Matching optional")][:1])
         )
+    elif not names and searched:
+        exposure = (
+            exposure
+            + "\nPer-ask tool search matched: "
+            + ", ".join(searched)
+            + ". Schemas withheld for this Q&A turn; call request_capability to opt in."
+        )
     install_lines = _installable_lines(offers)
     if install_lines:
         exposure = exposure + "\n\n" + install_lines
@@ -308,6 +322,7 @@ async def compose_turn_working_set(
         tool_schemas=schemas,
         installable_offers=offers,
         vault_hits=vault_hits,
+        searched_tool_names=searched,
     )
 
 
