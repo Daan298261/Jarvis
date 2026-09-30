@@ -233,9 +233,8 @@ export function TaskActivityPanel({
   return (
     <details className="task-activity" open={active}>
       <summary>
-        <span>
+        <span className="task-activity-head">
           <TaskHeartbeat task={view} />
-          {" · "}
           <span className={`badge phase-badge ${phaseBadgeClass(view)}`}>{phaseLabel(view)}</span>
           <span className={`badge ${lifecycleBadgeClass(view)}`} title="Lifecycle state">{lifecycleLabel(view)}</span>
         </span>

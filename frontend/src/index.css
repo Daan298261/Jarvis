@@ -295,6 +295,12 @@ h2 { font-size: 18px; margin: 0 0 12px; }
   font-size: 12px;
   text-transform: capitalize;
 }
+.task-activity-head {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
 .task-activity-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .task-activity-grid {
   display: grid;
