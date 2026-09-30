@@ -238,6 +238,7 @@ test("auto presence quality adapts with sustained thresholds and fit bounds keep
   assert.ok(fit.scale > 0 && fit.scale < 1, `wide silhouettes should be scaled into the stage, got ${fit.scale}`)
   assert.equal(fit.centerX, 0)
   assert.equal(fit.centerY, 0)
+  assert.equal(fit.centerZ, 0)
 
   const offset = quality.normalizedPresenceFitScale(
     new Float32Array([0.2, 0.4, 0, 1.2, 1.6, 0]), 1, 32, 5.6,
@@ -245,6 +246,74 @@ test("auto presence quality adapts with sustained thresholds and fit bounds keep
   assert.ok(offset.scale >= 0.45 && offset.scale <= 1.35)
   assert.ok(Math.abs(offset.centerX - 0.7) < 1e-6, `AABB center X, got ${offset.centerX}`)
   assert.ok(Math.abs(offset.centerY - 1.0) < 1e-6, `AABB center Y, got ${offset.centerY}`)
+  assert.equal(offset.centerZ, 0)
+})
+
+test("yaw-frame fit offset cancels AABB center under Three.js T*R*S", () => {
+  // Asymmetric bust: local +X/+Z mass so yaw≈0.06 moves the silhouette center.
+  const positions = new Float32Array([
+    -0.8, -1.0, -0.3,
+    0.8, -1.0, -0.3,
+    -0.5, 1.2, -0.2,
+    0.9, 1.2, 0.1,
+    0.15, 0.4, 0.95,
+    0.35, 0.1, 0.55,
+  ])
+  const yaw = quality.PRESENCE_DEFAULT_FRAMING_YAW
+  const fit = quality.normalizedPresenceFitScale(positions, 680 / 480, 32, 5.6, yaw, 0.88)
+  assert.ok(Math.abs(fit.centerX) > 1e-4 || Math.abs(fit.centerZ) > 1e-4, "fixture must be off-center under yaw")
+
+  const scale = fit.scale
+  const parent = quality.presenceFitYawFrameOffset(fit, scale)
+  // Parent translation stays in the yaw frame (not pre-rotate local X).
+  assert.ok(Math.abs(parent.x + fit.centerX * scale) < 1e-9)
+  assert.ok(Math.abs(parent.y + fit.centerY * scale) < 1e-9)
+  assert.ok(Math.abs(parent.z + fit.centerZ * scale) < 1e-9)
+
+  const c = Math.cos(yaw)
+  const s = Math.sin(yaw)
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+  for (let i = 0; i < positions.length; i += 3) {
+    const lx = positions[i] * scale
+    const ly = positions[i + 1] * scale
+    const lz = positions[i + 2] * scale
+    // T * R_yaw * S — same composition as MorphablePresenceStage bust.
+    const xr = lx * c + lz * s
+    const zr = -lx * s + lz * c
+    const x = parent.x + xr
+    const y = parent.y + ly
+    const z = parent.z + zr
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+    minZ = Math.min(minZ, z)
+    maxZ = Math.max(maxZ, z)
+  }
+  assert.ok(Math.abs((minX + maxX) * 0.5) < 1e-6, `yaw-frame center X should land on origin, got ${(minX + maxX) * 0.5}`)
+  assert.ok(Math.abs((minY + maxY) * 0.5) < 1e-6, `yaw-frame center Y should land on origin, got ${(minY + maxY) * 0.5}`)
+  assert.ok(Math.abs((minZ + maxZ) * 0.5) < 1e-6, `yaw-frame center Z should land on origin, got ${(minZ + maxZ) * 0.5}`)
+
+  // Wrong frame: treating yawed centerX as pre-rotate local X leaves residual at yaw≈0.06.
+  const wrongLocal = -fit.centerX * scale
+  let wMinX = Number.POSITIVE_INFINITY
+  let wMaxX = Number.NEGATIVE_INFINITY
+  for (let i = 0; i < positions.length; i += 3) {
+    const lx = (positions[i] + wrongLocal / scale) * scale
+    const lz = positions[i + 2] * scale
+    const x = lx * c + lz * s
+    wMinX = Math.min(wMinX, x)
+    wMaxX = Math.max(wMaxX, x)
+  }
+  assert.ok(
+    Math.abs((wMinX + wMaxX) * 0.5) > 1e-4,
+    "pre-rotate misuse of yawed centerX must remain off-center (guards the harden)",
+  )
 })
 
 test("presence quality changes figure, field, and stars in place without resetting morph", () => {
@@ -268,7 +337,8 @@ test("catalog shapes resolve a safe AABB frame in desktop, ultrawide, portrait, 
     const positions = new Float32Array(samples.length * 3)
     samples.forEach((orb, i) => positions.set([orb.x, orb.y, orb.z], i * 3))
     for (const [aspect, fov, distance] of [[1.7, 32, 5.6], [3.2, 32, 5.6], [0.58, 37, 6.15], [1.2, 32, 5.6]]) {
-      const yaw = shape.framing?.yaw ?? 0
+      // Match MorphablePresenceStage: missing yaw uses PRESENCE_DEFAULT_FRAMING_YAW.
+      const yaw = shape.framing?.yaw ?? quality.PRESENCE_DEFAULT_FRAMING_YAW
       const margin = shape.framing?.fitMargin ?? 0.88
       const fit = quality.normalizedPresenceFitScale(positions, aspect, fov, distance, yaw, margin)
       assert.ok(Number.isFinite(fit.scale) && fit.scale >= 0.45 && fit.scale <= 1.35, `${shape.id} should fit at aspect ${aspect}`)
@@ -278,13 +348,20 @@ test("catalog shapes resolve a safe AABB frame in desktop, ultrawide, portrait, 
       let maxX = Number.NEGATIVE_INFINITY
       let minY = Number.POSITIVE_INFINITY
       let maxY = Number.NEGATIVE_INFINITY
+      let minZ = Number.POSITIVE_INFINITY
+      let maxZ = Number.NEGATIVE_INFINITY
       for (let i = 0; i < positions.length; i += 3) {
-        const x = positions[i] * c + positions[i + 2] * s
-        const y = positions[i + 1]
+        const lx = positions[i]
+        const ly = positions[i + 1]
+        const lz = positions[i + 2]
+        const x = lx * c + lz * s
+        const z = -lx * s + lz * c
         minX = Math.min(minX, x)
         maxX = Math.max(maxX, x)
-        minY = Math.min(minY, y)
-        maxY = Math.max(maxY, y)
+        minY = Math.min(minY, ly)
+        maxY = Math.max(maxY, ly)
+        minZ = Math.min(minZ, z)
+        maxZ = Math.max(maxZ, z)
       }
       const spanX = maxX - minX
       const spanY = maxY - minY
@@ -294,6 +371,11 @@ test("catalog shapes resolve a safe AABB frame in desktop, ultrawide, portrait, 
       assert.ok(spanY * fit.scale <= visibleHeight * margin + 0.02, `${shape.id} should fit stage height at aspect ${aspect}`)
       assert.ok(Math.abs(fit.centerX - (minX + maxX) * 0.5) < 1e-6, `${shape.id} centerX`)
       assert.ok(Math.abs(fit.centerY - (minY + maxY) * 0.5) < 1e-6, `${shape.id} centerY`)
+      assert.ok(Math.abs(fit.centerZ - (minZ + maxZ) * 0.5) < 1e-6, `${shape.id} centerZ`)
+      const parent = quality.presenceFitYawFrameOffset(fit, fit.scale)
+      assert.ok(Math.abs((minX + maxX) * 0.5 * fit.scale + parent.x) < 1e-6, `${shape.id} yaw-frame offset X`)
+      assert.ok(Math.abs((minY + maxY) * 0.5 * fit.scale + parent.y) < 1e-6, `${shape.id} yaw-frame offset Y`)
+      assert.ok(Math.abs((minZ + maxZ) * 0.5 * fit.scale + parent.z) < 1e-6, `${shape.id} yaw-frame offset Z`)
     }
   }
 })

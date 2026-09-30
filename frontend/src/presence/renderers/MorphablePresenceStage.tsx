@@ -8,7 +8,13 @@ import { createPresenceAttentionController, type AttentionVector } from "../pres
 import { LIFECYCLE_MORPH_SECONDS, lifecycleMorphTarget } from "../presenceLifecycle"
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
-import { AutoPresenceQuality, normalizedPresenceFitScale, PRESENCE_QUALITY_DENSITIES } from "../presenceQuality"
+import {
+  AutoPresenceQuality,
+  normalizedPresenceFitScale,
+  presenceFitYawFrameOffset,
+  PRESENCE_DEFAULT_FRAMING_YAW,
+  PRESENCE_QUALITY_DENSITIES,
+} from "../presenceQuality"
 import {
   createMorphablePresenceSystem,
   particleFragmentShader,
@@ -181,6 +187,7 @@ export function MorphablePresenceStage({
     let framingScale = 0.98
     let framingCenterX = 0
     let framingCenterY = 0
+    let framingCenterZ = 0
     let previousPhase: PresencePhase = snapshot.phase
     let alertAge = 4
     const autoQuality = new AutoPresenceQuality()
@@ -192,13 +199,16 @@ export function MorphablePresenceStage({
     const fitCurrentShape = (aspect: number) => {
       const profile = resolvePresenceShape(system.currentShapeId)
       const bPos = system.figure.geometry.getAttribute("bPos")
+      // Measure AABB center in the same yaw frame the stage applies to bust.rotation.y.
+      const fitYaw = profile.framing?.yaw ?? PRESENCE_DEFAULT_FRAMING_YAW
       const fit = normalizedPresenceFitScale(
         bPos.array as ArrayLike<number>, aspect, camera.fov, camera.position.z,
-        profile.framing?.yaw ?? 0, profile.framing?.fitMargin ?? 0.88,
+        fitYaw, profile.framing?.fitMargin ?? 0.88,
       )
       framingScale = fit.scale
       framingCenterX = fit.centerX
       framingCenterY = fit.centerY
+      framingCenterZ = fit.centerZ
     }
 
     const resize = () => {
@@ -347,13 +357,17 @@ export function MorphablePresenceStage({
       const appearance = resolvePresenceShape(system.currentShapeId).appearance
       uniforms.uPointScale.value = bounded(visual?.pointScale, bounded(appearance?.pointScale, 1, 0.5, 1.5), 0.5, 1.5)
       uniforms.uDepthSoftness.value = bounded(visual?.depthSoftness, bounded(appearance?.depthSoftness, 0, 0, 1), 0, 1)
-      const baseYaw = framing?.yaw ?? 0.06
+      const baseYaw = framing?.yaw ?? PRESENCE_DEFAULT_FRAMING_YAW
       const basePos = framing?.position ?? [0, 0.08, 0]
-      // AABB geometric center offset so the silhouette sits on the framing point.
+      // Cancel yaw-frame AABB center in parent space (Three.js T*R*S — same frame as fit).
       const fitScale = framingScale * personaScale
-      const framedX = basePos[0] - framingCenterX * fitScale
-      const framedY = basePos[1] - framingCenterY * fitScale
-      const framedZ = basePos[2]
+      const yawOffset = presenceFitYawFrameOffset(
+        { centerX: framingCenterX, centerY: framingCenterY, centerZ: framingCenterZ },
+        fitScale,
+      )
+      const framedX = basePos[0] + yawOffset.x
+      const framedY = basePos[1] + yawOffset.y
+      const framedZ = basePos[2] + yawOffset.z
       const mode = current.settings.attentionMode
       const follow = !reduced && mode !== "off"
       const att = attentionRef.current
