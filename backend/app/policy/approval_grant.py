@@ -384,12 +384,27 @@ def validate_grant_for_action(
 
 
 def consume_grant(grant_id: str) -> dict[str, Any]:
+    """Consume a single-use grant. Durable ``always`` grants are left reusable."""
     with _LOCK:
         store = _load(_store_path())
         grant = store["items"].get(str(grant_id).strip())
         if not grant:
             raise KeyError(grant_id)
         grant = dict(grant)
+        decision = str(grant.get("decision") or "").strip().lower()
+        if decision == "always":
+            _append_audit(
+                store,
+                {
+                    "kind": "grant_reuse_always",
+                    "grant_id": grant["id"],
+                    "action_id": grant.get("action_id"),
+                    "tool_name": grant.get("tool_name"),
+                    "decision": "always",
+                },
+            )
+            _save(_store_path(), store)
+            return grant
         grant["consumed"] = True
         grant["consumed_at"] = _iso()
         store["items"][grant["id"]] = grant
@@ -400,6 +415,7 @@ def consume_grant(grant_id: str) -> dict[str, Any]:
                 "grant_id": grant["id"],
                 "action_id": grant.get("action_id"),
                 "tool_name": grant.get("tool_name"),
+                "decision": decision or "allow_once",
             },
         )
         _save(_store_path(), store)

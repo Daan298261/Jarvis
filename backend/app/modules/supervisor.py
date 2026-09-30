@@ -54,10 +54,47 @@ class WorkerSnapshot:
         }
 
 
+def _split_unbracketed_ipv6_loopback(url: str) -> tuple[str, str, str] | None:
+    """Parse ``http://::1:PORT/path`` which urllib rejects as a hostname/port pair."""
+    raw = (url or "").strip()
+    lowered = raw.lower()
+    if lowered.startswith("https://"):
+        scheme = "https"
+        rest = raw[len("https://") :]
+    elif lowered.startswith("http://"):
+        scheme = "http"
+        rest = raw[len("http://") :]
+    else:
+        return None
+    if rest.startswith("[::1]"):
+        return None
+    if not rest.startswith("::1"):
+        return None
+    after = rest[len("::1") :]
+    port = ""
+    path = "/"
+    if after.startswith(":"):
+        after = after[1:]
+        if "/" in after:
+            port, _, path_rest = after.partition("/")
+            path = "/" + path_rest
+        else:
+            port = after
+        if port and not port.isdigit():
+            return None
+    elif after.startswith("/"):
+        path = after
+    elif after:
+        return None
+    return scheme, port, path or "/"
+
+
 def is_loopback_url(url: str) -> bool:
     """Empty URL means process-alive check only (no HTTP). Non-empty must be loopback."""
     raw = (url or "").strip()
     if not raw:
+        return True
+    if _split_unbracketed_ipv6_loopback(raw) is not None:
         return True
     try:
         parsed = urlparse(raw)
@@ -65,7 +102,10 @@ def is_loopback_url(url: str) -> bool:
         return False
     if (parsed.scheme or "").lower() not in {"http", "https"}:
         return False
-    host = (parsed.hostname or "").strip().lower()
+    try:
+        host = (parsed.hostname or "").strip().lower()
+    except ValueError:
+        return False
     return host in LOOPBACK_HOSTS
 
 
@@ -93,13 +133,26 @@ def normalize_health_url(url: str) -> str:
     raw = (url or "").strip()
     if not raw:
         return ""
+    # Repair unbracketed IPv6 loopback before urllib/httpx see it.
+    split = _split_unbracketed_ipv6_loopback(raw)
+    if split is not None:
+        scheme, port, path = split
+        netloc = f"[::1]:{port}" if port else "[::1]"
+        return f"{scheme}://{netloc}{path or '/'}"
     if not is_loopback_url(raw):
         return ""
     parsed = urlparse(raw)
-    hostname = (parsed.hostname or "").lower()
-    # Prefer IPv4 loopback for localhost; keep ::1 when explicitly used.
-    host = "::1" if hostname == "::1" else DEFAULT_LOOPBACK
-    netloc = f"{host}:{parsed.port}" if parsed.port else host
+    try:
+        hostname = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError:
+        return ""
+    # Prefer IPv4 loopback for localhost; bracket IPv6 so httpx accepts the URL.
+    if hostname == "::1":
+        host = "[::1]"
+    else:
+        host = DEFAULT_LOOPBACK
+    netloc = f"{host}:{port}" if port else host
     path = parsed.path or "/"
     return f"{parsed.scheme}://{netloc}{path}"
 

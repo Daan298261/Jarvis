@@ -1017,18 +1017,13 @@ class AgentRuntime:
             MAX_RECENT_CHARS,
             MAX_RECENT_TURNS,
             apply_working_set_to_system,
+            bound_recent_turns,
             compose_turn_working_set,
         )
 
-        turn_ws = await compose_turn_working_set(
-            user_text,
-            task_class=CONVERSATION_CLASS,
-            agent_id="owner",
-            recent_messages=prior,
-            needs_tools=False,
-        )
-        # Bound history — never dump the full conversation into the prompt.
-        prior = list(turn_ws.recent_turns)
+        # Bound history only — do NOT await vault/Supermemory before routing/front.
+        # Simple replies must not wait on memory timeouts.
+        prior = bound_recent_turns(prior)
         if len(prior) > MAX_RECENT_TURNS:
             prior = prior[-MAX_RECENT_TURNS:]
         used = 0
@@ -1041,14 +1036,7 @@ class AgentRuntime:
             used += size
         prior = list(reversed(bounded))
 
-        system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws)
-        messages = [ChatMessage(role="system", content=system), *prior]
         briefing = await weather_system_message(user_text)
-        if briefing:
-            messages.insert(1, ChatMessage(role="system", content=briefing))
-        last = prior[-1] if prior else None
-        if last is None or last.role != "user" or (last.content or "").strip() != user_text:
-            messages.append(ChatMessage(role="user", content=user_text))
 
         from ..inference.answer_routing import prepare_answer_route
         from ..inference.model_escalation import schedule_orchestrator_restore
@@ -1061,9 +1049,16 @@ class AgentRuntime:
                 stored_route = str(getattr(task_row, "response_route", "") or "")
         route_kind = resolve_route_kind(user_text, stored_route=stored_route)
 
-        # RFC-0085 hard bypass: front reply before heavy answer-routing when the
-        # durable route is already a direct lane. Terminal fronts complete here
-        # and never pay worker / verify / progress cost — even with a warm model.
+        # Lean prompt for fast-path only — vault/Supermemory compose happens after miss.
+        lean_messages: list[ChatMessage] = [ChatMessage(role="system", content=OWNER_CHAT_SYSTEM), *prior]
+        if briefing:
+            lean_messages.insert(1, ChatMessage(role="system", content=briefing))
+        last = prior[-1] if prior else None
+        if last is None or last.role != "user" or (last.content or "").strip() != user_text:
+            lean_messages.append(ChatMessage(role="user", content=user_text))
+
+        # RFC-0085 hard bypass: front reply before vault/tool/Supermemory retrieval and
+        # before heavy answer-routing. Terminal fronts complete here without memory wait.
         prefetched_front = await generate_front_reply(
             user_text,
             history=prior,
@@ -1090,7 +1085,7 @@ class AgentRuntime:
             )
             await self._persist_front_partial(
                 task_id,
-                messages,
+                lean_messages,
                 prefetched_front.text,
                 first_response_ms=prefetched_front.first_text_ms or 0.0,
                 current_action="Checking details…"
@@ -1138,12 +1133,13 @@ class AgentRuntime:
                 )[:4000],
                 stage="chat",
             )
-            working.verified = True
+            # Terminal front has no independent verification evidence.
+            working.verified = False
             await self._complete(
                 task_id,
-                [*messages, ChatMessage(role="assistant", content=spoken_front)],
+                [*lean_messages, ChatMessage(role="assistant", content=spoken_front)],
                 spoken_front,
-                spoken_front,
+                "",
                 working,
                 metrics,
             )
@@ -1163,7 +1159,7 @@ class AgentRuntime:
                 task_id,
                 prompt=prompt,
                 user_text=user_text,
-                messages=messages,
+                messages=lean_messages,
                 profile_name=profile.name,
                 settings=settings,
                 working=working,
@@ -1183,6 +1179,25 @@ class AgentRuntime:
             json.dumps(miss_decision.as_dict(), ensure_ascii=False)[:1500],
             stage="chat",
         )
+
+        # Fast-path miss: retrieve vault/tools/Supermemory only now (does not delay first reply).
+        turn_ws = await compose_turn_working_set(
+            user_text,
+            task_class=CONVERSATION_CLASS,
+            agent_id="owner",
+            recent_messages=prior,
+            needs_tools=False,
+        )
+        prior = list(turn_ws.recent_turns)
+        if len(prior) > MAX_RECENT_TURNS:
+            prior = prior[-MAX_RECENT_TURNS:]
+        system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws)
+        messages = [ChatMessage(role="system", content=system), *prior]
+        if briefing:
+            messages.insert(1, ChatMessage(role="system", content=briefing))
+        last = prior[-1] if prior else None
+        if last is None or last.role != "user" or (last.content or "").strip() != user_text:
+            messages.append(ChatMessage(role="user", content=user_text))
         # Fail closed: a terminal front that could not be admitted must not
         # suppress the worker (empty/unsafe text would otherwise soft-complete).
         if (
@@ -1483,8 +1498,9 @@ class AgentRuntime:
             messages[-1] = ChatMessage(role="assistant", content=content)
         else:
             messages.append(ChatMessage(role="assistant", content=content))
-        working.verified = True
-        await self._complete(task_id, messages, content, content, working, metrics)
+        # Conversation answer is not independent verification evidence.
+        working.verified = False
+        await self._complete(task_id, messages, content, "", working, metrics)
 
     async def _run_direct_lookup_fastpath(
         self,
@@ -1613,8 +1629,18 @@ class AgentRuntime:
             messages[-1] = ChatMessage(role="assistant", content=content)
         else:
             messages.append(ChatMessage(role="assistant", content=content))
-        working.verified = True
-        await self._complete(task_id, messages, content, content, working, metrics)
+        # Direct lookup has no independent verification — never treat the answer as evidence.
+        working.verified = False
+        not_verified = json.dumps(
+            {
+                "result": "NOT_VERIFIED",
+                "checks": [],
+                "warnings": ["direct_lookup produced an answer without independent verification evidence"],
+                "answer_changed_by_verification": False,
+            },
+            ensure_ascii=False,
+        )
+        await self._complete(task_id, messages, content, not_verified, working, metrics)
 
     async def _run_simple_app_control(
         self,
@@ -3177,17 +3203,29 @@ class AgentRuntime:
         if success and decision.allowed:
             undo_note = ""
             try:
+                action_name = str(decision.effect.action or "").strip().lower()
+                args = arguments if isinstance(arguments, dict) else {}
+                source_path = str(args.get("path") or decision.effect.target or "").strip()
+                dest_path = str(args.get("destination") or args.get("to") or "").strip()
+                # Live undo precondition compares against this digest at undo time.
+                digest_path = dest_path if action_name in {"copy", "move", "rename"} and dest_path else source_path
                 post_digest = hashlib.sha256(
-                    f"{name}:{decision.effect.action}:{decision.effect.target}:{text[:200]}".encode()
+                    f"{name}:{action_name}:{digest_path or decision.effect.target}:{text[:200]}".encode()
                 ).hexdigest()[:32]
-                target_path = str(
-                    (arguments or {}).get("path") or decision.effect.target or ""
-                ).strip()
-                if target_path:
+                if digest_path:
                     try:
-                        p = Path(target_path).expanduser()
+                        p = Path(digest_path).expanduser()
                         if p.is_file():
                             post_digest = hashlib.sha256(p.read_bytes()).hexdigest()
+                        elif p.is_dir():
+                            hasher = hashlib.sha256()
+                            for item in sorted(p.rglob("*")):
+                                if item.is_file():
+                                    rel = item.relative_to(p).as_posix()
+                                    hasher.update(f"{rel}:{item.stat().st_size}".encode())
+                            post_digest = hasher.hexdigest()
+                        elif not p.exists() and action_name == "delete":
+                            post_digest = "missing"
                     except OSError:
                         pass
                 record = register_post_success_undo(
@@ -3196,8 +3234,9 @@ class AgentRuntime:
                     post_state={
                         "target": decision.effect.target,
                         "kind": prior_state.get("kind"),
+                        "digest_path": digest_path or decision.effect.target,
+                        "destination_path": dest_path or prior_state.get("destination_path"),
                         "expected_digest": post_digest,
-                        "current_digest": post_digest,
                     },
                     task_id=task_id,
                     run_id=task_id,

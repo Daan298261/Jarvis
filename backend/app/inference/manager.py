@@ -875,25 +875,33 @@ class InferenceManager:
             return int(self.state.context_size or current)
         return int(self.state.context_size or target)
 
+    @staticmethod
+    def _probe_nvidia_smi_memory() -> str:
+        """Sync nvidia-smi probe — always run via asyncio.to_thread from the event loop."""
+        import subprocess
+
+        return subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+
     async def refresh_resources(self) -> None:
         try:
-            import subprocess
-
-            out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            ).stdout.strip()
+            # Never block the FastAPI event loop on a hung/slow nvidia-smi (5s timeout).
+            out = await asyncio.to_thread(self._probe_nvidia_smi_memory)
             if out:
                 self.state.vram_used_mib = int(float(out.splitlines()[0].strip()))
         except Exception:
             pass
         try:
             if self.state.pid:
-                proc = psutil.Process(self.state.pid)
-                self.state.ram_used_gb = round(proc.memory_info().rss / (1024**3), 2)
+                ram_gb = await asyncio.to_thread(
+                    lambda: round(psutil.Process(self.state.pid).memory_info().rss / (1024**3), 2)
+                )
+                self.state.ram_used_gb = ram_gb
         except Exception:
             pass
 

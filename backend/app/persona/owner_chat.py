@@ -299,8 +299,9 @@ async def stream_owner_chat(
         and is_safe_front_speech(prefetched_front.action, prefetched_front.text)
     )
     if front_safe:
-        # Surface first text immediately — do not wait for worker model load.
-        chunks = prefetched_front.chunks or [prefetched_front.text]
+        # Emit ONLY validated sanitized text — never raw model chunks / JSON envelopes.
+        safe_text = (prefetched_front.text or "").strip()
+        chunks = [safe_text] if safe_text else []
         for chunk in chunks:
             if not chunk:
                 continue

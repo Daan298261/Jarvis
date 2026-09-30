@@ -141,6 +141,67 @@ _REVERSIBLE_FS = frozenset({"write", "edit", "mkdir", "copy", "move", "rename"})
 _COMPENSATABLE_FS = frozenset({"restore", "snapshot"})
 _IRREVERSIBLE_FS = frozenset({"delete"})
 
+# Observation-only actions for external / network / device / Office / MCP tools.
+# Mutations stay gated; credentials/financial still override below.
+_BROWSER_OBSERVE = frozenset(
+    {
+        "open",
+        "navigate",
+        "goto",
+        "title",
+        "snapshot",
+        "screenshot",
+        "tabs",
+        "action_frame",
+        "close",
+    }
+)
+_BROWSER_MUTATE = frozenset(
+    {
+        "click",
+        "type",
+        "fill",
+        "press",
+        "evaluate",
+        "download",
+        "upload",
+    }
+)
+_WEB_FETCH_OBSERVE = frozenset({"", "get", "fetch", "head", "read", "retrieve"})
+_OFFICE_OBSERVE = frozenset({"read", "info", "list", "status", "stat"})
+_OFFICE_MUTATE = frozenset({"create", "append", "save", "save_as", "write", "edit", "delete"})
+_MOBILE_OBSERVE = frozenset({"", "devices", "list", "status", "read"})
+_MCP_OBSERVE_HINTS = (
+    "list",
+    "status",
+    "read",
+    "get",
+    "fetch",
+    "search",
+    "find",
+    "query",
+    "describe",
+    "schema",
+    "health",
+    "ping",
+)
+_MCP_MUTATE_HINTS = (
+    "send",
+    "write",
+    "create",
+    "delete",
+    "update",
+    "post",
+    "put",
+    "patch",
+    "execute",
+    "run",
+    "call",
+    "invoke",
+    "transfer",
+    "pay",
+)
+
 _CREDENTIAL_HINTS = (
     "password",
     "secret",
@@ -166,6 +227,38 @@ _EXTERNAL_TOOLS = frozenset(
         "apps",
     }
 )
+
+
+def _observation_meta(tool_name: str, action: str, target: str, summary: str) -> ActionEffectMeta:
+    return ActionEffectMeta(
+        tool_name=tool_name,
+        action=action or "invoke",
+        reversibility=ReversibilityClass.REVERSIBLE,
+        side_effecting=False,
+        external_side_effect=False,
+        high_consequence=False,
+        target=target,
+        recovery_summary=summary,
+    )
+
+
+def _mcp_tool_looks_observational(args: dict[str, Any], action: str) -> bool:
+    blob = " ".join(
+        str(args.get(key) or "")
+        for key in ("mcp_tool", "name", "tool", "action", "method")
+    ).lower()
+    if action:
+        blob = f"{blob} {action}".strip()
+    if any(hint in blob for hint in _MCP_MUTATE_HINTS):
+        # Explicit mutate tokens win over observe heuristics.
+        if any(hint in blob for hint in ("list_", "list-", "get_", "get-", "read_", "status")):
+            # e.g. list_messages is still observational despite "send" elsewhere
+            pass
+        else:
+            return False
+    if action in {"list", "status", "read", "get", "search", "describe", "health", "ping"}:
+        return True
+    return any(hint in blob for hint in _MCP_OBSERVE_HINTS)
 
 
 def _target_from_args(arguments: dict[str, Any]) -> str:
@@ -456,6 +549,84 @@ def resolve_action_effect(
                 has_external_effects=False,
             ),
         )
+
+    # External tools: classify by action semantics before the UNKNOWN default.
+    if name in {"browser", "browser_use"}:
+        if act in _BROWSER_MUTATE:
+            return ActionEffectMeta(
+                tool_name=name,
+                action=act,
+                reversibility=ReversibilityClass.UNKNOWN,
+                external_side_effect=True,
+                high_consequence=True,
+                target=target,
+                recovery_summary="browser mutation may have consequential page effects — gate required",
+            )
+        if act in _BROWSER_OBSERVE or not act:
+            return _observation_meta(
+                name,
+                act or "navigate",
+                target,
+                "browser observation (navigate/read/status); no undo required",
+            )
+
+    if name == "web_fetch":
+        if act in _WEB_FETCH_OBSERVE:
+            return _observation_meta(
+                name,
+                act or "get",
+                target,
+                "HTTP GET/fetch observation; no undo required",
+            )
+
+    if name == "office":
+        if act in _OFFICE_OBSERVE:
+            return _observation_meta(
+                name,
+                act,
+                target,
+                "Office document read/info; no undo required",
+            )
+        if act in _OFFICE_MUTATE:
+            return ActionEffectMeta(
+                tool_name=name,
+                action=act,
+                reversibility=ReversibilityClass.IRREVERSIBLE
+                if act == "delete"
+                else ReversibilityClass.UNKNOWN,
+                external_side_effect=False,
+                high_consequence=True,
+                destructive_effect=act == "delete",
+                target=target,
+                recovery_summary=f"Office {act} is consequential — ApprovalGrant required",
+            )
+
+    if name == "mobile_call":
+        if act in _MOBILE_OBSERVE:
+            return _observation_meta(
+                name,
+                act or "devices",
+                target,
+                "mobile device list/status observation; no undo required",
+            )
+        return ActionEffectMeta(
+            tool_name=name,
+            action=act or "call",
+            reversibility=ReversibilityClass.UNKNOWN,
+            external_side_effect=True,
+            high_consequence=True,
+            target=target,
+            recovery_summary="mobile call / device mutation requires ApprovalGrant",
+        )
+
+    if name == "mcp_call" or name.startswith("mcp_"):
+        if _mcp_tool_looks_observational(args, act):
+            return _observation_meta(
+                name,
+                act or str(args.get("mcp_tool") or "list"),
+                target,
+                "MCP list/status/read observation; no undo required",
+            )
 
     if external:
         return ActionEffectMeta(

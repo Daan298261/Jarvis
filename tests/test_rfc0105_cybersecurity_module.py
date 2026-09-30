@@ -27,9 +27,19 @@ def clean_module_state(tmp_path, monkeypatch):
     monkeypatch.setattr("app.modules.catalog_download.data_dir", lambda: tmp_path)
     projects = tmp_path / "projects"
     projects.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "le-gated").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "Desktop" / "projects").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("app.modules.catalog_download.repo_root", lambda: tmp_path)
     monkeypatch.setattr("app.modules.cybersecurity.repo_root", lambda: tmp_path)
     monkeypatch.setattr("app.modules.supervisor.logs_dir", lambda: tmp_path / "logs")
+    # Isolate EVERY discovery root so tests never see real Strix/checkouts.
+    isolated_le = [tmp_path / "le-gated"]
+    isolated_desktop = tmp_path / "Desktop" / "projects"
+    isolated_library = tmp_path / "projects"
+    for mod in ("app.modules.cybersecurity", "app.modules.catalog_download"):
+        monkeypatch.setattr(f"{mod}.le_gated_roots", lambda roots=isolated_le: list(roots))
+        monkeypatch.setattr(f"{mod}.desktop_projects_root", lambda p=isolated_desktop: p)
+        monkeypatch.setattr(f"{mod}.library_projects_path", lambda p=isolated_library: p)
     cybersecurity.reset_state()
     catalog_download.reset_download_jobs()
     skill_packs.reset_skill_packs()
