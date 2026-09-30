@@ -236,6 +236,58 @@ def resolve_action_effect(
             recovery_summary="observation-only; no undo required",
         )
 
+    if name in {"python", "interpreter", "code_worker"}:
+        return ActionEffectMeta(
+            tool_name=name,
+            action=act or "run",
+            reversibility=ReversibilityClass.COMPENSATABLE,
+            high_consequence=False,
+            external_side_effect=False,
+            target=target,
+            recovery_summary="local code execution; compensate by discarding process outputs",
+            compensation=CompensationSpec(
+                operation=f"{name}.discard_outputs",
+                preconditions=["execution_was_local"],
+                has_external_effects=False,
+            ),
+        )
+
+    if name == "git":
+        if act in {"status", "diff", "log", "show", "branch", "remote"}:
+            return ActionEffectMeta(
+                tool_name=name,
+                action=act,
+                reversibility=ReversibilityClass.REVERSIBLE,
+                side_effecting=False,
+                target=target,
+                recovery_summary="read-only git inspection",
+            )
+        if act in {"commit", "add", "checkout", "switch", "stash", "branch_create", "worktree_add"}:
+            return ActionEffectMeta(
+                tool_name=name,
+                action=act,
+                reversibility=ReversibilityClass.COMPENSATABLE,
+                high_consequence=False,
+                target=target,
+                recovery_summary=f"compensate git {act} via reverse git op where safe",
+                compensation=CompensationSpec(
+                    operation=f"git.undo_{act or 'mutate'}",
+                    preconditions=["repo_state_matches_postcondition"],
+                    has_external_effects=False,
+                ),
+            )
+        if act in {"push", "worktree_remove", "clean", "reset_hard"} or destructive:
+            return ActionEffectMeta(
+                tool_name=name,
+                action=act or "mutate",
+                reversibility=ReversibilityClass.IRREVERSIBLE if destructive else ReversibilityClass.UNKNOWN,
+                destructive_effect=destructive,
+                high_consequence=True,
+                external_side_effect=act == "push",
+                target=target,
+                recovery_summary="destructive or publishing git op requires ApprovalGrant",
+            )
+
     if name == "apps":
         if act in {"find", "running", "list"}:
             return ActionEffectMeta(
@@ -333,14 +385,29 @@ def resolve_action_effect(
                 target=target or command[:500],
                 recovery_summary="shell destructive command is irreversible",
             )
+        if risk == RiskLevel.HIGH:
+            return ActionEffectMeta(
+                tool_name=name,
+                action=act or "run",
+                reversibility=ReversibilityClass.UNKNOWN,
+                high_consequence=True,
+                external_side_effect=True,
+                target=target or command[:500],
+                recovery_summary="high-impact shell command defaults to UNKNOWN and requires ApprovalGrant",
+            )
         return ActionEffectMeta(
             tool_name=name,
             action=act or "run",
-            reversibility=ReversibilityClass.UNKNOWN,
-            high_consequence=True,
-            external_side_effect=True,
+            reversibility=ReversibilityClass.COMPENSATABLE,
+            high_consequence=False,
+            external_side_effect=False,
             target=target or command[:500],
-            recovery_summary="shell effects are UNKNOWN unless proven reversible",
+            recovery_summary="routine local shell; compensate by stopping the process if still running",
+            compensation=CompensationSpec(
+                operation="terminal.stop_if_running",
+                preconditions=["command_was_local_non_destructive"],
+                has_external_effects=False,
+            ),
         )
 
     if credential:

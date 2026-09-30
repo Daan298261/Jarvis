@@ -242,7 +242,13 @@ def _tool_risk(name: str, arguments: dict[str, Any] | None) -> tuple[RiskLevel, 
     args = arguments if isinstance(arguments, dict) else {}
     command = args.get("command")
     if command:
-        risk = max(risk, classify_command(str(command)), key=lambda item: list(RiskLevel).index(item))
+        command_risk = classify_command(str(command))
+        # TerminalTool defaults to HIGH as a catalog hint; per-command classification
+        # must win so routine echo/pytest are not treated as UNKNOWN high-consequence.
+        if (name or "").strip().lower() == "terminal":
+            risk = command_risk
+        else:
+            risk = max(risk, command_risk, key=lambda item: list(RiskLevel).index(item))
     action = args.get("action")
     if is_destructive_operation(name, args, command if isinstance(command, str) else None):
         risk = RiskLevel.IRREVERSIBLE
@@ -2711,6 +2717,18 @@ class AgentRuntime:
         profile_id: str | None = None,
         grant_id: str | None = None,
     ) -> tuple[str, str | None]:
+        # Prefer gate_tool_call (via _tool_authorization) so existing hooks/tests that
+        # monkeypatch app.agent.loop.gate_tool_call still observe the deny/allow boundary.
+        authz = _tool_authorization(
+            name,
+            arguments,
+            approved=approved,
+            profile_id=profile_id,
+            grant_id=grant_id,
+            task_id=task_id,
+        )
+        if not authz.allowed:
+            return _authorization_observation(authz), None
         decision = _side_effect_decision(
             name,
             arguments,
@@ -2719,13 +2737,11 @@ class AgentRuntime:
             profile_id=profile_id,
             park_if_needed=False,
         )
-        if not decision.allowed:
-            return _authorization_observation(_to_authorization(decision)), None
-        if decision.grant_id:
+        if grant_id:
             from ..policy.approval_grant import consume_grant
 
             try:
-                consume_grant(decision.grant_id)
+                consume_grant(grant_id)
             except KeyError:
                 pass
         consume_once_grants(permission_ids_for_tool(name, arguments))
@@ -2741,8 +2757,8 @@ class AgentRuntime:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
             REGISTRY._context["task_id"] = task_id
-            REGISTRY._context["approved"] = bool(decision.grant_id) or approved
-            REGISTRY._context["approval_grant_id"] = decision.grant_id or ""
+            REGISTRY._context["approved"] = bool(grant_id) or approved
+            REGISTRY._context["approval_grant_id"] = grant_id or ""
             if name == "read_ingress":
                 result = await REGISTRY.execute(name, arguments, task_id=task_id)
             elif security_role:
@@ -2812,7 +2828,7 @@ class AgentRuntime:
                     Checkpoint(task_id=task_id, kind="git", path=arguments.get("path") or "", note=text[:500])
                 )
             await session.commit()
-        if success:
+        if success and decision.allowed:
             try:
                 register_post_success_undo(
                     decision,
