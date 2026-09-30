@@ -33,6 +33,8 @@ def test_force_stop_binds_ciminstance_not_managementobject():
     assert "$procId =" in text
     assert "Stop-Process -Id $procId" in text
     assert "$pid =" not in text.lower()
+    assert "param([int]$Pid" not in text
+    assert "param([int]$ProcessId" in text
     assert "CheckOnly" in text
     assert "ProtectedPids" in text
     assert "jarvissetup" in text.lower()
