@@ -1,6 +1,7 @@
 # RFC-0176: Shared dot appearance profiles
 
 **Status:** implemented
+**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) requires **profile/geometry separation** in **previews**: persona selector cards and mode tiles must show the live WebGL shape **plus** this appearance profile, not static symbolic marks alone. Profiles still must not drop silhouette or motif. Status stays **implemented** for #428/#433. Desktop visual soak of previews is RFC-0195 residual.
 **Implemented:** #428 @ `7ecfdcf0128c8e67d4ece8aef6af8ed4ca66977c` (shared appearance profiles; bounded point scale and depth softness).
 **Specs:** #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`.
 **Quality bar:** **Anzu 1.0**. Full intent. No stubs / soft-fail.
@@ -46,6 +47,6 @@ Changing persona roster, shape precedence, voice bindings, custom-UI generation,
 
 ## Notes
 
-This contract should be implemented before persona-specific render polish. RFC-0175 continues to own the single-cloud free-float / figure morph and pointer / optional face attract behavior; this RFC does not add a second morph API or camera path.
+RFC-0175 continues to own the single-cloud rest / figure morph and pointer / optional face attract behavior **as amended by RFC-0195** (rest is a readable silhouette, not `uMorph` 0 identity-hide); this RFC does not add a second morph API or camera path. APEX remains a visual reference for the **public orb-and-graph** look only — not a humanoid import.
 
 Product landed on development via #428 @ `7ecfdcf0128c8e67d4ece8aef6af8ed4ca66977c`. Specs were #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`. Quality bar stays **Anzu 1.0**. The harness acceptance row is closed by #433 @ `a128942e7849cec9ceeb8eabb04e70d4b44dcd83` (covered by the #430 shared profile controls and cross-shape preview). No residual.

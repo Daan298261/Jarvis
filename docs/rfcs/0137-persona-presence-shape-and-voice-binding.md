@@ -4,7 +4,8 @@
 **Queue item:** (none — no new §58 checkbox)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-23  
-**Amended:** 2026-09-23 on `development` @ `ec5c8f8c` (PR #376); 13-persona roster amend #379 @ `a434f4c8`. This file stays **0137**. Do not open RFC-0138 for the roster.
+**Amended:** 2026-09-23 on `development` @ `ec5c8f8c` (PR #376); 13-persona roster amend #379 @ `a434f4c8`. This file stays **0137**. Do not open RFC-0138 for the roster.  
+**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) uniqueness: selector cards use WebGL shape+profile thumbnails; side-injected **Umi** must not reuse Nabu `memory_rings` (unique `opus_tide`). Does **not** add a fourteenth canonical roster row. Status stays **implemented**. Desktop soak unchecked.
 
 **Related (do not rewrite):** [RFC-0126](0126-personality-session-modes.md) and [RFC-0130](0130-session-personalities.md) stay **session modes** (HUD accent + prompt). They are not this catalog. [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (**implemented** — `registerPresenceShape`, `uMorph`). [RFC-0051](0051-humanoid-presence-runtime.md) (reduced motion; existing phase machine). [RFC-0062](0062-selectable-voice-profile-catalog.md) / [RFC-0092](0092-neural-tts-default-no-silent-sapi.md) (original packs; no silent SAPI). [RFC-0078](0078-hexstrike-cyber-suite.md) already morphs to `hex_aegis` when the HexStrike suite profile is selected. [RFC-0106](0106-hexstrike-jarvis-full-operator-control.md) operator contract stays. [RFC-0104](0104-persona-candidates-pack.md) stays an unmerged hold.
 
@@ -94,6 +95,20 @@ Display archetype in the voice column is the **existing pack’s** display name,
 | 13 | `vulcan` | Hardware, infrastructure and physical systems | Practical, grounded, slightly rugged | `forge_core` | Orange/red molten-core orb. Sparks, forge rings, heat shimmer. | `synthetic_command_original_v1` | molten orange `#EA580C` + red `#DC2626` |
 
 Labels are Anzu, Mestor, Nabu, Enki, Veles, Themis, Aegir, Bragi, Hermes, Heimdall, Eir, Maia, Vulcan.
+
+### Side-injected Umi (2026-09-30 — uniqueness, not a 14th canonical row)
+
+Product already side-injects `umi` (Opus-style reasoning / `umi-opus-9b` / Pocket TTS). **RFC-0195** does **not** rewrite this 13-row table and does **not** make Umi a fourteenth canonical specialist in the RFC-0137 catalog count.
+
+**Required:** if Umi is selectable in the owner roster UI, it must have a **unique** presence silhouette:
+
+| Id | Role (product) | `presence_shape_id` | Visual intent | Must not |
+| --- | --- | --- | --- | --- |
+| `umi` | Side-injected main/reasoning (Opus-inspired) | **`opus_tide`** (locked) | Ocean / Opus-inspired reasoning current: deep indigo/violet tides, layered swell, slow intellectual pulse. Distinct from Aegir teal media waves. | Reuse Nabu `memory_rings`. Reuse Aegir `ocean_swell`. |
+
+Voice bind stays the product pack (`pocket_tts_alba_en_v1`); this amend does not retarget voice. Golden captures in RFC-0195 include Umi.
+
+**Selector cards:** deterministic thumbnails from the same WebGL shape + RFC-0176 profile as the HUD (RFC-0195). Static `SpecialistShapeMark` SVG-alone is not the card.
 
 `stormbird` and `ocean_swell` keep the ids from #376. Refine Anzu’s visual to the red-gold wing arcs and electrical pulses in this table (the earlier “beak silhouette” line is withdrawn). `ocean_swell` moves from the dropped `eagir` id to `aegir`.
 
@@ -270,6 +285,7 @@ Veles and Themis are the persona labels Taco gave for Red Team (threat intellige
 - A second presence renderer for specialists or for states.
 - A merged RFC-0104 tree, a rewritten RFC-0106 operator surface, new voice-pack files, or shape/voice strings that trip `contains_forbidden_ip_term`.
 - LE / ATO / officer gates or offensive tool wiring added for Veles or Themis.
+- **2026-09-30:** Umi (if shown) on `memory_rings` or `ocean_swell`; persona selector cards that are only static symbolic marks (RFC-0195).
 
 ## Acceptance criteria
 

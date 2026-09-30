@@ -1,10 +1,12 @@
 # RFC-0175: Galaxy presence option, chat voice waveform, and Advanced controls
 
 **Status:** implemented
+**Amended:** 2026-09-30 — **RFC-0195** overrides the idle free-float that **hides** the persona (Ref A as live rest). Engage still morphs/tightens. Status stays **implemented** for #419 / #425. Do **not** ledger-tick a new implemented row from this amend. Desktop soak stays unchecked, now against RFC-0195 goldens (humanoid rest + viewport-fill), not Ref A identity-hide.
 **Implemented:** #419 @ `444e50c9b48bc475d05b646ce6b47d36e3e35d47` (product code; Galaxy Appearance option, chat waveform, Advanced disclosures, figure/field budgets). Amend 2026-09-25 morph: #425 @ `063a5ee1e411ce5bb551f3edccd680f7ea71e7e9` (squash of head `9f86a14f`; one-presence free→humanoid morph on all avatars; idle attract).
 **Specs:** #418 @ `5954f7ee1c2faf130a7ef1846f6671b40f449b9e`. Amend specs: #422 @ `893d6e2c5c6a2c6476cdc46fdfb0b081e49db7be`.
 **Amend (2026-09-25):** **implemented** (#425 @ `063a5ee1`). Refs A/B/C are stages of **one** continuous presence. The free→humanoid morph and idle attract landed in product code. Product criteria for that lifecycle are checked below. Quality bar stays **Anzu 1.0**. Full intent. No stubs / soft-fail.
-**Residuals:** Desktop GPU / live WebGL soak of the live morph against `docs/rfcs/assets/0175/` refs A/B/C **and** real webcam face attract. Taco Desktop soak. Not signed off in #425. Cloud VMs cannot sign this off.
+**Amend (2026-09-30 settings):** the lock that `SETTINGS_SUBMENUS` **stays** `appearance-voice` is **superseded**. Canonical Settings IA is split **Appearance** vs **Voice** — see [RFC-0094](0094-settings-menu-information-architecture.md) 2026-09-30 amend. Do not re-merge Settings nav. HUD Voice / Appearance / Persona split stays.
+**Residuals:** Desktop GPU / live WebGL soak. After RFC-0195, soak is rest **identity** + viewport-fill + Ref B engage + Ref C Galaxy field + webcam attract. Taco Desktop soak. Cloud VMs cannot sign this off.
 **Queue item:** `JARVIS_MASTER_PLAN.md` §58 — RFC-0175 (checked; #419 implemented; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU soak vs refs A/B/C + real webcam face attract)
 **Author:** Jarvis Architect  
 **Date:** 2026-09-24
@@ -34,24 +36,26 @@ The lifecycle below is **implemented** via #425 @ `063a5ee1e411ce5bb551f3edccd68
 
 Full intent. Anzu 1.0. No stubs. A CSS class swap, a pre-baked bust that only yaws, a video texture, three swappable looks, or a morph that runs only when `requestedPresence` is `galaxy` is a **fail**.
 
-1. **Idle / attract (Ref A).** Orbs free-float in the stage. They are not a preformed bust. They are drawn to the mouse cursor (pointer). When webcam / person tracking is available and returns a real face sample, they are drawn to that face. If the camera is missing, permission is denied, the tracker cannot start, or confidence is zero, attract **fails closed** to the pointer. Mouse-only still works. Presence still renders. Do not invent a face, do not block the avatar on a camera error, and do not send frames off the machine.
-2. **Engage / start (Ref B).** Leaving idle morph-clumps those same orbs into the humanoid silhouette (Ref B lattice, or the winning non-bust figure when shape precedence says so). Ref C is the field through both stages, especially the Galaxy starfield already specified. It is not a stage the owner selects. One morph. Same orbs. Returning to idle reverses the morph back to free-float.
+**2026-09-30 override ([RFC-0195](0195-visual-acceptance-and-presence-stage.md)):** items 1–2 below no longer permit rest to be an anonymous free cloud or `uMorph` 0. Attract, fail-closed camera, and engage-tighten stay.
+
+1. **Idle / attract (rest — amended).** The winning figure stays a **recognizably humanoid (or winning-shape) silhouette**. Idle may loosen motion/density. Idle must **not** dissolve into an anonymous free cloud that erases identity. Orbs may bias toward the pointer. When webcam / person tracking is available and returns a real face sample, they may bias toward that face. If the camera is missing, permission is denied, the tracker cannot start, or confidence is zero, attract **fails closed** to the pointer. Mouse-only still works. Presence still renders. Do not invent a face, do not block the avatar on a camera error, and do not send frames off the machine. **Ref A is historical; it is not the live rest target.**
+2. **Engage / start (Ref B).** Leaving rest **morphs / tightens** those same orbs into the engaged humanoid silhouette (Ref B lattice, or the winning non-bust figure when shape precedence says so). Ref C is the field through both stages, especially the Galaxy starfield already specified. It is not a stage the owner selects. One morph. Same orbs. Returning to rest **loosens** tightness; it does **not** reverse to identity-hiding free-float.
 3. **Scope.** This free→humanoid morph is required for **all** UI avatars / presence modes. It is **not** gated on `requestedPresence: "galaxy"`. Galaxy stays the ADD Appearance option for the starfield and the enrichment already specified (Ref C). The lifecycle is cross-cutting.
 
 **Phases.** `idle`, `waiting`, and `offline` are the idle / attract stage. `thinking`, `listening`, `speaking`, `executing`, `alert`, `error`, and `approval` are the engaged stage. The transition is the morph. Phase drives the stage. The owner does not pick a stage.
 
 **Morph contract (RFC-0069, do not rewrite that RFC).** Use the existing `uMorph` lerp (0..1) on the morphable orb cloud. Do not add a second morph uniform, a second canvas, a mesh, or a GLTF. Do not remount `HumanoidPresence` / `PresenceHost` to play the transition.
 
-- `uMorph` 0 is the free-float cloud (idle).
-- `uMorph` 1 is the winning figure (`buildFigure` of the shape precedence already in §1).
+- `uMorph` **rest tightness** (RFC-0195: a documented constant in **[0.72, 0.92]**) is idle / waiting / offline. It is **not** 0. Zero free-float that hides the persona is **superseded**.
+- `uMorph` 1 is the winning figure at engage tightness (`buildFigure` of the shape precedence already in §1).
 - Non-reduced motion uses the existing morph duration (1.2s). Reduced motion snaps (`uMotion = 0`) and does not chase.
 - Field layers may swap rather than lerp, as RFC-0069 already allows. Galaxy star samples stay out of the figure `uMorph` budget (§2).
 
 **Attract contract (RFC-0050 / RFC-0051, do not rewrite those RFCs).** Pointer and camera attention already exist. Reuse them. Do not add a second webcam stack, and do not persist landmarks, embeddings, or frames (RFC-0050: local and ephemeral; nothing enters prompts, memory, logs, or telemetry).
 
-- Pointer attract uses the existing attention vector `source: "pointer"` from `createPresenceAttentionController` (`frontend/src/presence/presenceAttention.ts`). Idle orbs bias toward that point (the `uPointer` falloff in `morphableOrbCloud` is the mechanism to extend). A yaw-only bust that is already a head is not the idle stage.
+- Pointer attract uses the existing attention vector `source: "pointer"` from `createPresenceAttentionController` (`frontend/src/presence/presenceAttention.ts`). Rest orbs may bias toward that point (the `uPointer` falloff in `morphableOrbCloud` is the mechanism to extend) **without** dropping rest tightness to identity-hide. A yaw-only generic bust that is the wrong persona is a **fail**.
 - Face attract uses the existing camera path: `attentionMode: "camera"` plus `presenceCameraTrack` (MediaPipe face landmarks, `FaceDetector` fallback). Do not call `getUserMedia` unless that mode is already `camera`. “Available” means the owner has enabled camera attention and the tracker returns a face. It does not mean idle always opens a webcam. RFC-0051’s humanoid runtime still does not itself open the camera. Acquisition stays the attention controller. A usable sample has confidence above zero. Anything else fails closed to the pointer. Mouse attract still runs.
-- `attentionMode: "off"` and reduced motion: free-float holds without a chase. Pointer mode with no camera is the baseline, not a degraded mode.
+- `attentionMode: "off"` and reduced motion: the **rest silhouette** holds without a chase. Pointer mode with no camera is the baseline, not a degraded mode.
 
 **Where it runs.** Every host that renders a presence avatar:
 
@@ -171,7 +175,7 @@ Authoritative mood boards are the three room frames Taco sent after the earlier 
 
 | Board | What to match |
 | --- | --- |
-| **Ref A** — idle / attract stage | Free-floating cool-blue orbs. Not a preformed head and shoulders. Dark ground shows through. Edges dissolve. No bright amber face. Orbs draw toward the pointer, and toward a face when tracking is live. On Galaxy, the bottom-center pill reads `STATUS: IDLE \| ····· \| SYN-01`. This is the idle stage of the one presence. |
+| **Ref A** — historical idle mood board | **Superseded as the live rest target (RFC-0195).** Do not ship rest as an anonymous free cloud. Rest is a loosened **humanoid / winning-figure silhouette**. Attract and Galaxy `STATUS: IDLE \| ····· \| SYN-01` pill remain. The JPEG is historical, not permission to hide identity. |
 | **Ref B** — engaged humanoid lattice | The same orbs, morph-clumped into the humanoid silhouette: horizontal fiber lines, a warm orange/amber concentric face core, gold fibers in the neck, crown dissolving into particles, terrain streams left and right. This is the engaged stage, not a second mode. |
 | **Ref C** — field / ambience through the lifecycle | Deep black star field, especially while Galaxy is the Appearance option. The field is up during idle and during the clump. Not a third look, and not a control that hides the figure. A discreet status pill may sit on that field. The reference frame is mostly stars; the product still runs Ref A and Ref B on it. |
 
@@ -204,7 +208,7 @@ Add one component, `frontend/src/chat/VoiceWaveformBar.tsx`, mounted **in or imm
 
 ### 4. Common controls stay visible; power controls sit under Advanced
 
-RFC-0094’s Settings groups stay. `SETTINGS_SUBMENUS` in `frontend/src/settings/settingsSubmenus.ts` stays `appearance-voice`, `phone-pairing`, `models`, `network`, `integrations`, `advanced`. Do not add a group, rename a group, or move Voice, Appearance, Galaxy, or the persona picker under Advanced. Do not remove cards from `AdvancedSettingsPane`. HexStrike tab names (Runtime, Catalog, Operate, Jobs) stay.
+RFC-0094’s Settings groups stay, as **amended 2026-09-30**: canonical ids are **`appearance`** and **`voice`** as **separate** first-class groups (plus `phone-pairing`, `models`, `network`, `integrations`, `advanced`). The 2026-09-25 lock that `SETTINGS_SUBMENUS` **stays** `appearance-voice` is **superseded**. Do not re-merge Appearance and Voice in Settings nav. Do not move Voice, Appearance, Galaxy, or the persona picker under Advanced. Do not remove cards from `AdvancedSettingsPane`. HexStrike tab names (Runtime, Catalog, Operate, Jobs) stay. HUD Persona / Voice / Appearance split is unchanged. Full IA: [RFC-0094](0094-settings-menu-information-architecture.md) 2026-09-30 amend.
 
 On each tab below, add a collapsed **Advanced** disclosure (`<details>` or equivalent, label exactly **Advanced**) on that same tab. Primary actions stay outside it. Moving a control into Settings → Advanced, or deleting it, is a **fail**.
 
@@ -231,7 +235,7 @@ Checked rows are the #419 land (Galaxy option, waveform, Advanced, budgets) and 
 - [x] Waveform is mounted on HUD and Classic composers, visible only during real TTS playback or an open mic, hidden when idle, driven by an analyser when one attaches, steady when it does not.
 - [x] HUD Speak uses the existing `/api/voice/listen` path and sets real `recording` state.
 - [x] `waveformLetters.ts` is unchanged as the chat meter.
-- [x] Settings submenu ids are unchanged. Voice and Appearance are not placed under Advanced. The per-tab Advanced disclosures in §4 exist, collapsed by default, and the visible controls in that table still work.
+- [x] Settings submenu ids as of the #419 land. **2026-09-30:** implementers must follow RFC-0094 split `appearance` / `voice` (not keep `appearance-voice` as canonical). Voice and Appearance are not placed under Advanced. The per-tab Advanced disclosures in §4 exist, collapsed by default, and the visible controls in that table still work.
 - [x] Unit coverage for the new presence literal (default `neural`, `galaxy` round-trips, old values still parse) and for waveform visibility (idle hidden, speaking shown, listening shown, end hidden).
 - [x] `python3 -m pytest`
 - [x] `npm --prefix frontend run build` and `npm --prefix frontend run lint`
@@ -239,13 +243,13 @@ Checked rows are the #419 land (Galaxy option, waveform, Advanced, budgets) and 
 Lifecycle (implemented #425 @ `063a5ee1`; Desktop soak residual stays open):
 
 - [x] One presence. Ref A, Ref B, and Ref C are stages of the same continuous presence. No control swaps among three looks.
-- [x] Idle / attract on every presence avatar: orbs free-float (not a preformed bust) and are drawn to the pointer. When webcam/person tracking is available and returns a real face sample, they are drawn to that face. Camera missing, denied, or tracker failed fails closed to the pointer. Mouse-only still works. No fake face chase. No frames leave the machine (RFC-0050).
-- [x] Engage / start: those orbs morph-clump into the humanoid silhouette (Ref B lattice; winning `hex_aegis` / persona / preset figure when precedence says so). Ref C field stays through the lifecycle where Galaxy is selected. The morph is RFC-0069 `uMorph` (0 = free cloud, 1 = winning figure) without remounting the host and without a second canvas. Returning to idle reverses to free-float.
+- [x] Idle / attract on every presence avatar **as shipped in #425** (free-float). **2026-09-30 RFC-0195 overrides the identity-hide:** rest must remain a readable winning-figure silhouette; attract/privacy rows still apply (pointer baseline; camera fail-closed; no frames leave the machine). Do **not** treat the checked #425 free-float row as permission to keep hiding the persona.
+- [x] Engage / start: those orbs morph/tighten into the humanoid silhouette (Ref B lattice; winning `hex_aegis` / persona / preset figure when precedence says so). Ref C field stays through the lifecycle where Galaxy is selected. The morph is RFC-0069 `uMorph` without remounting the host and without a second canvas. **RFC-0195:** rest tightness ∈ [0.72, 0.92], engaged = 1.0; returning to rest loosens, it does not identity-hide. The checked #425 `0 = free cloud` wording is **superseded**.
 - [x] The free→humanoid morph runs for Neural, Humanoid, Particle bust, Galaxy, the HexStrike host, persona shapes, and RFC-0138 presets, and for Classic only where a presence avatar is actually mounted. It is not gated on `requestedPresence: galaxy`. A Galaxy-only morph is a **fail**. Classic `requestedPresence: none` does not grow a new canvas.
 - [x] Galaxy remains an ADD Appearance option. Default stays `neural`. HexStrike override rules, the waveform, and Advanced stay as the #419 land.
 - [x] Reduced motion: no chase and no traveling morph. `attentionMode: off` stops the attract and does not remove the avatar.
-- [x] Unit coverage for the lifecycle: idle is the free cloud, engage drives `uMorph` toward the winning figure, camera-unavailable attract stays on the pointer, and the morph is not skipped when `requestedPresence` is not `galaxy`.
-- [ ] **Residual:** Desktop GPU / live WebGL soak of the live morph against `docs/rfcs/assets/0175/` refs A/B/C and real webcam face attract. Taco Desktop soak. Not signed off in #425. Cloud VMs cannot sign this off.
+- [x] Unit coverage for the lifecycle as of #425 (free-cloud idle). **RFC-0195 implement must replace that coverage:** rest tightness ∈ [0.72, 0.92], engage drives `uMorph` toward 1.0, camera-unavailable attract stays on the pointer, and the morph is not skipped when `requestedPresence` is not `galaxy`. A test that still requires idle `=== 0` is a **fail**.
+- [ ] **Residual:** Desktop GPU / live WebGL soak against **RFC-0195** (viewport-fill, humanoid rest identity for 13 + Umi, Mestor not a slab, engage tighten) **and** real webcam face attract. RFC-0175 refs B/C still inform engage/field. Ref A is not the rest pass. Taco Desktop soak. Not signed off in #425. Cloud VMs cannot sign this off.
 
 ## Likely files
 

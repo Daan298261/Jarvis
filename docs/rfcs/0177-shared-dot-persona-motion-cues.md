@@ -23,7 +23,7 @@ The APEX humanoid materials describe assembly, breathing, distinct moods, depth-
 
 Add a shared motion-cue layer to the dot engine. It maps existing `PresenceSnapshot` values, real audio level, and the existing attention vector into reusable cues: idle breathing, listening response, thinking/executing energy, real-audio speech response, and a short alert impulse. Named persona appearance profiles may tune cue intensity and color within bounded ranges; they do not define another phase machine.
 
-The RFC-0175 idle / engaged transition remains the outer lifecycle and retains ownership of `uMorph`, pointer / face attract, reduced-motion behavior, and phase grouping. This RFC adds cues within those stages; it must not add a second canvas, morph uniform, webcam stack, synthetic audio meter, or TTS/AI logic. Effects and artwork are original Jarvis work, not copied APEX source.
+The RFC-0175 idle / engaged transition remains the outer lifecycle **as amended by RFC-0195**: rest is a readable silhouette (not `uMorph` 0 identity-hide); engage tightens. This RFC adds cues within those stages; it must not add a second canvas, morph uniform, webcam stack, synthetic audio meter, or TTS/AI logic. Effects and artwork are original Jarvis work, not copied APEX source. APEX humanoid materials are **not** a product reference for Jarvis rest (RFC-0136 / RFC-0195).
 
 ## Acceptance criteria
 
@@ -33,7 +33,7 @@ The RFC-0175 idle / engaged transition remains the outer lifecycle and retains o
 - [x] Cue transitions are smoothed and interrupt safely when the presence phase changes.
 - [x] Reduced motion removes continuous breathing and traveling impulses while preserving a clear static phase indication; attention chase follows RFC-0175's existing reduced-motion contract.
 - [x] The preview harness can drive each cue over every persona shape and inspect its reduced-motion behavior without a live model or webcam.
-- [x] RFC-0175's free-cloud / figure morph and camera privacy/fallback acceptance remain unchanged and independently testable.
+- [x] RFC-0175's rest / figure morph and camera privacy/fallback acceptance remain independently testable. **RFC-0195:** idle-breath cues apply to the **rest humanoid silhouette**, not an anonymous free cloud. A test that requires rest `uMorph === 0` is void.
 
 ## Likely files
 
