@@ -1,5 +1,8 @@
 /** Build official Obsidian URI for focus/open (vault name = folder basename). */
 
+/** Official installer — used when Obsidian is missing (RFC-0107 install CTA). */
+export const OBSIDIAN_DOWNLOAD_URL = "https://obsidian.md/download"
+
 export function vaultFolderName(vaultPath: string): string {
   const parts = vaultPath.replace(/\\/g, "/").split("/").filter(Boolean)
   return parts[parts.length - 1] || "vault"

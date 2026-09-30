@@ -116,6 +116,10 @@ function isChatPath(pathname: string): boolean {
   return pathname === "/" || pathname.startsWith("/tasks/") || pathname.startsWith("/chats/")
 }
 
+function isObsidianPath(pathname: string): boolean {
+  return pathname === "/obsidian" || pathname.startsWith("/obsidian/")
+}
+
 function isAdminPath(pathname: string): boolean {
   if (pathname === "/settings" || pathname.startsWith("/settings/")) return true
   return ADMIN_LINKS.some((link) => pathname === link.to || pathname.startsWith(`${link.to}/`))
@@ -174,6 +178,7 @@ function OwnerPortal() {
   }, [])
 
   const chat = isChatPath(location.pathname)
+  const obsidian = isObsidianPath(location.pathname)
   const currentTaskId = activeTaskId(location.pathname)
   const showAdmin = adminOpen || isAdminPath(location.pathname)
   const isSetup = location.pathname.startsWith("/setup")
@@ -668,7 +673,7 @@ function OwnerPortal() {
           Switch to HUD UI
         </button>
       </aside>
-      <main className={`main${chat ? " chat-main" : ""}`}>
+      <main className={`main${chat ? " chat-main" : ""}${obsidian ? " obsidian-main" : ""}`}>
         {routes}
       </main>
     </div>

@@ -8,7 +8,7 @@ import {
   type VaultHealthResponse,
   type VaultPublicStatus,
 } from "../vault/vaultApi"
-import { buildObsidianOpenUri } from "../vault/obsidianUri"
+import { buildObsidianOpenUri, OBSIDIAN_DOWNLOAD_URL } from "../vault/obsidianUri"
 import { settingsSubmenuPath } from "../settings/settingsSubmenus"
 import "../styles/obsidian-host.css"
 
@@ -24,6 +24,24 @@ function embedBoundsFromElement(el: HTMLElement, vaultPath: string) {
   }
 }
 
+function openProtocolUri(uri: string) {
+  const anchor = document.createElement("a")
+  anchor.href = uri
+  anchor.rel = "noopener"
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+type HostSurface =
+  | "loading"
+  | "unbound"
+  | "browser"
+  | "missing_install"
+  | "unsupported"
+  | "ready"
+  | "error"
+
 export function ObsidianPage() {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const [searchParams] = useSearchParams()
@@ -31,17 +49,25 @@ export function ObsidianPage() {
 
   const [status, setStatus] = useState<VaultPublicStatus | null>(null)
   const [health, setHealth] = useState<VaultHealthResponse | null>(null)
+  const [metaError, setMetaError] = useState("")
   const [probe, setProbe] = useState<ObsidianProbeResult | null>(null)
   const [embed, setEmbed] = useState<ObsidianEmbedStatus | null>(null)
   const [vaultPath, setVaultPath] = useState("")
   const [focusInput, setFocusInput] = useState(focusNote)
   const [busy, setBusy] = useState(false)
+  const [healthOpen, setHealthOpen] = useState(false)
+  const [chromeCollapsed, setChromeCollapsed] = useState(false)
   const isDesktop = DesktopBridge.isDesktop()
 
   const refreshMeta = useCallback(async () => {
-    const [st, h] = await Promise.all([fetchVaultStatus(), fetchVaultHealth()])
-    setStatus(st)
-    setHealth(h)
+    try {
+      const [st, h] = await Promise.all([fetchVaultStatus(), fetchVaultHealth()])
+      setStatus(st)
+      setHealth(h)
+      setMetaError("")
+    } catch (err) {
+      setMetaError(err instanceof Error ? err.message : String(err))
+    }
   }, [])
 
   useEffect(() => {
@@ -56,7 +82,7 @@ export function ObsidianPage() {
 
   useEffect(() => {
     if (!isDesktop) return
-    void DesktopBridge.obsidianProbe().then(setProbe)
+    void DesktopBridge.obsidianProbe().then((result) => setProbe(result))
     void (async () => {
       const fromShell = await DesktopBridge.obsidianBoundVaultPath()
       setVaultPath(fromShell || readCachedVaultPath())
@@ -82,9 +108,20 @@ export function ObsidianPage() {
       return
     }
     setBusy(true)
+    setEmbed({
+      state: "launching",
+      message: "Launching Obsidian inside Jarvis…",
+      obsidian_hwnd: null,
+    })
     const bounds = embedBoundsFromElement(hostRef.current, path)
     const result = await DesktopBridge.obsidianEmbedStart(bounds)
-    setEmbed(result)
+    setEmbed(
+      result || {
+        state: "failed",
+        message: "Desktop shell did not start the Obsidian host.",
+        obsidian_hwnd: null,
+      },
+    )
     setBusy(false)
     if (focusNote.trim()) {
       await DesktopBridge.obsidianFocusNote(focusNote.trim(), path)
@@ -93,8 +130,12 @@ export function ObsidianPage() {
 
   useEffect(() => {
     if (!isDesktop || !status?.bound) return
-    void startEmbed()
+    // Mount host first; start embed on next frame so the host rect is non-zero.
+    const id = window.requestAnimationFrame(() => {
+      void startEmbed()
+    })
     return () => {
+      window.cancelAnimationFrame(id)
       void DesktopBridge.obsidianEmbedStop()
     }
     // Auto-embed once when vault is bound; manual restart uses the toolbar button.
@@ -102,18 +143,23 @@ export function ObsidianPage() {
   }, [isDesktop, status?.bound])
 
   useEffect(() => {
-    if (!isDesktop || !hostRef.current || embed?.state !== "embedded") return
+    if (!isDesktop || !hostRef.current) return
+    if (embed?.state !== "embedded" && embed?.state !== "launching") return
     const el = hostRef.current
     const ro = new ResizeObserver(() => {
       const path = vaultPath || readCachedVaultPath()
-      if (!path) return
-      void DesktopBridge.obsidianEmbedResize(embedBoundsFromElement(el, path)).then(setEmbed)
+      if (!path || embed?.state !== "embedded") return
+      void DesktopBridge.obsidianEmbedResize(embedBoundsFromElement(el, path)).then((next) => {
+        if (next) setEmbed(next)
+      })
     })
     ro.observe(el)
     const onWinResize = () => {
       const path = vaultPath || readCachedVaultPath()
-      if (!path) return
-      void DesktopBridge.obsidianEmbedResize(embedBoundsFromElement(el, path)).then(setEmbed)
+      if (!path || embed?.state !== "embedded") return
+      void DesktopBridge.obsidianEmbedResize(embedBoundsFromElement(el, path)).then((next) => {
+        if (next) setEmbed(next)
+      })
     }
     window.addEventListener("resize", onWinResize)
     return () => {
@@ -122,140 +168,308 @@ export function ObsidianPage() {
     }
   }, [embed?.state, isDesktop, vaultPath])
 
+  useEffect(() => {
+    if (embed?.state === "embedded") {
+      setChromeCollapsed(true)
+    }
+  }, [embed?.state])
+
   async function handleFocusSubmit(event: React.FormEvent) {
     event.preventDefault()
     const rel = focusInput.trim()
     if (!rel) return
     const path = await resolveVaultPath()
     if (isDesktop) {
-      await DesktopBridge.obsidianFocusNote(rel, path || undefined)
-      if (embed?.state !== "embedded") {
+      const ok = await DesktopBridge.obsidianFocusNote(rel, path || undefined)
+      if (!ok || embed?.state !== "embedded") {
         await startEmbed()
+        await DesktopBridge.obsidianFocusNote(rel, path || undefined)
       }
       return
     }
     const vault = path || status?.vault_name || ""
     if (!vault) return
-    window.location.assign(buildObsidianOpenUri(vault, rel))
+    openProtocolUri(buildObsidianOpenUri(vault, rel))
   }
 
   function openVaultInObsidian() {
     const vault = vaultPath || status?.vault_name || readCachedVaultPath()
     if (!vault) return
-    window.location.assign(buildObsidianOpenUri(vault))
+    openProtocolUri(buildObsidianOpenUri(vault))
+  }
+
+  function openInstallPage() {
+    if (isDesktop) {
+      void DesktopBridge.obsidianOpenInstall()
+      return
+    }
+    window.open(OBSIDIAN_DOWNLOAD_URL, "_blank", "noopener,noreferrer")
   }
 
   const brokenCount = health?.broken_links?.length ?? 0
   const healthTone = brokenCount > 0 || health?.missing_router ? "warn" : "ok"
+  const embedded = embed?.state === "embedded"
+  const launching = embed?.state === "launching" || busy
+  const embedFailed = embed?.state === "failed" || embed?.state === "unsupported_platform"
+
+  let surface: HostSurface = "loading"
+  if (metaError && !status) surface = "error"
+  else if (status && !status.bound) surface = "unbound"
+  else if (status?.bound && !isDesktop) surface = "browser"
+  else if (status?.bound && isDesktop && probe && !probe.installed) surface = "missing_install"
+  else if (status?.bound && isDesktop && probe && !probe.platform_embed_supported) surface = "unsupported"
+  else if (status?.bound && isDesktop) surface = "ready"
+
+  const showNativeHost = surface === "ready" || surface === "unsupported" || (isDesktop && !!status?.bound)
 
   return (
-    <div className="obsidian-host-page">
-      <header className="obsidian-host-chrome card">
+    <div
+      className={`obsidian-host-page${embedded && chromeCollapsed ? " is-embedded" : ""}`}
+      data-testid="obsidian-host-page"
+    >
+      <header className={`obsidian-host-chrome${chromeCollapsed && embedded ? " is-collapsed" : ""}`}>
         <div className="obsidian-host-chrome-head">
-          <h1>Obsidian</h1>
-          <p className="lede">
-            Your linked memory vault is indexed by this local Jarvis portal. Notes themselves
-            live in the <strong>Obsidian</strong> app — this page hosts that app only inside the
-            Tauri Jarvis window, not in Chrome.
-          </p>
-        </div>
-        <div className="obsidian-host-status-grid">
-          <div className={`obsidian-pill tone-${status?.bound ? "ok" : "warn"}`}>
-            Vault: {status?.bound ? "bound" : "not bound"}
-            {status?.bound && status.note_count > 0 ? ` · ${status.note_count} notes indexed` : ""}
+          <div className="obsidian-host-title-row">
+            <h1>Obsidian</h1>
+            {embedded && (
+              <button
+                type="button"
+                className="btn secondary obsidian-chrome-toggle"
+                onClick={() => setChromeCollapsed((v) => !v)}
+                aria-expanded={!chromeCollapsed}
+              >
+                {chromeCollapsed ? "Show host controls" : "Hide host controls"}
+              </button>
+            )}
           </div>
-          <div className={`obsidian-pill tone-${healthTone}`}>
-            Health: {brokenCount ? `${brokenCount} broken links` : "OK"}
-            {health?.missing_router ? " · router missing" : ""}
-          </div>
-          {isDesktop && probe && (
-            <div className={`obsidian-pill tone-${probe.installed ? "ok" : "warn"}`}>
-              Obsidian: {probe.installed ? "installed" : "not installed"}
-            </div>
-          )}
-          {isDesktop && embed?.message && (
-            <div className={`obsidian-pill tone-${embed.state === "embedded" ? "ok" : "warn"}`}>
-              Host: {embed.message}
-            </div>
+          {!chromeCollapsed && (
+            <p className="lede">
+              This pane hosts the <strong>real Obsidian</strong> app for your bound vault — editor,
+              graph, wiki-links, and plugins. Jarvis indexes the same files; it does not ship a
+              second notebook.
+            </p>
           )}
         </div>
-        <div className="obsidian-host-actions row">
-          <Link className="btn secondary" to={settingsSubmenuPath("integrations", "#knowledge-vault")}>
-            Vault bind / settings
-          </Link>
-          {!isDesktop && (
-            <span className="obsidian-browser-hint">
-              You are already in the local Jarvis portal (this browser). Chrome cannot embed
-              Obsidian.exe in the page. Use <strong>Open vault in Obsidian</strong> to edit notes
-              in the Obsidian app.
-            </span>
-          )}
-          {isDesktop && probe && !probe.installed && (
-            <button
-              type="button"
-              className="btn"
-              onClick={() => void DesktopBridge.obsidianOpenInstall()}
+
+        {!chromeCollapsed && (
+          <>
+            <div className="obsidian-host-status-grid" role="status">
+              <div className={`obsidian-pill tone-${status?.bound ? "ok" : "warn"}`}>
+                Vault: {status?.bound ? "bound" : "not bound"}
+                {status?.bound && status.vault_name ? ` · ${status.vault_name}` : ""}
+                {status?.bound && status.note_count > 0 ? ` · ${status.note_count} notes` : ""}
+              </div>
+              <div className={`obsidian-pill tone-${healthTone}`}>
+                Health: {brokenCount ? `${brokenCount} broken links` : "OK"}
+                {health?.missing_router ? " · router missing" : ""}
+              </div>
+              {isDesktop && (
+                <div
+                  className={`obsidian-pill tone-${
+                    probe?.installed ? "ok" : probe ? "warn" : "muted"
+                  }`}
+                >
+                  Obsidian:{" "}
+                  {probe ? (probe.installed ? "installed" : "not installed") : "checking…"}
+                </div>
+              )}
+              {isDesktop && embed?.message && (
+                <div
+                  className={`obsidian-pill tone-${
+                    embed.state === "embedded" ? "ok" : embed.state === "launching" ? "muted" : "warn"
+                  }`}
+                >
+                  Host: {embed.message}
+                </div>
+              )}
+              {metaError && <div className="obsidian-pill tone-warn">Status: {metaError}</div>}
+            </div>
+
+            {(brokenCount > 0 || health?.missing_router) && (
+              <div className="obsidian-health-chrome">
+                <button
+                  type="button"
+                  className="obsidian-health-toggle"
+                  onClick={() => setHealthOpen((open) => !open)}
+                  aria-expanded={healthOpen}
+                >
+                  {healthOpen ? "Hide vault health detail" : "Show vault health detail"}
+                </button>
+                {healthOpen && (
+                  <ul className="obsidian-health-list">
+                    {health?.missing_router && (
+                      <li>
+                        Missing <code>_Config/router.md</code> — add it in Obsidian for local-model
+                        orientation.
+                      </li>
+                    )}
+                    {(health?.broken_links || []).slice(0, 12).map((link) => (
+                      <li key={`${link.source}->${link.target}`}>
+                        <code>{link.source}</code> → <code>{link.target}</code>
+                      </li>
+                    ))}
+                    {brokenCount > 12 && <li>…and {brokenCount - 12} more</li>}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            <div className="obsidian-host-actions row">
+              <Link
+                className="btn secondary"
+                to={settingsSubmenuPath("integrations", "#knowledge-vault")}
+              >
+                Vault bind / settings
+              </Link>
+              {!isDesktop && status?.bound && (
+                <button type="button" className="btn" onClick={openVaultInObsidian}>
+                  Open vault in Obsidian
+                </button>
+              )}
+              {isDesktop && probe && !probe.installed && (
+                <button type="button" className="btn" onClick={openInstallPage}>
+                  Install Obsidian
+                </button>
+              )}
+              {isDesktop && status?.bound && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => void startEmbed()}
+                >
+                  {busy ? "Starting…" : "Restart Obsidian host"}
+                </button>
+              )}
+            </div>
+
+            <form
+              className="obsidian-focus-form row"
+              onSubmit={(e) => void handleFocusSubmit(e)}
             >
-              Install Obsidian
-            </button>
-          )}
-          {isDesktop && status?.bound && (
-            <button type="button" className="btn" disabled={busy} onClick={() => void startEmbed()}>
-              {busy ? "Starting…" : "Restart Obsidian host"}
-            </button>
-          )}
-        </div>
-        <form className="obsidian-focus-form row" onSubmit={(e) => void handleFocusSubmit(e)}>
-          <label className="obsidian-focus-label">
-            Focus note (vault path)
-            <input
-              type="text"
-              value={focusInput}
-              onChange={(e) => setFocusInput(e.target.value)}
-              placeholder="Projects/alpha.md"
-              spellCheck={false}
-            />
-          </label>
-          <button type="submit" className="btn secondary" disabled={!focusInput.trim()}>
-            Focus in Obsidian
-          </button>
-        </form>
+              <label className="obsidian-focus-label">
+                Focus note (vault-relative path)
+                <input
+                  type="text"
+                  value={focusInput}
+                  onChange={(e) => setFocusInput(e.target.value)}
+                  placeholder="Projects/alpha.md"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </label>
+              <button type="submit" className="btn secondary" disabled={!focusInput.trim()}>
+                Focus in Obsidian
+              </button>
+            </form>
+          </>
+        )}
       </header>
 
       <section className="obsidian-embed-region" aria-label="Obsidian application host">
-        {!status?.bound && (
-          <div className="obsidian-embed-placeholder card">
+        {surface === "loading" && (
+          <div className="obsidian-embed-placeholder" data-testid="obsidian-surface-loading">
+            <p>Checking vault binding…</p>
+          </div>
+        )}
+
+        {surface === "error" && (
+          <div className="obsidian-embed-placeholder" data-testid="obsidian-surface-error">
+            <p>Could not load vault status from this PC.</p>
+            <p className="muted">{metaError}</p>
+            <button type="button" className="btn" onClick={() => void refreshMeta()}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        {surface === "unbound" && (
+          <div className="obsidian-embed-placeholder" data-testid="obsidian-surface-unbound">
             <p>
-              Jarvis binds a managed vault on first start. If you still see this, bind a folder in
-              Settings → Integrations.
+              Bind a local Obsidian vault so Jarvis can index Markdown and this pane can host the
+              real Obsidian UI.
             </p>
             <Link className="btn" to={settingsSubmenuPath("integrations", "#knowledge-vault")}>
               Vault settings
             </Link>
           </div>
         )}
-        {status?.bound && !isDesktop && (
-          <div className="obsidian-embed-placeholder card">
+
+        {surface === "browser" && (
+          <div className="obsidian-embed-placeholder" data-testid="obsidian-surface-browser">
             <p>
-              Vault is bound on this PC. Start Jarvis opens this portal in the browser, which cannot
-              parent the Obsidian window. Open the vault in Obsidian to edit notes; Jarvis still
-              indexes them here.
+              Vault <strong>{status?.vault_name || "bound"}</strong> is ready on this PC. This
+              browser tab cannot parent <code>Obsidian.exe</code>. Open Obsidian in Jarvis Desktop
+              for the in-window host, or open the vault in Obsidian on this machine.
             </p>
-            <button type="button" className="btn" onClick={openVaultInObsidian}>
-              Open vault in Obsidian
-            </button>
+            <div className="row obsidian-cta-row">
+              <button type="button" className="btn" onClick={openVaultInObsidian}>
+                Open vault in Obsidian
+              </button>
+              <Link
+                className="btn secondary"
+                to={settingsSubmenuPath("integrations", "#knowledge-vault")}
+              >
+                Vault settings
+              </Link>
+            </div>
+            <p className="obsidian-browser-hint">
+              No custom note browser ships here — the owner surface is official Obsidian only.
+            </p>
           </div>
         )}
-        {status?.bound && isDesktop && probe && !probe.installed && (
-          <div className="obsidian-embed-placeholder card">
-            <p>Install Obsidian to embed the real editor inside Jarvis.</p>
-            <button type="button" className="btn" onClick={() => void DesktopBridge.obsidianOpenInstall()}>
+
+        {surface === "missing_install" && (
+          <div className="obsidian-embed-placeholder" data-testid="obsidian-surface-missing">
+            <p>Install Obsidian to embed the real editor inside Jarvis Desktop.</p>
+            <button type="button" className="btn" onClick={openInstallPage}>
               Download Obsidian
             </button>
           </div>
         )}
-        {status?.bound && isDesktop && probe?.installed && (
-          <div ref={hostRef} className="obsidian-native-host" data-testid="obsidian-native-host" />
+
+        {showNativeHost && surface !== "missing_install" && (
+          <div className="obsidian-native-host-wrap">
+            <div
+              ref={hostRef}
+              className={`obsidian-native-host${embedded ? " is-live" : ""}`}
+              data-testid="obsidian-native-host"
+            />
+            {(launching || embedFailed || surface === "unsupported") && !embedded && (
+              <div className="obsidian-host-overlay" data-testid="obsidian-host-overlay">
+                {launching && <p>Starting Obsidian inside Jarvis…</p>}
+                {surface === "unsupported" && (
+                  <>
+                    <p>
+                      {probe?.message ||
+                        "In-window Obsidian embed requires Jarvis Desktop on Windows."}
+                    </p>
+                    <button type="button" className="btn" onClick={openVaultInObsidian}>
+                      Open vault in Obsidian
+                    </button>
+                  </>
+                )}
+                {embedFailed && surface !== "unsupported" && (
+                  <>
+                    <p>{embed?.message || "Obsidian host failed to start."}</p>
+                    <div className="row obsidian-cta-row">
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => void startEmbed()}
+                      >
+                        Retry embed
+                      </button>
+                      <button type="button" className="btn secondary" onClick={openVaultInObsidian}>
+                        Open vault in Obsidian
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </section>
     </div>
