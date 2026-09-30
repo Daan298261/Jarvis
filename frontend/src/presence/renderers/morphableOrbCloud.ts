@@ -1,6 +1,11 @@
 import * as THREE from "three"
 import { presenceBudgets } from "../galaxyPresence"
-import { LIFECYCLE_MORPH_SECONDS, REST_TIGHTNESS, clampLifecycleMorph } from "../presenceLifecycle"
+import {
+  LIFECYCLE_MORPH_SECONDS,
+  REST_TIGHTNESS,
+  clampLifecycleMorph,
+  lifecycleMorphBlend,
+} from "../presenceLifecycle"
 import type { ParticleOrb } from "./particleTypes"
 import { makeRng } from "./shapes/figureKit"
 import {
@@ -28,6 +33,8 @@ export const particleVertexShader = `
   uniform float uSpeech;
   uniform float uPixelScale;
   uniform float uMorph;
+  uniform float uRestTightness;
+  uniform float uRestRemap;
   uniform float uPhaseKind;
   uniform float uGlow;
   uniform float uPointScale;
@@ -48,7 +55,10 @@ export const particleVertexShader = `
   varying vec3 vPos;
   varying float vSeed;
   void main() {
-    float m = smoothstep(0.0, 1.0, uMorph);
+    float morph01 = smoothstep(0.0, 1.0, uMorph);
+    float restT = max(0.001, uRestTightness);
+    float lifecycle01 = smoothstep(restT, 1.0, clamp(uMorph, restT, 1.0));
+    float m = mix(morph01, lifecycle01, step(0.5, uRestRemap));
     vec3 p = mix(aPos, bPos, m);
     p.y += uBreath * smoothstep(-1.0, 0.15, p.y);
     float flow = mix(aFlow, bFlow, m);
@@ -80,16 +90,17 @@ export const particleVertexShader = `
     } else {
       p *= 1.0 + uSpeech * 0.03 * sin(t * 9.5);
     }
-    // Rest-weight attract (RFC-0175 as amended by RFC-0195). Rest keeps a
-    // readable silhouette (uMorph at rest tightness, not 0). Residual free
-    // weight may bias toward uPointer without erasing identity.
-    float freeWeight = 1.0 - m;
-    if (freeWeight > 0.001 && uPointerStrength > 0.001) {
+    // Rest-halo attract (RFC-0175 as amended by RFC-0195). Rest keeps a
+    // readable silhouette (lifecycle remap: rest tightness → rest pose, not
+    // a spherical free cloud). Only loose halo orbs bias toward uPointer;
+    // the anatomical core does not dissolve.
+    float restHalo = (1.0 - m) * step(0.2, flow) * (1.0 - step(0.8, flow));
+    if (restHalo > 0.001 && uPointerStrength > 0.001) {
       vec2 towardPointer = uPointer - p.xy;
       float pointerReach = length(towardPointer);
       vec2 attractDir = towardPointer / max(pointerReach, 0.04);
       float attractFalloff = smoothstep(0.02, 1.85, pointerReach);
-      float pull = freeWeight * uPointerStrength * attractFalloff * uMotion;
+      float pull = restHalo * uPointerStrength * attractFalloff * uMotion * 0.42;
       p.xy += attractDir * pull * 0.72;
       p.z += pull * (0.015 + aSeed * 0.03);
     }
@@ -247,8 +258,9 @@ function writeSlot(
 }
 
 /**
- * Loose end of uMorph. Mixed at rest tightness (RFC-0195), never shown alone
- * as the product rest. Gold stays off so the amber core belongs to the figure.
+ * Loose spherical cloud. Historical uMorph-0 identity-hide (RFC-0175 Ref A).
+ * Not the product rest. Kept so rest-identity tests can prove the idle slot
+ * is a humanoid silhouette, not this anonymous field.
  */
 export function buildFreeFloatCloud(count: number): ParticleOrb[] {
   const random = makeRng(1750917)
@@ -270,6 +282,41 @@ export function buildFreeFloatCloud(count: number): ParticleOrb[] {
     })
   }
   return orbs
+}
+
+/**
+ * Rest pose of the winning figure (RFC-0195 / RFC-0175 continuous presence).
+ * Same orbs, 1:1 with the engaged figure so uMorph still lerps. Looser clump,
+ * dimmer amber, crown/edge falloff — not an anonymous sphere, not engaged 1.0.
+ */
+export function buildRestSilhouette(
+  figure: ParticleOrb[],
+  tightness = REST_TIGHTNESS,
+): ParticleOrb[] {
+  const restT = Number.isFinite(tightness)
+    ? Math.max(0.72, Math.min(0.92, tightness))
+    : REST_TIGHTNESS
+  const loosen = 1 - restT
+  const out: ParticleOrb[] = new Array(figure.length)
+  for (let i = 0; i < figure.length; i++) {
+    const orb = figure[i]
+    const seed = (i * 0.61803398875) % 1
+    const seed2 = (i * 0.41421356237) % 1
+    const core = orb.flow < 0.2 ? 0.32 : 1
+    const crown = Math.max(0, (orb.y - 0.85) / 1.15)
+    const scatter = loosen * (0.16 + seed * 0.22) * core
+    const radial = 1 + loosen * (0.06 + (orb.gold > 0.45 ? 0.02 : 0.1) + crown * 0.22)
+    out[i] = {
+      x: orb.x * radial + (seed - 0.5) * scatter,
+      y: orb.y * (1 + crown * loosen * 0.06) + (seed2 - 0.42) * scatter * 0.38,
+      z: orb.z * radial + (seed2 - 0.5) * scatter * 0.55,
+      gold: orb.gold * (0.48 + restT * 0.42),
+      light: orb.light * (0.74 + restT * 0.2),
+      flow: Math.min(0.72, orb.flow + loosen * (0.16 + crown * 0.2)),
+      size: orb.size * (1 + loosen * (0.08 + crown * 0.1)),
+    }
+  }
+  return out
 }
 
 function geometryFromOrbs(
@@ -397,7 +444,7 @@ export type MorphablePresenceSystem = {
   stars: THREE.Points
   currentShapeId: PresenceShapeId
   morphTo: (shapeId: PresenceShapeId, opts?: { duration?: number; immediate?: boolean }) => void
-  /** Rest tightness..1 = winning figure. One uniform. Does not remount the cloud. Never 0 as product rest. */
+  /** Rest tightness..1 = winning figure. One uniform. Does not remount the cloud. Never 0 as product rest. Rest slot is the loosened silhouette, not a free-float sphere. */
   setLifecycleTarget: (target: number, opts?: { duration?: number; immediate?: boolean }) => void
   morphValue: () => number
   tick: (delta: number) => void
@@ -423,9 +470,9 @@ export function createMorphablePresenceSystem(
   let qualityDensity = THREE.MathUtils.clamp(density, Math.min(0.6, maxDensity), maxDensity)
   let shape = resolvePresenceShape(initialShapeId)
   let figureOrbs = resampleOrbs(shape.buildFigure(maxDensity), figureBudget)
-  const freeOrbs = buildFreeFloatCloud(figureBudget)
-  // aPos = free cloud (uMorph 0). bPos = winning figure (uMorph 1).
-  const figure = geometryFromOrbs(freeOrbs, material, figureOrbs)
+  let restOrbs = buildRestSilhouette(figureOrbs)
+  // aPos = rest silhouette (lifecycle remap at REST_TIGHTNESS). bPos = winning figure.
+  const figure = geometryFromOrbs(restOrbs, material, figureOrbs)
   let field: THREE.Points | null = null
   if (shape.buildField) {
     field = geometryFromOrbs(resampleOrbs(shape.buildField(maxDensity), fieldBudget), material)
@@ -457,6 +504,17 @@ export function createMorphablePresenceSystem(
   const uniforms = material.uniforms
   uniforms.uMorph = uniforms.uMorph ?? { value: REST_TIGHTNESS }
   uniforms.uMorph.value = REST_TIGHTNESS
+  uniforms.uRestTightness = uniforms.uRestTightness ?? { value: REST_TIGHTNESS }
+  uniforms.uRestTightness.value = REST_TIGHTNESS
+  uniforms.uRestRemap = uniforms.uRestRemap ?? { value: 1 }
+  uniforms.uRestRemap.value = 1
+
+  const displayedMixFactor = () => {
+    const morph = uniforms.uMorph.value as number
+    const remap = (uniforms.uRestRemap?.value as number | undefined) ?? 1
+    if (remap > 0.5) return lifecycleMorphBlend(morph)
+    return Math.max(0, Math.min(1, morph))
+  }
 
   const copyCurrentToA = (points: THREE.Points) => {
     const geo = points.geometry
@@ -470,7 +528,7 @@ export function createMorphablePresenceSystem(
     const bLight = geo.getAttribute("bLight") as THREE.BufferAttribute
     const aFlow = geo.getAttribute("aFlow") as THREE.BufferAttribute
     const bFlow = geo.getAttribute("bFlow") as THREE.BufferAttribute
-    const m = uniforms.uMorph.value as number
+    const m = displayedMixFactor()
     for (let i = 0; i < aPos.count; i++) {
       const i3 = i * 3
       aPos.array[i3] = aPos.array[i3] * (1 - m) + bPos.array[i3] * m
@@ -514,9 +572,14 @@ export function createMorphablePresenceSystem(
     flow.needsUpdate = true
   }
 
-  const anchorFreeAndFigure = () => {
-    writeSlotAttr(figure, freeOrbs, "a")
+  const setRestRemap = (on: boolean) => {
+    if (uniforms.uRestRemap) uniforms.uRestRemap.value = on ? 1 : 0
+  }
+
+  const anchorRestAndFigure = () => {
+    writeSlotAttr(figure, restOrbs, "a")
     writeSlotAttr(figure, figureOrbs, "b")
+    setRestRemap(true)
   }
 
   const captureDisplayed = (): ParticleOrb[] => {
@@ -531,7 +594,7 @@ export function createMorphablePresenceSystem(
     const bLight = geo.getAttribute("bLight") as THREE.BufferAttribute
     const aFlow = geo.getAttribute("aFlow") as THREE.BufferAttribute
     const bFlow = geo.getAttribute("bFlow") as THREE.BufferAttribute
-    const m = uniforms.uMorph.value as number
+    const m = displayedMixFactor()
     const out: ParticleOrb[] = []
     for (let i = 0; i < aPos.count; i++) {
       const i3 = i * 3
@@ -550,8 +613,9 @@ export function createMorphablePresenceSystem(
 
   const beginReturnToRest = (duration: number, target: number) => {
     const current = captureDisplayed()
-    writeSlotAttr(figure, freeOrbs, "a")
+    writeSlotAttr(figure, restOrbs, "a")
     writeSlotAttr(figure, current, "b")
+    setRestRemap(true)
     uniforms.uMorph.value = 1
     animFrom = 1
     animTo = target
@@ -598,7 +662,7 @@ export function createMorphablePresenceSystem(
         return
       }
       if (immediate) {
-        anchorFreeAndFigure()
+        anchorRestAndFigure()
         uniforms.uMorph.value = lifecycleTarget
         animating = false
         shapeBlendActive = false
@@ -643,12 +707,13 @@ export function createMorphablePresenceSystem(
       shape = next
       system.currentShapeId = next.id
       figureOrbs = nextOrbs
+      restOrbs = buildRestSilhouette(figureOrbs)
       applyFraming(bust)
 
       const immediate = Boolean(opts?.immediate) || (opts?.duration ?? LIFECYCLE_MORPH_SECONDS) <= 0
-      const morphNow = uniforms.uMorph.value as number
+      const mixNow = displayedMixFactor()
       if (immediate) {
-        anchorFreeAndFigure()
+        anchorRestAndFigure()
         uniforms.uMorph.value = lifecycleTarget
         animating = false
         shapeBlendActive = false
@@ -656,10 +721,9 @@ export function createMorphablePresenceSystem(
         restoreFreeOnArrive = false
         return
       }
-      // Still fully loose: keep aPos as the rest mix source and retarget bPos.
-      if (morphNow <= REST_TIGHTNESS * 0.15 && !shapeBlendActive) {
-        writeSlotAttr(figure, freeOrbs, "a")
-        writeSlotAttr(figure, figureOrbs, "b")
+      // Already on the rest pose: retarget both slots without a 0→1 identity-hide.
+      if (mixNow <= 0.04 && !shapeBlendActive) {
+        anchorRestAndFigure()
         return
       }
       copyCurrentToA(figure)
@@ -667,6 +731,7 @@ export function createMorphablePresenceSystem(
       shapeBlendActive = true
       pendingFigureRestore = false
       restoreFreeOnArrive = true
+      setRestRemap(false)
       animFrom = 0
       animTo = 1
       animElapsed = 0
@@ -684,15 +749,14 @@ export function createMorphablePresenceSystem(
       animating = false
       uniforms.uMorph.value = animTo
       if (shapeBlendActive || restoreFreeOnArrive) {
-        anchorFreeAndFigure()
+        anchorRestAndFigure()
         uniforms.uMorph.value = lifecycleTarget
         shapeBlendActive = false
         restoreFreeOnArrive = false
         return
       }
       if (pendingFigureRestore) {
-        writeSlotAttr(figure, freeOrbs, "a")
-        writeSlotAttr(figure, figureOrbs, "b")
+        anchorRestAndFigure()
         uniforms.uMorph.value = lifecycleTarget
         pendingFigureRestore = false
       }
