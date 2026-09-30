@@ -1,5 +1,7 @@
 # Intent-vs-land gap list — 2026-09-30
 
+**Follow-on (same day):** Taco/CoS visual + Settings IA amends — [`2026-09-30-visual-acceptance-and-settings-ia.md`](2026-09-30-visual-acceptance-and-settings-ia.md). RFC-0195 **accepted**; do not treat RFC-0175/0194 idle-hide or 680∶480 primary stage as the soak target.
+
 **Audience:** Chief of Staff (assign harden / bug / debt tickets to D1 / D2 / UX / Desktop)  
 **Scope:** Tip `development` @ `9bd2481` (RFC-0194 presence idle restore #466). Audit only — no product code, no new RFCs, no ledger flips.  
 **Quality bar:** Anzu 1.0 / multibillion — stubs, soft-fail, half-wires, “coming soon” chips count as gaps.  
@@ -74,12 +76,11 @@
   **Lane:** Desktop + D1 (pin fills when artifacts known)  
   **Ticket:** Fill production Laya sha pins; Desktop latency soak; block marketing speed claims without evidence.
 
-- **RFC-0175** — **Implemented**; Desktop GPU / WebGL soak vs refs A/B/C + real webcam face attract residual.  
-  **Evidence:** Unchecked soak acceptance; camera stack exists (`frontend/src/presence/presenceCameraTrack.ts` MediaPipe / FaceDetector fail-closed). #466 (RFC-0194) restored idle free-float on tip — soak still needed against mood boards.  
-  **Lane:** UX / Desktop  
-  **Ticket:** Taco Desktop soak: morph vs refs A/B/C + webcam face attract.
+- **RFC-0175** — **Implemented**; Desktop GPU / WebGL soak residual. **2026-09-30:** soak target is [RFC-0195](../rfcs/0195-visual-acceptance-and-presence-stage.md) (humanoid rest + viewport-fill), not Ref A identity-hide / 680∶480 postage stamp. #466 idle-hide is superseded.  
+  **Lane:** UX / Desktop (implement RFC-0195; Grok 4.6 for silhouette/framing/bloom)  
+  **Ticket:** Taco Desktop soak against RFC-0195 goldens (13 + Umi `opus_tide`) + webcam attract.
 
-- **RFC-0178** — **Implemented**; Windows GPU clarity / sustained FPS unsigned (low FPS noted in #430).  
+- **RFC-0178** — **Implemented**; Windows GPU clarity / sustained FPS unsigned; RFC-0195 adds overexposure-slab fail.  
   **Evidence:** Unchecked GPU review row; #432 low-tier bypass is part of implement, not residual close.  
   **Lane:** UX / Desktop  
   **Ticket:** GPU soak: sustained FPS + silhouette clarity across personas/tiers.
@@ -101,8 +102,8 @@
 - **RFC-0139** — Android fancy orb implemented; physical phone daylight soak only.  
   **Lane:** Android device sign-off.
 
-- **RFC-0194** — Presence idle/framing restore just landed (#466); Status in file may still say `accepted` with Galaxy/GPU soak checkbox open — treat as presence soak companion to 0175/0178, not a new feature.  
-  **Lane:** UX / Desktop / Architect ledger hygiene.
+- **RFC-0194** — Presence idle/framing restore landed (#466); **2026-09-30 RFC-0195 supersedes** idle-hide + 920×680∶480 primary stage. Crop-protection stays. Status **implemented** for #466; soak is RFC-0195, not a new feature RFC.  
+  **Lane:** UX / Desktop (RFC-0195 implement).
 
 - **RFC-0193** — Voice alternatives marked implemented; installer download checkboxes + live VoiceStudio/Pocket/Whisper paths still need Desktop Setup soak.  
   **Lane:** Desktop.
@@ -138,7 +139,7 @@ Ordered for CoS (quality/fix pass + Taco Obsidian priority):
 2. **RFC-0026** — Execution phase / verifier portal UI residual (UX) — already marked implemented; half-wire.  
 3. **RFC-0031** — Reversibility-first action gates full contract (D1) — accepted gap; autonomy quality.  
 4. **RFC-0172** — Reflex tip-wire harden; kill production stub idle; decide 0145/0151 soft deps (D1, optional D2).  
-5. **RFC-0175 + RFC-0178** — Combined Desktop GPU presence soak (morph/refs/webcam + FPS) (Desktop/UX) — blocks calling presence “done.”
+5. **RFC-0195 + RFC-0178** — Viewport-fill / humanoid-rest / bloom implement then Desktop GPU soak (UX/Desktop, Grok 4.6 for silhouette). Do not soak against Ref A identity-hide. Settings split is RFC-0094 amend (separate UX ticket).
 
 **Next wave:** 0105 connector deepen (D1); 0106 HexStrike Windows operator soak (Desktop); 0092 Desktop A/B then Architect status flip; 0071 auth/kind harden (D1); 0108/0140 phone soaks (D2).
 

@@ -2172,7 +2172,7 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
 - [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal #416 @ `ebcdf9da`; no residual)
 - [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal #417 @ `2cb6c0b2`; live multi-model room Desktop soak residual)
-- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU / live WebGL soak vs refs A/B/C + real webcam face attract)
+- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU / live WebGL soak vs **RFC-0195** humanoid rest + viewport-fill + refs B/C + webcam attract; idle-hide / 680∶480 primary stage superseded 2026-09-30; soak AC unchecked)
 - [x] RFC-0176 Shared dot appearance profiles — implemented (#428 @ `7ecfdcf0`; specs #426 @ `d792ed47`; harness row closed #433 @ `a128942` via #430 preview; no residual)
 - [x] RFC-0177 Shared dot persona motion cues — implemented (#429 @ `f0ea9e40`; specs #426 @ `d792ed47`; status line #433 @ `a128942`; no residual)
 - [x] RFC-0178 Adaptive dot rendering and persona framing — implemented (#430 @ `ae582af2` including low-tier WebGL bypass #432 @ `f51d5b3`; residual: Windows desktop GPU sign-off, low measured FPS in #430)
@@ -2966,6 +2966,16 @@ Decision: RFC-0194 presence idle free-float and framing implemented
 Reason:
 
 CoS asked Architect to ledger-tick after #466 landed on development; Desktop GPU soak stays residual like RFC-0175.
+
+---
+
+Decision: RFC-0195 visual acceptance + RFC-0094 Settings Appearance vs Voice (accepted amends)
+
+[RFC-0195](docs/rfcs/0195-visual-acceptance-and-presence-stage.md) is **accepted** (specs only). It **overrides** RFC-0194 idle identity-hide (`lifecycleMorphTarget("idle") === 0`) and the 920×680∶480 **primary** stage, and **overrides** RFC-0175 live rest as Ref A anonymous free-float. Crop-protection (AABB + geometric center) stays. Rest is a recognizably humanoid / winning-figure silhouette; engage still morphs/tightens; one viewport-filling WebGL renderer plus style/profile controls; APEX is public orb-and-graph only; golden captures for the 13 canonical personas plus side-injected Umi `opus_tide` (must not reuse Nabu `memory_rings`). [RFC-0094](docs/rfcs/0094-settings-menu-information-architecture.md) 2026-09-30 amend is the **canonical Settings IA**: separate first-class **Appearance** and **Voice** on Desktop + portal (HUD already split). RFC-0113 composed `appearance-voice` Settings nav is **superseded**; Phone Pairing / Network & Swarm remain. RFC-0175/0194/0051/0050/0069/0176/0178/0136-APEX/0137/0138 carry matching amend notes. Statuses stay honest: 0195 **accepted**; 0094 restore **accepted not implemented**; 0175/0194 **implemented** for prior lands; Desktop soak AC **unchecked**. No new §58 checkbox. No product code in this ledger line. Pointer: [`docs/audits/2026-09-30-visual-acceptance-and-settings-ia.md`](docs/audits/2026-09-30-visual-acceptance-and-settings-ia.md). Queued harden (next seats, not this PR): (a) model-status cached bg monitor; (b) RFC-0195 silhouette/framing/bloom implement (UX/Desktop, Grok 4.6); (c) RFC-0117 dedicated tiny seat.
+
+Reason:
+
+Taco / CoS 2026-09-30: product must match owner intent on the glass (identity at rest, viewport presence, one stage) and one Settings IA that matches the HUD split. Implementers must not restore idle-hide, a 920px primary stage, or a combined Appearance & Voice Settings dump.
 
 ---
 

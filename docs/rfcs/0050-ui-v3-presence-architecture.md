@@ -6,6 +6,8 @@ Target: Jarvis desktop frontend (React + Vite + Tauri)
 Depends on: existing HUD v2, NeuralOrb, settings API  
 Related: RFC-0051 (Humanoid Runtime), RFC-0052 (Premium Presence Entitlements)
 
+**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) collapses Neural / Humanoid / Particle bust / Galaxy / APEX as **competing stage concepts**. Stored `requestedPresence` values remain **style/profile ids** on **one** shared renderer. Status stays **Implemented**. APEX is the public orb-and-graph look only ([RFC-0136](0136-apex-ui-presence-option.md)); it is **not** the Jarvis humanoid reference.
+
 ## Summary
 
 Jarvis should evolve from a UI that contains an animated orb into a UI with a first-class presence layer. The presence layer is the visual embodiment of Jarvis and is independent from the surrounding task/chat/system shell.
@@ -59,7 +61,7 @@ export interface PresentationSettings {
 }
 ```
 
-User-facing mode cards may still show Classic, Neural HUD and Humanoid HUD. Internally these map onto shell + presence.
+User-facing mode cards may still show Classic, Neural HUD and Humanoid HUD. Internally these map onto shell + presence. **RFC-0195:** Neural / Humanoid / Particle bust / Galaxy / APEX-labeled Neural **must not** be competing WebGL stages or aspect-capped boxes. They are profiles/chrome/ADD on one renderer, with accurate previews. Classic `none` still has no canvas.
 
 ## Canonical presence state
 

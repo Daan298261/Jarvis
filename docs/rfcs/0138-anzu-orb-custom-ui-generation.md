@@ -5,6 +5,7 @@
 **Author:** Jarvis Architect  
 **Date:** 2026-09-23  
 **Amended:** 2026-09-23 — quality bar and **Anzu 1.0** release stretch (Taco via CoS). Status stays **accepted**. Specs-only.
+**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) uniqueness: custom presets and side-injected looks must not collide with a canonical roster silhouette (including Umi `opus_tide` vs Nabu `memory_rings` vs Aegir `ocean_swell`). Status stays **accepted**. Do not tick implemented from this amend.
 **Ledger:** 2026-09-24 — Phase C portal landed on development via #400 @ `4aaaf466`. Status stays **accepted** (live Anzu morph / Set as default / restart still need Taco Desktop sign-off; full A–D acceptance not closed).
 
 **Related (do not rewrite):** [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (**implemented** — `registerPresenceShape`, `buildFigure`, `uMorph`). [RFC-0137](0137-persona-presence-shape-and-voice-binding.md) (**implemented** — 13-persona ANZU roster, neural voice bind, shared presence states; ledger #385). [RFC-0051](0051-humanoid-presence-runtime.md) (reduced motion snaps). [RFC-0126](0126-personality-session-modes.md) / [RFC-0130](0130-session-personalities.md) stay session modes (HUD accent + prompt). [RFC-0062](0062-selectable-voice-profile-catalog.md) / [RFC-0092](0092-neural-tts-default-no-silent-sapi.md) voice catalog. [RFC-0078](0078-hexstrike-cyber-suite.md) `hex_aegis` while the suite profile is active. [RFC-0106](0106-hexstrike-jarvis-full-operator-control.md) operator contract stays. [RFC-0104](0104-persona-candidates-pack.md) stays an unmerged hold. [RFC-0109](0109-media-file-video-upload-phone-and-pc.md) image byte cap (`caps_for_kind("image")`).
@@ -230,6 +231,7 @@ Tests live in `tests/test_rfc0138_custom_presence.py`. They assert. They do not 
 - A merged RFC-0104 tree, or product code in the specs PR.
 - Prototype UX: a mock preview, a control that claims Set as default before `settings.json` has the preset, a soft-fail that stores a partial look, or copy that brands this stretch “Jarvis 1.x”.
 - A code path whose job is to notify Taco. The quality escalate is **CoS → Taco** in review, written here, not implemented.
+- **2026-09-30 RFC-0195:** a custom preset whose rest silhouette is interchangeable with Nabu `memory_rings`, Aegir `ocean_swell`, or Umi `opus_tide`; selector cards that are only static marks.
 
 ## Acceptance criteria
 

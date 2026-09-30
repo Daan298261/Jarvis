@@ -1,6 +1,7 @@
 # RFC-0069: Presence shape catalog and morph API
 
 **Status:** implemented
+**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) requires per-shape **framing landmarks** (crown / chin / motif bounds) for look-at and crop-protection under viewport-fill. Status stays **implemented**. Does not invent a second morph API. Idle rest tightness is RFC-0195, not `uMorph` 0 identity-hide.
 **Author:** Jarvis Architect
 **Date:** 2026-09-10
 
@@ -24,7 +25,7 @@ Source of truth: `frontend/src/presence/renderers/shapes/catalog.ts` (types in `
 - `PresenceShapeDefinition`: `{ id, label, buildFigure(density), buildField?(density), framing? }`
   - `buildFigure` returns figure orbs that morph between shapes.
   - `buildField` is an optional environment layer (mountains / HUD dust).
-  - `framing` is optional `{ yaw?, position? }` (¾ profile bust ≈ yaw `0.95`).
+  - `framing` is optional `{ yaw?, position? }` (¾ profile bust ≈ yaw `0.95`). **RFC-0195 / 2026-09-30:** each registered shape also declares **landmarks** `{ crown?, chin?, motifBounds? }` (or equivalent named extrema) consumed by AABB fit + camera look-at. Landmarks protect identity under viewport-fill. `buildField` is still not the silhouette.
 - Registry: `registerPresenceShape`, `listPresenceShapes`, `resolvePresenceShape`, `presenceShapeIdForAvatar`.
 - Default: `humanoid_bust` (`DEFAULT_PRESENCE_SHAPE_ID`).
 - Built-ins registered at load:
