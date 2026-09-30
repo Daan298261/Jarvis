@@ -214,9 +214,50 @@ async def test_owner_chat_streams_without_confirmation(jarvis_env, monkeypatch):
     assert events[0]["type"] == "start"
     deltas = [e for e in events if e["type"] == "delta"]
     assert len(deltas) == 2
+    assert all(e.get("lane") == "front" for e in deltas)
     done = events[-1]
     assert done["type"] == "done"
     assert done["text"] == "Certainly. One moment."
+    assert done.get("front_action") == "final_basic"
+    assert done.get("front_terminal") is True
+    assert done.get("background_verify") is False
+    assert pending_chat_tts()
+
+
+@pytest.mark.asyncio
+async def test_owner_chat_final_basic_skips_worker_model_load(jarvis_env, monkeypatch):
+    """RFC-0117: terminal front must not block first reply behind worker load."""
+    monkeypatch.setattr("app.persona.session_state.data_dir", lambda: jarvis_env["tmp"])
+    load_calls: list[str] = []
+
+    class StreamProvider:
+        async def chat_stream(self, messages, **kwargs):
+            del messages, kwargs
+            yield "Hello, sir."
+
+    async def boom_load(*_a, **_k):
+        load_calls.append("load")
+        raise AssertionError("terminal front must not load the worker model")
+
+    MANAGER.provider = StreamProvider()
+    MANAGER.state.loaded = False
+    monkeypatch.setattr(MANAGER, "load", boom_load)
+
+    from app.persona.owner_chat import stream_owner_chat
+
+    events = []
+    async for event in stream_owner_chat("Hello there"):
+        events.append(event)
+
+    assert load_calls == []
+    deltas = [e for e in events if e["type"] == "delta"]
+    assert deltas and deltas[0]["lane"] == "front"
+    done = events[-1]
+    assert done["type"] == "done"
+    assert done["front_action"] == "final_basic"
+    assert done["front_terminal"] is True
+    assert "Hello" in done["text"]
+    assert done.get("timing", {}).get("front_action") == "final_basic"
     assert pending_chat_tts()
 
 

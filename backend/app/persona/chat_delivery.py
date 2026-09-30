@@ -122,6 +122,16 @@ def stream_speak_offset(stream_key: str) -> int:
     return _stream_spoken_through.get(stream_key, 0)
 
 
+def mark_stream_spoken(stream_key: str, through: int) -> None:
+    """Advance the speak cursor so later TTS skips an already-spoken prefix."""
+    key = (stream_key or "").strip()
+    if not key or through <= 0:
+        return
+    current = _stream_spoken_through.get(key, 0)
+    if through > current:
+        _stream_spoken_through[key] = through
+
+
 def clear_stream_speak_state(stream_key: str | None = None) -> None:
     if stream_key is None:
         _stream_spoken_through.clear()
