@@ -1,3 +1,10 @@
+import type { PresencePerformancePreset } from "./presenceTypes"
+import type {
+  DotAppearanceProfile,
+  ParticleOrb,
+  PresenceShapeLandmarks,
+} from "./renderers/particleTypes"
+
 export const PRESENCE_QUALITY_DENSITIES = [0.6, 0.95, 1.15] as const
 export type PresenceQualityTier = 0 | 1 | 2
 
@@ -6,6 +13,29 @@ export type PresenceQualityTier = 0 | 1 | 2
  * Fit measurement and stage rotation must share this value (RFC-0194 harden).
  */
 export const PRESENCE_DEFAULT_FRAMING_YAW = 0.06
+
+/**
+ * RFC-0195 Decision 2 / RFC-0178 — bloom, emission, and point scale caps so
+ * edge contrast survives. Lowest auto tier may bypass bloom; the silhouette
+ * must remain the silhouette, not a slab.
+ */
+export const PRESENCE_BLOOM_STRENGTH_MAX = 0.52
+export const PRESENCE_BLOOM_RADIUS = 0.2
+export const PRESENCE_BLOOM_THRESHOLD = 0.86
+export const PRESENCE_BLOOM_STRENGTH_REST = 0.38
+export const PRESENCE_POINT_SCALE_MIN = 0.5
+export const PRESENCE_POINT_SCALE_MAX = 1.22
+export const PRESENCE_GLOW_MIN = 0.35
+export const PRESENCE_GLOW_MAX = 1.05
+export const PRESENCE_DEPTH_SOFTNESS_MAX = 0.55
+/** Occupied cells above this intensity count as washed-out (Mestor-slab fail). */
+export const PRESENCE_OVEREXPOSURE_RATIO_MAX = 0.46
+/** Mean edge vs interior contrast that a stranger needs to name the silhouette. */
+export const PRESENCE_EDGE_CONTRAST_MIN = 0.14
+/** Gold/motif ring occupancy vs the interstitial fill (hex rings vs disk). */
+export const PRESENCE_MOTIF_CONTRAST_MIN = 0.08
+/** Near-white accent luminance that would bloom motif rings into a slab. */
+export const PRESENCE_ACCENT_LUMA_MAX = 0.82
 
 /** AABB fit: scale into the frustum plus geometric center for framing offset. */
 export type PresenceFitFrame = {
@@ -16,9 +46,19 @@ export type PresenceFitFrame = {
   centerY: number
   /** Geometric center Z in the yaw frame (after Y-rotation used for fit). */
   centerZ: number
+  /** Crown Y in the yaw frame (landmark or AABB max Y). */
+  crownY: number
+  /** Chin Y in the yaw frame (landmark or AABB min Y). */
+  chinY: number
 }
 
 export type PresenceFitYawFrameOffset = {
+  x: number
+  y: number
+  z: number
+}
+
+export type PresenceLookAt = {
   x: number
   y: number
   z: number
@@ -42,11 +82,135 @@ export function presenceFitYawFrameOffset(
   }
 }
 
+function yawRotate(x: number, z: number, yaw: number): { x: number; z: number } {
+  const c = Math.cos(yaw)
+  const s = Math.sin(yaw)
+  return { x: x * c + z * s, z: -x * s + z * c }
+}
+
+export function landmarksFromPositions(
+  positions: ArrayLike<number>,
+  yaw = 0,
+): PresenceShapeLandmarks {
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+  for (let i = 0; i < positions.length; i += 3) {
+    const rotated = yawRotate(positions[i], positions[i + 2], yaw)
+    const y = positions[i + 1]
+    minX = Math.min(minX, rotated.x)
+    maxX = Math.max(maxX, rotated.x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+    minZ = Math.min(minZ, rotated.z)
+    maxZ = Math.max(maxZ, rotated.z)
+  }
+  if (!Number.isFinite(minX)) {
+    return {
+      crown: 1,
+      chin: -1,
+      motifBounds: { minX: -1, maxX: 1, minY: -1, maxY: 1, minZ: -1, maxZ: 1 },
+    }
+  }
+  return {
+    crown: maxY,
+    chin: minY,
+    motifBounds: { minX, maxX, minY, maxY, minZ, maxZ },
+  }
+}
+
+export function landmarksFromOrbs(orbs: ParticleOrb[], yaw = 0): PresenceShapeLandmarks {
+  const positions = new Float32Array(orbs.length * 3)
+  for (let i = 0; i < orbs.length; i++) {
+    positions[i * 3] = orbs[i].x
+    positions[i * 3 + 1] = orbs[i].y
+    positions[i * 3 + 2] = orbs[i].z
+  }
+  return landmarksFromPositions(positions, yaw)
+}
+
+function yawFrameBounds(
+  bounds: PresenceShapeLandmarks["motifBounds"],
+  yaw: number,
+): PresenceShapeLandmarks["motifBounds"] {
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+  const corners: Array<[number, number]> = [
+    [bounds.minX, bounds.minZ],
+    [bounds.minX, bounds.maxZ],
+    [bounds.maxX, bounds.minZ],
+    [bounds.maxX, bounds.maxZ],
+  ]
+  for (const [lx, lz] of corners) {
+    const rotated = yawRotate(lx, lz, yaw)
+    minX = Math.min(minX, rotated.x)
+    maxX = Math.max(maxX, rotated.x)
+    minZ = Math.min(minZ, rotated.z)
+    maxZ = Math.max(maxZ, rotated.z)
+  }
+  return {
+    minX,
+    maxX,
+    minY: bounds.minY,
+    maxY: bounds.maxY,
+    minZ,
+    maxZ,
+  }
+}
+
+export function resolveShapeLandmarks(
+  declared: Partial<PresenceShapeLandmarks> | undefined,
+  positions: ArrayLike<number>,
+  yaw = 0,
+): PresenceShapeLandmarks {
+  const derived = landmarksFromPositions(positions, yaw)
+  const motif = declared?.motifBounds
+    ? yawFrameBounds(declared.motifBounds, yaw)
+    : derived.motifBounds
+  return {
+    crown: typeof declared?.crown === "number" && Number.isFinite(declared.crown)
+      ? declared.crown
+      : derived.crown,
+    chin: typeof declared?.chin === "number" && Number.isFinite(declared.chin)
+      ? declared.chin
+      : derived.chin,
+    motifBounds: motif,
+  }
+}
+
+function expandAabbWithLandmarks(
+  box: { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number },
+  landmarks: PresenceShapeLandmarks,
+): void {
+  box.minY = Math.min(box.minY, landmarks.chin, landmarks.motifBounds.minY)
+  box.maxY = Math.max(box.maxY, landmarks.crown, landmarks.motifBounds.maxY)
+  box.minX = Math.min(box.minX, landmarks.motifBounds.minX)
+  box.maxX = Math.max(box.maxX, landmarks.motifBounds.maxX)
+  box.minZ = Math.min(box.minZ, landmarks.motifBounds.minZ)
+  box.maxZ = Math.max(box.maxZ, landmarks.motifBounds.maxZ)
+}
+
+/**
+ * After the yaw-frame offset, the silhouette geometric center (including
+ * landmarks) sits on the camera look-at. Stage cameras look at origin.
+ */
+export function presenceLookAtFromFit(
+  _fit: Pick<PresenceFitFrame, "centerX" | "centerY" | "centerZ">,
+): PresenceLookAt {
+  return { x: 0, y: 0, z: 0 }
+}
+
 /**
  * Fit sampled shape bounds inside the stage frustum with a safe edge margin.
  * Uses AABB span (not origin-symmetric extent) so off-center busts are not
  * over-shrunk, and returns the geometric center in the yaw frame for stage
- * offset (RFC-0194).
+ * offset (RFC-0194). Landmarks expand the AABB so crown / chin / motif stay
+ * on-frame under viewport-fill (RFC-0195 / RFC-0069).
  */
 export function normalizedPresenceFitScale(
   positions: ArrayLike<number>,
@@ -55,6 +219,7 @@ export function normalizedPresenceFitScale(
   cameraDistance: number,
   yaw = 0,
   safeMargin = 0.88,
+  landmarks?: Partial<PresenceShapeLandmarks>,
 ): PresenceFitFrame {
   let minX = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
@@ -80,13 +245,16 @@ export function normalizedPresenceFitScale(
     maxZ = Math.max(maxZ, z)
   }
   if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(minZ)) {
-    return { scale: 1, centerX: 0, centerY: 0, centerZ: 0 }
+    return { scale: 1, centerX: 0, centerY: 0, centerZ: 0, crownY: 1, chinY: -1 }
   }
-  const height = Math.max(0.001, maxY - minY)
-  const width = Math.max(0.001, maxX - minX)
-  const centerX = (minX + maxX) * 0.5
-  const centerY = (minY + maxY) * 0.5
-  const centerZ = (minZ + maxZ) * 0.5
+  const resolved = resolveShapeLandmarks(landmarks, positions, yaw)
+  const box = { minX, maxX, minY, maxY, minZ, maxZ }
+  expandAabbWithLandmarks(box, resolved)
+  const height = Math.max(0.001, box.maxY - box.minY)
+  const width = Math.max(0.001, box.maxX - box.minX)
+  const centerX = (box.minX + box.maxX) * 0.5
+  const centerY = (box.minY + box.maxY) * 0.5
+  const centerZ = (box.minZ + box.maxZ) * 0.5
   const visibleHeight = 2 * cameraDistance * Math.tan((fovDegrees * Math.PI) / 360)
   const visibleWidth = visibleHeight * Math.max(0.1, aspect)
   const margin = Number.isFinite(safeMargin) ? Math.max(0.5, Math.min(0.96, safeMargin)) : 0.88
@@ -94,7 +262,146 @@ export function normalizedPresenceFitScale(
     0.45,
     Math.min(1.35, margin * Math.min(visibleHeight / height, visibleWidth / width)),
   )
-  return { scale, centerX, centerY, centerZ }
+  return {
+    scale,
+    centerX,
+    centerY,
+    centerZ,
+    crownY: resolved.crown,
+    chinY: resolved.chin,
+  }
+}
+
+function bounded(value: number | undefined, fallback: number, min: number, max: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(min, Math.min(max, value))
+    : fallback
+}
+
+export type ResolvedDotAppearance = {
+  pointScale: number
+  depthSoftness: number
+  glow: number
+  bloomStrength: number
+}
+
+/**
+ * Geometry stays on `buildFigure`. Profiles only tune palette-adjacent shader
+ * knobs, and those knobs are capped so they cannot drop silhouette or motif
+ * (RFC-0176 + RFC-0195).
+ */
+export function resolveDotAppearance(
+  profile: DotAppearanceProfile | undefined,
+  visual?: { pointScale?: number; depthSoftness?: number; glow?: number },
+): ResolvedDotAppearance {
+  const pointScale = bounded(
+    visual?.pointScale,
+    bounded(profile?.pointScale, 1, PRESENCE_POINT_SCALE_MIN, PRESENCE_POINT_SCALE_MAX),
+    PRESENCE_POINT_SCALE_MIN,
+    PRESENCE_POINT_SCALE_MAX,
+  )
+  const depthSoftness = bounded(
+    visual?.depthSoftness,
+    bounded(profile?.depthSoftness, 0, 0, PRESENCE_DEPTH_SOFTNESS_MAX),
+    0,
+    PRESENCE_DEPTH_SOFTNESS_MAX,
+  )
+  const glow = bounded(
+    visual?.glow,
+    bounded(profile?.glow, 1, PRESENCE_GLOW_MIN, PRESENCE_GLOW_MAX),
+    PRESENCE_GLOW_MIN,
+    PRESENCE_GLOW_MAX,
+  )
+  const bloomStrength = bounded(
+    profile?.bloomStrength,
+    Math.min(PRESENCE_BLOOM_STRENGTH_MAX, 0.32 + glow * 0.18),
+    0,
+    PRESENCE_BLOOM_STRENGTH_MAX,
+  )
+  return { pointScale, depthSoftness, glow, bloomStrength }
+}
+
+export type PresenceBloomPass = {
+  enabled: boolean
+  strength: number
+  radius: number
+  threshold: number
+}
+
+/**
+ * Adaptive tiers may drop bloom under hysteresis (RFC-0178). They must not
+ * flatten the figure into a slab to "save FPS" (RFC-0195).
+ */
+export function resolvePresenceBloom(input: {
+  appearance: ResolvedDotAppearance
+  performancePreset: PresencePerformancePreset
+  autoTier: PresenceQualityTier
+  rest: boolean
+}): PresenceBloomPass {
+  const lowestAuto = input.performancePreset === "auto" && input.autoTier === 0
+  const efficient = input.performancePreset === "efficient"
+  if (lowestAuto || efficient) {
+    return {
+      enabled: false,
+      strength: 0,
+      radius: PRESENCE_BLOOM_RADIUS,
+      threshold: PRESENCE_BLOOM_THRESHOLD,
+    }
+  }
+  const restCap = input.rest ? PRESENCE_BLOOM_STRENGTH_REST : PRESENCE_BLOOM_STRENGTH_MAX
+  const strength = Math.min(restCap, input.appearance.bloomStrength)
+  return {
+    enabled: true,
+    strength,
+    radius: PRESENCE_BLOOM_RADIUS,
+    threshold: PRESENCE_BLOOM_THRESHOLD,
+  }
+}
+
+function parseCssHex(hex: string): { r: number; g: number; b: number } | null {
+  const raw = hex.trim().replace(/^#/, "")
+  if (!/^[0-9a-fA-F]{6}$/.test(raw) && !/^[0-9a-fA-F]{3}$/.test(raw)) return null
+  const full = raw.length === 3
+    ? raw.split("").map((ch) => ch + ch).join("")
+    : raw
+  return {
+    r: Number.parseInt(full.slice(0, 2), 16) / 255,
+    g: Number.parseInt(full.slice(2, 4), 16) / 255,
+    b: Number.parseInt(full.slice(4, 6), 16) / 255,
+  }
+}
+
+function luma(rgb: { r: number; g: number; b: number }): number {
+  return 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b
+}
+
+function toHex(rgb: { r: number; g: number; b: number }): string {
+  const ch = (v: number) => Math.max(0, Math.min(255, Math.round(v * 255))).toString(16).padStart(2, "0")
+  return `#${ch(rgb.r)}${ch(rgb.g)}${ch(rgb.b)}`
+}
+
+/**
+ * Near-white persona accents (Mestor `#F8FAFC`) bloom hexagonal rings into a
+ * slab. Pull luminance down so the motif keeps edge contrast.
+ */
+export function motifSafeAccentHex(accent: string | undefined, orb?: string): string {
+  const parsed = accent ? parseCssHex(accent) : null
+  if (!parsed) return accent || "#D4A017"
+  if (luma(parsed) <= PRESENCE_ACCENT_LUMA_MAX) return accent!.startsWith("#") ? accent! : `#${accent}`
+  const orbRgb = orb ? parseCssHex(orb) : null
+  const cool = orbRgb
+    ? {
+      r: orbRgb.r * 0.35 + 0.45,
+      g: orbRgb.g * 0.35 + 0.55,
+      b: orbRgb.b * 0.25 + 0.72,
+    }
+    : { r: 0.48, g: 0.68, b: 0.86 }
+  const mix = 0.42
+  return toHex({
+    r: parsed.r * mix + cool.r * (1 - mix),
+    g: parsed.g * mix + cool.g * (1 - mix),
+    b: parsed.b * mix + cool.b * (1 - mix),
+  })
 }
 
 /** Auto quality controller with sustained frame-time thresholds and cooldown. */

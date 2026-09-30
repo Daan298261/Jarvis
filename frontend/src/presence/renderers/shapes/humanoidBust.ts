@@ -287,5 +287,13 @@ export const humanoidBustShape: PresenceShapeDefinition = {
   label: "Humanoid bust",
   buildFigure: buildHumanoidBustFigure,
   buildField: buildHumanoidBustField,
-  framing: { yaw: 0.025, position: [0, -0.1, 0] },
+  framing: {
+    yaw: 0.025,
+    position: [0, -0.1, 0],
+    landmarks: {
+      crown: 1.68,
+      chin: -1.45,
+      motifBounds: { minX: -0.62, maxX: 0.62, minY: 0.35, maxY: 1.55, minZ: -0.2, maxZ: 0.55 },
+    },
+  },
 }

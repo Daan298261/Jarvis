@@ -36,7 +36,7 @@ function material() {
   })
 }
 
-test("idle free-floats and morphs into the selected figure when engaged", () => {
+test("idle keeps rest tightness and morphs into the selected figure when engaged", () => {
   const system = cloud.createMorphablePresenceSystem(0.02, material(), "humanoid_bust")
   const geo = system.figure.geometry
   const aPos = geo.getAttribute("aPos")
@@ -45,54 +45,74 @@ test("idle free-floats and morphs into the selected figure when engaged", () => 
   const bGold = geo.getAttribute("bGold")
   const freeY = meanAxis(aPos, 1)
   const figureY = meanAxis(bPos, 1)
+  const rest = lifecycle.REST_TIGHTNESS
+  const engaged = lifecycle.ENGAGED_TIGHTNESS
 
-  assert.equal(system.morphValue(), 0)
+  assert.equal(system.morphValue(), rest)
+  assert.ok(rest >= lifecycle.REST_TIGHTNESS_MIN && rest <= lifecycle.REST_TIGHTNESS_MAX)
   assert.equal(system.currentShapeId, "humanoid_bust")
-  assert.ok(Math.abs(meanGold(aGold)) < 0.001, "free cloud keeps the amber core off")
+  assert.ok(Math.abs(meanGold(aGold)) < 0.001, "loose slot keeps the amber core off")
   assert.ok(meanGold(bGold) > 0.02, "winning figure carries the lattice gold")
-  assert.ok(Math.abs(freeY - figureY) > 0.25, `free ${freeY} should not be the bust ${figureY}`)
-  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 0)
+  assert.ok(Math.abs(freeY - figureY) > 0.25, `loose ${freeY} should not be the bust ${figureY}`)
+  assert.equal(lifecycle.lifecycleMorphTarget("idle"), rest)
+  assert.notEqual(lifecycle.lifecycleMorphTarget("idle"), 0)
 
-  system.setLifecycleTarget(1, { duration: 1.2 })
+  system.setLifecycleTarget(engaged, { duration: 1.2 })
   system.tick(0.6)
   const mid = system.morphValue()
-  assert.ok(mid > 0.45 && mid < 0.55, `expected ~0.5, got ${mid}`)
+  const expectedMid = rest + (engaged - rest) * 0.5
+  assert.ok(Math.abs(mid - expectedMid) < 0.02, `expected ~${expectedMid}, got ${mid}`)
   system.tick(0.7)
-  assert.equal(system.morphValue(), 1)
+  assert.equal(system.morphValue(), engaged)
   assert.equal(system.currentShapeId, "humanoid_bust")
 
-  system.setLifecycleTarget(0, { duration: 1.2 })
+  system.setLifecycleTarget(rest, { duration: 1.2 })
   system.tick(0.6)
   const returning = system.morphValue()
-  assert.ok(returning > 0.45 && returning < 0.55, `expected ~0.5 on the way back, got ${returning}`)
+  assert.ok(Math.abs(returning - expectedMid) < 0.02, `expected ~${expectedMid} on the way back, got ${returning}`)
   system.tick(0.7)
-  assert.equal(system.morphValue(), 0)
+  assert.equal(system.morphValue(), rest)
+  assert.notEqual(system.morphValue(), 0)
   system.dispose()
 })
 
-test("reduced motion snaps uMorph and a non-bust winner is the engaged end", () => {
+test("reduced motion snaps uMorph to a static readable rest pose", () => {
   const system = cloud.createMorphablePresenceSystem(0.02, material(), "humanoid_bust")
   system.morphTo("hex_aegis", { immediate: true })
   assert.equal(system.currentShapeId, "hex_aegis")
-  assert.equal(system.morphValue(), 0)
-  system.setLifecycleTarget(1, { duration: 0, immediate: true })
-  assert.equal(system.morphValue(), 1)
+  assert.equal(system.morphValue(), lifecycle.REST_TIGHTNESS)
+  system.setLifecycleTarget(lifecycle.ENGAGED_TIGHTNESS, { duration: 0, immediate: true })
+  assert.equal(system.morphValue(), lifecycle.ENGAGED_TIGHTNESS)
   assert.equal(system.currentShapeId, "hex_aegis")
-  system.setLifecycleTarget(0, { immediate: true })
-  assert.equal(system.morphValue(), 0)
+  system.setLifecycleTarget(lifecycle.REST_TIGHTNESS, { immediate: true })
+  assert.equal(system.morphValue(), lifecycle.REST_TIGHTNESS)
+  assert.notEqual(system.morphValue(), 0)
+  const attract = lifecycle.resolvePresenceAttract({
+    attentionMode: "pointer",
+    reduced: true,
+    pointerX: 0.8,
+    pointerY: 0.8,
+    cameraX: 0,
+    cameraY: 0,
+    cameraConfidence: 1,
+    cameraAvailable: true,
+  })
+  assert.equal(attract.chase, false)
+  assert.equal(attract.source, "hold")
   system.dispose()
 })
 
-test("lifecycle free-floats idle and keeps engaged phases on the winning figure", () => {
+test("lifecycle rest phases keep identity tightness and engaged phases go to 1", () => {
   for (const mode of ["neural", "humanoid", "particle_bust", "galaxy"]) {
     assert.equal(lifecycle.presenceLifecycleEnabled(mode), true)
   }
   assert.equal(lifecycle.presenceLifecycleEnabled("none"), false)
-  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 0)
-  assert.equal(lifecycle.lifecycleMorphTarget("waiting"), 0)
-  assert.equal(lifecycle.lifecycleMorphTarget("offline"), 0)
+  assert.equal(lifecycle.lifecycleMorphTarget("idle"), lifecycle.REST_TIGHTNESS)
+  assert.equal(lifecycle.lifecycleMorphTarget("waiting"), lifecycle.REST_TIGHTNESS)
+  assert.equal(lifecycle.lifecycleMorphTarget("offline"), lifecycle.REST_TIGHTNESS)
+  assert.notEqual(lifecycle.lifecycleMorphTarget("idle"), 0)
   for (const phase of ["thinking", "listening", "speaking", "executing", "alert", "error", "approval"]) {
-    assert.equal(lifecycle.lifecycleMorphTarget(phase), 1)
+    assert.equal(lifecycle.lifecycleMorphTarget(phase), lifecycle.ENGAGED_TIGHTNESS)
   }
 
   const mat = material()
@@ -340,8 +360,12 @@ test("catalog shapes resolve a safe AABB frame in desktop, ultrawide, portrait, 
       // Match MorphablePresenceStage: missing yaw uses PRESENCE_DEFAULT_FRAMING_YAW.
       const yaw = shape.framing?.yaw ?? quality.PRESENCE_DEFAULT_FRAMING_YAW
       const margin = shape.framing?.fitMargin ?? 0.88
-      const fit = quality.normalizedPresenceFitScale(positions, aspect, fov, distance, yaw, margin)
+      const landmarks = quality.resolveShapeLandmarks(shape.framing?.landmarks, positions, yaw)
+      const fit = quality.normalizedPresenceFitScale(
+        positions, aspect, fov, distance, yaw, margin, shape.framing?.landmarks,
+      )
       assert.ok(Number.isFinite(fit.scale) && fit.scale >= 0.45 && fit.scale <= 1.35, `${shape.id} should fit at aspect ${aspect}`)
+      assert.ok(Number.isFinite(landmarks.crown) && landmarks.crown > landmarks.chin, `${shape.id} crown/chin`)
       const c = Math.cos(yaw)
       const s = Math.sin(yaw)
       let minX = Number.POSITIVE_INFINITY
@@ -363,6 +387,12 @@ test("catalog shapes resolve a safe AABB frame in desktop, ultrawide, portrait, 
         minZ = Math.min(minZ, z)
         maxZ = Math.max(maxZ, z)
       }
+      minY = Math.min(minY, landmarks.chin, landmarks.motifBounds.minY)
+      maxY = Math.max(maxY, landmarks.crown, landmarks.motifBounds.maxY)
+      minX = Math.min(minX, landmarks.motifBounds.minX)
+      maxX = Math.max(maxX, landmarks.motifBounds.maxX)
+      minZ = Math.min(minZ, landmarks.motifBounds.minZ)
+      maxZ = Math.max(maxZ, landmarks.motifBounds.maxZ)
       const spanX = maxX - minX
       const spanY = maxY - minY
       const visibleHeight = 2 * distance * Math.tan((fov * Math.PI) / 360)

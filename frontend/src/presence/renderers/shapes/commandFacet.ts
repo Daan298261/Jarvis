@@ -31,5 +31,19 @@ export const commandFacetShape: PresenceShapeDefinition = {
   id: "command_facet",
   label: "Command facet",
   buildFigure: buildCommandFacetFigure,
-  framing: { yaw: 0.2, position: [0, 0.08, 0] },
+  framing: {
+    yaw: 0.2,
+    position: [0, 0.08, 0],
+    landmarks: {
+      crown: 0.72,
+      chin: -0.55,
+      motifBounds: { minX: -1.08, maxX: 1.08, minY: -0.08, maxY: 0.36, minZ: -1.08, maxZ: 1.08 },
+    },
+  },
+  appearance: {
+    pointScale: 0.88,
+    depthSoftness: 0.08,
+    glow: 0.72,
+    bloomStrength: 0.4,
+  },
 }

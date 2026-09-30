@@ -5,13 +5,17 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { createPresenceAttentionController, type AttentionVector } from "../presenceAttention"
-import { LIFECYCLE_MORPH_SECONDS, lifecycleMorphTarget } from "../presenceLifecycle"
+import { LIFECYCLE_MORPH_SECONDS, isRestPresencePhase, lifecycleMorphTarget } from "../presenceLifecycle"
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
 import {
   AutoPresenceQuality,
+  motifSafeAccentHex,
   normalizedPresenceFitScale,
   presenceFitYawFrameOffset,
+  presenceLookAtFromFit,
+  resolveDotAppearance,
+  resolvePresenceBloom,
   PRESENCE_DEFAULT_FRAMING_YAW,
   PRESENCE_QUALITY_DENSITIES,
 } from "../presenceQuality"
@@ -48,17 +52,11 @@ const PHASE_KIND: Record<PresencePhase, number> = {
 }
 
 function phaseIsEngaged(phase: PresencePhase): boolean {
-  return lifecycleMorphTarget(phase) === 1
-}
-
-function bounded(value: number | undefined, fallback: number, min: number, max: number): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? THREE.MathUtils.clamp(value, min, max)
-    : fallback
+  return !isRestPresencePhase(phase)
 }
 
 /**
- * One canvas, one orb cloud, one `uMorph`. Phase drives free-float ↔ winning figure
+ * One canvas, one orb cloud, one `uMorph`. Phase drives rest tightness ↔ winning figure
  * for every avatar that mounts this stage. Galaxy only toggles the star layer.
  */
 export function MorphablePresenceStage({
@@ -124,11 +122,11 @@ export function MorphablePresenceStage({
     const scene = new THREE.Scene()
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40)
     camera.position.set(0.55, 0.28, 5.6)
-    camera.lookAt(0.05, 0.1, 0)
+    camera.lookAt(0, 0, 0)
     const uniforms = {
       uTime: { value: 0 }, uMotion: { value: 1 }, uActivity: { value: 0 },
       uSpeech: { value: 0 }, uPixelScale: { value: 1 }, uOpacity: { value: 1 },
-      uMorph: { value: 0 },
+      uMorph: { value: lifecycleMorphTarget("idle") },
       uPhaseKind: { value: 0 },
       uGlow: { value: 1 },
       uPointScale: { value: 1 },
@@ -170,7 +168,12 @@ export function MorphablePresenceStage({
     const composer = efficient ? null : new EffectComposer(renderer)
     const bloom = efficient
       ? null
-      : new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.28, 0.78)
+      : new UnrealBloomPass(
+        new THREE.Vector2(1, 1),
+        0.38,
+        0.2,
+        0.86,
+      )
     const output = efficient ? null : new OutputPass()
     if (composer && bloom && output) {
       composer.addPass(new RenderPass(scene, camera))
@@ -203,12 +206,14 @@ export function MorphablePresenceStage({
       const fitYaw = profile.framing?.yaw ?? PRESENCE_DEFAULT_FRAMING_YAW
       const fit = normalizedPresenceFitScale(
         bPos.array as ArrayLike<number>, aspect, camera.fov, camera.position.z,
-        fitYaw, profile.framing?.fitMargin ?? 0.88,
+        fitYaw, profile.framing?.fitMargin ?? 0.88, profile.framing?.landmarks,
       )
       framingScale = fit.scale
       framingCenterX = fit.centerX
       framingCenterY = fit.centerY
       framingCenterZ = fit.centerZ
+      const look = presenceLookAtFromFit(fit)
+      camera.lookAt(look.x, look.y, look.z)
     }
 
     const resize = () => {
@@ -224,7 +229,6 @@ export function MorphablePresenceStage({
       camera.aspect = aspect
       camera.fov = aspect < 0.85 ? 37 : 32
       camera.position.set(0, 0.12, aspect < 0.85 ? 6.15 : 5.6)
-      camera.lookAt(0, 0.06, 0)
       fitCurrentShape(aspect)
       const personaScale = stateRef.current.personaVisual?.scale
       bust.scale.setScalar(framingScale * (personaScale && personaScale > 0 ? personaScale : 1))
@@ -288,6 +292,8 @@ export function MorphablePresenceStage({
       }
       system.tick(delta)
       stage.dataset.morph = system.morphValue().toFixed(3)
+      stage.dataset.restTightness = String(lifecycleMorphTarget("idle"))
+      stage.dataset.silhouetteGuard = "rfc0195"
 
       const activity = {
         offline: 0, idle: 0.18, listening: 0.45, thinking: 0.72,
@@ -309,17 +315,21 @@ export function MorphablePresenceStage({
       uniforms.uBreath.value = reduced || phase !== "idle" ? 0 : Math.sin(animationTime * 1.15) * 0.009
       const listenTarget = phase === "listening" && !reduced ? 1 : 0
       uniforms.uListen.value += (listenTarget - uniforms.uListen.value) * Math.min(1, delta * 4)
-      uniforms.uGlow.value = typeof visual?.glow === "number" ? visual.glow : 1
+      const shapeDef = resolvePresenceShape(system.currentShapeId)
+      const appearance = resolveDotAppearance(shapeDef.appearance, visual)
+      uniforms.uGlow.value = appearance.glow
       const personaScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
       bust.scale.setScalar(framingScale * personaScale)
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)
         * (reduced ? 1 : Math.min(1, delta * 3))
       const galaxyOn = current.settings.requestedPresence === "galaxy"
       const bustShape = system.currentShapeId === "humanoid_bust"
+      const rest = isRestPresencePhase(phase)
       const alive = phaseIsEngaged(phase)
       uniforms.uGalaxy.value = galaxyOn ? 1 : 0
       uniforms.uGalaxyBust.value = galaxyOn && bustShape ? 1 : 0
-      uniforms.uLattice.value = alive ? 1 : 0
+      // Lattice follows morph so rest (0.82) keeps motif gold; engaged is 1.0.
+      uniforms.uLattice.value = system.morphValue()
       system.setGalaxy(galaxyOn)
       system.syncStars(animationTime, reduced ? 0 : 1)
       const clear = galaxyOn || current.transparentBackdrop
@@ -329,21 +339,30 @@ export function MorphablePresenceStage({
         ? THREE.MathUtils.clamp(meterNow.level, 0, 1)
         : 0
       uniforms.uSpeech.value = system.morphValue() > 0.45 ? speechLevel : 0
+      const bloomPass = resolvePresenceBloom({
+        appearance,
+        performancePreset: current.settings.performancePreset,
+        autoTier,
+        rest,
+      })
       if (bloom) {
-        const base = 0.35 + (uniforms.uGlow.value as number) * 0.35
-        bloom.strength = galaxyOn && bustShape && alive ? base + 0.2 : base
-        bloom.enabled = current.settings.performancePreset !== "auto" || autoTier > 0
+        bloom.strength = bloomPass.strength
+        bloom.radius = bloomPass.radius
+        bloom.threshold = bloomPass.threshold
+        bloom.enabled = bloomPass.enabled
       }
+      stage.dataset.bloomEnabled = bloomPass.enabled ? "1" : "0"
       uniforms.uOpacity.value = phase === "offline" ? 0.35 : phase === "waiting" ? 0.72 : phase === "error" ? 0.92 : 1
       const warning = phase === "alert" || phase === "error" || phase === "offline" || phase === "approval"
+      const safeAccent = motifSafeAccentHex(visual?.accentColor, visual?.orbColor)
       if (galaxyOn && bustShape) {
         color.setHex(alive ? 0x6fd0ff : 0x8ec4de)
         uniforms.uGold.value.setHex(alive ? 0xff8a1a : 0x24303a)
         uniforms.uAccent.value.set(visual?.accentColor || "#9fd4ea")
       } else if (!warning && visual?.orbColor) {
         color.set(visual.orbColor)
-        uniforms.uGold.value.set(visual.accentColor || "#D4A017")
-        uniforms.uAccent.value.set(visual.accentColor || "#D4A017")
+        uniforms.uGold.value.set(safeAccent)
+        uniforms.uAccent.value.set(safeAccent)
       } else {
         color.setHex(PHASE_COLOR[phase])
         uniforms.uGold.value.setHex(
@@ -353,10 +372,9 @@ export function MorphablePresenceStage({
       }
       uniforms.uColor.value.lerp(color, reduced ? 1 : 0.12)
 
-      const framing = resolvePresenceShape(system.currentShapeId).framing
-      const appearance = resolvePresenceShape(system.currentShapeId).appearance
-      uniforms.uPointScale.value = bounded(visual?.pointScale, bounded(appearance?.pointScale, 1, 0.5, 1.5), 0.5, 1.5)
-      uniforms.uDepthSoftness.value = bounded(visual?.depthSoftness, bounded(appearance?.depthSoftness, 0, 0, 1), 0, 1)
+      const framing = shapeDef.framing
+      uniforms.uPointScale.value = appearance.pointScale
+      uniforms.uDepthSoftness.value = appearance.depthSoftness
       const baseYaw = framing?.yaw ?? PRESENCE_DEFAULT_FRAMING_YAW
       const basePos = framing?.position ?? [0, 0.08, 0]
       // Cancel yaw-frame AABB center in parent space (Three.js T*R*S — same frame as fit).
@@ -402,7 +420,7 @@ export function MorphablePresenceStage({
         uniforms.uGesture.value += (gestureTarget - uniforms.uGesture.value) * Math.min(1, delta * 4)
       }
       try {
-        if (composer && (current.settings.performancePreset !== "auto" || autoTier > 0)) composer.render()
+        if (composer && bloomPass.enabled) composer.render()
         else renderer.render(scene, camera)
       } catch (error) {
         window.cancelAnimationFrame(frame)
@@ -439,7 +457,7 @@ export function MorphablePresenceStage({
   }, [settings.performancePreset])
 
   if (failure) throw failure
-  const stageName = lifecycleMorphTarget(snapshot.phase) === 0 ? "idle" : "engaged"
+  const stageName = isRestPresencePhase(snapshot.phase) ? "idle" : "engaged"
   return (
     <div
       ref={stageRef}
