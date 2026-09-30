@@ -2979,6 +2979,16 @@ Taco / CoS 2026-09-30: product must match owner intent on the glass (identity at
 
 ---
 
+Decision: RFC-0031 reversibility-first action gates implemented
+
+[RFC-0031](docs/rfcs/0031-reversibility-first-action-gates.md) is **implemented** on development via #476 @ `a50c7adf7c2f8467e51c464520e7b83b8915dc90` (squash; pre-squash APPROVE_WITH_RESIDUALS harden head `fca13da7`). Authorize → RFC-0027 firewall ordering hook → reversibility / unforgeable `ApprovalGrant` / park-resume / durable undo. Real filesystem + settings reverse executors (`undo_restore.py`); `snapshot_required` fail-closed before mutation; undo registration failures logged + BUS + observation (no silent `except: pass`); apply refuses with honest `not_implemented` when reverse payload missing (never fake `undone`). `tests/test_rfc0031_reversibility_gates.py` covers model self-confirm forge, file/settings undo, destructive/credential/external gates, timeout/reject, stale conflict, composite reverse order. Full intent for the backend path. No stubs for landed reverse paths. **Residuals (AC unchecked):** full RFC-0027 privacy-gateway / REDACT / egress (separate ticket; ordering hook only); portal/HUD undo chrome + NL undo surface; terminal/apps reverse executors (`not_implemented` until wired); Desktop live soak (irreversible pause → grant → resume with real model — cloud cannot sign). No §57 rewrite. No new §58 checkbox (none was filed for 0031). No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #476 squash-landed on `development` tip `a50c7adf`; residuals stay honest.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
