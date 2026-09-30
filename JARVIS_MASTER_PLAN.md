@@ -2959,6 +2959,16 @@ The caption link is a real agent-harness SDK. Leaving it unscored, or filing it 
 
 ---
 
+Decision: RFC-0194 presence idle free-float and framing implemented
+
+[RFC-0194](docs/rfcs/0194-restore-presence-idle-and-framing.md) is **implemented** on development via #466 @ `9bd2481211c2e27c17b6229a3468711a732c8b42` (squash; pre-squash yaw-frame harden head `6a236b1`). Fixes idle free-float (`lifecycleMorphTarget("idle") === 0`), AABB framing + geometric center offset, Neural/Humanoid ~680∶480 aspect lock, and yaw-frame fit offset harden (`presenceFitYawFrameOffset` / shared `PRESENCE_DEFAULT_FRAMING_YAW`). Quality bar **Anzu 1.0**. Full intent for the code path. No stubs. **Residual:** Desktop GPU / live WebGL soak (Galaxy ADD star layer + free-float idle → engaged figure). AC unchecked; Architect-signed; cloud cannot sign. No §58 RFC-0194 checkbox was filed (do not invent one). No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #466 landed on development; Desktop GPU soak stays residual like RFC-0175.
+
+---
+
 ## 60. Expected Example Behavior
 
 Example user request:
