@@ -1,7 +1,9 @@
 # RFC-0194: Restore presence idle free-float and centered framing
 
-**Status:** accepted  
-**Queue item:** P0 — Presence HUD visual regression  
+**Status:** implemented  
+**Implemented:** #466 @ `9bd2481211c2e27c17b6229a3468711a732c8b42` (squash; pre-squash yaw-frame harden head `6a236b1`). Restores idle free-float, AABB framing + geometric center offset, Neural/Humanoid aspect lock, and yaw-frame fit offset harden.  
+**Residuals:** Desktop GPU / live WebGL soak (Galaxy star layer + free-float idle → engaged figure). Architect-signed residual; cloud VMs cannot sign off. AC box below stays unchecked.  
+**Queue item:** P0 — Presence HUD visual regression (no §58 checkbox was filed for this RFC; residual noted in §59 Decision Log)  
 **Author:** Cursor cloud  
 **Date:** 2026-09-29
 
