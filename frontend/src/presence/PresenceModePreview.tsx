@@ -1,5 +1,3 @@
-import type { PresentationSettings } from "./presenceTypes"
-
 export type PresenceModePreviewId =
   | "classic"
   | "neural"
