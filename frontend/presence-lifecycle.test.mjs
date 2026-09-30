@@ -36,7 +36,7 @@ function material() {
   })
 }
 
-test("the normal idle state restores the selected figure", () => {
+test("idle free-floats and morphs into the selected figure when engaged", () => {
   const system = cloud.createMorphablePresenceSystem(0.02, material(), "humanoid_bust")
   const geo = system.figure.geometry
   const aPos = geo.getAttribute("aPos")
@@ -51,7 +51,7 @@ test("the normal idle state restores the selected figure", () => {
   assert.ok(Math.abs(meanGold(aGold)) < 0.001, "free cloud keeps the amber core off")
   assert.ok(meanGold(bGold) > 0.02, "winning figure carries the lattice gold")
   assert.ok(Math.abs(freeY - figureY) > 0.25, `free ${freeY} should not be the bust ${figureY}`)
-  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 1)
+  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 0)
 
   system.setLifecycleTarget(1, { duration: 1.2 })
   system.tick(0.6)
@@ -83,12 +83,12 @@ test("reduced motion snaps uMorph and a non-bust winner is the engaged end", () 
   system.dispose()
 })
 
-test("the selected persona remains visible when idle in every rendered mode", () => {
+test("lifecycle free-floats idle and keeps engaged phases on the winning figure", () => {
   for (const mode of ["neural", "humanoid", "particle_bust", "galaxy"]) {
     assert.equal(lifecycle.presenceLifecycleEnabled(mode), true)
   }
   assert.equal(lifecycle.presenceLifecycleEnabled("none"), false)
-  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 1)
+  assert.equal(lifecycle.lifecycleMorphTarget("idle"), 0)
   assert.equal(lifecycle.lifecycleMorphTarget("waiting"), 0)
   assert.equal(lifecycle.lifecycleMorphTarget("offline"), 0)
   for (const phase of ["thinking", "listening", "speaking", "executing", "alert", "error", "approval"]) {
@@ -111,7 +111,9 @@ test("the selected persona remains visible when idle in every rendered mode", ()
 
 test("all named personas expose their own registered visual avatar", async () => {
   const shapeIds = personas.ROSTER_IDS.map((id) => personas.PERSONA_VISUALS[id].shapeId)
-  assert.equal(shapeIds.length, 13)
+  assert.equal(personas.ROSTER_IDS.length, 14)
+  assert.equal(shapeIds.length, 14)
+  // Umi shares memory_rings with Nabu; every shapeId must still resolve.
   assert.equal(new Set(shapeIds).size, 13)
   for (const shapeId of shapeIds) {
     assert.equal(shapes.resolvePresenceShape(shapeId).id, shapeId)
@@ -233,7 +235,85 @@ test("auto presence quality adapts with sustained thresholds and fit bounds keep
   const fit = quality.normalizedPresenceFitScale(
     new Float32Array([-2, -1, 0, 2, 1, 0]), 1, 32, 5.6,
   )
-  assert.ok(fit > 0 && fit < 1, `wide silhouettes should be scaled into the stage, got ${fit}`)
+  assert.ok(fit.scale > 0 && fit.scale < 1, `wide silhouettes should be scaled into the stage, got ${fit.scale}`)
+  assert.equal(fit.centerX, 0)
+  assert.equal(fit.centerY, 0)
+  assert.equal(fit.centerZ, 0)
+
+  const offset = quality.normalizedPresenceFitScale(
+    new Float32Array([0.2, 0.4, 0, 1.2, 1.6, 0]), 1, 32, 5.6,
+  )
+  assert.ok(offset.scale >= 0.45 && offset.scale <= 1.35)
+  assert.ok(Math.abs(offset.centerX - 0.7) < 1e-6, `AABB center X, got ${offset.centerX}`)
+  assert.ok(Math.abs(offset.centerY - 1.0) < 1e-6, `AABB center Y, got ${offset.centerY}`)
+  assert.equal(offset.centerZ, 0)
+})
+
+test("yaw-frame fit offset cancels AABB center under Three.js T*R*S", () => {
+  // Asymmetric bust: local +X/+Z mass so yaw≈0.06 moves the silhouette center.
+  const positions = new Float32Array([
+    -0.8, -1.0, -0.3,
+    0.8, -1.0, -0.3,
+    -0.5, 1.2, -0.2,
+    0.9, 1.2, 0.1,
+    0.15, 0.4, 0.95,
+    0.35, 0.1, 0.55,
+  ])
+  const yaw = quality.PRESENCE_DEFAULT_FRAMING_YAW
+  const fit = quality.normalizedPresenceFitScale(positions, 680 / 480, 32, 5.6, yaw, 0.88)
+  assert.ok(Math.abs(fit.centerX) > 1e-4 || Math.abs(fit.centerZ) > 1e-4, "fixture must be off-center under yaw")
+
+  const scale = fit.scale
+  const parent = quality.presenceFitYawFrameOffset(fit, scale)
+  // Parent translation stays in the yaw frame (not pre-rotate local X).
+  assert.ok(Math.abs(parent.x + fit.centerX * scale) < 1e-9)
+  assert.ok(Math.abs(parent.y + fit.centerY * scale) < 1e-9)
+  assert.ok(Math.abs(parent.z + fit.centerZ * scale) < 1e-9)
+
+  const c = Math.cos(yaw)
+  const s = Math.sin(yaw)
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+  for (let i = 0; i < positions.length; i += 3) {
+    const lx = positions[i] * scale
+    const ly = positions[i + 1] * scale
+    const lz = positions[i + 2] * scale
+    // T * R_yaw * S — same composition as MorphablePresenceStage bust.
+    const xr = lx * c + lz * s
+    const zr = -lx * s + lz * c
+    const x = parent.x + xr
+    const y = parent.y + ly
+    const z = parent.z + zr
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+    minZ = Math.min(minZ, z)
+    maxZ = Math.max(maxZ, z)
+  }
+  assert.ok(Math.abs((minX + maxX) * 0.5) < 1e-6, `yaw-frame center X should land on origin, got ${(minX + maxX) * 0.5}`)
+  assert.ok(Math.abs((minY + maxY) * 0.5) < 1e-6, `yaw-frame center Y should land on origin, got ${(minY + maxY) * 0.5}`)
+  assert.ok(Math.abs((minZ + maxZ) * 0.5) < 1e-6, `yaw-frame center Z should land on origin, got ${(minZ + maxZ) * 0.5}`)
+
+  // Wrong frame: treating yawed centerX as pre-rotate local X leaves residual at yaw≈0.06.
+  const wrongLocal = -fit.centerX * scale
+  let wMinX = Number.POSITIVE_INFINITY
+  let wMaxX = Number.NEGATIVE_INFINITY
+  for (let i = 0; i < positions.length; i += 3) {
+    const lx = (positions[i] + wrongLocal / scale) * scale
+    const lz = positions[i + 2] * scale
+    const x = lx * c + lz * s
+    wMinX = Math.min(wMinX, x)
+    wMaxX = Math.max(wMaxX, x)
+  }
+  assert.ok(
+    Math.abs((wMinX + wMaxX) * 0.5) > 1e-4,
+    "pre-rotate misuse of yawed centerX must remain off-center (guards the harden)",
+  )
 })
 
 test("presence quality changes figure, field, and stars in place without resetting morph", () => {
@@ -250,28 +330,52 @@ test("presence quality changes figure, field, and stars in place without resetti
   system.dispose()
 })
 
-test("catalog shapes resolve a safe frame in desktop, ultrawide, portrait, and short stages", () => {
+test("catalog shapes resolve a safe AABB frame in desktop, ultrawide, portrait, and short stages", () => {
   for (const shape of shapes.listPresenceShapes()) {
     const orbs = shape.buildFigure(0.08)
     const samples = shapes.resampleOrbs(orbs, Math.min(600, Math.max(1, orbs.length)))
     const positions = new Float32Array(samples.length * 3)
     samples.forEach((orb, i) => positions.set([orb.x, orb.y, orb.z], i * 3))
     for (const [aspect, fov, distance] of [[1.7, 32, 5.6], [3.2, 32, 5.6], [0.58, 37, 6.15], [1.2, 32, 5.6]]) {
-      const yaw = shape.framing?.yaw ?? 0
+      // Match MorphablePresenceStage: missing yaw uses PRESENCE_DEFAULT_FRAMING_YAW.
+      const yaw = shape.framing?.yaw ?? quality.PRESENCE_DEFAULT_FRAMING_YAW
       const margin = shape.framing?.fitMargin ?? 0.88
-      const scale = quality.normalizedPresenceFitScale(positions, aspect, fov, distance, yaw, margin)
-      assert.ok(Number.isFinite(scale) && scale >= 0.45 && scale <= 1.35, `${shape.id} should fit at aspect ${aspect}`)
+      const fit = quality.normalizedPresenceFitScale(positions, aspect, fov, distance, yaw, margin)
+      assert.ok(Number.isFinite(fit.scale) && fit.scale >= 0.45 && fit.scale <= 1.35, `${shape.id} should fit at aspect ${aspect}`)
       const c = Math.cos(yaw)
       const s = Math.sin(yaw)
-      let extentX = 0
-      let extentY = 0
+      let minX = Number.POSITIVE_INFINITY
+      let maxX = Number.NEGATIVE_INFINITY
+      let minY = Number.POSITIVE_INFINITY
+      let maxY = Number.NEGATIVE_INFINITY
+      let minZ = Number.POSITIVE_INFINITY
+      let maxZ = Number.NEGATIVE_INFINITY
       for (let i = 0; i < positions.length; i += 3) {
-        extentX = Math.max(extentX, Math.abs(positions[i] * c + positions[i + 2] * s))
-        extentY = Math.max(extentY, Math.abs(positions[i + 1]))
+        const lx = positions[i]
+        const ly = positions[i + 1]
+        const lz = positions[i + 2]
+        const x = lx * c + lz * s
+        const z = -lx * s + lz * c
+        minX = Math.min(minX, x)
+        maxX = Math.max(maxX, x)
+        minY = Math.min(minY, ly)
+        maxY = Math.max(maxY, ly)
+        minZ = Math.min(minZ, z)
+        maxZ = Math.max(maxZ, z)
       }
+      const spanX = maxX - minX
+      const spanY = maxY - minY
       const visibleHeight = 2 * distance * Math.tan((fov * Math.PI) / 360)
-      assert.ok(extentX * scale <= visibleHeight * aspect * (margin / 2) + 0.02, `${shape.id} should fit stage width at aspect ${aspect}`)
-      assert.ok(extentY * scale <= visibleHeight * (margin / 2) + 0.02, `${shape.id} should fit stage height at aspect ${aspect}`)
+      const visibleWidth = visibleHeight * aspect
+      assert.ok(spanX * fit.scale <= visibleWidth * margin + 0.02, `${shape.id} should fit stage width at aspect ${aspect}`)
+      assert.ok(spanY * fit.scale <= visibleHeight * margin + 0.02, `${shape.id} should fit stage height at aspect ${aspect}`)
+      assert.ok(Math.abs(fit.centerX - (minX + maxX) * 0.5) < 1e-6, `${shape.id} centerX`)
+      assert.ok(Math.abs(fit.centerY - (minY + maxY) * 0.5) < 1e-6, `${shape.id} centerY`)
+      assert.ok(Math.abs(fit.centerZ - (minZ + maxZ) * 0.5) < 1e-6, `${shape.id} centerZ`)
+      const parent = quality.presenceFitYawFrameOffset(fit, fit.scale)
+      assert.ok(Math.abs((minX + maxX) * 0.5 * fit.scale + parent.x) < 1e-6, `${shape.id} yaw-frame offset X`)
+      assert.ok(Math.abs((minY + maxY) * 0.5 * fit.scale + parent.y) < 1e-6, `${shape.id} yaw-frame offset Y`)
+      assert.ok(Math.abs((minZ + maxZ) * 0.5 * fit.scale + parent.z) < 1e-6, `${shape.id} yaw-frame offset Z`)
     }
   }
 })
