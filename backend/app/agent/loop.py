@@ -1435,6 +1435,8 @@ class AgentRuntime:
                 content,
                 source="task_chat",
                 task_id=task_id,
+                route_kind=route_kind,
+                task_class=getattr(working, "task_class", None) or CONVERSATION_CLASS,
             )
         clear_stream_speak_state(stream_key)
         schedule_orchestrator_restore(settings)

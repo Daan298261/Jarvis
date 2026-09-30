@@ -1099,18 +1099,34 @@ def persist_verified_correction(
     initial_answer: str,
     correction: str,
     conversation_id: str | None = None,
+    provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Write a background-verification correction into Decisions/ when vault is bound."""
+    """Write a background-verification correction into Decisions/ when vault is bound.
+
+    Stores before/after text plus provenance metadata. Does not rewrite prompts or fine-tune.
+    Returns None when no vault is bound (not an error). On write failure returns ``ok: False``.
+    """
     if vault_root() is None:
         return None
     title = re.sub(r"\s+", " ", user_prompt.strip())[:80] or "Verified correction"
     body = (
         f"Owner question:\n{user_prompt.strip()[:1500]}\n\n"
-        f"Initial answer:\n{initial_answer.strip()[:1500]}\n\n"
-        f"Corrected answer:\n{correction.strip()[:2000]}\n"
+        f"Before (initial answer):\n{initial_answer.strip()[:1500]}\n\n"
+        f"After (corrected answer):\n{correction.strip()[:2000]}\n"
     )
     if conversation_id:
         body += f"\nconversation_id: `{conversation_id}`\n"
+    if provenance:
+        body += (
+            "\n## Provenance\n\n"
+            f"- source_type: `{provenance.get('source_type') or 'background_verify'}`\n"
+            f"- owner_scope: `{provenance.get('owner_scope') or 'owner'}`\n"
+            f"- source_id: `{provenance.get('source_id') or ''}`\n"
+            f"- created_at: `{provenance.get('created_at') or ''}`\n"
+        )
+        note = str(provenance.get("note") or "").strip()
+        if note:
+            body += f"- note: {note}\n"
     safe = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "-")[:80] or "correction"
     rel = f"Decisions/{safe}-{uuid.uuid4().hex[:8]}.md"
     try:

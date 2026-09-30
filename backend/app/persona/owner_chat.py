@@ -647,15 +647,21 @@ async def stream_owner_chat(
         )
         clear_stream_speak_state(stream_key)
         tts_id = early_tts_ids[0] if early_tts_ids and not delivery.get("tts_id") else delivery.get("tts_id")
-        # Direct front terminal turns skip verify; ack/handoff still verify the worker merge.
+        # Direct front terminal turns skip verify (#481); otherwise apply RFC-0167 admission.
         front_action = (done or {}).get("front_action") or prefetched_front.action
+        verify_scheduled = False
         if not terminal_front_completes_turn(str(front_action or "")):
-            schedule_background_verification(
+            from ..agent.planning import route_request
+
+            route = route_request(cleaned)
+            verify_scheduled = schedule_background_verification(
                 cleaned,
                 reply,
                 source="owner_chat",
                 speak=True,
                 conversation_id=cid,
+                route_kind=route.kind,
+                task_class=route.task_class,
             )
         yield {
             "type": "done",
@@ -666,7 +672,7 @@ async def stream_owner_chat(
             "front_action": front_action,
             "timing": (done or {}).get("timing") or last_front_timing(),
             "slow_nudges": nudge_meta.get("nudges", 0),
-            "background_verify": not terminal_front_completes_turn(str(front_action or "")),
+            "background_verify": bool(verify_scheduled),
         }
     else:
         clear_stream_speak_state(stream_key)
