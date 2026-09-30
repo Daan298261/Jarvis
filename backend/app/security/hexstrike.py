@@ -90,6 +90,9 @@ class HexStrikeStatus:
     processes: dict[str, Any] = field(default_factory=dict)
     dashboard: dict[str, Any] | None = None
     health: dict[str, Any] = field(default_factory=dict)
+    optional_stubs: list[str] = field(default_factory=list)
+    stub_status: str = "unavailable"
+    stub_message: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -112,6 +115,11 @@ class HexStrikeStatus:
             "processes": self.processes,
             "dashboard": self.dashboard,
             "health": self.health,
+            "optional_stubs": list(self.optional_stubs),
+            "stub_status": self.stub_status,
+            "stub_message": self.stub_message,
+            # Explicit non-live claim for optional extras (never "running"/"healthy").
+            "optional_extras_available": False,
         }
 
 
@@ -275,9 +283,19 @@ class HexStrikeManager:
         self._starting = False
         self.last_error = ""
         self._health: dict[str, Any] = {}
+        self._loopback_healthy = False
 
     @property
     def is_running(self) -> bool:
+        # Honest "running" requires a live managed process AND a successful loopback /health.
+        return (
+            self._process is not None
+            and self._process.returncode is None
+            and self._loopback_healthy
+        )
+
+    @property
+    def process_alive(self) -> bool:
         return self._process is not None and self._process.returncode is None
 
     def _settings_view(self) -> tuple[str, str, str, int]:
@@ -287,11 +305,54 @@ class HexStrikeManager:
         port = int(hex_cfg.port or DEFAULT_PORT)
         return hex_cfg.install_path, hex_cfg.python_executable, host, port
 
+    def _state_root(self, install: Path | None) -> Path | None:
+        env = (os.environ.get("JARVIS_HEXSTRIKE_STATE_DIR") or "").strip()
+        if env:
+            return Path(env)
+        if install is not None:
+            return install / "jarvis-state"
+        return None
+
+    def _stub_fields(self, install: Path | None) -> tuple[list[str], str, str]:
+        from .hexstrike_compat import ALWAYS_STUBBED_OPTIONALS, DISABLED_MESSAGE, read_stub_manifest
+
+        state_root = self._state_root(install)
+        manifest = read_stub_manifest(state_root) if state_root is not None else read_stub_manifest(None)
+        stubbed = list(manifest.get("stubbed") or [])
+        # Managed Jarvis launch always stubs these extras — never advertise them live.
+        for name in ALWAYS_STUBBED_OPTIONALS:
+            if name not in stubbed:
+                stubbed.append(name)
+        message = str(manifest.get("message") or DISABLED_MESSAGE)
+        return stubbed, "unavailable", message
+
+    def _sanitize_tools_for_stubs(self, tools: dict[str, Any], stubbed: list[str]) -> dict[str, Any]:
+        from .hexstrike_compat import package_is_stubbed
+
+        if not isinstance(tools, dict):
+            return {}
+        cleaned: dict[str, Any] = {}
+        for key, value in tools.items():
+            name = str(key)
+            if name == "available" and isinstance(value, list):
+                cleaned[name] = [
+                    item
+                    for item in value
+                    if not package_is_stubbed(str(item), stubbed)
+                ]
+                continue
+            if package_is_stubbed(name, stubbed):
+                cleaned[name] = "unavailable"
+                continue
+            cleaned[name] = value
+        return cleaned
+
     def _base_status(self) -> HexStrikeStatus:
         install_path, python_executable, host, port = self._settings_view()
         install = resolve_install(install_path)
         python = resolve_python(install, python_executable) if install else python_executable
         running = self.is_running
+        stubbed, stub_status, stub_message = self._stub_fields(install)
         return HexStrikeStatus(
             installed=install is not None,
             running=running,
@@ -303,11 +364,37 @@ class HexStrikeManager:
             health_url=f"http://{host}:{port}/health",
             pid=self._process.pid if running and self._process else None,
             last_error=self.last_error,
+            optional_stubs=stubbed,
+            stub_status=stub_status,
+            stub_message=stub_message,
         )
 
     async def status(self, *, enrich: bool = True) -> HexStrikeStatus:
+        # Re-probe whenever a managed process is alive so soft failures cannot keep "running".
+        if self.process_alive:
+            _, _, host, port = self._settings_view()
+            health_url = f"http://{_loopback_host(host)}:{int(port or DEFAULT_PORT)}/health"
+            healthy = await self._probe_health(health_url)
+            self._loopback_healthy = healthy
+            if not healthy:
+                self.last_error = (
+                    "HexStrike process is present but loopback /health is unreachable; reporting not running."
+                )
+                audit_hexstrike("status_unhealthy", error=self.last_error)
+        else:
+            self._loopback_healthy = False
+            self._health = {}
+
         snapshot = self._base_status()
-        if enrich and snapshot.running:
+        if not snapshot.running:
+            # Never leave stale health/tools that look live when not running.
+            snapshot.health = {}
+            snapshot.tools = {}
+            snapshot.telemetry = {}
+            snapshot.processes = {}
+            snapshot.dashboard = None
+            return snapshot
+        if enrich:
             await self._enrich(snapshot)
         return snapshot
 
@@ -414,6 +501,7 @@ class HexStrikeManager:
         process = self._process
         self._process = None
         self._health = {}
+        self._loopback_healthy = False
         if process and process.returncode is None:
             try:
                 if os.name == "nt":
@@ -480,24 +568,39 @@ class HexStrikeManager:
             return False
         return True
 
+    async def _probe_health(self, url: str) -> bool:
+        """Single-shot loopback health probe. Exceptions surface as unhealthy (no soft pass)."""
+        parsed = urlparse(url)
+        if parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=4, trust_env=False) as client:
+                response = await client.get(url)
+        except httpx.HTTPError as exc:
+            log.debug("HexStrike health probe failed: %s", exc)
+            self._loopback_healthy = False
+            return False
+        if response.status_code >= 500:
+            self._loopback_healthy = False
+            return False
+        try:
+            payload = response.json()
+            self._health = payload if isinstance(payload, dict) else {}
+        except ValueError:
+            self._health = {}
+        self._loopback_healthy = True
+        return True
+
     async def _wait_for_loopback_health(self, url: str, *, timeout: float) -> bool:
         deadline = asyncio.get_running_loop().time() + timeout
-        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
-            while asyncio.get_running_loop().time() < deadline:
-                if self._process is not None and self._process.returncode is not None:
-                    return False
-                try:
-                    response = await client.get(url)
-                    if response.status_code < 500:
-                        try:
-                            payload = response.json()
-                            self._health = payload if isinstance(payload, dict) else {}
-                        except ValueError:
-                            self._health = {}
-                        return True
-                except httpx.HTTPError:
-                    pass
-                await asyncio.sleep(1)
+        while asyncio.get_running_loop().time() < deadline:
+            if self._process is not None and self._process.returncode is not None:
+                self._loopback_healthy = False
+                return False
+            if await self._probe_health(url):
+                return True
+            await asyncio.sleep(1)
+        self._loopback_healthy = False
         return False
 
     async def _enrich(self, snapshot: HexStrikeStatus) -> None:
@@ -513,9 +616,22 @@ class HexStrikeManager:
                 or health.get("tools_status")
             )
             if isinstance(tools, dict):
-                snapshot.tools = tools
+                snapshot.tools = self._sanitize_tools_for_stubs(tools, snapshot.optional_stubs)
             elif isinstance(tools, list):
-                snapshot.tools = {"available": tools}
+                from .hexstrike_compat import package_is_stubbed
+
+                snapshot.tools = {
+                    "available": [
+                        item
+                        for item in tools
+                        if not package_is_stubbed(str(item), snapshot.optional_stubs)
+                    ]
+                }
+            # Never let stubbed optional packages linger as "available" in health.
+            if snapshot.optional_stubs:
+                for stub in snapshot.optional_stubs:
+                    if stub in snapshot.tools:
+                        snapshot.tools[stub] = "unavailable"
         telemetry = await self._get_json(f"{base}/api/telemetry")
         if isinstance(telemetry, dict):
             snapshot.telemetry = telemetry
@@ -537,7 +653,7 @@ class HexStrikeManager:
         if not gateway_allows(method, cleaned):
             audit_hexstrike("proxy_denied", method=method, path=cleaned)
             raise PermissionError(f"HexStrike gateway does not allow {method} /{cleaned}")
-        snapshot = self._base_status()
+        snapshot = await self.status(enrich=False)
         if not snapshot.running:
             raise RuntimeError("HexStrike is not running")
         url = f"http://{snapshot.host}:{snapshot.port}/{cleaned}"
@@ -553,7 +669,7 @@ class HexStrikeManager:
         if not operator_post_allowed(cleaned):
             audit_hexstrike("operator_proxy_denied", path=cleaned)
             raise PermissionError(f"HexStrike operator gateway does not allow POST /{cleaned}")
-        snapshot = self._base_status()
+        snapshot = await self.status(enrich=False)
         if not snapshot.running:
             raise RuntimeError("HexStrike is not running")
         url = f"http://{snapshot.host}:{snapshot.port}/{cleaned}"

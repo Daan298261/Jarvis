@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import threading
 import uuid
 from dataclasses import asdict, dataclass
@@ -13,9 +14,37 @@ from typing import Any
 from ..config import data_dir, default_allowed_directories, load_settings
 from ..tools.mcp_runtime import MCP
 from .hexstrike import HEXSTRIKE, audit_hexstrike
+from .hexstrike_compat import ALWAYS_STUBBED_OPTIONALS, DISABLED_MESSAGE, package_is_stubbed
 from .hexstrike_defensive import CAPABILITIES, CAPABILITY_BY_ID, capability_snapshot
 from .hexstrike_mcp import HEXSTRIKE_MCP_SERVER_NAME, mcp_registration_error, mcp_registration_status, register_hexstrike_mcp
 from .hexstrike_tools import dependency_catalog_rows, missing_host_tools
+
+# Defensive capability → host binary required for an honest "available" claim.
+_DEFENSIVE_HOST_TOOLS: dict[str, str] = {
+    "lan_inventory": "nmap",
+    "container_scan": "trivy",
+    "iac_scan": "checkov",
+    "host_baseline": "docker",
+    "forensic_inspection": "exiftool",
+}
+
+_UNAVAILABLE_STATUSES = frozenset(
+    {
+        "missing",
+        "unavailable",
+        "absent",
+        "stub",
+        "stubbed",
+        "disabled",
+        "error",
+        "failed",
+        "false",
+        "no",
+        "not_installed",
+        "not-installed",
+    }
+)
+_AVAILABLE_STATUSES = frozenset({"ok", "ready", "available", "installed", "true", "yes"})
 
 _JOB_ID_RE = re.compile(r"^[a-f0-9-]{8,64}$", re.IGNORECASE)
 _LOCK = threading.RLock()
@@ -159,19 +188,27 @@ def _http_tool_path(tool_name: str) -> str:
     return f"api/tools/{cleaned}"
 
 
+def _status_means_available(status: Any) -> bool:
+    if isinstance(status, bool):
+        return status
+    if status is None:
+        return False
+    if isinstance(status, str):
+        lowered = status.strip().lower()
+        if lowered in _UNAVAILABLE_STATUSES:
+            return False
+        return lowered in _AVAILABLE_STATUSES
+    return False
+
+
 def _capabilities_from_health(tools: dict[str, Any] | list[Any] | None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if isinstance(tools, dict):
         for key, status in tools.items():
             name = str(key).strip()
-            if not name:
+            if not name or name == "available":
                 continue
-            if isinstance(status, bool):
-                available = status
-            else:
-                available = status not in {False, "missing", "unavailable", "absent"}
-                if isinstance(status, str):
-                    available = status.lower() in {"ok", "ready", "available", "installed", "true", "yes"}
+            available = _status_means_available(status)
             rows.append(
                 {
                     "id": f"http:{name}",
@@ -184,6 +221,8 @@ def _capabilities_from_health(tools: dict[str, Any] | list[Any] | None) -> list[
                 }
             )
     elif isinstance(tools, list):
+        # Bare name lists from upstream are not proof of readiness — mark unavailable
+        # until a concrete status probe says otherwise.
         for item in tools:
             name = str(item).strip()
             if not name:
@@ -194,31 +233,41 @@ def _capabilities_from_health(tools: dict[str, Any] | list[Any] | None) -> list[
                     "source": "http",
                     "title": name,
                     "upstream_path": _http_tool_path(name),
-                    "available": True,
-                    "missing_dependencies": [],
+                    "available": False,
+                    "missing_dependencies": [name],
+                    "guidance": "Upstream listed this tool without a readiness status; treating as unavailable.",
                     "input_schema": {"type": "object", "properties": {}, "additionalProperties": True},
                 }
             )
     return rows
 
 
-def _capabilities_from_mcp() -> list[dict[str, Any]]:
+def _capabilities_from_mcp(*, suite_running: bool) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     prefix = f"mcp_{HEXSTRIKE_MCP_SERVER_NAME}_"
     alt_prefix = f"mcp_{HEXSTRIKE_MCP_SERVER_NAME}-stdio_"
+    mcp_status = mcp_registration_status()
+    mcp_live = suite_running and any(
+        (not value.startswith("error:") and value != "disabled" and value != "0 tools")
+        for value in mcp_status.values()
+    )
     for key, spec in MCP._tools.items():
         if not (key.startswith(prefix) or key.startswith(alt_prefix)):
             continue
         tool = spec.get("tool") or {}
         name = str(tool.get("name") or key.split("_", 2)[-1])
+        available = mcp_live and not package_is_stubbed(name)
         rows.append(
             {
                 "id": f"mcp:{name}",
                 "source": "mcp",
                 "title": name,
                 "mcp_tool_key": key,
-                "available": True,
-                "missing_dependencies": [],
+                "available": available,
+                "missing_dependencies": [] if available else ([name] if package_is_stubbed(name) else ["hexstrike-mcp"]),
+                "guidance": "" if available else (
+                    DISABLED_MESSAGE if package_is_stubbed(name) else "HexStrike MCP bridge is not live."
+                ),
                 "input_schema": tool.get("inputSchema")
                 or {"type": "object", "properties": {}, "additionalProperties": True},
             }
@@ -226,9 +275,19 @@ def _capabilities_from_mcp() -> list[dict[str, Any]]:
     return rows
 
 
-def _capabilities_from_defensive() -> list[dict[str, Any]]:
+def _capabilities_from_defensive(*, suite_running: bool) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in CAPABILITIES:
+        host_tool = _DEFENSIVE_HOST_TOOLS.get(item.id)
+        missing: list[str] = []
+        if host_tool and shutil.which(host_tool) is None:
+            missing.append(host_tool)
+        # threat_intel_lookup needs no local binary; still requires a live suite only for
+        # other defensive actions that POST upstream — CVE lookup is Jarvis-side.
+        needs_suite = item.id != "threat_intel_lookup"
+        available = (not missing) and (suite_running or not needs_suite)
+        if needs_suite and not suite_running:
+            missing = missing or ["hexstrike-suite"]
         rows.append(
             {
                 "id": f"defensive:{item.id}",
@@ -236,8 +295,17 @@ def _capabilities_from_defensive() -> list[dict[str, Any]]:
                 "title": item.title,
                 "defensive_action": item.id,
                 "upstream_path": item.upstream_path,
-                "available": True,
-                "missing_dependencies": [],
+                "available": available,
+                "missing_dependencies": missing,
+                "guidance": (
+                    ""
+                    if available
+                    else (
+                        f"Missing host tool `{host_tool}`."
+                        if host_tool and host_tool in missing
+                        else "HexStrike suite is not running."
+                    )
+                ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -251,15 +319,87 @@ def _capabilities_from_defensive() -> list[dict[str, Any]]:
     return rows
 
 
+def _apply_catalog_honesty(
+    rows: list[dict[str, Any]],
+    *,
+    suite_running: bool,
+    stubbed: list[str] | tuple[str, ...],
+) -> list[dict[str, Any]]:
+    """Force stubbed / missing / offline rows to unavailable — never running/available."""
+    honest: list[dict[str, Any]] = []
+    active_stubs = list(stubbed) or list(ALWAYS_STUBBED_OPTIONALS)
+    for row in rows:
+        item = dict(row)
+        source = str(item.get("source") or "")
+        ident = str(item.get("id") or "")
+        title = str(item.get("title") or ident)
+        missing = list(item.get("missing_dependencies") or [])
+        available = bool(item.get("available"))
+
+        if package_is_stubbed(ident, active_stubs) or package_is_stubbed(title, active_stubs):
+            available = False
+            for stub in active_stubs:
+                if package_is_stubbed(ident, [stub]) or package_is_stubbed(title, [stub]):
+                    if stub not in missing:
+                        missing.append(stub)
+            item["stub"] = True
+            item["guidance"] = DISABLED_MESSAGE
+            item["status"] = "unavailable"
+
+        if source in {"http", "mcp"} and not suite_running:
+            available = False
+            if "hexstrike-suite" not in missing:
+                missing.append("hexstrike-suite")
+            item["guidance"] = item.get("guidance") or "HexStrike suite is not running."
+            item["status"] = "unavailable"
+
+        # Host binary honesty for http tool names that match known PATH commands.
+        tool_name = ""
+        if source == "http" and ident.startswith("http:"):
+            tool_name = ident.split(":", 1)[1]
+        if tool_name and shutil.which(tool_name) is None and tool_name.lower() in {
+            "nmap",
+            "trivy",
+            "checkov",
+            "docker",
+            "exiftool",
+            "git",
+            "curl",
+            "jq",
+            "openssl",
+            "wireshark",
+        }:
+            available = False
+            if tool_name not in missing:
+                missing.append(tool_name)
+            item["guidance"] = item.get("guidance") or f"Host tool `{tool_name}` is not on PATH."
+            item["status"] = "unavailable"
+
+        if not available:
+            item["available"] = False
+            item["missing_dependencies"] = missing
+            # Never leave a decorative "running"/"healthy" marker on unavailable rows.
+            if str(item.get("status") or "").lower() in {"running", "healthy", "ok", "ready", "available"}:
+                item["status"] = "unavailable"
+        else:
+            item["available"] = True
+            item["missing_dependencies"] = missing
+        honest.append(item)
+    return honest
+
+
 async def refresh_discovered_catalog(*, force: bool = False) -> list[dict[str, Any]]:
     global _CATALOG_CACHE
     snapshot = await HEXSTRIKE.status(enrich=True)
+    suite_running = bool(snapshot.running)
+    stubbed = list(getattr(snapshot, "optional_stubs", None) or ALWAYS_STUBBED_OPTIONALS)
     rows: list[dict[str, Any]] = []
-    rows.extend(_capabilities_from_defensive())
-    rows.extend(_capabilities_from_health(snapshot.tools if isinstance(snapshot.tools, dict) else None))
-    if isinstance(snapshot.tools, dict) and snapshot.tools.get("available"):
-        rows.extend(_capabilities_from_health(snapshot.tools.get("available")))
-    rows.extend(_capabilities_from_mcp())
+    rows.extend(_capabilities_from_defensive(suite_running=suite_running))
+    if suite_running:
+        rows.extend(_capabilities_from_health(snapshot.tools if isinstance(snapshot.tools, dict) else None))
+        if isinstance(snapshot.tools, dict) and snapshot.tools.get("available"):
+            rows.extend(_capabilities_from_health(snapshot.tools.get("available")))
+    rows.extend(_capabilities_from_mcp(suite_running=suite_running))
     deps = dependency_catalog_rows(snapshot.install_path)
     dep_by_command = {item["command"]: item for item in deps}
     seen: set[str] = set()
@@ -271,7 +411,15 @@ async def refresh_discovered_catalog(*, force: bool = False) -> list[dict[str, A
         seen.add(ident)
         command = row.get("missing_dependencies", [None])[0] if row.get("missing_dependencies") else None
         if isinstance(command, str) and command in dep_by_command:
-            row = {**row, **dep_by_command[command]}
+            dep_row = dep_by_command[command]
+            # Dependency row availability wins when host probe says missing.
+            if dep_row.get("available") is False:
+                row = {
+                    **row,
+                    "available": False,
+                    "missing_dependencies": [command],
+                    "guidance": dep_row.get("guidance") or row.get("guidance") or f"Missing dependency `{command}`.",
+                }
         merged.append(row)
     for dep in deps:
         if dep.get("available"):
@@ -289,12 +437,20 @@ async def refresh_discovered_catalog(*, force: bool = False) -> list[dict[str, A
                 "missing_dependencies": [dep["command"]],
                 "install_id": dep["id"],
                 "install_method": dep.get("method"),
+                "status": "unavailable",
                 "input_schema": {"type": "object", "properties": {}},
             }
         )
+    merged = _apply_catalog_honesty(merged, suite_running=suite_running, stubbed=stubbed)
     _CATALOG_CACHE = merged
     _persist_catalog(merged)
-    audit_hexstrike("catalog_refresh", count=len(merged), mcp=mcp_registration_status())
+    audit_hexstrike(
+        "catalog_refresh",
+        count=len(merged),
+        mcp=mcp_registration_status(),
+        suite_running=suite_running,
+        optional_stubs=stubbed,
+    )
     return merged
 
 
@@ -340,12 +496,21 @@ async def sync_operator_surface(*, register_mcp: bool = True) -> dict[str, Any]:
 
 
 def discovered_catalog() -> list[dict[str, Any]]:
+    suite_running = bool(HEXSTRIKE.is_running)
+    try:
+        stubbed = list(HEXSTRIKE._base_status().optional_stubs or ALWAYS_STUBBED_OPTIONALS)
+    except Exception:
+        stubbed = list(ALWAYS_STUBBED_OPTIONALS)
     if _CATALOG_CACHE:
-        return list(_CATALOG_CACHE)
+        return _apply_catalog_honesty(list(_CATALOG_CACHE), suite_running=suite_running, stubbed=stubbed)
     persisted = _load_persisted_catalog()
     if persisted:
-        return list(persisted)
-    return [item for item in _capabilities_from_defensive()]
+        return _apply_catalog_honesty(list(persisted), suite_running=suite_running, stubbed=stubbed)
+    return _apply_catalog_honesty(
+        _capabilities_from_defensive(suite_running=suite_running),
+        suite_running=suite_running,
+        stubbed=stubbed,
+    )
 
 
 def catalog_snapshot() -> dict[str, Any]:
@@ -371,6 +536,9 @@ def catalog_snapshot() -> dict[str, Any]:
         "legacy_capabilities": capability_snapshot() if mode != HEXSTRIKE_ACCESS_LOCKED else [],
         "mcp": mcp_registration_status() if mode == HEXSTRIKE_ACCESS_FULL else {"ok": False, "error": ""},
         "mcp_error": mcp_registration_error() if mode == HEXSTRIKE_ACCESS_FULL else "",
+        "optional_stubs": list(ALWAYS_STUBBED_OPTIONALS),
+        "optional_extras_available": False,
+        "stub_status": "unavailable",
     }
     payload.update(hexstrike_access_payload())
     return payload
@@ -413,9 +581,23 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
         raise PermissionError(HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
     if source == "dependency" or str(capability_id).startswith("dep:"):
         raise ValueError("dependency rows install via POST /api/hexstrike/tools/{id}/install, not operate")
+    if capability.get("stub") or package_is_stubbed(str(capability_id)):
+        audit_hexstrike("operate_denied", capability=capability_id, reason="optional_stub")
+        raise RuntimeError(
+            f"capability unavailable: optional stub ({DISABLED_MESSAGE})"
+        )
     if capability.get("available") is False:
         missing = capability.get("missing_dependencies") or capability.get("guidance")
         raise RuntimeError(f"capability unavailable: {missing or capability_id}")
+    live = await HEXSTRIKE.status(enrich=False)
+    if not live.running and source in {"http", "mcp"}:
+        raise RuntimeError("capability unavailable: HexStrike suite is not running")
+    if (
+        not live.running
+        and source == "defensive"
+        and str(capability.get("defensive_action")) != "threat_intel_lookup"
+    ):
+        raise RuntimeError("capability unavailable: HexStrike suite is not running")
     args = arguments or {}
     schema = capability.get("input_schema") or {"type": "object"}
     _validate_arguments(schema if isinstance(schema, dict) else {"type": "object"}, args)
@@ -500,6 +682,7 @@ async def stop_operator_job(job_id: str) -> dict[str, Any]:
 
 def operator_status_extras() -> dict[str, Any]:
     catalog = discovered_catalog()
+    base = HEXSTRIKE._base_status()
     return {
         "catalog": catalog,
         "catalog_count": len(catalog),
@@ -508,4 +691,8 @@ def operator_status_extras() -> dict[str, Any]:
         "mcp": mcp_registration_status(),
         "mcp_error": mcp_registration_error(),
         "missing_host_tools": missing_host_tools(),
+        "optional_stubs": list(base.optional_stubs or ALWAYS_STUBBED_OPTIONALS),
+        "stub_status": base.stub_status or "unavailable",
+        "stub_message": base.stub_message or DISABLED_MESSAGE,
+        "optional_extras_available": False,
     }
