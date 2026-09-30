@@ -72,14 +72,14 @@ async def get_catalog_entry(entry_id: str) -> dict[str, Any]:
 
 @router.post("/catalog/cybersecurity/enable")
 async def enable_cybersecurity_module(body: EnableBody) -> dict[str, Any]:
-    module = cybersecurity.set_module_enabled(body.enabled)
+    module = await cybersecurity.set_module_enabled(body.enabled)
     return {"enabled": module["enabled"], "module": module, "detail": "Cybersecurity module updated."}
 
 
 @router.post("/catalog/cybersecurity/tools/{tool_id}/enable")
 async def enable_cybersecurity_tool(tool_id: str, body: EnableBody) -> dict[str, Any]:
     try:
-        module = cybersecurity.set_member_enabled(tool_id, body.enabled)
+        module = await cybersecurity.set_member_enabled(tool_id, body.enabled)
     except KeyError:
         raise HTTPException(status_code=404, detail="Unknown cybersecurity tool") from None
     return {"enabled": body.enabled, "module": module, "detail": "Tool enablement updated."}
