@@ -30,8 +30,8 @@ export function isFreePresencePhase(phase: PresencePhase): boolean {
 
 export function clampLifecycleMorph(value: number): number {
   if (!Number.isFinite(value)) return REST_TIGHTNESS
-  if (value <= 0) return REST_TIGHTNESS
-  return Math.max(0, Math.min(ENGAGED_TIGHTNESS, value))
+  if (value < REST_TIGHTNESS) return REST_TIGHTNESS
+  return Math.min(ENGAGED_TIGHTNESS, value)
 }
 
 /**
@@ -40,6 +40,29 @@ export function clampLifecycleMorph(value: number): number {
  */
 export function lifecycleMorphTarget(phase: PresencePhase): number {
   return isRestPresencePhase(phase) ? REST_TIGHTNESS : ENGAGED_TIGHTNESS
+}
+
+/**
+ * GPU mix factor for the rest-pose (aPos) ↔ engaged-figure (bPos) lerp.
+ * Matches GLSL `smoothstep(REST_TIGHTNESS, 1.0, uMorph)` used while lifecycle
+ * remap is on. Rest tightness displays the rest silhouette (blend 0), not an
+ * 18% spherical free-cloud smear. Engaged is 1. Shape-to-shape blends bypass
+ * this via `uRestRemap = 0` and a linear 0→1 mix.
+ */
+export function lifecycleMorphBlend(morph: number): number {
+  const t = clampLifecycleMorph(morph)
+  if (t <= REST_TIGHTNESS) return 0
+  const u = (t - REST_TIGHTNESS) / (ENGAGED_TIGHTNESS - REST_TIGHTNESS)
+  return u * u * (3 - 2 * u)
+}
+
+/**
+ * Pointer / face attract gain. Rest may bias a loose halo; it must not pull
+ * the anatomical core into an anonymous cloud (RFC-0195 / RFC-0175 attract).
+ */
+export function restAttractGain(morph: number): number {
+  const blend = lifecycleMorphBlend(morph)
+  return 0.28 + blend * 0.72
 }
 
 /**

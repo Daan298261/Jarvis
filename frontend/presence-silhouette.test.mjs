@@ -36,9 +36,14 @@ test("RFC-0195 rest tightness is locked in band and idle is never 0", () => {
   }
   assert.equal(lifecycle.clampLifecycleMorph(0), rest)
   assert.equal(lifecycle.clampLifecycleMorph(-1), rest)
+  assert.equal(lifecycle.clampLifecycleMorph(0.5), rest)
   assert.equal(lifecycle.clampLifecycleMorph(1), 1)
+  assert.equal(lifecycle.lifecycleMorphBlend(rest), 0)
+  assert.equal(lifecycle.lifecycleMorphBlend(1), 1)
   assert.equal(silhouette.restSilhouetteOrAnonymous(0), "anonymous")
   assert.equal(silhouette.restSilhouetteOrAnonymous(rest), "silhouette")
+  assert.ok(lifecycle.restAttractGain(rest) < lifecycle.restAttractGain(1))
+  assert.ok(lifecycle.restAttractGain(rest) >= 0.2)
 })
 
 test("supersession: presence tests do not require idle morph 0", async () => {
@@ -115,6 +120,7 @@ test("Mestor-like overexposure fails even at 165 FPS / 94k particles", () => {
 test("capped bloom/profile keeps a readable command_facet rest silhouette", () => {
   const shape = shapes.resolvePresenceShape("command_facet")
   const figure = shape.buildFigure(0.2)
+  const rest = cloud.buildRestSilhouette(figure)
   const appearance = quality.resolveDotAppearance(shape.appearance)
   const bloom = quality.resolvePresenceBloom({
     appearance,
@@ -124,6 +130,7 @@ test("capped bloom/profile keeps a readable command_facet rest silhouette", () =
   })
   const report = silhouette.evaluateSilhouetteQuality({
     figure,
+    free: rest,
     morph: lifecycle.REST_TIGHTNESS,
     bloomStrength: bloom.strength,
     pointScale: appearance.pointScale,
@@ -154,6 +161,7 @@ test("lowest auto tier bypasses bloom without flattening the persona", () => {
   const figure = figureOrbs("command_facet", 0.15)
   const report = silhouette.evaluateSilhouetteQuality({
     figure,
+    free: cloud.buildRestSilhouette(figure),
     morph: lifecycle.REST_TIGHTNESS,
     bloomStrength: 0,
     pointScale: appearance.pointScale,
@@ -175,8 +183,10 @@ test("roster rest stills stay on the winning figure, not an anonymous cloud", ()
   for (const id of personas.ROSTER_IDS) {
     const shapeId = personas.PERSONA_VISUALS[id].shapeId
     const figure = figureOrbs(shapeId, 0.1)
+    const restPose = cloud.buildRestSilhouette(figure)
     const report = silhouette.evaluateSilhouetteQuality({
       figure,
+      free: restPose,
       morph: rest,
       bloomStrength: 0.38,
       pointScale: 0.95,

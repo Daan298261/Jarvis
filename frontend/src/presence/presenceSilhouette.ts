@@ -1,4 +1,4 @@
-import { REST_TIGHTNESS, REST_TIGHTNESS_MIN } from "./presenceLifecycle"
+import { REST_TIGHTNESS, REST_TIGHTNESS_MIN, lifecycleMorphBlend } from "./presenceLifecycle"
 import {
   PRESENCE_EDGE_CONTRAST_MIN,
   PRESENCE_MOTIF_CONTRAST_MIN,
@@ -10,6 +10,7 @@ const GRID = 48
 
 export type SilhouetteQualityInput = {
   figure: ParticleOrb[]
+  /** Rest-pose slot (loosened winning figure). Not an anonymous free-float cloud. */
   free?: ParticleOrb[]
   morph: number
   bloomStrength: number
@@ -31,13 +32,14 @@ export type SilhouetteQualityReport = {
   failReasons: string[]
 }
 
-function mixOrbs(figure: ParticleOrb[], free: ParticleOrb[] | undefined, morph: number): ParticleOrb[] {
-  if (!free || free.length === 0 || morph >= 0.999) return figure
-  const n = Math.min(figure.length, free.length)
+function mixOrbs(figure: ParticleOrb[], rest: ParticleOrb[] | undefined, morph: number): ParticleOrb[] {
+  const m = lifecycleMorphBlend(morph)
+  if (!rest || rest.length === 0 || m >= 0.999) return figure
+  if (m <= 0.001) return rest
+  const n = Math.min(figure.length, rest.length)
   const out: ParticleOrb[] = new Array(n)
-  const m = Math.max(0, Math.min(1, morph))
   for (let i = 0; i < n; i++) {
-    const a = free[i]
+    const a = rest[i]
     const b = figure[i]
     out[i] = {
       x: a.x * (1 - m) + b.x * m,
@@ -199,6 +201,168 @@ export function evaluateSilhouetteQuality(input: SilhouetteQualityInput): Silhou
 
 export function restSilhouetteOrAnonymous(morph: number): "silhouette" | "anonymous" {
   return morph >= REST_TIGHTNESS_MIN ? "silhouette" : "anonymous"
+}
+
+export type CloudAnatomy = {
+  centroidX: number
+  centroidY: number
+  centroidZ: number
+  width: number
+  height: number
+  depth: number
+  goldMean: number
+  radialRms: number
+  upperShare: number
+}
+
+export function summarizeCloudAnatomy(orbs: ParticleOrb[]): CloudAnatomy {
+  const n = Math.max(1, orbs.length)
+  let cx = 0
+  let cy = 0
+  let cz = 0
+  let gold = 0
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+  for (const orb of orbs) {
+    cx += orb.x
+    cy += orb.y
+    cz += orb.z
+    gold += orb.gold
+    minX = Math.min(minX, orb.x)
+    maxX = Math.max(maxX, orb.x)
+    minY = Math.min(minY, orb.y)
+    maxY = Math.max(maxY, orb.y)
+    minZ = Math.min(minZ, orb.z)
+    maxZ = Math.max(maxZ, orb.z)
+  }
+  cx /= n
+  cy /= n
+  cz /= n
+  let radial = 0
+  let upper = 0
+  for (const orb of orbs) {
+    const dx = orb.x - cx
+    const dy = orb.y - cy
+    const dz = orb.z - cz
+    radial += dx * dx + dy * dy + dz * dz
+    if (orb.y > cy) upper += 1
+  }
+  return {
+    centroidX: cx,
+    centroidY: cy,
+    centroidZ: cz,
+    width: Math.max(0.001, maxX - minX),
+    height: Math.max(0.001, maxY - minY),
+    depth: Math.max(0.001, maxZ - minZ),
+    goldMean: gold / n,
+    radialRms: Math.sqrt(radial / n),
+    upperShare: upper / n,
+  }
+}
+
+export function meanOrbDisplacement(a: ParticleOrb[], b: ParticleOrb[]): number {
+  const n = Math.min(a.length, b.length)
+  if (n === 0) return Number.POSITIVE_INFINITY
+  let sum = 0
+  for (let i = 0; i < n; i++) {
+    const dx = a[i].x - b[i].x
+    const dy = a[i].y - b[i].y
+    const dz = a[i].z - b[i].z
+    sum += Math.hypot(dx, dy, dz)
+  }
+  return sum / n
+}
+
+export type RestIdentityReport = {
+  readable: boolean
+  failReasons: string[]
+  restAnatomy: CloudAnatomy
+  figureAnatomy: CloudAnatomy
+  restToFigureDisplacement: number
+  anonymousDisplacement: number
+  silhouette: SilhouetteQualityReport
+}
+
+/**
+ * Product rest identity: the displayed idle mix must stay a loosened winning
+ * figure, not an anonymous sphere and not a chase of engaged 1.0.
+ */
+export function evaluateRestIdentity(input: {
+  figure: ParticleOrb[]
+  rest: ParticleOrb[]
+  anonymous?: ParticleOrb[]
+  morph?: number
+  bloomStrength: number
+  pointScale: number
+  glow: number
+  depthSoftness?: number
+}): RestIdentityReport {
+  const morph = input.morph ?? REST_TIGHTNESS
+  const failReasons: string[] = []
+  const displayed = mixOrbs(input.figure, input.rest, morph)
+  const restAnatomy = summarizeCloudAnatomy(displayed)
+  const figureAnatomy = summarizeCloudAnatomy(input.figure)
+  const restToFigureDisplacement = meanOrbDisplacement(displayed, input.figure)
+  const anonymousDisplacement = input.anonymous
+    ? meanOrbDisplacement(displayed, input.anonymous)
+    : Number.POSITIVE_INFINITY
+  const silhouette = evaluateSilhouetteQuality({
+    figure: input.figure,
+    free: input.rest,
+    morph,
+    bloomStrength: input.bloomStrength,
+    pointScale: input.pointScale,
+    glow: input.glow,
+    depthSoftness: input.depthSoftness,
+  })
+  if (!silhouette.readable) failReasons.push(...silhouette.failReasons)
+  if (restSilhouetteOrAnonymous(morph) !== "silhouette") {
+    failReasons.push("rest morph is an anonymous cloud")
+  }
+  if (Math.abs(restAnatomy.centroidY - figureAnatomy.centroidY) > 0.22) {
+    failReasons.push(
+      `rest centroid Y ${restAnatomy.centroidY.toFixed(3)} drifted from figure ${figureAnatomy.centroidY.toFixed(3)}`,
+    )
+  }
+  if (Math.abs(restAnatomy.centroidX - figureAnatomy.centroidX) > 0.18) {
+    failReasons.push("rest centroid X drifted off the figure")
+  }
+  const heightRatio = restAnatomy.height / figureAnatomy.height
+  if (heightRatio < 0.78 || heightRatio > 1.35) {
+    failReasons.push(`rest height ratio ${heightRatio.toFixed(3)} is not a loosened figure`)
+  }
+  if (restToFigureDisplacement > 0.55) {
+    failReasons.push(`rest displacement ${restToFigureDisplacement.toFixed(3)} is a blob, not a bust`)
+  }
+  if (Number.isFinite(anonymousDisplacement) && restToFigureDisplacement > anonymousDisplacement * 0.55) {
+    failReasons.push("rest is closer to an anonymous cloud than to the winning figure")
+  }
+  if (figureAnatomy.goldMean > 0.02 && restAnatomy.goldMean < figureAnatomy.goldMean * 0.2) {
+    failReasons.push("rest gold collapsed (identity-hide of the amber core)")
+  }
+  if (figureAnatomy.goldMean > 0.02 && restAnatomy.goldMean >= figureAnatomy.goldMean * 0.98) {
+    failReasons.push("rest gold chases engaged 1.0 (not loosened)")
+  }
+  if (restAnatomy.radialRms + 1e-6 < figureAnatomy.radialRms * 0.92) {
+    failReasons.push("rest is tighter than the engaged figure")
+  }
+  const blend = lifecycleMorphBlend(morph)
+  if (blend > 0.08) {
+    failReasons.push(`rest blend ${blend.toFixed(3)} still mixes toward engaged`)
+  }
+  return {
+    readable: failReasons.length === 0,
+    failReasons,
+    restAnatomy,
+    figureAnatomy,
+    restToFigureDisplacement,
+    anonymousDisplacement,
+    silhouette,
+  }
 }
 
 export { REST_TIGHTNESS }

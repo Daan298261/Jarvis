@@ -205,6 +205,86 @@ export function presenceLookAtFromFit(
   return { x: 0, y: 0, z: 0 }
 }
 
+/** Concatenate rest + engaged slots so AABB fit covers both poses (no rest crop). */
+export function unionPresencePositions(
+  rest: ArrayLike<number>,
+  figure: ArrayLike<number>,
+): Float32Array {
+  const out = new Float32Array(rest.length + figure.length)
+  out.set(rest, 0)
+  out.set(figure, rest.length)
+  return out
+}
+
+export type PresenceIdentityOnFrame = {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  crownY: number
+  chinY: number
+  visibleHalfW: number
+  visibleHalfH: number
+  onFrame: boolean
+}
+
+/**
+ * After yaw-frame offset, rest/engaged landmarks must stay inside the camera
+ * frustum. Used to catch rest-specific crop (RFC-0194 crop-protection at rest).
+ */
+export function identityOnLookAtAfterFit(input: {
+  positions: ArrayLike<number>
+  fit: PresenceFitFrame
+  fovDegrees: number
+  cameraDistance: number
+  yaw?: number
+  aspect: number
+  margin?: number
+}): PresenceIdentityOnFrame {
+  const yaw = input.yaw ?? 0
+  const scale = input.fit.scale
+  const offset = presenceFitYawFrameOffset(input.fit, scale)
+  const c = Math.cos(yaw)
+  const s = Math.sin(yaw)
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  const pos = input.positions
+  for (let i = 0; i < pos.length; i += 3) {
+    const lx = pos[i] * scale
+    const ly = pos[i + 1] * scale
+    const lz = pos[i + 2] * scale
+    const x = offset.x + lx * c + lz * s
+    const y = offset.y + ly
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  }
+  const visibleHeight = 2 * input.cameraDistance * Math.tan((input.fovDegrees * Math.PI) / 360)
+  const visibleWidth = visibleHeight * Math.max(0.1, input.aspect)
+  const pad = Number.isFinite(input.margin) ? Math.max(0.5, Math.min(0.98, input.margin!)) : 0.96
+  const visibleHalfW = (visibleWidth * pad) / 2
+  const visibleHalfH = (visibleHeight * pad) / 2
+  const onFrame = Number.isFinite(minX)
+    && minX >= -visibleHalfW - 0.02
+    && maxX <= visibleHalfW + 0.02
+    && minY >= -visibleHalfH - 0.02
+    && maxY <= visibleHalfH + 0.02
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    crownY: maxY,
+    chinY: minY,
+    visibleHalfW,
+    visibleHalfH,
+    onFrame,
+  }
+}
+
 /**
  * Fit sampled shape bounds inside the stage frustum with a safe edge margin.
  * Uses AABB span (not origin-symmetric extent) so off-center busts are not

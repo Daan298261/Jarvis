@@ -5,7 +5,13 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js"
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js"
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { createPresenceAttentionController, type AttentionVector } from "../presenceAttention"
-import { LIFECYCLE_MORPH_SECONDS, isRestPresencePhase, lifecycleMorphTarget } from "../presenceLifecycle"
+import {
+  LIFECYCLE_MORPH_SECONDS,
+  isRestPresencePhase,
+  lifecycleMorphBlend,
+  lifecycleMorphTarget,
+  restAttractGain,
+} from "../presenceLifecycle"
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
 import {
@@ -16,6 +22,7 @@ import {
   presenceLookAtFromFit,
   resolveDotAppearance,
   resolvePresenceBloom,
+  unionPresencePositions,
   PRESENCE_DEFAULT_FRAMING_YAW,
   PRESENCE_QUALITY_DENSITIES,
 } from "../presenceQuality"
@@ -127,6 +134,8 @@ export function MorphablePresenceStage({
       uTime: { value: 0 }, uMotion: { value: 1 }, uActivity: { value: 0 },
       uSpeech: { value: 0 }, uPixelScale: { value: 1 }, uOpacity: { value: 1 },
       uMorph: { value: lifecycleMorphTarget("idle") },
+      uRestTightness: { value: lifecycleMorphTarget("idle") },
+      uRestRemap: { value: 1 },
       uPhaseKind: { value: 0 },
       uGlow: { value: 1 },
       uPointScale: { value: 1 },
@@ -201,11 +210,16 @@ export function MorphablePresenceStage({
 
     const fitCurrentShape = (aspect: number) => {
       const profile = resolvePresenceShape(system.currentShapeId)
+      const aPos = system.figure.geometry.getAttribute("aPos")
       const bPos = system.figure.geometry.getAttribute("bPos")
-      // Measure AABB center in the same yaw frame the stage applies to bust.rotation.y.
+      // Union rest + engaged so idle scatter cannot crop crown/chin off look-at.
+      const positions = unionPresencePositions(
+        aPos.array as ArrayLike<number>,
+        bPos.array as ArrayLike<number>,
+      )
       const fitYaw = profile.framing?.yaw ?? PRESENCE_DEFAULT_FRAMING_YAW
       const fit = normalizedPresenceFitScale(
-        bPos.array as ArrayLike<number>, aspect, camera.fov, camera.position.z,
+        positions, aspect, camera.fov, camera.position.z,
         fitYaw, profile.framing?.fitMargin ?? 0.88, profile.framing?.landmarks,
       )
       framingScale = fit.scale
@@ -292,7 +306,9 @@ export function MorphablePresenceStage({
       }
       system.tick(delta)
       stage.dataset.morph = system.morphValue().toFixed(3)
+      stage.dataset.morphBlend = lifecycleMorphBlend(system.morphValue()).toFixed(3)
       stage.dataset.restTightness = String(lifecycleMorphTarget("idle"))
+      stage.dataset.restIdentity = isRestPresencePhase(phase) ? "silhouette" : "engaged"
       stage.dataset.silhouetteGuard = "rfc0195"
 
       const activity = {
@@ -412,8 +428,7 @@ export function MorphablePresenceStage({
         bust.position.z = framedZ
         bust.position.y = framedY + Math.sin(animationTime * 1.05) * 0.016
         uniforms.uPointer.value.set(ax * 1.45, 0.12 - ay * 1.35)
-        const free = 1 - morphNow
-        const pointerTarget = THREE.MathUtils.clamp(att.confidence, 0, 1) * (free > 0.15 ? 1 : 0.42)
+        const pointerTarget = THREE.MathUtils.clamp(att.confidence, 0, 1) * restAttractGain(morphNow)
         uniforms.uPointerStrength.value += (pointerTarget - uniforms.uPointerStrength.value)
           * Math.min(1, delta * 5)
         const gestureTarget = att.source === "camera" ? att.gesture : 0
