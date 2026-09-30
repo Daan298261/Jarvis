@@ -25,7 +25,7 @@ export function NeuralCloudPresence({
       settings={settings}
       shapeId={shapeId}
       personaVisual={personaVisual}
-      className={`jarvis-presence jarvis-presence-neural jarvis-apex-presence${reduced ? " reduced-motion" : ""}`}
+      className={`jarvis-presence jarvis-presence-stage jarvis-presence-neural jarvis-apex-presence${reduced ? " reduced-motion" : ""}`}
       ariaLabel={`Jarvis is ${snapshot.phase}`}
       transparentBackdrop
       style={{ "--jarvis-apex-size": `${size}px` } as CSSProperties}

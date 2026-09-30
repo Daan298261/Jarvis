@@ -110,7 +110,7 @@ export function PresenceHost({ snapshot, settings, size = 540, shapeId, personaV
       )}
       {resolved.fallbackReason && (
         <span className="jarvis-presence-fallback-note" role="status">
-          {fallbackPresenceName(resolved.requested)} selected · Neural active because WebGL is unavailable
+          {fallbackPresenceName(resolved.requested)} selected · APEX UI · orb + graph active because WebGL is unavailable
         </span>
       )}
     </div>

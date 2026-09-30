@@ -17,7 +17,7 @@ export function ParticleBustPresence({ snapshot, settings, shapeId, personaVisua
       settings={settings}
       shapeId={shapeId}
       personaVisual={personaVisual}
-      className="jarvis-presence jarvis-presence-humanoid jarvis-presence-particle"
+      className="jarvis-presence jarvis-presence-stage jarvis-presence-humanoid jarvis-presence-particle"
       ariaLabel={`Jarvis particle bust is ${snapshot.phase}`}
     >
       <div className="jarvis-humanoid-label" aria-hidden="true">

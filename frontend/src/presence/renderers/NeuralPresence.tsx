@@ -36,7 +36,7 @@ function LegacyNeuralPresence({ snapshot, settings, size = 540 }: NeuralPresence
 
   return (
     <div
-      className={`jarvis-presence jarvis-presence-neural jarvis-apex-presence${reduced ? " reduced-motion" : ""}`}
+      className={`jarvis-presence jarvis-presence-stage jarvis-presence-neural jarvis-apex-presence${reduced ? " reduced-motion" : ""}`}
       data-performance-preset={settings.performancePreset}
       data-attention-mode={settings.attentionMode}
       data-phase={snapshot.phase}
@@ -61,7 +61,7 @@ function NeuralLoadingShell({ snapshot, settings, size = 540 }: NeuralPresencePr
   }, [navigate])
   return (
     <div
-      className={`jarvis-presence jarvis-presence-neural jarvis-apex-presence${reduced ? " reduced-motion" : ""}`}
+      className={`jarvis-presence jarvis-presence-stage jarvis-presence-neural jarvis-apex-presence${reduced ? " reduced-motion" : ""}`}
       data-phase={snapshot.phase}
       data-lifecycle="loading"
       aria-label={`Jarvis is ${snapshot.phase}`}
