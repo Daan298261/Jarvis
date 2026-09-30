@@ -61,6 +61,69 @@ _VAULT_RELEVANCE_TERMS = frozenset(
     }
 )
 
+# Keep lexical search from matching filler words ("the" ⊂ body, "we" ⊂ "Welcome").
+_SEARCH_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "about",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "but",
+        "by",
+        "can",
+        "did",
+        "do",
+        "does",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "how",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "me",
+        "my",
+        "of",
+        "on",
+        "or",
+        "our",
+        "please",
+        "so",
+        "than",
+        "that",
+        "the",
+        "their",
+        "then",
+        "there",
+        "these",
+        "this",
+        "those",
+        "to",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "will",
+        "with",
+        "would",
+        "you",
+        "your",
+    }
+)
+
 _lock = threading.RLock()
 _watch_stop = threading.Event()
 _watch_thread: threading.Thread | None = None
@@ -519,7 +582,24 @@ def resolve_wiki_link(target: str, from_rel: str = "") -> ResolvedLink:
 
 
 def _tokenize_query(query: str) -> list[str]:
-    return [t for t in re.findall(r"[a-z0-9_]{2,}", (query or "").lower()) if len(t) > 1]
+    return [
+        t
+        for t in re.findall(r"[a-z0-9_]{2,}", (query or "").lower())
+        if len(t) > 1 and t not in _SEARCH_STOPWORDS
+    ]
+
+
+def _hay_tokens(entry: NoteIndexEntry) -> set[str]:
+    hay = " ".join(
+        [
+            entry.title,
+            entry.body_excerpt,
+            " ".join(entry.headings),
+            " ".join(str(v) for v in entry.frontmatter.values()),
+            entry.rel_path.replace("/", " ").replace(".", " "),
+        ]
+    )
+    return set(_tokenize_query(hay))
 
 
 def search_vault(query: str, *, limit: int = MAX_SEARCH_RESULTS) -> list[VaultHit]:
@@ -529,15 +609,9 @@ def search_vault(query: str, *, limit: int = MAX_SEARCH_RESULTS) -> list[VaultHi
     notes = _load_index()
     ranked: list[tuple[float, VaultHit]] = []
     for rel, entry in notes.items():
-        hay = " ".join(
-            [
-                entry.title,
-                entry.body_excerpt,
-                " ".join(entry.headings),
-                " ".join(str(v) for v in entry.frontmatter.values()),
-            ]
-        ).lower()
-        score = sum(1.0 for tok in tokens if tok in hay)
+        hay_tokens = _hay_tokens(entry)
+        # Prefer whole-token overlap so short fillers cannot substring-match titles.
+        score = sum(1.0 for tok in tokens if tok in hay_tokens)
         if score <= 0:
             continue
         ranked.append(
@@ -819,14 +893,24 @@ def _watch_loop() -> None:
 def start_watch() -> None:
     global _watch_thread
     if _watch_thread and _watch_thread.is_alive():
-        return
+        # Ensure a previously stopped thread is not mistaken for an active watcher.
+        if not _watch_stop.is_set():
+            return
+        _watch_thread.join(timeout=2.0)
+        _watch_thread = None
     _watch_stop.clear()
     _watch_thread = threading.Thread(target=_watch_loop, name="obsidian-vault-watch", daemon=True)
     _watch_thread.start()
 
 
 def stop_watch() -> None:
+    global _watch_thread
     _watch_stop.set()
+    thread = _watch_thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=2.0)
+    if thread is not None and not thread.is_alive():
+        _watch_thread = None
 
 
 async def sync_hit_to_context_repo(agent_id: str, hit: VaultHit) -> dict[str, Any]:
@@ -1040,9 +1124,18 @@ def persist_verified_correction(
         return {"ok": False, "error": str(exc)[:400]}
 
 
-def vault_prompt_block(query: str, *, hop_cap: int = MAX_NEIGHBOR_HOPS) -> str:
+def format_vault_hit_line(hit: VaultHit, *, indent: str = "- ") -> str:
+    """Provenance line: path + heading + content hash + excerpt (RFC-0107)."""
+    heading = (hit.heading or hit.title or Path(hit.rel_path).stem).strip()
+    excerpt = re.sub(r"\s+", " ", (hit.excerpt or "").strip())[:280]
+    return (
+        f"{indent}[{hit.rel_path}#{heading}] {excerpt} "
+        f"(hash:{hit.content_hash[:12]}; provenance:{hit.provenance})"
+    )
+
+
+def vault_hits_to_prompt_block(hits: list[VaultHit], *, hop_cap: int = MAX_NEIGHBOR_HOPS) -> str:
     """Compact vault hits for the turn working set — never the full vault."""
-    hits = vault_turn_hits(query, limit=6)
     if not hits:
         return ""
     lines = [
@@ -1050,17 +1143,13 @@ def vault_prompt_block(query: str, *, hop_cap: int = MAX_NEIGHBOR_HOPS) -> str:
     ]
     seen_paths: set[str] = set()
     for hit in hits:
-        lines.append(
-            f"- [{hit.rel_path}] {hit.title}: {hit.excerpt[:280]} (hash:{hit.content_hash[:12]})"
-        )
+        lines.append(format_vault_hit_line(hit))
         seen_paths.add(hit.rel_path)
         for neighbor in neighborhood(hit.rel_path, hops=hop_cap):
             if neighbor.rel_path in seen_paths:
                 continue
             seen_paths.add(neighbor.rel_path)
-            lines.append(
-                f"  ↳ [{neighbor.rel_path}] {neighbor.title}: {neighbor.excerpt[:200]}"
-            )
+            lines.append(format_vault_hit_line(neighbor, indent="  ↳ "))
             if len(seen_paths) >= 10:
                 break
         if len(seen_paths) >= 10:
@@ -1068,22 +1157,90 @@ def vault_prompt_block(query: str, *, hop_cap: int = MAX_NEIGHBOR_HOPS) -> str:
     return "\n".join(lines)
 
 
+def vault_prompt_block(query: str, *, hop_cap: int = MAX_NEIGHBOR_HOPS) -> str:
+    """Compact vault hits for the turn working set — never the full vault."""
+    return vault_hits_to_prompt_block(vault_turn_hits(query, limit=6), hop_cap=hop_cap)
+
+
+def follow_wiki_link(link: str, *, source_rel: str = "", hops: int = 1) -> dict[str, Any]:
+    """Resolve a wiki-link, then return a hop-capped neighborhood (graph act)."""
+    resolved = resolve_wiki_link(link, source_rel or None)
+    payload: dict[str, Any] = {
+        "link": link,
+        "target_path": resolved.target_path,
+        "heading": resolved.heading,
+        "broken": resolved.broken,
+        "via_id": resolved.via_id,
+        "neighborhood": [],
+    }
+    if resolved.broken or not resolved.target_path:
+        return payload
+    hood = neighborhood(resolved.target_path, hops=max(0, min(int(hops), MAX_NEIGHBOR_HOPS)))
+    payload["neighborhood"] = [
+        {
+            "rel_path": h.rel_path,
+            "title": h.title,
+            "heading": h.heading,
+            "excerpt": h.excerpt,
+            "content_hash": h.content_hash,
+            "score": h.score,
+            "provenance": h.provenance,
+        }
+        for h in hood
+    ]
+    return payload
+
+
 def act_vault(
-    action: Literal["open", "read", "create", "append", "edit"],
+    action: Literal["open", "read", "create", "append", "edit", "resolve", "neighborhood", "follow"],
     *,
     rel_path: str = "",
     content: str = "",
     query: str = "",
     force: bool = False,
+    hops: int = 1,
+    memory_pointer: str | None = None,
 ) -> dict[str, Any]:
     if action == "read" or action == "open":
         return read_note(rel_path)
     if action == "create":
-        return create_note(rel_path, content)
+        return create_note(rel_path, content, jarvis_managed=True, memory_pointer=memory_pointer)
     if action == "append":
         return append_note(rel_path, content)
     if action == "edit":
         return edit_note(rel_path, content, force=force)
+    if action == "resolve":
+        link = query or rel_path
+        resolved = resolve_wiki_link(link, rel_path if query else None)
+        return {
+            "link": link,
+            "target_path": resolved.target_path,
+            "heading": resolved.heading,
+            "broken": resolved.broken,
+            "via_id": resolved.via_id,
+        }
+    if action == "neighborhood":
+        if not rel_path:
+            raise ValueError("rel_path is required for neighborhood")
+        hood = neighborhood(rel_path, hops=max(0, min(int(hops), MAX_NEIGHBOR_HOPS)))
+        return {
+            "rel_path": rel_path,
+            "hops": hops,
+            "hits": [
+                {
+                    "rel_path": h.rel_path,
+                    "title": h.title,
+                    "heading": h.heading,
+                    "excerpt": h.excerpt,
+                    "content_hash": h.content_hash,
+                    "provenance": h.provenance,
+                }
+                for h in hood
+            ],
+        }
+    if action == "follow":
+        link = query or rel_path
+        return follow_wiki_link(link, source_rel=rel_path if query else "", hops=hops)
     if action and not rel_path:
         return {"hits": [asdict(h) for h in search_vault(query)]}
     raise ValueError(f"Unsupported vault action: {action}")

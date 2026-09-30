@@ -855,16 +855,39 @@ class AgentRuntime:
             if message.role in {"user", "assistant"} and (message.content or "").strip()
         ]
         user_text = (extra_prompt or "").strip() or prompt
-        messages = [ChatMessage(role="system", content=OWNER_CHAT_SYSTEM), *prior]
+        from ..agent.turn_working_set import (
+            MAX_RECENT_CHARS,
+            MAX_RECENT_TURNS,
+            apply_working_set_to_system,
+            compose_turn_working_set,
+        )
+
+        turn_ws = await compose_turn_working_set(
+            user_text,
+            task_class=CONVERSATION_CLASS,
+            agent_id="owner",
+            recent_messages=prior,
+            needs_tools=False,
+        )
+        # Bound history — never dump the full conversation into the prompt.
+        prior = list(turn_ws.recent_turns)
+        if len(prior) > MAX_RECENT_TURNS:
+            prior = prior[-MAX_RECENT_TURNS:]
+        used = 0
+        bounded: list[ChatMessage] = []
+        for message in reversed(prior):
+            size = len(message.content or "") + 24
+            if bounded and used + size > MAX_RECENT_CHARS:
+                break
+            bounded.append(message)
+            used += size
+        prior = list(reversed(bounded))
+
+        system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws)
+        messages = [ChatMessage(role="system", content=system), *prior]
         briefing = await weather_system_message(user_text)
         if briefing:
             messages.insert(1, ChatMessage(role="system", content=briefing))
-        from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
-
-        if public_binding_status().get("bound"):
-            vault_block = vault_prompt_block(user_text)
-            if vault_block:
-                messages.insert(1, ChatMessage(role="system", content=vault_block))
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             messages.append(ChatMessage(role="user", content=user_text))
@@ -1713,6 +1736,7 @@ class AgentRuntime:
                 extra_capabilities=working.requested_tools,
                 security_role=working.security_role,
                 agent_id="owner",
+                recent_messages=existing,
                 needs_tools=working.ingress_needs_tools,
             )
             if working.ingress_needs_tools is False and not turn_ws.tool_schemas:

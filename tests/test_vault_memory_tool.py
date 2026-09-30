@@ -9,6 +9,7 @@ from app.memory.obsidian_vault import (
     mirror_owner_chat_turn,
     query_looks_vault_relevant,
     reset_vault_store,
+    stop_watch,
     unbind_vault,
     vault_turn_hits,
 )
@@ -17,15 +18,21 @@ from app.tools.vault_memory import VaultMemoryTool
 
 
 @pytest.fixture
-def bound_vault(tmp_path):
+def bound_vault(tmp_path, monkeypatch):
+    data_root = tmp_path / "obsidian-meta"
+    vault_root = tmp_path / "vault"
+    data_root.mkdir(parents=True, exist_ok=True)
+    vault_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: data_root)
     reset_vault_store()
-    bind_vault(str(tmp_path), init_layout=True)
-    (tmp_path / "Projects" / "alpha.md").write_text(
+    bind_vault(str(vault_root), init_layout=True)
+    stop_watch()
+    (vault_root / "Projects" / "alpha.md").write_text(
         "# Alpha\n\nkubernetes deploy uses rollout.\n",
         encoding="utf-8",
     )
     index_file("Projects/alpha.md")
-    yield tmp_path
+    yield vault_root
     unbind_vault()
     reset_vault_store()
 
@@ -36,14 +43,39 @@ async def test_vault_memory_search_and_append(bound_vault):
     search = await tool.execute(action="search", query="kubernetes rollout")
     assert search.success
     assert "Projects/alpha.md" in search.output
+    assert "hash:" in search.output
 
     created = await tool.execute(
         action="create",
         rel_path="Decisions/test-note.md",
         content="Decision body from agent.",
+        memory_pointer="mem-42",
     )
     assert created.success
-    assert (bound_vault / "Decisions" / "test-note.md").is_file()
+    path = bound_vault / "Decisions" / "test-note.md"
+    assert path.is_file()
+    assert "mem-42" in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_vault_memory_resolve_and_follow(bound_vault):
+    from app.memory.obsidian_vault import index_file
+
+    (bound_vault / "Beta.md").write_text("# Beta\n\nlinked\n", encoding="utf-8")
+    (bound_vault / "Projects" / "alpha.md").write_text(
+        "# Alpha\n\nSee [[Beta]]\n",
+        encoding="utf-8",
+    )
+    index_file("Beta.md")
+    index_file("Projects/alpha.md")
+    tool = VaultMemoryTool()
+    resolved = await tool.execute(action="resolve", query="Beta", rel_path="Projects/alpha.md")
+    assert resolved.success
+    assert resolved.data["target_path"] == "Beta.md"
+    followed = await tool.execute(action="follow", query="Beta", rel_path="Projects/alpha.md", hops=1)
+    assert followed.success
+    assert followed.data["target_path"] == "Beta.md"
+    assert any(h["rel_path"] == "Beta.md" for h in followed.data["neighborhood"])
 
 
 def test_tool_retrieval_includes_vault_memory_for_obsidian_ask():

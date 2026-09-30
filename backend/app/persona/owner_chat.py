@@ -145,18 +145,20 @@ def _ensure_conversation(conversation_id: str | None) -> str:
 
 def _owner_messages(conversation_id: str, user_text: str, briefing: str | None = None) -> list[ChatMessage]:
     history = _conversations[conversation_id]
+    from ..agent.turn_working_set import bound_recent_turns
+    from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
+
     messages = [
         ChatMessage(role="system", content=OWNER_CHAT_SYSTEM),
     ]
     if briefing:
         messages.append(ChatMessage(role="system", content=briefing))
-    from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
-
     if public_binding_status().get("bound"):
         vault_block = vault_prompt_block(user_text.strip())
         if vault_block:
             messages.append(ChatMessage(role="system", content=vault_block))
-    messages.extend(history)
+    # Bound recent turns — history dumps must not enter the prompt (RFC-0107).
+    messages.extend(bound_recent_turns(list(history)))
     messages.append(ChatMessage(role="user", content=user_text.strip()))
     return messages
 
