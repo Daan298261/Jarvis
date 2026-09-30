@@ -20,6 +20,7 @@ from app.reflex_loop.reflex_client import (
     DecisionQuestion,
     DecisionResult,
     FailClosedDecideClient,
+    ReflexLaneUnavailableError,
     adapt_decision_result,
     get_reflex_decide_client,
     map_decision_class,
@@ -68,7 +69,8 @@ def test_action_frame_schema_browser_and_desktop():
     assert desktop.nodes[0].backend_ref["automation_id"] == "saveBtn"
 
 
-def test_fail_closed_decide_stub_refuses():
+def test_injected_fail_closed_client_refuses():
+    """FailClosedDecideClient is test-injection only (not the tip default)."""
     client = FailClosedDecideClient()
     result = client.decide(
         {"goal": "click Save"},
@@ -76,6 +78,7 @@ def test_fail_closed_decide_stub_refuses():
         "browser_operation_target",
     )
     assert result.ok is False
+    assert result.source == "fail_closed_stub"
     assert "not available" in result.error.lower() or "refuse" in result.error.lower()
 
 
@@ -229,10 +232,13 @@ def test_forwarder_decide_fallback_shapes_questions():
 
 
 def test_live_decision_package_resolves_to_forwarder():
-    """On tips where RFC-0171 landed, get_reflex_decide_client must not fail-close."""
+    """On tip, get_reflex_decide_client binds live 0171 — never fail_closed_stub."""
     set_reflex_decide_client(None)
     client = get_reflex_decide_client(force_reload=True)
     assert isinstance(client, DecisionPackageForwarder)
+    assert not isinstance(client, FailClosedDecideClient)
+    assert callable(client._decide)
+    assert callable(client._browser_op_target)
     result = client.decide(
         {"goal": "click search", "suggested_operation": "CLICK", "suggested_target_id": "t0"},
         [
@@ -254,24 +260,86 @@ def test_live_decision_package_resolves_to_forwarder():
         privacy="local_only",
     )
     assert result.ok is True
+    assert result.source != "fail_closed_stub"
     assert "operation" in result.answers
     assert result.answers["operation"] in {"CLICK", "TYPE_TEXT", "DONE", "NOOP"}
     set_reflex_decide_client(None)
 
 
-def test_forwarder_absent_when_decision_cannot_import(monkeypatch):
+def test_tip_wire_raises_when_decision_cannot_bind(monkeypatch):
+    """Broken tip must fail loudly — no silent FailClosedDecideClient default."""
     import app.reflex_loop.reflex_client as rc
 
     set_reflex_decide_client(None)
-    monkeypatch.setattr(rc, "_try_import_decision_api", lambda: (None, None))
+
+    def _boom():
+        raise ReflexLaneUnavailableError("simulated broken tip")
+
+    monkeypatch.setattr(rc, "_bind_decision_api", _boom)
+    with pytest.raises(ReflexLaneUnavailableError, match="simulated broken tip"):
+        get_reflex_decide_client(force_reload=True)
+    set_reflex_decide_client(None)
+
+
+def test_bind_decision_api_requires_both_surfaces(monkeypatch):
+    """Half-wired app.decision (decide without browser_operation_target) must raise."""
+    import types
+
+    import app.reflex_loop.reflex_client as rc
+
+    set_reflex_decide_client(None)
+    real_import = rc.importlib.import_module
+
+    def fake_import(name, package=None):
+        if name == "app.decision":
+            return types.SimpleNamespace(decide=lambda *_a, **_k: None)
+        if name == "app.decision.surfaces":
+            return types.SimpleNamespace()  # missing browser_operation_target
+        if name.startswith("app.decision."):
+            raise ImportError(name)
+        return real_import(name, package)
+
+    monkeypatch.setattr(rc.importlib, "import_module", fake_import)
+    with pytest.raises(ReflexLaneUnavailableError, match="tip wire incomplete"):
+        rc._bind_decision_api()
+    set_reflex_decide_client(None)
+
+
+def test_default_client_never_uses_fail_closed_stub_source():
+    """Healthy tip forwarder answers must not report source=fail_closed_stub."""
+    set_reflex_decide_client(None)
     client = get_reflex_decide_client(force_reload=True)
-    assert isinstance(client, FailClosedDecideClient)
+    assert type(client).__name__ == "DecisionPackageForwarder"
     result = client.decide(
-        {"goal": "x"},
-        [DecisionQuestion(id="operation", kind="choice", prompt="op", options=("CLICK",))],
+        {
+            "goal": "click OK",
+            "suggested_operation": "CLICK",
+            "suggested_target_id": "t0",
+            "frame": {
+                "frame_id": "af_tip",
+                "nodes": [{"target_id": "t0", "role": "button", "name": "OK", "ops": ["CLICK"]}],
+            },
+        },
+        [
+            DecisionQuestion(
+                id="operation",
+                kind="choice",
+                prompt="op",
+                options=("CLICK", "DONE"),
+            ),
+            DecisionQuestion(
+                id="target_id",
+                kind="choice",
+                prompt="target",
+                options=("t0", "none"),
+            ),
+        ],
         BROWSER_OP_TARGET_CLASS,
     )
-    assert result.ok is False
+    assert result.source != "fail_closed_stub"
+    # Live lane may refuse or accept; either is fine — stub source string is not.
+    if result.ok:
+        assert result.answers.get("operation") in {"CLICK", "DONE", "NOOP", "TYPE_TEXT"}
     set_reflex_decide_client(None)
 
 

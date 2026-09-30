@@ -12,6 +12,7 @@ from .reflex_client import (
     DecisionQuestion,
     DecisionResult,
     ReflexDecideClient,
+    ReflexLaneUnavailableError,
     get_reflex_decide_client,
 )
 from .schema import (
@@ -36,6 +37,7 @@ __all__ = [
     "Operation",
     "ReflexDecideClient",
     "ReflexDecision",
+    "ReflexLaneUnavailableError",
     "ReflexLoopExecutor",
     "ReflexLoopResult",
     "SurfaceKind",
