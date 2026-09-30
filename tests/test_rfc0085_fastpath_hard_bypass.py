@@ -323,6 +323,11 @@ async def test_direct_lookup_uses_lean_path_without_background_verify(jarvis_env
         assert row is not None
         assert row.status == "completed"
         assert "dinteloord" in (row.result or "").lower()
+        # Answer must not be treated as independent verification evidence.
+        from app.agent.execution_status import verification_summary
+
+        assert verification_summary(row)["result"] == "NOT_VERIFIED"
+        assert "NOT_VERIFIED" in (row.verification or "")
         events = (
             await session.execute(select(TaskEvent).where(TaskEvent.task_id == task.id))
         ).scalars().all()
