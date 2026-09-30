@@ -129,6 +129,7 @@ def build_diagnostics(
         "disk_free_gb": hw.disk_free_gb,
         "log_files": _list_log_files(),
         "front_responder": _front_responder_diagnostics(settings),
+        "task_fastpath": _task_fastpath_diagnostics(),
     }
     return redact_mapping(payload)
 
@@ -151,6 +152,12 @@ def _front_responder_diagnostics(settings) -> dict[str, Any]:
         "speak_immediately": bool(cfg.speak_immediately),
         "last_turn": timing,
     }
+
+
+def _task_fastpath_diagnostics() -> dict[str, Any]:
+    from .agent.task_fastpath import fastpath_stats
+
+    return fastpath_stats()
 
 
 def _list_log_files() -> list[str]:

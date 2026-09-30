@@ -96,6 +96,8 @@ from .escalation import (
 )
 from .planning import (
     CONVERSATION_CLASS,
+    DIRECT_LOOKUP,
+    DIRECT_REPLY,
     MANAGED_TASK,
     RequestRoute,
     WorkingState,
@@ -136,6 +138,14 @@ from .front_responder import (
     note_front_audio,
     run_two_lane_chat,
     worker_required,
+)
+from .task_fastpath import (
+    TERMINAL_FRONT_ACTIONS,
+    admit_fastpath,
+    admit_lookup_fastpath,
+    note_fastpath_decision,
+    resolve_route_kind,
+    should_skip_background_verify,
 )
 from .worker_progress import (
     clear_worker_progress_for_task,
@@ -1024,26 +1034,18 @@ class AgentRuntime:
 
         from ..inference.answer_routing import prepare_answer_route
         from ..inference.model_escalation import schedule_orchestrator_restore
+        from ..tts.speech_safe import speech_safe
 
-        warm = ()
-        if MANAGER.state.loaded and MANAGER.state.profile:
-            warm = (MANAGER.state.profile,)
-        profile_name, messages, _route_decision, _switched = await prepare_answer_route(
-            task_id,
-            user_message=user_text,
-            working=working,
-            settings=settings,
-            profile_name=profile.name,
-            history=prior,
-            messages=messages,
-            tools_available=True,
-            vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
-            new_user_turn=True,
-            warm_models=warm,
-        )
-        profile = resolve_profile(profile_name)
-        await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
+        stored_route = ""
+        async with SessionLocal() as session:
+            task_row = await session.get(Task, task_id)
+            if task_row is not None:
+                stored_route = str(getattr(task_row, "response_route", "") or "")
+        route_kind = resolve_route_kind(user_text, stored_route=stored_route)
 
+        # RFC-0085 hard bypass: front reply before heavy answer-routing when the
+        # durable route is already a direct lane. Terminal fronts complete here
+        # and never pay worker / verify / progress cost — even with a warm model.
         prefetched_front = await generate_front_reply(
             user_text,
             history=prior,
@@ -1079,11 +1081,47 @@ class AgentRuntime:
                 else "Replying",
             )
 
-        from ..tts.speech_safe import speech_safe
-
-        spoken_front = speech_safe(prefetched_front.text or "")
-        model_ready = bool(MANAGER.provider and MANAGER.state.loaded)
-        if spoken_front and not model_ready and prefetched_front.action == "final_basic":
+        terminal = admit_fastpath(
+            user_text,
+            route_kind=route_kind,
+            front_action=prefetched_front.action,
+            front_text=prefetched_front.text,
+        )
+        if terminal.admitted:
+            note_fastpath_decision(terminal, task_id=task_id)
+            await BUS.publish(
+                task_id,
+                "fastpath",
+                "Fast path hit",
+                json.dumps(terminal.as_dict(), ensure_ascii=False)[:1500],
+                stage="chat",
+            )
+            spoken_front = speech_safe(prefetched_front.text or "") or (prefetched_front.text or "").strip()
+            first_ms = float(prefetched_front.first_text_ms or 0.0)
+            complete_ms = float(prefetched_front.complete_ms or first_ms or 0.0)
+            if complete_ms:
+                metrics.note_model_elapsed(max(1.0, complete_ms))
+            await BUS.publish(
+                task_id,
+                "response_timing",
+                "Response timing",
+                (
+                    f"First word {first_ms / 1000:.2f}s · completed {complete_ms / 1000:.2f}s\n"
+                    + json.dumps(
+                        {
+                            "fastpath": True,
+                            "fastpath_reason": terminal.reason,
+                            "first_word_s": round(first_ms / 1000, 2),
+                            "completed_s": round(complete_ms / 1000, 2),
+                            "front_action": prefetched_front.action,
+                            "stages_skipped": list(terminal.stages_skipped),
+                        },
+                        ensure_ascii=False,
+                    )
+                )[:4000],
+                stage="chat",
+            )
+            working.verified = True
             await self._complete(
                 task_id,
                 [*messages, ChatMessage(role="assistant", content=spoken_front)],
@@ -1093,6 +1131,70 @@ class AgentRuntime:
                 metrics,
             )
             return
+
+        lookup = admit_lookup_fastpath(user_text, route_kind=route_kind, briefing=briefing)
+        if lookup.admitted:
+            note_fastpath_decision(lookup, task_id=task_id)
+            await BUS.publish(
+                task_id,
+                "fastpath",
+                "Fast path hit",
+                json.dumps(lookup.as_dict(), ensure_ascii=False)[:1500],
+                stage="chat",
+            )
+            await self._run_direct_lookup_fastpath(
+                task_id,
+                prompt=prompt,
+                user_text=user_text,
+                messages=messages,
+                profile_name=profile.name,
+                settings=settings,
+                working=working,
+                metrics=metrics,
+                turn_started=turn_started,
+                stream_key=stream_key,
+                first_response_ms=float(prefetched_front.first_text_ms or 0.0),
+            )
+            return
+
+        miss_decision = terminal if route_kind == DIRECT_REPLY else lookup
+        note_fastpath_decision(miss_decision, task_id=task_id)
+        await BUS.publish(
+            task_id,
+            "fastpath",
+            "Fast path miss",
+            json.dumps(miss_decision.as_dict(), ensure_ascii=False)[:1500],
+            stage="chat",
+        )
+        # Fail closed: a terminal front that could not be admitted must not
+        # suppress the worker (empty/unsafe text would otherwise soft-complete).
+        if (
+            prefetched_front.action in TERMINAL_FRONT_ACTIONS
+            and miss_decision.reason in {"empty_front_text", "unsafe_front_speech", "missing_front_action"}
+        ):
+            prefetched_front.action = "silent_skip"
+            prefetched_front.skipped = True
+            prefetched_front.text = ""
+            front_spoken_early = False
+
+        warm = ()
+        if MANAGER.state.loaded and MANAGER.state.profile:
+            warm = (MANAGER.state.profile,)
+        profile_name, messages, _route_decision, _switched = await prepare_answer_route(
+            task_id,
+            user_message=user_text,
+            working=working,
+            settings=settings,
+            profile_name=profile.name,
+            history=prior,
+            messages=messages,
+            tools_available=True,
+            vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
+            new_user_turn=True,
+            warm_models=warm,
+        )
+        profile = resolve_profile(profile_name)
+        await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
 
         progress_watch = asyncio.create_task(
             run_worker_progress_watchdog(
@@ -1325,14 +1427,15 @@ class AgentRuntime:
             user_prompt=prompt,
             tts_char_offset=stream_speak_offset(stream_key),
         )
-        from .background_verify import schedule_background_verification
+        if not should_skip_background_verify(route_kind):
+            from .background_verify import schedule_background_verification
 
-        schedule_background_verification(
-            user_text,
-            content,
-            source="task_chat",
-            task_id=task_id,
-        )
+            schedule_background_verification(
+                user_text,
+                content,
+                source="task_chat",
+                task_id=task_id,
+            )
         clear_stream_speak_state(stream_key)
         schedule_orchestrator_restore(settings)
         await BUS.publish(
@@ -1353,6 +1456,136 @@ class AgentRuntime:
             )[:4000],
             stage="chat",
         )
+        if messages and messages[-1].role == "assistant":
+            messages[-1] = ChatMessage(role="assistant", content=content)
+        else:
+            messages.append(ChatMessage(role="assistant", content=content))
+        working.verified = True
+        await self._complete(task_id, messages, content, content, working, metrics)
+
+    async def _run_direct_lookup_fastpath(
+        self,
+        task_id: str,
+        *,
+        prompt: str,
+        user_text: str,
+        messages: list[ChatMessage],
+        profile_name: str | None,
+        settings: AppSettings,
+        working: WorkingState,
+        metrics: LiveTaskMetrics,
+        turn_started: float,
+        stream_key: str,
+        first_response_ms: float = 0.0,
+    ) -> None:
+        """RFC-0085 direct_lookup: briefing + one answer call; no tools/verify/two-lane."""
+        await self._update(task_id, stage="act", current_action="Checking the forecast…")
+        await BUS.publish(
+            task_id,
+            "stage",
+            "Direct lookup",
+            "Using the dedicated weather briefing path",
+            stage="act",
+        )
+        profile = resolve_profile(profile_name)
+        if not MANAGER.provider or not MANAGER.state.loaded:
+            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
+            await MANAGER.load(settings, profile.name)
+            profile = resolve_profile(MANAGER.state.profile or profile.name)
+        if not MANAGER.provider:
+            err = "Inference model is not loaded for direct lookup"
+            await self._update(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=err,
+                result=err,
+                **metrics.as_fields(),
+            )
+            await BUS.publish(task_id, "failed", "Direct lookup failed", err, stage="failed")
+            return
+
+        model_started = time.perf_counter()
+        parts: list[str] = []
+        try:
+            async for delta in MANAGER.chat_stream(
+                messages,
+                temperature=profile.temperature,
+                top_p=profile.top_p,
+                top_k=profile.top_k,
+                max_tokens=owner_chat_max_tokens(profile),
+                thinking=False,
+            ):
+                if not delta:
+                    continue
+                parts.append(delta)
+                if not first_response_ms:
+                    first_response_ms = max(0.0, (time.perf_counter() - turn_started) * 1000)
+                    await self._update(task_id, first_response_ms=round(first_response_ms, 1))
+                await BUS.publish(
+                    task_id,
+                    "assistant_delta",
+                    "Reply",
+                    delta,
+                    stage="chat",
+                    persist=False,
+                )
+        except Exception as exc:
+            err = str(exc)
+            await self._update(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=err,
+                result=err,
+                **metrics.as_fields(),
+            )
+            await BUS.publish(task_id, "failed", "Direct lookup failed", err, stage="failed")
+            return
+
+        content = "".join(parts).strip()
+        if not content:
+            err = empty_generation_error()
+            await self._update(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=err,
+                result=err,
+                **metrics.as_fields(),
+            )
+            await BUS.publish(task_id, "failed", "Direct lookup failed", err, stage="failed")
+            return
+
+        model_ms = max(0.0, (time.perf_counter() - model_started) * 1000)
+        metrics.note_model_elapsed(max(1.0, model_ms))
+        await publish_owner_text(
+            content,
+            source="task_chat",
+            speak=True,
+            user_prompt=prompt,
+            tts_char_offset=stream_speak_offset(stream_key),
+        )
+        await BUS.publish(
+            task_id,
+            "response_timing",
+            "Response timing",
+            (
+                f"First word {(first_response_ms or 0) / 1000:.2f}s · completed {model_ms / 1000:.2f}s\n"
+                + json.dumps(
+                    {
+                        "fastpath": True,
+                        "fastpath_reason": "direct_lookup_briefing",
+                        "first_word_s": round((first_response_ms or 0) / 1000, 2),
+                        "completed_s": round(model_ms / 1000, 2),
+                        "route_kind": DIRECT_LOOKUP,
+                    },
+                    ensure_ascii=False,
+                )
+            )[:4000],
+            stage="chat",
+        )
+        clear_stream_speak_state(stream_key)
         if messages and messages[-1].role == "assistant":
             messages[-1] = ChatMessage(role="assistant", content=content)
         else:
