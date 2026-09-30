@@ -33,7 +33,13 @@ def operator_store(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.security.hexstrike.data_dir", lambda: tmp)
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
-    return tmp
+    # Align process flags with mocked status(running=True) so catalog honesty matches.
+    HEXSTRIKE._process = SimpleNamespace(pid=1, returncode=None)
+    HEXSTRIKE._loopback_healthy = True
+    yield tmp
+    HEXSTRIKE._process = None
+    HEXSTRIKE._loopback_healthy = False
+    HEXSTRIKE._health = {}
 
 
 
