@@ -39,7 +39,7 @@ def test_without_laya_the_model_lane_is_used_not_rules():
 
 
 def test_gate_allows_routine_reads(monkeypatch):
-    monkeypatch.setattr("app.policy.action_gate.authorize", lambda *a, **k: _allow())
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", lambda *a, **k: _allow())
     monkeypatch.setattr(
         "app.policy.action_gate.decide",
         lambda *a, **k: type("R", (), {"answers": {}, "fallback_used": True, "provider": "generative"})(),
@@ -48,19 +48,29 @@ def test_gate_allows_routine_reads(monkeypatch):
     assert result.allowed is True
 
 
-def test_gate_fail_closed_on_destructive_when_unsure(monkeypatch):
-    monkeypatch.setattr("app.policy.action_gate.authorize", lambda *a, **k: _allow())
+def test_gate_fail_closed_on_destructive_when_unsure(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.policy.approval_grant.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", lambda *a, **k: _allow())
     monkeypatch.setattr(
         "app.policy.action_gate.decide",
         lambda *a, **k: type("R", (), {"answers": {}, "fallback_used": True, "provider": "generative"})(),
     )
     result = gate_tool_call("terminal", action="run", arguments={"command": "rm -rf scratch"}, risk=RiskLevel.IRREVERSIBLE)
     assert result.allowed is False
-    assert "approve" in result.reason.lower() or "harm" in result.reason.lower() or "fail closed" in result.reason.lower()
+    assert (
+        "approve" in result.reason.lower()
+        or "harm" in result.reason.lower()
+        or "fail closed" in result.reason.lower()
+        or "approval" in result.reason.lower()
+        or "irreversible" in result.reason.lower()
+    )
 
 
-def test_gate_blocks_destructive_even_when_laya_says_safe(monkeypatch):
-    monkeypatch.setattr("app.policy.action_gate.authorize", lambda *a, **k: _allow())
+def test_gate_blocks_destructive_even_when_laya_says_safe(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.policy.approval_grant.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", lambda *a, **k: _allow())
     safe = type(
         "A",
         (),
@@ -83,24 +93,47 @@ def test_gate_blocks_destructive_even_when_laya_says_safe(monkeypatch):
     assert result.allowed is False
 
 
-def test_gate_skips_veto_after_owner_approval(monkeypatch):
-    monkeypatch.setattr("app.policy.action_gate.authorize", lambda *a, **k: _allow())
-    called = {"n": 0}
+def test_gate_allows_after_real_approval_grant(monkeypatch, tmp_path):
+    """approved=True alone is insufficient; a real ApprovalGrant is required."""
+    from app.policy.action_gate import gate_side_effect
+    from app.policy.approval_grant import decide_approval_request, reset_approval_grants
 
-    def boom(*_a, **_k):
-        called["n"] += 1
-        raise AssertionError("veto should not run after approval")
-
-    monkeypatch.setattr("app.policy.action_gate.decide", boom)
-    result = gate_tool_call(
+    monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.policy.approval_grant.data_dir", lambda: tmp_path)
+    reset_approval_grants()
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", lambda *a, **k: _allow())
+    monkeypatch.setattr(
+        "app.policy.action_gate.decide",
+        lambda *a, **k: type("R", (), {"answers": {}, "fallback_used": True, "provider": "generative"})(),
+    )
+    blocked = gate_side_effect(
         "terminal",
         action="run",
         arguments={"command": "rm -rf scratch"},
         risk=RiskLevel.IRREVERSIBLE,
-        approved=True,
+        approved=True,  # model-style flag — must not satisfy
+        park_if_needed=True,
     )
-    assert result.allowed is True
-    assert called["n"] == 0
+    assert blocked.allowed is False
+    assert blocked.requires_approval is True
+    assert blocked.pending_approval_id
+    outcome = decide_approval_request(
+        blocked.pending_approval_id,
+        decision="allow_once",
+        origin_channel="ui",
+        actor="owner",
+    )
+    grant_id = outcome["grant"]["id"]
+    allowed = gate_side_effect(
+        "terminal",
+        action="run",
+        arguments={"command": "rm -rf scratch"},
+        risk=RiskLevel.IRREVERSIBLE,
+        grant_id=grant_id,
+        park_if_needed=False,
+    )
+    assert allowed.allowed is True
+    assert allowed.grant_id == grant_id
 
 
 def test_blue_watcher_requests_rollback_on_destructive_failure():

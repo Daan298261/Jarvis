@@ -173,6 +173,8 @@ class FilesystemTool(Tool):
         "returns a note for large binaries."
     )
     risk = RiskLevel.MEDIUM
+    # Per-action class resolved by RFC-0031; default UNKNOWN until action known.
+    reversibility = "UNKNOWN"
     parameters = {
         "type": "object",
         "properties": {

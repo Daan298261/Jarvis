@@ -4,11 +4,14 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("jarvis.agent.loop")
 
 from openai import APIConnectionError, APIStatusError
 
@@ -38,13 +41,16 @@ from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool
 from ..providers.openai_compat import OpenAICompatProvider
 from ..providers.tool_call_compat import validate_turn_calls
 from ..policy.authorize import AuthorizationResult
-from ..policy.action_gate import gate_tool_call
+from ..policy.action_gate import _to_authorization, gate_side_effect, gate_tool_call
+from ..policy.approval_grant import decide_approval_request
 from ..policy.computer_permissions import (
     confirmation_payload_for_tool,
     consume_once_grants,
     evaluate_tool_permissions,
     permission_ids_for_tool,
 )
+from ..policy.reversibility_gate import register_post_success_undo
+from ..policy.undo_restore import capture_prior_for_effect
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, classify_command, is_destructive_operation, needs_confirmation
@@ -234,21 +240,35 @@ def _authorization_observation(result: AuthorizationResult) -> str:
     return f"ERROR: Authorization denied: {result.reason}\n{payload}"
 
 
+def _tool_risk(name: str, arguments: dict[str, Any] | None) -> tuple[RiskLevel, str | None, str | None]:
+    tool_meta = REGISTRY.tools.get(name)
+    risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
+    args = arguments if isinstance(arguments, dict) else {}
+    command = args.get("command")
+    if command:
+        command_risk = classify_command(str(command))
+        # TerminalTool defaults to HIGH as a catalog hint; per-command classification
+        # must win so routine echo/pytest are not treated as UNKNOWN high-consequence.
+        if (name or "").strip().lower() == "terminal":
+            risk = command_risk
+        else:
+            risk = max(risk, command_risk, key=lambda item: list(RiskLevel).index(item))
+    action = args.get("action")
+    if is_destructive_operation(name, args, command if isinstance(command, str) else None):
+        risk = RiskLevel.IRREVERSIBLE
+    return risk, str(action) if action is not None else None, str(command) if command is not None else None
+
+
 def _tool_authorization(
     name: str,
     arguments: dict[str, Any],
     *,
     approved: bool = False,
     profile_id: str | None = None,
+    grant_id: str | None = None,
+    task_id: str | None = None,
 ) -> AuthorizationResult:
-    tool_meta = REGISTRY.tools.get(name)
-    risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
-    command = arguments.get("command") if isinstance(arguments, dict) else None
-    if command:
-        risk = max(risk, classify_command(command), key=lambda item: list(RiskLevel).index(item))
-    action = arguments.get("action") if isinstance(arguments, dict) else None
-    if is_destructive_operation(name, arguments, command):
-        risk = RiskLevel.IRREVERSIBLE
+    risk, action, _command = _tool_risk(name, arguments)
     return gate_tool_call(
         name,
         action=action,
@@ -256,6 +276,30 @@ def _tool_authorization(
         risk=risk,
         profile_id=profile_id,
         approved=approved,
+        grant_id=grant_id,
+        task_id=task_id,
+    )
+
+
+def _side_effect_decision(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    grant_id: str | None = None,
+    task_id: str | None = None,
+    profile_id: str | None = None,
+    park_if_needed: bool = True,
+):
+    risk, action, _command = _tool_risk(name, arguments)
+    return gate_side_effect(
+        name,
+        action=action,
+        arguments=arguments if isinstance(arguments, dict) else None,
+        risk=risk,
+        profile_id=profile_id,
+        grant_id=grant_id,
+        task_id=task_id,
+        park_if_needed=park_if_needed,
     )
 
 
@@ -454,7 +498,92 @@ class AgentRuntime:
                     except PermissionError as exc:
                         approved = False
                         await BUS.publish(task_id, "confirm", "Permission grant refused", str(exc)[:1500], stage="act")
+
+                # RFC-0031: human confirm creates an unforgeable ApprovalGrant.
+                # Model/tool confirmed=true never reaches this path.
+                # If grant_id is already attached (API decide path), do not re-decide.
+                pending_approval_id = payload.get("pending_approval_id")
+                if approved and payload.get("grant_id"):
+                    pass
+                elif approved and pending_approval_id:
+                    try:
+                        outcome = decide_approval_request(
+                            str(pending_approval_id),
+                            decision="always" if mode == "always" else "allow_once",
+                            origin_channel="ui",
+                            actor="owner",
+                            session_id=task_id,
+                        )
+                        grant = outcome.get("grant") or {}
+                        if grant.get("id"):
+                            payload["grant_id"] = grant["id"]
+                            payload["action_id"] = grant.get("action_id")
+                    except Exception as exc:  # noqa: BLE001
+                        approved = False
+                        await BUS.publish(
+                            task_id,
+                            "confirm",
+                            "ApprovalGrant refused",
+                            str(exc)[:1500],
+                            stage="act",
+                        )
+                elif approved and not payload.get("grant_id"):
+                    # Legacy destructive/permission pause without prior park: mint grant now.
+                    try:
+                        from ..policy.approval_grant import action_id_for, park_approval_request
+
+                        tool_name = str(payload.get("name") or "")
+                        arguments = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
+                        action = str(arguments.get("action") or "")
+                        target = str(
+                            arguments.get("path")
+                            or arguments.get("command")
+                            or arguments.get("url")
+                            or ""
+                        )[:500]
+                        action_id = action_id_for(tool_name, action, target, task_id=task_id)
+                        parked = park_approval_request(
+                            action_id=action_id,
+                            tool_name=tool_name,
+                            action=action,
+                            scope={"legacy_confirm": True},
+                            target=target,
+                            task_id=task_id,
+                            reason="legacy confirmation upgraded to ApprovalGrant",
+                        )
+                        outcome = decide_approval_request(
+                            parked["id"],
+                            decision="always" if mode == "always" else "allow_once",
+                            origin_channel="ui",
+                            actor="owner",
+                            session_id=task_id,
+                        )
+                        grant = outcome.get("grant") or {}
+                        if grant.get("id"):
+                            payload["grant_id"] = grant["id"]
+                            payload["action_id"] = grant.get("action_id")
+                            payload["pending_approval_id"] = parked["id"]
+                    except Exception as exc:  # noqa: BLE001
+                        await BUS.publish(
+                            task_id,
+                            "confirm",
+                            "ApprovalGrant mint failed",
+                            str(exc)[:1500],
+                            stage="act",
+                        )
             if not approved:
+                pending_approval_id = payload.get("pending_approval_id")
+                if pending_approval_id:
+                    try:
+                        decide_approval_request(
+                            str(pending_approval_id),
+                            decision="deny",
+                            origin_channel="ui",
+                            actor="owner",
+                            session_id=task_id,
+                        )
+                    except Exception:
+                        pass
                 task.status = "cancelled"
                 task.stage = "cancelled"
                 task.waiting_for_confirmation = False
@@ -463,6 +592,7 @@ class AgentRuntime:
                 return task
             task.waiting_for_confirmation = False
             task.status = "running"
+            task.confirmation_payload = json.dumps(payload)
             await session.commit()
         self._start_runner(task_id, self._run(task_id, continue_existing=True, pending_tool=payload))
         return task
@@ -1841,6 +1971,7 @@ class AgentRuntime:
         if pending_tool:
             pending_name = pending_tool["name"]
             pending_args = pending_tool["arguments"] if isinstance(pending_tool.get("arguments"), dict) else {}
+            pending_grant_id = pending_tool.get("grant_id")
             await speak_progress(task_id, pending_name, pending_args)
             result_text = await self._execute_tool(
                 task_id,
@@ -1848,7 +1979,8 @@ class AgentRuntime:
                 pending_args,
                 autonomy,
                 settings,
-                approved=True,
+                approved=bool(pending_grant_id),
+                grant_id=str(pending_grant_id) if pending_grant_id else None,
             )
             messages.append(
                 ChatMessage(
@@ -2256,17 +2388,50 @@ class AgentRuntime:
                             messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=denied))
                             working.note_tool(name, denied, False)
                             continue
-                        if _tool_needs_operator_pause(autonomy, risk, command, name, arguments):
+                        side = _side_effect_decision(
+                            name,
+                            arguments if isinstance(arguments, dict) else {},
+                            task_id=task_id,
+                            park_if_needed=True,
+                        )
+                        if side.requires_approval or (
+                            not side.allowed
+                            and _tool_needs_operator_pause(autonomy, risk, command, name, arguments)
+                        ):
                             metrics.note_confirmation()
                             irreversible = needs_confirmation(
                                 autonomy, risk, command, tool_name=name, arguments=arguments
-                            )
+                            ) or side.effect.destructive_effect
                             payload = confirmation_payload_for_tool(
                                 call_id=call["id"],
                                 name=name,
                                 arguments=arguments,
                                 irreversible=irreversible,
                             )
+                            payload["pending_approval_id"] = side.pending_approval_id
+                            payload["action_id"] = side.action_id
+                            payload["reversibility"] = side.effect.reversibility.value
+                            payload["rfc0031"] = True
+                            if not side.pending_approval_id:
+                                # Ensure a parked request exists even if pause came from legacy path.
+                                from ..policy.approval_grant import action_id_for, park_approval_request
+
+                                target = side.effect.target
+                                action_id = side.action_id or action_id_for(
+                                    name, side.effect.action, target, task_id=task_id
+                                )
+                                parked = park_approval_request(
+                                    action_id=action_id,
+                                    tool_name=name,
+                                    action=side.effect.action,
+                                    scope={"call_id": call["id"]},
+                                    target=target,
+                                    task_id=task_id,
+                                    reason=side.reason,
+                                    effect=side.effect.as_dict(),
+                                )
+                                payload["pending_approval_id"] = parked["id"]
+                                payload["action_id"] = action_id
                             await self._update(
                                 task_id,
                                 status="waiting",
@@ -2281,10 +2446,25 @@ class AgentRuntime:
                                 task_id,
                                 "confirm",
                                 f"Confirmation required for {name}",
-                                json.dumps(arguments)[:1500],
+                                json.dumps(
+                                    {
+                                        "arguments": arguments,
+                                        "pending_approval_id": payload.get("pending_approval_id"),
+                                        "reversibility": payload.get("reversibility"),
+                                        "reason": side.reason,
+                                    },
+                                    default=str,
+                                )[:1500],
                                 stage="act",
                             )
                             return
+                        if not side.allowed:
+                            observation = _authorization_observation(_tool_authorization(name, arguments))
+                            messages.append(
+                                ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation)
+                            )
+                            working.note_tool(name, observation, False)
+                            continue
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
                         await speak_progress(task_id, name, arguments)
@@ -2503,8 +2683,16 @@ class AgentRuntime:
         *,
         approved: bool = False,
         profile_id: str | None = None,
+        grant_id: str | None = None,
     ) -> str:
-        authz = _tool_authorization(name, arguments, approved=approved, profile_id=profile_id)
+        authz = _tool_authorization(
+            name,
+            arguments,
+            approved=approved,
+            profile_id=profile_id,
+            grant_id=grant_id,
+            task_id=task_id,
+        )
         if not authz.allowed:
             return _authorization_observation(authz)
         text, _ = await self._execute_tool_ex(
@@ -2515,6 +2703,7 @@ class AgentRuntime:
             settings,
             approved=approved,
             profile_id=profile_id,
+            grant_id=grant_id,
         )
         return text
 
@@ -2530,19 +2719,108 @@ class AgentRuntime:
         *,
         approved: bool = False,
         profile_id: str | None = None,
+        grant_id: str | None = None,
     ) -> tuple[str, str | None]:
-        authz = _tool_authorization(name, arguments, approved=approved, profile_id=profile_id)
+        # Prefer gate_tool_call (via _tool_authorization) so existing hooks/tests that
+        # monkeypatch app.agent.loop.gate_tool_call still observe the deny/allow boundary.
+        authz = _tool_authorization(
+            name,
+            arguments,
+            approved=approved,
+            profile_id=profile_id,
+            grant_id=grant_id,
+            task_id=task_id,
+        )
         if not authz.allowed:
             return _authorization_observation(authz), None
+        decision = _side_effect_decision(
+            name,
+            arguments,
+            grant_id=grant_id,
+            task_id=task_id,
+            profile_id=profile_id,
+            park_if_needed=False,
+        )
+        if grant_id:
+            from ..policy.approval_grant import consume_grant
+
+            try:
+                consume_grant(grant_id)
+            except KeyError:
+                pass
         consume_once_grants(permission_ids_for_tool(name, arguments))
         started = datetime.now(timezone.utc)
+
+        # RFC-0031: capture restorable prior_state BEFORE mutation when required.
+        prior_state: dict[str, Any] = {
+            "kind": "metadata_only",
+            "target": decision.effect.target,
+            "tool_name": name,
+            "action": decision.effect.action,
+            "restorable": False,
+        }
+        needs_snapshot = bool(decision.effect.snapshot_required) or (
+            decision.effect.side_effecting
+            and decision.effect.reversibility.value in {"REVERSIBLE", "COMPENSATABLE"}
+            and name in {"filesystem", "settings", "config"}
+        )
+        if needs_snapshot and decision.allowed:
+            try:
+                prior_state = capture_prior_for_effect(
+                    name,
+                    action=decision.effect.action,
+                    arguments=arguments if isinstance(arguments, dict) else {},
+                    snapshot_required=bool(decision.effect.snapshot_required),
+                )
+            except Exception as exc:  # noqa: BLE001 — fail closed when snapshot required
+                if decision.effect.snapshot_required:
+                    log.error(
+                        "rfc0031 snapshot_required capture failed tool=%s action=%s task=%s: %s",
+                        name,
+                        decision.effect.action,
+                        task_id,
+                        exc,
+                    )
+                    try:
+                        await BUS.publish(
+                            task_id,
+                            "error",
+                            "Undo snapshot capture failed",
+                            str(exc)[:1500],
+                            stage="act",
+                        )
+                    except Exception:
+                        pass
+                    REGISTRY._context.pop("approval_grant_id", None)
+                    return (
+                        "ERROR: Reversible action blocked — could not capture undo snapshot: "
+                        f"{exc}\n"
+                        + json.dumps(
+                            {
+                                "rfc0031": {
+                                    "code": "snapshot_capture_failed",
+                                    "tool": name,
+                                    "action": decision.effect.action,
+                                    "snapshot_required": True,
+                                }
+                            }
+                        ),
+                        None,
+                    )
+                log.warning(
+                    "rfc0031 prior capture skipped tool=%s action=%s: %s",
+                    name,
+                    decision.effect.action,
+                    exc,
+                )
 
         async def _run_tool_inner() -> tuple[str, str | None, bool, str]:
             async with SessionLocal() as session:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
             REGISTRY._context["task_id"] = task_id
-            REGISTRY._context["approved"] = approved
+            REGISTRY._context["approved"] = bool(grant_id) or approved
+            REGISTRY._context["approval_grant_id"] = grant_id or ""
             if name == "read_ingress":
                 result = await REGISTRY.execute(name, arguments, task_id=task_id)
             elif security_role:
@@ -2612,6 +2890,75 @@ class AgentRuntime:
                     Checkpoint(task_id=task_id, kind="git", path=arguments.get("path") or "", note=text[:500])
                 )
             await session.commit()
+        if success and decision.allowed:
+            undo_note = ""
+            try:
+                post_digest = hashlib.sha256(
+                    f"{name}:{decision.effect.action}:{decision.effect.target}:{text[:200]}".encode()
+                ).hexdigest()[:32]
+                target_path = str(
+                    (arguments or {}).get("path") or decision.effect.target or ""
+                ).strip()
+                if target_path:
+                    try:
+                        p = Path(target_path).expanduser()
+                        if p.is_file():
+                            post_digest = hashlib.sha256(p.read_bytes()).hexdigest()
+                    except OSError:
+                        pass
+                record = register_post_success_undo(
+                    decision,
+                    prior_state=prior_state,
+                    post_state={
+                        "target": decision.effect.target,
+                        "kind": prior_state.get("kind"),
+                        "expected_digest": post_digest,
+                        "current_digest": post_digest,
+                    },
+                    task_id=task_id,
+                    run_id=task_id,
+                    step_key=step_key,
+                )
+                if record is None and decision.effect.snapshot_required:
+                    raise RuntimeError("snapshot_required action produced no undo record")
+            except Exception as exc:  # noqa: BLE001 — never silent swallow
+                log.exception(
+                    "rfc0031 undo registration failed tool=%s action=%s task=%s step=%s",
+                    name,
+                    decision.effect.action,
+                    task_id,
+                    step_key,
+                )
+                try:
+                    await BUS.publish(
+                        task_id,
+                        "error",
+                        "Undo registration failed",
+                        str(exc)[:1500],
+                        stage="act",
+                    )
+                except Exception:
+                    pass
+                undo_note = (
+                    "\nERROR: Undo registration failed after successful side effect: "
+                    f"{exc}\n"
+                    + json.dumps(
+                        {
+                            "rfc0031": {
+                                "code": "undo_registration_failed",
+                                "tool": name,
+                                "action": decision.effect.action,
+                                "snapshot_required": bool(decision.effect.snapshot_required),
+                                "step_key": step_key,
+                            }
+                        }
+                    )
+                )
+                # Surface into the tool observation so the owner/agent sees it.
+                text = f"{text}{undo_note}"
+                success = False if decision.effect.snapshot_required else success
+                error = str(exc) if decision.effect.snapshot_required else error
+        REGISTRY._context.pop("approval_grant_id", None)
         return text, attach
 
     async def _maybe_consult_expert(

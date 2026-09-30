@@ -42,6 +42,9 @@ class Tool:
     # RFC-0029 replay contract (override on tools with external side effects)
     effect_class: str = "internal"
     replay_policy: str | None = None
+    # RFC-0031 default reversibility — UNKNOWN is never treated as safely reversible.
+    # Per-action resolution lives in policy.reversibility.resolve_action_effect.
+    reversibility: str = "UNKNOWN"
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -52,6 +55,17 @@ class Tool:
                 "parameters": self.parameters,
             },
         }
+
+    def effect_metadata(self, *, action: str | None = None, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        """RFC-0031 effect/recovery metadata for a proposed invocation."""
+        from ..policy.reversibility import resolve_action_effect
+
+        return resolve_action_effect(
+            self.name,
+            action=action,
+            arguments=arguments,
+            risk=self.risk,
+        ).as_dict()
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         return ToolResult(
