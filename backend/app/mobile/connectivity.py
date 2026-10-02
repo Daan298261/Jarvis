@@ -146,6 +146,7 @@ class Connectivity:
         self.identity = None
         self.public_ip = None
         self.natpmp_gateway = None
+        self.ssh_gateway = None
         self.pcp_nonce = None
         self.remote_prepared = False
         self.state = {
@@ -254,6 +255,7 @@ class Connectivity:
                 pass
             self.natpmp_gateway = None
             self.pcp_nonce = None
+        self.ssh_gateway = None
         self.public_ip = None
         self.report(mapped_lan_ip="", wan_path="")
         await REVERSE_TUNNEL.stop()
@@ -564,52 +566,47 @@ class Connectivity:
                     extra = "; ".join(nat_errors)[:240]
                     self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
             if config["remote"] and not wan_path:
-                from .wan_forward import apply_gateway_ssh, apply_ssh_reverse, gateway_ssh_configured, wan_settings_from_config
+                from .wan_forward import apply_ssh_reverse, gateway_ssh_configured, wan_settings_from_config
 
                 wan = wan_settings_from_config(config)
                 method = wan["wan_method"]
-                from .wan_forward import mapping_lan_ipv4
-
-                lan_ip = mapping_lan_ipv4(hosts, str(wan.get("gateway_host") or gw or ""))
                 if (
                     method in {"auto", "gateway_ssh"}
                     and gateway_ssh_configured(wan)
                 ):
-                    if not lan_ip:
-                        prior = self.state.get("limitation") or ""
-                        extra = (
-                            "Gateway SSH needs a LAN IPv4 on the router subnet; "
-                            "trying the next owner method."
-                        )
-                        self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
-                    else:
-                        self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
-                        try:
-                            from .wan_forward import is_literal_public_ipv4, lookup_egress_ipv4, public_dial_host_for_gateway
+                    try:
+                        from .wan_forward import is_literal_public_ipv4, lookup_egress_ipv4, public_dial_host_for_gateway
 
-                            named = str(wan.get("wan_public_host") or "").strip()
-                            live_egress = ""
-                            if not named or is_literal_public_ipv4(named):
-                                try:
-                                    live_egress = await asyncio.to_thread(lookup_egress_ipv4)
-                                except Exception:
-                                    live_egress = str(public_ip or "")
-                            public_host = public_dial_host_for_gateway(
-                                named, live_egress, str(public_ip or "")
-                            )
-                            mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=str(public_host or ""))
-                            wan_path = "gateway_ssh"
-                            if mapped:
-                                endpoints.append(mapped)
-                            self._remember_mapped_public_ip(mapped)
-                            self.report(
-                                router="mapped",
-                                wan_path=wan_path,
-                                limitation=detail,
-                                mapped_lan_ip=lan_ip,
-                            )
-                        except Exception as exc:
-                            self.report(router="unavailable", limitation=str(exc)[:240])
+                        named = str(wan.get("wan_public_host") or "").strip()
+                        live_egress = ""
+                        if not named or is_literal_public_ipv4(named):
+                            try:
+                                live_egress = await asyncio.to_thread(lookup_egress_ipv4)
+                            except Exception:
+                                live_egress = str(public_ip or "")
+                        public_host = public_dial_host_for_gateway(
+                            named, live_egress, str(public_ip or "")
+                        )
+                        mapped, detail, lan_ip = await self._try_gateway_ssh(
+                            wan, hosts, str(public_host or "")
+                        )
+                        wan_path = "gateway_ssh"
+                        if mapped:
+                            endpoints.append(mapped)
+                        self._remember_mapped_public_ip(mapped)
+                        self.report(
+                            router="mapped",
+                            wan_path=wan_path,
+                            limitation=detail,
+                            mapped_lan_ip=lan_ip,
+                        )
+                    except Exception as exc:
+                        prior = self.state.get("limitation") or ""
+                        extra = str(exc)[:240]
+                        self.report(
+                            router="unavailable",
+                            limitation=(f"{prior} {extra}").strip() if prior else extra,
+                        )
                 if not wan_path and method in {"auto", "ssh_reverse"} and wan["ssh_host"] and wan["ssh_user"]:
                     self.report(activity="Opening an SSH reverse tunnel for companion TLS")
                     try:
@@ -681,15 +678,53 @@ class Connectivity:
         """Backward-compatible entry: refresh remote access without stopping LAN listen."""
         await self.apply_remote(config)
 
+    def _gateway_ssh_candidates(self, wan: dict) -> list[str]:
+        """Typed OpenWrt host, else RFC1918 defaults with the last working router first."""
+        from .wan_forward import gateway_ssh_hosts
+
+        explicit = str(wan.get("gateway_host") or "").strip()
+        if explicit:
+            return [explicit]
+        hosts = [item for item in gateway_ssh_hosts(wan) if item]
+        remembered = str(self.ssh_gateway or "")
+        if remembered:
+            hosts = [remembered, *[item for item in hosts if item != remembered]]
+        return hosts
+
+    async def _try_gateway_ssh(self, wan: dict, hosts, public_host: str):
+        """SSH each candidate router until one maps TCP 4781 onto this PC."""
+        from .wan_forward import apply_gateway_ssh, mapping_lan_ipv4
+
+        errors: list[str] = []
+        for candidate in self._gateway_ssh_candidates(wan):
+            lan_ip = mapping_lan_ipv4(hosts, candidate)
+            if not lan_ip:
+                errors.append(f"{candidate}: Gateway SSH dest IP is not on the router subnet")
+                continue
+            attempt = dict(wan)
+            attempt["gateway_host"] = candidate
+            self.report(activity=f"Logging into {candidate} over SSH to map TCP 4781")
+            try:
+                mapped, detail = await apply_gateway_ssh(
+                    attempt, lan_ip, public_host=str(public_host or "")
+                )
+            except Exception as exc:
+                errors.append(f"{candidate}: {exc}")
+                continue
+            self.ssh_gateway = candidate
+            return mapped, detail, lan_ip
+        if errors:
+            raise RuntimeError("; ".join(errors)[:240])
+        raise RuntimeError(
+            "Gateway SSH needs a LAN IPv4 on the router subnet; trying the next owner method."
+        )
+
     async def _renew_gateway_ssh(self, config) -> None:
         """Re-apply the OpenWrt TCP 4781 redirect so DHCP / router reboot cannot drop WAN."""
         from .wan_forward import (
-            apply_gateway_ssh,
-            default_gateway_ipv4,
             gateway_ssh_configured,
             is_literal_public_ipv4,
             lookup_egress_ipv4,
-            mapping_lan_ipv4,
             public_dial_host_for_gateway,
             wan_settings_from_config,
         )
@@ -697,15 +732,6 @@ class Connectivity:
         wan = wan_settings_from_config(config)
         if not gateway_ssh_configured(wan):
             raise RuntimeError("Gateway SSH credentials are no longer configured")
-        gw = str(wan.get("gateway_host") or "")
-        if not gw:
-            try:
-                gw = default_gateway_ipv4()
-            except Exception:
-                gw = ""
-        lan_ip = mapping_lan_ipv4(lan_hosts(), gw)
-        if not lan_ip:
-            raise RuntimeError("Gateway SSH dest IP is not on the router subnet")
         named = str(wan.get("wan_public_host") or "").strip()
         live_egress = ""
         if not named or is_literal_public_ipv4(named):
@@ -715,7 +741,7 @@ class Connectivity:
                 live_egress = str(self.public_ip or "")
         public_host = public_dial_host_for_gateway(named, live_egress, str(self.public_ip or ""))
         previous_pub = str(self.public_ip or "")
-        mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=public_host)
+        mapped, detail, lan_ip = await self._try_gateway_ssh(wan, lan_hosts(), public_host)
         endpoints = list(self.state.get("endpoints") or [])
         if previous_pub:
             endpoints = [item for item in endpoints if dial_host(item) != previous_pub]
@@ -768,15 +794,13 @@ class Connectivity:
         if self.natpmp_gateway:
             return preferred_lan_ipv4(self.natpmp_gateway)
         if path == "gateway_ssh":
-            from .wan_forward import default_gateway_ipv4, mapping_lan_ipv4, wan_settings_from_config
+            from .wan_forward import mapping_lan_ipv4, wan_settings_from_config
 
             wan = wan_settings_from_config(self.config())
-            gw = str(wan.get("gateway_host") or "")
+            gw = str(self.ssh_gateway or "")
             if not gw:
-                try:
-                    gw = default_gateway_ipv4()
-                except Exception:
-                    gw = ""
+                candidates = self._gateway_ssh_candidates(wan)
+                gw = candidates[0] if candidates else ""
             return mapping_lan_ipv4(lan_hosts(), gw)
         return ""
 

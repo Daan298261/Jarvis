@@ -384,6 +384,35 @@ def default_gateway_ipv4() -> str:
     return gateways[0]
 
 
+def rfc1918_mapping_gateways() -> list[str]:
+    """RFC1918 default-route gateways with ``default_gateway_ipv4()`` first.
+
+    Tests that only patch the single-gateway helper still get a candidate, and
+    a VPN that stole 0.0.0.0 cannot hide the home LAN router from NAT-PMP or
+    OpenWrt SSH.
+    """
+    gateways: list[str] = []
+    try:
+        gateways = [item for item in rfc1918_default_gateways() if item]
+    except Exception:
+        gateways = []
+    try:
+        primary = default_gateway_ipv4()
+    except Exception:
+        primary = ""
+    if primary:
+        gateways = [primary, *[item for item in gateways if item != primary]]
+    return gateways
+
+
+def gateway_ssh_hosts(settings: dict[str, Any]) -> list[str]:
+    """Owner-typed gateway, or every RFC1918 default (home LAN first)."""
+    host = str(settings.get("gateway_host") or "").strip()
+    if host:
+        return [host]
+    return rfc1918_mapping_gateways()
+
+
 def resolved_gateway_host(settings: dict[str, Any]) -> str:
     host = str(settings.get("gateway_host") or "").strip()
     return host or default_gateway_ipv4()

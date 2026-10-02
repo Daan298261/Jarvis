@@ -214,6 +214,10 @@ def test_default_gateway_parsers_and_openwrt_user_fallback():
     assert resolved_gateway_user({"gateway_profile": "openwrt_uci"}) == "root"
     assert resolved_gateway_user({"gateway_username": "admin"}) == "admin"
     assert resolved_gateway_host({"gateway_host": "192.168.1.1"}) == "192.168.1.1"
+    from app.mobile.wan_forward import gateway_ssh_hosts
+
+    assert gateway_ssh_hosts({"gateway_host": "10.0.0.1"}) == ["10.0.0.1"]
+    assert gateway_ssh_hosts({"gateway_host": " 192.168.1.1 "}) == ["192.168.1.1"]
 
 
 def test_wan_origin_rejects_lan_and_accepts_public_hosts():
@@ -542,6 +546,10 @@ async def test_natpmp_skips_inner_mapping_and_uses_next_gateway(tmp_path, monkey
     assert seen == ["10.0.0.1", "192.168.1.1"]
     assert "https://203.0.113.50:4781" in result["endpoints"]
     assert "https://198.51.100.9:4781" not in result["endpoints"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_ssh_without_dest_falls_through_to_reverse(tmp_path, monkeypatch):
     from app.mobile import connectivity, store
     from tests.test_mobile_connectivity import FakeConnection
 
@@ -582,6 +590,10 @@ async def test_natpmp_skips_inner_mapping_and_uses_next_gateway(tmp_path, monkey
     assert result.get("wan_path") == "ssh_reverse"
     assert any(endpoint == "https://vpn.example.test:4781" for endpoint in result["endpoints"])
     assert "router subnet" in (result.get("limitation") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_gateway_ssh_maps_without_public_hostname(tmp_path, monkeypatch):
     from app.mobile import connectivity, store
     from tests.test_mobile_connectivity import FakeConnection
 
@@ -622,6 +634,7 @@ async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypa
     monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
     monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No public IPv4")))
     monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["192.168.1.1"])
     monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
     monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
 
@@ -643,9 +656,151 @@ async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypa
     assert result["state"] == "ready"
     assert result.get("wan_path") == "gateway_ssh"
     assert seen["password"] == "router-pass"
+    assert seen["host"] == "192.168.1.1"
+    assert seen["lan"] == "192.168.1.12"
     assert any(endpoint == "https://home.example.test:4781" for endpoint in result["endpoints"])
     from app.mobile.gateway import identity_covers
     assert identity_covers(connection.identity, ["home.example.test", "192.168.1.12"])
+
+
+def test_gateway_ssh_hosts_walks_rfc1918_when_host_blank(monkeypatch):
+    from app.mobile.wan_forward import gateway_ssh_hosts, rfc1918_mapping_gateways
+
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["192.168.1.1", "10.8.0.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    assert rfc1918_mapping_gateways() == ["192.168.1.1", "10.8.0.1"]
+    assert gateway_ssh_hosts({"gateway_password": "router-pass"}) == ["192.168.1.1", "10.8.0.1"]
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["10.8.0.1", "192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "10.8.0.1")
+    assert rfc1918_mapping_gateways() == ["10.8.0.1", "192.168.1.1"]
+    assert gateway_ssh_hosts({"gateway_host": "192.168.0.1"}) == ["192.168.0.1"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_ssh_tries_second_rfc1918_gateway_when_first_fails(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.0.0.8", "192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["10.0.0.1", "192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "10.0.0.1")
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    seen: list[tuple[str, str]] = []
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        host = str(settings.get("gateway_host") or "")
+        seen.append((host, lan_ip))
+        if host == "10.0.0.1":
+            raise RuntimeError("VPN gateway is not OpenWrt")
+        assert public_host == "home.example.test"
+        return "https://home.example.test:4781", "Owner gateway mapped TCP 4781"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    connection = FakeConnection()
+    result = await connection.configure(
+        True,
+        True,
+        {
+            "wan_method": "auto",
+            "gateway_password": "router-pass",
+            "wan_public_host": "home.example.test",
+        },
+    )
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "gateway_ssh"
+    assert seen == [("10.0.0.1", "10.0.0.8"), ("192.168.1.1", "192.168.1.12")]
+    assert result.get("mapped_lan_ip") == "192.168.1.12"
+    assert connection.ssh_gateway == "192.168.1.1"
+    assert connection._live_wan_dest_ip() == "192.168.1.12"
+    assert any(endpoint == "https://home.example.test:4781" for endpoint in result["endpoints"])
+
+
+@pytest.mark.asyncio
+async def test_gateway_ssh_explicit_host_does_not_walk_other_routers(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.0.0.8", "192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["10.0.0.1", "192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "10.0.0.1")
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+    seen: list[str] = []
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        del lan_ip, public_host
+        seen.append(str(settings.get("gateway_host") or ""))
+        raise RuntimeError("typed inner router refused SSH")
+
+    async def fake_tunnel(settings):
+        assert settings["ssh_host"] == "vpn.example.test"
+        return "https://vpn.example.test:4781"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    monkeypatch.setattr("app.mobile.wan_forward.apply_ssh_reverse", fake_tunnel)
+    result = await FakeConnection().configure(
+        True,
+        True,
+        {
+            "wan_method": "auto",
+            "gateway_host": "10.0.0.1",
+            "gateway_user": "root",
+            "gateway_identity_file": str(key),
+            "ssh_host": "vpn.example.test",
+            "ssh_user": "taco",
+            "ssh_identity_file": str(key),
+        },
+    )
+    assert result["state"] == "ready"
+    assert seen == ["10.0.0.1"]
+    assert result.get("wan_path") == "ssh_reverse"
+    assert any(endpoint == "https://vpn.example.test:4781" for endpoint in result["endpoints"])
+
+
+@pytest.mark.asyncio
+async def test_gateway_ssh_renew_stays_on_working_router(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.0.0.8", "192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["10.0.0.1", "192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "10.0.0.1")
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    seen: list[str] = []
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        del lan_ip, public_host
+        host = str(settings.get("gateway_host") or "")
+        seen.append(host)
+        if host == "10.0.0.1":
+            raise RuntimeError("VPN gateway is not OpenWrt")
+        return "https://home.example.test:4781", "mapped"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    connection = FakeConnection()
+    result = await connection.configure(
+        True,
+        True,
+        {"wan_method": "auto", "gateway_password": "router-pass", "wan_public_host": "home.example.test"},
+    )
+    assert result.get("wan_path") == "gateway_ssh"
+    assert seen == ["10.0.0.1", "192.168.1.1"]
+    seen.clear()
+    await connection._renew_gateway_ssh(connection.config())
+    assert seen[0] == "192.168.1.1"
+    assert "10.0.0.1" not in seen
+    assert connection.ssh_gateway == "192.168.1.1"
+    assert connection._live_wan_dest_ip() == "192.168.1.12"
 
 
 @pytest.mark.asyncio
