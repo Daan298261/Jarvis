@@ -678,3 +678,108 @@ def test_default_vault_path_discovers_existing_extra_vault(tmp_path, monkeypatch
     monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
     monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
     assert default_vault_path() == found
+
+
+def test_worktrees_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.agent.worktrees import worktrees_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.agent.worktrees.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = worktrees_root()
+    assert dest == extra / "Jarvis" / "runtime" / "worktrees"
+    assert dest.is_dir()
+
+
+def test_worktrees_root_discovers_existing_extra_registry(tmp_path, monkeypatch):
+    from app.agent.worktrees import worktrees_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "worktrees"
+    found.mkdir(parents=True)
+    (found / "worktrees.json").write_text("[]", encoding="utf-8")
+    monkeypatch.setattr("app.agent.worktrees.data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert worktrees_root() == found
+
+
+def test_environments_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.workers.credentials import credentials_root
+    from app.workers.environments import environments_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.workers.environments.data_dir", lambda: data)
+    monkeypatch.setattr("app.workers.credentials.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = environments_root()
+    assert dest == extra / "Jarvis" / "runtime" / "worker-environments"
+    assert credentials_root() == dest / ".credentials"
+
+
+def test_environments_root_discovers_existing_extra_registry(tmp_path, monkeypatch):
+    from app.workers.environments import environments_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "worker-environments"
+    found.mkdir(parents=True)
+    (found / "registry.json").write_text("[]", encoding="utf-8")
+    monkeypatch.setattr("app.workers.environments.data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert environments_root() == found
+
+
+def test_projects_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.media.store import blob_path, media_store_root
+    from app.projects.paths import media_relative_path, project_media_dir, projects_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "data_dir", lambda: data)
+    monkeypatch.setattr("app.media.store.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = projects_root()
+    assert dest == extra / "Jarvis" / "runtime" / "projects"
+    assert media_store_root() == extra / "Jarvis" / "runtime" / "media"
+    media_dir = project_media_dir("alpha")
+    upload = media_dir / "file-1"
+    upload.write_bytes(b"pic")
+    assert blob_path("file-1", record={"relative_path": media_relative_path("alpha", "file-1")}) == upload
+
+
+def test_projects_root_discovers_existing_extra_project(tmp_path, monkeypatch):
+    from app.projects.paths import projects_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "projects"
+    (found / "alpha").mkdir(parents=True)
+    monkeypatch.setattr(config, "data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert projects_root() == found
+
+
+def test_backup_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.tools.snapshots import backup_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.tools.snapshots.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = backup_root()
+    assert dest == extra / "Jarvis" / "runtime" / "backups"
+    assert dest.is_dir()

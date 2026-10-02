@@ -14,7 +14,7 @@ from fastapi import HTTPException
 
 from .. import config
 from ..config import data_dir
-from ..projects.paths import media_relative_path, project_media_dir, resolve_media_project_id
+from ..projects.paths import media_relative_path, project_media_dir, resolve_media_project_id, resolve_projects_relative
 from ..swarm.nodes import load_or_create_local_node_id
 from ..mobile.store import database, delete, get, put
 
@@ -42,14 +42,28 @@ _VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime", "video/x-matroska"
 _AUDIO_TYPES = {"audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp3", "audio/mp4", "audio/m4a", "audio/webm", "audio/ogg"}
 
 
+def media_store_root() -> Path:
+    """`data/media`, or extra-drive `Jarvis/runtime/media` when C: cannot fit."""
+    from ..config import resolved_data_sidecar_dir
+
+    dest = resolved_data_sidecar_dir(
+        "media",
+        local=data_dir() / "media",
+        markers=("uploads", "chunks"),
+        need_bytes=2 * 1024**3,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
 def media_root() -> Path:
-    path = data_dir() / "media" / "uploads"
+    path = media_store_root() / "uploads"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def chunks_root() -> Path:
-    path = data_dir() / "media" / "chunks"
+    path = media_store_root() / "chunks"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -153,14 +167,17 @@ def _record_to_upload(record: dict) -> MediaUpload:
 def blob_path(upload_id: str, *, record: dict | None = None) -> Path:
     rec = record if record is not None else _load_record(upload_id)
     if rec and rec.get("relative_path"):
+        stored = resolve_projects_relative(str(rec["relative_path"]))
+        if stored is not None:
+            return stored
         return data_dir() / str(rec["relative_path"])
     legacy = media_root() / upload_id
     if legacy.is_file():
         return legacy
     if rec:
         project_id = str(rec.get("project_id") or resolve_media_project_id(None))
-        candidate = data_dir() / media_relative_path(project_id, upload_id)
-        if candidate.is_file():
+        candidate = resolve_projects_relative(media_relative_path(project_id, upload_id))
+        if candidate is not None and candidate.is_file():
             return candidate
     return legacy
 

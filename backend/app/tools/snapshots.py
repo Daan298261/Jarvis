@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 
 _SKIP_DIR_NAMES = {
     ".git",
@@ -33,7 +33,12 @@ def backup_root(context: dict[str, Any] | None = None) -> Path:
         path = Path(custom)
         path.mkdir(parents=True, exist_ok=True)
         return path
-    path = data_dir() / "backups"
+    path = resolved_data_sidecar_dir(
+        "backups",
+        local=data_dir() / "backups",
+        markers=(),
+        need_bytes=2 * 1024**3,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
