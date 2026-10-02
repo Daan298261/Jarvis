@@ -990,6 +990,8 @@ export type HexStrikeOperatorReadiness = {
   mcp?: { ok?: boolean; servers?: unknown; error?: string; transport?: string }
   mcp_error?: string
   reason?: string
+  discovery_ok?: boolean
+  discovery_error?: string
 }
 
 export type HexStrikeCatalogItem = {
@@ -1040,6 +1042,14 @@ export type HexStrikeToolsCatalogResponse = {
   legacy_capabilities: HexStrikeCapability[]
   mcp: Record<string, unknown>
   mcp_error?: string
+  discovery_ok?: boolean
+  discovery_error?: string
+  truncated?: boolean
+  offset?: number
+  limit?: number
+  has_more?: boolean
+  access_mode?: string
+  access_message?: string
 }
 
 export type HexStrikeStatus = {
@@ -1074,6 +1084,9 @@ export type HexStrikeStatus = {
   access_message?: string
   operator_allowed?: boolean
   blue_allowed?: boolean
+  hexstrike_module?: boolean
+  discovery_ok?: boolean
+  discovery_error?: string
   operator?: HexStrikeOperatorReadiness
   operator_jobs?: HexStrikeOperatorJob[]
   dependency_install_jobs?: Record<string, HexStrikeDependencyInstallJob>

@@ -96,6 +96,7 @@ CATALOG: tuple[PermissionSpec, ...] = (
         "HexStrike AI suite",
         "Start and view the HexStrike cybersecurity suite through Jarvis. Command/payload endpoints stay blocked.",
         "ask",
+        gated="hexstrike",
     ),
     PermissionSpec(
         "blue.static_rules",

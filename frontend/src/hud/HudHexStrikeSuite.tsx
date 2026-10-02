@@ -24,6 +24,7 @@ import { usePendingApprovals } from "../chat/pendingApprovals"
 import "./hexstrike.css"
 
 const CATALOG_PAGE_SIZE = 24
+const JOBS_POLL_MS = 2000
 
 type DaybreakTab = "runtime" | "catalog" | "operate" | "jobs"
 
@@ -59,9 +60,18 @@ function defaultArgsJson(item: HexStrikeCatalogItem | null): string {
 function operatorLabel(status: HexStrikeStatus | null): string {
   const op = status?.operator
   if (!status?.running) return "Suite offline"
+  if (status.discovery_ok === false || op?.discovery_ok === false) {
+    return status.discovery_error || op?.discovery_error || "Discovery failed"
+  }
   if (op?.operator_ready) return "Operator ready"
   if (status.catalog_stale || op?.catalog_stale) return "Catalog stale — refresh"
   return "Surface syncing"
+}
+
+function normalizeJobStatus(status: string): string {
+  if (status === "completed" || status === "ok" || status === "success") return "succeeded"
+  if (status === "stopped" || status === "canceled") return "cancelled"
+  return status
 }
 
 export function HudHexStrikeSuite() {
@@ -104,9 +114,11 @@ export function HudHexStrikeSuite() {
     }
   }, [])
 
+  const hasRunningJob = jobs.some((j) => j.status === "running")
+
   useEffect(() => {
     void refresh()
-    const timer = window.setInterval(() => void refresh(), 2500)
+    const timer = window.setInterval(() => void refresh(), JOBS_POLL_MS)
     return () => window.clearInterval(timer)
   }, [refresh])
 
@@ -125,7 +137,7 @@ export function HudHexStrikeSuite() {
       }
     }
     void load()
-    const timer = window.setInterval(() => void load(), 2000)
+    const timer = window.setInterval(() => void load(), JOBS_POLL_MS)
     return () => {
       cancelled = true
       window.clearInterval(timer)
@@ -218,9 +230,8 @@ export function HudHexStrikeSuite() {
   const install = status?.install
   const accessMode = status?.access_mode || "locked"
   const locked = accessMode === "locked"
-  const blueOnly = accessMode === "blue"
   const stateLabel = locked
-    ? "Pro"
+    ? "Locked"
     : status?.starting
       ? "Igniting"
       : live
@@ -230,8 +241,15 @@ export function HudHexStrikeSuite() {
           : "Not installed"
   const op = status?.operator
   const depJobs = status?.dependency_install_jobs || {}
-
-  const hasRunningJob = jobs.some((j) => j.status === "running")
+  const discoveryError =
+    status?.discovery_error ||
+    op?.discovery_error ||
+    status?.mcp_error ||
+    op?.mcp?.error ||
+    ""
+  const discoveryFailed = locked
+    ? false
+    : status?.discovery_ok === false || op?.discovery_ok === false || !!discoveryError
 
   return (
     <div className="hex-suite" aria-label="Daybreak HexStrike operator console">
@@ -242,10 +260,8 @@ export function HudHexStrikeSuite() {
           <strong>Daybreak</strong>
           <span>
             {locked
-              ? "Pro feature"
-              : blueOnly
-                ? "HexStrike Blue · defensive suite"
-                : "HexStrike operator console · loopback suite"}
+              ? "License module required"
+              : "HexStrike operator console · loopback suite"}
           </span>
         </div>
         <span className={`hex-suite-pill${live ? " live" : ""}`}>{stateLabel}</span>
@@ -253,8 +269,11 @@ export function HudHexStrikeSuite() {
 
       {locked && (
         <section className="hex-panel hex-pro-lock" role="status">
-          <h2>Pro feature</h2>
-          <p>{status?.access_message || "Daybreak / HexStrike is a Pro feature. Install a signed Jarvis license to unlock it."}</p>
+          <h2>HexStrike module not entitled</h2>
+          <p>
+            {status?.access_message ||
+              "The installed license package does not include hexstrike. Install a signed package that lists the hexstrike module."}
+          </p>
           <a className="hex-suite-btn" href="/license">
             Open License
           </a>
@@ -286,6 +305,11 @@ export function HudHexStrikeSuite() {
       {loadError && (
         <p className="hex-suite-banner error" role="alert">
           {loadError}
+        </p>
+      )}
+      {discoveryFailed && (
+        <p className="hex-suite-banner error" role="alert">
+          Discovery failed: {discoveryError || "refresh the operator catalog"}
         </p>
       )}
 
@@ -364,35 +388,31 @@ export function HudHexStrikeSuite() {
                     {status?.catalog_stale ? " (stale)" : ""}
                   </dd>
                 </div>
-                {!blueOnly && (
-                  <div>
-                    <dt>MCP</dt>
-                    <dd>{op?.mcp?.ok ? "registered" : "pending"}</dd>
-                  </div>
-                )}
+                <div>
+                  <dt>Discovery</dt>
+                  <dd>{discoveryFailed ? "failed" : "ok"}</dd>
+                </div>
+                <div>
+                  <dt>MCP</dt>
+                  <dd>{op?.mcp?.ok ? "registered" : "pending"}</dd>
+                </div>
               </dl>
-              <p className="hex-suite-hint">
-                {blueOnly
-                  ? status?.access_message || "This license has Daybreak Blue (defensive) capabilities."
-                  : operatorLabel(status)}
-              </p>
-              {!blueOnly && (status?.mcp_error || op?.mcp?.error) && (
-                <p className="hex-suite-error">{status?.mcp_error || op?.mcp?.error}</p>
+              <p className="hex-suite-hint">{operatorLabel(status)}</p>
+              {(status?.mcp_error || op?.mcp?.error || discoveryError) && (
+                <p className="hex-suite-error">{status?.mcp_error || op?.mcp?.error || discoveryError}</p>
               )}
-              {!blueOnly && (
-                <button
-                  type="button"
-                  className="hex-suite-btn"
-                  disabled={busy || !live}
-                  onClick={() =>
-                    void run(async () => {
-                      await refreshHexStrikeToolsCatalog()
-                    }, "Operator catalog refreshed.")
-                  }
-                >
-                  Refresh catalog
-                </button>
-              )}
+              <button
+                type="button"
+                className="hex-suite-btn"
+                disabled={busy || !live}
+                onClick={() =>
+                  void run(async () => {
+                    await refreshHexStrikeToolsCatalog()
+                  }, "Operator catalog refreshed.")
+                }
+              >
+                Refresh catalog
+              </button>
             </section>
 
             <section className="hex-panel hex-panel-wide">
@@ -432,25 +452,30 @@ export function HudHexStrikeSuite() {
                   setCatalogPage(0)
                 }}
               />
-              {!blueOnly && (
-                <button
-                  type="button"
-                  className="hex-suite-btn ghost"
-                  disabled={busy || !live}
-                  onClick={() =>
-                    void run(async () => {
-                      await refreshHexStrikeToolsCatalog()
-                    }, "Catalog refreshed from live suite.")
-                  }
-                >
-                  Sync
-                </button>
-              )}
+              <button
+                type="button"
+                className="hex-suite-btn ghost"
+                disabled={busy || !live}
+                onClick={() =>
+                  void run(async () => {
+                    await refreshHexStrikeToolsCatalog()
+                  }, "Catalog refreshed from live suite.")
+                }
+              >
+                Sync
+              </button>
             </div>
+            {discoveryFailed && (
+              <p className="hex-suite-error" role="alert">
+                {discoveryError || "Discovery failed — catalog may be incomplete."}
+              </p>
+            )}
             {!catalog.length && (
               <p className="hex-suite-hint">
                 {live
-                  ? "No catalog rows yet — use Refresh catalog on Runtime."
+                  ? discoveryFailed
+                    ? "Discovery failed — use Sync after repairing the suite."
+                    : "No catalog rows yet — use Refresh catalog on Runtime."
                   : "Start the suite to discover tools."}
               </p>
             )}
@@ -470,6 +495,12 @@ export function HudHexStrikeSuite() {
                     <span className="hex-catalog-id">{item.id}</span>
                     <span className="hex-catalog-title">{item.title}</span>
                     <span className="hex-catalog-src">{item.source}</span>
+                    <span className="hex-catalog-avail">{missing ? "Unavailable" : "Available"}</span>
+                    {missing && item.guidance && (
+                      <span className="hex-catalog-guidance" title={item.guidance}>
+                        {item.guidance}
+                      </span>
+                    )}
                     {canInstall && (
                       <button
                         type="button"
@@ -559,6 +590,9 @@ export function HudHexStrikeSuite() {
                   </option>
                 ))}
               </select>
+              {selectedCapability?.available === false && selectedCapability.guidance && (
+                <p className="hex-suite-error">{selectedCapability.guidance}</p>
+              )}
               {selectedCapability?.source === "defensive" && scopes.length > 0 && (
                 <select
                   aria-label="Scope for defensive capability"
@@ -616,7 +650,10 @@ export function HudHexStrikeSuite() {
                   })
                   setSelectedJobId(job.id)
                   setTab("jobs")
-                }, "Operator job started.")
+                  if (normalizeJobStatus(job.status) === "failed") {
+                    setMsg(job.error || "Operator job failed.")
+                  }
+                }, "Operator job recorded.")
               }
             >
               Run capability
@@ -631,21 +668,24 @@ export function HudHexStrikeSuite() {
           <>
             <section className="hex-panel">
               <h2>Operator jobs</h2>
-              {hasRunningJob && <p className="hex-suite-hint">Polling while jobs are running…</p>}
+              {hasRunningJob && <p className="hex-suite-hint">Polling every {JOBS_POLL_MS / 1000}s while jobs run…</p>}
               <ul className="hex-job-list">
                 {jobs.length === 0 && <li className="hex-suite-hint">No operator jobs yet.</li>}
-                {[...jobs].reverse().map((job) => (
+                {[...jobs].reverse().map((job) => {
+                  const statusLabel = normalizeJobStatus(job.status)
+                  return (
                   <li key={job.id}>
                     <button
                       type="button"
                       className={`hex-job-row${selectedJobId === job.id ? " selected" : ""}`}
                       onClick={() => setSelectedJobId(job.id)}
                     >
-                      <span className={`hex-job-status ${job.status}`}>{job.status}</span>
+                      <span className={`hex-job-status ${statusLabel}`}>{statusLabel}</span>
                       <span className="hex-job-cap">{job.capability_id}</span>
                     </button>
                   </li>
-                ))}
+                  )
+                })}
               </ul>
             </section>
             <section className="hex-panel hex-panel-wide">
@@ -656,7 +696,7 @@ export function HudHexStrikeSuite() {
                   <dl className="hex-job-meta">
                     <div>
                       <dt>Status</dt>
-                      <dd>{jobDetail.status}</dd>
+                      <dd>{normalizeJobStatus(jobDetail.status)}</dd>
                     </div>
                     <div>
                       <dt>Capability</dt>
@@ -684,21 +724,43 @@ export function HudHexStrikeSuite() {
                   {jobDetail.log_tail && (
                     <pre className="hex-suite-json hex-job-log">{jobDetail.log_tail}</pre>
                   )}
-                  {(jobDetail.artifacts?.length || jobDetail.artifact_paths?.length) && (
+                  {(jobDetail.artifacts?.length || jobDetail.artifact_paths?.length) ? (
                     <ul className="hex-proc-list">
                       {(jobDetail.artifacts || []).map((art) => (
-                        <li key={art.path} title={art.path}>
-                          {art.name} ({art.size} B)
+                        <li key={art.path}>
+                          <a
+                            className="hex-artifact-link"
+                            href={`file://${art.path}`}
+                            title={art.path}
+                            onClick={(e) => {
+                              e.preventDefault()
+                              void navigator.clipboard?.writeText(art.path)
+                              setMsg(`Artifact path copied: ${art.path}`)
+                            }}
+                          >
+                            {art.name} ({art.size} B)
+                          </a>
                         </li>
                       ))}
                       {!jobDetail.artifacts?.length &&
                         jobDetail.artifact_paths?.map((path) => (
-                          <li key={path} title={path}>
-                            {path.split(/[/\\]/).pop()}
+                          <li key={path}>
+                            <a
+                              className="hex-artifact-link"
+                              href={`file://${path}`}
+                              title={path}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                void navigator.clipboard?.writeText(path)
+                                setMsg(`Artifact path copied: ${path}`)
+                              }}
+                            >
+                              {path.split(/[/\\]/).pop()}
+                            </a>
                           </li>
                         ))}
                     </ul>
-                  )}
+                  ) : null}
                   </AdvancedDisclosure>
                   {jobDetail.status === "running" && (
                     <button
@@ -708,11 +770,11 @@ export function HudHexStrikeSuite() {
                       onClick={() =>
                         void run(
                           () => stopHexStrikeOperatorJob(jobDetail.id),
-                          "Stop requested for tracked job.",
+                          "Cancel requested for tracked job.",
                         )
                       }
                     >
-                      Stop job
+                      Cancel job
                     </button>
                   )}
                 </>

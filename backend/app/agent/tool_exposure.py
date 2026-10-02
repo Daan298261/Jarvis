@@ -91,7 +91,8 @@ def _enabled_native(security_role: str = "") -> list[str]:
         if not tool.enabled or name == ESCAPE_TOOL:
             continue
         if name == "hexstrike_defensive":
-            if mode in {HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL}:
+            # RFC-0196: hexstrike module unlocks the suite (defensive rows remain in catalog).
+            if mode == HEXSTRIKE_ACCESS_FULL:
                 names.append(name)
             continue
         if name == "hexstrike_operator":

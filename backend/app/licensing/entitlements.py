@@ -55,41 +55,44 @@ def has_module(
 
 
 HEXSTRIKE_ACCESS_LOCKED = "locked"
-HEXSTRIKE_ACCESS_BLUE = "blue"
+HEXSTRIKE_ACCESS_BLUE = "blue"  # legacy; RFC-0196 gates on hexstrike module (locked vs full)
 HEXSTRIKE_ACCESS_FULL = "full"
 HEXSTRIKE_PRO_MESSAGE = (
-    "Daybreak / HexStrike is a Pro feature. Install a signed Jarvis license to unlock it."
+    "Install a signed license package on the License page that includes the hexstrike module."
+)
+HEXSTRIKE_MODULE_DENIED_MESSAGE = (
+    "The installed license package does not include hexstrike."
 )
 HEXSTRIKE_OPERATOR_LICENSE_MESSAGE = (
-    "Full HexStrike operator tools require an unrestricted or law-enforcement license. "
-    "This license has Daybreak Blue (defensive) capabilities."
+    "Full HexStrike operator tools require the hexstrike module on the installed license package."
 )
 OWNER_UNRESTRICTED_PACKAGE_CLASS = "owner_unrestricted"
 
 
+def hexstrike_denied_message(*, now: datetime | None = None) -> str:
+    """Owner-visible deny reason that names the missing hexstrike module (RFC-0196 §5)."""
+    return module_entitlement_blocked_reason("hexstrike", now=now) or HEXSTRIKE_MODULE_DENIED_MESSAGE
+
+
 def hexstrike_access_mode(*, now: datetime | None = None) -> str:
-    """License-only HexStrike/Daybreak surface: locked, blue, or full operator."""
-    status = evaluate(now=now)
-    if not status.installed or not status.valid or status.clock_rollback:
-        return HEXSTRIKE_ACCESS_LOCKED
-    if status.law_enforcement or status.package_class == OWNER_UNRESTRICTED_PACKAGE_CLASS:
+    """License-module HexStrike gate: full when hexstrike is entitled, else locked (RFC-0196).
+
+    Law-enforcement / password gates are not used as HexStrike capability unlocks.
+    """
+    if licensed_module_allowed("hexstrike", now=now):
         return HEXSTRIKE_ACCESS_FULL
-    return HEXSTRIKE_ACCESS_BLUE
+    return HEXSTRIKE_ACCESS_LOCKED
 
 
 def hexstrike_access_payload(*, now: datetime | None = None) -> dict[str, Any]:
     mode = hexstrike_access_mode(now=now)
-    if mode == HEXSTRIKE_ACCESS_LOCKED:
-        message = HEXSTRIKE_PRO_MESSAGE
-    elif mode == HEXSTRIKE_ACCESS_BLUE:
-        message = HEXSTRIKE_OPERATOR_LICENSE_MESSAGE
-    else:
-        message = ""
+    entitled = mode == HEXSTRIKE_ACCESS_FULL
     return {
         "access_mode": mode,
-        "access_message": message,
-        "operator_allowed": mode == HEXSTRIKE_ACCESS_FULL,
-        "blue_allowed": mode in {HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL},
+        "access_message": "" if entitled else hexstrike_denied_message(now=now),
+        "operator_allowed": entitled,
+        "blue_allowed": entitled,
+        "hexstrike_module": entitled,
     }
 
 
@@ -102,7 +105,7 @@ def module_entitlement_blocked_reason(module_id: str, *, now: datetime | None = 
         return blocked
     status = evaluate(now=now)
     if not status.installed:
-        return "Install a signed license package on the License page that includes this module."
+        return f"Install a signed license package on the License page that includes {key}."
     return f"The installed license package does not include {key}."
 
 

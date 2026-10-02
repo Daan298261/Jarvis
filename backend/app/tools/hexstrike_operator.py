@@ -72,13 +72,13 @@ class HexStrikeOperatorTool(Tool):
             HEXSTRIKE_ACCESS_FULL,
             HEXSTRIKE_ACCESS_LOCKED,
             HEXSTRIKE_OPERATOR_LICENSE_MESSAGE,
-            HEXSTRIKE_PRO_MESSAGE,
             hexstrike_access_mode,
+            hexstrike_denied_message,
         )
 
         mode = hexstrike_access_mode()
         if mode == HEXSTRIKE_ACCESS_LOCKED:
-            return ToolResult(False, "", error=HEXSTRIKE_PRO_MESSAGE)
+            return ToolResult(False, "", error=hexstrike_denied_message())
         if mode != HEXSTRIKE_ACCESS_FULL:
             return ToolResult(False, "", error=HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
         operation = str(kwargs.get("operation") or "").strip().lower()
@@ -100,11 +100,15 @@ class HexStrikeOperatorTool(Tool):
             if blocked:
                 return blocked
             surface = await sync_operator_surface(register_mcp=True)
-            if not surface.get("operator_ready"):
+            if not surface.get("operator_ready") or surface.get("discovery_ok") is False:
                 return ToolResult(
                     False,
                     "",
-                    error=str(surface.get("mcp", {}).get("error") or "operator surface not ready"),
+                    error=str(
+                        surface.get("discovery_error")
+                        or surface.get("mcp", {}).get("error")
+                        or "operator surface not ready"
+                    ),
                     data=surface,
                 )
             payload = {"operator": surface, **catalog_snapshot()}
@@ -140,5 +144,15 @@ class HexStrikeOperatorTool(Tool):
                 job = await operate(capability_id, kwargs.get("arguments") or {})
             except (ValueError, PermissionError, RuntimeError) as exc:
                 return ToolResult(False, "", error=str(exc))
-            return ToolResult(True, json.dumps(job, default=str), data=job)
+            hint = job.get("daybreak_jobs_hint") or f"Open Daybreak → Jobs for job {job.get('id')}"
+            summary = {
+                **job,
+                "daybreak_jobs_hint": hint,
+                "summary": (
+                    f"HexStrike job {job.get('id')} {job.get('status')}"
+                    + (f": {job.get('error')}" if job.get("error") else "")
+                ),
+            }
+            ok = str(job.get("status") or "") == "succeeded"
+            return ToolResult(ok, json.dumps(summary, default=str), data=summary, error="" if ok else str(job.get("error") or job.get("status")))
         return ToolResult(False, "", error=f"Unknown operation: {operation}")

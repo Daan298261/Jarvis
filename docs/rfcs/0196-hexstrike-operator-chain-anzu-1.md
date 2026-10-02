@@ -99,13 +99,13 @@ Specs-only in **this** PR:
 
 Implement follow-up (one or more CoS-named tickets; **Anzu 1.0 bar**):
 
-- [ ] Entitlement deny path is license-based (RFC-0119); no password gate required for entitled `hexstrike`
-- [ ] Discovery refresh on start and after dep install; failures visible in HUD
-- [ ] Full catalog paginated; Operate uses discovered schemas (not six-enum ceiling)
-- [ ] Jobs stream log tail + artifacts into Daybreak; chat shares job store
-- [ ] Error messages honest per §5; no mock/stub paths in production
-- [ ] Unit tests: discovery refresh, operate→job, entitlement deny, loopback/pin guards, artifact path bounds
-- [ ] `npm --prefix frontend run build` (and lint if TS changed)
+- [x] Entitlement deny path is license-based (RFC-0119); no password gate required for entitled `hexstrike`
+- [x] Discovery refresh on start and after dep install; failures visible in HUD
+- [x] Full catalog paginated; Operate uses discovered schemas (not six-enum ceiling)
+- [x] Jobs stream log tail + artifacts into Daybreak; chat shares job store
+- [x] Error messages honest per §5; no mock/stub paths in production
+- [x] Unit tests: discovery refresh, operate→job, entitlement deny, loopback/pin guards, artifact path bounds
+- [x] `npm --prefix frontend run build` (and lint if TS changed)
 - [ ] **Windows desktop soak** (unchecked in cloud): pinned install → start → catalog shows live tools → one real operate via HUD **and** chat → job log + artifact visible → stop/restart recovery → blocked invoke when unentitled
 
 ## Likely files
