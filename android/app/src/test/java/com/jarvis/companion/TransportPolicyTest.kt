@@ -178,4 +178,25 @@ class TransportPolicyTest {
         assertEquals(8, kept.size)
         assertEquals(lan, kept.last())
     }
+
+    @Test fun connectionRefreshReplacesStaleLanWhenServerListsLiveLan() {
+        val stale = "https://192.168.1.12:4781"
+        val live = "https://192.168.1.40:4781"
+        val wan = "https://203.0.113.4:4781"
+        val mdns = "https://jarvis.local:4781"
+        val merged = TransportPolicy.mergeConnectionEndpoints(listOf(stale), listOf(wan, live))
+        assertEquals(listOf(wan, live), merged)
+        assertFalse(stale in merged)
+        val locals = listOf("192.168.1.50")
+        val order = TransportPolicy.dialOrder(null, merged, locals)
+        assertEquals(live, order[0])
+        assertFalse(TransportPolicy.mayRaceOrigins("GET", "/connection", order, locals))
+        val droppedName = TransportPolicy.mergeConnectionEndpoints(listOf(stale, mdns), listOf(wan, live))
+        assertEquals(listOf(wan, live), droppedName)
+        val keptName = TransportPolicy.mergeConnectionEndpoints(listOf(stale, mdns), listOf(wan, live, mdns))
+        assertTrue(live in keptName)
+        assertTrue(mdns in keptName)
+        assertTrue(wan in keptName)
+        assertFalse(stale in keptName)
+    }
 }

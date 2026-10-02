@@ -39,11 +39,17 @@ object TransportPolicy {
     }
 
     fun mergeConnectionEndpoints(existing: Iterable<String>, incoming: Iterable<String>): List<String> {
-        val ranked = orderedForReachability(
-            (incoming + existing).mapNotNull { runCatching { origin(it) }.getOrNull() },
-        )
+        val live = incoming.mapNotNull { runCatching { origin(it) }.getOrNull() }
+        val known = existing.mapNotNull { runCatching { origin(it) }.getOrNull() }
+        val livePrivate = live.filter { isPrivateOrigin(it) }.toSet()
+        val retained = if (livePrivate.isEmpty()) {
+            known
+        } else {
+            known.filter { !isPrivateOrigin(it) || it in livePrivate }
+        }
+        val ranked = orderedForReachability(live + retained)
         if (ranked.size <= 8) return ranked
-        val privateOrigins = ranked.filter { reachabilityRank(it) >= 2 }
+        val privateOrigins = ranked.filter { isPrivateOrigin(it) }
         val keptPrivate = privateOrigins.takeLast(2)
         val publicOrigins = ranked.filter { it !in keptPrivate }
         return publicOrigins.take(8 - keptPrivate.size) + keptPrivate
@@ -156,6 +162,8 @@ object TransportPolicy {
     }
 
     internal fun sameSlash24(a: IntArray, b: IntArray): Boolean = sameNetwork(a, b, 24)
+
+    internal fun isPrivateOrigin(value: String): Boolean = reachabilityRank(value) >= 2
 
     internal fun reachabilityRank(value: String): Int {
         val host = runCatching { URI(value).host?.trim()?.lowercase().orEmpty() }.getOrDefault("")
