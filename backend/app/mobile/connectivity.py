@@ -457,7 +457,6 @@ class Connectivity:
             self.report(local_verified=True, server_pin=identity["server_pin"], endpoints=endpoints)
             await self.start_lan_beacon()
             wan_path = ""
-            inner_wan_unusable = False
             from .wan_forward import mapped_address_is_egress
 
             double_nat_limit = (
@@ -471,7 +470,6 @@ class Connectivity:
                     if not await asyncio.to_thread(mapped_address_is_egress, public_ip):
                         await asyncio.to_thread(unmap_router, router, config["marker"])
                         self.router = None
-                        inner_wan_unusable = True
                         self.report(router="unavailable", limitation=double_nat_limit)
                     else:
                         self.router, self.marker = router, config["marker"]
@@ -489,7 +487,7 @@ class Connectivity:
                     self.router = None
                     self.report(router="unavailable", limitation=str(exc)[:240])
             gw = ""
-            if config["remote"] and not self.router and not inner_wan_unusable and method in {"auto", "upnp"}:
+            if config["remote"] and not self.router and method in {"auto", "upnp"}:
                 from .wan_forward import default_gateway_ipv4, mapping_lan_ipv4, rfc1918_default_gateways
 
                 gateways: list[str] = []
@@ -520,10 +518,9 @@ class Connectivity:
 
                         public_ip = await asyncio.to_thread(apply_natpmp, candidate, lan_ip)
                         if not await asyncio.to_thread(mapped_address_is_egress, public_ip):
-                            inner_wan_unusable = True
-                            self.natpmp_gateway = None
-                            self.report(router="unavailable", limitation=double_nat_limit)
-                            break
+                            nat_errors.append(f"{candidate}: inner mapping is not this network's public IPv4")
+                            self.report(limitation=double_nat_limit)
+                            continue
                         gw = candidate
                         self.natpmp_gateway = candidate
                         self.pcp_nonce = None
@@ -544,11 +541,9 @@ class Connectivity:
 
                             public_ip, nonce = await asyncio.to_thread(apply_pcp, candidate, lan_ip, None)
                             if not await asyncio.to_thread(mapped_address_is_egress, public_ip):
-                                inner_wan_unusable = True
-                                self.natpmp_gateway = None
-                                self.pcp_nonce = None
-                                self.report(router="unavailable", limitation=double_nat_limit)
-                                break
+                                nat_errors.append(f"{candidate}: inner PCP mapping is not this network's public IPv4")
+                                self.report(limitation=double_nat_limit)
+                                continue
                             gw = candidate
                             self.natpmp_gateway = candidate
                             self.pcp_nonce = nonce

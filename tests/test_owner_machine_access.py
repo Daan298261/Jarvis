@@ -400,10 +400,13 @@ async def test_upnp_double_nat_falls_through_to_reverse_tunnel(tmp_path, monkeyp
     natpmp_hits = {"n": 0}
     monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (router, "198.51.100.8"))
     monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: "203.0.113.50")
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
     monkeypatch.setattr(
         "app.mobile.natpmp.apply_natpmp",
-        lambda *a, **k: natpmp_hits.__setitem__("n", natpmp_hits["n"] + 1) or (_ for _ in ()).throw(TimeoutError("should skip")),
+        lambda *a, **k: natpmp_hits.__setitem__("n", natpmp_hits["n"] + 1) or (_ for _ in ()).throw(TimeoutError("no NAT-PMP")),
     )
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
     key = tmp_path / "id_ed25519"
     key.write_text("dummy", encoding="utf-8")
 
@@ -423,7 +426,7 @@ async def test_upnp_double_nat_falls_through_to_reverse_tunnel(tmp_path, monkeyp
     )
     assert result["state"] == "ready"
     assert result.get("wan_path") == "ssh_reverse"
-    assert natpmp_hits["n"] == 0
+    assert natpmp_hits["n"] == 1
     assert "https://198.51.100.8:4781" not in result["endpoints"]
     assert any(endpoint == "https://vpn.example.test:4781" for endpoint in result["endpoints"])
     assert router.deleted == [(4781, "TCP")]
@@ -442,10 +445,13 @@ async def test_upnp_double_nat_still_tries_owner_gateway_ssh(tmp_path, monkeypat
     gateway_hits = {"n": 0}
     monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (router, "198.51.100.8"))
     monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: "203.0.113.50")
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
     monkeypatch.setattr(
         "app.mobile.natpmp.apply_natpmp",
-        lambda *a, **k: natpmp_hits.__setitem__("n", natpmp_hits["n"] + 1) or (_ for _ in ()).throw(TimeoutError("should skip")),
+        lambda *a, **k: natpmp_hits.__setitem__("n", natpmp_hits["n"] + 1) or (_ for _ in ()).throw(TimeoutError("no NAT-PMP")),
     )
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
     key = tmp_path / "id_ed25519"
     key.write_text("dummy", encoding="utf-8")
 
@@ -475,14 +481,67 @@ async def test_upnp_double_nat_still_tries_owner_gateway_ssh(tmp_path, monkeypat
     assert result["state"] == "ready"
     assert result.get("wan_path") == "gateway_ssh"
     assert gateway_hits["n"] == 1
-    assert natpmp_hits["n"] == 0
+    assert natpmp_hits["n"] == 1
     assert "https://198.51.100.8:4781" not in result["endpoints"]
     assert any(endpoint == "https://home.example.test:4781" for endpoint in result["endpoints"])
     assert router.deleted == [(4781, "TCP")]
 
 
 @pytest.mark.asyncio
-async def test_gateway_ssh_skips_when_pc_is_not_on_router_subnet(tmp_path, monkeypatch):
+async def test_upnp_double_nat_then_natpmp_on_second_gateway(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection, Router
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.0.0.8", "192.168.1.12"])
+    router = Router()
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (router, "198.51.100.8"))
+    monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: "203.0.113.50")
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["10.0.0.1", "192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "10.0.0.1")
+    seen: list[str] = []
+
+    def fake_natpmp(gw, lan):
+        seen.append(gw)
+        if gw == "192.168.1.1":
+            return "203.0.113.50"
+        return "198.51.100.9"
+
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", fake_natpmp)
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    result = await FakeConnection().configure(True, True, {"wan_method": "auto"})
+    assert result.get("wan_path") == "natpmp"
+    assert seen == ["10.0.0.1", "192.168.1.1"]
+    assert "https://203.0.113.50:4781" in result["endpoints"]
+    assert "https://198.51.100.8:4781" not in result["endpoints"]
+    assert router.deleted == [(4781, "TCP")]
+
+
+@pytest.mark.asyncio
+async def test_natpmp_skips_inner_mapping_and_uses_next_gateway(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.0.0.8", "192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: "203.0.113.50")
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["10.0.0.1", "192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "10.0.0.1")
+    seen: list[str] = []
+
+    def fake_natpmp(gw, lan):
+        del lan
+        seen.append(gw)
+        return "198.51.100.9" if gw == "10.0.0.1" else "203.0.113.50"
+
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", fake_natpmp)
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    result = await FakeConnection().configure(True, True, {"wan_method": "auto"})
+    assert result.get("wan_path") == "natpmp"
+    assert seen == ["10.0.0.1", "192.168.1.1"]
+    assert "https://203.0.113.50:4781" in result["endpoints"]
+    assert "https://198.51.100.9:4781" not in result["endpoints"]
     from app.mobile import connectivity, store
     from tests.test_mobile_connectivity import FakeConnection
 
