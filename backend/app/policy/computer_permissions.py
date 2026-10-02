@@ -27,6 +27,7 @@ PROMPT_OPTIONS = ("allow_once", "allow_session", "always", "deny")
 
 COMPUTER_TOOLS = frozenset({"desktop", "apps", "ufo", "cua", "reflex_computer_use"})
 INTERNET_TOOLS = frozenset({"browser", "browser_use", "web_fetch", "external_ingest"})
+SHELL_NETWORK_TOOLS = frozenset({"python", "terminal", "open_interpreter"})
 RDP_MARKERS = ("rdp", "mstsc", "remote desktop", "xfreerdp")
 NODE_KEYS = ("node_id", "hostname", "worker_node", "target_node", "rdp_host")
 
@@ -38,6 +39,17 @@ _PRIVATE_NETS = (
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
+)
+
+_OUTBOUND_RE = re.compile(
+    r"https?://|"
+    r"\b(?:curl|wget|invoke-webrequest|invoke-restmethod)\b|"
+    r"\b(?:iwr|irm)\b|"
+    r"\burllib(?:\.request)?\b|\bhttpx\b|\brequests\b|\baiohttp\b|"
+    r"\bpip(?:3)?\s+install\b|"
+    r"\bnpm\s+(?:i|install)\b|"
+    r"\bgit\s+clone\b",
+    re.I,
 )
 
 @dataclass(frozen=True)
@@ -397,16 +409,21 @@ def _host_is_local(value: str) -> bool:
 def looks_local_network(arguments: dict[str, Any] | None) -> bool:
     if not arguments:
         return False
+    args = arguments
     for key in ("url", "uri", "host", "hostname", "address", "target"):
-        value = (arguments or {}).get(key)
+        value = args.get(key)
         if isinstance(value, str) and _host_is_local(value):
             return True
-    goal = (arguments or {}).get("goal")
-    if isinstance(goal, str) and goal.strip():
-        for match in re.finditer(r"https?://[^\s]+", goal, flags=re.I):
+    texts: list[str] = []
+    for key in ("goal", "command", "code"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            texts.append(value)
+    for text in texts:
+        for match in re.finditer(r"https?://[^\s\"']+", text, flags=re.I):
             if _host_is_local(match.group(0)):
                 return True
-        stripped = re.sub(r"https?://[^\s]+", " ", goal, flags=re.I)
+        stripped = re.sub(r"https?://[^\s\"']+", " ", text, flags=re.I)
         for token in re.findall(
             r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[A-Za-z0-9._-]+\.(?:local|lan|home\.arpa)\b",
             stripped,
@@ -415,6 +432,14 @@ def looks_local_network(arguments: dict[str, Any] | None) -> bool:
             if _host_is_local(token):
                 return True
     return False
+
+
+def looks_outbound_network(arguments: dict[str, Any] | None) -> bool:
+    args = arguments or {}
+    if str(args.get("action") or "").strip().lower() == "install":
+        return True
+    blob = _blob(args)
+    return bool(_OUTBOUND_RE.search(blob))
 
 
 def looks_remote_node(arguments: dict[str, Any] | None) -> bool:
@@ -444,6 +469,8 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
         else:
             pending.append("computer.this_device")
     if name in INTERNET_TOOLS:
+        pending.append("network.local" if looks_local_network(arguments) else "network.internet")
+    if name in SHELL_NETWORK_TOOLS and looks_outbound_network(arguments):
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
     if any(
         isinstance((arguments or {}).get(key), str)
@@ -507,6 +534,13 @@ def evaluate_tool_permissions(tool_name: str, arguments: dict[str, Any] | None =
         pending=[],
         decisions=decisions,
     )
+
+
+def tool_permission_error(tool_name: str, arguments: dict[str, Any] | None = None) -> str | None:
+    decision = evaluate_tool_permissions(tool_name, arguments)
+    if decision.status == "allow":
+        return None
+    return decision.reason or "Permission required before using the network."
 
 
 _SPOKEN_ASKS: dict[str, str] = {

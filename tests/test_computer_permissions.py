@@ -68,6 +68,19 @@ def test_computer_permissions_browser_use_local_network(permission_store):
     assert permission_ids_for_tool("browser", {"url": "http://nas.local"}) == ["network.local"]
     assert permission_ids_for_tool("external_ingest", {"url": "https://example.com"}) == ["network.internet"]
     assert permission_ids_for_tool("external_ingest", {"url": "http://192.168.1.10/share"}) == ["network.local"]
+    assert permission_ids_for_tool("python", {"action": "run_code", "code": "print(1)"}) == []
+    assert permission_ids_for_tool(
+        "python",
+        {"action": "run_code", "code": "import urllib.request; urllib.request.urlopen('https://example.com')"},
+    ) == ["network.internet"]
+    assert permission_ids_for_tool("python", {"action": "install", "packages": ["httpx"]}) == ["network.internet"]
+    assert permission_ids_for_tool("terminal", {"command": "echo hi"}) == []
+    assert permission_ids_for_tool("terminal", {"command": "curl https://example.com"}) == ["network.internet"]
+    assert permission_ids_for_tool("terminal", {"command": "curl http://192.168.1.10/status"}) == ["network.local"]
+    assert permission_ids_for_tool(
+        "open_interpreter",
+        {"action": "delegate", "goal": "fetch https://example.com"},
+    ) == ["network.internet"]
 
 
 def test_allow_once_is_consumed_after_use(permission_store):

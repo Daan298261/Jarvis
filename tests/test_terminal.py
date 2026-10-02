@@ -81,3 +81,41 @@ def test_linux_default_shell_is_not_powershell():
         assert default_shell() == "powershell"
     else:
         assert default_shell() in {"bash", "python"}
+
+
+async def test_terminal_curl_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+
+    async def _boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("curl must not run when internet is denied")
+
+    monkeypatch.setattr("app.tools.terminal.TerminalTool._run", _boom)
+    tool = TerminalTool()
+    result = await tool.execute(command="curl https://example.com", shell="bash")
+    assert result.success is False
+    assert ran["n"] == 0
+    assert "internet" in (result.error or "").lower() or "permission" in (result.error or "").lower() or "don't allow" in (result.error or "").lower()
+
+
+async def test_python_urllib_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    tool = PythonTool()
+    result = await tool.execute(
+        action="run_code",
+        code="import urllib.request; urllib.request.urlopen('https://example.com')",
+    )
+    assert result.success is False
+    assert "internet" in (result.error or "").lower() or "permission" in (result.error or "").lower() or "don't allow" in (result.error or "").lower()
+    local = await tool.execute(action="run_code", code="print(1)")
+    assert local.success is True
+    assert "1" in local.output

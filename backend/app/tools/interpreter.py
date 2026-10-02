@@ -38,6 +38,11 @@ class OpenInterpreterTool(Tool):
             return ToolResult(True, probe["detail"], data=probe)
         if action != "delegate":
             return ToolResult(False, "", error=f"Unknown action {action}")
+        from ..policy.computer_permissions import tool_permission_error
+
+        denied = tool_permission_error("open_interpreter", kwargs)
+        if denied:
+            return ToolResult(False, "", error=denied)
         goal = kwargs.get("goal")
         if not goal:
             return ToolResult(False, "", error="goal is required")

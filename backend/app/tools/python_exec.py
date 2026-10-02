@@ -122,6 +122,11 @@ class PythonTool(Tool):
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         kwargs = normalize_python_call(kwargs)
+        from ..policy.computer_permissions import tool_permission_error
+
+        denied = tool_permission_error("python", kwargs)
+        if denied:
+            return ToolResult(False, "", error=denied)
         action = kwargs.get("action")
         cwd = kwargs.get("working_directory")
         timeout = int(kwargs.get("timeout_seconds") or 120)

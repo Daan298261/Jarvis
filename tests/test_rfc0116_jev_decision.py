@@ -91,6 +91,26 @@ def test_local_default_never_opens_typesafe(jev_env):
     assert probe_jev()["probed"] is False
 
 
+def test_jev_honors_internet_deny(jev_env, monkeypatch):
+    from app.decision.jev_client import JevHttpError, post_systemone
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: jev_env["tmp"])
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    calls: list[str] = []
+
+    def spy(url, headers, body, timeout):
+        calls.append(url)
+        return 200, {"answers": {"ready": {"type": "noul", "noul": 1}}}, ""
+
+    set_http_post(spy, fixture=True)
+    with pytest.raises(JevHttpError) as exc:
+        post_systemone(api_key="k", state={"probe": True}, questions={"ready": {"type": "noul", "question": "ready?"}})
+    assert exc.value.status_code == 403
+    assert calls == []
+
+
 def test_waitlist_notify_is_not_connected(jev_env):
     stamp = set_notify_requested()
     status = resolve_status()

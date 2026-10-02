@@ -218,6 +218,11 @@ class TerminalTool(Tool):
         command = kwargs.get("command") or ""
         if not command.strip():
             return ToolResult(False, "", error="command is required for run/start")
+        from ..policy.computer_permissions import tool_permission_error
+
+        denied = tool_permission_error("terminal", kwargs)
+        if denied:
+            return ToolResult(False, "", error=denied)
         shell = adapt_shell(command, (kwargs.get("shell") or default_shell()).lower())
         cwd = kwargs.get("working_directory") or os.getcwd()
         timeout = int(kwargs.get("timeout_seconds") or 120)
