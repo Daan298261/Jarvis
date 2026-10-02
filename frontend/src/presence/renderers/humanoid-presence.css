@@ -67,6 +67,52 @@
   pointer-events: none;
 }
 
+.jarvis-presence-particle canvas {
+  opacity: 1;
+}
+
+.jarvis-mythic-avatar-shell {
+  --mythic-primary: #67dcff;
+  --mythic-accent: #d4a017;
+  position: absolute;
+  inset: 5% 10% 9%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  animation: mythic-avatar-arrive 340ms cubic-bezier(.2, .82, .25, 1) both;
+}
+
+.jarvis-mythic-avatar-shell::before {
+  content: "";
+  position: absolute;
+  width: min(58dvh, 46vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--mythic-primary) 28%, transparent), transparent 62%),
+    conic-gradient(from 180deg, transparent, color-mix(in srgb, var(--mythic-accent) 15%, transparent), transparent 28%);
+  filter: blur(18px);
+  opacity: 0.75;
+}
+
+.jarvis-mythic-avatar-shell img {
+  position: relative;
+  width: min(58dvh, 46vw);
+  height: min(58dvh, 46vw);
+  max-width: 760px;
+  max-height: 760px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 0 16px color-mix(in srgb, var(--mythic-primary) 62%, transparent))
+    drop-shadow(0 0 38px color-mix(in srgb, var(--mythic-accent) 24%, transparent));
+}
+
+@keyframes mythic-avatar-arrive {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); filter: blur(7px); }
+  to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+}
+
 /* Faint TEM-style chrome — decorative only, does not compete with chat. */
 .jarvis-humanoid-hud {
   position: absolute;

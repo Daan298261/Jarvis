@@ -112,8 +112,8 @@ PROFILES: dict[str, ModelProfile] = {
         top_p=0.8,
         top_k=20,
         presence_penalty=0.0,
-        description="9B Abliterated Q6_K, thinking off, 8K context. Maximum responsiveness.",
-        fallbacks=("bootstrap", "quality", "expert"),
+        description="Default 9B Q6_K worker, thinking off, 8K context. Low-latency everyday commands.",
+        fallbacks=("bootstrap",),
     ),
     "balanced": ModelProfile(
         name="balanced",
@@ -405,7 +405,7 @@ def resolve_profile(name: str) -> ModelProfile:
         return _with_alt_weights(profile, bootstrap)
 
     expert = PROFILES["expert"]
-    if key in {"fast", "balanced", "quality"} and profile_gguf(expert).exists():
+    if key in {"balanced", "quality"} and profile_gguf(expert).exists():
         return _with_alt_weights(profile, expert)
     if key == "expert" and not profile_gguf(expert).exists():
         return PROFILES["balanced"]
@@ -434,7 +434,11 @@ def preferred_startup_profile(requested: str | None = None) -> str:
     """Everyday autoload: Qwen3.8-9B uncensored when installed (RFC-0078)."""
     from .qwen38_local import should_prefer_qwen38_default
 
-    name = (requested or "balanced").strip().lower() or "balanced"
+    name = (requested or "fast").strip().lower() or "fast"
+    # Fast is an explicit 9B Q6 choice, not an alias for whichever model was
+    # discovered last. Never silently promote it to a larger/slower model.
+    if name == "fast":
+        return name
     if should_prefer_qwen38_default(name) and qwen38_9b_profile() is not None:
         return "qwen38_9b"
     return name

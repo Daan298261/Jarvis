@@ -25,7 +25,7 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
       await updatePresentation(patch)
       setMessage(note)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save presentation settings.")
+      setMessage(error instanceof Error ? error.message : "Appearance changed locally; the saved setting could not be confirmed.")
     } finally {
       setBusy(false)
     }
@@ -99,11 +99,11 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "particle_bust" },
-              "Particle bust active. Jarvis will fall back to Neural if WebGL is unavailable.",
+              "Live mythic persona figure active. Persona selections morph immediately on the shared particle stage.",
             )
           }
         >
-          Particle bust · experimental
+          Mythic persona · live
         </button>
         <button
           type="button"

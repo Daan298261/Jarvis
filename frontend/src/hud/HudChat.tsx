@@ -25,6 +25,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const navigate = useNavigate()
   const [prompt, setPrompt] = useState("")
   const [task, setTask] = useState<Task | null>(null)
+  const [loadError, setLoadError] = useState(false)
   const [pending, setPending] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [showSetupProblem, setShowSetupProblem] = useState(false)
@@ -60,25 +61,37 @@ export function HudChat({ onMoodChange }: HudChatProps) {
       return
     }
     let timer: number
+    let cancelled = false
+    let inFlight = false
+    let request: AbortController | undefined
+    setLoadError(false)
     const load = async () => {
+      if (cancelled || inFlight) return
+      inFlight = true
+      request = new AbortController()
+      const timeout = window.setTimeout(() => request?.abort(), 10000)
       try {
-        const data = await api<Task>(`/api/tasks/${id}`)
+        const data = await api<Task>(`/api/tasks/${id}`, { signal: request.signal })
+        if (cancelled) return
         setTask(data)
+        setLoadError(false)
       } catch (err: unknown) {
+        if (cancelled) return
+        setLoadError(true)
         const message = err instanceof Error ? err.message : String(err)
         if (isAuthFailureMessage(message)) {
           setShowSetupProblem(true)
           const recovered = await ensureDesktopSession()
           if (recovered) {
             setShowSetupProblem(false)
-            api<Task>(`/api/tasks/${id}`).then(setTask).catch(() => undefined)
+            // The next poll retries after session recovery.
           }
         }
-      }
+      } finally { window.clearTimeout(timeout); inFlight = false }
     }
     load()
     timer = window.setInterval(() => load().catch(() => undefined), 400)
-    return () => clearInterval(timer)
+    return () => { cancelled = true; request?.abort(); clearInterval(timer) }
   }, [id])
 
   useEffect(() => {
@@ -177,7 +190,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
 
       {showThread && (
         <div className="hud-thread" ref={threadRef} aria-live="polite">
-          {!shown && <p className="hud-thread-empty">Loading task…</p>}
+          {!shown && <p className="hud-thread-empty" role="status">{loadError ? "Task could not be loaded. Reconnecting…" : "Loading task…"}</p>}
           {shown && (
             <OwnerChatTranscript
               key={shown.id}

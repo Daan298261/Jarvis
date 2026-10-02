@@ -28,9 +28,9 @@ from .planning import (
 
 RUNTIME_ROLE = "front_responder"
 ANSWER_TIER = 1
-FRONT_MAX_TOKENS_MIN = 128
-FRONT_MAX_TOKENS_MAX = 1024
-FRONT_MAX_TOKENS_DEFAULT = 512
+FRONT_MAX_TOKENS_MIN = 96
+FRONT_MAX_TOKENS_MAX = 160
+FRONT_MAX_TOKENS_DEFAULT = 128
 FRONT_USER_TEXT_SOFT_LIMIT = 1600
 DEEPER_RESULT_LABEL = "Deeper result"
 
@@ -544,13 +544,13 @@ async def generate_front_reply(
     timeout_s = cfg.timeout_ms / 1000.0
     deadline = time.perf_counter() + timeout_s
     try:
-        async for delta in _iter_chat_stream(
+        async for delta in _deadline_stream(_iter_chat_stream(
             chat,
             messages,
             temperature=cfg.temperature,
             max_tokens=cfg.max_tokens,
             thinking=False,
-        ):
+        ), timeout_s):
             if time.perf_counter() > deadline:
                 break
             if not delta:
@@ -850,6 +850,16 @@ def _distinct_front_model(settings: AppSettings, front_model: str) -> bool:
         return False
     loaded = str(getattr(MANAGER.provider, "model", "") or "").strip()
     return bool(front_model and loaded and front_model != loaded)
+
+
+async def _deadline_stream(stream: AsyncIterator[str], timeout_s: float) -> AsyncIterator[str]:
+    """Bound even a provider that never yields its first token."""
+    try:
+        async with asyncio.timeout(timeout_s):
+            async for delta in stream:
+                yield delta
+    finally:
+        await stream.aclose()
 
 
 async def _iter_chat_stream(provider: Any, messages: list[ChatMessage], **kwargs: Any) -> AsyncIterator[str]:

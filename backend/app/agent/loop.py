@@ -344,7 +344,9 @@ class AgentRuntime:
                     return existing
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
-        route = route_request(prompt)
+        from .request_routing import evaluate_request_route
+
+        route = await evaluate_request_route(prompt, route_request(prompt))
         task_class = route.task_class
         if security_role == "blue-team" and route.kind != "managed_task":
             task_class = classify_task(prompt)
@@ -1383,7 +1385,9 @@ class AgentRuntime:
             if spill:
                 active_prompt = f"{gate_text[:1200]}\n\n{spill}"
         metrics = LiveTaskMetrics()
-        follow_route = route_request(extra_prompt or prompt) if extra_prompt else None
+        from .request_routing import evaluate_request_route
+
+        follow_route = await evaluate_request_route(extra_prompt, route_request(extra_prompt)) if extra_prompt else None
         if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
             if follow_up_stays_conversation(extra_prompt, security_role=working.security_role):
                 working.task_class = CONVERSATION_CLASS

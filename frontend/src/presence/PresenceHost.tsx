@@ -1,11 +1,10 @@
-import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react"
+import { Component, type ErrorInfo, type ReactNode } from "react"
 import { NeuralPresence } from "./renderers/NeuralPresence"
+import HumanoidPresence from "./renderers/HumanoidPresence"
+import ParticleBustPresence from "./renderers/ParticleBustPresence"
 import { supportsHumanoidRuntime } from "./renderers/humanoidRuntime"
 import { PresenceFallback } from "./PresenceFallback"
 import type { EffectivePresence, PersonaCloudVisual, PresenceMode, PresenceSnapshot, PresentationSettings } from "./presenceTypes"
-
-const HumanoidPresence = lazy(() => import("./renderers/HumanoidPresence"))
-const ParticleBustPresence = lazy(() => import("./renderers/ParticleBustPresence"))
 
 function webglPresence(mode: PresenceMode): boolean {
   return mode === "humanoid" || mode === "particle_bust" || mode === "galaxy"
@@ -26,7 +25,7 @@ export function resolvePresence(settings: PresentationSettings): EffectivePresen
 }
 
 function fallbackPresenceName(mode: PresenceMode): string {
-  if (mode === "particle_bust") return "Particle bust"
+  if (mode === "particle_bust") return "Mythic persona"
   if (mode === "galaxy") return "Galaxy"
   return "Humanoid"
 }
@@ -90,22 +89,18 @@ export function PresenceHost({ snapshot, settings, size = 540, shapeId, personaV
       {resolved.effective === "neural" && neuralFallback}
       {(resolved.effective === "humanoid" || resolved.effective === "galaxy") && (
         <PresenceErrorBoundary key="humanoid" fallback={neuralFallback}>
-          <Suspense fallback={neuralFallback}>
-            <HumanoidPresence snapshot={snapshot} settings={settings} size={size} shapeId={shapeId} personaVisual={personaVisual} />
-          </Suspense>
+          <HumanoidPresence snapshot={snapshot} settings={settings} size={size} shapeId={shapeId} personaVisual={personaVisual} />
         </PresenceErrorBoundary>
       )}
       {resolved.effective === "particle_bust" && (
         <PresenceErrorBoundary key="particle-bust" fallback={neuralFallback}>
-          <Suspense fallback={neuralFallback}>
-            <ParticleBustPresence
-              snapshot={snapshot}
-              settings={settings}
-              size={size}
-              shapeId={shapeId}
-              personaVisual={personaVisual}
-            />
-          </Suspense>
+          <ParticleBustPresence
+            snapshot={snapshot}
+            settings={settings}
+            size={size}
+            shapeId={shapeId}
+            personaVisual={personaVisual}
+          />
         </PresenceErrorBoundary>
       )}
       {resolved.fallbackReason && (

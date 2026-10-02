@@ -174,7 +174,15 @@ async def stream_owner_chat(
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
 
-    if requests_agent_tools(cleaned):
+    from ..agent.planning import route_request, simple_app_control, simple_file_control
+    from ..agent.request_routing import evaluate_request_route
+    from .session_personality import detect_mode_from_text
+
+    intake_route = await evaluate_request_route(cleaned, route_request(cleaned))
+    if requests_agent_tools(cleaned) or simple_app_control(cleaned) or simple_file_control(cleaned) or (
+        intake_route.kind == "managed_task" and intake_route.task_class != "conversation"
+        and not detect_mode_from_text(cleaned)
+    ):
         from ..agent.loop import AGENT
 
         try:

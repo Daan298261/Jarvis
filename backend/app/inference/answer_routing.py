@@ -35,7 +35,7 @@ def select_runtime_for_decision(
             return current_profile
     preferred: tuple[str, ...] = ()
     if minimum <= 2:
-        preferred = ("balanced", "fast", "qwen38_9b")
+        preferred = ("fast", "balanced", "qwen38_9b")
     elif minimum == 3:
         preferred = ("quality", "balanced")
     else:

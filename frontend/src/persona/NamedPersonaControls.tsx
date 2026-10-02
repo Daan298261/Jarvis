@@ -53,7 +53,7 @@ export function NamedPersonaControls() {
     setProgress("")
     try {
       await activateNamedPersona(id, { onProgress: setProgress })
-      setVoiceCatalog(await loadVoiceProfileCatalog())
+      void loadVoiceProfileCatalog().then(setVoiceCatalog).catch(() => undefined)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update the named persona.")
     } finally {
@@ -123,6 +123,7 @@ export function NamedPersonaControls() {
                 onClick={() => void choose(persona.id)}
               >
                 <SpecialistShapeMark
+                  personaId={persona.id}
                   shapeId={persona.presence_shape_id}
                   color={persona.default_colors.orb}
                   label={`${persona.label} avatar`}
@@ -184,6 +185,12 @@ export function NamedPersonaControls() {
         </button>
       )}
       {progress && <p className="settings-note" role="status">{progress}</p>}
+      {pendingId && !progress && (
+        <p className="named-persona-switch-status" role="status">
+          <span className="named-persona-switch-pulse" aria-hidden="true" />
+          Morphing to {PERSONA_LABELS[pendingId] || pendingId}…
+        </p>
+      )}
       {appearance && active && (
         <div className="named-persona-overrides">
           <label>

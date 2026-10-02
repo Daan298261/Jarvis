@@ -57,7 +57,7 @@ export function PinnedPersonaDock({ disabled = false }: PinnedPersonaDockProps) 
               disabled={disabled || Boolean(busyId)}
               onClick={() => void switchTo(id)}
             >
-              <SpecialistShapeMark shapeId={shapeId} color={color} label={`${label} avatar`} size={28} />
+              <SpecialistShapeMark personaId={id} shapeId={shapeId} color={color} label={`${label} avatar`} size={28} />
               <span>{label}</span>
             </button>
           )
