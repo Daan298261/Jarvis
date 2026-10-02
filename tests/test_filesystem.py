@@ -1,8 +1,11 @@
+import io
 import os
+import tarfile
+import zipfile
 from pathlib import Path
 
 from app.config import LOCAL_NETWORK_SCOPE
-from app.tools.filesystem import FilesystemTool, search_workspace_roots
+from app.tools.filesystem import FilesystemTool, safe_extract_target, search_workspace_roots
 
 
 async def test_filesystem_write_read_hash(tmp_path):
@@ -157,4 +160,84 @@ async def test_search_with_path_stays_in_that_folder(tmp_path):
     assert result.success
     assert "keep.txt" in result.output
     assert "other.txt" not in result.output
+
+
+def test_safe_extract_target_rejects_zip_slip(tmp_path):
+    dest = tmp_path / "out"
+    dest.mkdir()
+    nested = safe_extract_target(dest, "docs/note.txt")
+    assert nested == dest.resolve() / "docs" / "note.txt"
+    try:
+        safe_extract_target(dest, "../escape.txt")
+        raise AssertionError("expected traversal reject")
+    except ValueError as exc:
+        assert "traversal" in str(exc)
+    try:
+        safe_extract_target(dest, "/tmp/evil")
+        raise AssertionError("expected absolute reject")
+    except ValueError as exc:
+        assert "absolute" in str(exc)
+
+
+async def test_extract_zip_onto_extra_drive(tmp_path):
+    extra = tmp_path / "E" / "USB"
+    extra.mkdir(parents=True)
+    archive = extra / "pack.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("docs/note.txt", "hello-usb")
+        zf.writestr("docs/nested/more.txt", "more")
+    dest = extra / "unpacked"
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="extract", path=str(archive), destination=str(dest))
+    assert result.success, result.error
+    assert (dest / "docs" / "note.txt").read_text(encoding="utf-8") == "hello-usb"
+    assert (dest / "docs" / "nested" / "more.txt").read_text(encoding="utf-8") == "more"
+    assert result.data["destination"] == str(dest.resolve())
+    assert len(result.data["files"]) == 2
+
+
+async def test_extract_without_destination_uses_sibling_folder(tmp_path):
+    archive = tmp_path / "photos.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("a.jpg", b"jpeg")
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="extract", path=str(archive))
+    assert result.success, result.error
+    dest = tmp_path / "photos"
+    assert dest.is_dir()
+    assert (dest / "a.jpg").read_bytes() == b"jpeg"
+
+
+async def test_extract_tar_gz_and_zip_slip(tmp_path):
+    extra = tmp_path / "D"
+    extra.mkdir()
+    archive = extra / "bundle.tar.gz"
+    payload = b"tar-body"
+    with tarfile.open(archive, "w:gz") as tf:
+        info = tarfile.TarInfo("readme.txt")
+        info.size = len(payload)
+        tf.addfile(info, io.BytesIO(payload))
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    unpacked = await tool.execute(action="extract", path=str(archive), destination=str(extra / "from-tar"))
+    assert unpacked.success, unpacked.error
+    assert (extra / "from-tar" / "readme.txt").read_bytes() == payload
+
+    evil = extra / "evil.zip"
+    with zipfile.ZipFile(evil, "w") as zf:
+        zf.writestr("../escape.txt", "nope")
+    slipped = await tool.execute(action="extract", path=str(evil), destination=str(extra / "safe"))
+    assert slipped.success is False
+    assert "traversal" in (slipped.error or "")
+    assert not (tmp_path / "escape.txt").exists()
+    assert not (extra / "escape.txt").exists()
+
+
+async def test_extract_refuses_outside_workspace(tmp_path):
+    archive = tmp_path / "pack.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("a.txt", "x")
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="extract", path=str(archive), destination="/tmp")
+    assert result.success is False
+    assert "outside allowed directories" in (result.error or "")
 

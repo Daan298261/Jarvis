@@ -11,7 +11,7 @@ from typing import Any
 from .coding_workers import is_software_task, start_coding_task
 from .worktrees import WorktreeError, get_coding_task, update_coding_task
 
-_EDIT_ACTIONS = frozenset({"write", "edit", "copy", "move", "rename", "delete"})
+_EDIT_ACTIONS = frozenset({"write", "edit", "copy", "move", "rename", "delete", "extract"})
 _EDIT_TOOLS = frozenset({"filesystem", "git", "code_worker"})
 _RUN_TOOLS = frozenset({"terminal", "python", "code_worker"})
 _VERIFY_TOOLS = frozenset({"verify_code"})
