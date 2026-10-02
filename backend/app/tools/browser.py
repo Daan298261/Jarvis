@@ -35,6 +35,16 @@ _NAMED_ROLES = ("button", "link", "tab", "menuitem", "checkbox", "radio")
 _GOTO_RETRIES = 3
 
 
+def browser_permission_url(action: str, kwargs: dict[str, Any] | None, current_url: str = "") -> str:
+    """Use the open URL for follow-on actions so LAN pages stay network.local."""
+    supplied = str((kwargs or {}).get("url") or "").strip()
+    if supplied:
+        return supplied
+    if action != "open":
+        return str(current_url or "").strip()
+    return ""
+
+
 def _browser_error(exc: BaseException) -> str:
     if isinstance(exc, ModuleNotFoundError):
         return "Playwright is not installed on this PC, so I cannot open a browser."
@@ -194,7 +204,16 @@ class BrowserTool(Tool):
 
         from ..policy.computer_permissions import evaluate_tool_permissions
 
-        gate = evaluate_tool_permissions("browser", {"url": kwargs.get("url") or "", "action": action})
+        current = ""
+        try:
+            if _page is not None:
+                current = str(getattr(_page, "url", "") or "")
+        except Exception:
+            current = ""
+        gate = evaluate_tool_permissions(
+            "browser",
+            {"url": browser_permission_url(action, kwargs, current), "action": action},
+        )
         if gate.status == "deny":
             return ToolResult(False, "", error=gate.reason)
         if gate.status == "ask":

@@ -72,3 +72,18 @@ def test_local_network_default_is_allowed_but_explicit_deny_wins(tmp_path, monke
     apply_grant("network.local", "deny")
     assert evaluate_permission("network.local").status == "deny"
     assert evaluate_tool_permissions("filesystem", {"path": r"\\nas.local\share\x"}).status == "deny"
+
+
+def test_browser_follow_on_actions_keep_local_network_permission():
+    from app.tools.browser import browser_permission_url
+
+    assert browser_permission_url("open", {"url": "http://nas.local/status"}) == "http://nas.local/status"
+    assert browser_permission_url("snapshot", {}, "http://nas.local/status") == "http://nas.local/status"
+    assert permission_ids_for_tool(
+        "browser",
+        {"url": browser_permission_url("snapshot", {}, "http://nas.local/status"), "action": "snapshot"},
+    ) == ["network.local"]
+    assert permission_ids_for_tool(
+        "browser",
+        {"url": browser_permission_url("snapshot", {}, "https://example.com/"), "action": "snapshot"},
+    ) == ["network.internet"]
