@@ -446,7 +446,11 @@ class LlamaCppBackend(InferenceBackend):
             self.last_probe = {
                 "ok": True,
                 "health_path": "/health",
-                "models": ["Qwen3.5-27B"],
+                # The managed server is launched with --alias profile.alias.
+                # Reporting a hardcoded 27B alias made successful 9B hotswaps
+                # look unchanged in the HUD and routed requests under the
+                # wrong model id.
+                "models": [profile.alias],
                 "n_ctx": ctx,
             }
         return ready

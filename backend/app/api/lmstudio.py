@@ -3,14 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ..config import load_settings
 from ..inference.default_candidates import (
     PERSONALITY_PRESETS,
     RECOMMENDED_16GB_STACK,
     TTS_CANDIDATES,
     list_model_candidates,
 )
-from ..inference.hotswap import activate_runtime_profile
+from ..inference.hotswap import activate_runtime_profile, runtime_activation_snapshot
 from ..inference.lmstudio_catalog import (
     AXIS_KEYS,
     build_catalog,
@@ -19,8 +18,6 @@ from ..inference.lmstudio_catalog import (
     set_profile_override,
     set_profile_pin,
 )
-from ..inference.manager import MANAGER
-
 router = APIRouter(prefix="/api/lmstudio", tags=["lmstudio"])
 
 
@@ -103,11 +100,8 @@ async def select_profile(profile_id: str):
         raise HTTPException(status_code=404, detail=str(exc)[:500]) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:500]) from exc
-    settings = load_settings()
     payload = profile.as_dict()
-    from ..inference.status_monitor import STATUS_MONITOR
-
-    payload["load"] = await STATUS_MONITOR.get_snapshot(settings, force_refresh=True)
+    payload["load"] = runtime_activation_snapshot()
     return payload
 
 
