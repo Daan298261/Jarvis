@@ -502,3 +502,36 @@ def test_skill_pack_start_fails_closed(jarvis_env, monkeypatch, tmp_path):
         "/api/modules/catalog/cybersecurity/tools/anthropic-cybersecurity-skills/start"
     )
     assert response.status_code == 400
+
+
+def test_dest_extra_uses_usb_jarvis_projects(tmp_path, monkeypatch):
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+    root = catalog_download._dest_root("extra")
+    assert root == extra / "Jarvis" / "projects"
+    assert root.is_dir()
+
+
+def test_dest_path_clones_into_allowed_usb_folder(tmp_path, monkeypatch):
+    extra = tmp_path / "USB" / "tools"
+    extra.mkdir(parents=True)
+    monkeypatch.setattr(
+        "app.config.live_allowed_directories",
+        lambda existing=None: [str(tmp_path)],
+    )
+    root = catalog_download._dest_root("library", dest_path=str(extra))
+    assert root.resolve() == extra.resolve()
+
+
+def test_dest_path_outside_workspace_is_refused(tmp_path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    allowed = tmp_path / "inside"
+    allowed.mkdir()
+    monkeypatch.setattr(
+        "app.config.live_allowed_directories",
+        lambda existing=None: [str(allowed)],
+    )
+    with pytest.raises(PermissionError):
+        catalog_download._dest_root("library", dest_path=str(outside))

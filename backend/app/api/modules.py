@@ -39,7 +39,8 @@ class EnableBody(BaseModel):
 
 class DownloadBody(BaseModel):
     mode: Literal["clone", "zip"] = "clone"
-    dest: Literal["desktop_projects", "library"] = "library"
+    dest: Literal["desktop_projects", "library", "documents_projects", "extra"] = "library"
+    dest_path: str = Field(default="", max_length=1024)
 
 
 @router.get("/catalog")
@@ -144,6 +145,7 @@ async def download_catalog_entry(entry_id: str, body: DownloadBody) -> dict[str,
             entry_id,
             mode=body.mode,
             dest=body.dest,
+            dest_path=body.dest_path,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

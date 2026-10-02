@@ -5106,7 +5106,11 @@ export async function setCybersecurityToolEnabled(
 
 export async function downloadModuleCatalogEntry(
   entryId: string,
-  options?: { mode?: "clone" | "zip"; dest?: "desktop_projects" | "library" },
+  options?: {
+    mode?: "clone" | "zip"
+    dest?: "desktop_projects" | "library" | "documents_projects" | "extra"
+    dest_path?: string
+  },
 ): Promise<CybersecurityActionResult> {
   const result = await fetchCybersecurityJson<{ job_id?: string; detail?: string; message?: string }>(
     `/api/modules/catalog/${encodeURIComponent(entryId)}/download`,
@@ -5115,6 +5119,7 @@ export async function downloadModuleCatalogEntry(
       body: JSON.stringify({
         mode: options?.mode ?? "clone",
         dest: options?.dest ?? "library",
+        dest_path: options?.dest_path ?? "",
       }),
     },
   )
