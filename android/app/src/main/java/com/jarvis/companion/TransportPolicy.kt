@@ -23,6 +23,12 @@ object TransportPolicy {
         return distinct.sortedWith(compareBy({ reachabilityRank(it) }, { it }))
     }
 
+    fun dialOrder(recent: String?, candidates: Iterable<String>): List<String> {
+        val rest = orderedForReachability(candidates + listOfNotNull(recent))
+        val head = recent?.let { runCatching { origin(it) }.getOrNull() }
+        return (listOfNotNull(head) + rest.filter { it != head }).distinct()
+    }
+
     internal fun reachabilityRank(value: String): Int {
         val host = runCatching { URI(value).host?.trim()?.lowercase().orEmpty() }.getOrDefault("")
         if (host.isEmpty()) return 2
