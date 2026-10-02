@@ -176,6 +176,12 @@ def test_default_gateway_parsers_and_openwrt_user_fallback():
         "eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
     )
     assert parse_proc_net_route(cgnat_then_lan) == "192.168.1.1"
+    vpn_then_lan = (
+        "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+        "wg0\t00000000\t0100080A\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"
+        "eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
+    )
+    assert parse_proc_net_route(vpn_then_lan) == "192.168.1.1"
     cgnat_only = (
         "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
         "wwan0\t00000000\t01004064\t0003\t0\t0\t50\t00000000\t0\t0\t0\n"
@@ -190,6 +196,12 @@ def test_default_gateway_parsers_and_openwrt_user_fallback():
         "          0.0.0.0          0.0.0.0      192.168.1.1     192.168.1.12    35\n"
     )
     assert parse_windows_route_print(dual) == "192.168.1.1"
+    vpn_win = (
+        "Network Destination        Netmask          Gateway       Interface  Metric\n"
+        "          0.0.0.0          0.0.0.0         10.8.0.1         10.8.0.2      1\n"
+        "          0.0.0.0          0.0.0.0      192.168.1.1     192.168.1.12    35\n"
+    )
+    assert parse_windows_route_print(vpn_win) == "192.168.1.1"
     with pytest.raises(ValueError):
         parse_windows_route_print(
             "Network Destination        Netmask          Gateway       Interface  Metric\n"
@@ -1096,6 +1108,36 @@ async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     assert "https://203.0.113.8:4781" in result["endpoints"]
     from app.mobile.gateway import identity_covers
     assert identity_covers(connection.identity, ["203.0.113.8", "192.168.1.12"])
+
+
+@pytest.mark.asyncio
+async def test_natpmp_uses_home_router_when_vpn_has_lower_metric(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from app.mobile.wan_forward import parse_windows_route_print
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.8.0.2", "192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    vpn_win = (
+        "Network Destination        Netmask          Gateway       Interface  Metric\n"
+        "          0.0.0.0          0.0.0.0         10.8.0.1         10.8.0.2      1\n"
+        "          0.0.0.0          0.0.0.0      192.168.1.1     192.168.1.12    35\n"
+    )
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: parse_windows_route_print(vpn_win))
+    seen: dict[str, str] = {}
+
+    def fake_natpmp(gw, lan):
+        seen["gw"] = gw
+        seen["lan"] = lan
+        return "203.0.113.8"
+
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", fake_natpmp)
+    result = await FakeConnection().configure(True, True, {"wan_method": "auto"})
+    assert result.get("wan_path") == "natpmp"
+    assert seen == {"gw": "192.168.1.1", "lan": "192.168.1.12"}
+    assert "https://192.168.1.12:4781" in result["endpoints"]
+    assert "https://10.8.0.2:4781" in result["endpoints"]
 
 
 @pytest.mark.asyncio

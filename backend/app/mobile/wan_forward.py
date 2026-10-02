@@ -275,7 +275,8 @@ def ssh_executable() -> str:
 
 
 def parse_proc_net_route(text: str) -> str:
-    """First RFC1918 IPv4 default gateway from /proc/net/route (skips CGNAT)."""
+    """Home-LAN RFC1918 default gateway from /proc/net/route (skips CGNAT and VPN steal-default)."""
+    found: list[tuple[int, str]] = []
     lines = (text or "").splitlines()
     for line in lines[1:]:
         parts = line.split()
@@ -283,12 +284,20 @@ def parse_proc_net_route(text: str) -> str:
             continue
         raw = int(parts[2], 16)
         address = ipaddress.IPv4Address(raw.to_bytes(4, "little"))
-        if is_rfc1918_ipv4(str(address)):
-            return str(address)
-    raise ValueError("No private default gateway")
+        if not is_rfc1918_ipv4(str(address)):
+            continue
+        metric = 0
+        if len(parts) > 6:
+            try:
+                metric = int(parts[6], 0)
+            except ValueError:
+                metric = 0
+        found.append((metric, str(address)))
+    return _home_lan_default_gateway(found)
 
 
 def parse_windows_route_print(text: str) -> str:
+    found: list[tuple[int, str]] = []
     for line in (text or "").splitlines():
         parts = line.split()
         if len(parts) < 3:
@@ -299,13 +308,27 @@ def parse_windows_route_print(text: str) -> str:
             address = ipaddress.ip_address(parts[2])
         except ValueError:
             continue
-        if address.version == 4 and is_rfc1918_ipv4(str(address)):
-            return str(address)
-    raise ValueError("No private default gateway")
+        if address.version != 4 or not is_rfc1918_ipv4(str(address)):
+            continue
+        metric = 0
+        if len(parts) >= 5:
+            try:
+                metric = int(parts[-1])
+            except ValueError:
+                metric = 0
+        found.append((metric, str(address)))
+    return _home_lan_default_gateway(found)
+
+
+def _home_lan_default_gateway(candidates: list[tuple[int, str]]) -> str:
+    """Pick the on-link home router, not a VPN that stole 0.0.0.0 with metric 0–1."""
+    if not candidates:
+        raise ValueError("No private default gateway")
+    return max(candidates, key=lambda item: (item[0], item[1]))[1]
 
 
 def default_gateway_ipv4() -> str:
-    """LAN router this PC already uses — used when the owner leaves gateway host blank."""
+    """Home LAN router — not a VPN that stole the default route with a lower metric."""
     if os.name == "nt":
         import subprocess
 
