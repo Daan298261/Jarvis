@@ -353,15 +353,15 @@ class MCPRuntime:
         name = spec.get("remote_name") or spec["tool"]["name"]
         args = dict(arguments or {})
         from ..security.hexstrike_defensive import (
-            bind_hexstrike_nmap_payload,
+            bind_hexstrike_lan_payload,
             looks_like_nmap_tool,
             lan_inventory_uses_host_nmap,
             nmap_target_from_payload,
             _host_nmap_lan_scan,
         )
 
+        args = bind_hexstrike_lan_payload(str(tool_key or name), args)
         if looks_like_nmap_tool(tool_key) or looks_like_nmap_tool(str(name)):
-            args = bind_hexstrike_nmap_payload(args)
             target = nmap_target_from_payload(args)
             if lan_inventory_uses_host_nmap(target):
                 data = await _host_nmap_lan_scan({**args, "target": target})

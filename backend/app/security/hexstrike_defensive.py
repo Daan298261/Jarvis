@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from ..config import data_dir, live_allowed_directories, load_settings
 from .hexstrike import HEXSTRIKE, audit_hexstrike
@@ -400,16 +401,21 @@ def nmap_lan_additional_args(target: str, base: str = "-T3") -> str:
 
 def looks_like_nmap_tool(name: str) -> bool:
     """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_nmap`` or ``http:nmap``."""
+    return hexstrike_tool_stem(name) == "nmap"
+
+
+def hexstrike_tool_stem(name: str) -> str:
+    """Last path/id segment: ``http:nuclei`` / ``api/tools/httpx`` / ``mcp_hexstrike_ai_naabu``."""
     text = str(name or "").strip().lower().replace("-", "_")
     if not text:
-        return False
-    return (
-        text == "nmap"
-        or text.endswith("_nmap")
-        or text.endswith(":nmap")
-        or text.endswith("/nmap")
-        or ".nmap" in text
-    )
+        return ""
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1]
+    if "_" in text:
+        text = text.rsplit("_", 1)[-1]
+    return text
 
 
 def nmap_target_from_payload(payload: dict[str, Any] | None) -> str:
@@ -421,23 +427,112 @@ def nmap_target_from_payload(payload: dict[str, Any] | None) -> str:
     return ""
 
 
-def bind_hexstrike_nmap_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Pin HexStrike operator nmap of an on-link RFC1918 target to that NIC.
+def bindable_lan_host(raw: str) -> str:
+    """Hostname/CIDR HexStrike can bind: URLs and ``host:port`` become the host."""
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        return (urlparse(text).hostname or "").strip()
+    if text.startswith("[") and "]" in text:
+        return text[1 : text.index("]")]
+    if "/" in text:
+        return text
+    if text.count(":") == 1:
+        host, port = text.rsplit(":", 1)
+        if port.isdigit():
+            return host
+    return text
 
-    Defensive lan_inventory already binds. The operator catalog ``http:nmap`` path
-    posted the caller's additional_args unchanged, so a VPN default route would
-    scan the tunnel instead of the owner's LAN.
+
+def lan_bind_target(payload: dict[str, Any] | None) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    raw = nmap_target_from_payload(row)
+    if not raw:
+        for key in ("url", "uri", "endpoint"):
+            text = str(row.get(key) or "").strip()
+            if text:
+                raw = text
+                break
+    if not raw:
+        urls = row.get("urls")
+        if isinstance(urls, str) and urls.strip():
+            raw = urls.strip()
+        elif isinstance(urls, list):
+            for item in urls:
+                text = str(item or "").strip()
+                if text:
+                    raw = text
+                    break
+    return bindable_lan_host(raw)
+
+
+def _hexstrike_args_key(payload: dict[str, Any]) -> str:
+    for key in ("additional_args", "extra_args", "args"):
+        if key in payload:
+            return key
+    return "additional_args"
+
+
+def bind_hexstrike_nmap_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Pin HexStrike operator nmap of an on-link RFC1918 target to that NIC."""
+    return bind_hexstrike_lan_payload("nmap", payload)
+
+
+_PD_SOURCE_TOOLS = frozenset({"nuclei", "httpx", "naabu"})
+
+
+def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Pin HexStrike LAN scanners to this PC's on-link RFC1918 NIC.
+
+    nmap uses ``-S``/``-e``. ProjectDiscovery nuclei/httpx/naabu use ``-source-ip``
+    / ``-interface``. masscan uses ``--source-ip``/``-e``. curl uses ``--interface``.
+    Public internet targets are left unchanged. Spaced Windows NIC names omit
+    ``-interface``/``-e`` (HexStrike ``additional_args.split()``).
     """
     bound = dict(payload or {})
-    target = nmap_target_from_payload(bound)
-    if not lan_scan_bind(target)[1]:
+    stem = hexstrike_tool_stem(tool)
+    if stem == "nmap" or looks_like_nmap_tool(tool):
+        target = nmap_target_from_payload(bound)
+        if not lan_scan_bind(target)[1]:
+            return bound
+        existing = str(bound.get("additional_args") or "").strip() or "-T3"
+        tokens = existing.split()
+        if "-S" in tokens:
+            bound["additional_args"] = existing
+            return bound
+        bound["additional_args"] = nmap_lan_additional_args(target, base=existing)
         return bound
-    existing = str(bound.get("additional_args") or "").strip() or "-T3"
+
+    target = lan_bind_target(bound)
+    iface, source = lan_scan_bind(target)
+    if not source:
+        return bound
+    key = _hexstrike_args_key(bound)
+    existing = str(bound.get(key) or "").strip()
     tokens = existing.split()
-    if "-S" in tokens:
-        bound["additional_args"] = existing
+    flags: list[str] = []
+    if stem in _PD_SOURCE_TOOLS:
+        if "-source-ip" in tokens:
+            return bound
+        flags.extend(["-source-ip", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-interface" not in tokens:
+            flags.extend(["-interface", iface])
+    elif stem == "masscan":
+        if "--source-ip" in tokens:
+            return bound
+        flags.extend(["--source-ip", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-e" not in tokens:
+            flags.extend(["-e", iface])
+    elif stem == "curl":
+        if "--interface" in tokens or "--local-addr" in tokens:
+            return bound
+        flags.extend(
+            ["--interface", iface if hexstrike_nmap_can_bind_interface(iface) else source]
+        )
+    else:
         return bound
-    bound["additional_args"] = nmap_lan_additional_args(target, base=existing)
+    bound[key] = " ".join([*tokens, *flags]).strip()
     return bound
 
 

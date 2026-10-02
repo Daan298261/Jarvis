@@ -669,6 +669,36 @@ def test_bind_hexstrike_nmap_payload_pins_lan_and_skips_public(monkeypatch):
     assert host_alias["additional_args"] == "-T4 -S 192.168.1.12 -e eth0"
 
 
+def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
+    from app.security.hexstrike_defensive import bind_hexstrike_lan_payload, bindable_lan_host
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    assert bindable_lan_host("http://192.168.1.40:8080/login") == "192.168.1.40"
+    nuclei = bind_hexstrike_lan_payload(
+        "http:nuclei",
+        {"url": "http://192.168.1.40:8080/login", "additional_args": "-t http/"},
+    )
+    assert nuclei["additional_args"] == "-t http/ -source-ip 192.168.1.12 -interface eth0"
+    assert nuclei["url"] == "http://192.168.1.40:8080/login"
+    httpx = bind_hexstrike_lan_payload("mcp_hexstrike_ai_httpx", {"target": "192.168.1.0/24"})
+    assert httpx["additional_args"] == "-source-ip 192.168.1.12 -interface eth0"
+    naabu = bind_hexstrike_lan_payload("api/tools/naabu", {"host": "192.168.50.12", "extra_args": "-p 80"})
+    assert naabu["extra_args"] == "-p 80 -source-ip 192.168.50.8"
+    masscan = bind_hexstrike_lan_payload("masscan", {"target": "192.168.1.0/24"})
+    assert masscan["additional_args"] == "--source-ip 192.168.1.12 -e eth0"
+    curl = bind_hexstrike_lan_payload("curl", {"url": "http://192.168.1.1/"})
+    assert curl["additional_args"] == "--interface eth0"
+    public = bind_hexstrike_lan_payload("nuclei", {"target": "https://example.com", "additional_args": "-t cves/"})
+    assert public["additional_args"] == "-t cves/"
+    gobuster = bind_hexstrike_lan_payload("http:gobuster", {"url": "http://192.168.1.40/", "additional_args": "-w wordlist.txt"})
+    assert gobuster["additional_args"] == "-w wordlist.txt"
+    already = bind_hexstrike_lan_payload(
+        "nuclei",
+        {"target": "192.168.1.40", "additional_args": "-source-ip 192.168.1.12"},
+    )
+    assert already["additional_args"] == "-source-ip 192.168.1.12"
+
+
 def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     from app.security.hexstrike_defensive import looks_like_nmap_tool
 
@@ -738,6 +768,41 @@ async def test_mcp_nmap_call_binds_home_nic(monkeypatch):
         assert result.success, result.error
         assert seen[0]["name"] == "nmap"
         assert seen[0]["arguments"]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_nuclei_call_binds_home_nic(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    seen: list[dict] = []
+
+    class FakeSession:
+        async def call_tool(self, name, arguments):
+            seen.append({"name": name, "arguments": dict(arguments)})
+            return SimpleNamespace(content="ok", is_error=False)
+
+    async def fake_connect(server):
+        return FakeSession()
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nuclei"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nuclei"},
+        "remote_name": "nuclei",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_nuclei",
+            {"url": "http://192.168.1.40/", "additional_args": "-t http/"},
+        )
+        assert result.success, result.error
+        assert seen[0]["name"] == "nuclei"
+        assert seen[0]["arguments"]["additional_args"] == "-t http/ -source-ip 192.168.1.12 -interface eth0"
+        assert seen[0]["arguments"]["url"] == "http://192.168.1.40/"
     finally:
         MCP.reset_for_tests()
 

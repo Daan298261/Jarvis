@@ -202,6 +202,46 @@ async def test_operate_http_nmap_binds_lan_nic(operator_store, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_operate_http_nuclei_binds_lan_nic(operator_store, monkeypatch):
+    from app.security.target_registry import add_target
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=True,
+            install_path=str(operator_store),
+            tools={"nuclei": "ok"},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr("app.security.target_registry.data_dir", lambda: operator_store)
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    add_target(kind="cidr", value="192.168.1.0/24", notes="home")
+    await refresh_discovered_catalog(force=True)
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nuclei"
+        seen.append(payload)
+        return {"pid": 42, "status": "started"}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    job = await operate("http:nuclei", {"url": "http://192.168.1.40:8080/", "additional_args": "-t http/"})
+    assert job["status"] == "succeeded"
+    assert seen[0]["additional_args"] == "-t http/ -source-ip 192.168.1.12 -interface eth0"
+    assert seen[0]["url"] == "http://192.168.1.40:8080/"
+
+
+@pytest.mark.asyncio
 async def test_stop_operator_job_only_stops_tracked_pids(operator_store, monkeypatch):
     async def fake_status(*, enrich=True):
         return SimpleNamespace(
