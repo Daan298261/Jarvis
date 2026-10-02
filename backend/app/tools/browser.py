@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+from pathlib import Path
 from typing import Any
 
-from ..config import AppSettings, load_settings
+from ..config import AppSettings, data_dir, load_settings
 from .base import RiskLevel, Tool, ToolResult
 
 _lock = asyncio.Lock()
@@ -31,6 +33,36 @@ _ACTIONS_NEEDING_PAGE = {
 
 _NAMED_ROLES = ("button", "link", "tab", "menuitem", "checkbox", "radio")
 _GOTO_RETRIES = 3
+
+
+def _title_payload(url: str, title: str) -> str:
+    return f"URL: {url}\nTitle: {title}"
+
+
+async def _wait_stable(page, timeout_ms: int = 1500) -> None:
+    try:
+        await page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    except Exception:
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+        except Exception:
+            return
+
+
+async def _goto_with_retry(page, url: str) -> None:
+    last_error: Exception | None = None
+    target = (url or "").strip()
+    if not target:
+        raise ValueError("url is required")
+    for attempt in range(_GOTO_RETRIES):
+        try:
+            await page.goto(target, wait_until="domcontentloaded", timeout=30_000)
+            await _wait_stable(page)
+            return
+        except Exception as exc:
+            last_error = exc
+            await asyncio.sleep(0.15 * (attempt + 1))
+    raise last_error or RuntimeError(f"Failed to open {target}")
 
 
 async def _ensure_page(headless: bool):
@@ -141,10 +173,21 @@ class BrowserTool(Tool):
         if action not in _ACTIONS_NEEDING_PAGE:
             return ToolResult(False, "", error=f"Unknown action {action}")
 
-        settings = self.context_getter()
+        from ..policy.computer_permissions import evaluate_tool_permissions
+
+        gate = evaluate_tool_permissions("browser", {"url": kwargs.get("url") or "", "action": action})
+        if gate.status == "deny":
+            return ToolResult(False, "", error=gate.reason)
+        if gate.status == "ask":
+            return ToolResult(False, "", error=gate.reason or "Permission required before the browser can reach the network.")
+
+        ctx = self.context_getter() if callable(self.context_getter) else {}
         headless = kwargs.get("headless")
         if headless is None:
-            headless = bool((settings.get("browser") or {}).get("headless", False))
+            if isinstance(ctx, dict):
+                headless = bool((ctx.get("browser") or {}).get("headless", False))
+            else:
+                headless = bool(getattr(getattr(ctx, "browser", None), "headless", False))
         async with _lock:
             try:
                 if action == "close":

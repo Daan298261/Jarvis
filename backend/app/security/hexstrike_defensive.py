@@ -42,7 +42,7 @@ class DefensiveCapability:
 
 
 CAPABILITIES: tuple[DefensiveCapability, ...] = (
-    DefensiveCapability("lan_inventory", "Private LAN inventory", ("private_host", "private_cidr"), "blue.active_response", "api/tools/nmap"),
+    DefensiveCapability("lan_inventory", "Private LAN inventory", ("private_host", "private_cidr"), "network.local", "api/tools/nmap"),
     DefensiveCapability("container_scan", "Container vulnerability scan", ("container_image", "local_path"), "blue.static_rules", "api/tools/trivy"),
     DefensiveCapability("iac_scan", "Infrastructure-as-code scan", ("local_path",), "blue.static_rules", "api/tools/checkov"),
     DefensiveCapability("host_baseline", "Local host benchmark", ("local_infrastructure",), "blue.static_rules", "api/tools/docker-bench-security"),

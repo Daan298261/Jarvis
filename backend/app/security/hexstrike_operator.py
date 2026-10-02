@@ -110,8 +110,17 @@ def artifact_path_allowed(candidate: Path) -> bool:
     if resolved == job_root or resolved.is_relative_to(job_root):
         return True
     settings = load_settings()
+    from ..config import LOCAL_NETWORK_SCOPE
+    from ..tools.safety import _is_unc_path, _private_lan_unc
+
     roots = settings.allowed_directories or default_allowed_directories()
-    allowed = [Path(root).expanduser().resolve(strict=False) for root in roots]
+    if LOCAL_NETWORK_SCOPE in roots and _is_unc_path(str(candidate)) and _private_lan_unc(str(candidate)):
+        return True
+    allowed = []
+    for root in roots:
+        if root == LOCAL_NETWORK_SCOPE:
+            continue
+        allowed.append(Path(root).expanduser().resolve(strict=False))
     return any(resolved == root or resolved.is_relative_to(root) for root in allowed)
 
 
