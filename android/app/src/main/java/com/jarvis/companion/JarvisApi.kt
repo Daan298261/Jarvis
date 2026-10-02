@@ -137,6 +137,7 @@ class JarvisApi(context: Context) {
     fun candidateOrigins(): List<String> = TransportPolicy.dialOrder(
         preferred.takeIf { it.isNotBlank() },
         endpoints + endpoint,
+        TransportPolicy.localIpv4Addresses(),
     )
 
     fun noteReachable(origin: String) {
@@ -181,7 +182,7 @@ class JarvisApi(context: Context) {
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
         val client = pinnedClient()
         val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }
-        val addresses = TransportPolicy.dialOrder(recent, endpoints + endpoint)
+        val addresses = TransportPolicy.dialOrder(recent, endpoints + endpoint, TransportPolicy.localIpv4Addresses())
         var failure: java.io.IOException? = null
         for (address in addresses) {
         val request = Request.Builder().url("${TransportPolicy.origin(address)}/api/companion$path")

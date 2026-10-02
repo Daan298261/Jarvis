@@ -52,6 +52,34 @@ class TransportPolicyTest {
         assertEquals(lan, cold.last())
     }
 
+    @Test fun homeWifiDialsLanBeforePublicWan() {
+        val lan = "https://10.2.0.2:4781"
+        val wan = "https://203.0.113.4:4781"
+        val relay = "https://relay.example.test:4781"
+        val order = TransportPolicy.dialOrder(wan, listOf(lan, wan, relay), listOf("10.2.0.5"))
+        assertEquals(lan, order[0])
+        assertEquals(relay, order[1])
+        assertEquals(wan, order.last())
+    }
+
+    @Test fun leavingHomeDoesNotStickyPrivateLan() {
+        val lan = "https://10.2.0.2:4781"
+        val wan = "https://203.0.113.4:4781"
+        val relay = "https://relay.example.test:4781"
+        val order = TransportPolicy.dialOrder(lan, listOf(lan, wan, relay), listOf("100.64.1.8"))
+        assertEquals(relay, order[0])
+        assertEquals(wan, order[1])
+        assertEquals(lan, order.last())
+    }
+
+    @Test fun guestWifiOnOtherSubnetUsesWanFirst() {
+        val lan = "https://192.168.1.12:4781"
+        val wan = "https://203.0.113.4:4781"
+        val order = TransportPolicy.dialOrder(null, listOf(lan, wan), listOf("192.168.2.40"))
+        assertEquals(wan, order[0])
+        assertEquals(lan, order.last())
+    }
+
     @Test fun hostnameTlsErrorsAreOrdinaryDialFailures() {
         val error: Throwable = javax.net.ssl.SSLException("Hostname 8.8.8.8 not verified")
         assertTrue(error is java.io.IOException)
