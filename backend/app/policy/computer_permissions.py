@@ -433,7 +433,7 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
     if any(
         isinstance((arguments or {}).get(key), str)
-        and str((arguments or {})[key]).startswith("\\\\")
+        and (str((arguments or {})[key]).startswith("\\\\") or str((arguments or {})[key]).startswith("//"))
         for key in ("path", "destination", "working_directory")
     ):
         pending.append("network.local")
@@ -441,7 +441,7 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
         pending.append("cyber.hexstrike")
     if name == "hexstrike_defensive":
         action_permissions = {
-            "lan_inventory": "blue.active_response",
+            "lan_inventory": "network.local",
             "container_scan": "blue.static_rules",
             "iac_scan": "blue.static_rules",
             "host_baseline": "blue.static_rules",

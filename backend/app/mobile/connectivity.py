@@ -40,15 +40,18 @@ def lan_hosts():
             and not ipaddress.ip_address(host).is_loopback and not ipaddress.ip_address(host).is_link_local]
 
 
-def router_candidate():
+def router_candidate(username: str = "", password: str = ""):
     import miniupnpc
     router = miniupnpc.UPnP()
-    router.discoverdelay = 1500
+    router.discoverdelay = 2000 if username else 1500
     router.discover()
     router.selectigd()
+    if username:
+        router.username = username
+        router.password = password or ""
     address = ipaddress.ip_address(router.externalipaddress())
     if address.version != 4 or not address.is_global:
-        raise ValueError("Router has no public IPv4 address; hosted relay is needed for remote access")
+        raise ValueError("Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access")
     return router, str(address)
 
 
@@ -98,8 +101,11 @@ class Connectivity:
         self.state.update(changes, updated_at=time.time())
 
     def snapshot(self):
+        from .wan_forward import redact_wan_config
+
         payload = {**self.state, "heartbeat_at": time.time(), "worker": "Jarvis desktop"}
         payload.update(GUARD.snapshot())
+        payload["wan"] = redact_wan_config(self.config())
         return payload
 
     def config(self):
@@ -108,14 +114,24 @@ class Connectivity:
                 "enabled": True,
                 "remote": False,
                 "marker": "Jarvis-" + str(uuid.uuid4()),
+                "wan_method": "auto",
             }
 
-    async def configure(self, enabled: bool, remote: bool):
+    async def configure(self, enabled: bool, remote: bool, extras: dict | None = None):
         if self.lock.locked():
             raise HTTPException(409, "Connection setup is already running")
         async with self.lock:
             config = self.config()
             config.update(enabled=enabled, remote=remote)
+            if extras:
+                from .wan_forward import WAN_METHODS
+
+                for key, value in extras.items():
+                    if value is None:
+                        continue
+                    if key == "wan_method" and str(value).strip().lower() not in WAN_METHODS:
+                        raise HTTPException(400, "Unknown WAN method")
+                    config[key] = value
             with database() as db:
                 put(db, "network", "config", config)
             await self.apply_remote(config)
@@ -152,12 +168,15 @@ class Connectivity:
             pass
 
     async def release_mapping(self):
+        from .wan_forward import REVERSE_TUNNEL
+
         if self.router:
             try:
                 await asyncio.to_thread(unmap_router, self.router, self.marker)
             except Exception:
                 pass  # Finite lease expires if the router is unavailable during shutdown.
             self.router = None
+        await REVERSE_TUNNEL.stop()
 
     async def on_security_cooldown(self):
         await self.stop_gateway()
@@ -280,17 +299,31 @@ class Connectivity:
         hosts = await asyncio.to_thread(lan_hosts)
         relay = os.environ.get("JARVIS_RELAY_ENDPOINT", "") if config["remote"] else ""
         endpoints = self._lan_endpoints(hosts)
+        wan_path = ""
         try:
             relay = origin(relay) if relay else ""
             if relay:
                 hosts.append(urlsplit(relay).hostname)
             if config["remote"]:
+                from .wan_forward import wan_settings_from_config
+
+                wan = wan_settings_from_config(config)
+                method = wan["wan_method"]
                 self.report(activity="Checking router support for encrypted remote access", router="discovering")
-                try:
-                    router, public_ip = await asyncio.to_thread(router_candidate)
-                    hosts.append(public_ip)
-                except Exception as exc:
-                    self.report(router="unavailable", limitation=str(exc)[:240])
+                if method in {"auto", "upnp"}:
+                    try:
+                        try:
+                            router, public_ip = await asyncio.to_thread(
+                                router_candidate,
+                                wan.get("gateway_username") or "",
+                                wan.get("gateway_password") or "",
+                            )
+                        except TypeError:
+                            router, public_ip = await asyncio.to_thread(router_candidate)
+                        hosts.append(public_ip)
+                    except Exception as exc:
+                        self.report(router="unavailable", limitation=str(exc)[:240])
+                        router, public_ip = None, None
             if not self.identity or GUARD.cooldown_active():
                 await self.ensure_gateway_listening()
             identity = self.identity
@@ -301,6 +334,7 @@ class Connectivity:
             endpoints = self._lan_endpoints([host for host in hosts if host != public_ip and host != relay_hostname])
             self.report(local_verified=True, server_pin=identity["server_pin"], endpoints=endpoints)
             await self.start_lan_beacon()
+            wan_path = ""
             if router:
                 self.report(activity="Requesting a one-hour lease for the TLS gateway")
                 try:
@@ -308,10 +342,38 @@ class Connectivity:
                     self.router, self.marker = router, config["marker"]
                     self.public_ip = public_ip
                     endpoints.append(f"https://{public_ip}:{PORT}")
-                    self.report(router="mapped", limitation="Router lease created; internet reachability still needs verification from outside this network")
+                    wan_path = "upnp"
+                    self.report(router="mapped", wan_path=wan_path, limitation="Router lease created; internet reachability still needs verification from outside this network")
                 except Exception as exc:
                     await asyncio.to_thread(unmap_router, router, config["marker"])
+                    self.router = None
                     self.report(router="unavailable", limitation=str(exc)[:240])
+            if config["remote"] and not self.router:
+                from .wan_forward import apply_gateway_ssh, apply_ssh_reverse, wan_settings_from_config
+
+                wan = wan_settings_from_config(config)
+                method = wan["wan_method"]
+                lan_ip = (hosts[0] if hosts else "") or ""
+                if method in {"auto", "gateway_ssh"} and wan["gateway_host"] and wan["gateway_user"]:
+                    self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
+                    try:
+                        public_host = wan.get("wan_public_host") or public_ip or ""
+                        mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=str(public_host or ""))
+                        wan_path = "gateway_ssh"
+                        if mapped:
+                            endpoints.append(mapped)
+                        self.report(router="mapped", wan_path=wan_path, limitation=detail)
+                    except Exception as exc:
+                        self.report(router="unavailable", limitation=str(exc)[:240])
+                if not wan_path and method in {"auto", "ssh_reverse"} and wan["ssh_host"] and wan["ssh_user"]:
+                    self.report(activity="Opening an SSH reverse tunnel for companion TLS")
+                    try:
+                        mapped = await apply_ssh_reverse(wan)
+                        endpoints.append(mapped)
+                        wan_path = "ssh_reverse"
+                        self.report(router="tunneled", wan_path=wan_path, limitation="SSH reverse tunnel is up; the phone should use the SSH host on TCP 4781")
+                    except Exception as exc:
+                        self.report(router="unavailable", limitation=str(exc)[:240])
             if relay:
                 try:
                     await self.probe(relay, identity)
@@ -319,9 +381,13 @@ class Connectivity:
                     self.report(remote_verified=True)
                 except Exception:
                     self.report(limitation="Configured relay did not reach this gateway; check relay service and credentials")
-            if config["remote"] and not relay and not self.router:
+            if config["remote"] and not relay and not self.router and not wan_path:
                 prior = self.state.get("limitation") or ""
-                self.report(limitation=(prior + ". Hosted relay is not configured on this installation.").strip(". "))
+                extra = (
+                    " No UPnP lease, gateway SSH, SSH reverse tunnel, or hosted relay is ready. "
+                    "Set SSH reverse-tunnel or OpenWrt gateway credentials, or JARVIS_RELAY_ENDPOINT."
+                )
+                self.report(limitation=(prior + extra).strip())
             self.remote_prepared = True
             self.report(
                 state="ready",
@@ -351,6 +417,8 @@ class Connectivity:
                             cooldown_remaining_seconds=GUARD.cooldown_remaining_seconds(),
                         )
                     else:
+                        from .wan_forward import REVERSE_TUNNEL, apply_ssh_reverse, wan_settings_from_config
+
                         if not self.server_task or self.server_task.done():
                             try:
                                 await self.ensure_gateway_listening()
@@ -358,10 +426,26 @@ class Connectivity:
                                 self.report(state="failed", activity=str(exc)[:300])
                         config = self.config()
                         if config["enabled"]:
+                            tunnel_dead = self.state.get("wan_path") == "ssh_reverse" and not REVERSE_TUNNEL.alive()
                             if self.state.get("state") == "cooldown":
                                 pass
                             elif self.state.get("state") != "ready" or not self.remote_prepared:
                                 await self.apply_remote(config)
+                            elif tunnel_dead:
+                                try:
+                                    mapped = await apply_ssh_reverse(wan_settings_from_config(config))
+                                    endpoints = list(self.state.get("endpoints") or [])
+                                    if mapped not in endpoints:
+                                        endpoints.append(mapped)
+                                    self.report(
+                                        router="tunneled",
+                                        wan_path="ssh_reverse",
+                                        endpoints=endpoints,
+                                        limitation="SSH reverse tunnel reconnected",
+                                        next_renewal_at=time.time() + 1200,
+                                    )
+                                except Exception:
+                                    await self.apply_remote(config)
                             elif time.time() >= self.state.get("next_renewal_at", 0):
                                 try:
                                     await self.probe(f"https://127.0.0.1:{PORT}", self.identity)

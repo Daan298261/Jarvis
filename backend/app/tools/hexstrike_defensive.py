@@ -54,6 +54,7 @@ class HexStrikeDefensiveTool(Tool):
             "cyber.hexstrike",
             capability.permission,
             *(("network.internet",) if action == "threat_intel_lookup" else ()),
+            *(("network.local",) if action == "lan_inventory" else ()),
         )
         denied = [permission for permission in required if evaluate_permission(permission).status != "allow"]
         if denied:

@@ -169,8 +169,8 @@ def test_defensive_permission_mapping_requires_cyber_and_blue():
         "blue.static_rules",
     ]
     assert permission_ids_for_tool("hexstrike_defensive", {"action": "lan_inventory"}) == [
+        "network.local",
         "cyber.hexstrike",
-        "blue.active_response",
     ]
     assert permission_ids_for_tool("hexstrike_defensive", {"action": "threat_intel_lookup"}) == [
         "network.internet",

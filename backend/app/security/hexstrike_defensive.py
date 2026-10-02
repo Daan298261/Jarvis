@@ -42,7 +42,7 @@ class DefensiveCapability:
 
 
 CAPABILITIES: tuple[DefensiveCapability, ...] = (
-    DefensiveCapability("lan_inventory", "Private LAN inventory", ("private_host", "private_cidr"), "blue.active_response", "api/tools/nmap"),
+    DefensiveCapability("lan_inventory", "Private LAN inventory", ("private_host", "private_cidr"), "network.local", "api/tools/nmap"),
     DefensiveCapability("container_scan", "Container vulnerability scan", ("container_image", "local_path"), "blue.static_rules", "api/tools/trivy"),
     DefensiveCapability("iac_scan", "Infrastructure-as-code scan", ("local_path",), "blue.static_rules", "api/tools/checkov"),
     DefensiveCapability("host_baseline", "Local host benchmark", ("local_infrastructure",), "blue.static_rules", "api/tools/docker-bench-security"),
@@ -98,7 +98,14 @@ def _local_path(value: str) -> str:
     resolved = candidate.resolve(strict=False)
     settings = load_settings()
     roots = settings.allowed_directories or default_allowed_directories()
-    allowed = [Path(root).expanduser().resolve(strict=False) for root in roots]
+    from ..config import LOCAL_NETWORK_SCOPE
+    from ..tools.safety import _is_unc_path, _private_lan_unc
+
+    if LOCAL_NETWORK_SCOPE in roots and _is_unc_path(value) and _private_lan_unc(value):
+        from ..tools.safety import resolve_allowed_path
+
+        return str(resolve_allowed_path(value, roots))
+    allowed = [Path(root).expanduser().resolve(strict=False) for root in roots if root != LOCAL_NETWORK_SCOPE]
     if not any(resolved == root or resolved.is_relative_to(root) for root in allowed):
         raise ValueError("local path is outside Jarvis allowed directories")
     if not re.fullmatch(r"[A-Za-z0-9_./:\\-]+", str(resolved)):

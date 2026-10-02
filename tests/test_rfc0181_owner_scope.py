@@ -22,10 +22,14 @@ def test_private_unc_host_classification():
 
 
 def test_owner_scope_covers_steam_and_local_shares(tmp_path):
-    if os.name != "nt":
-        pytest.skip("Windows drive and UNC authorization")
     allowed = default_allowed_directories()
     assert LOCAL_NETWORK_SCOPE in allowed
+    if os.name != "nt":
+        share = r"\\nas.local\games\steam.exe"
+        assert "nas.local" in str(resolve_allowed_path(share, allowed)).lower()
+        with pytest.raises(PermissionError):
+            resolve_allowed_path(r"\\8.8.8.8\share\game.exe", allowed)
+        return
     steam = Path(Path.home().anchor) / "Program Files (x86)" / "Steam" / "steam.exe"
     assert resolve_allowed_path(str(steam), allowed) == steam.resolve()
     share = r"\\nas.local\games\steam.exe"

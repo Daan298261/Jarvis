@@ -527,6 +527,29 @@ class Build(BaseModel):
 class ConnectionSetup(BaseModel):
     enabled: bool = True
     remote: bool = True
+    wan_method: Literal["auto", "upnp", "ssh_reverse", "gateway_ssh"] | None = None
+    ssh_host: str | None = Field(default=None, max_length=255)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_user: str | None = Field(default=None, max_length=64)
+    ssh_identity_file: str | None = Field(default=None, max_length=1024)
+    gateway_host: str | None = Field(default=None, max_length=255)
+    gateway_port: int | None = Field(default=None, ge=1, le=65535)
+    gateway_user: str | None = Field(default=None, max_length=64)
+    gateway_identity_file: str | None = Field(default=None, max_length=1024)
+    gateway_profile: Literal["openwrt_uci"] | None = None
+    gateway_username: str | None = Field(default=None, max_length=64)
+    gateway_password: str | None = Field(default=None, max_length=256)
+    wan_public_host: str | None = Field(default=None, max_length=255)
+
+
+@owner_router.post("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
+async def connection_setup(body: ConnectionSetup):
+    from ..mobile.connectivity import CONNECTIVITY
+
+    extras = body.model_dump(exclude={"enabled", "remote"}, exclude_none=True)
+    if extras:
+        return await CONNECTIVITY.configure(body.enabled, body.remote, extras)
+    return await CONNECTIVITY.configure(body.enabled, body.remote)
 
 
 @owner_router.get("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
@@ -539,12 +562,6 @@ def connection_status():
 def infrastructure_status():
     from ..mobile.infrastructure import infrastructure_readiness
     return infrastructure_readiness()
-
-
-@owner_router.post("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
-async def connection_setup(body: ConnectionSetup):
-    from ..mobile.connectivity import CONNECTIVITY
-    return await CONNECTIVITY.configure(body.enabled, body.remote)
 
 
 @router.get("/connection")
