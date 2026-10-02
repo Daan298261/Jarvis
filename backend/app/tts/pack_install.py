@@ -121,6 +121,9 @@ def ensure_kokoro_python(*, force: bool = False) -> None:
     """Install Kokoro into this Jarvis interpreter. End users never run pip themselves."""
     if not force and kokoro_python_ready():
         return
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://pypi.org/simple/", tool="web_fetch")
     logger.info("Installing Kokoro TTS packages into %s", sys.executable)
     command = [
         sys.executable,
@@ -152,6 +155,9 @@ def ensure_chatterbox_python(*, force: bool = False) -> None:
     """Install the optional expressive engine into the Jarvis interpreter."""
     if not force and chatterbox_python_ready():
         return
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://pypi.org/simple/", tool="web_fetch")
     logger.info("Installing Chatterbox TTS into %s", sys.executable)
     command = [
         sys.executable,
@@ -187,7 +193,12 @@ def ensure_chatterbox_weights(*, force: bool = False) -> None:
             except Exception:
                 pass
         try:
+            from ..policy.network_http import require_http_url_allowed
+
+            require_http_url_allowed(f"https://huggingface.co/{CHATTERBOX_HF_REPO}", tool="web_fetch")
             hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename)
+        except PermissionError:
+            raise
         except Exception as exc:
             raise RuntimeError(CHATTERBOX_RUNTIME_ERROR) from exc
 
@@ -196,6 +207,9 @@ def ensure_kokoro_weights(*, force: bool = False) -> Path:
     KOKORO_MODEL_DIR.mkdir(parents=True, exist_ok=True)
     if not force and kokoro_weights_ready(KOKORO_MODEL_DIR):
         return KOKORO_MODEL_DIR
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(f"https://huggingface.co/{KOKORO_HF_REPO}", tool="web_fetch")
     logger.info("Downloading Kokoro-82M weights to %s", KOKORO_MODEL_DIR)
     snapshot_download(
         repo_id=KOKORO_HF_REPO,

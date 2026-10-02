@@ -199,6 +199,9 @@ def ensure_package() -> str:
     hint = f"pip install laya=={LAYA_PACKAGE_VERSION}"
     if os.environ.get("PYTEST_CURRENT_TEST"):
         raise RuntimeError(f"The 'laya' package is not installed ({hint})")
+    from ...policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://pypi.org/simple/laya/", tool="web_fetch")
     cmd = [sys.executable, "-m", "pip", "install", f"laya=={LAYA_PACKAGE_VERSION}"]
     try:
         subprocess.check_call(cmd)
@@ -260,6 +263,9 @@ def install_managed(*, token: str | None = None) -> dict[str, Any]:
     version = ensure_package()
     from huggingface_hub import snapshot_download
 
+    from ...policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(f"https://huggingface.co/{LAYA_REPO}", tool="web_fetch")
     snapshot = Path(
         snapshot_download(
             LAYA_REPO,

@@ -287,6 +287,30 @@ def test_ensure_kokoro_python_installs_without_user_facing_pip(monkeypatch):
     assert pack_install.KOKORO_RUNTIME_ERROR.lower().find("pip") == -1
 
 
+def test_kokoro_install_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.tts import pack_install
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    monkeypatch.setattr(pack_install, "kokoro_python_ready", lambda: False)
+    monkeypatch.setattr(pack_install, "kokoro_weights_ready", lambda *_args, **_kwargs: False)
+    ran = {"n": 0}
+
+    def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not pip/download when internet is denied")
+
+    monkeypatch.setattr(pack_install.subprocess, "run", boom)
+    monkeypatch.setattr(pack_install, "snapshot_download", boom)
+    with pytest.raises(PermissionError):
+        pack_install.ensure_kokoro_python()
+    with pytest.raises(PermissionError):
+        pack_install.ensure_kokoro_weights(force=True)
+    assert ran["n"] == 0
+
+
 def test_ensure_kokoro_runtime_prepares_python_and_weights(monkeypatch, tmp_path):
     from app.tts import pack_install
 
@@ -323,3 +347,25 @@ def test_voicestudio_synthesize_timeout_is_short():
 
     params = inspect.signature(VoiceStudioAdapter.synthesize).parameters
     assert params["timeout"].default == 8.0
+
+
+def test_voicestudio_wan_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.tts import voicestudio_adapter as vs
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    opened = {"n": 0}
+
+    def boom(*_args, **_kwargs):
+        opened["n"] += 1
+        raise AssertionError("must not urlopen WAN VoiceStudio when internet is denied")
+
+    monkeypatch.setattr(vs.urllib.request, "urlopen", boom)
+    monkeypatch.setenv("JARVIS_VOICESTUDIO_URL", "https://voice.example.test")
+    adapter = vs.VoiceStudioAdapter(base_url="https://voice.example.test")
+    with pytest.raises(PermissionError):
+        adapter.synthesize("hello")
+    assert vs.voicestudio_probe_endpoint() is False
+    assert opened["n"] == 0
