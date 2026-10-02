@@ -71,7 +71,30 @@ def test_stdio_filesystem_mcp_defaults_to_documents(tmp_path, monkeypatch):
             "args": ["-y", "@modelcontextprotocol/server-filesystem"],
         }
     )
-    assert launch["args"][-1] == str(docs)
+    assert str(docs.resolve()) in [str(Path(item).resolve()) if not str(item).startswith(("@", "-")) else item for item in launch["args"]]
+    assert launch["args"][1].startswith("@")
+
+
+def test_stdio_filesystem_mcp_includes_extra_drive(tmp_path, monkeypatch):
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    monkeypatch.setattr(
+        "app.config.live_allowed_directories",
+        lambda existing=None: [str(tmp_path), str(extra)],
+    )
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.tools.owner_paths.default_workspace_dir", lambda allowed: docs)
+    launch = prepare_stdio_launch(
+        {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+        }
+    )
+    resolved_args = [str(Path(item).resolve()) for item in launch["args"] if not str(item).startswith(("@", "-"))]
+    assert str(extra.resolve()) in resolved_args
+    assert str(docs.resolve()) in resolved_args
     assert launch["args"][1].startswith("@")
 
 

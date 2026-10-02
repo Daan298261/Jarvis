@@ -26,6 +26,52 @@ def _looks_like_fs_path(arg: str) -> bool:
     return "\\" in text
 
 
+def mcp_filesystem_directories(allowed: list[str] | None = None) -> list[str]:
+    """Directories to pass to MCP ``server-filesystem``.
+
+    The official server only sees argv roots. Documents-only meant a plugged-in
+    USB or ``D:`` was invisible to MCP file tools. Extra volumes plus the
+    owner's Documents folder; never the OS volume root or the LAN UNC sentinel.
+    """
+    from ..config import LOCAL_NETWORK_SCOPE, extra_volume_roots, live_allowed_directories
+    from .filesystem import _root_key, _system_volume_keys
+    from .owner_paths import default_workspace_dir
+    from .safety import resolve_allowed_path
+
+    roots = list(allowed if allowed is not None else live_allowed_directories())
+    skip = _system_volume_keys()
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def _take(raw: str) -> None:
+        text = str(raw or "").strip()
+        if not text or text == LOCAL_NETWORK_SCOPE:
+            return
+        try:
+            path = resolve_allowed_path(text, roots)
+        except (PermissionError, OSError, ValueError):
+            return
+        try:
+            if not path.is_dir():
+                return
+            resolved = path.resolve()
+        except OSError:
+            return
+        key = _root_key(resolved)
+        if key in seen or key in skip:
+            return
+        seen.add(key)
+        found.append(str(resolved))
+
+    for extra in extra_volume_roots():
+        _take(str(extra))
+    try:
+        _take(str(default_workspace_dir(roots)))
+    except (PermissionError, OSError, ValueError):
+        pass
+    return found[:16]
+
+
 def mcp_prefix_dir() -> Path:
     from ..config import repo_root
 
@@ -77,9 +123,7 @@ def prepare_stdio_launch(server: dict[str, Any]) -> dict[str, Any]:
                 rewritten.append(arg)
         args = rewritten
         if any("server-filesystem" in arg for arg in args) and not any(_looks_like_fs_path(arg) for arg in args):
-            from .owner_paths import default_workspace_dir
-
-            args.append(str(default_workspace_dir(allowed)))
+            args.extend(mcp_filesystem_directories(allowed))
     env_in = server.get("env") or {}
     env = {str(key): str(value) for key, value in os.environ.items() if value is not None}
     for key, value in env_in.items():
