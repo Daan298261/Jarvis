@@ -368,17 +368,31 @@ def nmap_lan_bind_args(target: str) -> list[str]:
     return args
 
 
+def hexstrike_nmap_can_bind_interface(iface: str) -> bool:
+    """HexStrike nmap uses additional_args.split(); spaced Windows NIC names cannot round-trip."""
+    text = str(iface or "")
+    return bool(text) and not any(ch.isspace() for ch in text)
+
+
+def lan_inventory_uses_host_nmap(target: str) -> bool:
+    """Prefer argv host nmap when HexStrike would split a Windows NIC name like Ethernet 2."""
+    iface, _source = lan_scan_bind(target)
+    return bool(iface) and not hexstrike_nmap_can_bind_interface(iface)
+
+
 def nmap_lan_additional_args(target: str, base: str = "-T3") -> str:
     """HexStrike nmap additional_args: timing plus source bind.
 
     Interface names with whitespace are omitted from the string payload (HexStrike
-    splits additional_args); ``-S`` still pins the source address.
+    splits additional_args). LAN inventory then uses host nmap argv so ``-e`` still
+    binds that NIC. ``-S`` remains on the suite string when the scan still goes
+    through HexStrike.
     """
     iface, source = lan_scan_bind(target)
     parts = [str(base or "").strip()]
     if source:
         parts.extend(["-S", source])
-    if iface and not any(ch.isspace() for ch in iface):
+    if hexstrike_nmap_can_bind_interface(iface):
         parts.extend(["-e", iface])
     return " ".join(part for part in parts if part)
 
@@ -610,7 +624,7 @@ async def _run_lan_inventory(scope: dict[str, Any], payload: dict[str, Any]) -> 
             "additional_args": nmap_lan_additional_args(target),
         }
         try:
-            if snapshot.running:
+            if snapshot.running and not lan_inventory_uses_host_nmap(target):
                 results.append(await HEXSTRIKE.post_defensive("api/tools/nmap", item_payload))
             else:
                 results.append(await _host_nmap_ping_scan(target))

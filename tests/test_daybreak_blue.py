@@ -368,6 +368,57 @@ def test_lan_scan_bind_pins_home_nic_not_vpn_or_cgnat(monkeypatch):
     assert nmap_lan_additional_args("192.168.50.0/24") == "-T3 -S 192.168.50.8"
 
 
+@pytest.mark.asyncio
+async def test_lan_inventory_uses_host_nmap_when_windows_nic_name_has_space(blue_store, monkeypatch):
+    from app.security.hexstrike_defensive import lan_inventory_uses_host_nmap
+
+    upsert_scope("wifi", kind="private_cidr", value="192.168.50.0/24", label="Wi-Fi", attested_owned=True)
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    assert lan_inventory_uses_host_nmap("192.168.50.0/24") is True
+    assert lan_inventory_uses_host_nmap("192.168.1.0/24") is False
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        raise AssertionError(f"HexStrike nmap must not receive a spaced NIC name: {payload}")
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap" if str(name).lower() == "nmap" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for nas (192.168.50.12)\nHost is up.\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        assert args[0] == "/usr/bin/nmap"
+        assert args[args.index("-S") + 1] == "192.168.50.8"
+        assert args[args.index("-e") + 1] == "Ethernet 2"
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    job = await execute_defensive("lan_inventory", "wifi")
+    assert job["status"] == "completed"
+    assert job["result"]["source"] == "host-nmap"
+    assert job["result"]["hosts"][0]["address"] == "192.168.50.12"
+    assert seen
+
+
 def test_default_lan_scope_prefers_home_lan_and_registers_vpn_cidr(blue_store, monkeypatch):
     from app.security.hexstrike_defensive import (
         extra_lan_scope_id,
