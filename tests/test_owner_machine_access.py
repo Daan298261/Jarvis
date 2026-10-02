@@ -197,7 +197,7 @@ async def test_ssh_reverse_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
         },
     )
     assert result["state"] == "ready"
-    assert "https://vpn.example.test:4781" in result["endpoints"]
+    assert "https://vpn.example.test:4781" in set(result["endpoints"])
     assert result.get("wan_path") == "ssh_reverse"
     from app.mobile.gateway import identity_covers
     assert identity_covers(connection.identity, ["vpn.example.test", "192.168.1.12"])
@@ -239,7 +239,7 @@ async def test_upnp_double_nat_falls_through_to_reverse_tunnel(tmp_path, monkeyp
     assert result.get("wan_path") == "ssh_reverse"
     assert natpmp_hits["n"] == 0
     assert "https://198.51.100.8:4781" not in result["endpoints"]
-    assert "https://vpn.example.test:4781" in result["endpoints"]
+    assert "https://vpn.example.test:4781" in set(result["endpoints"])
     assert router.deleted == [(4781, "TCP")]
     assert "double nat" in (result.get("limitation") or "").lower()
 
@@ -307,7 +307,7 @@ async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypa
     assert result["state"] == "ready"
     assert result.get("wan_path") == "gateway_ssh"
     assert seen["password"] == "router-pass"
-    assert "https://home.example.test:4781" in result["endpoints"]
+    assert "https://home.example.test:4781" in set(result["endpoints"])
     from app.mobile.gateway import identity_covers
     assert identity_covers(connection.identity, ["home.example.test", "192.168.1.12"])
 
