@@ -106,6 +106,8 @@ class Connectivity:
         self.marker = ""
         self.identity = None
         self.public_ip = None
+        self.natpmp_gateway = None
+        self.pcp_nonce = None
         self.remote_prepared = False
         self.state = {
             "state": "starting",
@@ -193,6 +195,21 @@ class Connectivity:
             except Exception:
                 pass  # Finite lease expires if the router is unavailable during shutdown.
             self.router = None
+        if self.natpmp_gateway:
+            try:
+                lan = next(iter(lan_hosts()), "")
+                if self.pcp_nonce:
+                    from .pcp import delete_pcp
+
+                    await asyncio.to_thread(delete_pcp, self.natpmp_gateway, lan, self.pcp_nonce)
+                else:
+                    from .natpmp import delete_natpmp
+
+                    await asyncio.to_thread(delete_natpmp, self.natpmp_gateway, lan)
+            except Exception:
+                pass
+            self.natpmp_gateway = None
+            self.pcp_nonce = None
         await REVERSE_TUNNEL.stop()
 
     async def on_security_cooldown(self):
@@ -236,9 +253,12 @@ class Connectivity:
             try:
                 from .wan_forward import ensure_private_firewall_4781
 
-                await asyncio.to_thread(ensure_private_firewall_4781)
-            except Exception:
-                pass
+                fw = await asyncio.to_thread(ensure_private_firewall_4781)
+                self.report(firewall_4781=fw)
+                if str(fw).startswith("failed"):
+                    self.report(limitation=f"Windows private-profile firewall did not allow inbound TCP 4781 ({fw})")
+            except Exception as exc:
+                self.report(firewall_4781="error", limitation=f"Windows firewall helper failed: {exc}"[:240])
             settings = load_settings()
             config = uvicorn.Config(gateway_app(f"http://127.0.0.1:{settings.bind_port}"),
                 ssl_keyfile=identity["key"], ssl_certfile=identity["certificate"],
@@ -371,7 +391,54 @@ class Connectivity:
                     await asyncio.to_thread(unmap_router, router, config["marker"])
                     self.router = None
                     self.report(router="unavailable", limitation=str(exc)[:240])
-            if config["remote"] and not self.router:
+            if config["remote"] and not self.router and method in {"auto", "upnp"}:
+                from .wan_forward import default_gateway_ipv4
+
+                gw = ""
+                lan_ip = (hosts[0] if hosts else "") or ""
+                try:
+                    gw = default_gateway_ipv4()
+                except Exception as exc:
+                    prior = self.state.get("limitation") or ""
+                    extra = str(exc)[:240]
+                    self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
+                if gw:
+                    self.report(activity="Trying NAT-PMP on this PC's default gateway for TCP 4781")
+                    try:
+                        from .natpmp import apply_natpmp
+
+                        public_ip = await asyncio.to_thread(apply_natpmp, gw, lan_ip)
+                        self.natpmp_gateway = gw
+                        self.pcp_nonce = None
+                        self.public_ip = public_ip
+                        endpoints.append(f"https://{public_ip}:{PORT}")
+                        wan_path = "natpmp"
+                        self.report(
+                            router="mapped",
+                            wan_path=wan_path,
+                            limitation="NAT-PMP lease created; internet reachability still needs verification from outside this network",
+                        )
+                    except Exception as nat_exc:
+                        self.report(activity="Trying PCP MAP on this PC's default gateway for TCP 4781")
+                        try:
+                            from .pcp import apply_pcp
+
+                            public_ip, nonce = await asyncio.to_thread(apply_pcp, gw, lan_ip, None)
+                            self.natpmp_gateway = gw
+                            self.pcp_nonce = nonce
+                            self.public_ip = public_ip
+                            endpoints.append(f"https://{public_ip}:{PORT}")
+                            wan_path = "pcp"
+                            self.report(
+                                router="mapped",
+                                wan_path=wan_path,
+                                limitation="PCP lease created; internet reachability still needs verification from outside this network",
+                            )
+                        except Exception as pcp_exc:
+                            prior = self.state.get("limitation") or ""
+                            extra = f"{nat_exc}; {pcp_exc}"[:240]
+                            self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
+            if config["remote"] and not wan_path:
                 from .wan_forward import apply_gateway_ssh, apply_ssh_reverse, gateway_ssh_configured, wan_settings_from_config
 
                 wan = wan_settings_from_config(config)
@@ -414,7 +481,7 @@ class Connectivity:
             if config["remote"] and not relay and not self.router and not wan_path:
                 prior = self.state.get("limitation") or ""
                 extra = (
-                    " No UPnP lease, gateway SSH, SSH reverse tunnel, or hosted relay is ready. "
+                    " No UPnP, NAT-PMP, or PCP lease, gateway SSH, SSH reverse tunnel, or hosted relay is ready. "
                     "Set SSH reverse-tunnel or OpenWrt gateway credentials, or JARVIS_RELAY_ENDPOINT."
                 )
                 self.report(limitation=(prior + extra).strip())
@@ -483,6 +550,20 @@ class Connectivity:
                                         if await asyncio.to_thread(self.router.externalipaddress) != self.public_ip:
                                             raise RuntimeError("Router address changed")
                                         await asyncio.to_thread(map_router, self.router, self.marker)
+                                    elif self.natpmp_gateway:
+                                        lan = next(iter(lan_hosts()), "")
+                                        if self.pcp_nonce:
+                                            from .pcp import apply_pcp
+
+                                            public_ip, nonce = await asyncio.to_thread(
+                                                apply_pcp, self.natpmp_gateway, lan, self.pcp_nonce
+                                            )
+                                            self.pcp_nonce = nonce
+                                        else:
+                                            from .natpmp import apply_natpmp
+
+                                            public_ip = await asyncio.to_thread(apply_natpmp, self.natpmp_gateway, lan)
+                                        self.public_ip = public_ip
                                     self.report(next_renewal_at=time.time() + 1200)
                                 except Exception:
                                     await self.apply_remote(config)

@@ -35,6 +35,19 @@ _NAMED_ROLES = ("button", "link", "tab", "menuitem", "checkbox", "radio")
 _GOTO_RETRIES = 3
 
 
+def _browser_error(exc: BaseException) -> str:
+    if isinstance(exc, ModuleNotFoundError):
+        return "Playwright is not installed on this PC, so I cannot open a browser."
+    text = str(exc)
+    lowered = text.lower()
+    if "executable doesn't exist" in lowered or "playwright install" in lowered:
+        return (
+            "Chromium is not installed for Playwright on this PC. "
+            "Install it with playwright install chromium."
+        )
+    return text
+
+
 def _title_payload(url: str, title: str) -> str:
     return f"URL: {url}\nTitle: {title}"
 
@@ -292,5 +305,7 @@ class BrowserTool(Tool):
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
                 return ToolResult(False, "", error=f"Unknown action {action}")
+            except ModuleNotFoundError as exc:
+                return ToolResult(False, "", error=_browser_error(exc))
             except Exception as exc:
-                return ToolResult(False, "", error=str(exc))
+                return ToolResult(False, "", error=_browser_error(exc))

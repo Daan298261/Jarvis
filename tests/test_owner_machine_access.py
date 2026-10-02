@@ -235,6 +235,8 @@ async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypa
     monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
     monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No public IPv4")))
     monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
 
     seen: dict[str, str] = {}
 
@@ -254,6 +256,45 @@ async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypa
     assert result.get("wan_path") == "gateway_ssh"
     assert seen["password"] == "router-pass"
     assert "https://home.example.test:4781" in result["endpoints"]
+
+
+@pytest.mark.asyncio
+async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda gw, lan: "203.0.113.8" if gw == "192.168.1.1" else (_ for _ in ()).throw(ValueError(gw)))
+    result = await FakeConnection().configure(True, True, {"wan_method": "auto"})
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "natpmp"
+    assert "https://203.0.113.8:4781" in result["endpoints"]
+
+
+@pytest.mark.asyncio
+async def test_pcp_is_used_when_natpmp_unavailable(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr(
+        "app.mobile.natpmp.apply_natpmp",
+        lambda gw, lan: (_ for _ in ()).throw(ValueError("NAT-PMP unsupported version")),
+    )
+    monkeypatch.setattr(
+        "app.mobile.pcp.apply_pcp",
+        lambda gw, lan, nonce=None: ("198.51.100.8", b"\x11" * 12) if gw == "192.168.1.1" else (_ for _ in ()).throw(ValueError(gw)),
+    )
+    result = await FakeConnection().configure(True, True, {"wan_method": "auto"})
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "pcp"
+    assert "https://198.51.100.8:4781" in result["endpoints"]
 
 
 def test_ssh_askpass_prints_secret_without_argv(tmp_path, monkeypatch):
@@ -334,3 +375,19 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
     blocked = await tool.execute(action="open", url="file:///etc/passwd")
     assert not blocked.success
     await tool.execute(action="close")
+
+
+@pytest.mark.asyncio
+async def test_browser_open_names_missing_chromium(monkeypatch):
+    from app.tools import browser as browser_mod
+    from app.tools.browser import BrowserTool
+
+    async def boom(headless):
+        raise RuntimeError("Executable doesn't exist at /missing/chromium")
+
+    monkeypatch.setattr(browser_mod, "_page", None)
+    monkeypatch.setattr(browser_mod, "_ensure_page", boom)
+    tool = BrowserTool(lambda: {"browser": {"headless": True}})
+    result = await tool.execute(action="open", url="https://example.com/")
+    assert not result.success
+    assert "Chromium is not installed" in (result.error or "")

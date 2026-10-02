@@ -161,6 +161,43 @@ def test_personalized_build_auto_prepares_connection(owner_client, monkeypatch):
     assert started["endpoint"] == "https://192.168.1.10:4781"
 
 
+def test_personalized_build_prefers_wan_endpoint(owner_client, monkeypatch):
+    client, headers = owner_client
+    started = {}
+
+    class FakeConnectivity:
+        def snapshot(self):
+            return {
+                "endpoints": ["https://192.168.1.10:4781", "https://8.8.4.4:4781"],
+                "server_pin": "a" * 64,
+            }
+
+    async def fake_start(endpoint, endpoints=None, *, generic=False):
+        started.update(endpoint=endpoint, endpoints=endpoints, generic=generic)
+        return {
+            "id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            "state": "queued",
+            "activity": "Preparing Android build",
+            "mode": "personalized",
+            "started_at": 1,
+            "updated_at": 1,
+            "heartbeat_at": 1,
+            "stale": False,
+        }
+
+    monkeypatch.setattr("app.mobile.connectivity.CONNECTIVITY", FakeConnectivity())
+    monkeypatch.setattr(provision, "start", fake_start)
+    response = client.post(
+        "/api/mobile/manage/builds",
+        headers=headers,
+        json={"mode": "personalized", "prepare_connection": False, "endpoint": ""},
+    )
+    assert response.status_code == 200, response.text
+    assert started["endpoint"] == "https://8.8.4.4:4781"
+    assert started["endpoints"][0] == "https://8.8.4.4:4781"
+    assert "https://192.168.1.10:4781" in started["endpoints"]
+
+
 def test_personalized_build_requires_endpoint_without_prepare(owner_client, monkeypatch):
     client, headers = owner_client
 

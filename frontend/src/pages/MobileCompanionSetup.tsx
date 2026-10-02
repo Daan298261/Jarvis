@@ -119,7 +119,7 @@ export function MobileCompanionSetup() {
   async function startBuild(mode: "personalized" | "generic") {
     const created = await startCompanionBuild({
       mode,
-      endpoint: mode === "personalized" ? endpoint || connection?.endpoints[0] || "" : "",
+      endpoint: mode === "personalized" ? endpoint.trim() : "",
       prepareConnection: mode === "personalized",
       remote,
     })
@@ -169,9 +169,10 @@ export function MobileCompanionSetup() {
       {remote && (
         <div className="grid" style={{ marginTop: 12, gap: 8 }}>
           <p className="lede" style={{ margin: 0 }}>
-            Off LAN the phone talks to TCP 4781 only. Auto tries UPnP (optional router logon), then SSH into
-            your OpenWrt gateway, then an SSH reverse tunnel to a host you control. Jarvis will not map 4780,
-            SSH, or the router admin port.
+            Off LAN the phone talks to TCP 4781 only. Auto tries UPnP (optional router logon), then
+            NAT-PMP or PCP on this PC's gateway, then SSH into your OpenWrt gateway, then an SSH
+            reverse tunnel to a host you control. Jarvis will not map 4780, SSH, or the router admin
+            port.
           </p>
           <label>
             Reachability
@@ -179,7 +180,7 @@ export function MobileCompanionSetup() {
               value={wanForm.wan_method}
               onChange={(event) => patchWan("wan_method", event.target.value as WanMethod)}
             >
-              <option value="auto">Auto (UPnP, then gateway SSH, then reverse tunnel)</option>
+              <option value="auto">Auto (UPnP, NAT-PMP/PCP, gateway SSH, reverse tunnel)</option>
               <option value="upnp">UPnP / IGD on this router</option>
               <option value="gateway_ssh">Log into the gateway over SSH (OpenWrt)</option>
               <option value="ssh_reverse">SSH reverse tunnel to my host</option>
