@@ -61,6 +61,8 @@ def parse_beacon(raw: bytes) -> dict[str, Any] | None:
 
 def prefer_lan_https(endpoints: list[str], prefer_host: str = "") -> str:
     """LAN beacons must advertise an RFC1918 / .local origin, not the public hairpin."""
+    from .wan_forward import is_rfc1918_ipv4
+
     values = [str(item).rstrip("/") for item in endpoints if item]
     if not values:
         return ""
@@ -76,7 +78,7 @@ def prefer_lan_https(endpoints: list[str], prefer_host: str = "") -> str:
             ip = ipaddress.ip_address(host)
         except ValueError:
             continue
-        if ip.version == 4 and ip.is_private and not ip.is_loopback and not ip.is_link_local:
+        if is_rfc1918_ipv4(str(ip)):
             return item
     return values[0]
 

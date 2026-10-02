@@ -12,6 +12,8 @@ from app.mobile.wan_forward import (
     gateway_ssh_argv,
     gateway_ssh_configured,
     is_public_dial_host,
+    is_rfc1918_ipv4,
+    mapping_lan_ipv4,
     openwrt_redirect_script,
     parse_proc_net_route,
     parse_windows_route_print,
@@ -98,6 +100,8 @@ def test_openwrt_script_maps_only_companion_port_on_private_lan():
         openwrt_redirect_script("8.8.8.8")
     with pytest.raises(ValueError):
         openwrt_redirect_script("127.0.0.1")
+    with pytest.raises(ValueError):
+        openwrt_redirect_script("100.64.1.8")
 
 
 def test_gateway_ssh_argv_uses_identity_and_openwrt_profile(tmp_path, monkeypatch):
@@ -167,6 +171,26 @@ def test_wan_origin_rejects_lan_and_accepts_public_hosts():
     assert "secret" not in str(public)
     assert public["gateway_password_set"] is True
     assert public["ssh_host"] == "vpn.example.test"
+
+
+def test_mapping_lan_ipv4_skips_cgnat_and_prefers_gateway_subnet():
+    assert is_rfc1918_ipv4("192.168.1.12")
+    assert is_rfc1918_ipv4("10.0.0.5")
+    assert not is_rfc1918_ipv4("100.64.1.8")
+    assert not is_rfc1918_ipv4("8.8.8.8")
+    assert mapping_lan_ipv4(["100.64.1.8", "192.168.1.12"], "192.168.1.1") == "192.168.1.12"
+    assert mapping_lan_ipv4(["10.0.0.5", "192.168.1.12"], "192.168.1.1") == "192.168.1.12"
+    assert mapping_lan_ipv4(["10.0.0.5", "192.168.0.9"], "192.168.1.1") == "192.168.0.9"
+    assert mapping_lan_ipv4(["100.64.1.8"], "192.168.1.1") == ""
+    assert mapping_lan_ipv4([], "192.168.1.1") == ""
+    assert mapping_lan_ipv4(["192.168.1.12", "10.0.0.5"], "") == "192.168.1.12"
+
+
+def test_lan_hosts_drops_cgnat(monkeypatch):
+    from app.mobile import connectivity
+
+    monkeypatch.setattr("app.api.mobile._lan_hosts", lambda: ["100.64.1.8", "8.8.8.8", "192.168.1.12"])
+    assert connectivity.lan_hosts() == ["192.168.1.12"]
 
 
 @pytest.mark.asyncio
@@ -327,6 +351,34 @@ async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     assert result["state"] == "ready"
     assert result.get("wan_path") == "natpmp"
     assert "https://203.0.113.8:4781" in result["endpoints"]
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["203.0.113.8", "192.168.1.12"])
+
+
+@pytest.mark.asyncio
+async def test_natpmp_maps_rfc1918_when_cgnat_sorts_first(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["100.64.1.8", "192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    seen: dict[str, str] = {}
+
+    def fake_natpmp(gw, lan):
+        seen["gw"] = gw
+        seen["lan"] = lan
+        return "203.0.113.8"
+
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", fake_natpmp)
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_method": "auto"})
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "natpmp"
+    assert seen == {"gw": "192.168.1.1", "lan": "192.168.1.12"}
+    assert "https://192.168.1.12:4781" in result["endpoints"]
+    assert "https://100.64.1.8:4781" not in result["endpoints"]
     from app.mobile.gateway import identity_covers
     assert identity_covers(connection.identity, ["203.0.113.8", "192.168.1.12"])
 

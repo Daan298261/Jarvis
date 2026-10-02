@@ -135,14 +135,52 @@ def lookup_egress_ipv4() -> str:
     raise ValueError(str(last_error) if last_error else "Could not learn public IPv4")
 
 
-_NOT_INTERNET_V4 = (
+_RFC1918_V4 = (
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
+)
+_NOT_INTERNET_V4 = _RFC1918_V4 + (
     ipaddress.ip_network("100.64.0.0/10"),
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("169.254.0.0/16"),
 )
+
+
+def is_rfc1918_ipv4(value: str) -> bool:
+    """True for 10/8, 172.16/12, 192.168/16 — not CGNAT, loopback, or link-local."""
+    try:
+        address = ipaddress.ip_address((value or "").strip())
+    except ValueError:
+        return False
+    return address.version == 4 and any(address in net for net in _RFC1918_V4)
+
+
+def mapping_lan_ipv4(hosts, gateway: str = "") -> str:
+    """Dest IP for NAT-PMP / PCP / gateway SSH: RFC1918 on the gateway subnet, never CGNAT.
+
+    ``lan_hosts()`` is lexicographically sorted, so a cellular 100.64 address would
+    otherwise beat 192.168 and the inner router would map the wrong interface.
+    """
+    candidates = [str(host).strip() for host in (hosts or []) if is_rfc1918_ipv4(str(host))]
+    if not candidates:
+        return ""
+    try:
+        gw = ipaddress.ip_address((gateway or "").strip())
+    except ValueError:
+        return candidates[0]
+    if gw.version != 4:
+        return candidates[0]
+    same_24 = ipaddress.ip_network(f"{gw}/24", strict=False)
+    for host in candidates:
+        if ipaddress.ip_address(host) in same_24:
+            return host
+    for net in _RFC1918_V4:
+        if gw in net:
+            for host in candidates:
+                if ipaddress.ip_address(host) in net:
+                    return host
+    return candidates[0]
 
 
 def mapped_address_is_egress(mapped_ip: str) -> bool:
@@ -166,10 +204,10 @@ def mapped_address_is_egress(mapped_ip: str) -> bool:
 
 
 def _private_ipv4(value: str) -> str:
-    address = ipaddress.ip_address((value or "").strip())
-    if address.version != 4 or not address.is_private or address.is_loopback:
+    text = (value or "").strip()
+    if not is_rfc1918_ipv4(text):
         raise ValueError("Gateway port-forward destination must be a private LAN IPv4 address")
-    return str(address)
+    return text
 
 
 def ssh_executable() -> str:

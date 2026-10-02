@@ -51,6 +51,13 @@ def test_public_beacon_payload_needs_pin_and_endpoint():
         }
     )
     assert wan_first["https"] == "https://192.168.1.12:4781"
+    skip_cgnat = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "endpoints": ["https://100.64.1.8:4781", "https://192.168.1.12:4781"],
+        }
+    )
+    assert skip_cgnat["https"] == "https://192.168.1.12:4781"
 
 
 def test_lan_enroll_is_pending_until_owner_confirms(companion_env):

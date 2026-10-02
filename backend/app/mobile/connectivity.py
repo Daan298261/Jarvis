@@ -46,8 +46,9 @@ def dial_host(value: str) -> str:
 
 def lan_hosts():
     from ..api.mobile import _lan_hosts
-    return [host for host in _lan_hosts() if ipaddress.ip_address(host).is_private
-            and not ipaddress.ip_address(host).is_loopback and not ipaddress.ip_address(host).is_link_local]
+    from .wan_forward import is_rfc1918_ipv4
+
+    return [host for host in _lan_hosts() if is_rfc1918_ipv4(host)]
 
 
 def router_candidate(username: str = "", password: str = ""):
@@ -308,7 +309,20 @@ class Connectivity:
             raise RuntimeError("Mobile gateway is not enforcing device authentication or desktop API is unavailable")
 
     def _lan_endpoints(self, hosts: list[str]) -> list[str]:
-        return [f"https://{host}:{PORT}" for host in hosts]
+        from .wan_forward import is_rfc1918_ipv4
+
+        endpoints = []
+        for host in hosts:
+            if not host:
+                continue
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                endpoints.append(f"https://{host}:{PORT}")
+                continue
+            if is_rfc1918_ipv4(host):
+                endpoints.append(f"https://{host}:{PORT}")
+        return endpoints
 
     async def ensure_gateway_listening(self):
         if GUARD.cooldown_active():
@@ -437,17 +451,19 @@ class Connectivity:
                     await asyncio.to_thread(unmap_router, router, config["marker"])
                     self.router = None
                     self.report(router="unavailable", limitation=str(exc)[:240])
+            gw = ""
             if config["remote"] and not self.router and not inner_wan_unusable and method in {"auto", "upnp"}:
                 from .wan_forward import default_gateway_ipv4
 
-                gw = ""
-                lan_ip = (hosts[0] if hosts else "") or ""
                 try:
                     gw = default_gateway_ipv4()
                 except Exception as exc:
                     prior = self.state.get("limitation") or ""
                     extra = str(exc)[:240]
                     self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
+                from .wan_forward import mapping_lan_ipv4
+
+                lan_ip = mapping_lan_ipv4(hosts, gw)
                 if gw:
                     self.report(activity="Trying NAT-PMP on this PC's default gateway for TCP 4781")
                     try:
@@ -500,7 +516,9 @@ class Connectivity:
 
                 wan = wan_settings_from_config(config)
                 method = wan["wan_method"]
-                lan_ip = (hosts[0] if hosts else "") or ""
+                from .wan_forward import mapping_lan_ipv4
+
+                lan_ip = mapping_lan_ipv4(hosts, str(wan.get("gateway_host") or gw or ""))
                 if (
                     not inner_wan_unusable
                     and method in {"auto", "gateway_ssh"}

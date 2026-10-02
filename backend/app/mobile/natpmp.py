@@ -9,7 +9,7 @@ import ipaddress
 import socket
 import struct
 
-from .wan_forward import PORT, default_gateway_ipv4
+from .wan_forward import PORT, default_gateway_ipv4, is_rfc1918_ipv4
 
 NATPMP_PORT = 5351
 LEASE_SECONDS = 3600
@@ -79,10 +79,8 @@ def udp_exchange(
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(delay)
         try:
-            if lan_ip:
-                dest = ipaddress.ip_address(lan_ip)
-                if dest.version == 4 and dest.is_private and not dest.is_loopback:
-                    sock.bind((str(dest), 0))
+            if lan_ip and is_rfc1918_ipv4(lan_ip):
+                sock.bind((lan_ip.strip(), 0))
             sock.sendto(packet, (gw, NATPMP_PORT))
             data, addr = sock.recvfrom(512)
             peer = ipaddress.ip_address(addr[0])

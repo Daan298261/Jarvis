@@ -30,6 +30,8 @@ def test_pcp_map_request_is_tcp_4781_only():
     assert packet[44:60] == b"\x00" * 16
     with pytest.raises(ValueError):
         ipv4_mapped("8.8.8.8")
+    with pytest.raises(ValueError):
+        ipv4_mapped("100.64.1.8")
 
 
 def test_pcp_map_reply_must_be_4781_and_public():

@@ -11,7 +11,7 @@ import os
 import struct
 
 from .natpmp import LEASE_SECONDS, PORT, require_private_gateway, udp_exchange
-from .wan_forward import default_gateway_ipv4
+from .wan_forward import default_gateway_ipv4, is_rfc1918_ipv4
 
 _OPCODE_MAP = 1
 _PROTO_TCP = 6
@@ -19,9 +19,10 @@ _RESPONSE = 0x80
 
 
 def ipv4_mapped(host: str) -> bytes:
-    address = ipaddress.ip_address((host or "").strip())
-    if address.version != 4 or not address.is_private or address.is_loopback:
+    text = (host or "").strip()
+    if not is_rfc1918_ipv4(text):
         raise ValueError("PCP client address must be a private LAN IPv4")
+    address = ipaddress.ip_address(text)
     return b"\x00" * 10 + b"\xff\xff" + address.packed
 
 
