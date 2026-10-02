@@ -219,7 +219,7 @@ def ssh_executable() -> str:
 
 
 def parse_proc_net_route(text: str) -> str:
-    """First private IPv4 default gateway from /proc/net/route."""
+    """First RFC1918 IPv4 default gateway from /proc/net/route (skips CGNAT)."""
     lines = (text or "").splitlines()
     for line in lines[1:]:
         parts = line.split()

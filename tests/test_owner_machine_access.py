@@ -216,6 +216,32 @@ def test_lan_hosts_drops_cgnat(monkeypatch):
     assert connectivity.lan_hosts() == ["192.168.1.12"]
 
 
+def test_preferred_lan_ipv4_picks_home_lan_over_vpn(monkeypatch):
+    from app.mobile import connectivity
+
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.8.0.2", "192.168.1.12"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    assert connectivity.preferred_lan_ipv4() == "192.168.1.12"
+    assert connectivity.preferred_lan_ipv4("10.8.0.1") == "10.8.0.2"
+
+
+def test_udp_lan_ipv4_ignores_cgnat(monkeypatch):
+    from app.mobile import igd
+
+    class FakeSock:
+        def connect(self, addr):
+            return None
+
+        def getsockname(self):
+            return ("100.64.1.8", 12345)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(igd.socket, "socket", lambda *a, **k: FakeSock())
+    assert igd._udp_lan_ipv4() == ""
+
+
 @pytest.mark.asyncio
 async def test_ssh_reverse_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     from app.mobile import connectivity, store

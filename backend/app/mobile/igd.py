@@ -297,12 +297,12 @@ def stdlib_igd_candidate(username: str = "", password: str = "", lanaddr: str = 
     if description.status_code >= 400:
         raise RuntimeError(f"IGD description HTTP {description.status_code}")
     control, service = parse_igd_control(description.text, location)
-    host = lanaddr.strip() if lanaddr else _udp_lan_ipv4()
-    if not host:
+    host = lanaddr.strip()
+    if not is_rfc1918_ipv4(host):
+        host = _udp_lan_ipv4()
+    if not is_rfc1918_ipv4(host):
         raise ValueError("No private LAN IPv4 for IGD internal client")
     dest = ipaddress.ip_address(host)
-    if not is_rfc1918_ipv4(str(dest)):
-        raise ValueError("IGD internal client must be a private LAN IPv4 address")
     router = StdlibIGD(control, service, str(dest), username, password)
     return router, router.externalipaddress()
 
@@ -314,4 +314,4 @@ def _udp_lan_ipv4() -> str:
         host = sock.getsockname()[0]
     finally:
         sock.close()
-    return host
+    return host if is_rfc1918_ipv4(host) else ""

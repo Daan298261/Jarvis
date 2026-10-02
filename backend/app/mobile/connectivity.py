@@ -51,6 +51,19 @@ def lan_hosts():
     return [host for host in _lan_hosts() if is_rfc1918_ipv4(host)]
 
 
+def preferred_lan_ipv4(gateway: str = "") -> str:
+    """RFC1918 address on the default-gateway subnet — not lexicographic lan_hosts()[0]."""
+    from .wan_forward import default_gateway_ipv4, mapping_lan_ipv4
+
+    gw = (gateway or "").strip()
+    if not gw:
+        try:
+            gw = default_gateway_ipv4()
+        except Exception:
+            gw = ""
+    return mapping_lan_ipv4(lan_hosts(), gw)
+
+
 def router_candidate(username: str = "", password: str = ""):
     last_error: Exception | None = None
     try:
@@ -76,7 +89,7 @@ def router_candidate(username: str = "", password: str = ""):
     try:
         from .igd import stdlib_igd_candidate
 
-        lan = next(iter(lan_hosts()), "")
+        lan = preferred_lan_ipv4()
         return stdlib_igd_candidate(username, password, lanaddr=lan)
     except Exception as exc:
         last_error = exc
@@ -211,7 +224,7 @@ class Connectivity:
             self.router = None
         if self.natpmp_gateway:
             try:
-                lan = next(iter(lan_hosts()), "")
+                lan = preferred_lan_ipv4(self.natpmp_gateway)
                 if self.pcp_nonce:
                     from .pcp import delete_pcp
 
@@ -658,7 +671,7 @@ class Connectivity:
                                             raise RuntimeError("Router address changed")
                                         await asyncio.to_thread(map_router, self.router, self.marker)
                                     elif self.natpmp_gateway:
-                                        lan = next(iter(lan_hosts()), "")
+                                        lan = preferred_lan_ipv4(self.natpmp_gateway)
                                         if self.pcp_nonce:
                                             from .pcp import apply_pcp
 
