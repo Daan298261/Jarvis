@@ -132,10 +132,18 @@ class JarvisApi(context: Context) {
 
     suspend fun ensureSession() = session()
     fun accessToken(): String = token
-    fun preferredOrigin(): String = TransportPolicy.dialOrder(
+    fun preferredOrigin(): String = candidateOrigins().firstOrNull() ?: TransportPolicy.origin(endpoint)
+
+    fun candidateOrigins(): List<String> = TransportPolicy.dialOrder(
         preferred.takeIf { it.isNotBlank() },
         endpoints + endpoint,
-    ).firstOrNull() ?: TransportPolicy.origin(endpoint)
+    )
+
+    fun noteReachable(origin: String) {
+        val address = TransportPolicy.origin(origin)
+        preferred = address
+        preferredAt = System.currentTimeMillis()
+    }
     fun pinnedClient(): OkHttpClient {
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
         val expectedPin = pin

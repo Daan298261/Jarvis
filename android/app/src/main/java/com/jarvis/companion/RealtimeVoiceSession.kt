@@ -39,35 +39,54 @@ class RealtimeVoiceSession(
     suspend fun connect() = withContext(Dispatchers.IO) {
         api.ensureSession()
         val client = api.pinnedClient().newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build()
-        val url = api.preferredOrigin().replace("https://", "wss://").replace("http://", "ws://") +
-            "/api/companion/voice/realtime"
-        val request = Request.Builder().url(url)
-            .header("Authorization", "Bearer ${api.accessToken()}")
-            .header("X-Jarvis-Device", api.deviceId)
-            .build()
-        suspendCancellableCoroutine { cont ->
-            socket = client.newWebSocket(request, object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    open.set(true)
-                    if (cont.isActive) cont.resume(Unit)
-                }
+        var lastError: Throwable? = null
+        for (origin in api.candidateOrigins()) {
+            val url = origin.replace("https://", "wss://").replace("http://", "ws://") +
+                "/api/companion/voice/realtime"
+            val request = Request.Builder().url(url)
+                .header("Authorization", "Bearer ${api.accessToken()}")
+                .header("X-Jarvis-Device", api.deviceId)
+                .build()
+            try {
+                suspendCancellableCoroutine { cont ->
+                    socket = client.newWebSocket(request, object : WebSocketListener() {
+                        override fun onOpen(webSocket: WebSocket, response: Response) {
+                            open.set(true)
+                            if (cont.isActive) cont.resume(Unit)
+                        }
 
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    runCatching { JSONObject(text) }.onSuccess { events.trySend(it) }
-                }
+                        override fun onMessage(webSocket: WebSocket, text: String) {
+                            runCatching { JSONObject(text) }.onSuccess { events.trySend(it) }
+                        }
 
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    open.set(false)
-                    events.trySend(JSONObject().put("type", "error").put("detail", t.message ?: "socket failed"))
-                    if (cont.isActive) cont.resumeWithException(t)
-                }
+                        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                            open.set(false)
+                            if (cont.isActive) {
+                                cont.resumeWithException(t)
+                            } else {
+                                events.trySend(JSONObject().put("type", "error").put("detail", t.message ?: "socket failed"))
+                            }
+                        }
 
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    open.set(false)
-                    events.close()
+                        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                            open.set(false)
+                            events.close()
+                        }
+                    })
+                    cont.invokeOnCancellation { socket?.close(1000, "cancel") }
                 }
-            })
-            cont.invokeOnCancellation { socket?.close(1000, "cancel") }
+                api.noteReachable(origin)
+                lastError = null
+                break
+            } catch (error: Throwable) {
+                lastError = error
+                socket?.cancel()
+                socket = null
+                open.set(false)
+            }
+        }
+        if (!open.get()) {
+            throw lastError ?: java.io.IOException("No reachable Jarvis voice endpoint")
         }
         val hello = JSONObject().put("type", "hello")
         conversationId?.let { hello.put("conversation_id", it) }
