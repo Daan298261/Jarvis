@@ -126,6 +126,64 @@ def public_beacon_payload(snapshot: dict[str, Any], *, prefer_host: str = "") ->
     }
 
 
+def _rfc1918_bind_ips(bind_ips: list[str] | None = None) -> list[str]:
+    from .wan_forward import interface_ipv4_addresses, is_rfc1918_ipv4, mapping_lan_ipv4, rfc1918_mapping_gateways
+
+    nics = [
+        ip
+        for ip in (bind_ips if bind_ips is not None else interface_ipv4_addresses())
+        if is_rfc1918_ipv4(ip)
+    ]
+    ordered: list[str] = []
+    try:
+        for gw in rfc1918_mapping_gateways():
+            dest = mapping_lan_ipv4(nics, gw)
+            if dest and dest not in ordered:
+                ordered.append(dest)
+    except Exception:
+        pass
+    return ordered + [ip for ip in nics if ip not in ordered]
+
+
+def beacon_reply_source(peer: str, bind_ips: list[str] | None = None) -> str:
+    """Source IPv4 on the same /24 as the phone, so a VPN default route cannot steal the reply."""
+    from .wan_forward import is_rfc1918_ipv4, mapping_lan_ipv4
+
+    host = (peer or "").strip()
+    if not is_rfc1918_ipv4(host):
+        return ""
+    return mapping_lan_ipv4(_rfc1918_bind_ips(bind_ips), host)
+
+
+def beacon_send_plan(bind_ips: list[str] | None = None) -> list[tuple[str, str]]:
+    """(source_ip, dest_ip) for directed subnet broadcast plus limited broadcast per NIC."""
+    plan: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for ip in _rfc1918_bind_ips(bind_ips):
+        net = ipaddress.ip_network(f"{ip}/24", strict=False)
+        for dest in (str(net.broadcast_address), "255.255.255.255"):
+            key = (ip, dest)
+            if key in seen:
+                continue
+            seen.add(key)
+            plan.append(key)
+    return plan
+
+
+def send_beacon_datagram(blob: bytes, dest: str, port: int, source: str = "") -> None:
+    from .wan_forward import is_rfc1918_ipv4
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        bind = (source or "").strip()
+        if is_rfc1918_ipv4(bind):
+            sock.bind((bind, 0))
+        sock.sendto(blob, (dest, int(port)))
+    finally:
+        sock.close()
+
+
 class LanBeaconServer:
     def __init__(self, port: int = BEACON_PORT):
         self.port = port
@@ -136,7 +194,7 @@ class LanBeaconServer:
         await self.stop()
         loop = asyncio.get_running_loop()
         transport, protocol = await loop.create_datagram_endpoint(
-            lambda: _BeaconProtocol(payload_factory),
+            lambda: _BeaconProtocol(payload_factory, port=self.port),
             local_addr=("0.0.0.0", self.port),
             allow_broadcast=True,
         )
@@ -153,8 +211,9 @@ class LanBeaconServer:
 
 
 class _BeaconProtocol(asyncio.DatagramProtocol):
-    def __init__(self, payload_factory):
+    def __init__(self, payload_factory, port: int = BEACON_PORT):
         self._payload_factory = payload_factory
+        self._port = int(port or BEACON_PORT)
         self._transport: asyncio.DatagramTransport | None = None
         self._broadcast_task: asyncio.Task | None = None
 
@@ -184,6 +243,14 @@ class _BeaconProtocol(asyncio.DatagramProtocol):
         if not payload:
             return
         blob = encode_beacon(payload)
+        dest_port = int(addr[1]) if addr and len(addr) > 1 else self._port
+        source = beacon_reply_source(str(peer or ""))
+        if source:
+            try:
+                send_beacon_datagram(blob, str(peer), dest_port, source)
+                return
+            except OSError:
+                pass
         if self._transport:
             self._transport.sendto(blob, addr)
 
@@ -191,12 +258,18 @@ class _BeaconProtocol(asyncio.DatagramProtocol):
         try:
             while True:
                 payload = self._payload()
-                if payload and self._transport:
+                if payload:
                     blob = encode_beacon(payload)
-                    try:
-                        self._transport.sendto(blob, ("255.255.255.255", self.port))
-                    except OSError:
-                        pass
+                    for source, dest in beacon_send_plan():
+                        try:
+                            send_beacon_datagram(blob, dest, self._port, source)
+                        except OSError:
+                            continue
+                    if self._transport:
+                        try:
+                            self._transport.sendto(blob, ("255.255.255.255", self._port))
+                        except OSError:
+                            pass
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
             return
