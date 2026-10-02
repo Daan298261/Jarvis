@@ -140,7 +140,8 @@ class JarvisApi(context: Context) {
         val challenge = JSONObject(raw("/challenge/$deviceId", authenticated = false).toString(Charsets.UTF_8))
         val proof = Signature.getInstance("SHA256withECDSA").run {
             initSign(keys.getKey(keyAlias, null) as java.security.PrivateKey)
-            update("jarvis-mobile-v1\n$deviceId\n${challenge.getString(\"challenge\")}".toByteArray())
+            val nonce = challenge.getString("challenge")
+            update("jarvis-mobile-v1\n$deviceId\n$nonce".toByteArray())
             Base64.encodeToString(sign(), Base64.NO_WRAP)
         }
         val result = JSONObject(raw("/session", "POST", JSONObject().put("device_id", deviceId).put("signature", proof).toString().toByteArray(), false).toString(Charsets.UTF_8))
