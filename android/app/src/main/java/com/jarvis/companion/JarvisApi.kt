@@ -48,6 +48,8 @@ class JarvisApi(context: Context) {
     }.getOrDefault(emptyList())
     @Volatile private var preferred = ""
     @Volatile private var preferredAt = 0L
+    private val failedLock = Any()
+    private var failedOrigins: List<Pair<String, Long>> = emptyList()
     @Volatile private var cachedClient: Pair<String, OkHttpClient>? = null
     private var token = ""
     private var expiresAt = 0L
@@ -74,6 +76,7 @@ class JarvisApi(context: Context) {
         pin = publicPin.lowercase()
         if (changed) { deviceId = ""; token = ""; expiresAt = 0; endpoints = emptyList(); cachedClient = null }
         preferred = ""; preferredAt = 0
+        synchronized(failedLock) { failedOrigins = emptyList() }
         endpoints = ordered.ifEmpty { listOf(endpoint) }
         prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).putString("endpoints", JSONArray(endpoints).toString()).apply()
     }
@@ -143,12 +146,36 @@ class JarvisApi(context: Context) {
         preferred.takeIf { it.isNotBlank() },
         endpoints + endpoint,
         TransportPolicy.localIpv4Addresses(),
+        recentFailures(),
     )
 
     fun noteReachable(origin: String) {
         val address = TransportPolicy.origin(origin)
         preferred = address
         preferredAt = System.currentTimeMillis()
+        synchronized(failedLock) {
+            failedOrigins = failedOrigins.filter { it.first != address }
+        }
+    }
+
+    fun noteUnreachable(origin: String) {
+        noteFailed(origin)
+    }
+
+    private fun noteFailed(origin: String) {
+        val address = runCatching { TransportPolicy.origin(origin) }.getOrDefault(origin)
+        val now = System.currentTimeMillis()
+        synchronized(failedLock) {
+            failedOrigins = (failedOrigins.filter { now - it.second < 30_000 && it.first != address } + (address to now)).takeLast(8)
+        }
+    }
+
+    private fun recentFailures(): List<String> {
+        val now = System.currentTimeMillis()
+        synchronized(failedLock) {
+            failedOrigins = failedOrigins.filter { now - it.second < 30_000 }
+            return failedOrigins.map { it.first }
+        }
     }
     fun pinnedClient(): OkHttpClient {
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
@@ -186,7 +213,12 @@ class JarvisApi(context: Context) {
         if (authenticated) session()
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
         val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }
-        val addresses = TransportPolicy.dialOrder(recent, endpoints + endpoint, TransportPolicy.localIpv4Addresses())
+        val addresses = TransportPolicy.dialOrder(
+            recent,
+            endpoints + endpoint,
+            TransportPolicy.localIpv4Addresses(),
+            recentFailures(),
+        )
         val client = pinnedClient().newBuilder()
             .connectTimeout(TransportPolicy.connectTimeoutMs(addresses.size), TimeUnit.MILLISECONDS)
             .build()
@@ -212,6 +244,7 @@ class JarvisApi(context: Context) {
             try {
                 return callOrigin(client, address, path, method, body, authenticated, contentType, filename, extraHeaders)
             } catch (error: java.io.IOException) {
+                noteFailed(address)
                 failure = error
             }
         }
@@ -243,6 +276,9 @@ class JarvisApi(context: Context) {
                 } catch (error: CancellationException) {
                     call.cancel()
                     throw error
+                } catch (error: java.io.IOException) {
+                    noteFailed(address)
+                    outcomes.send(Result.failure(error))
                 } catch (error: Throwable) {
                     outcomes.send(Result.failure(error))
                 }

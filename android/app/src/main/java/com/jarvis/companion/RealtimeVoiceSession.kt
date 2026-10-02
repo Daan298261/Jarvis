@@ -84,6 +84,7 @@ class RealtimeVoiceSession(
                 break
             } catch (error: Throwable) {
                 lastError = error
+                api.noteUnreachable(origin)
                 socket?.cancel()
                 socket = null
                 open.set(false)

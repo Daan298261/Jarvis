@@ -80,6 +80,16 @@ class TransportPolicyTest {
         assertEquals(lan, order.last())
     }
 
+    @Test fun failedLanOnSameSubnetIsTriedLast() {
+        val lan = "https://10.2.0.2:4781"
+        val wan = "https://203.0.113.4:4781"
+        val relay = "https://relay.example.test:4781"
+        val order = TransportPolicy.dialOrder(null, listOf(lan, wan, relay), listOf("10.2.0.5"), listOf(lan))
+        assertEquals(relay, order[0])
+        assertEquals(wan, order[1])
+        assertEquals(lan, order.last())
+    }
+
     @Test fun hostnameTlsErrorsAreOrdinaryDialFailures() {
         val error: Throwable = javax.net.ssl.SSLException("Hostname 8.8.8.8 not verified")
         assertTrue(error is java.io.IOException)
@@ -89,6 +99,7 @@ class TransportPolicyTest {
         assertTrue(TransportPolicy.mayRaceOrigins("GET", "/connection"))
         assertTrue(TransportPolicy.mayRaceOrigins("GET", "/models"))
         assertFalse(TransportPolicy.mayRaceOrigins("GET", "/challenge/device-1"))
+        assertFalse(TransportPolicy.mayRaceOrigins("GET", "/enroll"))
         assertFalse(TransportPolicy.mayRaceOrigins("POST", "/session"))
         assertFalse(TransportPolicy.mayRaceOrigins("POST", "/messages"))
         assertEquals(1500L, TransportPolicy.connectTimeoutMs(2))

@@ -44,22 +44,26 @@ object TransportPolicy {
         recent: String?,
         candidates: Iterable<String>,
         localIpv4: Iterable<String> = emptyList(),
+        skipped: Iterable<String> = emptyList(),
     ): List<String> {
         val rest = orderedForReachability(candidates + listOfNotNull(recent))
         val locals = localIpv4.map { it.trim() }.filter { it.isNotEmpty() }
+        val skip = skipped.mapNotNull { runCatching { origin(it) }.getOrNull() }.toSet()
+        val usable = rest.filter { it !in skip }
+        val deferred = rest.filter { it in skip }
         if (locals.isNotEmpty()) {
-            val home = rest.filter { onAttachedLan(it, locals) }
+            val home = usable.filter { onAttachedLan(it, locals) }
             if (home.isNotEmpty()) {
                 val head = home.first()
-                return (listOf(head) + rest.filter { it != head }).distinct()
+                return (listOf(head) + usable.filter { it != head } + deferred).distinct()
             }
             val sticky = recent?.let { runCatching { origin(it) }.getOrNull() }
-            val useSticky = sticky != null && reachabilityRank(sticky) < 2
+            val useSticky = sticky != null && sticky !in skip && reachabilityRank(sticky) < 2
             val head = if (useSticky) sticky else null
-            return (listOfNotNull(head) + rest.filter { it != head }).distinct()
+            return (listOfNotNull(head) + usable.filter { it != head } + deferred).distinct()
         }
-        val head = recent?.let { runCatching { origin(it) }.getOrNull() }
-        return (listOfNotNull(head) + rest.filter { it != head }).distinct()
+        val head = recent?.let { runCatching { origin(it) }.getOrNull() }?.takeIf { it !in skip }
+        return (listOfNotNull(head) + usable.filter { it != head } + deferred).distinct()
     }
 
     internal fun onAttachedLan(endpoint: String, localIpv4: Iterable<String>): Boolean {
