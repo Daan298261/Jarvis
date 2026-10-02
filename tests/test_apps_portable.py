@@ -100,6 +100,60 @@ def test_portable_search_roots_skips_posix_slash(tmp_path, monkeypatch):
     assert Path("/") not in roots
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX extra-mount roots")
+def test_portable_search_roots_expand_media_usb_label(tmp_path, monkeypatch):
+    media = tmp_path / "media"
+    usb = media / "owner" / "USBDRIVE"
+    portable = usb / "PortableApps"
+    portable.mkdir(parents=True)
+    monkeypatch.setattr("app.config._posix_owner_roots", lambda: [Path("/"), media])
+    from app.tools.apps import _portable_search_roots, _posix_portable_volumes
+
+    volumes = _posix_portable_volumes()
+    assert usb in volumes
+    assert media not in volumes
+    assert Path("/") not in volumes
+    roots = [path for path, _depth in _portable_search_roots()]
+    assert usb in roots
+    assert portable in roots
+    assert media not in roots
+    assert Path("/") not in roots
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX extra-mount roots")
+def test_portable_search_roots_expand_run_media_usb_label(tmp_path, monkeypatch):
+    run_media = tmp_path / "run" / "media"
+    usb = run_media / "owner" / "KINGSTON"
+    usb.mkdir(parents=True)
+    monkeypatch.setattr("app.config._posix_owner_roots", lambda: [Path("/"), run_media])
+    from app.tools.apps import _posix_portable_volumes
+
+    volumes = _posix_portable_volumes()
+    assert usb in volumes
+    assert run_media not in volumes
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX extra-mount roots")
+def test_resolve_portable_appimage_under_media_usb(tmp_path, monkeypatch):
+    media = tmp_path / "media"
+    usb = media / "owner" / "USBDRIVE"
+    appdir = usb / "PortableApps" / "CoolTool"
+    appdir.mkdir(parents=True)
+    exe = appdir / "cooltool.appimage"
+    exe.write_bytes(b"AI")
+    monkeypatch.setattr("app.config._posix_owner_roots", lambda: [Path("/"), media])
+    monkeypatch.setattr("app.tools.apps._shortcuts", lambda: [])
+    monkeypatch.setattr("app.tools.apps._uwp_apps", lambda: [])
+    monkeypatch.setattr("app.tools.apps._app_paths", lambda _query: None)
+    monkeypatch.setattr("app.tools.apps.shutil.which", lambda _name: None)
+    from app.tools.apps import resolve_app
+
+    target = resolve_app("cooltool")
+    assert target is not None
+    assert target.kind == "exe"
+    assert Path(target.target) == exe
+
+
 @pytest.mark.asyncio
 async def test_launch_error_mentions_extra_drives(monkeypatch):
     monkeypatch.setattr("app.tools.apps.resolve_app", lambda _name: None)

@@ -146,13 +146,42 @@ def _portable_search_roots() -> list[tuple[Path, int]]:
             add(drive / "Program Files (x86)", 3)
             add(drive, 2)
     else:
-        from ..config import _posix_owner_roots
-
-        for mount in _posix_owner_roots():
-            if str(mount) in _POSIX_SKIP_MOUNTS:
-                continue
-            add(mount, 3)
+        for volume in _posix_portable_volumes():
+            add(volume / "PortableApps", 3)
+            add(volume, 3)
     return rows
+
+
+def _posix_portable_volumes() -> list[Path]:
+    """USB / extra mounts as volume roots, not `/media` or `/run/media` parents.
+
+    `extra_volume_roots()` expands the same parents, but returns [] under pytest.
+    Portable launch still needs the live USB label so `PortableApps/<App>/app`
+    is inside the depth-3 walk (walking `/media` itself stops at the label).
+    """
+    from ..config import _posix_owner_roots, _posix_volume_parent_children
+
+    posix_parents = {Path("/media"), Path("/mnt"), Path("/run/media")}
+    volumes: list[Path] = []
+    seen: set[str] = set()
+    for mount in _posix_owner_roots():
+        if str(mount) in _POSIX_SKIP_MOUNTS:
+            continue
+        children = (
+            _posix_volume_parent_children(mount)
+            if mount in posix_parents or mount.name in {"media", "mnt"}
+            else [mount]
+        )
+        for volume in children:
+            try:
+                key = str(volume.resolve()).replace("\\", "/").rstrip("/").lower()
+            except OSError:
+                key = str(volume).replace("\\", "/").rstrip("/").lower()
+            if not key or key in seen or key == "/":
+                continue
+            seen.add(key)
+            volumes.append(volume)
+    return volumes
 
 
 def _iter_app_files(root: Path, *, max_depth: int) -> list[Path]:
