@@ -822,6 +822,45 @@ async def test_lan_refresh_rebuilds_natpmp_when_public_ip_changes(tmp_path, monk
     assert "https://203.0.113.8:4781" not in connection.state["endpoints"]
 
 
+@pytest.mark.asyncio
+async def test_lan_refresh_rebuilds_pcp_when_public_ip_changes(tmp_path, monkeypatch):
+    import time
+
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr(
+        "app.mobile.natpmp.apply_natpmp",
+        lambda gw, lan: (_ for _ in ()).throw(ValueError("NAT-PMP unsupported version")),
+    )
+    public = {"ip": "198.51.100.8"}
+
+    def fake_pcp(gw, lan, nonce=None):
+        del gw, lan, nonce
+        return public["ip"], bytes([0x11]) * 12
+
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", fake_pcp)
+    monkeypatch.setattr("app.mobile.pcp.delete_pcp", lambda *a, **k: None)
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_method": "auto"})
+    assert result.get("wan_path") == "pcp"
+    assert "https://198.51.100.8:4781" in result["endpoints"]
+    held = time.time() + 1190
+    connection.report(next_renewal_at=held)
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.state.get("next_renewal_at") == held
+    public["ip"] = "198.51.100.9"
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.public_ip == "198.51.100.9"
+    assert "https://198.51.100.9:4781" in connection.state["endpoints"]
+    assert "https://198.51.100.8:4781" not in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" in connection.state["endpoints"]
+
+
 def test_igd_mapping_dest_never_uses_an_address_this_pc_does_not_hold(monkeypatch):
     from app.mobile import connectivity
     from tests.test_mobile_connectivity import Router

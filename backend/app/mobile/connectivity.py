@@ -746,16 +746,31 @@ class Connectivity:
         return previous not in hosts
 
     async def _live_wan_public_ip(self) -> str:
-        """Public IPv4 the live WAN method currently advertises — query only, no remap."""
+        """Public IPv4 the live WAN method currently advertises.
+
+        UPnP and NAT-PMP are query-only. PCP has no public-IP opcode, so one MAP
+        renew reads the assigned address (and keeps the one-hour lease alive).
+        """
         if self.router:
             try:
                 return str(await asyncio.to_thread(self.router.externalipaddress) or "")
             except Exception:
                 return ""
-        if self.natpmp_gateway and not self.pcp_nonce:
+        if self.natpmp_gateway:
+            lan = preferred_lan_ipv4(self.natpmp_gateway)
+            if self.pcp_nonce:
+                from .pcp import apply_pcp
+
+                try:
+                    public_ip, nonce = await asyncio.to_thread(
+                        apply_pcp, self.natpmp_gateway, lan, self.pcp_nonce
+                    )
+                    self.pcp_nonce = nonce
+                    return str(public_ip or "")
+                except Exception:
+                    return ""
             from .natpmp import query_public_ip
 
-            lan = preferred_lan_ipv4(self.natpmp_gateway)
             try:
                 return str(await asyncio.to_thread(query_public_ip, self.natpmp_gateway, lan) or "")
             except Exception:
