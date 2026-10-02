@@ -549,23 +549,31 @@ class Connectivity:
                     method in {"auto", "gateway_ssh"}
                     and gateway_ssh_configured(wan)
                 ):
-                    self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
-                    try:
-                        public_host = wan.get("wan_public_host") or public_ip or ""
-                        if not public_host:
-                            try:
-                                from .wan_forward import lookup_egress_ipv4
+                    if not lan_ip:
+                        prior = self.state.get("limitation") or ""
+                        extra = (
+                            "Gateway SSH needs a LAN IPv4 on the router subnet; "
+                            "trying the next owner method."
+                        )
+                        self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
+                    else:
+                        self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
+                        try:
+                            public_host = wan.get("wan_public_host") or public_ip or ""
+                            if not public_host:
+                                try:
+                                    from .wan_forward import lookup_egress_ipv4
 
-                                public_host = await asyncio.to_thread(lookup_egress_ipv4)
-                            except Exception:
-                                public_host = ""
-                        mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=str(public_host or ""))
-                        wan_path = "gateway_ssh"
-                        if mapped:
-                            endpoints.append(mapped)
-                        self.report(router="mapped", wan_path=wan_path, limitation=detail)
-                    except Exception as exc:
-                        self.report(router="unavailable", limitation=str(exc)[:240])
+                                    public_host = await asyncio.to_thread(lookup_egress_ipv4)
+                                except Exception:
+                                    public_host = ""
+                            mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=str(public_host or ""))
+                            wan_path = "gateway_ssh"
+                            if mapped:
+                                endpoints.append(mapped)
+                            self.report(router="mapped", wan_path=wan_path, limitation=detail)
+                        except Exception as exc:
+                            self.report(router="unavailable", limitation=str(exc)[:240])
                 if not wan_path and method in {"auto", "ssh_reverse"} and wan["ssh_host"] and wan["ssh_user"]:
                     self.report(activity="Opening an SSH reverse tunnel for companion TLS")
                     try:

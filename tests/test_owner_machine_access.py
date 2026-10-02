@@ -388,7 +388,47 @@ async def test_upnp_double_nat_still_tries_owner_gateway_ssh(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_gateway_ssh_does_not_advertise_private_router_as_wan(tmp_path, monkeypatch):
+async def test_gateway_ssh_skips_when_pc_is_not_on_router_subnet(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+    gateway_hits = {"n": 0}
+
+    async def fake_gateway(*_a, **_k):
+        gateway_hits["n"] += 1
+        raise AssertionError("Gateway SSH must not run without a dest IP on the router /24")
+
+    async def fake_tunnel(settings):
+        assert settings["ssh_host"] == "vpn.example.test"
+        return "https://vpn.example.test:4781"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    monkeypatch.setattr("app.mobile.wan_forward.apply_ssh_reverse", fake_tunnel)
+    result = await FakeConnection().configure(
+        True,
+        True,
+        {
+            "wan_method": "auto",
+            "gateway_host": "192.168.0.1",
+            "gateway_user": "root",
+            "gateway_identity_file": str(key),
+            "ssh_host": "vpn.example.test",
+            "ssh_user": "taco",
+            "ssh_identity_file": str(key),
+        },
+    )
+    assert result["state"] == "ready"
+    assert gateway_hits["n"] == 0
+    assert result.get("wan_path") == "ssh_reverse"
+    assert any(endpoint == "https://vpn.example.test:4781" for endpoint in result["endpoints"])
+    assert "router subnet" in (result.get("limitation") or "").lower()
     from app.mobile import connectivity, store
     from tests.test_mobile_connectivity import FakeConnection
 
