@@ -104,7 +104,7 @@ MODEL_MANIFEST: dict[str, dict[str, Any]] = {
         "bundled": False,
         "estimated_disk_gb": 22.0,
         "why": "Deeper incident-response, correlation and detection-engineering specialist.",
-        "limitations": "Large specialist runtime; configure on demand and keep the existing security password gate authoritative.",
+        "limitations": "Large specialist runtime; configure on demand. Blue/DFIR routing requires the blue-team module on the installed license package.",
     },
     "red_deephat": {
         "id": "red_deephat",
@@ -118,7 +118,7 @@ MODEL_MANIFEST: dict[str, dict[str, Any]] = {
         "bundled": False,
         "estimated_disk_gb": 5.5,
         "why": "Optional offensive-security specialist for explicitly authorized assessments.",
-        "limitations": "Never auto-enabled. Password plus the existing Red Team authorization/case gate remains mandatory.",
+        "limitations": "Never auto-enabled. Requires red-team on the license package with law enforcement, plus case reference and human confirmation per routing policy.",
     },
 }
 
