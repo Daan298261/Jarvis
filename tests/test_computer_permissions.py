@@ -66,6 +66,8 @@ def test_computer_permissions_browser_use_local_network(permission_store):
     assert permission_ids_for_tool("web_fetch", {"url": "https://example.com"}) == ["network.internet"]
     assert permission_ids_for_tool("web_fetch", {"url": "http://192.168.1.1/status"}) == ["network.local"]
     assert permission_ids_for_tool("browser", {"url": "http://nas.local"}) == ["network.local"]
+    assert permission_ids_for_tool("external_ingest", {"url": "https://example.com"}) == ["network.internet"]
+    assert permission_ids_for_tool("external_ingest", {"url": "http://192.168.1.10/share"}) == ["network.local"]
 
 
 def test_allow_once_is_consumed_after_use(permission_store):

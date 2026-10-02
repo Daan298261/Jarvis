@@ -208,6 +208,57 @@ async def test_external_ingest_tool_wraps_orchestrator(monkeypatch):
     assert result.data["title"] == "Hello"
 
 
+async def test_external_ingest_tool_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    called = {"n": 0}
+
+    async def _fake_ingest(url, **kwargs):
+        called["n"] += 1
+        return {"title": "should not run"}
+
+    monkeypatch.setattr("app.ingest.orchestrator.ingest_url", _fake_ingest)
+    tool = ExternalIngestTool(lambda: {})
+    result = await tool.execute(url="https://example.com")
+    assert result.success is False
+    assert called["n"] == 0
+    assert "don't allow" in (result.error or "").lower() or "internet" in (result.error or "").lower()
+
+
+async def test_ingest_http_hop_does_not_follow_denied_wan(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host or ""
+        if host.startswith("192.168."):
+            return httpx.Response(302, headers={"location": "https://evil.example/leak"})
+        return httpx.Response(200, text="<html>wan</html>")
+
+    class RedirectClient(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.ingest.adapters.generic.httpx.AsyncClient", RedirectClient)
+    tool = ExternalIngestTool(lambda: {})
+    result = await tool.execute(url="http://192.168.1.10/home")
+    assert result.success is False
+    assert "evil.example" not in str(result.data or "")
+    assert called_error_mentions_permission(result.error)
+
+
+def called_error_mentions_permission(error: str | None) -> bool:
+    text = (error or "").lower()
+    return "don't allow" in text or "permission" in text or "internet" in text
+
+
 async def test_ingest_raises_when_all_tiers_fail(monkeypatch):
     class FailClient(httpx.AsyncClient):
         def __init__(self, **kwargs):

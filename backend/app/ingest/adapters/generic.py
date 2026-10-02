@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from html import unescape
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -76,11 +77,25 @@ def _artifact_from_tags(
 
 
 async def _fetch_html(url: str, timeout: float = 20.0) -> str:
+    from ...policy.computer_permissions import evaluate_tool_permissions
+
     headers = {"User-Agent": "JarvisLocal/1.0"}
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.text
+    current = url
+    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, headers=headers) as client:
+        for _ in range(8):
+            gate = evaluate_tool_permissions("external_ingest", {"url": current, "method": "GET"})
+            if gate.status != "allow":
+                raise PermissionError(gate.reason or "Permission required before ingesting from the network.")
+            response = await client.get(current)
+            location = (response.headers.get("location") or "").strip()
+            if response.status_code not in {301, 302, 303, 307, 308} or not location:
+                response.raise_for_status()
+                return response.text
+            nxt = urljoin(str(response.url), location)
+            if (urlparse(nxt).scheme or "").lower() not in {"http", "https"}:
+                raise PermissionError("Blocked URL scheme. Only http and https URLs are allowed")
+            current = nxt
+    raise PermissionError("Too many redirects")
 
 
 class GenericWebAdapter:
@@ -89,6 +104,8 @@ class GenericWebAdapter:
     async def resolve_http(self, ctx: IngestContext) -> ExternalContentArtifact | None:
         try:
             html = await _fetch_html(ctx.url)
+        except PermissionError:
+            raise
         except Exception:
             return None
         tags = _parse_og_tags(html)

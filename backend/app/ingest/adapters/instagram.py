@@ -118,6 +118,8 @@ class InstagramAdapter:
 
         try:
             html = await _fetch_html(ctx.url)
+        except PermissionError:
+            raise
         except Exception:
             return None
 
