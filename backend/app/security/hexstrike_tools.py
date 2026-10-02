@@ -228,6 +228,12 @@ async def install_host_tool(command: str, *, install_path: str = "") -> ToolInst
         return ToolInstallResult(command=key, ok=False, detail=f"Unknown tool id: {command}")
     if shutil.which(key):
         return ToolInstallResult(command=key, ok=True, detail=f"{TOOL_LABELS.get(key, key)} already on PATH.")
+    from ..policy.network_http import require_http_url_allowed
+
+    try:
+        require_http_url_allowed("https://cdn.winget.microsoft.com/cache", tool="web_fetch")
+    except PermissionError as exc:
+        return ToolInstallResult(command=key, ok=False, detail=str(exc))
     if sys.platform != "win32":
         return ToolInstallResult(
             command=key,
@@ -282,6 +288,12 @@ async def install_pip_package(package: str, *, install_path: str = "") -> ToolIn
             ok=False,
             detail="HexStrike install path is not configured; pip installs require hexstrike-env.",
         )
+    from ..policy.network_http import require_http_url_allowed
+
+    try:
+        require_http_url_allowed("https://pypi.org/simple/", tool="web_fetch")
+    except PermissionError as exc:
+        return ToolInstallResult(command=pip_name, ok=False, detail=str(exc))
     audit_hexstrike("pip_install_start", package=pip_name)
     async with _INSTALL_LOCK:
         _INSTALL_JOBS[f"pip:{pip_name}"] = {"status": "installing", "package": pip_name}

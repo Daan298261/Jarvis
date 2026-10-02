@@ -572,6 +572,27 @@ def test_installer_reports_ready_only_for_reviewed_complete_install(tmp_path, mo
     assert status.approved_commit == APPROVED_HEXSTRIKE_COMMIT
 
 
+@pytest.mark.asyncio
+async def test_hexstrike_bootstrap_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+
+    async def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not launch HexStrike bootstrap when internet is denied")
+
+    monkeypatch.setattr("app.security.hexstrike_install.asyncio.create_subprocess_exec", boom)
+    installer = HexStrikeInstaller()
+    await installer._run(tmp_path / "hexstrike")
+    assert ran["n"] == 0
+    assert installer._status.state == "failed"
+    assert installer._status.error
+
+
 def test_bootstrapper_pins_source_commit_and_loopback():
     script = Path("scripts/bootstrap-hexstrike.ps1").read_text(encoding="utf-8")
     assert APPROVED_HEXSTRIKE_COMMIT in script

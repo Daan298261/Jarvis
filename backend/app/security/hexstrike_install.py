@@ -159,6 +159,16 @@ class HexStrikeInstaller:
         return self.status()
 
     async def _run(self, path: Path) -> None:
+        from ..policy.network_http import require_http_url_allowed
+
+        try:
+            require_http_url_allowed(APPROVED_HEXSTRIKE_REMOTE, tool="web_fetch")
+        except PermissionError as exc:
+            self._status.state = "failed"
+            self._status.stage = "failed"
+            self._status.error = str(exc)[:500]
+            audit_hexstrike("install_failed", install_path=str(path), error=self._status.error)
+            return
         if os.name != "nt":
             self._status.state = "failed"
             self._status.stage = "failed"

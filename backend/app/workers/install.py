@@ -262,7 +262,16 @@ def _refresh_import_path() -> None:
         os.environ["PATH"] = prefix + os.pathsep + current
 
 
+def _require_pypi() -> None:
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://pypi.org/simple/", tool="web_fetch")
+
+
 def _playwright_chromium() -> None:
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://cdn.playwright.dev/", tool="web_fetch")
     code, output = _run([sys.executable, "-m", "playwright", "install", "chromium"], timeout=600)
     if code != 0:
         logger.warning("Playwright Chromium extra step failed: %s", _tail(output))
@@ -278,6 +287,7 @@ def _install_attempt(worker_id: str, attempt: InstallAttempt) -> None:
             requirements = dest / "requirements.txt"
             if not requirements.is_file():
                 raise RuntimeError(f"{dest} has no requirements.txt")
+            _require_pypi()
             _set_job(worker_id, detail="Installing UFO Python requirements…")
             code, output = _run(_pip_cmd("-r", str(requirements)), cwd=dest)
             outputs.append(output)
@@ -286,6 +296,7 @@ def _install_attempt(worker_id: str, attempt: InstallAttempt) -> None:
                 raise RuntimeError(f"pip install -r requirements.txt failed:\n{_tail(output)}")
         _write_pth(attempt.git_dirname.replace("-", "_"), dest)
     elif attempt.pip_packages:
+        _require_pypi()
         _set_job(worker_id, detail=f"Installing {' '.join(attempt.pip_packages)}…")
         code, output = _run(_pip_cmd(*attempt.pip_packages))
         outputs.append(output)

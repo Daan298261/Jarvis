@@ -14,6 +14,7 @@ from app.security.hexstrike_operator import sync_operator_surface
 from app.security.hexstrike_tools import (
     allowed_pip_package_names,
     install_dependency_by_id,
+    install_host_tool,
     install_pip_package,
 )
 
@@ -231,6 +232,47 @@ async def test_pip_install_rejects_arbitrary_package(hardened_env, monkeypatch):
     result = await install_pip_package("evil-package", install_path=str(hardened_env["tmp"] / "hexstrike-ai"))
     assert result.ok is False
     assert "allowlist" in result.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_pip_install_honors_internet_deny(hardened_env, monkeypatch):
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    monkeypatch.setattr(
+        "app.security.hexstrike_tools._hexstrike_python",
+        lambda install_path="": "/usr/bin/python3",
+    )
+    monkeypatch.setattr(
+        "app.security.hexstrike_tools.allowed_pip_package_names",
+        lambda install_path="": {"requests"},
+    )
+    ran = {"n": 0}
+
+    async def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not pip when internet is denied")
+
+    monkeypatch.setattr("app.security.hexstrike_tools.asyncio.create_subprocess_exec", boom)
+    result = await install_pip_package("requests", install_path=str(hardened_env["tmp"] / "hexstrike-ai"))
+    assert result.ok is False
+    assert ran["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_winget_install_honors_internet_deny(hardened_env, monkeypatch):
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    monkeypatch.setattr("app.security.hexstrike_tools.shutil.which", lambda *_args, **_kwargs: None)
+    ran = {"n": 0}
+
+    async def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not winget when internet is denied")
+
+    monkeypatch.setattr("app.security.hexstrike_tools.asyncio.create_subprocess_exec", boom)
+    result = await install_host_tool("nmap")
+    assert result.ok is False
+    assert ran["n"] == 0
 
 
 @pytest.mark.asyncio
