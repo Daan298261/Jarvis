@@ -18,7 +18,6 @@ def permission_gate_for_surface(surface: SurfaceKind) -> Callable[[ReflexDecisio
     """Map computer/network permissions — kept outside the decision model."""
 
     def _gate(decision: ReflexDecision, frame: ActionFrame) -> str | None:
-        del frame
         if decision.operation in {Operation.DONE, Operation.BLOCK}:
             return None
         if surface == SurfaceKind.DESKTOP:
@@ -33,10 +32,16 @@ def permission_gate_for_surface(surface: SurfaceKind) -> Callable[[ReflexDecisio
                     f"({decision_perm.reason})"
                 )
             return None
-        # Browser surface uses network.internet / network.local depending on URL — soft check.
-        net = evaluate_permission("network.internet")
+        # Browser surface uses network.local for RFC1918/.local pages, otherwise internet.
+        from ..policy.computer_permissions import looks_local_network
+
+        url = str(frame.url_or_title or frame.app_or_page_id or "")
+        perm_id = "network.local" if looks_local_network({"url": url}) else "network.internet"
+        net = evaluate_permission(perm_id)
         if net.status == "deny":
             return net.reason
+        if net.status == "ask":
+            return f"{perm_id} requires owner approval before reflex browse ({net.reason})"
         return None
 
     return _gate

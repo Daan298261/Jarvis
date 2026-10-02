@@ -560,6 +560,25 @@ async def test_browser_use_reflex_mode_fail_closed_without_nodes():
 
 
 @pytest.mark.asyncio
+async def test_browser_use_reflex_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.tools.browser_use import BrowserUseTool
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    tool = BrowserUseTool()
+    result = await tool.execute(
+        goal="click Save",
+        mode="reflex",
+        url="https://example.com/",
+        nodes=[{"name": "Save", "role": "button"}],
+    )
+    assert result.success is False
+    assert result.error
+
+
+@pytest.mark.asyncio
 async def test_reflex_computer_use_tool_with_scripted_lane(monkeypatch):
     from app.tools.computer_use import ReflexComputerUseTool
 

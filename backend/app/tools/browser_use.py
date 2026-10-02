@@ -66,6 +66,6 @@ class BrowserUseTool(Tool):
                 nodes=list(nodes),
                 identity=url or "",
                 title=str(kwargs.get("title") or ""),
-                enforce_permissions=False,
+                enforce_permissions=True,
             )
         return await _BACKEND.run(goal, url, settings)
