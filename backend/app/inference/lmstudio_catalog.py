@@ -188,6 +188,22 @@ def preferred_gguf_install_dir(relative_dir: str = "", *, need_bytes: int = 0) -
     return extra / str(relative_dir or "") if relative_dir else extra
 
 
+def extra_volume_named_model_dir(*relative: str, marker: str) -> Path | None:
+    """`tts/kokoro-82m` (or similar) under extra-volume model folders, if `marker` exists."""
+    parts = [str(part).strip() for part in relative if str(part).strip()]
+    needle = str(marker or "").strip()
+    if not parts or not needle:
+        return None
+    for root in extra_volume_model_roots():
+        candidate = root.joinpath(*parts)
+        try:
+            if (candidate / needle).is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 def extra_volume_file_named(filename: str) -> Path | None:
     """Find a named GGUF (including mmproj) on extra-volume model folders or roots."""
     needle = str(filename or "").strip()

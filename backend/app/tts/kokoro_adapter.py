@@ -22,6 +22,23 @@ KOKORO_MODEL_DIR = models_dir() / "tts" / KOKORO_MODEL_ID
 KOKORO_PACKAGE_VERSION = "0.9.4"
 SOUNDFILE_PACKAGE_VERSION = "0.14.0"
 KOKORO_PROBE_VOICE = "bm_george"
+_KOKORO_NEED_BYTES = 1024**3
+
+logger = logging.getLogger(__name__)
+
+
+def resolved_kokoro_model_dir() -> Path:
+    """Local `models/tts/kokoro-82m`, or extra-drive `Jarvis/models/tts` when C: cannot fit."""
+    from ..config import models_dir as live_models_dir
+    from ..inference.lmstudio_catalog import extra_volume_named_model_dir, preferred_gguf_install_dir
+
+    local = live_models_dir() / "tts" / KOKORO_MODEL_ID
+    if (local / "config.json").is_file():
+        return local
+    extra = extra_volume_named_model_dir("tts", KOKORO_MODEL_ID, marker="config.json")
+    if extra is not None:
+        return extra
+    return preferred_gguf_install_dir(f"tts/{KOKORO_MODEL_ID}", need_bytes=_KOKORO_NEED_BYTES)
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +66,7 @@ def kokoro_package_ready() -> bool:
 
 
 def kokoro_assets_ready(model_dir: Path | None = None) -> bool:
-    root = model_dir or KOKORO_MODEL_DIR
+    root = model_dir if model_dir is not None else resolved_kokoro_model_dir()
     return (
         root.is_dir()
         and (root / "config.json").is_file()
@@ -83,12 +100,18 @@ def _float32_to_pcm16(audio: Any) -> bytes:
 class KokoroAdapter:
     """Pinned Kokoro 0.9.4 adapter backed only by Jarvis-bundled assets."""
 
-    def __init__(self, model_dir: Path = KOKORO_MODEL_DIR) -> None:
-        self.model_dir = model_dir
+    def __init__(self, model_dir: Path | None = None) -> None:
+        self._model_dir_override = model_dir
         self._lock = threading.RLock()
         self._model: Any | None = None
         self._pipelines: dict[str, Any] = {}
         self._state: TtsRuntimeState | None = None
+
+    @property
+    def model_dir(self) -> Path:
+        if self._model_dir_override is not None:
+            return self._model_dir_override
+        return resolved_kokoro_model_dir()
 
     def _base_state(self, *, last_error: str = "") -> TtsRuntimeState:
         package_ready = kokoro_package_ready()

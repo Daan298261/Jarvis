@@ -230,3 +230,66 @@ def test_discover_named_runtime_dir_joins_nested_marker(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "repo_root", lambda: repo)
     monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
     assert config.discover_named_runtime_dir("optional-workers", marker="microsoft-ufo/.git/HEAD") == found
+
+
+def test_kokoro_model_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    from app.tts.kokoro_adapter import KokoroAdapter, resolved_kokoro_model_dir
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    models.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(
+        "app.inference.lmstudio_catalog.shutil.disk_usage",
+        lambda path: _full_local_usage(path, extra),
+    )
+    dest = resolved_kokoro_model_dir()
+    assert dest == extra / "Jarvis" / "models" / "tts" / "kokoro-82m"
+    assert KokoroAdapter().model_dir == dest
+
+
+def test_kokoro_model_dir_discovers_existing_extra_weights(tmp_path, monkeypatch):
+    from app.tts.kokoro_adapter import resolved_kokoro_model_dir
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "models" / "tts" / "kokoro-82m"
+    found.mkdir(parents=True)
+    (found / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
+    assert resolved_kokoro_model_dir() == found
+
+
+def test_ensure_kokoro_weights_downloads_to_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    from app.tts import pack_install
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    models.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(
+        "app.inference.lmstudio_catalog.shutil.disk_usage",
+        lambda path: _full_local_usage(path, extra),
+    )
+    monkeypatch.setattr("app.tts.pack_install.kokoro_weights_ready", lambda *_a, **_k: False)
+
+    def fake_snapshot(*, repo_id, local_dir, **_kwargs):
+        dest = Path(local_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "config.json").write_text("{}", encoding="utf-8")
+        return str(dest)
+
+    monkeypatch.setattr("app.tts.pack_install.snapshot_download", fake_snapshot)
+    monkeypatch.setattr(
+        "app.policy.network_http.require_http_url_allowed",
+        lambda *args, **kwargs: None,
+    )
+    dest = pack_install.ensure_kokoro_weights(force=True)
+    assert dest == extra / "Jarvis" / "models" / "tts" / "kokoro-82m"
+    assert (dest / ".jarvis_staged_ok").is_file()

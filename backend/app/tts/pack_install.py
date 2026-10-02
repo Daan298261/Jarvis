@@ -16,10 +16,9 @@ from ..config import repo_root
 from ..voice_profiles.catalog import reload_catalog, voice_packs_dir
 from ..voice_profiles.schema import VoiceProfile
 from .engines import (
-    KOKORO_HF_REPO,
-    KOKORO_MODEL_DIR,
     CHATTERBOX_HF_REPO,
     CHATTERBOX_MODEL_FILES,
+    KOKORO_HF_REPO,
     chatterbox_python_ready,
     is_chatterbox_available,
     kokoro_python_ready,
@@ -29,6 +28,7 @@ from .kokoro_adapter import (
     KOKORO_PACKAGE_VERSION,
     SOUNDFILE_PACKAGE_VERSION,
     reset_kokoro_runtime_state,
+    resolved_kokoro_model_dir,
     verify_kokoro_runtime,
 )
 
@@ -204,21 +204,22 @@ def ensure_chatterbox_weights(*, force: bool = False) -> None:
 
 
 def ensure_kokoro_weights(*, force: bool = False) -> Path:
-    KOKORO_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    if not force and kokoro_weights_ready(KOKORO_MODEL_DIR):
-        return KOKORO_MODEL_DIR
+    dest = resolved_kokoro_model_dir()
+    dest.mkdir(parents=True, exist_ok=True)
+    if not force and kokoro_weights_ready(dest):
+        return dest
     from ..policy.network_http import require_http_url_allowed
 
     require_http_url_allowed(f"https://huggingface.co/{KOKORO_HF_REPO}", tool="web_fetch")
-    logger.info("Downloading Kokoro-82M weights to %s", KOKORO_MODEL_DIR)
+    logger.info("Downloading Kokoro-82M weights to %s", dest)
     snapshot_download(
         repo_id=KOKORO_HF_REPO,
-        local_dir=str(KOKORO_MODEL_DIR),
+        local_dir=str(dest),
         local_dir_use_symlinks=False,
     )
-    marker = KOKORO_MODEL_DIR / ".jarvis_staged_ok"
+    marker = dest / ".jarvis_staged_ok"
     marker.write_text("ok\n", encoding="utf-8")
-    return KOKORO_MODEL_DIR
+    return dest
 
 
 def ensure_kokoro_runtime(*, force: bool = False) -> Path:

@@ -11,11 +11,11 @@ from huggingface_hub import try_to_load_from_cache
 from ..config import models_dir, repo_root
 from .kokoro_adapter import (
     KOKORO_HF_REPO,
-    KOKORO_MODEL_DIR,
     is_kokoro_installable,
     kokoro_assets_ready,
     kokoro_package_ready,
     kokoro_runtime_state,
+    resolved_kokoro_model_dir,
 )
 from .pocket_tts_adapter import (
     is_pocket_tts_available,
@@ -180,7 +180,7 @@ def engine_availability() -> dict[str, Any]:
         "chatterbox": is_chatterbox_available(),
         "system": legacy_system_tts_available(),
         "kokoro_weights": kokoro_state.assets_ready,
-        "kokoro_model_dir": str(KOKORO_MODEL_DIR),
+        "kokoro_model_dir": str(resolved_kokoro_model_dir()),
         "kokoro_runtime": kokoro_state.to_dict(),
         "chatterbox_opt_in": is_chatterbox_available(),
     }
@@ -206,4 +206,4 @@ def resolve_pack_model_dir(profile: Any) -> Path:
                     return path
             except Exception:
                 pass
-    return KOKORO_MODEL_DIR
+    return resolved_kokoro_model_dir()
