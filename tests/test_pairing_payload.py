@@ -29,4 +29,4 @@ def test_order_phone_reachable_endpoints_ranks_mdns_with_lan():
     )
     assert ordered[0] == "https://home.example.test:4781"
     assert ordered[-1] in {"https://jarvis.local:4781", "https://10.2.0.2:4781"}
-    assert "https://jarvis.local:4781" in set(ordered[1:])
+    assert any(endpoint == "https://jarvis.local:4781" for endpoint in ordered[1:])

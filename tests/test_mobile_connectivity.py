@@ -131,7 +131,7 @@ async def test_upnp_lease_advertises_owner_public_hostname(network_env, monkeypa
     result = await connection.configure(True, True, {"wan_public_host": "home.example.test"})
     assert result["state"] == "ready"
     assert "https://8.8.8.8:4781" in result["endpoints"]
-    assert "https://home.example.test:4781" in set(result["endpoints"])
+    assert any(endpoint == "https://home.example.test:4781" for endpoint in result["endpoints"])
     from app.mobile.gateway import identity_covers
     assert identity_covers(connection.identity, ["8.8.8.8", "home.example.test", "192.168.1.12"])
 
@@ -144,7 +144,7 @@ async def test_public_hostname_is_advertised_without_automatic_mapping(network_e
     connection = FakeConnection()
     result = await connection.configure(True, True, {"wan_public_host": "home.example.test"})
     assert result["state"] == "ready"
-    assert "https://home.example.test:4781" in set(result["endpoints"])
+    assert any(endpoint == "https://home.example.test:4781" for endpoint in result["endpoints"])
     assert "public hostname" in (result.get("limitation") or "").lower()
     from app.mobile.gateway import identity_covers
     assert identity_covers(connection.identity, ["home.example.test", "192.168.1.12"])
