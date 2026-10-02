@@ -5310,6 +5310,15 @@ async function fetchCleanReinstallStart(
   }
 }
 
+export type LicenseSidecarStatus = {
+  pending_apply: boolean
+  failure: { message: string; source: string; at: string } | null
+}
+
+export async function getLicenseSidecarStatus(): Promise<LicenseSidecarStatus> {
+  return api<LicenseSidecarStatus>("/api/installer/license-sidecar/status")
+}
+
 export async function getCleanReinstallOwnedRoots(): Promise<CleanReinstallPreview> {
   return api<CleanReinstallPreview>("/api/installer/clean-reinstall/owned-roots")
 }

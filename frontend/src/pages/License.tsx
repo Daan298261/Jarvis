@@ -4,6 +4,7 @@ import {
   deleteInferenceCredential,
   getLicenseCluster,
   getLicenseEntitlements,
+  getLicenseSidecarStatus,
   getLicenseStatus,
   listInferenceCredentials,
   refreshLicenseLease,
@@ -11,6 +12,7 @@ import {
   validateLicenseOffline,
   type InferenceCredentialPublic,
   type LicenseEntitlements,
+  type LicenseSidecarStatus,
   type LicenseStatus,
   type LicenseValidation,
   type SignedLeaseObject,
@@ -110,13 +112,16 @@ export function LicenseSettings({ showPageChrome = false }: LicenseSettingsProps
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [msg, setMsg] = useState("")
+  const [sidecarStatus, setSidecarStatus] = useState<LicenseSidecarStatus | null>(null)
 
   const loadAll = useCallback(async () => {
-    const [statusResult, entitlementResult, credentialResult, clusterResult] = await Promise.allSettled([
+    const [statusResult, entitlementResult, credentialResult, clusterResult, sidecarResult] =
+      await Promise.allSettled([
       getLicenseStatus(),
       getLicenseEntitlements(),
       listInferenceCredentials(),
       getLicenseCluster(),
+      getLicenseSidecarStatus(),
     ])
 
     if (statusResult.status === "fulfilled") {
@@ -144,6 +149,12 @@ export function LicenseSettings({ showPageChrome = false }: LicenseSettingsProps
       setCredentials(credentialResult.value.credentials)
     } else {
       setCredentials([])
+    }
+
+    if (sidecarResult.status === "fulfilled") {
+      setSidecarStatus(sidecarResult.value)
+    } else {
+      setSidecarStatus(null)
     }
   }, [])
 
@@ -352,6 +363,11 @@ export function LicenseSettings({ showPageChrome = false }: LicenseSettingsProps
       {error && (
         <div className="card license-banner bad" role="alert">
           {error}
+        </div>
+      )}
+      {sidecarStatus?.failure?.message && (
+        <div className="card license-banner bad" role="alert">
+          {sidecarStatus.failure.message}
         </div>
       )}
 

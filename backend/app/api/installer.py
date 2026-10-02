@@ -118,6 +118,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..installer.clean_reinstall import read_clean_reinstall_status, start_clean_reinstall_detached
+from ..installer.license_sidecar import public_sidecar_status
 from ..installer.owned_paths import owned_paths_preview
 
 router = APIRouter(prefix="/api/installer", tags=["installer"])
@@ -143,6 +144,12 @@ class CleanReinstallStartBody(BaseModel):
 async def clean_reinstall_owned_roots():
     """Owned paths + labels + confirm token for the Advanced danger card."""
     return owned_paths_preview()
+
+
+@router.get("/license-sidecar/status")
+async def license_sidecar_status():
+    """RFC-0199: sidecar apply failure banner state for License settings."""
+    return public_sidecar_status()
 
 
 @router.get("/clean-reinstall/preview")
