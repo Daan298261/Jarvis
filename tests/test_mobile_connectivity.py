@@ -12,6 +12,10 @@ def network_env(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
     monkeypatch.delenv("JARVIS_RELAY_ENDPOINT", raising=False)
+    monkeypatch.setattr(
+        "app.mobile.wan_forward.lookup_egress_ipv4",
+        lambda: (_ for _ in ()).throw(ValueError("offline")),
+    )
 
 
 class Router:

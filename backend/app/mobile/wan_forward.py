@@ -135,6 +135,36 @@ def lookup_egress_ipv4() -> str:
     raise ValueError(str(last_error) if last_error else "Could not learn public IPv4")
 
 
+_NOT_INTERNET_V4 = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+)
+
+
+def mapped_address_is_egress(mapped_ip: str) -> bool:
+    """False when an inner router mapped an address that is not the internet egress (double NAT).
+
+    RFC1918, loopback, link-local, and CGNAT mappings are never kept. Documentation
+    TEST-NET addresses are treated as comparable public IPs so unit tests can prove
+    mismatch. If egress cannot be learned, keep a non-RFC1918 mapping.
+    """
+    try:
+        mapped = ipaddress.ip_address((mapped_ip or "").strip())
+    except ValueError:
+        return False
+    if mapped.version != 4 or any(mapped in net for net in _NOT_INTERNET_V4):
+        return False
+    try:
+        egress = ipaddress.ip_address(lookup_egress_ipv4())
+    except Exception:
+        return True
+    return mapped == egress
+
+
 def _private_ipv4(value: str) -> str:
     address = ipaddress.ip_address((value or "").strip())
     if address.version != 4 or not address.is_private or address.is_loopback:

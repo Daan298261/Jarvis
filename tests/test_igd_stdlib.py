@@ -90,6 +90,21 @@ def test_lookup_egress_ipv4_accepts_global_and_rejects_private(monkeypatch):
     assert ipaddress.ip_address("8.8.4.4").is_global
 
 
+def test_mapped_address_is_egress_detects_double_nat(monkeypatch):
+    from app.mobile.wan_forward import mapped_address_is_egress
+
+    monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: "203.0.113.50")
+    assert mapped_address_is_egress("203.0.113.50") is True
+    assert mapped_address_is_egress("198.51.100.8") is False
+    assert mapped_address_is_egress("10.1.1.1") is False
+    assert mapped_address_is_egress("100.64.1.8") is False
+    monkeypatch.setattr(
+        "app.mobile.wan_forward.lookup_egress_ipv4",
+        lambda: (_ for _ in ()).throw(ValueError("offline")),
+    )
+    assert mapped_address_is_egress("8.8.8.8") is True
+
+
 def test_windows_firewall_helper_skips_on_linux():
     assert ensure_private_firewall_4781() == "skipped"
 
