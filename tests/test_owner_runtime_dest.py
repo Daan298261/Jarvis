@@ -1,4 +1,4 @@
-"""Extra-drive install dest for HexStrike / Crucix / Supermemory sidecars."""
+"""Extra-drive install dest for runtime sidecars, TTS caches, and Laya pins."""
 from __future__ import annotations
 
 import os
@@ -442,3 +442,160 @@ def test_whisper_models_dir_discovers_existing_extra_base(tmp_path, monkeypatch)
     monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
     assert whisper_models_dir() == found
     assert resolved_faster_whisper_model() == str(found / "base")
+
+
+def test_laya_install_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.decision.laya import pins as laya_pins
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(laya_pins, "data_dir", lambda: data)
+    _patch_model_disk(monkeypatch, extra)
+    dest = laya_pins.install_root()
+    assert dest == extra / "Jarvis" / "models" / "laya"
+    assert dest.is_dir()
+
+
+def test_laya_install_root_discovers_existing_extra_manifest(tmp_path, monkeypatch):
+    from app.decision.laya import pins as laya_pins
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "models" / "laya"
+    found.mkdir(parents=True)
+    (found / "install_manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(laya_pins, "data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
+    assert laya_pins.install_root() == found
+
+
+def test_huggingface_home_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    from app.inference.lmstudio_catalog import apply_huggingface_home, resolved_huggingface_home
+
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    _patch_model_disk(monkeypatch, extra)
+    dest = resolved_huggingface_home()
+    assert dest == extra / "Jarvis" / "models" / "huggingface"
+    applied = apply_huggingface_home()
+    assert applied == dest
+    assert os.environ.get("HF_HOME") == str(dest)
+    assert os.environ.get("HF_HUB_CACHE") == str(dest / "hub")
+
+
+def test_huggingface_home_discovers_existing_extra_hub(tmp_path, monkeypatch):
+    from app.inference.lmstudio_catalog import resolved_huggingface_home
+
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "models" / "huggingface"
+    (found / "hub").mkdir(parents=True)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
+    assert resolved_huggingface_home() == found
+
+
+def test_huggingface_home_honors_existing_hf_home(tmp_path, monkeypatch):
+    from app.inference.lmstudio_catalog import apply_huggingface_home, resolved_huggingface_home
+
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    custom = tmp_path / "custom-hf"
+    custom.mkdir()
+    monkeypatch.setenv("HF_HOME", str(custom))
+    _patch_model_disk(monkeypatch, extra)
+    assert resolved_huggingface_home() == custom
+    assert apply_huggingface_home() == custom
+    assert os.environ.get("HF_HOME") == str(custom)
+
+
+def test_ensure_chatterbox_weights_use_extra_hf_cache(tmp_path, monkeypatch):
+    from app.tts import pack_install
+
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    _patch_model_disk(monkeypatch, extra)
+    seen: dict[str, str] = {}
+
+    def download(*, repo_id, filename, local_files_only=False, cache_dir=None, **_kwargs):
+        del repo_id, local_files_only
+        seen["cache_dir"] = str(cache_dir or "")
+        seen["hf_home"] = os.environ.get("HF_HOME") or ""
+        return filename
+
+    monkeypatch.setattr(pack_install, "hf_hub_download", download)
+    monkeypatch.setattr(
+        "app.policy.network_http.require_http_url_allowed",
+        lambda *args, **kwargs: None,
+    )
+    pack_install.ensure_chatterbox_weights(force=True)
+    dest = extra / "Jarvis" / "models" / "huggingface"
+    assert seen["cache_dir"] == str(dest / "hub")
+    assert seen["hf_home"] == str(dest)
+
+
+def test_pocket_tts_model_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    from app.tts.pocket_tts_adapter import PocketTtsAdapter, resolved_pocket_tts_model_dir
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    models.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    _patch_model_disk(monkeypatch, extra)
+    dest = resolved_pocket_tts_model_dir()
+    assert dest == extra / "Jarvis" / "models" / "tts" / "pocket-tts"
+    assert PocketTtsAdapter().model_dir == dest
+
+
+def test_pocket_tts_model_dir_discovers_existing_extra_weights(tmp_path, monkeypatch):
+    from app.tts.pocket_tts_adapter import resolved_pocket_tts_model_dir
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "models" / "tts" / "pocket-tts"
+    found.mkdir(parents=True)
+    (found / "model.safetensors").write_bytes(b"w")
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
+    assert resolved_pocket_tts_model_dir() == found
+
+
+def test_piper_voices_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    from app.tts.engines import resolved_piper_voices_dir
+    from app.tts.synthesize import _resolve_piper_onnx
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    models.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    _patch_model_disk(monkeypatch, extra)
+    dest = resolved_piper_voices_dir()
+    assert dest == extra / "Jarvis" / "models" / "tts" / "piper"
+    voice = dest / "en_US-lessac-medium.onnx"
+    voice.write_bytes(b"onnx")
+    assert _resolve_piper_onnx("lessac", None) == voice
+
+
+def test_piper_voices_dir_discovers_existing_extra_onnx(tmp_path, monkeypatch):
+    from app.tts.engines import resolved_piper_voices_dir
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "models" / "tts" / "piper"
+    found.mkdir(parents=True)
+    (found / "en_US-lessac-medium.onnx").write_bytes(b"onnx")
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
+    assert resolved_piper_voices_dir() == found

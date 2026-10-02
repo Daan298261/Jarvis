@@ -35,7 +35,25 @@ CHATTERBOX_MODEL_FILES = (
     "tokenizer.json",
     "conds.pt",
 )
+_PIPER_NEED_BYTES = 256 * 1024**2
+
+
+def resolved_piper_voices_dir() -> Path:
+    """`models/tts/piper`, or extra-drive `Jarvis/models/tts/piper` when C: cannot fit."""
+    from ..inference.lmstudio_catalog import resolved_tts_model_dir
+
+    dest = resolved_tts_model_dir("piper", markers=(), need_bytes=_PIPER_NEED_BYTES)
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
 PIPER_VOICES_DIR = models_dir() / "tts" / "piper"
+
+
+def chatterbox_hub_cache() -> Path:
+    from ..inference.lmstudio_catalog import apply_huggingface_home
+
+    return apply_huggingface_home() / "hub"
 
 
 def _module_available(name: str) -> bool:
@@ -86,8 +104,9 @@ def chatterbox_python_ready() -> bool:
 
 
 def chatterbox_weights_ready() -> bool:
+    cache = str(chatterbox_hub_cache())
     return all(
-        isinstance(try_to_load_from_cache(CHATTERBOX_HF_REPO, filename), str)
+        isinstance(try_to_load_from_cache(CHATTERBOX_HF_REPO, filename, cache_dir=cache), str)
         for filename in CHATTERBOX_MODEL_FILES
     )
 

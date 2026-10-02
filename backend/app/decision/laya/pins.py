@@ -121,10 +121,22 @@ def pins() -> list[PinRecord]:
     ]
 
 
+_LAYA_NEED_BYTES = 2 * 1024**3
+
+
 def install_root() -> Path:
-    path = data_dir() / "system_one" / "laya"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """`data/system_one/laya`, or extra-drive `Jarvis/models/laya` when C: cannot fit the pin."""
+    from ...inference.lmstudio_catalog import resolved_cache_dir
+
+    local = data_dir() / "system_one" / "laya"
+    dest = resolved_cache_dir(
+        "laya",
+        local=local,
+        markers=("install_manifest.json",),
+        need_bytes=_LAYA_NEED_BYTES,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def manifest_path() -> Path:

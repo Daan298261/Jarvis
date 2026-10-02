@@ -15,10 +15,20 @@ from typing import Any
 from ..config import models_dir
 from .runtime_state import TtsRuntimeState
 
+logger = logging.getLogger(__name__)
+
+_POCKET_TTS_NEED_BYTES = 512 * 1024**2
 POCKET_TTS_MODEL_DIR = models_dir() / "tts" / "pocket-tts"
 POCKET_TTS_DEFAULT_VOICE = "alba"
 
-logger = logging.getLogger(__name__)
+
+def resolved_pocket_tts_model_dir() -> Path:
+    """`models/tts/pocket-tts`, or extra-drive `Jarvis/models/tts/pocket-tts` when C: cannot fit."""
+    from ..inference.lmstudio_catalog import resolved_tts_model_dir
+
+    dest = resolved_tts_model_dir("pocket-tts", markers=(), need_bytes=_POCKET_TTS_NEED_BYTES)
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def _module_available(name: str) -> bool:
@@ -34,7 +44,7 @@ def pocket_tts_package_ready() -> bool:
 def pocket_tts_assets_ready(model_dir: Path | None = None) -> bool:
     if not pocket_tts_package_ready():
         return False
-    root = model_dir or POCKET_TTS_MODEL_DIR
+    root = model_dir if model_dir is not None else resolved_pocket_tts_model_dir()
     if root.is_dir() and (any(root.glob("*.safetensors")) or any(root.glob("*.pt"))):
         return True
     return pocket_tts_package_ready()
@@ -61,11 +71,17 @@ def _float32_to_pcm16(audio: Any) -> bytes:
 class PocketTtsAdapter:
     """Kyutai Labs Pocket TTS lightweight CPU neural text-to-speech adapter."""
 
-    def __init__(self, model_dir: Path = POCKET_TTS_MODEL_DIR) -> None:
-        self.model_dir = model_dir
+    def __init__(self, model_dir: Path | None = None) -> None:
+        self._model_dir_override = model_dir
         self._lock = threading.RLock()
         self._model: Any | None = None
         self._state: TtsRuntimeState | None = None
+
+    @property
+    def model_dir(self) -> Path:
+        if self._model_dir_override is not None:
+            return self._model_dir_override
+        return resolved_pocket_tts_model_dir()
 
     def _base_state(self, *, last_error: str = "") -> TtsRuntimeState:
         package_ready = pocket_tts_package_ready()
@@ -113,8 +129,10 @@ class PocketTtsAdapter:
                 return self._model
             if not pocket_tts_package_ready():
                 raise RuntimeError("pocket_tts package is not installed (pip install pocket-tts).")
+            from ..inference.lmstudio_catalog import apply_huggingface_home
             from pocket_tts import TTSModel
 
+            apply_huggingface_home()
             self._model = TTSModel.load_model()
             return self._model
 

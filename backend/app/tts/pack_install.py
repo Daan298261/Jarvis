@@ -185,10 +185,18 @@ def ensure_chatterbox_python(*, force: bool = False) -> None:
 
 def ensure_chatterbox_weights(*, force: bool = False) -> None:
     """Prefetch exactly the files used by ChatterboxTTS.from_pretrained."""
+    from ..inference.lmstudio_catalog import apply_huggingface_home
+
+    hub = str(apply_huggingface_home() / "hub")
     for filename in CHATTERBOX_MODEL_FILES:
         if not force:
             try:
-                hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename, local_files_only=True)
+                hf_hub_download(
+                    repo_id=CHATTERBOX_HF_REPO,
+                    filename=filename,
+                    local_files_only=True,
+                    cache_dir=hub,
+                )
                 continue
             except Exception:
                 pass
@@ -196,7 +204,7 @@ def ensure_chatterbox_weights(*, force: bool = False) -> None:
             from ..policy.network_http import require_http_url_allowed
 
             require_http_url_allowed(f"https://huggingface.co/{CHATTERBOX_HF_REPO}", tool="web_fetch")
-            hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename)
+            hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename, cache_dir=hub)
         except PermissionError:
             raise
         except Exception as exc:
@@ -208,14 +216,17 @@ def ensure_kokoro_weights(*, force: bool = False) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     if not force and kokoro_weights_ready(dest):
         return dest
+    from ..inference.lmstudio_catalog import apply_huggingface_home
     from ..policy.network_http import require_http_url_allowed
 
+    hub = str(apply_huggingface_home() / "hub")
     require_http_url_allowed(f"https://huggingface.co/{KOKORO_HF_REPO}", tool="web_fetch")
     logger.info("Downloading Kokoro-82M weights to %s", dest)
     snapshot_download(
         repo_id=KOKORO_HF_REPO,
         local_dir=str(dest),
         local_dir_use_symlinks=False,
+        cache_dir=hub,
     )
     marker = dest / ".jarvis_staged_ok"
     marker.write_text("ok\n", encoding="utf-8")

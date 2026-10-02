@@ -252,6 +252,73 @@ def resolved_cache_dir(
     return local
 
 
+def resolved_tts_model_dir(name: str, *, markers: tuple[str, ...] = (), need_bytes: int) -> Path:
+    """`models/tts/<name>`, or extra-drive `Jarvis/models/tts/<name>` when C: cannot fit."""
+    from ..config import models_dir as live_models_dir
+
+    slug = str(name or "").strip()
+    local = live_models_dir() / "tts" / slug if slug else live_models_dir() / "tts"
+    if not slug:
+        return local
+    for marker in markers:
+        try:
+            hit = local / marker
+            if hit.is_file() or hit.is_dir():
+                return local
+        except OSError:
+            continue
+    if not markers:
+        try:
+            if local.is_dir() and any(local.iterdir()):
+                return local
+        except OSError:
+            pass
+    for marker in markers or ("",):
+        extra = extra_volume_named_model_dir("tts", slug, marker=marker)
+        if extra is not None:
+            return extra
+    return preferred_gguf_install_dir(f"tts/{slug}", need_bytes=need_bytes)
+
+
+def default_huggingface_home() -> Path:
+    env = (os.environ.get("HF_HOME") or "").strip()
+    if env:
+        return Path(env)
+    return Path.home() / ".cache" / "huggingface"
+
+
+def resolved_huggingface_home() -> Path:
+    """Keep `~/.cache/huggingface` when that volume fits; else extra-drive `Jarvis/models/huggingface`."""
+    local = default_huggingface_home()
+    if (os.environ.get("HF_HOME") or "").strip():
+        return local
+    dest = resolved_cache_dir(
+        "huggingface",
+        local=local,
+        markers=("hub",),
+        need_bytes=3 * 1024**3,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def apply_huggingface_home() -> Path:
+    """Point Hugging Face Hub at extra-drive cache when C: cannot fit Chatterbox/Kokoro blobs."""
+    dest = resolved_huggingface_home()
+    dest.mkdir(parents=True, exist_ok=True)
+    if (os.environ.get("HF_HOME") or "").strip():
+        return dest
+    default = Path.home() / ".cache" / "huggingface"
+    try:
+        same = dest.resolve() == default.resolve()
+    except OSError:
+        same = dest == default
+    if not same:
+        os.environ["HF_HOME"] = str(dest)
+        os.environ["HF_HUB_CACHE"] = str(dest / "hub")
+    return dest
+
+
 def extra_volume_file_named(filename: str) -> Path | None:
     """Find a named GGUF (including mmproj) on extra-volume model folders or roots."""
     needle = str(filename or "").strip()

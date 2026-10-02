@@ -183,7 +183,7 @@ def test_chatterbox_downloads_only_missing_model_files(monkeypatch):
     calls: list[tuple[str, bool]] = []
     cached = {"ve.safetensors", "tokenizer.json"}
 
-    def download(*, repo_id, filename, local_files_only=False):
+    def download(*, repo_id, filename, local_files_only=False, **_kwargs):
         assert repo_id == "ResembleAI/chatterbox"
         calls.append((filename, local_files_only))
         if local_files_only and filename not in cached:
@@ -207,7 +207,7 @@ def test_chatterbox_weights_honor_internet_deny(tmp_path, monkeypatch):
     apply_grant("network.internet", "deny")
     ran = {"n": 0}
 
-    def missing(*, repo_id, filename, local_files_only=False):
+    def missing(*, repo_id, filename, local_files_only=False, **_kwargs):
         ran["n"] += 1
         if local_files_only:
             raise FileNotFoundError(filename)
