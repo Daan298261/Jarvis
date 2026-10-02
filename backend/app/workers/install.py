@@ -234,6 +234,9 @@ def _optional_worker_root() -> Path:
 def _clone_repo(url: str, dest: Path) -> None:
     if url != UFO_GIT_URL:
         raise RuntimeError("Refusing to clone an unlisted repository")
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(url, tool="web_fetch")
     git = shutil.which("git")
     if not git:
         raise RuntimeError("Git is required to install Microsoft UFO. Install Git for Windows and retry.")

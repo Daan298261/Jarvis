@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.policy.network_http import gated_get, gated_get_sync, gated_stream, require_http_url_allowed
+from app.policy.network_http import gated_download_to, gated_get, gated_get_sync, gated_stream, require_http_url_allowed
 
 
 async def test_gated_get_blocks_denied_wan_before_request(tmp_path, monkeypatch):
@@ -109,3 +109,61 @@ async def test_gated_stream_does_not_follow_lan_to_denied_wan(tmp_path, monkeypa
         async with gated_stream("http://192.168.1.10/gguf", tool="web_fetch") as response:
             await response.aread()
     assert seen == ["192.168.1.10"]
+
+
+def test_gated_download_to_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.policy.network_http import gated_download_to
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["n"] += 1
+        return httpx.Response(200, content=b"zip-bytes")
+
+    class Client(httpx.Client):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.Client", Client)
+    dest = tmp_path / "a.zip"
+    with pytest.raises(PermissionError):
+        gated_download_to("https://github.com/org/repo/archive/refs/heads/main.zip", dest, tool="web_fetch")
+    assert seen["n"] == 0
+    assert not dest.exists()
+
+
+def test_gated_download_to_writes_body(tmp_path, monkeypatch):
+    from app.policy.network_http import gated_download_to
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"zip-bytes")
+
+    class Client(httpx.Client):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.Client", Client)
+    dest = tmp_path / "a.zip"
+    gated_download_to("https://example.com/a.zip", dest, tool="web_fetch")
+    assert dest.read_bytes() == b"zip-bytes"
+
+
+def test_runtime_downloads_honor_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app import runtime_install
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    dest = tmp_path / "llama.zip"
+    with pytest.raises(PermissionError):
+        runtime_install._download_file("https://example.com/llama.zip", dest, "llama_cpp")
+    assert not dest.exists()
+    with pytest.raises(PermissionError):
+        runtime_install._hf_download("org/model", "a.gguf", tmp_path, "primary_model")

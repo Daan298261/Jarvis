@@ -422,6 +422,27 @@ def test_download_allowlist_accepts_member():
         assert catalog_download.allowlisted_source(member_id) is not None
 
 
+def test_catalog_zip_and_clone_honor_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+
+    def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not fetch when internet is denied")
+
+    monkeypatch.setattr("app.modules.catalog_download.subprocess.run", boom)
+    dest = tmp_path / "mod"
+    with pytest.raises(PermissionError):
+        catalog_download._run_git_clone("https://github.com/usestrix/strix", dest)
+    with pytest.raises(PermissionError):
+        catalog_download._run_zip_download("https://github.com/usestrix/strix", dest)
+    assert ran["n"] == 0
+
+
 def test_catalog_api_available(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.main.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.auth.load_settings", lambda: jarvis_env["settings"])

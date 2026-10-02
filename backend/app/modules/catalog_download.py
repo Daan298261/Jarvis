@@ -155,6 +155,9 @@ def _safe_dest_dir(root: Path, slug: str) -> Path:
 
 
 def _run_git_clone(url: str, dest: Path) -> None:
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(url, tool="web_fetch")
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -175,12 +178,12 @@ def _run_zip_download(url: str, dest: Path) -> None:
         raise ValueError("zip download requires a GitHub source_url")
     owner, repo = parsed
     archive_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/main.zip"
-    import urllib.request
+    from ..policy.network_http import gated_download_to
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     zip_path = dest.parent / f"{repo}-download.zip"
     try:
-        urllib.request.urlretrieve(archive_url, zip_path)
+        gated_download_to(archive_url, zip_path, tool="web_fetch", timeout=120.0)
         extract_root = dest.parent / f"{repo}-extract"
         if extract_root.exists():
             shutil.rmtree(extract_root)

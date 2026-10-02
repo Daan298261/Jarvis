@@ -16,7 +16,6 @@ import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from urllib.request import urlopen
 
 from .config import models_dir, repo_root, runtime_dir
 from .inference.profiles import (
@@ -209,22 +208,15 @@ def _set_state(component_id: str, **kwargs: Any) -> ComponentState:
 
 
 def _download_file(url: str, dest: Path, component_id: str) -> None:
+    from .policy.network_http import gated_download_to
+
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".partial")
     _set_state(component_id, status="downloading", error="", bytes_done=0, bytes_total=0)
-    with urlopen(url, timeout=120) as resp:  # noqa: S310 — fixed release URLs
-        total = int(resp.headers.get("Content-Length") or 0)
-        _set_state(component_id, bytes_total=total)
-        done = 0
-        with open(tmp, "wb") as out:
-            while True:
-                chunk = resp.read(1024 * 256)
-                if not chunk:
-                    break
-                out.write(chunk)
-                done += len(chunk)
-                _set_state(component_id, bytes_done=done, bytes_total=total or done)
-    tmp.replace(dest)
+
+    def progress(done: int, total: int) -> None:
+        _set_state(component_id, status="downloading", error="", bytes_done=done, bytes_total=total)
+
+    gated_download_to(url, dest, tool="web_fetch", timeout=120.0, on_progress=progress)
     _set_state(component_id, status="verifying", path=str(dest))
 
 
@@ -272,6 +264,12 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
         _set_state(component_id, status="ready", path=str(target), error="")
         return target
     _set_state(component_id, status="downloading", error="", path=str(target))
+    from .policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(
+        f"https://huggingface.co/{repo_id}/resolve/main/{filename}",
+        tool="web_fetch",
+    )
     try:
         from huggingface_hub import hf_hub_download
     except Exception as exc:  # pragma: no cover - optional dep failure path

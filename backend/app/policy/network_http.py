@@ -1,8 +1,9 @@
 """HTTP GET that re-checks computer-permissions on each redirect hop."""
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -133,3 +134,39 @@ async def gated_stream(
         finally:
             if response is not None:
                 await response.aclose()
+
+
+def gated_download_to(
+    url: str,
+    dest: Path,
+    *,
+    tool: str,
+    timeout: float = 120.0,
+    max_hops: int = 8,
+    trust_env: bool = False,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> None:
+    current = url
+    tmp = dest.with_name(dest.name + ".partial")
+    with httpx.Client(follow_redirects=False, timeout=timeout, trust_env=trust_env) as http:
+        for _ in range(max(1, int(max_hops))):
+            require_http_url_allowed(current, tool=tool)
+            with http.stream("GET", current) as response:
+                nxt = _redirect_target(response)
+                if nxt is not None:
+                    current = nxt
+                    continue
+                if response.status_code >= 400:
+                    raise RuntimeError(f"Download failed with HTTP {response.status_code}")
+                total = int(response.headers.get("content-length") or 0)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                done = 0
+                with open(tmp, "wb") as out:
+                    for chunk in response.iter_bytes(256 * 1024):
+                        out.write(chunk)
+                        done += len(chunk)
+                        if on_progress:
+                            on_progress(done, total or done)
+                tmp.replace(dest)
+                return
+    raise PermissionError("Too many redirects")
