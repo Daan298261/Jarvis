@@ -144,7 +144,8 @@ class StdlibIGD:
 
     def _post(self, action: str, inner: str) -> str:
         envelope = soap_envelope(action, self.service_type, inner)
-        with httpx.Client(timeout=4, trust_env=False, follow_redirects=False) as client:
+        # LAN IGD boxes often present a self-signed certificate; the URL already passed require_lan_http_url.
+        with httpx.Client(timeout=4, trust_env=False, follow_redirects=False, verify=False) as client:
             response = client.post(
                 self.control_url,
                 content=envelope.encode("utf-8"),
@@ -265,7 +266,7 @@ def ssdp_search(timeout: float = 1.2) -> str:
 
 def stdlib_igd_candidate(username: str = "", password: str = "", lanaddr: str = "") -> tuple[StdlibIGD, str]:
     location = ssdp_search()
-    with httpx.Client(timeout=4, trust_env=False, follow_redirects=False) as client:
+    with httpx.Client(timeout=4, trust_env=False, follow_redirects=False, verify=False) as client:
         description = client.get(location, auth=(username, password) if username else None)
     if description.status_code in {401, 403}:
         raise RuntimeError("IGD requires the owner router username and password")

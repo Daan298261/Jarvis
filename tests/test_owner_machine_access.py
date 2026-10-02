@@ -10,9 +10,14 @@ from app.config import LOCAL_NETWORK_SCOPE, default_allowed_directories
 from app.mobile.wan_forward import (
     companion_wan_origin,
     gateway_ssh_argv,
+    gateway_ssh_configured,
     is_public_dial_host,
     openwrt_redirect_script,
+    parse_proc_net_route,
+    parse_windows_route_print,
     redact_wan_config,
+    resolved_gateway_host,
+    resolved_gateway_user,
     reverse_tunnel_argv,
 )
 from app.tools.safety import resolve_allowed_path
@@ -45,6 +50,8 @@ def test_posix_slash_share_is_treated_as_lan_unc():
     resolved = resolve_allowed_path("//nas/games/steam.exe", allowed)
     text = str(resolved).replace("\\", "/").lower()
     assert "nas" in text and "games" in text
+    lan = resolve_allowed_path("//nas.lan/media/clip.mp4", allowed)
+    assert "nas.lan" in str(lan).replace("\\", "/").lower()
 
 
 def test_empty_allowlist_still_denies():
@@ -106,6 +113,38 @@ def test_gateway_ssh_argv_uses_identity_and_openwrt_profile(tmp_path, monkeypatc
             lan_ip="192.168.1.12",
             profile="exploit-kit",
         )
+
+
+def test_gateway_ssh_accepts_owner_password_without_identity(monkeypatch):
+    monkeypatch.setattr("app.mobile.wan_forward.shutil.which", lambda name: "/usr/bin/ssh" if "ssh" in name else None)
+    argv = gateway_ssh_argv(
+        host="192.168.1.1",
+        user="root",
+        lan_ip="192.168.1.12",
+        password="owner-secret",
+    )
+    joined = " ".join(argv)
+    assert "-i" not in argv
+    assert "owner-secret" not in joined
+    assert "BatchMode=no" in argv
+    assert "src_dport='4781'" in argv[-1]
+    assert gateway_ssh_configured({"gateway_password": "owner-secret"})
+    assert not gateway_ssh_configured({"gateway_host": "192.168.1.1"})
+    with pytest.raises(ValueError, match="identity file or the owner router password"):
+        gateway_ssh_argv(host="192.168.1.1", user="root", lan_ip="192.168.1.12")
+
+
+def test_default_gateway_parsers_and_openwrt_user_fallback():
+    proc = (
+        "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+        "eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
+    )
+    assert parse_proc_net_route(proc) == "192.168.1.1"
+    printed = "Network Destination        Netmask          Gateway       Interface  Metric\n          0.0.0.0          0.0.0.0      192.168.0.1     192.168.0.12     25\n"
+    assert parse_windows_route_print(printed) == "192.168.0.1"
+    assert resolved_gateway_user({"gateway_profile": "openwrt_uci"}) == "root"
+    assert resolved_gateway_user({"gateway_username": "admin"}) == "admin"
+    assert resolved_gateway_host({"gateway_host": "192.168.1.1"}) == "192.168.1.1"
 
 
 def test_wan_origin_rejects_lan_and_accepts_public_hosts():
@@ -185,6 +224,50 @@ async def test_gateway_ssh_does_not_advertise_private_router_as_wan(tmp_path, mo
     assert result.get("wan_path") == "gateway_ssh"
     assert "https://192.168.1.1:4781" not in result["endpoints"]
     assert "public hostname" in (result.get("limitation") or "")
+
+
+@pytest.mark.asyncio
+async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No public IPv4")))
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+
+    seen: dict[str, str] = {}
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        seen["host"] = settings.get("gateway_host") or ""
+        seen["password"] = settings.get("gateway_password") or ""
+        seen["lan"] = lan_ip
+        return "https://home.example.test:4781", "mapped"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    result = await FakeConnection().configure(
+        True,
+        True,
+        {"wan_method": "auto", "gateway_password": "router-pass", "wan_public_host": "home.example.test"},
+    )
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "gateway_ssh"
+    assert seen["password"] == "router-pass"
+    assert "https://home.example.test:4781" in result["endpoints"]
+
+
+def test_ssh_askpass_prints_secret_without_argv(tmp_path, monkeypatch):
+    import subprocess
+
+    from app.mobile import store
+    from app.mobile.wan_forward import prepare_ssh_password_env
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    env, path = prepare_ssh_password_env("router-pass")
+    assert "router-pass" not in env["SSH_ASKPASS"]
+    result = subprocess.run([env["SSH_ASKPASS"]], env=env, capture_output=True, text=True, check=True)
+    assert result.stdout == "router-pass"
+    assert not Path(path).exists()
 
 
 @pytest.mark.asyncio

@@ -372,12 +372,12 @@ class Connectivity:
                     self.router = None
                     self.report(router="unavailable", limitation=str(exc)[:240])
             if config["remote"] and not self.router:
-                from .wan_forward import apply_gateway_ssh, apply_ssh_reverse, wan_settings_from_config
+                from .wan_forward import apply_gateway_ssh, apply_ssh_reverse, gateway_ssh_configured, wan_settings_from_config
 
                 wan = wan_settings_from_config(config)
                 method = wan["wan_method"]
                 lan_ip = (hosts[0] if hosts else "") or ""
-                if method in {"auto", "gateway_ssh"} and wan["gateway_host"] and wan["gateway_user"]:
+                if method in {"auto", "gateway_ssh"} and gateway_ssh_configured(wan):
                     self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
                     try:
                         public_host = wan.get("wan_public_host") or public_ip or ""

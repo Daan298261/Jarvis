@@ -389,7 +389,7 @@ def _host_is_local(value: str) -> bool:
     try:
         addr = ipaddress.ip_address(host)
     except ValueError:
-        return host.endswith((".local", ".home.arpa")) or host in {"localhost", "host.docker.internal"} or (bool(host) and "." not in host)
+        return host.endswith((".local", ".home.arpa", ".lan")) or host in {"localhost", "host.docker.internal"} or (bool(host) and "." not in host)
     return any(addr in net for net in _PRIVATE_NETS)
 
 

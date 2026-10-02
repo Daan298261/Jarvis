@@ -185,8 +185,9 @@ export function MobileCompanionSetup() {
               <option value="ssh_reverse">SSH reverse tunnel to my host</option>
             </select>
           </label>
-          {(wanForm.wan_method === "auto" || wanForm.wan_method === "upnp") && (
+          {(wanForm.wan_method === "auto" || wanForm.wan_method === "upnp" || wanForm.wan_method === "gateway_ssh") && (
             <>
+              {(wanForm.wan_method === "auto" || wanForm.wan_method === "upnp") && (
               <label>
                 Router IGD username (optional)
                 <input
@@ -196,8 +197,9 @@ export function MobileCompanionSetup() {
                   onChange={(event) => patchWan("gateway_username", event.target.value)}
                 />
               </label>
+              )}
               <label>
-                Router IGD password (optional, never shown after save)
+                Router password (optional IGD logon and OpenWrt SSH if no key; never shown after save)
                 <input
                   className="command"
                   type="password"
@@ -211,7 +213,7 @@ export function MobileCompanionSetup() {
           {(wanForm.wan_method === "auto" || wanForm.wan_method === "gateway_ssh") && (
             <>
               <label>
-                Gateway SSH host
+                Gateway SSH host (blank uses this PC's default gateway)
                 <input
                   className="command"
                   value={wanForm.gateway_host}
@@ -238,7 +240,7 @@ export function MobileCompanionSetup() {
                 />
               </label>
               <label>
-                Gateway identity file
+                Gateway identity file (optional if you set the router password)
                 <input
                   className="command"
                   value={wanForm.gateway_identity_file}
