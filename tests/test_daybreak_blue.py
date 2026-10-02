@@ -680,6 +680,26 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert not looks_like_nmap_tool("container_scan")
 
 
+def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch):
+    from app.security.hexstrike import hexstrike_child_env
+
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:3128")
+    monkeypatch.setenv("ALL_PROXY", "socks5://10.8.0.1:1080")
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("JARVIS_HEXSTRIKE_HOME", "/opt/hexstrike")
+    env = hexstrike_child_env()
+    assert "HTTP_PROXY" not in env
+    assert "https_proxy" not in env
+    assert "ALL_PROXY" not in env
+    assert "NO_PROXY" not in env
+    assert env["JARVIS_HEXSTRIKE_HOME"] == "/opt/hexstrike"
+    kept = hexstrike_child_env({"PATH": "/usr/bin", "http_proxy": "http://proxy.example:8080", "HEXSTRIKE_PORT": "8888"})
+    assert "http_proxy" not in kept
+    assert kept["PATH"] == "/usr/bin"
+    assert kept["HEXSTRIKE_PORT"] == "8888"
+
+
 @pytest.mark.asyncio
 async def test_mcp_nmap_call_binds_home_nic(monkeypatch):
     from app.tools.mcp_runtime import MCP

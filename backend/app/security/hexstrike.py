@@ -67,6 +67,22 @@ _BLOCKED_TOKENS = (
     "hack-back",
     "hackback",
 )
+_PROXY_ENV_NAMES = frozenset({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FTP_PROXY"})
+
+
+def hexstrike_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for the managed HexStrike suite process.
+
+    Copy PATH and JARVIS_* from the parent, but drop HTTP_PROXY / HTTPS_PROXY so
+    LAN scans (nuclei, gobuster, suite httpx) are not stolen by a leftover env
+    proxy. nmap still binds the home NIC via ``-S``/``-e``. ``web_fetch`` and
+    Chromium already ignore process proxies.
+    """
+    env = dict(os.environ if base is None else base)
+    for key in list(env):
+        if key.upper() in _PROXY_ENV_NAMES:
+            env.pop(key, None)
+    return env
 
 
 @dataclass
@@ -586,7 +602,7 @@ class HexStrikeManager:
         logs_dir().mkdir(parents=True, exist_ok=True)
         log_file = logs_dir() / "hexstrike-server.log"
         self._log_handle = open(log_file, "ab", buffering=0)
-        env = os.environ.copy()
+        env = hexstrike_child_env()
         env["PYTHONUNBUFFERED"] = "1"
         env["HEXSTRIKE_HOST"] = "127.0.0.1"
         env["HEXSTRIKE_PORT"] = str(current.port)
