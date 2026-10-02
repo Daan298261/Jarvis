@@ -487,7 +487,10 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
         else:
             pending.append("computer.this_device")
     if name in INTERNET_TOOLS:
-        pending.append("network.local" if looks_local_network(arguments) else "network.internet")
+        url = str((arguments or {}).get("url") or "").strip()
+        scheme = (urlparse(url).scheme or "").lower() if url else ""
+        if scheme != "file":
+            pending.append("network.local" if looks_local_network(arguments) else "network.internet")
     if name in SHELL_NETWORK_TOOLS and looks_outbound_network(arguments):
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
     if name == "git":

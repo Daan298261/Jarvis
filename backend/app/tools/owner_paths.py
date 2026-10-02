@@ -74,7 +74,7 @@ def resolve_workspace_dir(raw: str | None, allowed: list[str]) -> str | None:
     return str(resolve_allowed_path(expanded, allowed))
 
 
-def default_workspace_dir(allowed: list[str]) -> Path:
+def default_workspace_dir(allowed: list[str], *, media_only: bool = False) -> Path:
     """Documents (then Desktop/Downloads) when that folder is in the workspace."""
     for name in ("Documents", "Desktop", "Downloads"):
         candidate = Path.home() / name
@@ -87,6 +87,8 @@ def default_workspace_dir(allowed: list[str]) -> Path:
             return resolve_allowed_path(str(candidate), allowed)
         except PermissionError:
             continue
+    if media_only:
+        raise PermissionError("Documents is not in the allowed workspace")
     if allowed:
         return resolve_allowed_path(allowed[0], allowed)
     return Path.cwd()

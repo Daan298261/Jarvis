@@ -413,3 +413,68 @@ def test_chromium_downloads_fallback_when_home_folder_missing(tmp_path, monkeypa
     assert owner_downloads_dir() == tmp_path / "downloads"
     assert (tmp_path / "downloads").is_dir()
 
+
+def test_resolve_browser_open_url_workspace_file(tmp_path):
+    from app.tools.browser import resolve_browser_open_url
+
+    page = tmp_path / "E" / "report.html"
+    page.parent.mkdir(parents=True)
+    page.write_text("<html><body>usb</body></html>", encoding="utf-8")
+    uri = resolve_browser_open_url(str(page), [str(tmp_path)])
+    assert uri.startswith("file:")
+    assert "report.html" in uri
+    try:
+        resolve_browser_open_url("file:///etc/passwd", [str(tmp_path)])
+        raise AssertionError("expected outside allowed")
+    except PermissionError as exc:
+        assert "outside allowed" in str(exc).lower() or "workspace" in str(exc).lower()
+    try:
+        resolve_browser_open_url("javascript:alert(1)", [str(tmp_path)])
+        raise AssertionError("expected blocked scheme")
+    except PermissionError as exc:
+        assert "scheme" in str(exc).lower()
+
+
+async def test_browser_open_local_file_on_extra_drive(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.tools.browser import BrowserTool, resolve_browser_open_url
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    html = tmp_path / "E" / "notes.html"
+    html.parent.mkdir(parents=True)
+    html.write_text("<html><body>local-usb</body></html>", encoding="utf-8")
+    expected = resolve_browser_open_url(str(html), [str(tmp_path)])
+
+    class FakePage:
+        url = "about:blank"
+
+        async def goto(self, url, **kwargs):
+            FakePage.url = url
+            return None
+
+        async def title(self):
+            return "local-usb"
+
+        async def wait_for_load_state(self, *args, **kwargs):
+            return None
+
+    async def fake_ensure(headless):
+        return FakePage()
+
+    monkeypatch.setattr(browser_mod, "_page", None)
+    monkeypatch.setattr(browser_mod, "_context", None)
+    monkeypatch.setattr(browser_mod, "_playwright", None)
+    monkeypatch.setattr(browser_mod, "_browser", None)
+    monkeypatch.setattr(browser_mod, "_pages", [])
+    monkeypatch.setattr(browser_mod, "_ensure_page", fake_ensure)
+    tool = BrowserTool(lambda: {"allowed_directories": [str(tmp_path)], "browser": {"headless": True}})
+    result = await tool.execute(action="open", url=str(html))
+    assert result.success, result.error
+    assert FakePage.url == expected
+    blocked = await tool.execute(action="open", url="file:///etc/passwd")
+    assert not blocked.success
+    js = await tool.execute(action="open", url="javascript:alert(1)")
+    assert not js.success
+

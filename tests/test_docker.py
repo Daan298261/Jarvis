@@ -61,6 +61,15 @@ async def test_docker_build_uses_extra_drive_context(tmp_path):
     assert "outside allowed directories" in (blocked.error or "")
 
 
+async def test_docker_build_omitted_path_uses_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    (docs / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    tool = DockerTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    assert Path(tool._build_path(None)) == docs.resolve()
+
+
 async def test_docker_build_without_path_refuses_foreign_cwd(tmp_path):
     tool = DockerTool(lambda: {"allowed_directories": [str(tmp_path)]})
     result = await tool.execute(action="build")

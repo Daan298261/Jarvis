@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import shutil
-from pathlib import Path
 from typing import Any
 
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import resolve_workspace_dir
-from .safety import resolve_allowed_path
+from .owner_paths import default_workspace_dir, resolve_workspace_dir
 
 
 def looks_like_host_path(host: str) -> bool:
@@ -137,6 +135,7 @@ class DockerTool(Tool):
     description = (
         "Inspect and run Docker containers when Docker is installed. Actions: ps, images, build, run, logs, inspect. "
         "build path is the folder with a Dockerfile (USB/`D:` extra drives included). "
+        "Omit path to build in Documents. "
         "run -v/--volume/--mount host paths must be inside the allowed workspace. "
         "run requires image; logs requires container; inspect requires container or image."
     )
@@ -148,7 +147,7 @@ class DockerTool(Tool):
             "args": {"type": "string"},
             "path": {
                 "type": "string",
-                "description": "docker build context folder. Extra drives are allowed. Omit only when cwd is already the project.",
+                "description": "docker build context folder. Extra drives are allowed. Omit to use Documents.",
             },
             "image": {"type": "string"},
             "container": {"type": "string"},
@@ -166,15 +165,14 @@ class DockerTool(Tool):
         allowed = self._allowed()
         text = str(raw or "").strip()
         if not text:
-            if allowed:
-                cwd = str(Path.cwd())
-                try:
-                    return str(resolve_allowed_path(cwd, allowed))
-                except PermissionError:
-                    raise ValueError(
-                        "path is required for docker build (folder with a Dockerfile, including extra drives)"
-                    ) from None
-            return "."
+            if not allowed:
+                return "."
+            try:
+                return str(default_workspace_dir(allowed, media_only=True))
+            except PermissionError:
+                raise ValueError(
+                    "path is required for docker build (folder with a Dockerfile, including extra drives)"
+                ) from None
         resolved = resolve_workspace_dir(text, allowed)
         if not resolved:
             raise ValueError("path is required for docker build (folder with a Dockerfile, including extra drives)")

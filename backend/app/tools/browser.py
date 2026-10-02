@@ -4,7 +4,7 @@ import asyncio
 import base64
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from ..config import AppSettings, data_dir, load_settings
 from .base import RiskLevel, Tool, ToolResult
@@ -37,6 +37,60 @@ _ACTIONS_NEEDING_PAGE = {
 _NAMED_ROLES = ("button", "link", "tab", "menuitem", "checkbox", "radio")
 _GOTO_RETRIES = 3
 _INTERNAL_BROWSER_SCHEMES = ("about:", "chrome:", "devtools:", "data:")
+_BLOCKED_BROWSER_SCHEMES = frozenset({"javascript", "vbscript", "blob", "ws", "wss"})
+_allowed_override: list[str] | None = None
+
+
+def file_url_to_path(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    path = unquote(parsed.path or "")
+    if parsed.netloc and parsed.netloc.lower() not in {"", "localhost", "127.0.0.1"}:
+        return f"//{parsed.netloc}{path}"
+    if len(path) >= 3 and path[0] == "/" and path[2] == ":":
+        return path[1:]
+    return path
+
+
+def looks_like_workspace_file_target(raw: str) -> bool:
+    text = str(raw or "").strip().strip('"')
+    if not text:
+        return False
+    scheme = (urlparse(text).scheme or "").lower()
+    if scheme == "file":
+        return True
+    if scheme in {"http", "https"} or scheme in _BLOCKED_BROWSER_SCHEMES or scheme == "data":
+        return False
+    return "/" in text or "\\" in text or text.startswith("~") or (len(text) >= 2 and text[1] == ":")
+
+
+def resolve_browser_open_url(raw: str, allowed: list[str]) -> str:
+    """http(s) URLs pass through; local workspace files become file:// URIs."""
+    text = str(raw or "").strip()
+    scheme = (urlparse(text).scheme or "").lower()
+    if scheme in {"http", "https"}:
+        return text
+    if scheme in _BLOCKED_BROWSER_SCHEMES or scheme == "data":
+        raise PermissionError("Blocked URL scheme. Only http, https, and workspace files are allowed")
+    if scheme == "file" or looks_like_workspace_file_target(text):
+        path_text = file_url_to_path(text) if scheme == "file" else text
+        return Path(resolve_allowed_path(path_text, allowed)).as_uri()
+    raise PermissionError("Blocked URL scheme. Only http, https, and workspace files are allowed")
+
+
+def _browser_allowed() -> list[str]:
+    if _allowed_override:
+        return list(_allowed_override)
+    try:
+        from .registry import REGISTRY
+
+        allowed = list((getattr(REGISTRY, "_context", {}) or {}).get("allowed_directories") or [])
+        if allowed:
+            return allowed
+    except Exception:
+        pass
+    from ..config import default_allowed_directories
+
+    return default_allowed_directories()
 
 
 def redirect_chain_urls(response: Any, final_url: str = "") -> list[str]:
@@ -61,8 +115,14 @@ def gate_browser_url(url: str, action: str = "open") -> str | None:
     if not cleaned or cleaned.lower().startswith(_INTERNAL_BROWSER_SCHEMES):
         return None
     scheme = (urlparse(cleaned).scheme or "").lower()
+    if scheme == "file":
+        try:
+            resolve_allowed_path(file_url_to_path(cleaned), _browser_allowed())
+        except PermissionError as exc:
+            return str(exc)
+        return None
     if scheme and scheme not in {"http", "https"}:
-        return "Blocked URL scheme. Only http and https URLs are allowed"
+        return "Blocked URL scheme. Only http, https, and workspace files are allowed"
     from ..policy.computer_permissions import evaluate_tool_permissions
 
     gate = evaluate_tool_permissions("browser", {"url": cleaned, "action": action})
@@ -300,7 +360,8 @@ class BrowserTool(Tool):
         "Automate Chromium with Playwright using accessibility snapshots rather than coordinates. "
         "Actions: open, snapshot, click, type, fill, press, evaluate, screenshot, tabs, download, "
         "upload, title, close. Use snapshot first, then click by the element's accessible name or CSS selector. "
-        "open retries navigation; named clicks try button/link/tab before failing."
+        "open retries navigation; named clicks try button/link/tab before failing. "
+        "open accepts http(s) URLs and local files in the allowed workspace (USB/`D:` HTML/PDF)."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -325,7 +386,10 @@ class BrowserTool(Tool):
                     "close",
                 ],
             },
-            "url": {"type": "string"},
+            "url": {
+                "type": "string",
+                "description": "http(s) URL, or a local file path / file:// URI inside the allowed workspace",
+            },
             "selector": {"type": "string"},
             "name": {"type": "string", "description": "Accessible name for click/type"},
             "text": {"type": "string"},
@@ -367,17 +431,20 @@ class BrowserTool(Tool):
         return settings
 
     async def execute(self, **kwargs: Any) -> ToolResult:
+        global _allowed_override
         settings = self._settings()
         action = kwargs.get("action")
+        _allowed_override = self._allowed()
         if action == "close":
             async with _lock:
                 return await _close_browser()
         if action == "open" and not (kwargs.get("url") or "").strip():
             return ToolResult(False, "", error="url is required")
         if action == "open":
-            scheme = (urlparse(str(kwargs.get("url") or "")).scheme or "").lower()
-            if scheme not in {"http", "https"}:
-                return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed")
+            try:
+                kwargs = {**kwargs, "url": resolve_browser_open_url(str(kwargs.get("url") or ""), self._allowed())}
+            except PermissionError as exc:
+                return ToolResult(False, "", error=str(exc))
         if action not in _ACTIONS_NEEDING_PAGE:
             return ToolResult(False, "", error=f"Unknown action {action}")
 
