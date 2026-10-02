@@ -135,3 +135,24 @@ def test_apply_settings_unions_newly_mounted_drives(monkeypatch, tmp_path):
     roots["now"] = [str(first), str(second)]
     registry.apply_settings(settings)
     assert str(second) in registry._context["allowed_directories"]
+
+
+def test_live_context_unions_drive_without_settings_save(monkeypatch, tmp_path):
+    from app.config import AppSettings
+    from app.tools.registry import ToolRegistry
+
+    first = tmp_path / "vol-a"
+    second = tmp_path / "vol-b"
+    first.mkdir()
+    second.mkdir()
+    roots = {"now": [str(first)]}
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: list(roots["now"]))
+    registry = ToolRegistry()
+    settings = AppSettings(allowed_directories=[str(first)])
+    registry.apply_settings(settings)
+    roots["now"] = [str(first), str(second)]
+    live = registry._live_context()
+    assert str(second) in live["allowed_directories"]
+    assert str(second) in registry._context["allowed_directories"]

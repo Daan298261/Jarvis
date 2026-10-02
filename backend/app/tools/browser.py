@@ -71,12 +71,50 @@ def gate_browser_url(url: str, action: str = "open") -> str | None:
     return None
 
 
-async def _abandon_disallowed_page(page, reason: str) -> None:
+async def _blank_page(page) -> None:
     try:
         await page.goto("about:blank", wait_until="domcontentloaded", timeout=5_000)
     except Exception:
         pass
+
+
+async def _abandon_disallowed_page(page, reason: str) -> None:
+    await _blank_page(page)
     raise PermissionError(reason)
+
+
+def _bind_event(target: Any, event: str, handler: Any) -> bool:
+    adder = getattr(target, "on", None) if target is not None else None
+    if not callable(adder):
+        return False
+    try:
+        adder(event, handler)
+        return True
+    except Exception:
+        return False
+
+
+def _unbind_event(target: Any, event: str, handler: Any) -> None:
+    if target is None:
+        return
+    for name in ("remove_listener", "off"):
+        remover = getattr(target, name, None)
+        if callable(remover):
+            try:
+                remover(event, handler)
+                return
+            except Exception:
+                continue
+
+
+def _context_pages(page) -> list[Any]:
+    ctx = getattr(page, "context", None)
+    pages = list(getattr(ctx, "pages", None) or [])
+    ordered: list[Any] = []
+    for item in [page, *pages]:
+        if item is not None and item not in ordered:
+            ordered.append(item)
+    return ordered
 
 
 async def _assert_navigation_allowed(page, response: Any, action: str) -> None:
@@ -94,42 +132,57 @@ async def _assert_current_url_allowed(page, action: str) -> None:
 
 
 async def _run_and_gate_navigation(page, coro, action: str = "open") -> Any:
-    """Run an interaction, then re-gate every captured navigation hop plus the final URL."""
+    """Run an interaction, then re-gate every captured hop, spawned tab, and final URL."""
     hops: list[str] = []
+    spawned: list[Any] = []
 
     def _on_response(response: Any) -> None:
         hops.extend(redirect_chain_urls(response, str(getattr(response, "url", "") or "")))
 
-    bound = False
-    adder = getattr(page, "on", None)
-    if callable(adder):
-        try:
-            adder("response", _on_response)
-            bound = True
-        except Exception:
-            bound = False
+    def _on_page(new_page: Any) -> None:
+        if new_page is not None and new_page not in spawned:
+            spawned.append(new_page)
+            _bind_event(new_page, "response", _on_response)
+
+    ctx = getattr(page, "context", None)
+    bound_page = _bind_event(page, "response", _on_response)
+    bound_ctx_page = _bind_event(ctx, "page", _on_page)
+    bound_ctx_response = _bind_event(ctx, "response", _on_response)
     result: Any = None
     try:
         result = await coro
         await _wait_stable(page)
+        for extra in spawned:
+            await _wait_stable(extra)
     finally:
-        if bound:
-            for name in ("remove_listener", "off"):
-                remover = getattr(page, name, None)
-                if callable(remover):
-                    try:
-                        remover("response", _on_response)
-                        break
-                    except Exception:
-                        continue
+        if bound_page:
+            _unbind_event(page, "response", _on_response)
+        if bound_ctx_page:
+            _unbind_event(ctx, "page", _on_page)
+        if bound_ctx_response:
+            _unbind_event(ctx, "response", _on_response)
+        for extra in spawned:
+            _unbind_event(extra, "response", _on_response)
+    pages = _context_pages(page)
+    for extra in spawned:
+        if extra not in pages:
+            pages.append(extra)
     ordered: list[str] = []
-    for hop in hops + [str(getattr(page, "url", "") or "")]:
+    for hop in hops + [str(getattr(item, "url", "") or "") for item in pages]:
         if hop and hop not in ordered:
             ordered.append(hop)
     for hop in ordered:
         blocked = gate_browser_url(hop, action)
         if blocked:
-            await _abandon_disallowed_page(page, blocked)
+            for item in pages:
+                await _blank_page(item)
+            raise PermissionError(blocked)
+    if spawned:
+        global _page, _pages
+        newest = spawned[-1]
+        _page = newest
+        if newest not in _pages:
+            _pages.append(newest)
     return result
 
 
@@ -377,6 +430,7 @@ class BrowserTool(Tool):
                             await page.locator(kwargs["selector"]).first.click(timeout=10000)
 
                     await _run_and_gate_navigation(page, _click(), "open")
+                    page = _page or page
                     return ToolResult(True, f"Clicked. URL now {page.url}")
                 if action in {"type", "fill"}:
                     text = kwargs.get("text") or ""
@@ -395,17 +449,20 @@ class BrowserTool(Tool):
                             await locator.type(text)
 
                     await _run_and_gate_navigation(page, _type_or_fill(), "open")
+                    page = _page or page
                     return ToolResult(True, "Typed into field")
                 if action == "press":
                     await _run_and_gate_navigation(
                         page, page.keyboard.press(kwargs.get("key") or "Enter"), "open"
                     )
+                    page = _page or page
                     return ToolResult(True, f"Pressed {kwargs.get('key')}")
                 if action == "evaluate":
                     async def _eval() -> Any:
                         return await page.evaluate(kwargs.get("script") or "() => document.title")
 
                     result = await _run_and_gate_navigation(page, _eval(), "open")
+                    page = _page or page
                     return ToolResult(True, str(result))
                 if action == "screenshot":
                     out = Path(kwargs.get("path") or (data_dir() / "screenshots" / "browser.png"))

@@ -215,3 +215,82 @@ async def test_run_and_gate_returns_coro_result_when_url_allowed(tmp_path, monke
 
     assert await _run_and_gate_navigation(page, eval_title(), "open") == "NAS"
     assert page.url == "http://nas.local/home"
+
+
+class _FakeContext:
+    def __init__(self, pages: list | None = None):
+        self.pages = list(pages or [])
+        self._handlers: dict[str, list] = {}
+
+    def on(self, event, handler):
+        self._handlers.setdefault(event, []).append(handler)
+
+    def remove_listener(self, event, handler):
+        self._handlers[event] = [item for item in self._handlers.get(event, []) if item is not handler]
+
+    def emit(self, event, payload):
+        for handler in list(self._handlers.get(event, [])):
+            handler(payload)
+
+
+async def test_spawned_tab_wan_hop_blanks_all_pages(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    home = _HopPage("http://nas.local/home")
+    ctx = _FakeContext([home])
+    home.context = ctx
+    child = _HopPage("about:blank")
+    child.context = ctx
+
+    async def click_blank():
+        child.url = "https://example.test/popup"
+        ctx.pages.append(child)
+        ctx.emit("page", child)
+
+    try:
+        await _run_and_gate_navigation(home, click_blank(), "open")
+        raise AssertionError("expected PermissionError")
+    except PermissionError as exc:
+        assert "don't allow" in str(exc).lower()
+    assert home.url == "about:blank"
+    assert child.url == "about:blank"
+    assert home.gotos[-1] == "about:blank"
+    assert child.gotos[-1] == "about:blank"
+
+
+async def test_spawned_lan_tab_becomes_active_page(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.tools import browser as browser_mod
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.local", "always")
+    apply_grant("network.internet", "deny")
+    home = _HopPage("http://nas.local/home")
+    ctx = _FakeContext([home])
+    home.context = ctx
+    child = _HopPage("about:blank")
+    child.context = ctx
+    previous = browser_mod._page
+    previous_pages = list(browser_mod._pages)
+    browser_mod._page = home
+    browser_mod._pages = [home]
+    try:
+
+        async def click_lan_popup():
+            child.url = "http://nas.local/share"
+            ctx.pages.append(child)
+            ctx.emit("page", child)
+            return "ok"
+
+        assert await _run_and_gate_navigation(home, click_lan_popup(), "open") == "ok"
+        assert browser_mod._page is child
+        assert child in browser_mod._pages
+        assert child.url == "http://nas.local/share"
+    finally:
+        browser_mod._page = previous
+        browser_mod._pages = previous_pages

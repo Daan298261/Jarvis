@@ -44,8 +44,16 @@ class ToolRegistry:
         self.tools: dict[str, Tool] = {}
         self._init_tools()
 
+    def _live_context(self) -> dict[str, Any]:
+        """Re-union mounted drives on each tool call so a USB disk is usable without a settings save."""
+        ctx = self._context
+        allowed = sanitize_allowed_directories(ctx.get("allowed_directories"))
+        if allowed != ctx.get("allowed_directories"):
+            ctx["allowed_directories"] = allowed
+        return ctx
+
     def _init_tools(self) -> None:
-        getter: Callable[[], dict[str, Any]] = lambda: self._context
+        getter: Callable[[], dict[str, Any]] = self._live_context
         items = [
             FilesystemTool(getter),
             TerminalTool(),
