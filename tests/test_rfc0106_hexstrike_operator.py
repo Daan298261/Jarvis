@@ -252,3 +252,96 @@ async def test_operate_rejects_dependency_catalog_rows(operator_store, monkeypat
 def test_install_pin_constants_unchanged():
     assert APPROVED_HEXSTRIKE_REMOTE == "https://github.com/0x4m4/hexstrike-ai.git"
     assert len(APPROVED_HEXSTRIKE_COMMIT) == 40
+
+
+def _nmap_on_path(monkeypatch):
+    import shutil as _shutil
+
+    real_which = _shutil.which
+
+    def _which(name, *args, **kwargs):
+        if str(name).lower() == "nmap":
+            return "/usr/bin/nmap"
+        return real_which(name, *args, **kwargs)
+
+    monkeypatch.setattr("app.security.hexstrike_operator.shutil.which", _which)
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_catalog_available_when_suite_stopped(operator_store, monkeypatch):
+    from app.security import hexstrike_operator as hop
+
+    HEXSTRIKE._process = None
+    HEXSTRIKE._loopback_healthy = False
+    hop._CATALOG_CACHE = []
+    _nmap_on_path(monkeypatch)
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=False,
+            install_path=str(operator_store),
+            tools={},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+            optional_stubs=[],
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    catalog = await refresh_discovered_catalog(force=True)
+    lan = next(item for item in catalog if item["id"] == "defensive:lan_inventory")
+    assert lan["available"] is True
+    assert lan["input_schema"]["required"] == []
+    host = next(item for item in catalog if item["id"] == "defensive:host_baseline")
+    assert host["available"] is False
+
+    hop._CATALOG_CACHE = []
+    offline = discovered_catalog()
+    lan_offline = next(item for item in offline if item["id"] == "defensive:lan_inventory")
+    assert lan_offline["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_operate_lan_inventory_empty_scope_starts_stopped_suite(operator_store, monkeypatch):
+    from app.security import hexstrike_operator as hop
+
+    HEXSTRIKE._process = None
+    HEXSTRIKE._loopback_healthy = False
+    hop._CATALOG_CACHE = []
+    _nmap_on_path(monkeypatch)
+    monkeypatch.setattr("app.security.hexstrike_defensive.data_dir", lambda: operator_store)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["10.2.0.0/16"],
+    )
+    started = {"count": 0}
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(
+            running=False,
+            last_error="",
+            install_path=str(operator_store),
+            tools={},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+            optional_stubs=[],
+        )
+
+    async def fake_start():
+        started["count"] += 1
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        assert payload["target"] == "10.2.0.0/16"
+        return {"hosts": []}
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "ensure_started", fake_start)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    await refresh_discovered_catalog(force=True)
+    job = await operate("defensive:lan_inventory", {})
+    assert job["status"] == "completed"
+    assert started["count"] == 1
+    assert job["result"]["scope_id"] == "lan"

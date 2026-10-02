@@ -293,7 +293,7 @@ def _capabilities_from_defensive(*, suite_running: bool) -> list[dict[str, Any]]
             missing.append(host_tool)
         # threat_intel_lookup needs no local binary; still requires a live suite only for
         # other defensive actions that POST upstream — CVE lookup is Jarvis-side.
-        needs_suite = item.id != "threat_intel_lookup"
+        needs_suite = item.id not in {"threat_intel_lookup", "lan_inventory"}
         available = (not missing) and (suite_running or not needs_suite)
         if needs_suite and not suite_running:
             missing = missing or ["hexstrike-suite"]
@@ -321,7 +321,7 @@ def _capabilities_from_defensive(*, suite_running: bool) -> list[dict[str, Any]]
                         "scope_id": {"type": "string"},
                         "options": {"type": "object"},
                     },
-                    "required": ["scope_id"],
+                    "required": [] if item.id == "lan_inventory" else ["scope_id"],
                 },
             }
         )
@@ -737,7 +737,7 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
     if (
         not live.running
         and source == "defensive"
-        and str(capability.get("defensive_action")) != "threat_intel_lookup"
+        and str(capability.get("defensive_action")) not in {"threat_intel_lookup", "lan_inventory"}
     ):
         raise RuntimeError("capability unavailable: HexStrike suite is not running")
     args = arguments or {}

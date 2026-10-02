@@ -273,3 +273,31 @@ def test_private_lan_scope_put_does_not_require_suite_grant(hardened_env):
     assert parked.status_code == 428
     detail = parked.json()["detail"]
     assert "cyber.hexstrike" in detail.get("permission_ids", [detail.get("permission_id")])
+
+
+def test_default_lan_scope_endpoint_uses_nic_cidr(hardened_env, monkeypatch):
+    monkeypatch.setattr("app.security.hexstrike_defensive.data_dir", lambda: hardened_env["tmp"])
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["192.168.20.0/24"],
+    )
+    client = TestClient(app)
+    created = client.post("/api/hexstrike/scopes/default-lan")
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["id"] == "lan"
+    assert body["kind"] == "private_cidr"
+    assert body["value"] == "192.168.20.0/24"
+    assert body["label"] == "This PC's LAN"
+    again = client.post("/api/hexstrike/scopes/default-lan")
+    assert again.status_code == 200
+    assert again.json()["id"] == "lan"
+
+
+def test_default_lan_scope_endpoint_422_without_rfc1918(hardened_env, monkeypatch):
+    monkeypatch.setattr("app.security.hexstrike_defensive.data_dir", lambda: hardened_env["tmp"])
+    monkeypatch.setattr("app.security.hexstrike_defensive.discover_private_lan_cidrs", lambda: [])
+    client = TestClient(app)
+    missing = client.post("/api/hexstrike/scopes/default-lan")
+    assert missing.status_code == 422
+    assert "RFC1918" in missing.json()["detail"]

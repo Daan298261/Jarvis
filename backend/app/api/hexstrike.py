@@ -11,6 +11,7 @@ from ..security.hexstrike import HEXSTRIKE, audit_hexstrike, gateway_allows
 from ..security.hexstrike_defensive import (
     CAPABILITY_BY_ID,
     capability_snapshot,
+    ensure_default_lan_scope,
     execute_defensive,
     list_jobs as list_defensive_jobs,
     list_scopes,
@@ -456,6 +457,20 @@ async def hexstrike_job_stop(job_id: str):
 @router.get("/scopes")
 async def hexstrike_scopes():
     return {"scopes": list_scopes()}
+
+
+@router.post("/scopes/default-lan")
+async def hexstrike_scope_default_lan():
+    _require_hexstrike_module_entitlement()
+    _require_permissions_grant(
+        ["network.local"],
+        action_kind="hexstrike.scope.default_lan",
+        context={"kind": "private_cidr"},
+    )
+    try:
+        return ensure_default_lan_scope()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.put("/scopes/{scope_id}")

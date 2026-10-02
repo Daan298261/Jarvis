@@ -1189,6 +1189,10 @@ export async function listHexStrikeScopes(): Promise<{ scopes: HexStrikeScope[] 
   return api<{ scopes: HexStrikeScope[] }>("/api/hexstrike/scopes")
 }
 
+export async function ensureDefaultLanScope(): Promise<HexStrikeScope> {
+  return api<HexStrikeScope>("/api/hexstrike/scopes/default-lan", { method: "POST" })
+}
+
 export async function upsertHexStrikeScope(
   scopeId: string,
   body: { kind: string; value: string; label?: string; attested_owned: boolean },
