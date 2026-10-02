@@ -40,7 +40,7 @@ function gatewayTroubleshooting(connection: Connection | null): string | null {
   }
   if (connection.state === "failed") {
     return (
-      "Gateway failed to start. On Windows, allow inbound TCP 4781 on your private network profile, " +
+      "Gateway failed to start. On Windows, allow inbound TCP 4781 (Jarvis adds a firewall rule on every profile), " +
       "ensure nothing else is using port 4781, and confirm Jarvis is running on localhost:4780."
     )
   }

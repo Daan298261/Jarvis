@@ -90,8 +90,68 @@ def test_lookup_egress_ipv4_accepts_global_and_rejects_private(monkeypatch):
     assert ipaddress.ip_address("8.8.4.4").is_global
 
 
+def test_mapped_address_is_egress_detects_double_nat(monkeypatch):
+    from app.mobile.wan_forward import mapped_address_is_egress
+
+    monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: "203.0.113.50")
+    assert mapped_address_is_egress("203.0.113.50") is True
+    assert mapped_address_is_egress("198.51.100.8") is False
+    assert mapped_address_is_egress("10.1.1.1") is False
+    assert mapped_address_is_egress("100.64.1.8") is False
+    monkeypatch.setattr(
+        "app.mobile.wan_forward.lookup_egress_ipv4",
+        lambda: (_ for _ in ()).throw(ValueError("offline")),
+    )
+    assert mapped_address_is_egress("8.8.8.8") is True
+
+
 def test_windows_firewall_helper_skips_on_linux():
     assert ensure_private_firewall_4781() == "skipped"
+
+
+def test_windows_firewall_rule_covers_every_profile():
+    from app.mobile.wan_forward import (
+        FIREWALL_RULE_NAME,
+        PORT,
+        firewall_4781_add_argv,
+        firewall_4781_covers_all_profiles,
+        firewall_4781_upgrade_argv,
+    )
+
+    added = " ".join(firewall_4781_add_argv())
+    assert FIREWALL_RULE_NAME in added
+    assert f"localport={PORT}" in added
+    assert "profile=any" in added
+    assert "4780" not in added
+    assert "profile=any" in " ".join(firewall_4781_upgrade_argv())
+    assert firewall_4781_covers_all_profiles("Profiles: Domain,Private,Public")
+    assert firewall_4781_covers_all_profiles("Profiles: Any")
+    assert not firewall_4781_covers_all_profiles("Profiles: Private")
+
+
+def test_windows_firewall_upgrades_private_only_rule(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    from app.mobile.wan_forward import FIREWALL_RULE_NAME, ensure_private_firewall_4781
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if "show" in argv:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=f"Rule Name:                            {FIREWALL_RULE_NAME}\nProfiles:                             Private\n",
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="Ok.\n", stderr="")
+
+    monkeypatch.setattr("app.mobile.wan_forward.os.name", "nt")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert ensure_private_firewall_4781() == "upgraded"
+    joined = [" ".join(item) for item in calls]
+    assert any(" set " in row and "profile=any" in row for row in joined)
 
 
 def test_stdlib_igd_maps_4781_and_treats_soap_fault_as_empty(monkeypatch):

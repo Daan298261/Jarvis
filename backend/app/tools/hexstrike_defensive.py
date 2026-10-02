@@ -51,8 +51,8 @@ class HexStrikeDefensiveTool(Tool):
             audit_hexstrike("defensive_tool_denied", capability=action, reason="unknown_action")
             return ToolResult(False, "", error="Unknown defensive action.")
         required = (
-            "cyber.hexstrike",
             capability.permission,
+            *(("cyber.hexstrike",) if action != "lan_inventory" else ()),
             *(("network.internet",) if action == "threat_intel_lookup" else ()),
             *(("network.local",) if action == "lan_inventory" else ()),
         )

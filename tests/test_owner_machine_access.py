@@ -23,6 +23,14 @@ from app.mobile.wan_forward import (
 from app.tools.safety import resolve_allowed_path
 
 
+@pytest.fixture(autouse=True)
+def _egress_lookup_offline_in_owner_tests(monkeypatch):
+    monkeypatch.setattr(
+        "app.mobile.wan_forward.lookup_egress_ipv4",
+        lambda: (_ for _ in ()).throw(ValueError("offline")),
+    )
+
+
 def test_defaults_cover_machine_roots_and_lan_scope():
     allowed = default_allowed_directories()
     assert LOCAL_NETWORK_SCOPE in allowed
@@ -193,6 +201,47 @@ async def test_ssh_reverse_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     assert result.get("wan_path") == "ssh_reverse"
     from app.mobile.gateway import identity_covers
     assert identity_covers(connection.identity, ["vpn.example.test", "192.168.1.12"])
+
+
+@pytest.mark.asyncio
+async def test_upnp_double_nat_falls_through_to_reverse_tunnel(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection, Router
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    router = Router()
+    natpmp_hits = {"n": 0}
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (router, "198.51.100.8"))
+    monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: "203.0.113.50")
+    monkeypatch.setattr(
+        "app.mobile.natpmp.apply_natpmp",
+        lambda *a, **k: natpmp_hits.__setitem__("n", natpmp_hits["n"] + 1) or (_ for _ in ()).throw(TimeoutError("should skip")),
+    )
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+
+    async def fake_tunnel(settings):
+        return "https://vpn.example.test:4781"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_ssh_reverse", fake_tunnel)
+    result = await FakeConnection().configure(
+        True,
+        True,
+        {
+            "wan_method": "auto",
+            "ssh_host": "vpn.example.test",
+            "ssh_user": "taco",
+            "ssh_identity_file": str(key),
+        },
+    )
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "ssh_reverse"
+    assert natpmp_hits["n"] == 0
+    assert "https://198.51.100.8:4781" not in result["endpoints"]
+    assert "https://vpn.example.test:4781" in result["endpoints"]
+    assert router.deleted == [(4781, "TCP")]
+    assert "double nat" in (result.get("limitation") or "").lower()
 
 
 @pytest.mark.asyncio

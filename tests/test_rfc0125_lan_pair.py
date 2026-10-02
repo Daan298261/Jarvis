@@ -44,6 +44,13 @@ def test_public_beacon_payload_needs_pin_and_endpoint():
     body = public_beacon_payload(snapshot, prefer_host="192.168.1.9")
     assert body["https"] == "https://192.168.1.9:4781"
     assert body["lan_pair"] is True
+    wan_first = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "endpoints": ["https://home.example.test:4781", "https://192.168.1.12:4781"],
+        }
+    )
+    assert wan_first["https"] == "https://192.168.1.12:4781"
 
 
 def test_lan_enroll_is_pending_until_owner_confirms(companion_env):

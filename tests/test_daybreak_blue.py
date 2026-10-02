@@ -170,13 +170,36 @@ def test_defensive_permission_mapping_requires_cyber_and_blue():
     ]
     assert permission_ids_for_tool("hexstrike_defensive", {"action": "lan_inventory"}) == [
         "network.local",
-        "cyber.hexstrike",
     ]
     assert permission_ids_for_tool("hexstrike_defensive", {"action": "threat_intel_lookup"}) == [
         "network.internet",
         "cyber.hexstrike",
         "blue.static_rules",
     ]
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_does_not_require_hexstrike_suite_grant(monkeypatch):
+    context = {"security_role": "blue-team"}
+    tool = HexStrikeDefensiveTool(lambda: context)
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "blue")
+
+    def eval_perm(permission):
+        if permission == "cyber.hexstrike":
+            return SimpleNamespace(status="ask")
+        return SimpleNamespace(status="allow")
+
+    monkeypatch.setattr("app.tools.hexstrike_defensive.evaluate_permission", eval_perm)
+
+    async def fake_execute(action, scope_id, options):
+        return {"id": "job", "action": action, "scope_id": scope_id, "status": "completed"}
+
+    monkeypatch.setattr("app.tools.hexstrike_defensive.execute_defensive", fake_execute)
+    allowed = await tool.execute(action="lan_inventory", scope_id="lan")
+    assert allowed.success is True
+    blocked = await tool.execute(action="host_baseline", scope_id="host")
+    assert blocked.success is False
+    assert "cyber.hexstrike" in (blocked.error or "")
 
 
 @pytest.mark.asyncio

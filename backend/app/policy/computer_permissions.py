@@ -437,9 +437,12 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
         for key in ("path", "destination", "working_directory")
     ):
         pending.append("network.local")
-    if name in {"hexstrike", "hexstrike_suite", "hexstrike_defensive", "hexstrike_operator"}:
+    if name in {"hexstrike", "hexstrike_suite", "hexstrike_operator"}:
         pending.append("cyber.hexstrike")
     if name == "hexstrike_defensive":
+        action = str((arguments or {}).get("action") or "")
+        if action != "lan_inventory":
+            pending.append("cyber.hexstrike")
         action_permissions = {
             "lan_inventory": "network.local",
             "container_scan": "blue.static_rules",
@@ -448,10 +451,10 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
             "forensic_inspection": "blue.static_rules",
             "threat_intel_lookup": "blue.static_rules",
         }
-        permission = action_permissions.get(str((arguments or {}).get("action") or ""))
+        permission = action_permissions.get(action)
         if permission:
             pending.append(permission)
-        if str((arguments or {}).get("action") or "") == "threat_intel_lookup":
+        if action == "threat_intel_lookup":
             pending.append("network.internet")
     # unique, stable order following catalog
     order = [spec.id for spec in CATALOG]
