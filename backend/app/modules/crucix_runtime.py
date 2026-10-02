@@ -22,6 +22,10 @@ async def status()->dict[str,Any]:
 def catalog_list_row():
     s=_settings(); return {"id":MODULE_ID,"name":MODULE_NAME,"description":"Local OSINT intelligence engine; installed automatically when enabled.","kind":"local_sidecar","enabled":s.enabled,"installed":(install_dir()/"package.json").is_file(),"downloadable":True}
 def _install_sync():
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(UPSTREAM, tool="web_fetch")
+    require_http_url_allowed("https://registry.npmjs.org/", tool="web_fetch")
     root=install_dir(); git=shutil.which("git"); npm=shutil.which("npm") or shutil.which("npm.cmd")
     if not git or not npm: raise RuntimeError("Crucix requires Git and Node.js/npm 22+")
     if root.exists(): shutil.rmtree(root)

@@ -34,6 +34,38 @@ def test_remote_endpoint_requires_explicit_owner_opt_in():
 
 
 @pytest.mark.asyncio
+async def test_remote_request_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    settings = AppSettings()
+    settings.supermemory.enabled = True
+    settings.supermemory.allow_remote = True
+    settings.supermemory.base_url = "https://api.supermemory.ai"
+    monkeypatch.setattr(supermemory.app_config, "load_settings", lambda: settings)
+    monkeypatch.setattr(supermemory, "_api_key", lambda: "sm_test_key")
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            seen["n"] += 1
+            raise AssertionError("must not HTTP when internet is denied")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(supermemory.httpx, "AsyncClient", Client)
+    with pytest.raises(supermemory.SupermemoryError):
+        await supermemory._request_json("GET", "/v3/documents")
+    assert seen["n"] == 0
+
+
+@pytest.mark.asyncio
 async def test_search_uses_bounded_hybrid_recall(monkeypatch):
     settings = AppSettings()
     settings.supermemory.enabled = True
