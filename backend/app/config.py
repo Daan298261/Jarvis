@@ -756,6 +756,83 @@ def preferred_runtime_install_dir(name: str, *, need_bytes: int = _RUNTIME_NEED_
     return extra / slug
 
 
+_PLAYWRIGHT_NEED_BYTES = 1024**3
+
+
+def default_playwright_browsers_dir() -> Path:
+    """Playwright's own default (`%LOCALAPPDATA%\\ms-playwright` or `~/.cache/ms-playwright`)."""
+    if os.name == "nt":
+        local = (os.environ.get("LOCALAPPDATA") or "").strip()
+        root = Path(local) if local else Path.home() / "AppData" / "Local"
+        return root / "ms-playwright"
+    xdg = (os.environ.get("XDG_CACHE_HOME") or "").strip()
+    cache = Path(xdg) if xdg else Path.home() / ".cache"
+    return cache / "ms-playwright"
+
+
+def _playwright_chromium_present(root: Path) -> bool:
+    try:
+        if not root.is_dir():
+            return False
+        for child in root.iterdir():
+            name = child.name.lower()
+            if child.is_dir() and (name.startswith("chromium") or name.startswith("ffmpeg")):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def extra_volume_playwright_browsers_dir() -> Path | None:
+    for candidate in extra_volume_named_runtime_dirs("ms-playwright"):
+        if _playwright_chromium_present(candidate):
+            return candidate
+    return None
+
+
+def playwright_browsers_dir() -> Path:
+    """Chromium folder. Extra-drive `Jarvis/runtime/ms-playwright` when C: cannot fit a fresh install."""
+    for raw in (
+        os.environ.get("JARVIS_PLAYWRIGHT_BROWSERS"),
+        os.environ.get("PLAYWRIGHT_BROWSERS_PATH"),
+    ):
+        text = (raw or "").strip()
+        if text:
+            return Path(text).expanduser()
+    extra_existing = extra_volume_playwright_browsers_dir()
+    if extra_existing is not None:
+        return extra_existing
+    local = default_playwright_browsers_dir()
+    if _playwright_chromium_present(local):
+        return local
+    required = _PLAYWRIGHT_NEED_BYTES
+    try:
+        probe = local if local.exists() else local.parent
+        if not probe.exists():
+            probe = Path.home()
+        local_free = int(shutil.disk_usage(probe).free)
+    except OSError:
+        local_free = 0
+    extra_root = extra_volume_runtime_root(need_bytes=required)
+    if extra_root is not None and local_free < required:
+        return extra_root / "ms-playwright"
+    return local
+
+
+def apply_playwright_browsers_path() -> Path:
+    """Point Playwright at extra-drive Chromium when that is the install dest."""
+    dest = playwright_browsers_dir()
+    dest.mkdir(parents=True, exist_ok=True)
+    default = default_playwright_browsers_dir()
+    try:
+        same = dest.resolve() == default.resolve()
+    except OSError:
+        same = False
+    if not same:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(dest)
+    return dest
+
+
 def default_allowed_directories() -> list[str]:
     home = Path.home()
     candidates = [

@@ -170,11 +170,15 @@ def discover_component_states(*, include_optional_expert: bool | None = None) ->
     )
     marker = repo_root() / ".venv" / ".playwright-chromium-ready"
     if want_playwright:
+        from .config import _playwright_chromium_present, playwright_browsers_dir
+
+        browsers = playwright_browsers_dir()
+        ready = marker.exists() or _playwright_chromium_present(browsers)
         states["playwright_chromium"] = ComponentState(
             id="playwright_chromium",
             label=_label("playwright_chromium"),
-            status="ready" if marker.exists() else "pending",
-            path=str(marker),
+            status="ready" if ready else "pending",
+            path=str(browsers),
             optional=True,
         )
     else:
@@ -379,11 +383,16 @@ def _install_heretic_27b() -> None:
 
 
 def _install_playwright() -> None:
+    from .config import _playwright_chromium_present, apply_playwright_browsers_path
+
+    browsers = apply_playwright_browsers_path()
     marker = repo_root() / ".venv" / ".playwright-chromium-ready"
-    if marker.exists():
-        _set_state("playwright_chromium", status="ready", path=str(marker), error="")
+    if _playwright_chromium_present(browsers):
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("ok\n", encoding="utf-8")
+        _set_state("playwright_chromium", status="ready", path=str(browsers), error="")
         return
-    _set_state("playwright_chromium", status="downloading", error="")
+    _set_state("playwright_chromium", status="downloading", error="", path=str(browsers))
     try:
         import subprocess
         import sys
@@ -399,7 +408,7 @@ def _install_playwright() -> None:
             raise RuntimeError(result.stderr or result.stdout or "playwright install failed")
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("ok\n", encoding="utf-8")
-        _set_state("playwright_chromium", status="ready", path=str(marker), error="")
+        _set_state("playwright_chromium", status="ready", path=str(browsers), error="")
     except Exception as exc:
         # Optional capability — do not crash Jarvis.
         _set_state(

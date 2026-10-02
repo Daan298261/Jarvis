@@ -1,6 +1,7 @@
 """Extra-drive install dest for HexStrike / Crucix / Supermemory sidecars."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -293,3 +294,65 @@ def test_ensure_kokoro_weights_downloads_to_extra_when_os_volume_is_full(tmp_pat
     dest = pack_install.ensure_kokoro_weights(force=True)
     assert dest == extra / "Jarvis" / "models" / "tts" / "kokoro-82m"
     assert (dest / ".jarvis_staged_ok").is_file()
+
+
+def _clear_playwright_env(monkeypatch) -> None:
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    monkeypatch.delenv("JARVIS_PLAYWRIGHT_BROWSERS", raising=False)
+
+
+def test_playwright_browsers_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    _clear_playwright_env(monkeypatch)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", lambda path: _full_local_usage(path, extra))
+    dest = config.playwright_browsers_dir()
+    assert dest == extra / "Jarvis" / "runtime" / "ms-playwright"
+    applied = config.apply_playwright_browsers_path()
+    assert applied == dest
+    assert dest.is_dir()
+    assert os.environ.get("PLAYWRIGHT_BROWSERS_PATH") == str(dest)
+
+
+def test_playwright_browsers_dir_discovers_existing_extra_chromium(tmp_path, monkeypatch):
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "ms-playwright"
+    (found / "chromium-1234").mkdir(parents=True)
+    _clear_playwright_env(monkeypatch)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert config.playwright_browsers_dir() == found
+
+
+def test_playwright_browsers_dir_stays_default_when_os_volume_fits(tmp_path, monkeypatch):
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    _clear_playwright_env(monkeypatch)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    dest = config.playwright_browsers_dir()
+    assert dest == config.default_playwright_browsers_dir()
+    config.apply_playwright_browsers_path()
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in os.environ
+
+
+def test_playwright_install_reuses_extra_chromium(tmp_path, monkeypatch):
+    from app import runtime_install
+
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "ms-playwright"
+    (found / "chromium-1234").mkdir(parents=True)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _clear_playwright_env(monkeypatch)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    monkeypatch.setattr(runtime_install, "repo_root", lambda: repo)
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("must not download Chromium when extra-drive browsers exist")
+
+    monkeypatch.setattr("subprocess.run", boom)
+    runtime_install._install_playwright()
+    assert (repo / ".venv" / ".playwright-chromium-ready").is_file()

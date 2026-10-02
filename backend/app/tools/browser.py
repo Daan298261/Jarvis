@@ -322,7 +322,9 @@ async def _ensure_page(headless: bool):
     if _page:
         return _page
     from playwright.async_api import async_playwright
+    from ..config import apply_playwright_browsers_path
 
+    apply_playwright_browsers_path()
     _playwright = await async_playwright().start()
     user_dir = data_dir() / "browser-profile"
     user_dir.mkdir(parents=True, exist_ok=True)

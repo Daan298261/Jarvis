@@ -216,6 +216,9 @@ class BrowserUseBackend:
             return BrowserSession
 
     def _build_browser_session(self, settings: AppSettings) -> Any:
+        from ..config import apply_playwright_browsers_path
+
+        apply_playwright_browsers_path()
         BrowserSession = self._browser_session_class()
         profile_dir = data_dir() / "browser-use-profile"
         profile_dir.mkdir(parents=True, exist_ok=True)

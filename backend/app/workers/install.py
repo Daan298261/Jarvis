@@ -269,9 +269,11 @@ def _require_pypi() -> None:
 
 
 def _playwright_chromium() -> None:
+    from ..config import apply_playwright_browsers_path
     from ..policy.network_http import require_http_url_allowed
 
     require_http_url_allowed("https://cdn.playwright.dev/", tool="web_fetch")
+    apply_playwright_browsers_path()
     code, output = _run([sys.executable, "-m", "playwright", "install", "chromium"], timeout=600)
     if code != 0:
         logger.warning("Playwright Chromium extra step failed: %s", _tail(output))
