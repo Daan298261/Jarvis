@@ -428,6 +428,9 @@ async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] 
     scope_kind = str(scope.get("kind") or "")
     scope_value = str(scope.get("value") or "")
     if scope_kind != "local_infrastructure" and scope_value:
+        # Scopes written before RFC-0197 have no registry row; attested LAN
+        # inventory must still run for the owner.
+        _mirror_scope_to_target_registry(scope)
         previous_tr = tr.data_dir
         previous_audit = security_audit_mod.data_dir
         tr.data_dir = data_dir

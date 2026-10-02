@@ -232,6 +232,47 @@ async def test_lan_inventory_starts_suite_without_hexstrike_grant(blue_store, mo
     assert started["count"] == 1
 
 
+@pytest.mark.asyncio
+async def test_lan_inventory_accepts_legacy_scope_missing_from_target_registry(blue_store, monkeypatch):
+    """HexStrike scopes saved before RFC-0197 have no security-targets.json row."""
+    from app.security.target_registry import is_registered_value
+
+    monkeypatch.setattr("app.security.target_registry.data_dir", lambda: blue_store)
+    monkeypatch.setattr("app.security.security_audit.data_dir", lambda: blue_store)
+    (blue_store / "hexstrike-scopes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "scopes": [
+                    {
+                        "id": "legacy-lan",
+                        "kind": "private_cidr",
+                        "value": "192.168.20.0/24",
+                        "label": "Home",
+                        "attested_owned": True,
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert is_registered_value("192.168.20.0/24") is False
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        assert payload["target"] == "192.168.20.0/24"
+        return {"hosts": [{"ip": "192.168.20.10"}]}
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    job = await execute_defensive("lan_inventory", "legacy-lan")
+    assert job["status"] == "completed"
+    assert is_registered_value("192.168.20.0/24") is True
+
+
 def test_discover_private_lan_cidrs_skips_cgnat_and_public(monkeypatch):
     from types import SimpleNamespace
 

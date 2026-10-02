@@ -298,9 +298,10 @@ def extract_target_candidates(arguments: dict[str, Any] | None) -> list[dict[str
             continue
         if key == "scope_id":
             try:
-                from .hexstrike_defensive import get_scope
+                from .hexstrike_defensive import _mirror_scope_to_target_registry, get_scope
 
                 scope = get_scope(text)
+                _mirror_scope_to_target_registry(scope)
                 _add(str(scope.get("kind") or "scope"), str(scope.get("value") or ""))
             except Exception:
                 _add("scope_id", text)

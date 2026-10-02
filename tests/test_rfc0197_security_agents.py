@@ -131,6 +131,30 @@ async def test_operate_denies_unlisted_target(security_store, monkeypatch):
         await operate("http:scanner_one", {"target": "198.51.100.20"})
 
 
+def test_legacy_hexstrike_scope_id_mirrors_into_registry(security_store):
+    (security_store / "hexstrike-scopes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "scopes": [
+                    {
+                        "id": "legacy-lan",
+                        "kind": "private_cidr",
+                        "value": "192.168.20.0/24",
+                        "label": "Home",
+                        "attested_owned": True,
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert list_targets() == []
+    assert_targets_allowed({"scope_id": "legacy-lan"}, capability_id="defensive:lan_inventory")
+    assert any(str(row.get("value") or "") == "192.168.20.0/24" for row in list_targets())
+
+
 def test_tool_exposure_maps_per_mode(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.agent.tool_exposure.hexstrike_access_mode", lambda now=None: "full")
     from app.tools.registry import REGISTRY
