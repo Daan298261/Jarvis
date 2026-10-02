@@ -461,6 +461,21 @@ def looks_rdp(arguments: dict[str, Any] | None) -> bool:
     return bool(args.get("rdp") or args.get("rdp_host"))
 
 
+def looks_remote_git_source(source: str) -> bool:
+    """True for http(s)/ssh/git remotes and scp-style host:path, not local folders."""
+    text = (source or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    if lowered.startswith(("http://", "https://", "ssh://", "git://", "git@")):
+        return True
+    if "://" in text:
+        return False
+    if re.match(r"^[a-zA-Z]:[\\/]", text):
+        return False
+    return bool(re.match(r"^[\w.-]+:[^/\\]", text))
+
+
 def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = None) -> list[str]:
     name = (tool_name or "").strip().lower()
     pending: list[str] = []
@@ -475,6 +490,16 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
     if name in SHELL_NETWORK_TOOLS and looks_outbound_network(arguments):
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
+    if name == "git":
+        action = str((arguments or {}).get("action") or "").strip().lower()
+        source = str((arguments or {}).get("url") or (arguments or {}).get("query") or "").strip()
+        needs_net = action in {"fetch", "pull", "push"}
+        if action == "clone" and (not source or looks_remote_git_source(source)):
+            needs_net = True
+        elif looks_remote_git_source(source):
+            needs_net = True
+        if needs_net:
+            pending.append("network.local" if looks_local_network(arguments) else "network.internet")
     if any(
         isinstance((arguments or {}).get(key), str)
         and (str((arguments or {})[key]).startswith("\\\\") or str((arguments or {})[key]).startswith("//"))

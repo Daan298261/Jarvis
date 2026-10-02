@@ -239,3 +239,23 @@ def test_computer_use_plan_endpoint(jarvis_env, permission_store, monkeypatch):
     assert any("192.168.1.40" in part for part in body["rdp"]["command"])
     isolate = client.post("/api/computer-use/blue/isolate", json={"device": "cam-1", "reason": "owned LAN"})
     assert isolate.status_code == 403
+
+
+def test_git_clone_permission_ids():
+    from app.policy.computer_permissions import looks_remote_git_source
+
+    assert looks_remote_git_source("https://github.com/example/repo.git")
+    assert looks_remote_git_source("git@github.com:example/repo.git")
+    assert not looks_remote_git_source("/home/owner/src/repo")
+    assert not looks_remote_git_source(r"D:\Projects\repo")
+    assert permission_ids_for_tool("git", {"action": "clone", "url": "https://github.com/example/repo.git"}) == [
+        "network.internet"
+    ]
+    assert permission_ids_for_tool("git", {"action": "clone", "url": "/home/owner/src/repo"}) == []
+    assert permission_ids_for_tool("git", {"action": "fetch"}) == ["network.internet"]
+    assert permission_ids_for_tool("git", {"action": "status"}) == []
+    assert permission_ids_for_tool(
+        "git",
+        {"action": "clone", "url": "http://nas.local/git/repo.git"},
+    ) == ["network.local"]
+

@@ -25,9 +25,11 @@ _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 class GitTool(Tool):
     name = "git"
     description = (
-        "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint, list_checkpoints, restore. checkpoint creates a recoverable backup branch "
-        "named jarvis-checkpoint-* without resetting the working tree."
+        "Inspect, clone, and checkpoint git repositories. Actions: clone, fetch, pull, status, "
+        "diff, branch, log, search, checkpoint, list_checkpoints, restore. clone copies a remote "
+        "or local repo into an allowed folder (including extra drives). fetch/pull update an "
+        "existing repo and honor internet/LAN deny. checkpoint creates a recoverable backup "
+        "branch named jarvis-checkpoint-* without resetting the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -36,6 +38,9 @@ class GitTool(Tool):
             "action": {
                 "type": "string",
                 "enum": [
+                    "clone",
+                    "fetch",
+                    "pull",
                     "status",
                     "diff",
                     "branch",
@@ -51,7 +56,11 @@ class GitTool(Tool):
                     "commit",
                 ],
             },
-            "path": {"type": "string"},
+            "path": {
+                "type": "string",
+                "description": "Repo working tree, or clone destination directory",
+            },
+            "url": {"type": "string", "description": "clone: https URL or local repo path"},
             "query": {"type": "string"},
             "ref": {"type": "string"},
             "message": {"type": "string"},
@@ -63,11 +72,52 @@ class GitTool(Tool):
     def __init__(self, context_getter=None) -> None:
         self.context_getter = context_getter or (lambda: {})
 
+    def _allowed(self) -> list[str]:
+        return list((self.context_getter() or {}).get("allowed_directories") or [])
+
     def _cwd(self, path: str | None) -> str:
-        allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
+        allowed = self._allowed()
         if path:
             return str(resolve_allowed_path(path, allowed))
         return str(Path.cwd())
+
+    def _network_denied(self, kwargs: dict[str, Any]) -> str | None:
+        from ..policy.computer_permissions import tool_permission_error
+
+        return tool_permission_error("git", kwargs)
+
+    async def _clone(self, kwargs: dict[str, Any]) -> ToolResult:
+        from ..policy.computer_permissions import looks_remote_git_source
+
+        url = str(kwargs.get("url") or kwargs.get("query") or "").strip()
+        dest_raw = str(kwargs.get("path") or "").strip()
+        if not url:
+            return ToolResult(False, "", error="url is required for clone")
+        if not dest_raw:
+            return ToolResult(False, "", error="path is required for clone (destination directory)")
+        allowed = self._allowed()
+        dest = resolve_allowed_path(dest_raw, allowed)
+        source = url
+        if looks_remote_git_source(url):
+            denied = self._network_denied({**kwargs, "action": "clone", "url": url})
+            if denied:
+                return ToolResult(False, "", error=denied)
+            if url.lower().startswith(("http://", "https://")):
+                from ..policy.network_http import require_http_url_allowed
+
+                require_http_url_allowed(url, tool="git")
+        else:
+            local = url[7:] if url.lower().startswith("file://") else url
+            source = str(resolve_allowed_path(local, allowed))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        cloned = await self._git(["clone", "--", source, str(dest)], str(dest.parent))
+        if cloned.success:
+            cloned = ToolResult(
+                True,
+                f"Cloned {source} into {dest}",
+                data={"source": source, "path": str(dest)},
+            )
+        return cloned
 
     async def _git(self, args: list[str], cwd: str) -> ToolResult:
         proc = await asyncio.create_subprocess_exec(
@@ -86,7 +136,17 @@ class GitTool(Tool):
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
         try:
+            if action == "clone":
+                return await self._clone(kwargs)
+            if action in {"fetch", "pull"}:
+                denied = self._network_denied({**kwargs, "action": action})
+                if denied:
+                    return ToolResult(False, "", error=denied)
             cwd = self._cwd(kwargs.get("path"))
+            if action == "fetch":
+                return await self._git(["fetch"], cwd)
+            if action == "pull":
+                return await self._git(["pull", "--ff-only"], cwd)
             if action == "status":
                 return await self._git(["status", "--porcelain=v1", "-b"], cwd)
             if action == "diff":

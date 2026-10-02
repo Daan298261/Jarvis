@@ -73,3 +73,68 @@ async def test_restore_rejects_arbitrary_refs(tmp_path):
     result = await tool.execute(action="restore", path=str(repo), ref="main")
     assert result.success is False
     assert "jarvis-checkpoint" in result.error
+
+
+async def test_clone_local_repo_onto_extra_volume(tmp_path):
+    src = await _repo(tmp_path)
+    extra = tmp_path / "E" / "Projects"
+    extra.mkdir(parents=True)
+    dest = extra / "copy"
+    tool = _tool(tmp_path)
+    result = await tool.execute(action="clone", url=str(src), path=str(dest))
+    assert result.success, result.error
+    assert (dest / "readme.txt").read_text(encoding="utf-8") == "one\n"
+
+
+async def test_clone_rejects_destination_outside_workspace(tmp_path):
+    src = await _repo(tmp_path)
+    tool = _tool(tmp_path)
+    result = await tool.execute(action="clone", url=str(src), path="/etc/jarvis-clone-dest")
+    assert result.success is False
+    assert "outside allowed directories" in result.error
+
+
+async def test_clone_https_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+
+    async def _boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("git clone must not run when internet is denied")
+
+    monkeypatch.setattr("app.tools.git_tools.GitTool._git", _boom)
+    tool = _tool(tmp_path)
+    result = await tool.execute(
+        action="clone",
+        url="https://github.com/example/repo.git",
+        path=str(tmp_path / "out"),
+    )
+    assert result.success is False
+    assert ran["n"] == 0
+    assert "internet" in (result.error or "").lower() or "permission" in (result.error or "").lower() or "don't allow" in (result.error or "").lower()
+
+
+async def test_fetch_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    repo = await _repo(tmp_path)
+    ran = {"n": 0}
+
+    async def _boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("git fetch must not run when internet is denied")
+
+    monkeypatch.setattr("app.tools.git_tools.GitTool._git", _boom)
+    tool = _tool(tmp_path)
+    result = await tool.execute(action="fetch", path=str(repo))
+    assert result.success is False
+    assert ran["n"] == 0
+    assert "internet" in (result.error or "").lower() or "permission" in (result.error or "").lower() or "don't allow" in (result.error or "").lower()
+
