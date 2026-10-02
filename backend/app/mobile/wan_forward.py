@@ -239,6 +239,75 @@ def interface_ipv4_addresses() -> list[str]:
     return found
 
 
+def lan_source_ipv4_for_peer(peer: str) -> str:
+    """This PC's RFC1918 address on the same network as *peer*.
+
+    web_fetch and other LAN HTTP must source from that NIC. A VPN default
+    route would otherwise steal the hop to the NAS or home gateway.
+    """
+    host = (peer or "").strip().split("%", 1)[0]
+    if not host:
+        return ""
+    try:
+        dest = ipaddress.ip_address(host)
+    except ValueError:
+        return ""
+    if dest.version != 4 or not is_rfc1918_ipv4(str(dest)):
+        return ""
+    matches: list[tuple[int, str]] = []
+    try:
+        import psutil
+
+        nics = psutil.net_if_addrs().items()
+    except Exception:
+        return mapping_lan_ipv4(interface_ipv4_addresses(), str(dest))
+    for _name, addrs in nics:
+        for addr in addrs:
+            if getattr(addr, "family", None) != socket.AF_INET:
+                continue
+            ip_text = (getattr(addr, "address", None) or "").split("%", 1)[0].strip()
+            mask = getattr(addr, "netmask", None) or "255.255.255.0"
+            try:
+                interface = ipaddress.IPv4Interface(f"{ip_text}/{mask}")
+            except ValueError:
+                continue
+            if not is_rfc1918_ipv4(str(interface.ip)):
+                continue
+            if dest in interface.network or dest == interface.ip:
+                matches.append((interface.network.prefixlen, str(interface.ip)))
+    if not matches:
+        return mapping_lan_ipv4(interface_ipv4_addresses(), str(dest))
+    matches.sort(key=lambda item: -item[0])
+    return matches[0][1]
+
+
+def lan_http_bind_for_url(url: str) -> str:
+    """Source IPv4 for http(s) to an on-link RFC1918 host, else empty (use default route)."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(str(url) or "").hostname or "").strip()
+    if not host:
+        return ""
+    bind = lan_source_ipv4_for_peer(host)
+    if bind:
+        return bind
+    lowered = host.lower().rstrip(".")
+    if not (lowered.endswith((".local", ".lan", ".home.arpa")) or "." not in lowered):
+        return ""
+    try:
+        infos = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        return ""
+    for info in infos:
+        ip = ""
+        if info and info[4]:
+            ip = str(info[4][0] or "")
+        bind = lan_source_ipv4_for_peer(ip)
+        if bind:
+            return bind
+    return ""
+
+
 def mapped_address_is_egress(mapped_ip: str) -> bool:
     """False when an inner router mapped an address that is not the internet egress (double NAT).
 

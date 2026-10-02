@@ -14,6 +14,21 @@ from .computer_permissions import evaluate_tool_permissions
 _REDIRECT = {301, 302, 303, 307, 308}
 
 
+def lan_http_bind_for_url(url: str) -> str:
+    from ..mobile.wan_forward import lan_http_bind_for_url as bind_for_url
+
+    return bind_for_url(url)
+
+
+def _with_lan_bind(kwargs: dict[str, Any], url: str, *, async_client: bool) -> dict[str, Any]:
+    bind = lan_http_bind_for_url(url)
+    if not bind or kwargs.get("transport") is not None:
+        return kwargs
+    transport_cls = httpx.AsyncHTTPTransport if async_client else httpx.HTTPTransport
+    kwargs["transport"] = transport_cls(local_address=bind)
+    return kwargs
+
+
 def _redirect_target(response: httpx.Response) -> str | None:
     location = (response.headers.get("location") or "").strip()
     if response.status_code not in _REDIRECT or not location:
@@ -43,7 +58,17 @@ async def gated_get(
     current = url
     query = params
     own = client is None
-    http = client or httpx.AsyncClient(follow_redirects=False, timeout=timeout, headers=headers or {})
+    http = client or httpx.AsyncClient(
+        **_with_lan_bind(
+            {
+                "follow_redirects": False,
+                "timeout": timeout,
+                "headers": headers or {},
+            },
+            current,
+            async_client=True,
+        )
+    )
     try:
         for _ in range(max(1, int(max_hops))):
             require_http_url_allowed(current, tool=tool)
@@ -80,10 +105,16 @@ def gated_get_sync(
     query = params
     own = client is None
     http = client or httpx.Client(
-        follow_redirects=False,
-        timeout=timeout,
-        headers=headers or {},
-        trust_env=trust_env,
+        **_with_lan_bind(
+            {
+                "follow_redirects": False,
+                "timeout": timeout,
+                "headers": headers or {},
+                "trust_env": trust_env,
+            },
+            current,
+            async_client=False,
+        )
     )
     try:
         for _ in range(max(1, int(max_hops))):
@@ -117,7 +148,17 @@ async def gated_stream(
 ) -> AsyncIterator[httpx.Response]:
     current = url
     response: httpx.Response | None = None
-    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, headers=headers or {}) as http:
+    async with httpx.AsyncClient(
+        **_with_lan_bind(
+            {
+                "follow_redirects": False,
+                "timeout": timeout,
+                "headers": headers or {},
+            },
+            current,
+            async_client=True,
+        )
+    ) as http:
         try:
             for _ in range(max(1, int(max_hops))):
                 require_http_url_allowed(current, tool=tool)
@@ -148,7 +189,17 @@ def gated_download_to(
 ) -> None:
     current = url
     tmp = dest.with_name(dest.name + ".partial")
-    with httpx.Client(follow_redirects=False, timeout=timeout, trust_env=trust_env) as http:
+    with httpx.Client(
+        **_with_lan_bind(
+            {
+                "follow_redirects": False,
+                "timeout": timeout,
+                "trust_env": trust_env,
+            },
+            current,
+            async_client=False,
+        )
+    ) as http:
         for _ in range(max(1, int(max_hops))):
             require_http_url_allowed(current, tool=tool)
             with http.stream("GET", current) as response:

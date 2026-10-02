@@ -53,6 +53,48 @@ async def test_gated_get_does_not_follow_lan_to_denied_wan(tmp_path, monkeypatch
     assert seen == ["192.168.1.10"]
 
 
+async def test_gated_get_binds_lan_source_not_vpn(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import socket
+
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.local", "always")
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=socket.AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+            "wg0": [
+                SimpleNamespace(family=socket.AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="nas")
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            seen["local_address"] = getattr(getattr(kwargs.get("transport"), "_pool", None), "_local_address", None)
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    response = await gated_get("http://192.168.1.50/status", tool="web_fetch")
+    assert response.status_code == 200
+    assert seen["local_address"] == "192.168.1.12"
+
+    seen.clear()
+    await gated_get("https://example.com/", tool="web_fetch")
+    assert seen.get("local_address") in {None, ""}
+
+
 def test_require_http_url_allowed_rejects_file_scheme():
     with pytest.raises(PermissionError, match="http and https"):
         require_http_url_allowed("file:///etc/passwd", tool="web_fetch")

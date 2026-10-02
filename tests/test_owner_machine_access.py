@@ -367,6 +367,35 @@ def test_lan_inventory_nmap_binds_home_nic_not_vpn(monkeypatch):
     assert nmap_lan_bind_args("10.8.0.0/24") == ["-S", "10.8.0.2", "-e", "wg0"]
 
 
+def test_web_fetch_lan_http_binds_home_nic_not_vpn(monkeypatch):
+    from types import SimpleNamespace
+
+    import socket
+
+    from app.mobile.wan_forward import lan_http_bind_for_url, lan_source_ipv4_for_peer
+
+    def fake_addrs():
+        return {
+            "eth0": [
+                SimpleNamespace(family=socket.AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+            "wg0": [
+                SimpleNamespace(family=socket.AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+            ],
+        }
+
+    monkeypatch.setattr("psutil.net_if_addrs", fake_addrs)
+    assert lan_source_ipv4_for_peer("192.168.1.50") == "192.168.1.12"
+    assert lan_source_ipv4_for_peer("10.8.0.9") == "10.8.0.2"
+    assert lan_http_bind_for_url("http://192.168.1.50/status") == "192.168.1.12"
+    assert lan_http_bind_for_url("https://example.com/") == ""
+    monkeypatch.setattr(
+        "app.mobile.wan_forward.socket.getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.50", 80))],
+    )
+    assert lan_http_bind_for_url("http://nas.local/media") == "192.168.1.12"
+
+
 def test_udp_lan_ipv4_ignores_cgnat(monkeypatch):
     from app.mobile import igd
 

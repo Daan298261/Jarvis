@@ -8,6 +8,8 @@ from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 
+from ..config import live_workspace_roots_from_context
+from ..policy.network_http import _with_lan_bind
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import resolve_owner_file_path
 
@@ -128,10 +130,20 @@ class WebFetchTool(Tool):
         body = kwargs.get("body")
         save_path = str(kwargs.get("path") or "").strip()
         ctx = self.context_getter() or {}
-        allowed = list((ctx or {}).get("allowed_directories") or []) if isinstance(ctx, dict) else []
+        allowed = live_workspace_roots_from_context(ctx)
 
         try:
-            async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, headers=headers) as client:
+            async with httpx.AsyncClient(
+                **_with_lan_bind(
+                    {
+                        "follow_redirects": False,
+                        "timeout": timeout,
+                        "headers": headers,
+                    },
+                    url,
+                    async_client=True,
+                )
+            ) as client:
                 request_kwargs: dict[str, Any] = {}
                 if json_body is not None:
                     request_kwargs["json"] = json_body
