@@ -502,6 +502,14 @@ class Connectivity:
                         self.report(router="tunneled", wan_path=wan_path, limitation="SSH reverse tunnel is up; the phone should use the SSH host on TCP 4781")
                     except Exception as exc:
                         self.report(router="unavailable", limitation=str(exc)[:240])
+            if config.get("remote"):
+                from .wan_forward import companion_wan_origin, is_public_dial_host
+
+                named = str(config.get("wan_public_host") or "").strip()
+                if is_public_dial_host(named):
+                    origin_name = companion_wan_origin(named)
+                    if origin_name not in endpoints:
+                        endpoints.append(origin_name)
             await self.cover_phone_dial_hosts(
                 *endpoints,
                 relay,
@@ -518,10 +526,17 @@ class Connectivity:
                     self.report(limitation="Configured relay did not reach this gateway; check relay service and credentials")
             if config["remote"] and not relay and not self.router and not wan_path:
                 prior = self.state.get("limitation") or ""
-                extra = (
-                    " No UPnP, NAT-PMP, or PCP lease, gateway SSH, SSH reverse tunnel, or hosted relay is ready. "
-                    "Set SSH reverse-tunnel or OpenWrt gateway credentials, or JARVIS_RELAY_ENDPOINT."
-                )
+                named = str(config.get("wan_public_host") or "").strip()
+                if named:
+                    extra = (
+                        " Automatic router mapping was not created. Using the owner public hostname; "
+                        "confirm the router forwards TCP 4781 to this PC."
+                    )
+                else:
+                    extra = (
+                        " No UPnP, NAT-PMP, or PCP lease, gateway SSH, SSH reverse tunnel, or hosted relay is ready. "
+                        "Set SSH reverse-tunnel or OpenWrt gateway credentials, or JARVIS_RELAY_ENDPOINT."
+                    )
                 self.report(limitation=(prior + extra).strip())
             self.remote_prepared = True
             self.report(

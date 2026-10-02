@@ -120,6 +120,33 @@ async def test_router_failure_keeps_lan_available(network_env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upnp_lease_advertises_owner_public_hostname(network_env, monkeypatch):
+    router = Router()
+    monkeypatch.setattr(connectivity, "router_candidate", lambda: (router, "8.8.8.8"))
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_public_host": "home.example.test"})
+    assert result["state"] == "ready"
+    assert "https://8.8.8.8:4781" in result["endpoints"]
+    assert "https://home.example.test:4781" in result["endpoints"]
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["8.8.8.8", "home.example.test", "192.168.1.12"])
+
+
+@pytest.mark.asyncio
+async def test_public_hostname_is_advertised_without_automatic_mapping(network_env, monkeypatch):
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_public_host": "home.example.test"})
+    assert result["state"] == "ready"
+    assert "https://home.example.test:4781" in result["endpoints"]
+    assert "public hostname" in (result.get("limitation") or "").lower()
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["home.example.test", "192.168.1.12"])
+
+
+@pytest.mark.asyncio
 async def test_connection_setup_requires_owner_key_for_remote_callers(network_env):
     """Localhost pairing may auto-mint; remote callers must still present the owner key."""
     from app.api.companion import owner_router
