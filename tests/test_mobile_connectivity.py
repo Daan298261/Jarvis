@@ -52,6 +52,17 @@ def test_router_mapping_uses_only_tls_port_and_finite_lease():
     assert router.deleted == [(4781, "TCP")]
 
 
+def test_map_router_replaces_cgnat_internal_client(monkeypatch):
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "preferred_lan_ipv4", lambda gateway="": "192.168.1.12")
+    router = Router(("100.64.1.8", 4781, "Jarvis-owned"))
+    router.lanaddr = "100.64.1.8"
+    connectivity.map_router(router, "Jarvis-owned")
+    assert router.added == [(4781, "TCP", "192.168.1.12", 4781, "Jarvis-owned", "", 3600)]
+    connectivity.unmap_router(router, "Jarvis-owned")
+    assert router.deleted == [(4781, "TCP")]
+
+
 @pytest.mark.parametrize("value", ["http://host", "https://key@host", "https://host/api", "https://host?key=secret", "https://host#token", "https://host:0"])
 def test_endpoint_rejects_insecure_or_credential_bearing_origins(value):
     with pytest.raises(ValueError):

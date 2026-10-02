@@ -97,20 +97,33 @@ def router_candidate(username: str = "", password: str = ""):
 
 
 def owned_mapping(mapping, host, marker):
-    return bool(mapping and mapping[0] == host and int(mapping[1]) == PORT and mapping[2] == marker)
+    """True when TCP 4781 is our lease (marker), even if the internal client was CGNAT."""
+    return bool(mapping and int(mapping[1]) == PORT and mapping[2] == marker)
+
+
+def igd_mapping_dest(router) -> str:
+    """Internal client for UPnP: RFC1918 on the IGD subnet, never CGNAT."""
+    advertised = str(getattr(router, "lanaddr", "") or "").strip()
+    from .wan_forward import is_rfc1918_ipv4, mapping_lan_ipv4
+
+    hosts = lan_hosts()
+    if is_rfc1918_ipv4(advertised):
+        return mapping_lan_ipv4(hosts, advertised) or advertised
+    return preferred_lan_ipv4() or advertised
 
 
 def map_router(router, marker):
+    dest = igd_mapping_dest(router)
     mapping = router.getspecificportmapping(PORT, "TCP")
-    if mapping and not owned_mapping(mapping, router.lanaddr, marker):
+    if mapping and not owned_mapping(mapping, dest, marker):
         raise ValueError("Router port 4781 is already used by another mapping; existing mapping preserved")
     # Request a finite lease. Routers supporting permanent leases only use relay instead.
-    if not router.addportmapping(PORT, "TCP", router.lanaddr, PORT, marker, "", 3600):
+    if not router.addportmapping(PORT, "TCP", dest, PORT, marker, "", 3600):
         raise RuntimeError("Router declined the one-hour mobile gateway lease")
 
 
 def unmap_router(router, marker):
-    if owned_mapping(router.getspecificportmapping(PORT, "TCP"), router.lanaddr, marker):
+    if owned_mapping(router.getspecificportmapping(PORT, "TCP"), igd_mapping_dest(router), marker):
         router.deleteportmapping(PORT, "TCP")
 
 
