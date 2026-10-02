@@ -248,6 +248,37 @@ def mmproj_path(profile: ModelProfile) -> Path:
     return extra if extra is not None else local
 
 
+def profile_from_gguf_path(path: Path) -> ModelProfile:
+    """Ad-hoc llama.cpp profile for a discovered owner GGUF (USB/`D:\\Models`)."""
+    from .lmstudio_catalog import parse_quantization
+
+    resolved = Path(path)
+    quant = parse_quantization(resolved.name) or "Q4"
+    stem = resolved.stem or "local-gguf"
+    return ModelProfile(
+        name="local_gguf",
+        label=stem,
+        quant=quant,
+        filename=resolved.name,
+        family="local-gguf",
+        alias=stem,
+        repo="local/gguf",
+        repo_dir=resolved.parent.name,
+        mmproj_filename="",
+        thinking=True,
+        thinking_mode="selective",
+        context_size=32768,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        presence_penalty=0.0,
+        description=f"Owner GGUF at {resolved}",
+        vision=False,
+        fallbacks=("bootstrap", "balanced"),
+        absolute_path=str(resolved),
+    )
+
+
 def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:
     """First existing projector. Used only when a vision request needs it."""
     candidates: list[Path] = []

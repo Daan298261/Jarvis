@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -634,3 +635,85 @@ def discovery_payload(*, models_root: Path | None = None) -> dict[str, Any]:
             for item in items
         ],
     }
+
+
+def _discovered_runtime_name(path: Path) -> str:
+    digest = hashlib.sha1(str(path).encode("utf-8", errors="replace")).hexdigest()[:10]
+    stem = re.sub(r"[^a-z0-9]+", "-", path.stem.lower()).strip("-")[:24] or "local"
+    return f"gguf-{stem}-{digest}"
+
+
+def select_discovered_gguf(path: str, *, models_root: Path | None = None) -> RuntimeProfile:
+    """Bind an owner-discovered GGUF (including extra-drive files) to llama.cpp."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("path is required")
+    items = discover_ggufs() if models_root is None else discover_ggufs(models_root)
+    try:
+        target_key = str(Path(raw).expanduser().resolve()).replace("\\", "/").lower()
+    except OSError:
+        target_key = raw.replace("\\", "/").lower()
+    match: DiscoveredGguf | None = None
+    for item in items:
+        try:
+            key = str(Path(item.path).resolve()).replace("\\", "/").lower()
+        except OSError:
+            key = item.path.replace("\\", "/").lower()
+        if key == target_key or item.path == raw:
+            match = item
+            break
+    if match is None:
+        raise KeyError(f"gguf not in owner catalog: {raw}")
+    resolved = Path(match.path)
+    name = _discovered_runtime_name(resolved)
+    settings = load_settings()
+    endpoint = f"{settings.inference.host}:{suggested_port('llama.cpp', settings.inference.port)}"
+    existing = next(
+        (item for item in list_runtime_profiles() if (item.gguf_path or "") == str(resolved) or item.name == name),
+        None,
+    )
+    if existing is not None:
+        return update_runtime_profile(
+            existing.id,
+            label=match.filename,
+            model=resolved.stem,
+            provider="local-llama",
+            endpoint=endpoint,
+            quantization=match.quantization,
+            privacy_class=PRIVACY_LOCAL_ONLY,
+            is_local=True,
+            capability_tags=["llm_inference", "text", "owner-gguf"],
+            description=f"Owner GGUF {match.filename}",
+            gguf_path=str(resolved),
+        )
+    taken = {item.name for item in list_runtime_profiles()}
+    if name in taken:
+        profile = next(item for item in list_runtime_profiles() if item.name == name)
+        return update_runtime_profile(
+            profile.id,
+            label=match.filename,
+            model=resolved.stem,
+            provider="local-llama",
+            endpoint=endpoint,
+            quantization=match.quantization,
+            privacy_class=PRIVACY_LOCAL_ONLY,
+            is_local=True,
+            capability_tags=["llm_inference", "text", "owner-gguf"],
+            description=f"Owner GGUF {match.filename}",
+            gguf_path=str(resolved),
+        )
+    return create_runtime_profile(
+        name=name,
+        label=match.filename,
+        model=resolved.stem,
+        provider="local-llama",
+        endpoint=endpoint,
+        context_limit=32768,
+        quantization=match.quantization,
+        privacy_class=PRIVACY_LOCAL_ONLY,
+        cost_ceiling_usd=0.0,
+        capability_tags=["llm_inference", "text", "owner-gguf"],
+        is_local=True,
+        description=f"Owner GGUF {match.filename}",
+        gguf_path=str(resolved),
+    )

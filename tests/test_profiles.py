@@ -151,3 +151,14 @@ def test_profile_gguf_finds_weights_on_extra_volume(tmp_path, monkeypatch):
     assert resolved.name == "expert"
     assert profile_gguf(resolved) == usb
     assert profiles_mod.mmproj_path(expert) == projector
+
+
+def test_profile_from_gguf_path_keeps_absolute_file(tmp_path):
+    from app.inference.profiles import profile_from_gguf_path
+
+    gguf = tmp_path / "owner-model-Q4_K_M.gguf"
+    gguf.write_bytes(b"gguf")
+    profile = profile_from_gguf_path(gguf)
+    assert profile.absolute_path == str(gguf)
+    assert profile_gguf(profile) == gguf
+    assert profile.filename == gguf.name

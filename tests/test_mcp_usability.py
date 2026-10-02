@@ -57,6 +57,24 @@ def test_stdio_launch_uses_extra_volume_cwd_and_path_args(tmp_path, monkeypatch)
     assert denied["args"][1].startswith("@")
 
 
+def test_stdio_filesystem_mcp_defaults_to_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    monkeypatch.setattr(
+        "app.config.live_allowed_directories",
+        lambda existing=None: [str(tmp_path)],
+    )
+    monkeypatch.setattr("app.tools.owner_paths.default_workspace_dir", lambda allowed: docs)
+    launch = prepare_stdio_launch(
+        {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+        }
+    )
+    assert launch["args"][-1] == str(docs)
+    assert launch["args"][1].startswith("@")
+
+
 def test_mcp_tool_keys_are_openai_safe():
     key = mcp_tool_key("email", "send email!")
     assert key.startswith("mcp_email_")

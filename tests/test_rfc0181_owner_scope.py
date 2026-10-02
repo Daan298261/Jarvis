@@ -205,3 +205,17 @@ def test_extra_volume_roots_expand_media_and_skip_os_volume(monkeypatch, tmp_pat
     assert usb.resolve() in roots
     assert Path("/") not in roots
     assert media.resolve() not in roots
+
+
+def test_environment_block_lists_live_extra_volume(monkeypatch, tmp_path):
+    from app.agent.loop import _environment_block
+    from app.config import AppSettings
+
+    extra = tmp_path / "E"
+    extra.mkdir()
+    monkeypatch.setattr(
+        "app.config.live_allowed_directories",
+        lambda existing=None: [str(tmp_path), str(extra)],
+    )
+    text = _environment_block(AppSettings(allowed_directories=[str(tmp_path)]))
+    assert str(extra) in text

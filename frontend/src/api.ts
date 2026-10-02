@@ -690,6 +690,7 @@ export type RuntimeProfile = {
   specialization_tags: string[]
   is_local: boolean
   description: string
+  gguf_path?: string
 }
 
 export type RuntimeProfileIn = {
@@ -967,6 +968,16 @@ export async function selectLmStudioProfile(profileId: string): Promise<RuntimeP
     `/api/lmstudio/catalog/${encodeURIComponent(profileId)}/select`,
     {
       method: "POST",
+    },
+  )
+}
+
+export async function selectDiscoveredGguf(path: string): Promise<RuntimeProfile & { load?: Record<string, unknown> }> {
+  return api<RuntimeProfile & { load?: Record<string, unknown> }>(
+    "/api/lmstudio/discovery/select",
+    {
+      method: "POST",
+      body: JSON.stringify({ path }),
     },
   )
 }

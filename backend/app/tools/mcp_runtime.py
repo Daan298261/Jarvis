@@ -76,6 +76,10 @@ def prepare_stdio_launch(server: dict[str, Any]) -> dict[str, Any]:
             except (PermissionError, OSError):
                 rewritten.append(arg)
         args = rewritten
+        if any("server-filesystem" in arg for arg in args) and not any(_looks_like_fs_path(arg) for arg in args):
+            from .owner_paths import default_workspace_dir
+
+            args.append(str(default_workspace_dir(allowed)))
     env_in = server.get("env") or {}
     env = {str(key): str(value) for key, value in os.environ.items() if value is not None}
     for key, value in env_in.items():

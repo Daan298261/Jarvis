@@ -47,6 +47,7 @@ class RuntimeProfile:
     enabled: bool = True
     runtime_role: str = "general"
     answer_tier: int = 2
+    gguf_path: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -76,6 +77,7 @@ class RuntimeProfile:
             enabled=bool(raw.get("enabled", True)),
             runtime_role=str(raw.get("runtime_role") or "general"),
             answer_tier=int(raw.get("answer_tier") if raw.get("answer_tier") is not None else 2),
+            gguf_path=str(raw.get("gguf_path") or ""),
         )
 
 
@@ -128,6 +130,7 @@ def _runtime_profile_from_model(profile: ModelProfile, *, endpoint: str = "127.0
         enabled=True,
         runtime_role=runtime_role,
         answer_tier=answer_tier,
+        gguf_path=str(profile.absolute_path or ""),
     )
 
 
@@ -223,6 +226,7 @@ def create_runtime_profile(
     is_local: bool = False,
     description: str = "",
     enabled: bool = True,
+    gguf_path: str = "",
 ) -> RuntimeProfile:
     normalized = (name or "").strip().lower().replace(" ", "-")
     if not normalized:
@@ -251,6 +255,7 @@ def create_runtime_profile(
             enabled=bool(enabled),
             runtime_role=runtime_role,
             answer_tier=answer_tier,
+            gguf_path=str(gguf_path or ""),
         )
         items.append(profile)
         _save_runtime_registry_unlocked(items)

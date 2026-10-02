@@ -325,3 +325,10 @@ def test_discover_includes_named_folder_and_loose_gguf_on_extra_volume(catalog_e
     ungraded = {item["filename"] for item in merged["ungraded"]}
     assert "usb-qwen-Q4_K_M.gguf" in ungraded
     assert merged["models_root"] == str(lm_root)
+
+    runtime = catalog.select_discovered_gguf(str(named))
+    assert runtime.gguf_path == str(named)
+    assert runtime.provider == "local-llama"
+    clutter = extra / "Photos" / "vacation-not-a-model-Q4.gguf"
+    with pytest.raises(KeyError):
+        catalog.select_discovered_gguf(str(clutter))

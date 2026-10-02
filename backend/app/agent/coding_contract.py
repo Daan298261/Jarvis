@@ -241,13 +241,13 @@ def ensure_coding_worktree(task_id: str, source: str | Path | None = None) -> st
         pass
     if not shutil.which("git"):
         return None
-    from ..config import load_settings, repo_root
+    from ..config import live_allowed_directories, load_settings, repo_root
 
     candidates: list[Path] = []
     if source:
         candidates.append(Path(source))
     settings = load_settings()
-    for item in settings.allowed_directories or []:
+    for item in live_allowed_directories(settings.allowed_directories):
         candidates.append(Path(item))
     trusted_dev = repo_root().resolve()
     for root in candidates:
