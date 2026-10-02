@@ -1823,6 +1823,8 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
     assert "Opened https://example.com/" in result.output
     assert FakeChromium.last_context.routes
     assert FakeChromium.last_context.routes[0][0] == "**/*"
+    assert FakeChromium.last_kwargs["proxy"] == {"server": "direct://"}
+    assert "--no-proxy-server" in FakeChromium.last_kwargs["args"]
     blocked = await tool.execute(action="open", url="file:///etc/passwd")
     assert not blocked.success
     await tool.execute(action="close")

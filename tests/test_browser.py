@@ -403,6 +403,8 @@ def test_chromium_downloads_land_in_owner_downloads(tmp_path, monkeypatch):
     launch = chromium_download_launch_kwargs()
     assert launch["accept_downloads"] is True
     assert launch["downloads_path"] == str(downloads)
+    assert launch["proxy"] == {"server": "direct://"}
+    assert "--no-proxy-server" in launch["args"]
 
 
 def test_chromium_downloads_fallback_when_home_folder_missing(tmp_path, monkeypatch):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from ..config import data_dir
 from .safety import resolve_allowed_path
@@ -29,9 +30,23 @@ def owner_downloads_dir() -> Path:
     return dest
 
 
-def chromium_download_launch_kwargs() -> dict[str, str | bool]:
-    """Playwright persistent-context kwargs so click-saves land in Downloads."""
-    return {"accept_downloads": True, "downloads_path": str(owner_downloads_dir())}
+CHROMIUM_NO_PROXY_ARGS = ("--no-proxy-server",)
+PLAYWRIGHT_DIRECT_PROXY = {"server": "direct://"}
+
+
+def chromium_download_launch_kwargs() -> dict[str, Any]:
+    """Playwright persistent-context kwargs: Downloads folder, OS default route.
+
+    Chromium otherwise honors HTTP_PROXY from the process environment, which
+    steals internet (and can steal LAN) away from the owner's default route.
+    ``web_fetch`` already uses trust_env=False; Chromium must match.
+    """
+    return {
+        "accept_downloads": True,
+        "downloads_path": str(owner_downloads_dir()),
+        "proxy": dict(PLAYWRIGHT_DIRECT_PROXY),
+        "args": list(CHROMIUM_NO_PROXY_ARGS),
+    }
 
 
 def resolve_owner_file_path(

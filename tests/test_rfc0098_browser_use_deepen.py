@@ -434,6 +434,8 @@ def test_browser_use_session_kwargs_download_to_owner_downloads(tmp_path, monkey
     assert kwargs["user_data_dir"] == str(profile_dir)
     assert kwargs["keep_alive"] is True
     assert kwargs["headless"] is True
+    assert "--no-proxy-server" in kwargs["args"]
+    assert kwargs["proxy"] == {"server": "direct://"}
 
     captured: dict[str, object] = {}
 

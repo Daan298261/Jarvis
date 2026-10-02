@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import AppSettings, browser_use_user_data_dir, load_settings
-from ..tools.owner_paths import owner_downloads_dir
+from ..tools.owner_paths import CHROMIUM_NO_PROXY_ARGS, PLAYWRIGHT_DIRECT_PROXY, owner_downloads_dir
 from .browser_structured import (
     browser_use_tool_result_data,
     format_browser_use_output,
@@ -68,20 +68,42 @@ async def reset_browser_use_session_async() -> None:
 
 def browser_use_session_kwargs(headless: bool, profile_dir: Path) -> dict[str, Any]:
     """Browser Use session/profile kwargs; downloads go to the owner's Downloads folder."""
+    no_proxy = list(CHROMIUM_NO_PROXY_ARGS)
     return {
         "headless": headless,
         "keep_alive": True,
         "user_data_dir": str(profile_dir),
         "downloads_path": str(owner_downloads_dir()),
+        "args": no_proxy,
+        "extra_chromium_args": no_proxy,
+        "proxy": dict(PLAYWRIGHT_DIRECT_PROXY),
     }
+
+
+def _construct_with_supported_kwargs(cls: Any, kwargs: dict[str, Any]) -> Any:
+    """Call *cls* with only kwargs its __init__ accepts (older Browser Use drops extras)."""
+    import inspect
+
+    try:
+        signature = inspect.signature(cls.__init__)
+    except (TypeError, ValueError):
+        return cls(**kwargs)
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        return cls(**kwargs)
+    allowed = {
+        name
+        for name, param in signature.parameters.items()
+        if name != "self"
+        and param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    return cls(**{key: value for key, value in kwargs.items() if key in allowed})
 
 
 def _browser_profile_with_downloads(profile_cls: Any, kwargs: dict[str, Any]) -> Any:
     try:
         return profile_cls(**kwargs)
     except TypeError:
-        slim = {key: value for key, value in kwargs.items() if key != "downloads_path"}
-        return profile_cls(**slim)
+        return _construct_with_supported_kwargs(profile_cls, kwargs)
 
 
 def network_permission_block(tool_name: str, *, goal: str, url: str | None) -> str | None:
@@ -233,9 +255,8 @@ class BrowserUseBackend:
         try:
             return BrowserSession(**kwargs)
         except TypeError:
-            slim = {key: value for key, value in kwargs.items() if key != "downloads_path"}
             try:
-                return BrowserSession(**slim)
+                return _construct_with_supported_kwargs(BrowserSession, kwargs)
             except TypeError:
                 return BrowserSession(headless=headless)
 
