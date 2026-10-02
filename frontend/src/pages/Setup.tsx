@@ -416,7 +416,7 @@ export function SetupPage() {
             <ul>
               <li><code>data/setup/download-models.ps1</code> — selected models only, with a disk-space check before download.</li>
               <li><code>data/setup/install-lm-studio.ps1</code> — no-op unless a future plan requires LM Studio.</li>
-              <li><code>data/setup/configure-mobile-access.ps1</code> — private firewall + Tailscale path; public forwarding only when requested.</li>
+              <li><code>data/setup/configure-mobile-access.ps1</code> — inbound TCP 4781 firewall; off-LAN mapping is Phone → Prepare connection, never portal 4780.</li>
             </ul>
             <p className="lede" style={{ marginTop: 10 }}>{plan.lm_studio.reason}</p>
           </div>

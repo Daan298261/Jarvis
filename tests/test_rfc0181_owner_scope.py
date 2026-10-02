@@ -74,6 +74,21 @@ def test_local_network_default_is_allowed_but_explicit_deny_wins(tmp_path, monke
     assert evaluate_tool_permissions("filesystem", {"path": r"\\nas.local\share\x"}).status == "deny"
 
 
+def test_browser_use_goal_with_lan_host_is_local_network():
+    assert permission_ids_for_tool(
+        "browser_use",
+        {"goal": "open the NAS status page at http://nas.local/status"},
+    ) == ["network.local"]
+    assert permission_ids_for_tool(
+        "browser_use",
+        {"goal": "search publicly for router firmware"},
+    ) == ["network.internet"]
+    assert permission_ids_for_tool(
+        "browser_use",
+        {"goal": "follow https://example.com/?next=nas.local"},
+    ) == ["network.internet"]
+
+
 def test_browser_follow_on_actions_keep_local_network_permission():
     from app.tools.browser import browser_permission_url
 

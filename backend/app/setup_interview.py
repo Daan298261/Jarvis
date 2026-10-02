@@ -267,10 +267,14 @@ def _mobile_plan() -> dict[str, Any]:
         "apk_supported": True,
         "pairing_script": "data/setup/configure-mobile-access.ps1",
         "same_lan": "pair from Phone after this PC allows LAN access",
-        "remote_access": "tailscale",
+        "remote_access": "companion TLS 4781",
         "router_forwarding_required": False,
-        "router_forwarding": "opt-in only",
-        "reason": "Direct internet port-forwarding is not required. Jarvis prefers LAN pairing or an authenticated private overlay (Tailscale) so the API is not exposed raw to the public internet.",
+        "router_forwarding": "opt-in TCP 4781 via UPnP, NAT-PMP, PCP, OpenWrt SSH, or reverse tunnel",
+        "reason": (
+            "Pair on the same LAN first. Off-LAN uses Jarvis > Phone > Prepare connection, which maps "
+            "companion TLS 4781 only (UPnP, NAT-PMP, PCP, gateway SSH, or SSH reverse tunnel). "
+            "Portal 4780, SSH, and router admin are never forwarded."
+        ),
     }
 
 
@@ -377,7 +381,7 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
         "Ornith 1.5 9B Q4_K_M remains the local bootstrap/fallback model.",
         disk["message"],
         "LM Studio is optional; Jarvis uses its bundled llama.cpp runtime by default.",
-        "Phone access defaults to LAN or Tailscale; Jarvis does not silently open a public router port.",
+        "Phone access defaults to LAN pairing; off-LAN uses Phone > Prepare connection for TCP 4781 only.",
     ]
     if install_expert:
         reasoning.append("A 27B local expert is selected for harder work and may use RAM offload when it does not fully fit VRAM.")
@@ -501,14 +505,9 @@ def render_mobile_script(plan: dict[str, Any]) -> str:
             "  netsh advfirewall firewall delete rule name='Jarvis companion TLS 4781' | Out-Null",
             "  netsh advfirewall firewall add rule name='Jarvis companion TLS 4781' dir=in action=allow protocol=TCP localport=$Port profile=any | Out-Null",
             "}",
-            "if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {",
-            "  if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id Tailscale.Tailscale -e --accept-package-agreements --accept-source-agreements }",
-            "}",
-            "if (Get-Command tailscale -ErrorAction SilentlyContinue) {",
-            "  Write-Host 'Tailscale available. Sign in once if this PC is not already connected; no router port forwarding is needed.' -ForegroundColor Green",
-            "}",
+            "Write-Host 'LAN pairing is ready. Off-LAN: open Jarvis > Phone > Prepare connection to map companion TLS 4781 (UPnP, NAT-PMP, PCP, gateway SSH, or reverse tunnel).' -ForegroundColor Green",
             "if ($UseRouterPortForward) {",
-            "  Write-Warning 'Do not forward portal TCP 4780. Open Jarvis > Phone > Prepare connection to map companion TLS 4781 only (UPnP, NAT-PMP, PCP, gateway SSH, or reverse tunnel).'",
+            "  Write-Warning 'Do not forward portal TCP 4780. Prepare connection maps companion TLS 4781 only.'",
             "}",
             "Write-Host 'Phone access preparation complete. Open Jarvis > Phone for companion pairing.' -ForegroundColor Green",
             "",

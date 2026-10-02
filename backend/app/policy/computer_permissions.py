@@ -401,6 +401,19 @@ def looks_local_network(arguments: dict[str, Any] | None) -> bool:
         value = (arguments or {}).get(key)
         if isinstance(value, str) and _host_is_local(value):
             return True
+    goal = (arguments or {}).get("goal")
+    if isinstance(goal, str) and goal.strip():
+        for match in re.finditer(r"https?://[^\s]+", goal, flags=re.I):
+            if _host_is_local(match.group(0)):
+                return True
+        stripped = re.sub(r"https?://[^\s]+", " ", goal, flags=re.I)
+        for token in re.findall(
+            r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[A-Za-z0-9._-]+\.(?:local|lan|home\.arpa)\b",
+            stripped,
+            flags=re.I,
+        ):
+            if _host_is_local(token):
+                return True
     return False
 
 
