@@ -38,18 +38,27 @@ class TransportPolicyTest {
         assertEquals("https://10.2.0.2:4781", ordered.last())
     }
 
-    @Test fun dialOrderKeepsRecentLanBeforePublicWan() {
+    @Test fun dialOrderKeepsRecentPublicWanWhenLocalsUnknown() {
         val lan = "https://10.2.0.2:4781"
         val wan = "https://203.0.113.4:4781"
         val relay = "https://relay.example.test:4781"
-        val sticky = TransportPolicy.dialOrder(lan, listOf(lan, wan, relay))
-        assertEquals(lan, sticky[0])
-        assertEquals(relay, sticky[1])
-        assertEquals(wan, sticky[2])
-        val cold = TransportPolicy.dialOrder(null, listOf(lan, wan, relay))
+        val sticky = TransportPolicy.dialOrder(wan, listOf(lan, wan, relay), emptyList())
+        assertEquals(wan, sticky[0])
+        assertEquals(lan, sticky.last())
+        val cold = TransportPolicy.dialOrder(null, listOf(lan, wan, relay), emptyList())
         assertEquals(relay, cold[0])
         assertEquals(wan, cold[1])
         assertEquals(lan, cold.last())
+    }
+
+    @Test fun emptyLocalsDoesNotStickyPrivateLan() {
+        val lan = "https://10.2.0.2:4781"
+        val wan = "https://203.0.113.4:4781"
+        val relay = "https://relay.example.test:4781"
+        val order = TransportPolicy.dialOrder(lan, listOf(lan, wan, relay), emptyList())
+        assertEquals(relay, order[0])
+        assertEquals(wan, order[1])
+        assertEquals(lan, order.last())
     }
 
     @Test fun homeWifiDialsLanBeforePublicWan() {

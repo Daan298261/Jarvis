@@ -67,18 +67,15 @@ object TransportPolicy {
         val skip = skipped.mapNotNull { runCatching { origin(it) }.getOrNull() }.toSet()
         val usable = rest.filter { it !in skip }
         val deferred = rest.filter { it in skip }
-        if (locals.isNotEmpty()) {
-            val home = usable.filter { onAttachedLan(it, locals) }
-            if (home.isNotEmpty()) {
-                val head = home.first()
-                return (listOf(head) + usable.filter { it != head } + deferred).distinct()
-            }
-            val sticky = recent?.let { runCatching { origin(it) }.getOrNull() }
-            val useSticky = sticky != null && sticky !in skip && reachabilityRank(sticky) < 2
-            val head = if (useSticky) sticky else null
-            return (listOfNotNull(head) + usable.filter { it != head } + deferred).distinct()
+        val home = usable.filter { onAttachedLan(it, locals) }
+        if (home.isNotEmpty()) {
+            val head = home.first()
+            return (listOf(head) + usable.filter { it != head } + deferred).distinct()
         }
-        val head = recent?.let { runCatching { origin(it) }.getOrNull() }?.takeIf { it !in skip }
+        val sticky = recent?.let { runCatching { origin(it) }.getOrNull() }
+        val useSticky = sticky != null && sticky !in skip &&
+            (onAttachedLan(sticky, locals) || reachabilityRank(sticky) < 2)
+        val head = if (useSticky) sticky else null
         return (listOfNotNull(head) + usable.filter { it != head } + deferred).distinct()
     }
 

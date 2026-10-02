@@ -350,8 +350,7 @@ class JarvisApi(context: Context) {
                 val reason = runCatching { JSONObject(result.toString(Charsets.UTF_8)).optString("detail") }.getOrDefault("")
                 throw ApiException(response.code, reason.ifEmpty { "Jarvis returned ${response.code}" })
             }
-            preferred = address
-            preferredAt = System.currentTimeMillis()
+            noteReachable(address)
             return result
         }
     }
