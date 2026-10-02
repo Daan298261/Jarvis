@@ -20,7 +20,7 @@ async def test_checkpoint_keeps_working_tree(tmp_path):
     _git(repo, "commit", "-m", "init")
     note.write_text("edited by agent\n", encoding="utf-8")
 
-    tool = GitTool()
+    tool = GitTool(lambda: {"allowed_directories": [str(tmp_path)]})
     result = await tool.execute(action="checkpoint", path=str(repo))
     assert result.success, result.error
     assert "working tree unchanged" in result.output

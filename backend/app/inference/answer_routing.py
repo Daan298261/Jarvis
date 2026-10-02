@@ -30,6 +30,25 @@ def select_runtime_for_decision(
     user_message: str = "",
 ) -> str | None:
     minimum = int(decision.minimum_answer_tier or 0)
+    # Persona-bound brains (e.g. Umi → umi-opus-9b) win over the cheap
+    # answer_basic early-return so named personas keep their dedicated runtime.
+    try:
+        from ..persona.named_persona import active_persona_id
+        from ..persona.persona_brain import brain_runtime_name_for_persona
+
+        bound = brain_runtime_name_for_persona(active_persona_id())
+    except Exception:
+        bound = None
+    if bound:
+        catalog = profiles if profiles is not None else list_runtime_profiles()
+        names = {
+            (row.model_profile or row.name or "").strip()
+            for row in catalog
+            if row.enabled
+        }
+        names |= {(row.name or "").strip() for row in catalog if row.enabled}
+        if bound in names and profile_meets_minimum_tier(bound, minimum):
+            return bound
     if decision.action == "answer_basic" and minimum <= 1:
         if profile_meets_minimum_tier(current_profile, minimum):
             return current_profile

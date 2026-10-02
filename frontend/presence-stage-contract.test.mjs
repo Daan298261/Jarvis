@@ -38,7 +38,9 @@ test("morphable presence mounts use the shared stage class", () => {
   const neural = read("presence/renderers/NeuralCloudPresence.tsx")
   assert.match(humanoid, /jarvis-presence-stage/)
   assert.match(particle, /jarvis-presence-stage/)
-  assert.match(neural, /jarvis-presence-stage/)
+  // Neural cloud reuses HumanoidPresence (stage class lives there).
+  assert.match(neural, /HumanoidPresence/)
+  assert.match(humanoid, /MorphablePresenceStage/)
 })
 
 test("Appearance exposes APEX UI copy and accurate mode previews", () => {

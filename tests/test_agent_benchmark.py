@@ -100,7 +100,9 @@ def test_agent_suite_endpoints(jarvis_env, monkeypatch):
     assert listed.status_code == 200
     body = listed.json()
     assert body["count"] == 20
-    assert body["live_comparison_blocked"] is True
+    # Live suite is intentionally available against the selected local models.
+    assert body["live_comparison_blocked"] is False
+    assert body["live_comparison_reason"]
     run = client.post("/api/model/agent-suite/run", json={"case_id": "json-update", "simulate_success": True})
     assert run.status_code == 200
     payload = run.json()

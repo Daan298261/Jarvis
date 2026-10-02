@@ -34,7 +34,8 @@ def test_lifecycle_is_not_galaxy_gated_in_the_host():
     assert "MorphablePresenceStage" not in host
     assert "shapeId={shapeId}" in host
     assert host.count("shapeId={shapeId}") >= 3
-    assert "MorphablePresenceStage" in neural
+    # Neural cloud mounts HumanoidPresence, which owns MorphablePresenceStage.
+    assert "HumanoidPresence" in neural
     assert "NeuralCloudPresence" in neural_host
     assert "MorphablePresenceStage" in particle
     assert "MorphablePresenceStage" in humanoid

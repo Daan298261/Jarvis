@@ -29,7 +29,12 @@ def test_recommended_stack_keeps_kimi_out_of_default_path():
 
 
 def test_all_normal_primary_candidates_are_uncensored():
+    # Persona-bound brains (Umi/Ollama) may remain censored upstream; they are
+    # not general primary preferences (see candidate_routing primary keys).
+    persona_brains = {"umi-opus-9b-ollama"}
     for candidate in list_model_candidates("primary"):
+        if candidate.key in persona_brains:
+            continue
         assert candidate.uncensored is True
 
 

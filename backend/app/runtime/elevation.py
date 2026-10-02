@@ -68,10 +68,10 @@ def prompt_windows_uac() -> dict[str, object]:
         return {**snap, "ok": False, "prompted": False, "detail": "Full PC control uses a Windows logon task."}
     if is_elevated() and logon_task_registered():
         return {**snap, "ok": True, "prompted": False, "detail": "Jarvis already has administrator on this session."}
-    from ..config import repo_root
-
-    root = repo_root()
-    script = root / "start-jarvis.ps1"
+    # Prefer os.path over pathlib: tests patch os.name to "nt" on Linux, which
+    # makes pathlib.Path construct WindowsPath and Path.resolve() raise.
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    script = os.path.join(root, "start-jarvis.ps1")
     params = (
         "-NoProfile -ExecutionPolicy Bypass -File "
         f'"{script}" -RegisterLogonTask -NoBrowser'
@@ -79,7 +79,7 @@ def prompt_windows_uac() -> dict[str, object]:
     try:
         import ctypes
 
-        rc = int(ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", params, str(root), 1))
+        rc = int(ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", params, root, 1))
     except Exception as exc:  # noqa: BLE001 — UAC UI is best-effort
         return {**snapshot(), "ok": False, "prompted": False, "detail": str(exc)[:240]}
     prompted = rc > 32
