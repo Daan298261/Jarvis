@@ -170,6 +170,12 @@ class BrowserTool(Tool):
                 return await _close_browser()
         if action == "open" and not (kwargs.get("url") or "").strip():
             return ToolResult(False, "", error="url is required")
+        if action == "open":
+            from urllib.parse import urlparse
+
+            scheme = (urlparse(str(kwargs.get("url") or "")).scheme or "").lower()
+            if scheme not in {"http", "https"}:
+                return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed")
         if action not in _ACTIONS_NEEDING_PAGE:
             return ToolResult(False, "", error=f"Unknown action {action}")
 

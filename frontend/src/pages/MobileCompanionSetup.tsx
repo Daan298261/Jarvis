@@ -10,6 +10,14 @@ import {
 } from "../api"
 import { CompanionApkBuildPanel } from "../components/CompanionApkBuildPanel"
 import { CompanionPairingPanel } from "../components/CompanionPairingPanel"
+import {
+  EMPTY_WAN_FORM,
+  connectionPrepareBody,
+  wanFormFromSnapshot,
+  wanPathLabel,
+  type WanForm,
+  type WanMethod,
+} from "../companionWan"
 
 type Device = { id: string; name: string; status: string; fingerprint: string }
 type Connection = {
@@ -21,6 +29,8 @@ type Connection = {
   limitation?: string
   local_verified?: boolean
   remote_verified?: boolean
+  wan_path?: string
+  wan?: Record<string, unknown>
   updated_at?: number
 }
 
@@ -51,6 +61,7 @@ export function MobileCompanionSetup() {
   const [endpoint, setEndpoint] = useState("")
   const [connection, setConnection] = useState<Connection | null>(null)
   const [remote, setRemote] = useState(false)
+  const [wanForm, setWanForm] = useState<WanForm>(EMPTY_WAN_FORM)
   const [build, setBuild] = useState<CompanionBuildJob | null>(null)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -58,10 +69,28 @@ export function MobileCompanionSetup() {
 
   const refresh = () => api<Device[]>("/api/mobile/manage/devices").then(setDevices)
 
+  function applyConnection(next: Connection) {
+    setConnection(next)
+    setWanForm((current) => {
+      const dirty = Boolean(
+        current.ssh_host ||
+          current.gateway_host ||
+          current.ssh_user ||
+          current.gateway_user ||
+          current.ssh_identity_file ||
+          current.gateway_identity_file ||
+          current.wan_public_host,
+      )
+      if (dirty) return current
+      const hydrated = wanFormFromSnapshot(next)
+      return { ...hydrated, gateway_password: current.gateway_password }
+    })
+  }
+
   useEffect(() => {
     const tick = () => {
       refresh().catch(() => undefined)
-      api<Connection>("/api/mobile/manage/connection").then(setConnection).catch(() => undefined)
+      api<Connection>("/api/mobile/manage/connection").then(applyConnection).catch(() => undefined)
     }
     tick()
     const interval = window.setInterval(tick, 5000)
@@ -96,7 +125,7 @@ export function MobileCompanionSetup() {
     })
     setBuild(created)
     if (mode === "personalized") {
-      api<Connection>("/api/mobile/manage/connection").then(setConnection).catch(() => undefined)
+      api<Connection>("/api/mobile/manage/connection").then(applyConnection).catch(() => undefined)
     }
   }
 
@@ -110,6 +139,20 @@ export function MobileCompanionSetup() {
   const canStartPersonalized = !busy && !buildLocked
   const canStartGeneric = !busy && !buildLocked
   const gatewayHint = gatewayTroubleshooting(connection)
+  const wanPath = wanPathLabel(connection?.wan_path, connection?.router)
+
+  function patchWan<K extends keyof WanForm>(key: K, value: WanForm[K]) {
+    setWanForm((current) => ({ ...current, [key]: value }))
+  }
+
+  async function prepareConnection(enabled: boolean, useRemote: boolean) {
+    applyConnection(
+      await api<Connection>("/api/mobile/manage/connection", {
+        method: "POST",
+        body: JSON.stringify(connectionPrepareBody(enabled, useRemote, wanForm)),
+      }),
+    )
+  }
 
   return (
     <section className="card" style={{ marginBottom: 20 }}>
@@ -123,20 +166,125 @@ export function MobileCompanionSetup() {
         <input type="checkbox" checked={remote} onChange={(event) => setRemote(event.target.checked)} /> Enable
         encrypted internet access when supported
       </label>
+      {remote && (
+        <div className="grid" style={{ marginTop: 12, gap: 8 }}>
+          <p className="lede" style={{ margin: 0 }}>
+            Off LAN the phone talks to TCP 4781 only. Auto tries UPnP (optional router logon), then SSH into
+            your OpenWrt gateway, then an SSH reverse tunnel to a host you control. Jarvis will not map 4780,
+            SSH, or the router admin port.
+          </p>
+          <label>
+            Reachability
+            <select
+              value={wanForm.wan_method}
+              onChange={(event) => patchWan("wan_method", event.target.value as WanMethod)}
+            >
+              <option value="auto">Auto (UPnP, then gateway SSH, then reverse tunnel)</option>
+              <option value="upnp">UPnP / IGD on this router</option>
+              <option value="gateway_ssh">Log into the gateway over SSH (OpenWrt)</option>
+              <option value="ssh_reverse">SSH reverse tunnel to my host</option>
+            </select>
+          </label>
+          {(wanForm.wan_method === "auto" || wanForm.wan_method === "upnp") && (
+            <>
+              <label>
+                Router IGD username (optional)
+                <input
+                  className="command"
+                  value={wanForm.gateway_username}
+                  autoComplete="username"
+                  onChange={(event) => patchWan("gateway_username", event.target.value)}
+                />
+              </label>
+              <label>
+                Router IGD password (optional, never shown after save)
+                <input
+                  className="command"
+                  type="password"
+                  value={wanForm.gateway_password}
+                  autoComplete="current-password"
+                  onChange={(event) => patchWan("gateway_password", event.target.value)}
+                />
+              </label>
+            </>
+          )}
+          {(wanForm.wan_method === "auto" || wanForm.wan_method === "gateway_ssh") && (
+            <>
+              <label>
+                Gateway SSH host
+                <input
+                  className="command"
+                  value={wanForm.gateway_host}
+                  placeholder="192.168.1.1"
+                  onChange={(event) => patchWan("gateway_host", event.target.value)}
+                />
+              </label>
+              <label>
+                Gateway SSH user
+                <input
+                  className="command"
+                  value={wanForm.gateway_user}
+                  placeholder="root"
+                  onChange={(event) => patchWan("gateway_user", event.target.value)}
+                />
+              </label>
+              <label>
+                Gateway identity file
+                <input
+                  className="command"
+                  value={wanForm.gateway_identity_file}
+                  placeholder="C:\\Users\\you\\.ssh\\router_ed25519"
+                  onChange={(event) => patchWan("gateway_identity_file", event.target.value)}
+                />
+              </label>
+              <label>
+                Public hostname the phone should dial
+                <input
+                  className="command"
+                  value={wanForm.wan_public_host}
+                  placeholder="home.example.com"
+                  onChange={(event) => patchWan("wan_public_host", event.target.value)}
+                />
+              </label>
+            </>
+          )}
+          {(wanForm.wan_method === "auto" || wanForm.wan_method === "ssh_reverse") && (
+            <>
+              <label>
+                Reverse-tunnel SSH host
+                <input
+                  className="command"
+                  value={wanForm.ssh_host}
+                  placeholder="vpn.example.com"
+                  onChange={(event) => patchWan("ssh_host", event.target.value)}
+                />
+              </label>
+              <label>
+                Reverse-tunnel SSH user
+                <input
+                  className="command"
+                  value={wanForm.ssh_user}
+                  onChange={(event) => patchWan("ssh_user", event.target.value)}
+                />
+              </label>
+              <label>
+                Reverse-tunnel identity file
+                <input
+                  className="command"
+                  value={wanForm.ssh_identity_file}
+                  placeholder="C:\\Users\\you\\.ssh\\id_ed25519"
+                  onChange={(event) => patchWan("ssh_identity_file", event.target.value)}
+                />
+              </label>
+            </>
+          )}
+        </div>
+      )}
       <div className="row" style={{ gap: 10, marginTop: 12 }}>
         <button
           className="btn"
           disabled={busy}
-          onClick={() =>
-            run(async () =>
-              setConnection(
-                await api<Connection>("/api/mobile/manage/connection", {
-                  method: "POST",
-                  body: JSON.stringify({ enabled: true, remote }),
-                }),
-              ),
-            )
-          }
+          onClick={() => run(() => prepareConnection(true, remote))}
         >
           Prepare connection
         </button>
@@ -144,16 +292,7 @@ export function MobileCompanionSetup() {
           <button
             className="btn secondary"
             disabled={busy}
-            onClick={() =>
-              run(async () =>
-                setConnection(
-                  await api<Connection>("/api/mobile/manage/connection", {
-                    method: "POST",
-                    body: JSON.stringify({ enabled: false, remote: false }),
-                  }),
-                ),
-              )
-            }
+            onClick={() => run(() => prepareConnection(false, false))}
           >
             Stop mobile access
           </button>
@@ -162,6 +301,7 @@ export function MobileCompanionSetup() {
       {connection && (
         <div role="status" style={{ marginTop: 12 }}>
           <strong>{connection.state}</strong> · {connection.activity}
+          {wanPath && <p>{wanPath}</p>}
           {connection.local_verified && (
             <p>Desktop encryption and device authentication verified. Test the phone on Wi-Fi next.</p>
           )}
@@ -241,16 +381,7 @@ export function MobileCompanionSetup() {
               className="btn secondary"
               type="button"
               disabled={busy}
-              onClick={() =>
-                run(async () =>
-                  setConnection(
-                    await api<Connection>("/api/mobile/manage/connection", {
-                      method: "POST",
-                      body: JSON.stringify({ enabled: true, remote }),
-                    }),
-                  ),
-                )
-              }
+              onClick={() => run(() => prepareConnection(true, remote))}
             >
               Prepare connection for pairing
             </button>

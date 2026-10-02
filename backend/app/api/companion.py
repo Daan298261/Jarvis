@@ -539,6 +539,7 @@ class ConnectionSetup(BaseModel):
     gateway_profile: Literal["openwrt_uci"] | None = None
     gateway_username: str | None = Field(default=None, max_length=64)
     gateway_password: str | None = Field(default=None, max_length=256)
+    wan_public_host: str | None = Field(default=None, max_length=255)
 
 
 @owner_router.post("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])

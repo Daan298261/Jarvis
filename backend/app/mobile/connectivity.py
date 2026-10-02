@@ -357,10 +357,12 @@ class Connectivity:
                 if method in {"auto", "gateway_ssh"} and wan["gateway_host"] and wan["gateway_user"]:
                     self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
                     try:
-                        mapped = await apply_gateway_ssh(wan, lan_ip)
-                        endpoints.append(mapped)
+                        public_host = wan.get("wan_public_host") or public_ip or ""
+                        mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=str(public_host or ""))
                         wan_path = "gateway_ssh"
-                        self.report(router="mapped", wan_path=wan_path, limitation="Gateway SSH mapping applied; verify from outside this network")
+                        if mapped:
+                            endpoints.append(mapped)
+                        self.report(router="mapped", wan_path=wan_path, limitation=detail)
                     except Exception as exc:
                         self.report(router="unavailable", limitation=str(exc)[:240])
                 if not wan_path and method in {"auto", "ssh_reverse"} and wan["ssh_host"] and wan["ssh_user"]:
@@ -415,6 +417,8 @@ class Connectivity:
                             cooldown_remaining_seconds=GUARD.cooldown_remaining_seconds(),
                         )
                     else:
+                        from .wan_forward import REVERSE_TUNNEL, apply_ssh_reverse, wan_settings_from_config
+
                         if not self.server_task or self.server_task.done():
                             try:
                                 await self.ensure_gateway_listening()
@@ -422,10 +426,26 @@ class Connectivity:
                                 self.report(state="failed", activity=str(exc)[:300])
                         config = self.config()
                         if config["enabled"]:
+                            tunnel_dead = self.state.get("wan_path") == "ssh_reverse" and not REVERSE_TUNNEL.alive()
                             if self.state.get("state") == "cooldown":
                                 pass
                             elif self.state.get("state") != "ready" or not self.remote_prepared:
                                 await self.apply_remote(config)
+                            elif tunnel_dead:
+                                try:
+                                    mapped = await apply_ssh_reverse(wan_settings_from_config(config))
+                                    endpoints = list(self.state.get("endpoints") or [])
+                                    if mapped not in endpoints:
+                                        endpoints.append(mapped)
+                                    self.report(
+                                        router="tunneled",
+                                        wan_path="ssh_reverse",
+                                        endpoints=endpoints,
+                                        limitation="SSH reverse tunnel reconnected",
+                                        next_renewal_at=time.time() + 1200,
+                                    )
+                                except Exception:
+                                    await self.apply_remote(config)
                             elif time.time() >= self.state.get("next_renewal_at", 0):
                                 try:
                                     await self.probe(f"https://127.0.0.1:{PORT}", self.identity)

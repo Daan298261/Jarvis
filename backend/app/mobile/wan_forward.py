@@ -18,6 +18,39 @@ GATEWAY_PROFILES = frozenset({"openwrt_uci"})
 _SSH_BINARIES = ("ssh", "ssh.exe")
 
 
+def is_public_dial_host(host: str) -> bool:
+    """True when a companion off-LAN could reasonably dial this name or address."""
+    text = (host or "").strip().lower().rstrip(".")
+    if not text or "/" in text or "\\" in text or "@" in text or ":" in text:
+        return False
+    if text in {"localhost", "router", "gateway"} or text.endswith((".local", ".home.arpa", ".lan")):
+        return False
+    try:
+        ip = ipaddress.ip_address(text)
+    except ValueError:
+        return "." in text
+    return bool(ip.is_global)
+
+
+def companion_wan_origin(host: str) -> str:
+    if not is_public_dial_host(host):
+        raise ValueError("Companion WAN origin must be a public hostname or global IPv4, not a LAN address")
+    return f"https://{host.strip()}:{PORT}"
+
+
+def discover_public_ipv4() -> str:
+    import miniupnpc
+
+    router = miniupnpc.UPnP()
+    router.discoverdelay = 1500
+    router.discover()
+    router.selectigd()
+    address = ipaddress.ip_address(router.externalipaddress())
+    if address.version != 4 or not address.is_global:
+        raise ValueError("Router has no public IPv4 address")
+    return str(address)
+
+
 def _private_ipv4(value: str) -> str:
     address = ipaddress.ip_address((value or "").strip())
     if address.version != 4 or not address.is_private or address.is_loopback:
@@ -53,8 +86,8 @@ def reverse_tunnel_argv(
     user = (user or "").strip()
     if not host or not user:
         raise ValueError("SSH reverse tunnel needs host and user")
-    if "/" in host or "\\" in host or "@" in host:
-        raise ValueError("SSH host must be a hostname or address")
+    if not is_public_dial_host(host):
+        raise ValueError("SSH reverse tunnel host must be a public hostname or global IPv4")
     if not 1 <= int(port) <= 65535:
         raise ValueError("Invalid SSH port")
     bind = (bind_host or "0.0.0.0").strip() or "0.0.0.0"
@@ -161,6 +194,7 @@ def wan_settings_from_config(config: dict[str, Any]) -> dict[str, Any]:
         "gateway_profile": str(config.get("gateway_profile") or "openwrt_uci").strip() or "openwrt_uci",
         "gateway_username": str(config.get("gateway_username") or "").strip(),
         "gateway_password": str(config.get("gateway_password") or ""),
+        "wan_public_host": str(config.get("wan_public_host") or "").strip(),
     }
 
 
@@ -212,7 +246,7 @@ class ReverseTunnel:
 REVERSE_TUNNEL = ReverseTunnel()
 
 
-async def apply_gateway_ssh(settings: dict[str, Any], lan_ip: str) -> str:
+async def apply_gateway_ssh(settings: dict[str, Any], lan_ip: str, public_host: str = "") -> tuple[str | None, str]:
     argv = gateway_ssh_argv(
         host=settings["gateway_host"],
         user=settings["gateway_user"],
@@ -221,7 +255,6 @@ async def apply_gateway_ssh(settings: dict[str, Any], lan_ip: str) -> str:
         port=int(settings.get("gateway_port") or 22),
         profile=settings["gateway_profile"],
     )
-    # Remote script is the last argv item; OpenSSH passes remaining args to remote sh -s.
     proc = await asyncio.create_subprocess_exec(
         *argv[:-1],
         stdin=asyncio.subprocess.PIPE,
@@ -232,7 +265,13 @@ async def apply_gateway_ssh(settings: dict[str, Any], lan_ip: str) -> str:
     if proc.returncode != 0:
         detail = (stderr or b"").decode("utf-8", errors="replace").strip()[:240]
         raise RuntimeError(detail or "Gateway SSH port-forward failed")
-    return f"https://{settings['gateway_host']}:{PORT}"
+    host = (settings.get("wan_public_host") or public_host or "").strip()
+    if not is_public_dial_host(host):
+        return (
+            None,
+            "Gateway SSH mapped TCP 4781 on the router. Set a public hostname so the phone can dial it from outside this network.",
+        )
+    return companion_wan_origin(host), "Gateway SSH mapping applied; verify from outside this network"
 
 
 async def apply_ssh_reverse(settings: dict[str, Any]) -> str:
@@ -242,6 +281,6 @@ async def apply_ssh_reverse(settings: dict[str, Any]) -> str:
         identity_file=settings["ssh_identity_file"],
         port=int(settings["ssh_port"] or 22),
     )
-    endpoint = f"https://{settings['ssh_host']}:{PORT}"
+    endpoint = companion_wan_origin(settings["ssh_host"])
     await REVERSE_TUNNEL.start(argv, endpoint)
     return endpoint

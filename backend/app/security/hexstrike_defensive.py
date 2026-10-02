@@ -98,7 +98,14 @@ def _local_path(value: str) -> str:
     resolved = candidate.resolve(strict=False)
     settings = load_settings()
     roots = settings.allowed_directories or default_allowed_directories()
-    allowed = [Path(root).expanduser().resolve(strict=False) for root in roots]
+    from ..config import LOCAL_NETWORK_SCOPE
+    from ..tools.safety import _is_unc_path, _private_lan_unc
+
+    if LOCAL_NETWORK_SCOPE in roots and _is_unc_path(value) and _private_lan_unc(value):
+        from ..tools.safety import resolve_allowed_path
+
+        return str(resolve_allowed_path(value, roots))
+    allowed = [Path(root).expanduser().resolve(strict=False) for root in roots if root != LOCAL_NETWORK_SCOPE]
     if not any(resolved == root or resolved.is_relative_to(root) for root in allowed):
         raise ValueError("local path is outside Jarvis allowed directories")
     if not re.fullmatch(r"[A-Za-z0-9_./:\\-]+", str(resolved)):

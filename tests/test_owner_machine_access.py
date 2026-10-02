@@ -8,7 +8,9 @@ import pytest
 
 from app.config import LOCAL_NETWORK_SCOPE, default_allowed_directories
 from app.mobile.wan_forward import (
+    companion_wan_origin,
     gateway_ssh_argv,
+    is_public_dial_host,
     openwrt_redirect_script,
     redact_wan_config,
     reverse_tunnel_argv,
@@ -106,7 +108,14 @@ def test_gateway_ssh_argv_uses_identity_and_openwrt_profile(tmp_path, monkeypatc
         )
 
 
-def test_wan_config_redacts_gateway_password():
+def test_wan_origin_rejects_lan_and_accepts_public_hosts():
+    assert is_public_dial_host("vpn.example.test")
+    assert is_public_dial_host("8.8.8.8")
+    assert not is_public_dial_host("192.168.1.1")
+    assert not is_public_dial_host("router.local")
+    with pytest.raises(ValueError):
+        companion_wan_origin("192.168.1.1")
+    assert companion_wan_origin("home.example.test") == "https://home.example.test:4781"
     public = redact_wan_config({"gateway_password": "secret", "ssh_host": "vpn.example.test"})
     assert "secret" not in str(public)
     assert public["gateway_password_set"] is True
@@ -143,6 +152,39 @@ async def test_ssh_reverse_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     assert result["state"] == "ready"
     assert "https://vpn.example.test:4781" in result["endpoints"]
     assert result.get("wan_path") == "ssh_reverse"
+
+
+@pytest.mark.asyncio
+async def test_gateway_ssh_does_not_advertise_private_router_as_wan(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No public IPv4")))
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        assert lan_ip == "192.168.1.12"
+        assert settings["gateway_host"] == "192.168.1.1"
+        return None, "Gateway SSH mapped TCP 4781 on the router. Set a public hostname so the phone can dial it from outside this network."
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    result = await FakeConnection().configure(
+        True,
+        True,
+        {
+            "wan_method": "gateway_ssh",
+            "gateway_host": "192.168.1.1",
+            "gateway_user": "root",
+            "gateway_identity_file": str(key),
+        },
+    )
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "gateway_ssh"
+    assert "https://192.168.1.1:4781" not in result["endpoints"]
+    assert "public hostname" in (result.get("limitation") or "")
 
 
 @pytest.mark.asyncio
@@ -206,4 +248,6 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
     result = await tool.execute(action="open", url="https://example.com/")
     assert result.success, result.error
     assert "Opened https://example.com/" in result.output
+    blocked = await tool.execute(action="open", url="file:///etc/passwd")
+    assert not blocked.success
     await tool.execute(action="close")
