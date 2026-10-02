@@ -198,8 +198,11 @@ class JarvisApi(context: Context) {
             }
             preferred = address; preferredAt = System.currentTimeMillis()
             return@withContext result
-        } } catch (error: javax.net.ssl.SSLException) { throw error }
-        catch (error: java.io.IOException) { failure = error }
+        } } catch (error: java.io.IOException) {
+            // Hostname SAN mismatch, hairpin, or captive-portal TLS on one origin
+            // must not poison the rest of the owner-supplied LAN/WAN list.
+            failure = error
+        }
         }
         throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
     }

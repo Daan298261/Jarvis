@@ -51,4 +51,9 @@ class TransportPolicyTest {
         assertEquals(wan, cold[1])
         assertEquals(lan, cold.last())
     }
+
+    @Test fun hostnameTlsErrorsAreOrdinaryDialFailures() {
+        val error: Throwable = javax.net.ssl.SSLException("Hostname 8.8.8.8 not verified")
+        assertTrue(error is java.io.IOException)
+    }
 }

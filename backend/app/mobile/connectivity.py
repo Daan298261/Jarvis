@@ -17,7 +17,7 @@ import uvicorn
 from fastapi import HTTPException
 
 from .companion_security import GUARD
-from .gateway import gateway_app, server_identity
+from .gateway import gateway_app, identity_covers, server_identity
 from .lan_beacon import LanBeaconServer, public_beacon_payload
 from .store import database, get, put
 
@@ -32,6 +32,16 @@ def origin(value: str) -> str:
     if parsed.port is not None and not 1 <= parsed.port <= 65535:
         raise ValueError("Invalid connection port")
     return value.rstrip("/")
+
+
+def dial_host(value: str) -> str:
+    """Hostname or IP the phone would present in SNI / hostname verification."""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        return (urlsplit(text).hostname or "").strip()
+    return text.split("/")[0].strip()
 
 
 def lan_hosts():
@@ -156,8 +166,9 @@ class Connectivity:
             await self.apply_remote(config)
         return self.snapshot()
 
-    async def stop_gateway(self):
-        await self.stop_lan_beacon()
+    async def stop_gateway(self, beacons: bool = True):
+        if beacons:
+            await self.stop_lan_beacon()
         external = bool(getattr(self, "_uses_external_listener", False))
         if self.server and not external:
             self.server.should_exit = True
@@ -238,11 +249,11 @@ class Connectivity:
 
         self.server_task = asyncio.create_task(_hold(), name="jarvis-companion-gateway-external")
 
-    async def start_gateway(self, identity):
+    async def start_gateway(self, identity, beacons: bool = True):
         from ..config import load_settings
         if self.server and self.server_task and not self.server_task.done() and self.server.started:
             return
-        await self.stop_gateway()
+        await self.stop_gateway(beacons=beacons)
         # Bind ourselves so port conflicts raise OSError instead of Uvicorn's SystemExit.
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         addr_in_use = getattr(errno, "WSAEADDRINUSE", 10048)
@@ -322,6 +333,26 @@ class Connectivity:
             local_verified=True,
             server_pin=identity["server_pin"],
         )
+
+    async def cover_phone_dial_hosts(self, *hosts: str):
+        """RFC-0123: every phone-dial IP/DNS name must be a SAN on the live gateway cert."""
+        extra = [dial_host(host) for host in hosts]
+        extra = [host for host in extra if host]
+        if not extra:
+            return self.identity
+        current = self.identity
+        if current and identity_covers(current, extra):
+            return current
+        identity = await asyncio.to_thread(server_identity, extra)
+        self.identity = identity
+        external = bool(getattr(self, "_uses_external_listener", False))
+        running = bool(self.server_task and not self.server_task.done())
+        if running and not external:
+            await self.stop_gateway(beacons=False)
+            await self.start_gateway(identity, beacons=False)
+            await self.probe(f"https://127.0.0.1:{PORT}", identity)
+        self.report(server_pin=identity["server_pin"])
+        return identity
 
     async def apply_remote(self, config):
         """Prepare connection: port-forward lease and relay only (gateway already listens)."""
@@ -471,6 +502,13 @@ class Connectivity:
                         self.report(router="tunneled", wan_path=wan_path, limitation="SSH reverse tunnel is up; the phone should use the SSH host on TCP 4781")
                     except Exception as exc:
                         self.report(router="unavailable", limitation=str(exc)[:240])
+            await self.cover_phone_dial_hosts(
+                *endpoints,
+                relay,
+                str(public_ip or ""),
+                str(self.public_ip or ""),
+            )
+            identity = self.identity or identity
             if relay:
                 try:
                     await self.probe(relay, identity)
@@ -563,6 +601,8 @@ class Connectivity:
                                             from .natpmp import apply_natpmp
 
                                             public_ip = await asyncio.to_thread(apply_natpmp, self.natpmp_gateway, lan)
+                                        if public_ip != self.public_ip:
+                                            raise RuntimeError("Mapped public address changed")
                                         self.public_ip = public_ip
                                     self.report(next_renewal_at=time.time() + 1200)
                                 except Exception:
