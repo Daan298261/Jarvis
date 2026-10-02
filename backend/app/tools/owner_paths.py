@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, repo_root
 from .safety import resolve_allowed_path
 
 _PROXY_ENV_NAMES = frozenset({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FTP_PROXY"})
@@ -27,13 +27,12 @@ def direct_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def python_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """Python HTTP uses Jarvis's loopback proxy so LAN binds the home NIC.
+def lan_http_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """HTTP_PROXY to Jarvis's loopback proxy: LAN binds the home NIC.
 
-    ``requests`` / urllib / httpx honor HTTP_PROXY and cannot take ``--interface``.
-    After dropping a leftover VPN proxy, point them at the process-local proxy
-    which sources RFC1918 from the on-link NIC and sends public internet on the
-    OS default route.
+    Git and Python ``requests`` honor HTTP_PROXY. After dropping a leftover VPN
+    proxy, point them at the process-local proxy which sources RFC1918 from the
+    on-link NIC and sends public internet on the OS default route.
     """
     env = direct_child_env(base)
     try:
@@ -48,6 +47,19 @@ def python_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     env["HTTPS_PROXY"] = origin
     env["http_proxy"] = origin
     env["https_proxy"] = origin
+    return env
+
+
+def python_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Python HTTP proxy plus sitecustomize so raw sockets bind the home NIC."""
+    env = lan_http_child_env(base)
+    site = Path(__file__).resolve().parent / "lan_python_site"
+    backend = repo_root() / "backend"
+    parts = [str(site), str(backend)]
+    existing = env.get("PYTHONPATH") or ""
+    if existing:
+        parts.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(parts)
     return env
 
 

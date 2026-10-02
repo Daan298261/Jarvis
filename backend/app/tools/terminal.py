@@ -230,6 +230,39 @@ def _decode(data: bytes | bytearray) -> str:
     return bytes(data).decode("utf-8", errors="replace")
 
 
+def _python_interpreter_name(name: str) -> bool:
+    text = Path(name or "").name.lower()
+    if text.endswith(".exe"):
+        text = text[:-4]
+    if text in {"python", "python3", "pythonw", "py"}:
+        return True
+    return bool(re.fullmatch(r"python\d+(\.\d+)*", text))
+
+
+def python_direct_argv(command: str) -> list[str] | None:
+    """Run ``python -c`` / ``python3 script.py`` as argv, not ``bash -lc``.
+
+    Default Linux shell is bash. Without this, ``python3 -c`` inherits the
+    proxy-free bash env and LAN ``socket.connect`` / requests follow the VPN.
+    Semicolons inside ``-c`` are Python, not shell, once the command is argv.
+    """
+    text = str(command or "").strip()
+    if not text or "\n" in text:
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or not _python_interpreter_name(parts[0]):
+        return None
+    if any(part in {"|", "||", "&", "&&", ";", ">", ">>", "<"} for part in parts):
+        return None
+    if any(part.startswith("$(") or part.startswith("`") for part in parts):
+        return None
+    python = sys.executable or shutil.which(parts[0]) or shutil.which("python3") or "python3"
+    return [python, *parts[1:]]
+
+
 def _python_args(command: str) -> list[str]:
     stripped = (command or "").strip()
     python = sys.executable or shutil.which("python") or shutil.which("python3") or "python3"
@@ -243,10 +276,7 @@ def _python_args(command: str) -> list[str]:
 
 
 def _child_env(args: list[str]) -> dict[str, str]:
-    name = Path(args[0]).name.lower() if args else ""
-    if name.endswith(".exe"):
-        name = name[:-4]
-    if name in {"python", "python3", "py"}:
+    if args and (args[0] == sys.executable or _python_interpreter_name(args[0])):
         return python_child_env()
     return direct_child_env()
 
@@ -255,6 +285,9 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
     bound = lan_bound_http_argv(command)
     if bound:
         return bound
+    py = python_direct_argv(command)
+    if py:
+        return py
     if shell == "powershell":
         exe = shutil.which("powershell") or shutil.which("pwsh")
         if not exe:

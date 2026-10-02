@@ -96,6 +96,10 @@ def test_python_child_env_uses_lan_proxy_not_vpn(monkeypatch):
     assert env["HTTPS_PROXY"] == env["HTTP_PROXY"]
     assert env["http_proxy"] == env["HTTP_PROXY"]
     assert "10.8.0.1" not in env["HTTP_PROXY"]
+    assert "lan_python_site" in env["PYTHONPATH"]
+    from app.config import repo_root
+
+    assert str(repo_root() / "backend") in env["PYTHONPATH"].split(os.pathsep)
 
 
 def test_reverse_tunnel_argv_is_batch_mode_and_4781_only(tmp_path, monkeypatch):

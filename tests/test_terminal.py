@@ -1,5 +1,12 @@
 from app.tools.python_exec import PythonTool
-from app.tools.terminal import TerminalTool, _command_args, _python_args, default_shell, lan_bound_http_argv
+from app.tools.terminal import (
+    TerminalTool,
+    _command_args,
+    _python_args,
+    default_shell,
+    lan_bound_http_argv,
+    python_direct_argv,
+)
 
 
 def test_python_shell_uses_dash_c_for_snippets():
@@ -10,6 +17,13 @@ def test_python_shell_uses_dash_c_for_snippets():
     assert print_args[1:] == ["-c", "print('hi')"]
     file_args = _python_args("script.py --flag")
     assert file_args[1:3] == ["script.py", "--flag"]
+    bash_py = python_direct_argv("python3 -c \"import os; print(1)\"")
+    assert bash_py is not None
+    assert bash_py[1:3] == ["-c", "import os; print(1)"]
+    bash_run = _command_args("python3 -c \"print('hi')\"", "bash")
+    assert bash_run[0] == bash_py[0]
+    assert bash_run[1] == "-c"
+    assert python_direct_argv("python3 -c 'print(1)' | cat") is None
 
 
 async def test_background_process_can_be_inspected_and_killed(tmp_path):
@@ -232,6 +246,26 @@ async def test_python_child_uses_lan_http_proxy_not_vpn(tmp_path, monkeypatch):
     result = await tool.execute(
         action="run_code",
         code="import os; print(os.environ.get('HTTP_PROXY') or '')",
+        working_directory=str(tmp_path),
+    )
+    assert result.success, result.error
+    assert "10.8.0.1" not in result.output
+    assert "http://127.0.0.1:" in result.output
+    wrapped = await tool.execute(
+        action="run_code",
+        code="import socket; print(socket.socket.connect.__name__)",
+        working_directory=str(tmp_path),
+    )
+    assert wrapped.success, wrapped.error
+    assert "_connect" in wrapped.output
+
+
+async def test_bash_python_c_uses_lan_http_proxy_not_vpn(tmp_path, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    tool = TerminalTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(
+        command="python3 -c \"import os; print(os.environ.get('HTTP_PROXY') or '')\"",
+        shell="bash",
         working_directory=str(tmp_path),
     )
     assert result.success, result.error

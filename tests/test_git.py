@@ -215,7 +215,7 @@ async def test_worktree_add_onto_extra_drive(tmp_path, monkeypatch):
     assert "outside allowed" in (outside.error or "").lower()
 
 
-async def test_git_tool_child_drops_http_proxy(tmp_path, monkeypatch):
+async def test_git_tool_child_uses_lan_http_proxy_not_vpn(tmp_path, monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
     seen: dict[str, dict] = {}
     real = asyncio.create_subprocess_exec
@@ -231,6 +231,7 @@ async def test_git_tool_child_drops_http_proxy(tmp_path, monkeypatch):
     tool = _tool(tmp_path)
     result = await tool.execute(action="status", path=str(repo))
     assert result.success, result.error
-    assert seen.get("env") is not None
-    assert "HTTP_PROXY" not in seen["env"]
+    env = seen.get("env") or {}
+    assert env.get("HTTP_PROXY", "").startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env.get("HTTP_PROXY", "")
 
