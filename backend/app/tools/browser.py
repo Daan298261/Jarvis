@@ -292,5 +292,7 @@ class BrowserTool(Tool):
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
                 return ToolResult(False, "", error=f"Unknown action {action}")
+            except ModuleNotFoundError:
+                return ToolResult(False, "", error="Playwright is not installed on this PC, so I cannot open a browser.")
             except Exception as exc:
                 return ToolResult(False, "", error=str(exc))

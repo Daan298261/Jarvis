@@ -58,6 +58,10 @@ describe("companion WAN prepare body", () => {
     assert.equal("gateway_host" in body, false)
   })
 
+  test("natpmp path has an owner-facing label", () => {
+    assert.equal(wan.wanPathLabel("natpmp", "mapped"), "Router mapped with NAT-PMP (TCP 4781, one-hour lease)")
+  })
+
   test("snapshot hydrate never copies a stored password", () => {
     const form = wan.wanFormFromSnapshot({
       wan: { wan_method: "gateway_ssh", gateway_host: "192.168.1.1", gateway_password: "nope" },
