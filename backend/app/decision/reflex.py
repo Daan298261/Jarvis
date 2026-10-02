@@ -240,9 +240,10 @@ def decide(
         a.value == "technical" and a.confidence is not None and a.confidence >= 0.85
         for a in rules_result.answers.values()
     )
-    hard_safety = dclass in POLICY_HARDENED_CLASSES or bool(projection.get("policy_deny")) or bool(
-        projection.get("policy_requires_approval")
-    )
+    # Hard short-circuit is for policy deny and hardened classes only.
+    # policy_requires_approval must still reach Jev/Laya; _apply_policy_guard
+    # raises the approval floor after the typed provider answers (RFC-0116).
+    hard_safety = dclass in POLICY_HARDENED_CLASSES or bool(projection.get("policy_deny"))
     harm_fence = dclass == "harm_veto" and rules_result.hard_rule
     if rules_result.hard_rule and (hard_safety or speak_fence or harm_fence):
         guarded = _apply_policy_guard(state=projection, decision_class=dclass, result=rules_result)

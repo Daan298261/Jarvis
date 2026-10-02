@@ -269,7 +269,9 @@ def test_license_api_endpoints(jarvis_env, license_store, monkeypatch):
     assert status.status_code == 200
     assert status.json()["validation"]["status"] == "unlicensed"
 
-    now = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
+    # Wall-clock validation: keep the lease relative to "now" so the suite does
+    # not rot when calendar time moves past a frozen fixture date.
+    now = datetime.now(timezone.utc)
     lease = _make_lease(
         license_store["cluster_id"],
         issued_at=now - timedelta(days=1),

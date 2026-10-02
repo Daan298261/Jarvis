@@ -24,10 +24,13 @@ def test_dialogue_rejects_out_of_range_personality_values():
 def test_tts_defaults_preserve_primary_vram_headroom():
     settings = TtsSettings()
     assert settings.engine == "auto"
-    assert settings.quality_engine == "chatterbox_multilingual_v3"
+    # Default quality engine stays on Kokoro so primary-model VRAM is preserved;
+    # Chatterbox remains the advisory quality candidate in RECOMMENDED_16GB_STACK.
+    assert settings.quality_engine == "kokoro"
     assert settings.fallback_engine == "kokoro"
     assert settings.loading_policy == "lazy"
     assert settings.prefer_cpu_fallback is True
+    assert RECOMMENDED_16GB_STACK["tts_quality"] == "chatterbox-multilingual-v3"
 
 
 def test_app_settings_include_dialogue_and_tts():

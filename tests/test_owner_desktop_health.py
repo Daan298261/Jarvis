@@ -12,7 +12,12 @@ def test_ephemeral_pytest_paths_are_stripped(tmp_path, monkeypatch):
     assert is_ephemeral_workspace_path(leaked)
     cleaned = sanitize_allowed_directories([leaked])
     assert leaked not in cleaned
-    assert any(path.lower().endswith("\\documents") or path.lower().endswith("/documents") for path in cleaned)
+    # Outside pytest, empty/ephemeral lists fall back to default workspace roots
+    # (Documents may be absent on Linux CI — assert the fallback path instead).
+    from app.config import default_allowed_directories
+
+    assert cleaned == default_allowed_directories()
+    assert cleaned, "default workspace roots should be non-empty"
 
 
 def test_parse_desktop_goal_click_and_type():

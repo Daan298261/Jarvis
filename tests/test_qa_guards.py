@@ -83,11 +83,12 @@ async def test_git_checkpoint_creates_branch_and_keeps_edits(tmp_path):
     subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True, env=env)
     subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, env=env)
     (repo / "a.txt").write_text("two\n", encoding="utf-8")
-    result = await GitTool().execute(action="checkpoint", path=str(repo))
+    git = GitTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await git.execute(action="checkpoint", path=str(repo))
     assert result.success, result.error
     assert "jarvis-checkpoint-" in result.output
     assert (repo / "a.txt").read_text(encoding="utf-8") == "two\n"
-    branches = await GitTool().execute(action="branch", path=str(repo))
+    branches = await git.execute(action="branch", path=str(repo))
     assert "jarvis-checkpoint-" in branches.output
 
 

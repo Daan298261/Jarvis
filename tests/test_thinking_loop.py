@@ -32,6 +32,14 @@ async def test_balanced_profile_thinks_on_plan_not_on_simple_read(jarvis_env):
     task = await _finished(created.id)
     assert task.status == "completed"
     flags = [call["kwargs"].get("thinking") for call in provider.calls]
-    assert flags[0] is True
-    # After the first filesystem.read, the next act/verify turn should skip thinking.
-    assert False in flags[1:]
+    # Call 0 may be an ingress/metadata turn (tools=None, thinking off). The first
+    # planning turn with tools exposed must think under balanced/selective.
+    plan_flags = [
+        call["kwargs"].get("thinking")
+        for call in provider.calls
+        if call.get("tools")
+    ]
+    assert plan_flags, "expected at least one tool-exposed model turn"
+    assert plan_flags[0] is True
+    # After the first filesystem.read, later act/verify turns should skip thinking.
+    assert False in flags

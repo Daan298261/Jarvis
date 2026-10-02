@@ -33,7 +33,9 @@ def test_index_lists_rooms_and_anzu_specialist_roster(client):
     assert "enki" in ids
     assert "nabu" in ids
     assert "eir" in ids
-    assert len(ids) == 12
+    # ROSTER includes Anzu (supervisor, excluded) plus specialists; Umi adds one.
+    assert len(ids) == 13
+    assert "umi" in ids
     enki = next(row for row in body["roster"] if row["id"] == "enki")
     assert enki["label"] == "Enki"
     assert enki["phrase"]

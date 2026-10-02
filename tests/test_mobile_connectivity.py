@@ -116,13 +116,24 @@ async def test_router_failure_keeps_lan_available(network_env, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_connection_setup_requires_owner_key_even_on_localhost(network_env):
+async def test_connection_setup_requires_owner_key_for_remote_callers(network_env):
+    """Localhost pairing may auto-mint; remote callers must still present the owner key."""
     from app.api.companion import owner_router
     from fastapi import FastAPI
     app = FastAPI()
     app.include_router(owner_router)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=("127.0.0.1", 123)), base_url="http://localhost") as client:
+    # Remote (non-loopback) client must be rejected without the owner key.
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, client=("203.0.113.10", 123)),
+        base_url="http://example.test",
+    ) as client:
         assert (await client.post("/api/mobile/manage/connection", json={"enabled": True})).status_code in (401, 403)
+    # Localhost remains usable for the desktop portal first-pair flow.
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, client=("127.0.0.1", 123)),
+        base_url="http://localhost",
+    ) as client:
+        assert (await client.post("/api/mobile/manage/connection", json={"enabled": True})).status_code == 200
 
 
 @pytest.mark.asyncio
