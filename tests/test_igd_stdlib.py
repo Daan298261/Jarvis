@@ -8,6 +8,7 @@ from app.mobile.igd import (
     StdlibIGD,
     accept_ssdp_peer,
     igd_auth_candidates,
+    igd_http_bind,
     is_wan_connection_service,
     parse_igd_control,
     parse_ssdp_location,
@@ -52,6 +53,10 @@ def test_ssdp_and_control_url_parsing():
     assert accept_ssdp_peer(("192.168.1.1", 1900))
     assert not accept_ssdp_peer(("8.8.8.8", 1900))
     assert not accept_ssdp_peer(("100.64.0.1", 1900))
+    assert igd_http_bind("192.168.1.12") == "192.168.1.12"
+    assert igd_http_bind("10.8.0.2") == "10.8.0.2"
+    assert igd_http_bind("8.8.8.8") == ""
+    assert igd_http_bind("100.64.1.8") == ""
     assert is_wan_connection_service("urn:schemas-upnp-org:service:WANIPConnection:2")
     v2 = DESC.replace("WANIPConnection:1", "WANIPConnection:2")
     control, service = parse_igd_control(v2, "http://192.168.1.1:5000/rootDesc.xml")
@@ -94,6 +99,15 @@ def test_lookup_egress_ipv4_accepts_global_and_rejects_private(monkeypatch):
     monkeypatch.setattr("app.policy.network_http.httpx.Client", FakeClient)
     assert lookup_egress_ipv4() == "8.8.4.4"
     assert ipaddress.ip_address("8.8.4.4").is_global
+
+    class TestNetClient(FakeClient):
+        def get(self, url, **kwargs):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(status_code=200, headers={}, url=url, text="203.0.113.9")
+
+    monkeypatch.setattr("app.policy.network_http.httpx.Client", TestNetClient)
+    assert lookup_egress_ipv4() == "203.0.113.9"
 
 
 def test_lookup_egress_ipv4_honors_internet_deny(tmp_path, monkeypatch):

@@ -159,7 +159,7 @@ def lookup_egress_ipv4() -> str:
         try:
             text = gated_get_sync(url, tool="web_fetch", timeout=3.0, trust_env=False).text.strip()
             address = ipaddress.ip_address(text.split()[0])
-            if address.version == 4 and address.is_global:
+            if address.version == 4 and is_literal_public_ipv4(str(address)):
                 return str(address)
             last_error = ValueError("egress lookup was not a public IPv4")
         except Exception as exc:
@@ -592,7 +592,8 @@ def gateway_ssh_argv(
     auth = _identity_args(identity_file) if (identity_file or "").strip() else []
     if not auth and not (password or "").strip():
         raise ValueError("Gateway SSH needs an identity file or the owner router password")
-    script = openwrt_redirect_script(lan_ip)
+    dest = _private_ipv4(lan_ip)
+    script = openwrt_redirect_script(dest)
     options = ["-o", "StrictHostKeyChecking=accept-new"]
     if auth:
         options = ["-o", "BatchMode=yes", *options, *auth]
@@ -607,6 +608,8 @@ def gateway_ssh_argv(
         ]
     return [
         ssh_executable(),
+        "-b",
+        dest,
         *options,
         "-p",
         str(int(port)),

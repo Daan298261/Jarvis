@@ -11,7 +11,7 @@ import os
 import struct
 
 from .natpmp import LEASE_SECONDS, PORT, require_private_gateway, udp_exchange
-from .wan_forward import default_gateway_ipv4, is_rfc1918_ipv4
+from .wan_forward import default_gateway_ipv4, is_literal_public_ipv4, is_rfc1918_ipv4
 
 _OPCODE_MAP = 1
 _PROTO_TCP = 6
@@ -33,7 +33,7 @@ def decode_assigned_ipv4(raw: bytes) -> str:
         address = ipaddress.IPv4Address(raw[12:16])
     else:
         raise ValueError("PCP assigned address was not IPv4")
-    if not address.is_global:
+    if not is_literal_public_ipv4(str(address)):
         raise ValueError("Router has no public IPv4 address")
     return str(address)
 

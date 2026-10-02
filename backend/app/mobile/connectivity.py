@@ -119,7 +119,9 @@ def router_candidate(username: str = "", password: str = ""):
                 router.selectigd()
                 apply_igd_logon(router, username, password)
                 address = ipaddress.ip_address(router.externalipaddress())
-                if address.version != 4 or not address.is_global:
+                from .wan_forward import is_literal_public_ipv4
+
+                if address.version != 4 or not is_literal_public_ipv4(str(address)):
                     last_error = ValueError(
                         "Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access"
                     )

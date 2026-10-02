@@ -15,7 +15,7 @@ from xml.sax.saxutils import escape
 
 import httpx
 
-from .wan_forward import PORT, is_rfc1918_ipv4, mapping_lan_ipv4
+from .wan_forward import PORT, is_literal_public_ipv4, is_rfc1918_ipv4, mapping_lan_ipv4
 
 WANIP = "urn:schemas-upnp-org:service:WANIPConnection:1"
 WANPPP = "urn:schemas-upnp-org:service:WANPPPConnection:1"
@@ -179,6 +179,25 @@ def lan_igd_request(client, method: str, url: str, username: str = "", password:
     return last
 
 
+def igd_http_bind(local_address: str = "") -> str:
+    """Source IPv4 for IGD HTTP so a VPN default route cannot steal the LAN hop."""
+    bind = (local_address or "").strip()
+    return bind if is_rfc1918_ipv4(bind) else ""
+
+
+def lan_http_client(local_address: str = "") -> httpx.Client:
+    kwargs: dict = {
+        "timeout": 4,
+        "trust_env": False,
+        "follow_redirects": False,
+        "verify": False,
+    }
+    bind = igd_http_bind(local_address)
+    if bind:
+        kwargs["transport"] = httpx.HTTPTransport(local_address=bind)
+    return httpx.Client(**kwargs)
+
+
 class StdlibIGD:
     def __init__(self, control_url: str, service_type: str, lanaddr: str, username: str = "", password: str = ""):
         parsed = urlparse(control_url)
@@ -197,7 +216,7 @@ class StdlibIGD:
     def _post(self, action: str, inner: str) -> str:
         envelope = soap_envelope(action, self.service_type, inner)
         # LAN IGD boxes often present a self-signed certificate; the URL already passed require_lan_http_url.
-        with httpx.Client(timeout=4, trust_env=False, follow_redirects=False, verify=False) as client:
+        with lan_http_client(self.lanaddr) as client:
             response = lan_igd_request(
                 client,
                 "post",
@@ -220,7 +239,7 @@ class StdlibIGD:
         text = self._post("GetExternalIPAddress", "")
         value = _soap_text(text, "NewExternalIPAddress")
         address = ipaddress.ip_address(value)
-        if address.version != 4 or not address.is_global:
+        if address.version != 4 or not is_literal_public_ipv4(str(address)):
             raise ValueError("Router has no public IPv4 address")
         return str(address)
 
@@ -488,17 +507,17 @@ def stdlib_igd_candidate(username: str = "", password: str = "", lanaddr: str = 
     hosts = _igd_lan_hosts(lanaddr)
     for location in locations:
         try:
-            with httpx.Client(timeout=4, trust_env=False, follow_redirects=False, verify=False) as client:
+            igd_host = urlparse(location).hostname or ""
+            host = mapping_lan_ipv4(hosts, igd_host)
+            if not is_rfc1918_ipv4(host):
+                raise ValueError("No private LAN IPv4 for IGD internal client")
+            with lan_http_client(host) as client:
                 description = lan_igd_request(client, "get", location, username, password)
             if description.status_code in {401, 403}:
                 raise RuntimeError("IGD requires the owner router username and password")
             if description.status_code >= 400:
                 raise RuntimeError(f"IGD description HTTP {description.status_code}")
             control, service = parse_igd_control(description.text, location)
-            igd_host = urlparse(location).hostname or ""
-            host = mapping_lan_ipv4(hosts, igd_host)
-            if not is_rfc1918_ipv4(host):
-                raise ValueError("No private LAN IPv4 for IGD internal client")
             router = StdlibIGD(control, service, str(ipaddress.ip_address(host)), username, password)
             return router, router.externalipaddress()
         except Exception as exc:

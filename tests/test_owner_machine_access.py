@@ -135,6 +135,7 @@ def test_gateway_ssh_argv_uses_identity_and_openwrt_profile(tmp_path, monkeypatc
     assert argv[-2] == "-s"
     assert "src_dport='4781'" in argv[-1]
     assert "BatchMode=yes" in argv
+    assert argv[1:3] == ["-b", "192.168.1.12"]
     with pytest.raises(ValueError):
         gateway_ssh_argv(
             host="192.168.1.1",
@@ -157,6 +158,7 @@ def test_gateway_ssh_accepts_owner_password_without_identity(monkeypatch):
     assert "-i" not in argv
     assert "owner-secret" not in joined
     assert "BatchMode=no" in argv
+    assert argv[1:3] == ["-b", "192.168.1.12"]
     assert "src_dport='4781'" in argv[-1]
     assert gateway_ssh_configured({"gateway_password": "owner-secret"})
     assert not gateway_ssh_configured({"gateway_host": "192.168.1.1"})

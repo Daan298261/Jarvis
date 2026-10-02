@@ -49,5 +49,7 @@ def test_pcp_map_reply_must_be_4781_and_public():
     cgnat = b"\x00" * 10 + b"\xff\xff" + bytes([10, 8, 0, 2])
     with pytest.raises(ValueError, match="no public IPv4"):
         decode_assigned_ipv4(cgnat)
+    testnet = b"\x00" * 10 + b"\xff\xff" + bytes([203, 0, 113, 9])
+    assert decode_assigned_ipv4(testnet) == "203.0.113.9"
     with pytest.raises(ValueError, match="nonce"):
         decode_map_response(header + body, b"\x00" * 12)

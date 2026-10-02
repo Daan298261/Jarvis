@@ -9,7 +9,7 @@ import ipaddress
 import socket
 import struct
 
-from .wan_forward import PORT, default_gateway_ipv4, is_rfc1918_ipv4
+from .wan_forward import PORT, default_gateway_ipv4, is_literal_public_ipv4, is_rfc1918_ipv4
 
 NATPMP_PORT = 5351
 LEASE_SECONDS = 3600
@@ -44,7 +44,7 @@ def decode_public_ip(payload: bytes) -> str:
     if result != 0:
         raise RuntimeError(f"NAT-PMP public IP refused ({result})")
     address = ipaddress.IPv4Address(raw_ip)
-    if not address.is_global:
+    if not is_literal_public_ipv4(str(address)):
         raise ValueError("Router has no public IPv4 address")
     return str(address)
 
