@@ -84,4 +84,14 @@ class TransportPolicyTest {
         val error: Throwable = javax.net.ssl.SSLException("Hostname 8.8.8.8 not verified")
         assertTrue(error is java.io.IOException)
     }
+
+    @Test fun racesOrdinaryGetsButNotPairing() {
+        assertTrue(TransportPolicy.mayRaceOrigins("GET", "/connection"))
+        assertTrue(TransportPolicy.mayRaceOrigins("GET", "/models"))
+        assertFalse(TransportPolicy.mayRaceOrigins("GET", "/challenge/device-1"))
+        assertFalse(TransportPolicy.mayRaceOrigins("POST", "/session"))
+        assertFalse(TransportPolicy.mayRaceOrigins("POST", "/messages"))
+        assertEquals(1500L, TransportPolicy.connectTimeoutMs(2))
+        assertEquals(4000L, TransportPolicy.connectTimeoutMs(1))
+    }
 }

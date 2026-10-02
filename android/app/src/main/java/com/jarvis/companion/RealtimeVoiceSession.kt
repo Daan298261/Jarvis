@@ -38,9 +38,13 @@ class RealtimeVoiceSession(
 
     suspend fun connect() = withContext(Dispatchers.IO) {
         api.ensureSession()
-        val client = api.pinnedClient().newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build()
+        val origins = api.candidateOrigins()
+        val client = api.pinnedClient().newBuilder()
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .connectTimeout(TransportPolicy.connectTimeoutMs(origins.size), TimeUnit.MILLISECONDS)
+            .build()
         var lastError: Throwable? = null
-        for (origin in api.candidateOrigins()) {
+        for (origin in origins) {
             val url = origin.replace("https://", "wss://").replace("http://", "ws://") +
                 "/api/companion/voice/realtime"
             val request = Request.Builder().url(url)

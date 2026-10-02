@@ -20,6 +20,11 @@ object TransportPolicy {
     fun pairingFailover(path: String): Boolean =
         path == "/enroll" || path == "/lan-enroll" || path == "/session" || path.startsWith("/challenge/")
 
+    fun mayRaceOrigins(method: String, path: String): Boolean =
+        method == "GET" && !pairingFailover(path)
+
+    fun connectTimeoutMs(originCount: Int): Long = if (originCount > 1) 1_500L else 4_000L
+
     fun orderedForReachability(addresses: Iterable<String>): List<String> {
         val distinct = addresses.map { origin(it) }.distinct()
         return distinct.sortedWith(compareBy({ reachabilityRank(it) }, { it }))
