@@ -32,7 +32,12 @@ def models_dir() -> Path:
 
 
 def queue_dir() -> Path:
-    path = data_dir() / "queue"
+    path = resolved_data_sidecar_dir(
+        "queue",
+        local=data_dir() / "queue",
+        markers=("pending", "processed", "failed"),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 

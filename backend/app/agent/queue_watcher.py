@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 from .loop import AGENT
 from .self_dev import kill_switch_active
 
@@ -17,7 +17,12 @@ logger = logging.getLogger("jarvis.queue")
 
 
 def queue_root() -> Path:
-    path = data_dir() / "queue"
+    path = resolved_data_sidecar_dir(
+        "queue",
+        local=data_dir() / "queue",
+        markers=("pending", "processed", "failed"),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     (path / "pending").mkdir(parents=True, exist_ok=True)
     (path / "processed").mkdir(parents=True, exist_ok=True)

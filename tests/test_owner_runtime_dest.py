@@ -912,3 +912,17 @@ def test_obsidian_index_uses_extra_when_data_volume_is_full(tmp_path, monkeypatc
     dest = _index_path()
     assert dest == extra / "Jarvis" / "runtime" / "obsidian-index" / "lexical.json"
     assert dest.parent.is_dir()
+
+
+def test_queue_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.agent.queue_watcher import queue_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.agent.queue_watcher.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = queue_root()
+    assert dest == extra / "Jarvis" / "runtime" / "queue"
+    assert (dest / "pending").is_dir()

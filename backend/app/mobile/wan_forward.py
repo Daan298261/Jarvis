@@ -174,11 +174,6 @@ def mapping_lan_ipv4(hosts, gateway: str = "") -> str:
     for host in candidates:
         if ipaddress.ip_address(host) in same_24:
             return host
-    for net in _RFC1918_V4:
-        if gw in net:
-            for host in candidates:
-                if ipaddress.ip_address(host) in net:
-                    return host
     return ""
 
 

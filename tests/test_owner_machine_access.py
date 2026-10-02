@@ -221,7 +221,7 @@ def test_mapping_lan_ipv4_skips_cgnat_and_prefers_gateway_subnet():
     assert not is_rfc1918_ipv4("8.8.8.8")
     assert mapping_lan_ipv4(["100.64.1.8", "192.168.1.12"], "192.168.1.1") == "192.168.1.12"
     assert mapping_lan_ipv4(["10.0.0.5", "192.168.1.12"], "192.168.1.1") == "192.168.1.12"
-    assert mapping_lan_ipv4(["10.0.0.5", "192.168.0.9"], "192.168.1.1") == "192.168.0.9"
+    assert mapping_lan_ipv4(["10.0.0.5", "192.168.0.9"], "192.168.1.1") == ""
     assert mapping_lan_ipv4(["10.8.0.2"], "192.168.1.1") == ""
     assert mapping_lan_ipv4(["100.64.1.8"], "192.168.1.1") == ""
     assert mapping_lan_ipv4([], "192.168.1.1") == ""
