@@ -93,7 +93,7 @@ async def _assert_current_url_allowed(page, action: str) -> None:
         await _abandon_disallowed_page(page, blocked)
 
 
-async def _run_and_gate_navigation(page, coro, action: str = "open") -> None:
+async def _run_and_gate_navigation(page, coro, action: str = "open") -> Any:
     """Run an interaction, then re-gate every captured navigation hop plus the final URL."""
     hops: list[str] = []
 
@@ -108,8 +108,9 @@ async def _run_and_gate_navigation(page, coro, action: str = "open") -> None:
             bound = True
         except Exception:
             bound = False
+    result: Any = None
     try:
-        await coro
+        result = await coro
         await _wait_stable(page)
     finally:
         if bound:
@@ -129,6 +130,7 @@ async def _run_and_gate_navigation(page, coro, action: str = "open") -> None:
         blocked = gate_browser_url(hop, action)
         if blocked:
             await _abandon_disallowed_page(page, blocked)
+    return result
 
 
 def browser_permission_url(action: str, kwargs: dict[str, Any] | None, current_url: str = "") -> str:
@@ -384,11 +386,15 @@ class BrowserTool(Tool):
                         locator = page.get_by_label(kwargs["name"]).first
                     else:
                         locator = page.locator("input, textarea, [contenteditable=true]").first
-                    if action == "fill":
-                        await locator.fill(text)
-                    else:
-                        await locator.click()
-                        await locator.type(text)
+
+                    async def _type_or_fill() -> None:
+                        if action == "fill":
+                            await locator.fill(text)
+                        else:
+                            await locator.click()
+                            await locator.type(text)
+
+                    await _run_and_gate_navigation(page, _type_or_fill(), "open")
                     return ToolResult(True, "Typed into field")
                 if action == "press":
                     await _run_and_gate_navigation(
@@ -396,7 +402,10 @@ class BrowserTool(Tool):
                     )
                     return ToolResult(True, f"Pressed {kwargs.get('key')}")
                 if action == "evaluate":
-                    result = await page.evaluate(kwargs.get("script") or "() => document.title")
+                    async def _eval() -> Any:
+                        return await page.evaluate(kwargs.get("script") or "() => document.title")
+
+                    result = await _run_and_gate_navigation(page, _eval(), "open")
                     return ToolResult(True, str(result))
                 if action == "screenshot":
                     out = Path(kwargs.get("path") or (data_dir() / "screenshots" / "browser.png"))
@@ -413,16 +422,25 @@ class BrowserTool(Tool):
                     listing = "\n".join(f"{i}: {p.url}" for i, p in enumerate(pages))
                     return ToolResult(True, listing or "No tabs")
                 if action == "download":
-                    async with page.expect_download(timeout=30000) as download_info:
-                        if kwargs.get("selector"):
-                            await page.locator(kwargs["selector"]).first.click()
-                    download = await download_info.value
+                    async def _download() -> Any:
+                        async with page.expect_download(timeout=30000) as download_info:
+                            if kwargs.get("selector"):
+                                await page.locator(kwargs["selector"]).first.click()
+                        return await download_info.value
+
+                    download = await _run_and_gate_navigation(page, _download(), "open")
                     dest = Path(kwargs.get("path") or (data_dir() / "downloads" / download.suggested_filename))
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     await download.save_as(str(dest))
                     return ToolResult(True, f"Downloaded to {dest}")
                 if action == "upload":
-                    await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
+                    await _run_and_gate_navigation(
+                        page,
+                        page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(
+                            kwargs.get("path")
+                        ),
+                        "open",
+                    )
                     return ToolResult(True, "Uploaded file")
                 return ToolResult(False, "", error=f"Unknown action {action}")
             except ModuleNotFoundError as exc:

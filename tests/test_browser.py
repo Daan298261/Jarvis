@@ -127,3 +127,91 @@ async def test_click_navigation_hops_lan_to_wan_are_blocked(tmp_path, monkeypatc
         assert "don't allow" in str(exc).lower()
     assert page.gotos[-1] == "about:blank"
     assert page.url == "about:blank"
+
+
+class _HopPage:
+    def __init__(self, url: str = "http://nas.local/home"):
+        self.url = url
+        self.gotos: list[str] = []
+        self._handlers: list = []
+
+    def on(self, event, handler):
+        if event == "response":
+            self._handlers.append(handler)
+
+    def remove_listener(self, event, handler):
+        self._handlers = [item for item in self._handlers if item is not handler]
+
+    async def goto(self, url, **kwargs):
+        self.gotos.append(url)
+        self.url = url
+
+    async def wait_for_load_state(self, *args, **kwargs):
+        return None
+
+    def fire_wan_hop(self):
+        first = SimpleNamespace(url="http://nas.local/go", redirected_from=None)
+        second = SimpleNamespace(url="https://example.test/leaked", redirected_from=first)
+        self.url = "https://example.test/leaked"
+        response = SimpleNamespace(request=second, url="https://example.test/leaked")
+        for handler in list(self._handlers):
+            handler(response)
+
+
+async def test_evaluate_navigation_hops_lan_to_wan_are_blocked(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    page = _HopPage()
+
+    async def eval_navigate():
+        page.fire_wan_hop()
+        return "navigated"
+
+    try:
+        await _run_and_gate_navigation(page, eval_navigate(), "open")
+        raise AssertionError("expected PermissionError")
+    except PermissionError as exc:
+        assert "don't allow" in str(exc).lower()
+    assert page.gotos[-1] == "about:blank"
+    assert page.url == "about:blank"
+
+
+async def test_fill_navigation_hops_lan_to_wan_are_blocked(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    page = _HopPage()
+
+    async def fill_and_submit():
+        page.fire_wan_hop()
+
+    try:
+        await _run_and_gate_navigation(page, fill_and_submit(), "open")
+        raise AssertionError("expected PermissionError")
+    except PermissionError as exc:
+        assert "don't allow" in str(exc).lower()
+    assert page.gotos[-1] == "about:blank"
+    assert page.url == "about:blank"
+
+
+async def test_run_and_gate_returns_coro_result_when_url_allowed(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.local", "always")
+    apply_grant("network.internet", "deny")
+    page = _HopPage()
+
+    async def eval_title():
+        return "NAS"
+
+    assert await _run_and_gate_navigation(page, eval_title(), "open") == "NAS"
+    assert page.url == "http://nas.local/home"
