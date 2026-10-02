@@ -16,7 +16,7 @@ from ..agent.worktrees import (
 )
 from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import resolve_owner_file_path, workspace_cwd
+from .owner_paths import direct_child_env, resolve_owner_file_path, workspace_cwd
 from .safety import resolve_allowed_path
 
 
@@ -166,6 +166,7 @@ class GitTool(Tool):
             "git",
             *args,
             cwd=cwd,
+            env=direct_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

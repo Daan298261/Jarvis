@@ -214,3 +214,23 @@ async def test_worktree_add_onto_extra_drive(tmp_path, monkeypatch):
     assert outside.success is False
     assert "outside allowed" in (outside.error or "").lower()
 
+
+async def test_git_tool_child_drops_http_proxy(tmp_path, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    seen: dict[str, dict] = {}
+    real = asyncio.create_subprocess_exec
+
+    async def wrapped(*args, **kwargs):
+        env = kwargs.get("env")
+        if env is not None:
+            seen["env"] = env
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr("app.tools.git_tools.asyncio.create_subprocess_exec", wrapped)
+    repo = await _repo(tmp_path)
+    tool = _tool(tmp_path)
+    result = await tool.execute(action="status", path=str(repo))
+    assert result.success, result.error
+    assert seen.get("env") is not None
+    assert "HTTP_PROXY" not in seen["env"]
+

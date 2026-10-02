@@ -11,7 +11,7 @@ from app.tools.registry import REGISTRY
 from app.workers.browser import BrowserUseBackend, playwright_is_default
 from app.workers.code import OpenHandsBackend
 from app.workers.interpreter import OpenInterpreterBackend
-from app.workers.local_llm import local_openai_env
+from app.workers.local_llm import local_openai_env, merge_local_env
 from app.config import AppSettings
 
 
@@ -44,6 +44,16 @@ def test_local_worker_llm_stays_on_jarvis_endpoint():
     assert env["OPENAI_BASE_URL"].startswith("http://127.0.0.1:8088")
     assert "openai.com" not in env["OPENAI_BASE_URL"]
     assert env["LLM_API_KEY"] == "local"
+
+
+def test_merge_local_env_drops_http_proxy_so_workers_use_os_route(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:3128")
+    env = merge_local_env(AppSettings())
+    assert "HTTP_PROXY" not in env
+    assert "https_proxy" not in env
+    assert env["OPENAI_API_KEY"] == "local"
+    assert env["OPENAI_BASE_URL"].startswith("http://127.0.0.1:8088")
 
 
 def test_browser_use_model_uses_browser_settings():

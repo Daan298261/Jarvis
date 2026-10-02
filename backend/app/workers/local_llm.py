@@ -44,7 +44,9 @@ def local_openai_env(settings: AppSettings | None = None) -> dict[str, str]:
 
 
 def merge_local_env(settings: AppSettings | None = None) -> dict[str, str]:
-    env = os.environ.copy()
+    from ..tools.owner_paths import direct_child_env
+
+    env = direct_child_env()
     env.update(local_openai_env(settings))
     return env
 

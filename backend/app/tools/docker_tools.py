@@ -6,7 +6,7 @@ from typing import Any
 
 from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import default_workspace_dir, resolve_workspace_dir
+from .owner_paths import default_workspace_dir, direct_child_env, resolve_workspace_dir
 
 
 def looks_like_host_path(host: str) -> bool:
@@ -199,6 +199,7 @@ class DockerTool(Tool):
         proc = await asyncio.create_subprocess_exec(
             "docker",
             *argv,
+            env=direct_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

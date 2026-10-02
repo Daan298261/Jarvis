@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ..tools.base import ToolResult
+from ..tools.owner_paths import direct_child_env
 
 UFO_TIMEOUT_SECONDS = 180
 CUA_TIMEOUT_SECONDS = 180
@@ -150,6 +151,7 @@ class ComputerUseBackend:
     async def _invoke(self, command: list[str], timeout: int) -> tuple[str, str, int]:
         proc = await asyncio.create_subprocess_exec(
             *command,
+            env=direct_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -383,7 +385,7 @@ class UFOBackend(ComputerUseBackend):
 
     def _openai_env(self) -> dict[str, str]:
         """Point UFO² at the local OpenAI-compatible llama.cpp endpoint (>=20k ctx)."""
-        env = os.environ.copy()
+        env = direct_child_env()
         try:
             from ..config import load_settings
 
@@ -407,7 +409,7 @@ class UFOBackend(ComputerUseBackend):
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=env,
+            env=env or direct_child_env(),
             cwd=cwd or None,
         )
         try:
@@ -517,6 +519,7 @@ class CuaBackend(ComputerUseBackend):
     async def _invoke(self, command: list[str], timeout: int) -> tuple[str, str, int]:
         proc = await asyncio.create_subprocess_exec(
             *command,
+            env=direct_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

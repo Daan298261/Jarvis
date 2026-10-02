@@ -209,3 +209,31 @@ async def test_terminal_omitted_cwd_uses_documents(tmp_path, monkeypatch):
     result = await tool.execute(command="cat here.txt", shell="bash")
     assert result.success, result.error
     assert "shell-docs" in result.output
+
+
+async def test_terminal_child_does_not_see_http_proxy(tmp_path, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:8080")
+    tool = TerminalTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(
+        command="import os; print('HAS' if os.environ.get('HTTP_PROXY') or os.environ.get('https_proxy') else 'NO')",
+        shell="python",
+        working_directory=str(tmp_path),
+    )
+    assert result.success, result.error
+    assert "NO" in result.output
+    assert "HAS" not in result.output
+
+
+async def test_python_child_does_not_see_http_proxy(tmp_path, monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:8080")
+    tool = PythonTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(
+        action="run_code",
+        code="import os; print('HAS' if os.environ.get('HTTP_PROXY') or os.environ.get('https_proxy') else 'NO')",
+        working_directory=str(tmp_path),
+    )
+    assert result.success, result.error
+    assert "NO" in result.output
+    assert "HAS" not in result.output

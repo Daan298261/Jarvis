@@ -2,11 +2,29 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 from ..config import data_dir
 from .safety import resolve_allowed_path
+
+_PROXY_ENV_NAMES = frozenset({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FTP_PROXY"})
+
+
+def direct_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for owner tool children on the OS default route.
+
+    Leftover HTTP_PROXY (VPN clients, installer leftovers) steals LAN curl and
+    internet fetch away from this PC's default route. ``web_fetch`` and Chromium
+    already ignore process proxies; terminal, python, git, and HexStrike must
+    match. PATH and JARVIS_* are kept.
+    """
+    env = dict(os.environ if base is None else base)
+    for key in list(env):
+        if key.upper() in _PROXY_ENV_NAMES:
+            env.pop(key, None)
+    return env
 
 
 def owner_media_dir(*names: str) -> Path:

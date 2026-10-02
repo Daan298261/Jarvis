@@ -14,7 +14,7 @@ import psutil
 
 from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import workspace_cwd
+from .owner_paths import direct_child_env, workspace_cwd
 from .safety import classify_command, is_protected_process
 
 
@@ -256,6 +256,7 @@ class TerminalTool(Tool):
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 cwd=cwd,
+                env=direct_child_env(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -288,6 +289,7 @@ class TerminalTool(Tool):
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 cwd=cwd,
+                env=direct_child_env(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

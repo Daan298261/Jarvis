@@ -23,6 +23,7 @@ from app.mobile.wan_forward import (
     reverse_tunnel_argv,
 )
 from app.tools.safety import resolve_allowed_path
+from app.tools.owner_paths import direct_child_env
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +68,24 @@ def test_posix_slash_share_is_treated_as_lan_unc():
 def test_empty_allowlist_still_denies():
     with pytest.raises(PermissionError, match="No workspace directories"):
         resolve_allowed_path(str(Path.home()), [])
+
+
+def test_direct_child_env_drops_proxy_keeps_path(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:3128")
+    monkeypatch.setenv("ALL_PROXY", "socks5://10.8.0.1:1080")
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("JARVIS_HOME", "/tmp/jarvis")
+    env = direct_child_env()
+    assert "HTTP_PROXY" not in env
+    assert "https_proxy" not in env
+    assert "ALL_PROXY" not in env
+    assert "NO_PROXY" not in env
+    assert env["JARVIS_HOME"] == "/tmp/jarvis"
+    kept = direct_child_env({"PATH": "/usr/bin", "http_proxy": "http://proxy.example:8080", "HOME": "/home/taco"})
+    assert "http_proxy" not in kept
+    assert kept["PATH"] == "/usr/bin"
+    assert kept["HOME"] == "/home/taco"
 
 
 def test_reverse_tunnel_argv_is_batch_mode_and_4781_only(tmp_path, monkeypatch):

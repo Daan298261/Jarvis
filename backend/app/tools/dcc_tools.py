@@ -10,7 +10,7 @@ from typing import Any
 from ..projects.paths import project_media_dir
 from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import resolve_owner_file_path
+from .owner_paths import direct_child_env, resolve_owner_file_path
 from .safety import resolve_allowed_path
 
 _BLENDER_INSTALL = (
@@ -49,6 +49,7 @@ async def _run(argv: list[str], *, cwd: Path | None = None, timeout: int = 600) 
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd) if cwd else None,
+        env=direct_child_env(),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
