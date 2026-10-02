@@ -7,6 +7,8 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from ..config import AppSettings, live_workspace_roots_from_context, load_settings, playwright_user_data_dir
+from ..mobile.wan_forward import lan_http_bind_for_url
+from ..policy.network_http import _with_lan_bind
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import chromium_download_launch_kwargs, owner_media_dir, resolve_owner_file_path
 from .safety import resolve_allowed_path
@@ -316,6 +318,109 @@ async def _goto_with_retry(page, url: str) -> None:
     raise last_error or RuntimeError(f"Failed to open {target}")
 
 
+_HOP_BY_HOP = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-connection",
+        "transfer-encoding",
+        "te",
+        "trailer",
+        "upgrade",
+        "content-encoding",
+        "content-length",
+        "host",
+    }
+)
+
+
+def browser_lan_bind_for_url(url: str) -> str:
+    """Source IPv4 when Chromium would otherwise follow a VPN default route to a LAN host."""
+    scheme = (urlparse(str(url) or "").scheme or "").lower()
+    if scheme not in {"http", "https"}:
+        return ""
+    return lan_http_bind_for_url(url)
+
+
+async def fetch_browser_lan_url(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: Any = None,
+) -> dict[str, Any]:
+    """GET/POST a LAN URL from this PC's on-link RFC1918 address (not the VPN NIC)."""
+    import httpx
+
+    cleaned = (url or "").strip()
+    bind = browser_lan_bind_for_url(cleaned)
+    if not bind:
+        raise ValueError("URL is not an on-link RFC1918 browser target")
+    req_headers = {
+        str(key): str(value)
+        for key, value in (headers or {}).items()
+        if str(key).lower() not in _HOP_BY_HOP
+    }
+    kwargs = _with_lan_bind(
+        {
+            "timeout": 30.0,
+            "follow_redirects": False,
+            "trust_env": False,
+            "verify": False,
+            "headers": req_headers,
+        },
+        cleaned,
+        async_client=True,
+    )
+    async with httpx.AsyncClient(**kwargs) as client:
+        response = await client.request(method or "GET", cleaned, content=body)
+    out_headers = {
+        str(key): str(value)
+        for key, value in response.headers.items()
+        if str(key).lower() not in _HOP_BY_HOP
+    }
+    return {"status": response.status_code, "headers": out_headers, "body": response.content}
+
+
+async def handle_browser_lan_route(route: Any) -> None:
+    request = getattr(route, "request", None)
+    url = str(getattr(request, "url", "") or "")
+    if not browser_lan_bind_for_url(url):
+        await route.continue_()
+        return
+    try:
+        headers: dict[str, str] = {}
+        getter = getattr(request, "all_headers", None)
+        if callable(getter):
+            raw = getter()
+            if hasattr(raw, "__await__"):
+                raw = await raw
+            if isinstance(raw, dict):
+                headers = {str(key): str(value) for key, value in raw.items()}
+        body = getattr(request, "post_data", None)
+        payload = await fetch_browser_lan_url(
+            url,
+            method=str(getattr(request, "method", None) or "GET"),
+            headers=headers,
+            body=body,
+        )
+        await route.fulfill(**payload)
+    except Exception:
+        abort = getattr(route, "abort", None)
+        if callable(abort):
+            await abort("failed")
+            return
+        raise
+
+
+async def install_browser_lan_route(context: Any) -> None:
+    """Send on-link RFC1918 Chromium requests from the home NIC, not a VPN default route."""
+    route = getattr(context, "route", None)
+    if not callable(route):
+        return
+    await route("**/*", handle_browser_lan_route)
+
+
 async def _ensure_page(headless: bool):
     global _playwright, _browser, _context, _page, _pages
     if _page:
@@ -332,6 +437,7 @@ async def _ensure_page(headless: bool):
         viewport={"width": 1400, "height": 900},
         **chromium_download_launch_kwargs(),
     )
+    await install_browser_lan_route(_context)
     _pages = list(_context.pages) or [await _context.new_page()]
     _page = _pages[0]
     return _page

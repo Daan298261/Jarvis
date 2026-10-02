@@ -396,6 +396,85 @@ def test_web_fetch_lan_http_binds_home_nic_not_vpn(monkeypatch):
     assert lan_http_bind_for_url("http://nas.local/media") == "192.168.1.12"
 
 
+@pytest.mark.asyncio
+async def test_browser_lan_route_fetches_from_home_nic_not_vpn(monkeypatch):
+    from types import SimpleNamespace
+
+    import httpx
+
+    from app.tools.browser import (
+        browser_lan_bind_for_url,
+        fetch_browser_lan_url,
+        handle_browser_lan_route,
+        install_browser_lan_route,
+    )
+
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+            "wg0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    assert browser_lan_bind_for_url("http://192.168.1.50/status") == "192.168.1.12"
+    assert browser_lan_bind_for_url("https://example.com/") == ""
+    assert browser_lan_bind_for_url("file:///home/owner/notes.html") == ""
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="nas-ok")
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            seen["local_address"] = getattr(getattr(kwargs.get("transport"), "_pool", None), "_local_address", None)
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("httpx.AsyncClient", Client)
+    payload = await fetch_browser_lan_url("http://192.168.1.50/status")
+    assert payload["status"] == 200
+    assert payload["body"] == b"nas-ok"
+    assert seen["local_address"] == "192.168.1.12"
+
+    continued = {"n": 0}
+    fulfilled = {}
+
+    class FakeRoute:
+        def __init__(self, url, method="GET"):
+            self.request = SimpleNamespace(url=url, method=method, post_data=None, all_headers=lambda: {})
+
+        async def continue_(self):
+            continued["n"] += 1
+
+        async def fulfill(self, **kwargs):
+            fulfilled.update(kwargs)
+
+        async def abort(self, reason=""):
+            fulfilled["aborted"] = reason
+
+    await handle_browser_lan_route(FakeRoute("https://example.com/"))
+    assert continued["n"] == 1
+    await handle_browser_lan_route(FakeRoute("http://192.168.1.50/status"))
+    assert fulfilled.get("status") == 200
+    assert fulfilled.get("body") == b"nas-ok"
+
+    class FakeContext:
+        def __init__(self):
+            self.routes = []
+
+        async def route(self, pattern, handler):
+            self.routes.append((pattern, handler))
+
+    ctx = FakeContext()
+    await install_browser_lan_route(ctx)
+    assert ctx.routes == [("**/*", handle_browser_lan_route)]
+
+
 def test_udp_lan_ipv4_ignores_cgnat(monkeypatch):
     from app.mobile import igd
 
@@ -1562,12 +1641,16 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
 
     class FakeContext:
         pages = []
+        routes = []
 
         async def new_page(self):
             return FakePage()
 
         async def close(self):
             return None
+
+        async def route(self, pattern, handler):
+            self.routes.append((pattern, handler))
 
     class FakeChromium:
         last_kwargs = None
@@ -1579,6 +1662,7 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
             assert kwargs.get("downloads_path")
             ctx = FakeContext()
             ctx.pages = [FakePage()]
+            FakeChromium.last_context = ctx
             return ctx
 
     class FakePlaywright:
@@ -1607,6 +1691,8 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
     result = await tool.execute(action="open", url="https://example.com/")
     assert result.success, result.error
     assert "Opened https://example.com/" in result.output
+    assert FakeChromium.last_context.routes
+    assert FakeChromium.last_context.routes[0][0] == "**/*"
     blocked = await tool.execute(action="open", url="file:///etc/passwd")
     assert not blocked.success
     await tool.execute(action="close")
