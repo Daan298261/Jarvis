@@ -127,8 +127,9 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
 
   useEffect(() => {
     if (!open) return
+    void refreshProfiles()
     void refreshCatalog()
-  }, [open, refreshCatalog])
+  }, [open, refreshCatalog, refreshProfiles])
 
   useEffect(() => {
     onOpenChange?.(open)
@@ -406,6 +407,18 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
           )}
 
           {msg && <p className="hud-model-msg">{msg}</p>}
+          {(profilesError || catalogUnavailable) && !transferring && (
+            <button
+              type="button"
+              className="hud-icon-btn hud-model-retry"
+              onClick={() => {
+                setMsg("Checking local models…")
+                void Promise.all([refreshProfiles(), refreshCatalog()]).then(() => setMsg(""))
+              }}
+            >
+              Retry local models
+            </button>
+          )}
           {model?.last_error && !transferring && (
             <p className="hud-model-error">{model.last_error}</p>
           )}

@@ -54,6 +54,16 @@ function syncRuntimeSelection(id: string): void {
   window.dispatchEvent(new CustomEvent("jarvis:runtime-profile-changed", { detail: { id } }))
 }
 
+async function finishModelActivation(load?: Record<string, unknown>): Promise<void> {
+  const snapshot = load as ModelPollSnapshot | undefined
+  const err = (snapshot?.last_error || "").trim()
+  if (err) throw new Error(err)
+  // Runtime activation is synchronous and already returns a fresh status
+  // snapshot. Avoid another expensive /api/model probe when it is ready.
+  if (snapshot?.loaded && !snapshot.loading) return
+  await waitForModelLoaded()
+}
+
 /** Mirror Model page + RuntimeProfiles force-select for one-click HUD hotswap. */
 export async function applyRuntimeProfile(profileId: string): Promise<RuntimeProfile> {
   const id = profileId.trim()
@@ -75,7 +85,7 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
   }
 
   const result = await activateRuntimeProfile(id)
-  await waitForModelLoaded()
+  await finishModelActivation(result.load)
   syncRuntimeSelection(id)
   return result.profile || profile
 }
@@ -84,7 +94,7 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
 export async function playLmStudioCatalogProfile(catalogProfileId: string): Promise<RuntimeProfile> {
   const runtime = await selectLmStudioProfile(catalogProfileId)
   const id = runtime.id || runtime.name
+  await finishModelActivation(runtime.load)
   syncRuntimeSelection(id)
-  await waitForModelLoaded()
   return runtime
 }

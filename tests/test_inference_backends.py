@@ -304,3 +304,31 @@ async def test_base_inference_backend_start_fails_when_server_is_down(monkeypatc
 
     monkeypatch.setattr("app.inference.backends.probe_remote_server", fake_probe)
     assert await backend.start(resolve_profile("balanced")) is False
+
+
+@pytest.mark.asyncio
+async def test_managed_llama_reports_the_profile_alias_after_start(monkeypatch, tmp_path):
+    import app.inference.backends as backends
+
+    class FakeProcess:
+        pid = 123
+        returncode = None
+
+    async def fake_create(*args, **kwargs):
+        return FakeProcess()
+
+    async def fake_wait(*args, **kwargs):
+        return True
+
+    async def fake_stop(self):
+        self._process = None
+
+    monkeypatch.setattr(backends.asyncio, "create_subprocess_exec", fake_create)
+    monkeypatch.setattr(backends, "wait_for_health", fake_wait)
+    monkeypatch.setattr(backends.LlamaCppBackend, "stop", fake_stop)
+    monkeypatch.setattr(backends, "logs_dir", lambda: tmp_path)
+
+    backend = backends.LlamaCppBackend(_settings())
+    profile = resolve_profile("fast")
+    assert await backend.start(profile, timeout=1) is True
+    assert backend.last_probe["models"] == [profile.alias]
