@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..config import data_dir, load_settings, logs_dir, repo_root, save_settings
+from ..config import data_dir, extra_volume_named_runtime_dirs, load_settings, logs_dir, repo_root, save_settings
 from ..inference.runtime_profiles import RuntimeProfile
 
 log = logging.getLogger(__name__)
@@ -237,6 +237,7 @@ def candidate_install_roots(explicit: str = "") -> list[Path]:
             Path.home() / "hexstrike-ai",
         ]
     )
+    roots.extend(extra_volume_named_runtime_dirs("hexstrike-ai"))
     seen: set[Path] = set()
     out: list[Path] = []
     for root in roots:
@@ -470,7 +471,8 @@ class HexStrikeManager:
             if not current.installed:
                 self.last_error = (
                     "HexStrike AI is not installed. Clone https://github.com/0x4m4/hexstrike-ai "
-                    "into runtime/hexstrike-ai or set the install path in the suite HUD."
+                    "into runtime/hexstrike-ai (or Jarvis/runtime on an extra drive) or set the "
+                    "install path in the suite HUD."
                 )
                 current.last_error = self.last_error
                 audit_hexstrike("start_skipped", reason="not_installed")

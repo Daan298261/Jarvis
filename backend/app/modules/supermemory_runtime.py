@@ -25,7 +25,10 @@ _INSTALL_ERROR = ""
 
 
 def install_dir() -> Path:
-    return app_config.repo_root() / "runtime" / "supermemory"
+    existing = app_config.discover_named_runtime_dir("supermemory", marker="supermemory-server.exe")
+    if existing is not None:
+        return existing
+    return app_config.preferred_runtime_install_dir("supermemory")
 
 
 def binary_path() -> Path:

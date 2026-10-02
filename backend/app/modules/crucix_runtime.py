@@ -9,7 +9,11 @@ from .supervisor import StartSpec, get_supervisor
 
 MODULE_ID="crucix"; MODULE_NAME="Crucix"; UPSTREAM="https://github.com/calesthio/Crucix.git"; PORT=3117
 _LOCK=asyncio.Lock(); _TASK=None; _STATUS="idle"; _ERROR=""
-def install_dir(): return app_config.repo_root()/"runtime"/"crucix"
+def install_dir():
+    existing = app_config.discover_named_runtime_dir("crucix", marker="package.json")
+    if existing is not None:
+        return existing
+    return app_config.preferred_runtime_install_dir("crucix")
 def _settings(): return app_config.load_settings().crucix
 async def healthy():
     try:

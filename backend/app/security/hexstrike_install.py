@@ -8,7 +8,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import load_settings, repo_root, save_settings
+from ..config import (
+    discover_named_runtime_dir,
+    load_settings,
+    preferred_runtime_install_dir,
+    repo_root,
+    save_settings,
+)
 from .hexstrike import audit_hexstrike
 
 APPROVED_HEXSTRIKE_REMOTE = "https://github.com/0x4m4/hexstrike-ai.git"
@@ -50,7 +56,17 @@ class HexStrikeInstaller:
 
     def default_path(self) -> Path:
         configured = (os.environ.get("JARVIS_HEXSTRIKE_HOME") or "").strip()
-        return Path(configured).expanduser() if configured else repo_root() / "runtime" / "hexstrike-ai"
+        if configured:
+            return Path(configured).expanduser()
+        saved = (load_settings().hexstrike.install_path or "").strip()
+        if saved:
+            saved_path = Path(saved).expanduser()
+            if saved_path.exists():
+                return saved_path
+        existing = discover_named_runtime_dir("hexstrike-ai", marker="hexstrike_server.py")
+        if existing is not None:
+            return existing
+        return preferred_runtime_install_dir("hexstrike-ai")
 
     def _installed_commit(self, path: Path) -> str:
         if not (path / ".git").exists():

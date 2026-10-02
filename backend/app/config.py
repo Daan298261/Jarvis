@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Literal
 
@@ -656,6 +657,82 @@ def extra_volume_roots() -> list[Path]:
         seen.add(key)
         out.append(root)
     return out
+
+
+_RUNTIME_NEED_BYTES = 2 * 1024**3
+
+
+def extra_volume_runtime_root(*, need_bytes: int = 0) -> Path | None:
+    """`Jarvis/runtime` on the extra volume with the most free space that fits."""
+    required = int(need_bytes or 0)
+    best: Path | None = None
+    best_free = 0
+    for volume in extra_volume_roots():
+        try:
+            free = int(shutil.disk_usage(volume).free)
+        except OSError:
+            continue
+        if required and free < required:
+            continue
+        if free > best_free:
+            best_free = free
+            best = volume / "Jarvis" / "runtime"
+    return best
+
+
+def extra_volume_named_runtime_dirs(name: str) -> list[Path]:
+    """Candidate sidecar folders on extra volumes (`Jarvis/runtime/<name>`)."""
+    slug = str(name or "").strip()
+    if not slug:
+        return []
+    out: list[Path] = []
+    seen: set[str] = set()
+    for volume in extra_volume_roots():
+        for rel in (
+            Path("Jarvis") / "runtime" / slug,
+            Path("runtime") / slug,
+            Path("Jarvis") / slug,
+        ):
+            candidate = volume / rel
+            key = str(candidate).replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(candidate)
+    return out
+
+
+def discover_named_runtime_dir(name: str, *, marker: str) -> Path | None:
+    """Existing local or extra-drive sidecar that already has `marker`."""
+    slug = str(name or "").strip()
+    needle = str(marker or "").strip()
+    if not slug or not needle:
+        return None
+    candidates = [repo_root() / "runtime" / slug, *extra_volume_named_runtime_dirs(slug)]
+    for root in candidates:
+        try:
+            if (root / needle).is_file():
+                return root
+        except OSError:
+            continue
+    return None
+
+
+def preferred_runtime_install_dir(name: str, *, need_bytes: int = _RUNTIME_NEED_BYTES) -> Path:
+    """Install under `runtime/<name>` when that volume fits; else extra-drive `Jarvis/runtime`."""
+    slug = str(name or "").strip() or "runtime"
+    local = repo_root() / "runtime" / slug
+    required = int(need_bytes or 0)
+    try:
+        local_free = int(shutil.disk_usage(repo_root()).free)
+    except OSError:
+        local_free = 0
+    if required <= 0 or local_free >= required:
+        return local
+    extra = extra_volume_runtime_root(need_bytes=required)
+    if extra is None:
+        return local
+    return extra / slug
 
 
 def default_allowed_directories() -> list[str]:

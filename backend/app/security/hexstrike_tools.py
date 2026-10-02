@@ -128,7 +128,14 @@ def _parse_requirements(path: Path) -> list[str]:
 
 
 def _discover_pip_packages(install_path: str) -> list[str]:
-    root = Path(install_path) if install_path else resolve_install() or repo_root() / "runtime" / "hexstrike-ai"
+    if install_path:
+        root = Path(install_path)
+    else:
+        root = resolve_install()
+        if root is None:
+            from .hexstrike_install import HEXSTRIKE_INSTALLER
+
+            root = HEXSTRIKE_INSTALLER.default_path()
     candidates = [
         root / "requirements.txt",
         repo_root() / "config" / "hexstrike-defensive-requirements.txt",
