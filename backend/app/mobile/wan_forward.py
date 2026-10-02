@@ -41,6 +41,36 @@ def companion_wan_origin(host: str) -> str:
     return f"https://{host.strip()}:{PORT}"
 
 
+def is_literal_public_ipv4(host: str) -> bool:
+    """True for a routed public IPv4, including documentation TEST-NET used in tests.
+
+    Excludes RFC1918, loopback, link-local, multicast, and CGNAT. Python marks
+    TEST-NET as is_private; companion WAN still treats those as public dials.
+    """
+    try:
+        ip = ipaddress.ip_address((host or "").strip())
+    except ValueError:
+        return False
+    if ip.version != 4 or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+        return False
+    if is_rfc1918_ipv4(str(ip)):
+        return False
+    return ip not in ipaddress.ip_network("100.64.0.0/10")
+
+
+def public_dial_host_for_gateway(configured: str, live_egress: str = "", fallback: str = "") -> str:
+    """Keep a DDNS name; prefer live egress over a stale literal public IPv4."""
+    named = (configured or "").strip()
+    live = (live_egress or "").strip()
+    alt = (fallback or "").strip()
+    if named and not is_literal_public_ipv4(named) and is_public_dial_host(named):
+        return named
+    for candidate in (live, alt, named):
+        if candidate and (is_public_dial_host(candidate) or is_literal_public_ipv4(candidate)):
+            return candidate
+    return named or live or alt
+
+
 def firewall_4781_show_argv() -> list[str]:
     return ["netsh", "advfirewall", "firewall", "show", "rule", f"name={FIREWALL_RULE_NAME}"]
 

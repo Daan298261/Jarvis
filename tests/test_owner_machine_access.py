@@ -214,6 +214,15 @@ def test_wan_origin_rejects_lan_and_accepts_public_hosts():
     assert public["ssh_host"] == "vpn.example.test"
 
 
+def test_public_dial_host_for_gateway_keeps_ddns_and_prefers_live_ipv4():
+    from app.mobile.wan_forward import public_dial_host_for_gateway
+
+    assert public_dial_host_for_gateway("home.example.test", "203.0.113.9") == "home.example.test"
+    assert public_dial_host_for_gateway("203.0.113.8", "203.0.113.9") == "203.0.113.9"
+    assert public_dial_host_for_gateway("", "203.0.113.9") == "203.0.113.9"
+    assert public_dial_host_for_gateway("", "", "203.0.113.8") == "203.0.113.8"
+
+
 def test_mapping_lan_ipv4_skips_cgnat_and_prefers_gateway_subnet():
     assert is_rfc1918_ipv4("192.168.1.12")
     assert is_rfc1918_ipv4("10.0.0.5")
@@ -539,6 +548,56 @@ async def test_gateway_ssh_renews_when_lan_ip_changes(tmp_path, monkeypatch):
     assert "https://192.168.1.40:4781" in connection.state["endpoints"]
     assert "https://192.168.1.12:4781" not in connection.state["endpoints"]
     assert any(endpoint == "https://home.example.test:4781" for endpoint in connection.state["endpoints"])
+
+
+@pytest.mark.asyncio
+async def test_lan_refresh_rebuilds_gateway_ssh_when_egress_ipv4_changes(tmp_path, monkeypatch):
+    import time
+
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    egress = {"ip": "203.0.113.8"}
+    monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: egress["ip"])
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+    seen_hosts: list[str] = []
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        del settings, lan_ip
+        seen_hosts.append(public_host)
+        return f"https://{public_host}:4781", "mapped"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    connection = FakeConnection()
+    result = await connection.configure(
+        True,
+        True,
+        {
+            "wan_method": "gateway_ssh",
+            "gateway_host": "192.168.1.1",
+            "gateway_user": "root",
+            "gateway_identity_file": str(key),
+        },
+    )
+    assert result.get("wan_path") == "gateway_ssh"
+    assert connection.public_ip == "203.0.113.8"
+    assert "https://203.0.113.8:4781" in result["endpoints"]
+    held = time.time() + 1190
+    connection.report(next_renewal_at=held)
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.state.get("next_renewal_at") == held
+    egress["ip"] = "203.0.113.9"
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.public_ip == "203.0.113.9"
+    assert "https://203.0.113.9:4781" in connection.state["endpoints"]
+    assert "https://203.0.113.8:4781" not in connection.state["endpoints"]
+    assert seen_hosts == ["203.0.113.8", "203.0.113.9"]
 
 
 @pytest.mark.asyncio

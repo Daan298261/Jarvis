@@ -570,18 +570,23 @@ class Connectivity:
                     else:
                         self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
                         try:
-                            public_host = wan.get("wan_public_host") or public_ip or ""
-                            if not public_host:
-                                try:
-                                    from .wan_forward import lookup_egress_ipv4
+                            from .wan_forward import is_literal_public_ipv4, lookup_egress_ipv4, public_dial_host_for_gateway
 
-                                    public_host = await asyncio.to_thread(lookup_egress_ipv4)
+                            named = str(wan.get("wan_public_host") or "").strip()
+                            live_egress = ""
+                            if not named or is_literal_public_ipv4(named):
+                                try:
+                                    live_egress = await asyncio.to_thread(lookup_egress_ipv4)
                                 except Exception:
-                                    public_host = ""
+                                    live_egress = str(public_ip or "")
+                            public_host = public_dial_host_for_gateway(
+                                named, live_egress, str(public_ip or "")
+                            )
                             mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=str(public_host or ""))
                             wan_path = "gateway_ssh"
                             if mapped:
                                 endpoints.append(mapped)
+                            self._remember_mapped_public_ip(mapped)
                             self.report(
                                 router="mapped",
                                 wan_path=wan_path,
@@ -662,7 +667,10 @@ class Connectivity:
             apply_gateway_ssh,
             default_gateway_ipv4,
             gateway_ssh_configured,
+            is_literal_public_ipv4,
+            lookup_egress_ipv4,
             mapping_lan_ipv4,
+            public_dial_host_for_gateway,
             wan_settings_from_config,
         )
 
@@ -678,11 +686,22 @@ class Connectivity:
         lan_ip = mapping_lan_ipv4(lan_hosts(), gw)
         if not lan_ip:
             raise RuntimeError("Gateway SSH dest IP is not on the router subnet")
-        public_host = str(wan.get("wan_public_host") or self.public_ip or "")
+        named = str(wan.get("wan_public_host") or "").strip()
+        live_egress = ""
+        if not named or is_literal_public_ipv4(named):
+            try:
+                live_egress = await asyncio.to_thread(lookup_egress_ipv4)
+            except Exception:
+                live_egress = str(self.public_ip or "")
+        public_host = public_dial_host_for_gateway(named, live_egress, str(self.public_ip or ""))
+        previous_pub = str(self.public_ip or "")
         mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=public_host)
         endpoints = list(self.state.get("endpoints") or [])
+        if previous_pub:
+            endpoints = [item for item in endpoints if dial_host(item) != previous_pub]
         if mapped and mapped not in endpoints:
             endpoints.append(mapped)
+        self._remember_mapped_public_ip(mapped)
         self.report(
             router="mapped",
             wan_path="gateway_ssh",
@@ -690,6 +709,13 @@ class Connectivity:
             endpoints=endpoints,
             mapped_lan_ip=lan_ip,
         )
+
+    def _remember_mapped_public_ip(self, origin: str | None) -> None:
+        host = dial_host(origin or "")
+        from .wan_forward import is_literal_public_ipv4
+
+        if is_literal_public_ipv4(host):
+            self.public_ip = host
 
     def _merge_live_lan_endpoints(self, live: list[str], current: list[str]) -> list[str]:
         """Keep WAN/relay origins; replace stale RFC1918 dials with this PC's current LAN IPs."""
@@ -773,6 +799,16 @@ class Connectivity:
 
             try:
                 return str(await asyncio.to_thread(query_public_ip, self.natpmp_gateway, lan) or "")
+            except Exception:
+                return ""
+        if str(self.state.get("wan_path") or "") == "gateway_ssh":
+            from .wan_forward import is_literal_public_ipv4, lookup_egress_ipv4
+
+            named = str((self.config() or {}).get("wan_public_host") or "").strip()
+            if named and not is_literal_public_ipv4(named):
+                return ""
+            try:
+                return str(await asyncio.to_thread(lookup_egress_ipv4) or "")
             except Exception:
                 return ""
         return ""
