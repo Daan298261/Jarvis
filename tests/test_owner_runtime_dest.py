@@ -783,3 +783,34 @@ def test_backup_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
     dest = backup_root()
     assert dest == extra / "Jarvis" / "runtime" / "backups"
     assert dest.is_dir()
+
+
+def test_hf_download_uses_extra_hub_cache_when_os_volume_is_full(tmp_path, monkeypatch):
+    from app import runtime_install
+
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    dest = extra / "Jarvis" / "models" / "Qwen"
+    dest.mkdir(parents=True)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    _patch_model_disk(monkeypatch, extra)
+    seen: dict[str, str] = {}
+
+    def download(*, repo_id, filename, local_dir=None, cache_dir=None, **_kwargs):
+        del repo_id
+        seen["cache_dir"] = str(cache_dir or "")
+        seen["local_dir"] = str(local_dir or "")
+        path = Path(local_dir or dest) / filename
+        path.write_bytes(b"gguf")
+        return str(path)
+
+    monkeypatch.setattr(
+        "app.policy.network_http.require_http_url_allowed",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", download)
+    path = runtime_install._hf_download("org/model", "a.gguf", dest, "primary_model")
+    hub = extra / "Jarvis" / "models" / "huggingface" / "hub"
+    assert seen["cache_dir"] == str(hub)
+    assert Path(path).read_bytes() == b"gguf"

@@ -74,6 +74,7 @@ def test_disk_gate_reports_shortfall_before_download():
     script = render_download_script(plan)
     assert "Not enough disk space" in script
     assert "$RequiredGb" in script
+    assert "HF_HOME" not in script
 
 
 def test_lm_studio_is_not_required_for_default_runtime():
@@ -160,6 +161,8 @@ def test_disk_gate_uses_extra_volume_when_os_volume_is_full(tmp_path, monkeypatc
     assert "Join-Path $Root 'models'" not in script
     assert "Jarvis" in script
     assert "Not enough disk space" in script
+    assert "$env:HF_HOME = Join-Path $Models 'huggingface'" in script
+    assert "$env:HF_HUB_CACHE = Join-Path $env:HF_HOME 'hub'" in script
 
 
 def test_discover_component_states_ready_when_primary_is_on_extra_volume(tmp_path, monkeypatch):

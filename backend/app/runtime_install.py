@@ -287,6 +287,10 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
     except Exception as exc:  # pragma: no cover - optional dep failure path
         raise RuntimeError(f"huggingface_hub unavailable: {exc}") from exc
 
+    from .inference.lmstudio_catalog import apply_huggingface_home
+
+    hub = str(apply_huggingface_home() / "hub")
+
     def _hook(progress: Any) -> None:
         try:
             done = int(getattr(progress, "n", 0) or 0)
@@ -300,7 +304,7 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
         repo_id=repo_id,
         filename=filename,
         local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
+        cache_dir=hub,
     )
     resolved = Path(path)
     if not resolved.exists():

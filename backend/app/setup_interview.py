@@ -472,24 +472,34 @@ def render_download_script(plan: dict[str, Any]) -> str:
         "if (-not (Test-Path $Hf)) { $Hf = (Get-Command hf -ErrorAction SilentlyContinue).Source }",
         "if (-not $Hf) { throw 'huggingface_hub installed but hf CLI was not found.' }",
         "$env:HF_XET_HIGH_PERFORMANCE = '1'",
-        "",
-        "function Install-JarvisModel([string]$Repo, [string]$Include, [string]$Dir, [string]$Canonical) {",
-        "  $dest = Join-Path $Models $Dir",
-        "  $target = Join-Path $dest $Canonical",
-        "  if ((Test-Path $target) -and ((Get-Item $target).Length -gt 0)) { Write-Host \"Already present: $Canonical\"; return }",
-        "  New-Item -ItemType Directory -Force -Path $dest | Out-Null",
-        "  Write-Host \"Downloading $Repo ($Include)...\" -ForegroundColor Cyan",
-        "  & $Hf download $Repo --include $Include --local-dir $dest",
-        "  if ($LASTEXITCODE -ne 0) { throw \"Download failed: $Repo\" }",
-        "  if (-not (Test-Path $target)) {",
-        "    $found = Get-ChildItem -Path $dest -Recurse -File | Where-Object { $_.Name -like $Include } | Select-Object -First 1",
-        "    if (-not $found) { throw \"Download completed but no file matched $Include\" }",
-        "    if ($found.FullName -ne $target) { Copy-Item -Force $found.FullName $target }",
-        "  }",
-        "  Write-Host \"Ready: $target\" -ForegroundColor Green",
-        "}",
-        "",
     ]
+    if using_extra and extra_root:
+        lines.append("$env:HF_HOME = Join-Path $Models 'huggingface'")
+        lines.append("$env:HF_HUB_CACHE = Join-Path $env:HF_HOME 'hub'")
+        lines.append("New-Item -ItemType Directory -Force -Path $env:HF_HUB_CACHE | Out-Null")
+    lines.append("")
+    lines.append("function Install-JarvisModel([string]$Repo, [string]$Include, [string]$Dir, [string]$Canonical) {")
+    lines.append("  $dest = Join-Path $Models $Dir")
+    lines.append("  $target = Join-Path $dest $Canonical")
+    lines.append(
+        "  if ((Test-Path $target) -and ((Get-Item $target).Length -gt 0)) { "
+        'Write-Host "Already present: $Canonical"; return }'
+    )
+    lines.append("  New-Item -ItemType Directory -Force -Path $dest | Out-Null")
+    lines.append('  Write-Host "Downloading $Repo ($Include)..." -ForegroundColor Cyan')
+    lines.append("  & $Hf download $Repo --include $Include --local-dir $dest")
+    lines.append('  if ($LASTEXITCODE -ne 0) { throw "Download failed: $Repo" }')
+    lines.append("  if (-not (Test-Path $target)) {")
+    lines.append(
+        "    $found = Get-ChildItem -Path $dest -Recurse -File | "
+        "Where-Object { $_.Name -like $Include } | Select-Object -First 1"
+    )
+    lines.append('    if (-not $found) { throw "Download completed but no file matched $Include" }')
+    lines.append("    if ($found.FullName -ne $target) { Copy-Item -Force $found.FullName $target }")
+    lines.append("  }")
+    lines.append('  Write-Host "Ready: $target" -ForegroundColor Green')
+    lines.append("}")
+    lines.append("")
     if not models:
         lines.append("Write-Host 'All selected downloadable models are already present.' -ForegroundColor Green")
     else:
