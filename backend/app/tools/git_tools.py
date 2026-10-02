@@ -15,7 +15,7 @@ from ..agent.worktrees import (
     worktree_status,
 )
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import resolve_owner_file_path
+from .owner_paths import resolve_owner_file_path, workspace_cwd
 from .safety import resolve_allowed_path
 
 
@@ -43,7 +43,9 @@ class GitTool(Tool):
         "diff, branch, log, search, checkpoint, list_checkpoints, restore. clone copies a remote "
         "or local repo into an allowed folder (including extra drives). Omit path to clone into "
         "Documents/<repo>. A folder path (USB/`D:`) gets <repo> appended. fetch/pull update an "
-        "existing repo and honor internet/LAN deny. checkpoint creates a recoverable backup "
+        "existing repo and honor internet/LAN deny. Omit path for status/fetch/pull to use Documents. "
+        "worktree_add checks out an isolated tree; destination may be USB/`D:` (omit to use Jarvis worktrees). "
+        "checkpoint creates a recoverable backup "
         "branch named jarvis-checkpoint-* without resetting the working tree."
     )
     risk = RiskLevel.MEDIUM
@@ -73,7 +75,11 @@ class GitTool(Tool):
             },
             "path": {
                 "type": "string",
-                "description": "Repo working tree, or clone destination. Omit clone to use Documents/<repo>. A folder path is allowed.",
+                "description": "Repo working tree, or clone destination. Omit clone/status to use Documents. A folder path is allowed.",
+            },
+            "destination": {
+                "type": "string",
+                "description": "worktree_add: new tree folder (USB/`D:` allowed). Omit to use Jarvis worktrees.",
             },
             "url": {"type": "string", "description": "clone: https URL or local repo path"},
             "query": {"type": "string"},
@@ -92,9 +98,26 @@ class GitTool(Tool):
 
     def _cwd(self, path: str | None) -> str:
         allowed = self._allowed()
-        if path:
-            return str(resolve_allowed_path(path, allowed))
-        return str(Path.cwd())
+        text = str(path or "").strip()
+        if text:
+            return str(resolve_allowed_path(text, allowed))
+        if not allowed:
+            return str(Path.cwd())
+        return workspace_cwd(None, allowed) or str(Path.cwd())
+
+    def _worktree_dest(self, raw: str | None) -> str | None:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return str(
+            resolve_owner_file_path(
+                text,
+                suggested_name=f"jarvis-worktree-{stamp}",
+                allowed=self._allowed(),
+                fallback_dirs=("Documents", "Desktop", "Downloads"),
+            )
+        )
 
     def _network_denied(self, kwargs: dict[str, Any]) -> str | None:
         from ..policy.computer_permissions import tool_permission_error
@@ -188,13 +211,15 @@ class GitTool(Tool):
             if action == "restore":
                 return await self._restore(cwd, kwargs.get("ref") or "")
             if action == "worktree_add":
-                spec = create_worktree(cwd, kwargs.get("path"))
+                spec = create_worktree(cwd, self._worktree_dest(kwargs.get("destination")))
                 return ToolResult(True, f"Created worktree {spec.id}", data=spec.__dict__)
             if action == "worktree_list":
                 trees = list_worktrees()
                 return ToolResult(True, "\n".join(item.get("id", "") for item in trees), data={"worktrees": trees})
             if action == "worktree_status":
-                status = worktree_status(kwargs.get("path") or cwd)
+                raw_status = str(kwargs.get("destination") or kwargs.get("path") or "").strip() or cwd
+                status_path = str(resolve_allowed_path(raw_status, self._allowed())) if self._allowed() else raw_status
+                status = worktree_status(status_path)
                 return ToolResult(True, str(status), data=status)
             if action == "worktree_remove":
                 spec = discard_worktree(kwargs.get("worktree_id") or "")

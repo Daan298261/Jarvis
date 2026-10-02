@@ -181,3 +181,36 @@ async def test_fetch_honors_internet_deny(tmp_path, monkeypatch):
     assert ran["n"] == 0
     assert "internet" in (result.error or "").lower() or "permission" in (result.error or "").lower() or "don't allow" in (result.error or "").lower()
 
+
+async def test_git_omitted_path_uses_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    await _git(docs, "init")
+    await _git(docs, "config", "user.email", "jarvis@example.test")
+    await _git(docs, "config", "user.name", "Jarvis")
+    (docs / "readme.txt").write_text("docs-repo\n", encoding="utf-8")
+    await _git(docs, "add", "readme.txt")
+    await _git(docs, "commit", "-m", "init")
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    tool = GitTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="status")
+    assert result.success, result.error
+
+
+async def test_worktree_add_onto_extra_drive(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.agent.worktrees.data_dir", lambda: tmp_path / "wt-meta")
+    extra = tmp_path / "E"
+    extra.mkdir()
+    repo = await _repo(tmp_path)
+    tool = _tool(tmp_path)
+    result = await tool.execute(action="worktree_add", path=str(repo), destination=str(extra))
+    assert result.success, result.error
+    dest = Path(result.data["path"])
+    assert dest.exists()
+    assert dest.is_dir()
+    assert extra == dest.parent or extra in dest.parents
+    assert dest.resolve() != repo.resolve()
+    outside = await tool.execute(action="worktree_add", path=str(repo), destination="/etc/jarvis-wt")
+    assert outside.success is False
+    assert "outside allowed" in (outside.error or "").lower()
+
