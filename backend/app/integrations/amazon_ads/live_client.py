@@ -111,6 +111,7 @@ class LiveAmazonAdsClient(AmazonAdsClient):
         token = self._default_refresh_token
         if token:
             try:
+                self._require_http(REVOKE_URL)
                 self._http.post(
                     REVOKE_URL,
                     data={"token": token, "client_id": self._client_id, "client_secret": self._client_secret},
@@ -270,7 +271,16 @@ class LiveAmazonAdsClient(AmazonAdsClient):
 
     # --- HTTP helpers ---
 
+    def _require_http(self, url: str) -> None:
+        from ...policy.network_http import require_http_url_allowed
+
+        try:
+            require_http_url_allowed(url, tool="web_fetch")
+        except PermissionError as exc:
+            raise AmazonAdsError(str(exc)) from exc
+
     def _token_request(self, payload: dict[str, str]) -> dict[str, Any]:
+        self._require_http(TOKEN_URL)
         try:
             response = self._http.post(
                 TOKEN_URL,
@@ -300,6 +310,7 @@ class LiveAmazonAdsClient(AmazonAdsClient):
         if profile_id:
             headers["Amazon-Advertising-API-Scope"] = profile_id
         url = f"{self.api_base}{path}"
+        self._require_http(url)
         try:
             response = self._http.request(method, url, headers=headers, json=json_body)
         except httpx.HTTPError as exc:
@@ -368,6 +379,7 @@ class LiveAmazonAdsClient(AmazonAdsClient):
         raise AmazonAdsError(f"report {report_id} timed out")
 
     def _download_report_rows(self, url: str) -> list[dict[str, Any]]:
+        self._require_http(url)
         try:
             response = self._http.get(url)
         except httpx.HTTPError as exc:

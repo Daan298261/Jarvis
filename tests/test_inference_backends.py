@@ -332,3 +332,33 @@ async def test_managed_llama_reports_the_profile_alias_after_start(monkeypatch, 
     profile = resolve_profile("fast")
     assert await backend.start(profile, timeout=1) is True
     assert backend.last_probe["models"] == [profile.alias]
+
+
+@pytest.mark.asyncio
+async def test_remote_model_health_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.providers.base import ModelProvider
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            seen["n"] += 1
+            raise AssertionError("must not probe WAN inference when internet is denied")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr("app.providers.base.httpx.AsyncClient", Client)
+    wan = ModelProvider("https://api.openai.com/v1")
+    assert await wan.health() is False
+    assert seen["n"] == 0
+    local = ModelProvider("http://127.0.0.1:8088/v1")
+    assert await local.health() is False
+    assert seen["n"] == 1

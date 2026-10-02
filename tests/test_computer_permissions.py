@@ -77,6 +77,8 @@ def test_computer_permissions_browser_use_local_network(permission_store):
     assert permission_ids_for_tool("terminal", {"command": "echo hi"}) == []
     assert permission_ids_for_tool("terminal", {"command": "curl https://example.com"}) == ["network.internet"]
     assert permission_ids_for_tool("terminal", {"command": "curl http://192.168.1.10/status"}) == ["network.local"]
+    assert permission_ids_for_tool("terminal", {"command": "git pull origin main"}) == ["network.internet"]
+    assert permission_ids_for_tool("terminal", {"command": "docker pull nginx"}) == ["network.internet"]
     assert permission_ids_for_tool(
         "open_interpreter",
         {"action": "delegate", "goal": "fetch https://example.com"},

@@ -48,7 +48,10 @@ _OUTBOUND_RE = re.compile(
     r"\burllib(?:\.request)?\b|\bhttpx\b|\brequests\b|\baiohttp\b|"
     r"\bpip(?:3)?\s+install\b|"
     r"\bnpm\s+(?:i|install)\b|"
-    r"\bgit\s+clone\b",
+    r"\bgit\s+(?:clone|fetch|pull|push|ls-remote)\b|"
+    r"\bdocker\s+pull\b|"
+    r"\bwinget\s+install\b|"
+    r"\bhuggingface-cli\b|\bhf\s+download\b",
     re.I,
 )
 

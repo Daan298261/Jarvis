@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from app.mobile import runtime, store
@@ -58,6 +59,32 @@ async def test_push_dedup_and_preference_revocation(mobile_env, monkeypatch):
     duplicate = runtime.enqueue_push(active, "call-one", "call", expires_at=3000, now=2501)
     assert duplicate["already_sent"] and await runtime.deliver_one(duplicate, now=2501)
     assert len(sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_push_honors_internet_deny(mobile_env, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: mobile_env)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    monkeypatch.setenv("JARVIS_PUSH_URL", "https://relay.example.test/v1/push")
+    monkeypatch.setenv("JARVIS_PUSH_CREDENTIAL", "token")
+    seen = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["n"] += 1
+        return httpx.Response(200, json={"ok": True})
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.mobile.runtime.httpx.AsyncClient", Client)
+    with pytest.raises(PermissionError):
+        await runtime.push(device(), "evt", "task")
+    assert seen["n"] == 0
 
 
 @pytest.mark.asyncio

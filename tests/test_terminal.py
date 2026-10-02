@@ -119,3 +119,22 @@ async def test_python_urllib_honors_internet_deny(tmp_path, monkeypatch):
     local = await tool.execute(action="run_code", code="print(1)")
     assert local.success is True
     assert "1" in local.output
+
+
+async def test_terminal_git_pull_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+
+    async def _boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("git pull must not run when internet is denied")
+
+    monkeypatch.setattr("app.tools.terminal.TerminalTool._run", _boom)
+    tool = TerminalTool()
+    result = await tool.execute(command="git pull origin main", shell="bash")
+    assert result.success is False
+    assert ran["n"] == 0

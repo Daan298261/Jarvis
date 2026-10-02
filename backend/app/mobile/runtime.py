@@ -23,6 +23,9 @@ async def push(device: dict, event_id: str, kind: str):
         return False
     if not url.startswith("https://"):
         raise ValueError("Push endpoint must use HTTPS")
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(url, tool="web_fetch")
     # No conversation text, attachments or provider credentials in push payloads.
     async with httpx.AsyncClient(timeout=10) as client:
         response = await client.post(url, headers={"Authorization": f"Bearer {token}"},
