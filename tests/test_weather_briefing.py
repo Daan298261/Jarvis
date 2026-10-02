@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 import pytest
 
 from app.agent.planning import CONVERSATION_CLASS, classify_task, is_plain_conversation, is_weather_query
@@ -101,3 +102,57 @@ async def test_weather_without_place_asks_for_town():
     briefing = await fetch_weather_briefing("what is the weather tomorrow")
     assert briefing is not None
     assert "no town" in briefing.lower()
+
+
+async def test_weather_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    def _count(request: httpx.Request) -> httpx.Response:
+        seen["n"] += 1
+        return httpx.Response(200, json={"results": []})
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(_count)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    briefing = await fetch_weather_briefing("what is the weather in dinteloord, tomorrow")
+    assert briefing is not None
+    assert "not allowed" in briefing.lower() or "permission" in briefing.lower() or "internet" in briefing.lower()
+    assert seen["n"] == 0
+    assert "16°C" not in briefing
+
+
+async def test_weather_hop_does_not_follow_denied_wan(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host or "")
+        if (request.url.host or "").startswith("192.168."):
+            return httpx.Response(302, headers={"location": "https://geocoding-api.open-meteo.com/v1/search"})
+        return httpx.Response(200, json={"results": [{"name": "leaked"}]})
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    monkeypatch.setattr(weather_mod, "GEOCODE_URL", "http://192.168.1.10/geo")
+    briefing = await fetch_weather_briefing("what is the weather in dinteloord, tomorrow")
+    assert briefing is not None
+    assert "leaked" not in briefing.lower()
+    assert "open-meteo.com" not in seen
+    assert "not allowed" in briefing.lower() or "permission" in briefing.lower() or "internet" in briefing.lower()

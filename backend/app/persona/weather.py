@@ -10,8 +10,6 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import httpx
-
 from ..agent.planning import is_weather_query, latest_user_utterance
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -121,11 +119,18 @@ def day_label(offset: int) -> str:
 
 
 async def _get_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
+    from ..policy.network_http import gated_get
+
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
-    async with httpx.AsyncClient(follow_redirects=True, timeout=8.0, headers=headers) as client:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        payload = response.json()
+    response = await gated_get(
+        url,
+        tool="web_fetch",
+        timeout=8.0,
+        headers=headers,
+        params=params,
+    )
+    response.raise_for_status()
+    payload = response.json()
     if not isinstance(payload, dict):
         raise ValueError("Unexpected weather payload")
     return payload
@@ -242,6 +247,12 @@ async def fetch_weather_briefing(prompt: str) -> str | None:
             precip_chance=_daily_value(daily, "precipitation_probability_max", index),
             wind=_daily_value(daily, "wind_speed_10m_max", index),
             timezone_name=tz_name,
+        )
+    except PermissionError as exc:
+        return (
+            f"{SPEAK_RULES}\n"
+            f"Lookup failed: {exc}. Say internet access is not allowed. "
+            "Do not invent temperatures."
         )
     except Exception as exc:
         return (

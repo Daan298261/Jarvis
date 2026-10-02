@@ -5,8 +5,6 @@ import re
 from html import unescape
 from typing import Any
 
-import httpx
-
 from ..links import extract_urls
 from ..schema import ExternalContentArtifact
 from .base import IngestContext
@@ -90,29 +88,37 @@ class InstagramAdapter:
     async def resolve_http(self, ctx: IngestContext) -> ExternalContentArtifact | None:
         oembed_url = "https://api.instagram.com/oembed"
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
-                response = await client.get(oembed_url, params={"url": ctx.url})
-                if response.is_success:
-                    payload = response.json()
-                    if isinstance(payload, dict):
-                        title = str(payload.get("title") or payload.get("author_name") or "")
-                        author = str(payload.get("author_name") or "")
-                        thumbnail = str(payload.get("thumbnail_url") or "")
-                        html = str(payload.get("html") or "")
-                        images = [thumbnail] if thumbnail else []
-                        links = extract_urls(html, title)
-                        return ExternalContentArtifact(
-                            source="instagram",
-                            url=ctx.url,
-                            author=author,
-                            title=title,
-                            caption=title,
-                            text=title,
-                            images=images,
-                            video=[],
-                            links=links,
-                            metadata={"tier": "http", "resolver": "oembed"},
-                        )
+            from ...policy.network_http import gated_get
+
+            response = await gated_get(
+                oembed_url,
+                tool="external_ingest",
+                timeout=20.0,
+                params={"url": ctx.url},
+            )
+            if response.is_success:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    title = str(payload.get("title") or payload.get("author_name") or "")
+                    author = str(payload.get("author_name") or "")
+                    thumbnail = str(payload.get("thumbnail_url") or "")
+                    html = str(payload.get("html") or "")
+                    images = [thumbnail] if thumbnail else []
+                    links = extract_urls(html, title)
+                    return ExternalContentArtifact(
+                        source="instagram",
+                        url=ctx.url,
+                        author=author,
+                        title=title,
+                        caption=title,
+                        text=title,
+                        images=images,
+                        video=[],
+                        links=links,
+                        metadata={"tier": "http", "resolver": "oembed"},
+                    )
+        except PermissionError:
+            raise
         except Exception:
             pass
 
