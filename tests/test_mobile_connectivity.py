@@ -20,6 +20,7 @@ def network_env(tmp_path, monkeypatch):
 
 class Router:
     lanaddr = "192.168.1.12"
+    wan_ip = "8.8.8.8"
     def __init__(self, mapping=None):
         self.mapping = mapping
         self.added = []
@@ -33,6 +34,8 @@ class Router:
     def deleteportmapping(self, *args):
         self.deleted.append(args)
         self.mapping = None
+    def externalipaddress(self):
+        return self.wan_ip
 
 
 def test_router_mapping_never_overwrites_or_removes_foreign_entry():

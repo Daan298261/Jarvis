@@ -680,6 +680,35 @@ class Connectivity:
             mapped_lan_ip=lan_ip,
         )
 
+    def _merge_live_lan_endpoints(self, live: list[str], current: list[str]) -> list[str]:
+        """Keep WAN/relay origins; replace stale RFC1918 dials with this PC's current LAN IPs."""
+        from .wan_forward import is_rfc1918_ipv4
+
+        live_set = set(live)
+        kept: list[str] = []
+        for endpoint in current:
+            host = dial_host(endpoint)
+            if is_rfc1918_ipv4(host) and endpoint not in live_set:
+                continue
+            if endpoint not in kept:
+                kept.append(endpoint)
+        merged: list[str] = []
+        for endpoint in live:
+            if endpoint not in merged:
+                merged.append(endpoint)
+        for endpoint in kept:
+            if endpoint not in merged:
+                merged.append(endpoint)
+        return merged
+
+    async def _refresh_lan_dial_endpoints(self) -> None:
+        hosts = await asyncio.to_thread(lan_hosts)
+        live = self._lan_endpoints(hosts)
+        merged = self._merge_live_lan_endpoints(live, list(self.state.get("endpoints") or []))
+        if merged:
+            await self.cover_phone_dial_hosts(*merged)
+        self.report(endpoints=merged)
+
     async def _renew_wan_mapping(self, config) -> None:
         """Keep the one-hour UPnP/NAT-PMP/PCP lease and the OpenWrt redirect alive."""
         await self.probe(f"https://127.0.0.1:{PORT}", self.identity)
@@ -688,6 +717,7 @@ class Connectivity:
             if await asyncio.to_thread(self.router.externalipaddress) != self.public_ip:
                 raise RuntimeError("Router address changed")
             await asyncio.to_thread(map_router, self.router, self.marker)
+            self.report(mapped_lan_ip=igd_mapping_dest(self.router))
         elif self.natpmp_gateway:
             lan = preferred_lan_ipv4(self.natpmp_gateway)
             if self.pcp_nonce:
@@ -704,8 +734,10 @@ class Connectivity:
             if public_ip != self.public_ip:
                 raise RuntimeError("Mapped public address changed")
             self.public_ip = public_ip
+            self.report(mapped_lan_ip=lan)
         elif path == "gateway_ssh":
             await self._renew_gateway_ssh(config)
+        await self._refresh_lan_dial_endpoints()
         self.report(next_renewal_at=time.time() + 1200)
 
     async def run(self):

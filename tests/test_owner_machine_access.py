@@ -536,6 +536,8 @@ async def test_gateway_ssh_renews_when_lan_ip_changes(tmp_path, monkeypatch):
     await connection._renew_wan_mapping(connection.config())
     assert seen == ["192.168.1.12", "192.168.1.40"]
     assert connection.state.get("mapped_lan_ip") == "192.168.1.40"
+    assert "https://192.168.1.40:4781" in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" not in connection.state["endpoints"]
     assert any(endpoint == "https://home.example.test:4781" for endpoint in connection.state["endpoints"])
 
 
@@ -574,6 +576,33 @@ async def test_gateway_ssh_renew_raises_when_dest_leaves_router_subnet(tmp_path,
     hosts[:] = ["10.8.0.2"]
     with pytest.raises(RuntimeError, match="not on the router subnet"):
         await connection._renew_wan_mapping(connection.config())
+
+
+@pytest.mark.asyncio
+async def test_upnp_renew_refreshes_lan_endpoint_after_dhcp(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection, Router
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    hosts = ["192.168.1.12"]
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: list(hosts))
+    router = Router()
+    router.wan_ip = "203.0.113.8"
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (router, "203.0.113.8"))
+    connection = FakeConnection()
+    result = await connection.configure(True, True)
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "upnp"
+    assert "https://192.168.1.12:4781" in result["endpoints"]
+    assert "https://203.0.113.8:4781" in result["endpoints"]
+    hosts[:] = ["192.168.1.40"]
+    router.lanaddr = "192.168.1.40"
+    await connection._renew_wan_mapping(connection.config())
+    assert connection.state.get("mapped_lan_ip") == "192.168.1.40"
+    assert router.added[-1][2] == "192.168.1.40"
+    assert "https://192.168.1.40:4781" in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" not in connection.state["endpoints"]
+    assert "https://203.0.113.8:4781" in connection.state["endpoints"]
 
 
 @pytest.mark.asyncio
