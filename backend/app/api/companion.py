@@ -546,7 +546,9 @@ async def connection_setup(body: ConnectionSetup):
     from ..mobile.connectivity import CONNECTIVITY
 
     extras = body.model_dump(exclude={"enabled", "remote"}, exclude_none=True)
-    return await CONNECTIVITY.configure(body.enabled, body.remote, extras or None)
+    if extras:
+        return await CONNECTIVITY.configure(body.enabled, body.remote, extras)
+    return await CONNECTIVITY.configure(body.enabled, body.remote)
 
 
 @owner_router.get("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
