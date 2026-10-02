@@ -4,7 +4,14 @@ import ipaddress
 
 import pytest
 
-from app.mobile.igd import StdlibIGD, parse_igd_control, parse_ssdp_location, soap_envelope
+from app.mobile.igd import (
+    StdlibIGD,
+    accept_ssdp_peer,
+    is_wan_connection_service,
+    parse_igd_control,
+    parse_ssdp_location,
+    soap_envelope,
+)
 from app.mobile.wan_forward import ensure_private_firewall_4781, lookup_egress_ipv4
 
 
@@ -39,6 +46,13 @@ def test_ssdp_and_control_url_parsing():
         parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: http://8.8.8.8/desc.xml\r\n\r\n")
     with pytest.raises(ValueError):
         parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: https://evil.example/desc.xml\r\n\r\n")
+    assert accept_ssdp_peer(("192.168.1.1", 1900))
+    assert not accept_ssdp_peer(("8.8.8.8", 1900))
+    assert is_wan_connection_service("urn:schemas-upnp-org:service:WANIPConnection:2")
+    v2 = DESC.replace("WANIPConnection:1", "WANIPConnection:2")
+    control, service = parse_igd_control(v2, "http://192.168.1.1:5000/rootDesc.xml")
+    assert control.endswith("/upnp/control/WANIPConn1")
+    assert service.endswith(":2")
 
 
 def test_soap_addportmapping_is_tcp_4781_only():
@@ -124,3 +138,47 @@ def test_stdlib_igd_maps_4781_and_treats_soap_fault_as_empty(monkeypatch):
     map_router(router, "Jarvis-owned")
     assert any("AddPortMapping" in item for item in posts)
     unmap_router(router, "Jarvis-owned")
+
+
+def test_stdlib_igd_rejects_cgnat_and_explains_igd_logon(monkeypatch):
+    from types import SimpleNamespace
+
+    posts = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, content, headers, auth=None):
+            posts.append(headers["SOAPAction"])
+            return SimpleNamespace(
+                status_code=401,
+                text="Unauthorized",
+            )
+
+    monkeypatch.setattr("app.mobile.igd.httpx.Client", FakeClient)
+    router = StdlibIGD(
+        "http://192.168.1.1:5000/upnp/control/WANIPConn1",
+        "urn:schemas-upnp-org:service:WANIPConnection:2",
+        "192.168.1.12",
+    )
+    with pytest.raises(RuntimeError, match="username and password"):
+        router.externalipaddress()
+    assert posts
+
+    class CgnatClient(FakeClient):
+        def post(self, url, content, headers, auth=None):
+            return SimpleNamespace(
+                status_code=200,
+                text="<s:Envelope><s:Body><NewExternalIPAddress>10.8.0.2</NewExternalIPAddress></s:Body></s:Envelope>",
+            )
+
+    monkeypatch.setattr("app.mobile.igd.httpx.Client", CgnatClient)
+    with pytest.raises(ValueError, match="no public IPv4"):
+        router.externalipaddress()
