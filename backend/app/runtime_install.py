@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import models_dir, repo_root, runtime_dir
+from .inference.lmstudio_catalog import extra_volume_file_named, preferred_gguf_install_dir
 from .inference.profiles import (
     EXPERT_DIR,
     EXPERT_GGUF_REPO,
@@ -29,6 +30,7 @@ from .inference.profiles import (
     PRIMARY_GGUF_REPO,
     PRIMARY_MMPROJ,
     PROFILES,
+    mmproj_path,
     profile_gguf,
 )
 from .setup_state import load_setup_state, save_setup_state
@@ -94,8 +96,12 @@ def _expert_profile():
     return PROFILES["expert"]
 
 
+_PRIMARY_NEED_BYTES = 8 * 1024**3
+_EXPERT_NEED_BYTES = 24 * 1024**3
+
+
 def _mmproj_primary() -> Path:
-    return models_dir() / PRIMARY_DIR / PRIMARY_MMPROJ
+    return mmproj_path(_primary_profile())
 
 
 def discover_component_states(*, include_optional_expert: bool | None = None) -> dict[str, ComponentState]:
@@ -151,7 +157,9 @@ def discover_component_states(*, include_optional_expert: bool | None = None) ->
             optional=True,
             detail="Optional — not selected",
         )
-    heretic = models_dir() / HERETIC_27B_DIR / HERETIC_27B_FILENAME
+    heretic = extra_volume_file_named(HERETIC_27B_FILENAME) or (
+        models_dir() / HERETIC_27B_DIR / HERETIC_27B_FILENAME
+    )
     states["heretic_27b_model"] = ComponentState(
         id="heretic_27b_model",
         label=_label("heretic_27b_model"),
@@ -314,12 +322,21 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
 def _install_primary() -> None:
     profile = _primary_profile()
     fast = PROFILES["fast"]
-    local = models_dir() / PRIMARY_DIR
-    _hf_download(PRIMARY_GGUF_REPO, profile.filename, local, "primary_model")
-    # Also fetch Q6_K when missing (fast profile) — skip if already present.
+    existing = profile_gguf(profile)
+    if existing.exists():
+        _set_state("primary_model", status="ready", path=str(existing), error="")
+        if not profile_gguf(fast).exists():
+            dest = preferred_gguf_install_dir(PRIMARY_DIR, need_bytes=_PRIMARY_NEED_BYTES)
+            try:
+                _hf_download(PRIMARY_GGUF_REPO, fast.filename, dest, "primary_model")
+            except Exception as exc:
+                logger.warning("Optional fast quant download skipped: %s", exc)
+        return
+    dest = preferred_gguf_install_dir(PRIMARY_DIR, need_bytes=_PRIMARY_NEED_BYTES)
+    _hf_download(PRIMARY_GGUF_REPO, profile.filename, dest, "primary_model")
     if not profile_gguf(fast).exists():
         try:
-            _hf_download(PRIMARY_GGUF_REPO, fast.filename, local, "primary_model")
+            _hf_download(PRIMARY_GGUF_REPO, fast.filename, dest, "primary_model")
         except Exception as exc:
             logger.warning("Optional fast quant download skipped: %s", exc)
 
@@ -329,7 +346,8 @@ def _install_mmproj() -> None:
     if path.exists():
         _set_state("vision_projector", status="ready", path=str(path), error="")
         return
-    _hf_download(PRIMARY_GGUF_REPO, PRIMARY_MMPROJ, models_dir() / PRIMARY_DIR, "vision_projector")
+    dest = preferred_gguf_install_dir(PRIMARY_DIR, need_bytes=_PRIMARY_NEED_BYTES)
+    _hf_download(PRIMARY_GGUF_REPO, PRIMARY_MMPROJ, dest, "vision_projector")
 
 
 def _install_expert() -> None:
@@ -338,16 +356,22 @@ def _install_expert() -> None:
     if target.exists():
         _set_state("expert_model", status="ready", path=str(target), error="")
         return
-    _hf_download(EXPERT_GGUF_REPO, profile.filename, models_dir() / EXPERT_DIR, "expert_model")
+    dest = preferred_gguf_install_dir(EXPERT_DIR, need_bytes=_EXPERT_NEED_BYTES)
+    _hf_download(EXPERT_GGUF_REPO, profile.filename, dest, "expert_model")
 
 
 def _install_heretic_27b() -> None:
-    target = _hf_download(
-        HERETIC_27B_GGUF_REPO,
-        HERETIC_27B_FILENAME,
-        models_dir() / HERETIC_27B_DIR,
-        "heretic_27b_model",
-    )
+    existing = extra_volume_file_named(HERETIC_27B_FILENAME)
+    if existing is not None and existing.exists():
+        target = existing
+    else:
+        dest = preferred_gguf_install_dir(HERETIC_27B_DIR, need_bytes=_EXPERT_NEED_BYTES)
+        target = _hf_download(
+            HERETIC_27B_GGUF_REPO,
+            HERETIC_27B_FILENAME,
+            dest,
+            "heretic_27b_model",
+        )
     digest = _sha256(target).lower()
     if digest != HERETIC_27B_SHA256:
         raise ValueError("Downloaded Qwen3.8 27B Heretic file failed SHA-256 verification")

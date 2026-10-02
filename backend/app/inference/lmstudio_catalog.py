@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -131,6 +132,60 @@ def extra_volume_model_roots() -> list[Path]:
             seen.add(key)
             roots.append(candidate)
     return roots
+
+
+def extra_volume_free_bytes() -> int:
+    """Largest free space among currently mounted extra volumes."""
+    from ..config import extra_volume_roots
+
+    best = 0
+    for volume in extra_volume_roots():
+        try:
+            free = int(shutil.disk_usage(volume).free)
+        except OSError:
+            continue
+        if free > best:
+            best = free
+    return best
+
+
+def extra_volume_install_root(*, need_bytes: int = 0) -> Path | None:
+    """`Jarvis/models` on the extra volume with the most free space that fits."""
+    from ..config import extra_volume_roots
+
+    required = int(need_bytes or 0)
+    best: Path | None = None
+    best_free = 0
+    for volume in extra_volume_roots():
+        try:
+            free = int(shutil.disk_usage(volume).free)
+        except OSError:
+            continue
+        if required and free < required:
+            continue
+        if free > best_free:
+            best_free = free
+            best = volume / "Jarvis" / "models"
+    return best
+
+
+def preferred_gguf_install_dir(relative_dir: str = "", *, need_bytes: int = 0) -> Path:
+    """Install under `models/` when that volume fits; otherwise extra-drive `Jarvis/models`."""
+    from ..config import models_dir
+
+    local_root = models_dir()
+    local = local_root / str(relative_dir or "") if relative_dir else local_root
+    required = int(need_bytes or 0)
+    try:
+        local_free = int(shutil.disk_usage(local_root).free)
+    except OSError:
+        local_free = 0
+    if required <= 0 or local_free >= required:
+        return local
+    extra = extra_volume_install_root(need_bytes=required)
+    if extra is None:
+        return local
+    return extra / str(relative_dir or "") if relative_dir else extra
 
 
 def extra_volume_file_named(filename: str) -> Path | None:
