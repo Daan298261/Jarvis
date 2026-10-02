@@ -190,3 +190,18 @@ def test_lta_and_hexstrike_accept_plugged_in_drive_without_settings_save(monkeyp
     assert Path(normalize_scope("local_path", str(extra))).resolve() == extra.resolve()
     assert artifact_path_allowed(evidence)
     assert Path(normalize_target("local_path", str(extra))).resolve() == extra.resolve()
+
+
+def test_extra_volume_roots_expand_media_and_skip_os_volume(monkeypatch, tmp_path):
+    from app import config
+
+    media = tmp_path / "media"
+    usb = media / "owner" / "USBDRIVE"
+    usb.mkdir(parents=True)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr(config, "_posix_owner_roots", lambda: [Path("/"), media])
+    monkeypatch.setattr(config, "os_volume_root", lambda: Path("/"))
+    roots = {path.resolve() for path in config.extra_volume_roots()}
+    assert usb.resolve() in roots
+    assert Path("/") not in roots
+    assert media.resolve() not in roots

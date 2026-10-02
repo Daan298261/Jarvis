@@ -92,6 +92,94 @@ def resolve_models_root() -> Path:
     return default_models_root()
 
 
+# Named folders on extra volumes (USB, D:). Do not rglob the whole drive.
+_EXTRA_VOLUME_MODEL_RELATIVES = (
+    "Models",
+    "models",
+    "GGUF",
+    "gguf",
+    "HuggingFace",
+    "huggingface",
+    "Hugging Face",
+    ".lmstudio/models",
+    "llama.cpp",
+    "Jarvis/models",
+    "Jarvis/Models",
+    "Jarvis/GGUF",
+)
+
+
+def extra_volume_model_roots() -> list[Path]:
+    """Model directories on extra volumes (`D:\\Models`, USB `GGUF`, …)."""
+    from ..config import extra_volume_roots
+
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for volume in extra_volume_roots():
+        for relative in _EXTRA_VOLUME_MODEL_RELATIVES:
+            candidate = volume / Path(relative)
+            try:
+                if not candidate.is_dir():
+                    continue
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            key = str(resolved).replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            roots.append(candidate)
+    return roots
+
+
+def extra_volume_loose_ggufs() -> list[Path]:
+    """`*.gguf` sitting on an extra volume root (not nested in Photos, etc.)."""
+    from ..config import extra_volume_roots
+
+    files: list[Path] = []
+    seen: set[str] = set()
+    for volume in extra_volume_roots():
+        try:
+            matches = list(volume.glob("*.gguf"))
+        except OSError:
+            continue
+        for path in matches:
+            try:
+                if not path.is_file():
+                    continue
+                key = str(path.resolve()).replace("\\", "/").lower()
+            except OSError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            files.append(path)
+    return files
+
+
+def owner_gguf_roots() -> list[Path]:
+    """LM Studio root plus named extra-volume model folders."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add(path: Path) -> None:
+        try:
+            if not path.exists():
+                return
+        except OSError:
+            return
+        key = str(path).replace("\\", "/").lower()
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(path)
+
+    add(resolve_models_root())
+    for extra in extra_volume_model_roots():
+        add(extra)
+    return roots
+
+
 def probe_vram_gb() -> float | None:
     info = detect_hardware(force=True)
     if info.vram_total_mib is None:
@@ -113,23 +201,64 @@ def file_weight_gb(path: Path) -> float:
         return 0.0
 
 
-def discover_ggufs(models_root: Path | None = None) -> list[DiscoveredGguf]:
-    root = models_root or resolve_models_root()
-    if not root.exists():
+def _iter_gguf_files(root: Path, *, recursive: bool) -> list[Path]:
+    try:
+        if not root.exists():
+            return []
+        iterator = root.rglob("*.gguf") if recursive else root.glob("*.gguf")
+        return [path for path in iterator if path.is_file()]
+    except OSError:
         return []
+
+
+def _gguf_record(path: Path) -> DiscoveredGguf | None:
+    if "mmproj" in path.name.lower():
+        return None
+    return DiscoveredGguf(
+        filename=path.name,
+        path=str(path),
+        weight_gb=file_weight_gb(path),
+        quantization=parse_quantization(path.name),
+    )
+
+
+def _collect_ggufs(paths: list[Path], *, recursive: bool) -> list[DiscoveredGguf]:
     found: list[DiscoveredGguf] = []
-    for path in sorted(root.rglob("*.gguf")):
-        name_lower = path.name.lower()
-        if "mmproj" in name_lower:
+    seen: set[str] = set()
+    for root in paths:
+        for path in _iter_gguf_files(root, recursive=recursive):
+            item = _gguf_record(path)
+            if item is None:
+                continue
+            key = item.path.replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(item)
+    return found
+
+
+def discover_ggufs(models_root: Path | None = None) -> list[DiscoveredGguf]:
+    """Index GGUFs under one root, or the owner union when `models_root` is omitted.
+
+    Explicit `models_root` stays a single-tree scan (tests and custom settings).
+    The default union is LM Studio plus named folders on extra volumes and
+    loose `*.gguf` files on those volume roots — never a full-drive rglob.
+    """
+    if models_root is not None:
+        return sorted(_collect_ggufs([models_root], recursive=True), key=lambda item: item.path.lower())
+    found = _collect_ggufs(owner_gguf_roots(), recursive=True)
+    seen = {item.path.replace("\\", "/").lower() for item in found}
+    for path in extra_volume_loose_ggufs():
+        item = _gguf_record(path)
+        if item is None:
             continue
-        found.append(
-            DiscoveredGguf(
-                filename=path.name,
-                path=str(path),
-                weight_gb=file_weight_gb(path),
-                quantization=parse_quantization(path.name),
-            )
-        )
+        key = item.path.replace("\\", "/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(item)
+    found.sort(key=lambda item: item.path.lower())
     return found
 
 
@@ -276,7 +405,7 @@ def sort_profiles(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_catalog(*, show_hidden: bool = False, models_root: Path | None = None) -> dict[str, Any]:
     seed = _load_seed_catalog()
     root = models_root or resolve_models_root()
-    discovered = discover_ggufs(root)
+    discovered = discover_ggufs(models_root) if models_root is not None else discover_ggufs()
     with _lock:
         state = _load_user_state_unlocked()
         profiles: list[dict[str, Any]] = []
@@ -302,9 +431,11 @@ def build_catalog(*, show_hidden: bool = False, models_root: Path | None = None)
             for item in discovered
             if item.path not in matched_paths
         ]
+    extra_roots = extra_volume_model_roots() if models_root is None else []
     return {
         "catalog_version": str(seed.get("catalog_version") or "unknown"),
         "models_root": str(root),
+        "extra_roots": [str(path) for path in extra_roots],
         "vram_gb": probe_vram_gb(),
         "profiles": sort_profiles(profiles),
         "ungraded": ungraded,
@@ -464,9 +595,11 @@ def select_catalog_profile(profile_id: str, *, models_root: Path | None = None) 
 
 def discovery_payload(*, models_root: Path | None = None) -> dict[str, Any]:
     root = models_root or resolve_models_root()
-    items = discover_ggufs(root)
+    items = discover_ggufs(models_root) if models_root is not None else discover_ggufs()
+    extra_roots = extra_volume_model_roots() if models_root is None else []
     return {
         "models_root": str(root),
+        "extra_roots": [str(path) for path in extra_roots],
         "count": len(items),
         "models": [
             {

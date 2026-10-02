@@ -584,6 +584,80 @@ def _posix_owner_roots() -> list[Path]:
     return roots
 
 
+def os_volume_root() -> Path:
+    """System volume (`C:\\` or `/`). Extra-drive scans skip this root."""
+    if os.name == "nt":
+        return Path(Path.home().anchor or "C:\\")
+    return Path("/")
+
+
+def _posix_volume_parent_children(parent: Path) -> list[Path]:
+    """USB labels live under `/media/<user>/<label>` or `/mnt/<label>`."""
+    try:
+        children = [path for path in parent.iterdir() if path.is_dir()]
+    except OSError:
+        return []
+    two_level = parent in {Path("/media"), Path("/run/media")} or parent.name == "media"
+    if not two_level:
+        return children
+    found: list[Path] = []
+    for child in children:
+        try:
+            grandchildren = [path for path in child.iterdir() if path.is_dir()]
+        except OSError:
+            grandchildren = []
+        if grandchildren:
+            found.extend(grandchildren)
+        else:
+            found.append(child)
+    return found
+
+
+def extra_volume_roots() -> list[Path]:
+    """Mounted owner volumes that are not the OS system volume.
+
+    USB sticks, `D:`, mapped drives, `/media` mounts — places an owner copies
+    GGUFs or archives when the system volume is full. Does not include `/` or
+    `C:\\`, and does not recurse into those trees.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return []
+    os_root = os_volume_root()
+    try:
+        os_resolved = os_root.resolve()
+    except OSError:
+        os_resolved = os_root
+    skip_keys = {
+        str(os_root).replace("\\", "/").rstrip("/").lower(),
+        str(os_resolved).replace("\\", "/").rstrip("/").lower(),
+        "",
+        "/",
+    }
+    raw = _windows_owner_drives() if os.name == "nt" else _posix_owner_roots()
+    expanded: list[Path] = []
+    posix_parents = {Path("/media"), Path("/mnt"), Path("/run/media")}
+    for root in raw:
+        if os.name != "nt" and (root in posix_parents or root.name in {"media", "mnt"}):
+            expanded.extend(_posix_volume_parent_children(root))
+            continue
+        expanded.append(root)
+    out: list[Path] = []
+    seen: set[str] = set()
+    for root in expanded:
+        try:
+            if not root.exists():
+                continue
+            resolved = root.resolve()
+        except OSError:
+            continue
+        key = str(resolved).replace("\\", "/").rstrip("/").lower()
+        if key in skip_keys or key in seen or resolved == os_resolved:
+            continue
+        seen.add(key)
+        out.append(root)
+    return out
+
+
 def default_allowed_directories() -> list[str]:
     home = Path.home()
     candidates = [
