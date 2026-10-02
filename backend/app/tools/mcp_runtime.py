@@ -237,6 +237,21 @@ class MCPRuntime:
             return ToolResult(False, "", error=f"Unknown MCP tool {tool_key}")
         server = spec["server"]
         name = spec.get("remote_name") or spec["tool"]["name"]
+        args = dict(arguments or {})
+        from ..security.hexstrike_defensive import (
+            bind_hexstrike_nmap_payload,
+            looks_like_nmap_tool,
+            lan_inventory_uses_host_nmap,
+            nmap_target_from_payload,
+            _host_nmap_lan_scan,
+        )
+
+        if looks_like_nmap_tool(tool_key) or looks_like_nmap_tool(str(name)):
+            args = bind_hexstrike_nmap_payload(args)
+            target = nmap_target_from_payload(args)
+            if lan_inventory_uses_host_nmap(target):
+                data = await _host_nmap_lan_scan({**args, "target": target})
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
         server_id = self._server_id(server)
         last_error = ""
         for attempt in range(2):
@@ -245,7 +260,7 @@ class MCPRuntime:
                     if attempt:
                         await self._close_session(server_id)
                     session = await self._connect(server)
-                    result = await session.call_tool(name, arguments or {})
+                    result = await session.call_tool(name, args)
                 is_error = bool(getattr(result, "is_error", False) or getattr(result, "isError", False))
                 return ToolResult(not is_error, str(getattr(result, "content", result)))
             except Exception as exc:

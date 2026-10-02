@@ -665,6 +665,101 @@ def test_bind_hexstrike_nmap_payload_pins_lan_and_skips_public(monkeypatch):
     assert spaced["additional_args"] == "-T4 -S 192.168.50.8"
     public = bind_hexstrike_nmap_payload({"target": "8.8.8.8", "additional_args": "-T3"})
     assert public["additional_args"] == "-T3"
+    host_alias = bind_hexstrike_nmap_payload({"host": "192.168.1.40", "additional_args": "-T4"})
+    assert host_alias["additional_args"] == "-T4 -S 192.168.1.12 -e eth0"
+
+
+def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
+    from app.security.hexstrike_defensive import looks_like_nmap_tool
+
+    assert looks_like_nmap_tool("nmap")
+    assert looks_like_nmap_tool("http:nmap")
+    assert looks_like_nmap_tool("mcp_hexstrike_ai_nmap")
+    assert looks_like_nmap_tool("mcp_hexstrike-ai_nmap")
+    assert not looks_like_nmap_tool("mcp_hexstrike_ai_trivy")
+    assert not looks_like_nmap_tool("container_scan")
+
+
+@pytest.mark.asyncio
+async def test_mcp_nmap_call_binds_home_nic(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    seen: list[dict] = []
+
+    class FakeSession:
+        async def call_tool(self, name, arguments):
+            seen.append({"name": name, "arguments": dict(arguments)})
+            return SimpleNamespace(content="ok", is_error=False)
+
+    async def fake_connect(server):
+        return FakeSession()
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nmap"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nmap"},
+        "remote_name": "nmap",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_nmap", {"target": "192.168.1.0/24"})
+        assert result.success, result.error
+        assert seen[0]["name"] == "nmap"
+        assert seen[0]["arguments"]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_nmap_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("MCP nmap must not be used when HexStrike would split -e")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nmap"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nmap"},
+        "remote_name": "nmap",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap" if str(name).lower() == "nmap" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for nas (192.168.50.12)\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_nmap", {"target": "192.168.50.0/24"})
+        assert result.success, result.error
+        assert result.data["source"] == "host-nmap"
+        argv = seen[0]
+        assert argv[argv.index("-e") + 1] == "Ethernet 2"
+        assert argv[argv.index("-S") + 1] == "192.168.50.8"
+        assert argv[-1] == "192.168.50.0/24"
+    finally:
+        MCP.reset_for_tests()
 
 
 @pytest.mark.asyncio

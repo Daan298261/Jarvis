@@ -398,6 +398,29 @@ def nmap_lan_additional_args(target: str, base: str = "-T3") -> str:
     return " ".join(part for part in parts if part)
 
 
+def looks_like_nmap_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_nmap`` or ``http:nmap``."""
+    text = str(name or "").strip().lower().replace("-", "_")
+    if not text:
+        return False
+    return (
+        text == "nmap"
+        or text.endswith("_nmap")
+        or text.endswith(":nmap")
+        or text.endswith("/nmap")
+        or ".nmap" in text
+    )
+
+
+def nmap_target_from_payload(payload: dict[str, Any] | None) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    for key in ("target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
 def bind_hexstrike_nmap_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     """Pin HexStrike operator nmap of an on-link RFC1918 target to that NIC.
 
@@ -406,7 +429,7 @@ def bind_hexstrike_nmap_payload(payload: dict[str, Any] | None) -> dict[str, Any
     scan the tunnel instead of the owner's LAN.
     """
     bound = dict(payload or {})
-    target = str(bound.get("target") or "").strip()
+    target = nmap_target_from_payload(bound)
     if not lan_scan_bind(target)[1]:
         return bound
     existing = str(bound.get("additional_args") or "").strip() or "-T3"
@@ -446,7 +469,7 @@ def _strip_nmap_bind_tokens(parts: list[str]) -> list[str]:
 
 async def _host_nmap_lan_scan(payload: dict[str, Any]) -> dict[str, Any]:
     """Host nmap argv for a private LAN target, including spaced Windows NIC names."""
-    cleaned = _require_private_lan_target(str(payload.get("target") or ""))
+    cleaned = _require_private_lan_target(nmap_target_from_payload(payload) or str(payload.get("target") or ""))
     binary = shutil.which("nmap")
     if not binary:
         raise RuntimeError(
@@ -490,9 +513,9 @@ async def _host_nmap_lan_scan(payload: dict[str, Any]) -> dict[str, Any]:
 async def execute_operator_nmap(payload: dict[str, Any] | None) -> dict[str, Any]:
     """Operator ``api/tools/nmap``: bind the home LAN NIC; host argv when HexStrike would split ``-e``."""
     bound = bind_hexstrike_nmap_payload(payload)
-    target = str(bound.get("target") or "").strip()
+    target = nmap_target_from_payload(bound)
     if lan_inventory_uses_host_nmap(target):
-        return await _host_nmap_lan_scan(bound)
+        return await _host_nmap_lan_scan({**bound, "target": target})
     return await HEXSTRIKE.post_operator("api/tools/nmap", bound)
 
 
