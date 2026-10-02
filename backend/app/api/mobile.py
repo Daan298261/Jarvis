@@ -37,7 +37,17 @@ def _lan_hosts() -> list[str]:
 def mobile_snapshot() -> dict[str, Any]:
     settings = load_settings()
     port = settings.bind_port
-    hosts = _lan_hosts()
+    from ..mobile.wan_forward import default_gateway_ipv4, is_rfc1918_ipv4, mapping_lan_ipv4
+
+    hosts = [host for host in _lan_hosts() if is_rfc1918_ipv4(host)]
+    gw = ""
+    try:
+        gw = default_gateway_ipv4()
+    except Exception:
+        pass
+    preferred = mapping_lan_ipv4(hosts, gw)
+    if preferred:
+        hosts = [preferred, *[host for host in hosts if host != preferred]]
     lan_urls = [f"http://{host}:{port}" for host in hosts]
     return {
         "app": "Jarvis",

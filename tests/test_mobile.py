@@ -23,6 +23,21 @@ def test_mobile_endpoint_lists_command_surface():
     assert "lan_phone" in info["urls"]
 
 
+def test_mobile_snapshot_lan_urls_skip_cgnat_and_prefer_home(monkeypatch):
+    monkeypatch.setattr(
+        "app.api.mobile._lan_hosts",
+        lambda: ["100.64.1.8", "10.8.0.2", "192.168.1.12", "8.8.8.8"],
+    )
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    info = mobile_snapshot()
+    port = info["bind_port"]
+    lan = info["urls"]["lan"]
+    assert lan[0] == f"http://192.168.1.12:{port}"
+    assert all("100.64." not in url and "8.8.8.8" not in url for url in lan)
+    assert f"http://10.8.0.2:{port}" in lan
+    assert info["urls"]["lan_phone"][0] == f"{lan[0]}/phone"
+
+
 def test_mobile_endpoint_is_open_when_auth_required(jarvis_env, monkeypatch):
     settings = AppSettings(
         allowed_directories=[str(jarvis_env["tmp"])],
