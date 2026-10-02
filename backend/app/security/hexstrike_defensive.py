@@ -272,9 +272,19 @@ def ensure_default_lan_scope() -> dict[str, Any]:
         ),
         None,
     )
-    if existing and existing.get("kind") in {"private_host", "private_cidr"}:
-        return existing
     cidrs = discover_private_lan_cidrs()
+    if existing and existing.get("kind") in {"private_host", "private_cidr"}:
+        value = str(existing.get("value") or "")
+        kind = str(existing.get("kind") or "")
+        try:
+            normalize_scope(kind, value)
+        except ValueError:
+            existing = None
+        else:
+            if kind == "private_cidr" and cidrs and value not in cidrs:
+                existing = None
+            elif existing is not None:
+                return existing
     if not cidrs:
         raise ValueError("No RFC1918 interface found; register a private LAN scope first")
     return upsert_scope(

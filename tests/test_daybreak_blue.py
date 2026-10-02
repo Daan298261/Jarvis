@@ -330,6 +330,40 @@ async def test_lan_inventory_uses_nic_cidr_when_scope_missing(blue_store, monkey
     assert job["scope_id"] == "lan"
 
 
+def test_default_lan_scope_refreshes_stale_or_public_cidr(blue_store, monkeypatch):
+    from app.security.hexstrike_defensive import ensure_default_lan_scope, upsert_scope
+
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["192.168.20.0/24"],
+    )
+    upsert_scope("lan", kind="private_cidr", value="10.0.0.0/24", label="Old house", attested_owned=True)
+    refreshed = ensure_default_lan_scope()
+    assert refreshed["value"] == "192.168.20.0/24"
+    (blue_store / "hexstrike-scopes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "scopes": [
+                    {
+                        "id": "lan",
+                        "kind": "private_cidr",
+                        "value": "8.8.8.0/24",
+                        "label": "Poisoned",
+                        "attested_owned": True,
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    repaired = ensure_default_lan_scope()
+    assert repaired["value"] == "192.168.20.0/24"
+    kept = ensure_default_lan_scope()
+    assert kept["value"] == "192.168.20.0/24"
+
+
 def test_parse_nmap_ping_hosts():
     from app.security.hexstrike_defensive import parse_nmap_ping_hosts
 
