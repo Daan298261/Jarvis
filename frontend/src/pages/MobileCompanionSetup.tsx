@@ -85,7 +85,7 @@ export function MobileCompanionSetup() {
       )
       if (dirty) return current
       const hydrated = wanFormFromSnapshot(next)
-      return { ...hydrated, gateway_password: current.gateway_password }
+      return { ...hydrated, gateway_password: current.gateway_password, ssh_password: current.ssh_password }
     })
   }
 
@@ -293,12 +293,22 @@ export function MobileCompanionSetup() {
                 />
               </label>
               <label>
-                Reverse-tunnel identity file
+                Reverse-tunnel identity file (optional if you set the SSH password)
                 <input
                   className="command"
                   value={wanForm.ssh_identity_file}
                   placeholder="C:\\Users\\you\\.ssh\\id_ed25519"
                   onChange={(event) => patchWan("ssh_identity_file", event.target.value)}
+                />
+              </label>
+              <label>
+                Reverse-tunnel SSH password (optional if you set an identity file; never shown after save)
+                <input
+                  className="command"
+                  type="password"
+                  value={wanForm.ssh_password}
+                  autoComplete="current-password"
+                  onChange={(event) => patchWan("ssh_password", event.target.value)}
                 />
               </label>
             </>

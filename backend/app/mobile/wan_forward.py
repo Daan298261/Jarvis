@@ -353,9 +353,10 @@ def reverse_tunnel_argv(
     *,
     host: str,
     user: str,
-    identity_file: str,
+    identity_file: str = "",
     port: int = 22,
     bind_host: str = "0.0.0.0",
+    password: str = "",
 ) -> list[str]:
     """ssh -R 4781:127.0.0.1:4781 so the companion can dial the owner's SSH host."""
     host = (host or "").strip()
@@ -366,13 +367,14 @@ def reverse_tunnel_argv(
         raise ValueError("SSH reverse tunnel host must be a public hostname or global IPv4")
     if not 1 <= int(port) <= 65535:
         raise ValueError("Invalid SSH port")
+    has_key = bool((identity_file or "").strip())
+    has_password = bool((password or "").strip())
+    if not has_key and not has_password:
+        raise ValueError("SSH reverse tunnel needs an identity file or the owner SSH password")
     bind = (bind_host or "0.0.0.0").strip() or "0.0.0.0"
     spec = f"{bind}:{PORT}:127.0.0.1:{PORT}"
-    return [
-        ssh_executable(),
+    options = [
         "-N",
-        "-o",
-        "BatchMode=yes",
         "-o",
         "ExitOnForwardFailure=yes",
         "-o",
@@ -381,7 +383,21 @@ def reverse_tunnel_argv(
         "ServerAliveCountMax=3",
         "-o",
         "StrictHostKeyChecking=accept-new",
-        *_identity_args(identity_file),
+    ]
+    if has_key:
+        options = ["-o", "BatchMode=yes", *options, *_identity_args(identity_file)]
+    else:
+        options += [
+            "-o",
+            "BatchMode=no",
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+        ]
+    return [
+        ssh_executable(),
+        *options,
         "-p",
         str(int(port)),
         "-R",
@@ -458,10 +474,12 @@ def redact_wan_config(config: dict[str, Any]) -> dict[str, Any]:
     public = {
         key: value
         for key, value in config.items()
-        if key not in {"gateway_password"}
+        if key not in {"gateway_password", "ssh_password"}
     }
     if config.get("gateway_password"):
         public["gateway_password_set"] = True
+    if config.get("ssh_password"):
+        public["ssh_password_set"] = True
     return public
 
 
@@ -475,6 +493,7 @@ def wan_settings_from_config(config: dict[str, Any]) -> dict[str, Any]:
         "ssh_port": int(config.get("ssh_port") or 22),
         "ssh_user": str(config.get("ssh_user") or "").strip(),
         "ssh_identity_file": str(config.get("ssh_identity_file") or "").strip(),
+        "ssh_password": str(config.get("ssh_password") or ""),
         "gateway_host": str(config.get("gateway_host") or "").strip(),
         "gateway_port": int(config.get("gateway_port") or 22),
         "gateway_user": str(config.get("gateway_user") or "").strip(),
@@ -492,15 +511,19 @@ class ReverseTunnel:
         self.argv: list[str] = []
         self.endpoint = ""
 
-    async def start(self, argv: list[str], endpoint: str) -> None:
+    async def start(self, argv: list[str], endpoint: str, env: dict[str, str] | None = None) -> None:
         await self.stop()
         self.argv = list(argv)
         self.endpoint = endpoint
+        kwargs: dict[str, Any] = {}
+        if env is not None:
+            kwargs["env"] = env
         self.process = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL,
+            **kwargs,
         )
         try:
             await asyncio.wait_for(self.process.wait(), timeout=0.4)
@@ -579,12 +602,27 @@ async def apply_gateway_ssh(settings: dict[str, Any], lan_ip: str, public_host: 
 
 
 async def apply_ssh_reverse(settings: dict[str, Any]) -> str:
+    password = str(settings.get("ssh_password") or "")
+    identity = str(settings.get("ssh_identity_file") or "")
     argv = reverse_tunnel_argv(
         host=settings["ssh_host"],
         user=settings["ssh_user"],
-        identity_file=settings["ssh_identity_file"],
+        identity_file=identity,
         port=int(settings["ssh_port"] or 22),
+        password=password,
     )
     endpoint = companion_wan_origin(settings["ssh_host"])
-    await REVERSE_TUNNEL.start(argv, endpoint)
+    env: dict[str, str] | None = None
+    secret_path = ""
+    if not identity.strip() and password:
+        env, secret_path = prepare_ssh_password_env(password)
+    try:
+        await REVERSE_TUNNEL.start(argv, endpoint, env=env)
+    except Exception:
+        if secret_path:
+            try:
+                os.remove(secret_path)
+            except OSError:
+                pass
+        raise
     return endpoint

@@ -87,6 +87,24 @@ def test_reverse_tunnel_argv_is_batch_mode_and_4781_only(tmp_path, monkeypatch):
     assert "4780" not in joined
     with pytest.raises(ValueError):
         reverse_tunnel_argv(host="bad/host", user="taco", identity_file=str(key))
+    with pytest.raises(ValueError, match="identity file or the owner SSH password"):
+        reverse_tunnel_argv(host="vpn.example.test", user="taco")
+
+
+def test_reverse_tunnel_accepts_owner_password_without_identity(monkeypatch):
+    monkeypatch.setattr("app.mobile.wan_forward.shutil.which", lambda name: "/usr/bin/ssh" if "ssh" in name else None)
+    argv = reverse_tunnel_argv(host="vpn.example.test", user="taco", password="owner-secret")
+    joined = " ".join(argv)
+    assert "-N" in argv
+    assert "-i" not in argv
+    assert "owner-secret" not in joined
+    assert "BatchMode=no" in argv
+    assert "PreferredAuthentications=password,keyboard-interactive" in argv
+    assert "0.0.0.0:4781:127.0.0.1:4781" in argv
+    public = redact_wan_config({"ssh_password": "owner-secret", "ssh_host": "vpn.example.test"})
+    assert "owner-secret" not in str(public)
+    assert public["ssh_password_set"] is True
+    assert "ssh_password" not in public
 
 
 def test_openwrt_script_maps_only_companion_port_on_private_lan():
@@ -471,6 +489,40 @@ def test_ssh_askpass_prints_secret_without_argv(tmp_path, monkeypatch):
     result = subprocess.run([env["SSH_ASKPASS"]], env=env, capture_output=True, text=True, check=True)
     assert result.stdout == "router-pass"
     assert not Path(path).exists()
+
+
+@pytest.mark.asyncio
+async def test_apply_ssh_reverse_uses_askpass_when_password_only(tmp_path, monkeypatch):
+    from app.mobile import store
+    from app.mobile.wan_forward import REVERSE_TUNNEL, apply_ssh_reverse
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.mobile.wan_forward.shutil.which", lambda name: "/usr/bin/ssh" if "ssh" in name else None)
+    seen: dict[str, object] = {}
+
+    async def fake_start(argv, endpoint, env=None):
+        seen["argv"] = argv
+        seen["endpoint"] = endpoint
+        seen["env"] = env
+
+    monkeypatch.setattr(REVERSE_TUNNEL, "start", fake_start)
+    endpoint = await apply_ssh_reverse(
+        {
+            "ssh_host": "vpn.example.test",
+            "ssh_user": "taco",
+            "ssh_identity_file": "",
+            "ssh_port": 22,
+            "ssh_password": "vps-pass",
+        }
+    )
+    assert endpoint == "https://vpn.example.test:4781"
+    argv = list(seen["argv"])
+    assert "vps-pass" not in " ".join(str(item) for item in argv)
+    assert "-i" not in argv
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env.get("SSH_ASKPASS_REQUIRE") == "force"
+    assert env.get("JARVIS_SSH_ASKPASS_FILE")
 
 
 @pytest.mark.asyncio

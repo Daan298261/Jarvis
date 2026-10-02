@@ -6,6 +6,7 @@ export type WanForm = {
   ssh_port: string
   ssh_user: string
   ssh_identity_file: string
+  ssh_password: string
   gateway_host: string
   gateway_port: string
   gateway_user: string
@@ -21,6 +22,7 @@ export const EMPTY_WAN_FORM: WanForm = {
   ssh_port: "22",
   ssh_user: "",
   ssh_identity_file: "",
+  ssh_password: "",
   gateway_host: "",
   gateway_port: "22",
   gateway_user: "",
@@ -80,6 +82,8 @@ export function connectionPrepareBody(
   }
   const password = form.gateway_password.trim()
   if (password) body.gateway_password = password
+  const sshPassword = form.ssh_password.trim()
+  if (sshPassword) body.ssh_password = sshPassword
   return body
 }
 
