@@ -140,7 +140,7 @@ class JarvisApi(context: Context) {
         val challenge = JSONObject(raw("/challenge/$deviceId", authenticated = false).toString(Charsets.UTF_8))
         val proof = Signature.getInstance("SHA256withECDSA").run {
             initSign(keys.getKey(keyAlias, null) as java.security.PrivateKey)
-            update("jarvis-mobile-v1\n$deviceId\n${challenge.getString("challenge")}".toByteArray())
+            update("jarvis-mobile-v1\n$deviceId\n${challenge.getString(\"challenge\")}".toByteArray())
             Base64.encodeToString(sign(), Base64.NO_WRAP)
         }
         val result = JSONObject(raw("/session", "POST", JSONObject().put("device_id", deviceId).put("signature", proof).toString().toByteArray(), false).toString(Charsets.UTF_8))
@@ -233,10 +233,29 @@ class JarvisApi(context: Context) {
         val client = pinnedClient().newBuilder()
             .connectTimeout(TransportPolicy.connectTimeoutMs(addresses.size), TimeUnit.MILLISECONDS)
             .build()
-        if (TransportPolicy.mayRaceOrigins(method, path, addresses, locals) && addresses.size > 1) {
-            return@withContext raceOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
+        try {
+            if (TransportPolicy.mayRaceOrigins(method, path, addresses, locals) && addresses.size > 1) {
+                return@withContext raceOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
+            }
+            sequentialOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
+        } catch (error: java.io.IOException) {
+            if (!recoverPairedLanFromBeacon()) throw error
+            val retryLocals = TransportPolicy.localIpv4Addresses()
+            val retryAddresses = TransportPolicy.dialOrder(
+                preferred.takeIf { System.currentTimeMillis() - preferredAt < 60_000 },
+                endpoints + endpoint,
+                retryLocals,
+                recentFailures(),
+            )
+            sequentialOrigins(client, retryAddresses, path, method, body, authenticated, contentType, filename, extraHeaders)
         }
-        sequentialOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
+    }
+
+    suspend fun recoverPairedLanFromBeacon(): Boolean {
+        if (deviceId.isEmpty() || pin.length != 64) return false
+        if (TransportPolicy.localIpv4Addresses().isEmpty()) return false
+        val host = runCatching { LanScanner.scan(timeoutMs = 1600) }.getOrNull() ?: return false
+        return absorbMatchingLanOrigin(host.endpoint, host.serverPin)
     }
 
     private fun sequentialOrigins(
