@@ -9,6 +9,7 @@ import asyncio
 import ipaddress
 import os
 import shutil
+import socket
 import sys
 from pathlib import Path
 from typing import Any
@@ -207,6 +208,35 @@ def mapping_lan_ipv4(hosts, gateway: str = "") -> str:
         if ipaddress.ip_address(host) in same_24:
             return host
     return ""
+
+
+def interface_ipv4_addresses() -> list[str]:
+    """Every non-loopback IPv4 this PC currently holds, including USB ethernet and VPN NICs.
+
+    Hostname lookup plus a UDP connect to 1.1.1.1 only see the default-route
+    address. A WireGuard default route would otherwise hide the home LAN IP
+    the phone and the IGD both need.
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+    try:
+        import psutil
+    except ImportError:
+        return []
+    try:
+        nics = psutil.net_if_addrs().items()
+    except Exception:
+        return []
+    for _name, addrs in nics:
+        for addr in addrs:
+            if getattr(addr, "family", None) != socket.AF_INET:
+                continue
+            ip = (getattr(addr, "address", None) or "").split("%", 1)[0].strip()
+            if not ip or ip.startswith("127.") or ip in seen:
+                continue
+            seen.add(ip)
+            found.append(ip)
+    return found
 
 
 def mapped_address_is_egress(mapped_ip: str) -> bool:

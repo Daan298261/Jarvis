@@ -58,6 +58,47 @@ def test_public_beacon_payload_needs_pin_and_endpoint():
         }
     )
     assert skip_cgnat["https"] == "https://192.168.1.12:4781"
+    vpn_first = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "endpoints": [
+                "https://home.example.test:4781",
+                "https://10.8.0.2:4781",
+                "https://192.168.1.12:4781",
+            ],
+        },
+        prefer_host="192.168.1.40",
+    )
+    assert vpn_first["https"] == "https://192.168.1.12:4781"
+    mapped = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "mapped_lan_ip": "192.168.1.12",
+            "endpoints": [
+                "https://10.8.0.2:4781",
+                "https://192.168.1.12:4781",
+                "https://203.0.113.8:4781",
+            ],
+        }
+    )
+    assert mapped["https"] == "https://192.168.1.12:4781"
+    wan_only = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "endpoints": ["https://home.example.test:4781", "https://203.0.113.8:4781"],
+        }
+    )
+    assert wan_only is None
+    from app.mobile.lan_beacon import prefer_lan_https
+
+    assert prefer_lan_https(
+        ["https://home.example.test:4781", "https://192.168.1.12:4781"],
+        "home.example.test",
+    ) == "https://192.168.1.12:4781"
+    assert prefer_lan_https(
+        ["https://192.168.1.12:4781"],
+        "192.168.1.1",
+    ) == "https://192.168.1.12:4781"
 
 
 def test_lan_enroll_is_pending_until_owner_confirms(companion_env):

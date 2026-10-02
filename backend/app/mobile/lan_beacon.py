@@ -59,28 +59,52 @@ def parse_beacon(raw: bytes) -> dict[str, Any] | None:
     }
 
 
+def _lan_origin_host(item: str) -> str:
+    return (urlsplit(item).hostname or "").strip().lower().rstrip(".")
+
+
+def _is_lan_origin(item: str) -> bool:
+    from .wan_forward import is_rfc1918_ipv4
+
+    host = _lan_origin_host(item)
+    if not host:
+        return False
+    if host.endswith((".local", ".lan", ".home.arpa")) or host in {"localhost", "router", "gateway"}:
+        return True
+    return is_rfc1918_ipv4(host)
+
+
 def prefer_lan_https(endpoints: list[str], prefer_host: str = "") -> str:
-    """LAN beacons must advertise an RFC1918 / .local origin, not the public hairpin."""
+    """LAN beacons must advertise an RFC1918 / .local origin, not the public hairpin.
+
+    A VPN NIC often sorts ahead of 192.168. Prefer the origin on the same /24 as
+    the phone that probed, or the mapped home-LAN dest, never a WAN hostname.
+    """
     from .wan_forward import is_rfc1918_ipv4
 
     values = [str(item).rstrip("/") for item in endpoints if item]
-    if not values:
+    lan_items = [item for item in values if _is_lan_origin(item)]
+    if not lan_items:
         return ""
-    if prefer_host:
-        for item in values:
-            if prefer_host in item:
+    prefer = (prefer_host or "").strip().lower().rstrip(".")
+    if prefer:
+        for item in lan_items:
+            if _lan_origin_host(item) == prefer:
                 return item
-    for item in values:
-        host = (urlsplit(item).hostname or "").strip().lower().rstrip(".")
-        if host.endswith((".local", ".lan", ".home.arpa")) or host in {"localhost", "router", "gateway"}:
-            return item
         try:
-            ip = ipaddress.ip_address(host)
+            peer = ipaddress.ip_address(prefer)
+            net = ipaddress.ip_network(f"{peer}/24", strict=False)
         except ValueError:
-            continue
-        if is_rfc1918_ipv4(str(ip)):
-            return item
-    return values[0]
+            net = None
+        if net is not None:
+            for item in lan_items:
+                host = _lan_origin_host(item)
+                try:
+                    if is_rfc1918_ipv4(host) and ipaddress.ip_address(host) in net:
+                        return item
+                except ValueError:
+                    continue
+    return lan_items[0]
 
 
 def public_beacon_payload(snapshot: dict[str, Any], *, prefer_host: str = "") -> dict[str, Any] | None:
@@ -88,7 +112,10 @@ def public_beacon_payload(snapshot: dict[str, Any], *, prefer_host: str = "") ->
     endpoints = [str(item).rstrip("/") for item in (snapshot.get("endpoints") or []) if item]
     if len(pin) != 64 or not endpoints:
         return None
-    chosen = prefer_lan_https(endpoints, prefer_host)
+    host = (prefer_host or "").strip() or str(snapshot.get("mapped_lan_ip") or "").strip()
+    chosen = prefer_lan_https(endpoints, host)
+    if not chosen:
+        return None
     return {
         "https": chosen,
         "server_pin": pin,
@@ -141,11 +168,19 @@ class _BeaconProtocol(asyncio.DatagramProtocol):
                 pass
         self._broadcast_task = asyncio.create_task(self._broadcast_loop())
 
+    def _payload(self, peer_host: str = "") -> dict[str, Any] | None:
+        factory = self._payload_factory
+        try:
+            return factory(peer_host)
+        except TypeError:
+            return factory()
+
     def datagram_received(self, data, addr):
         parsed = parse_beacon(data)
         if not parsed:
             return
-        payload = self._payload_factory()
+        peer = addr[0] if addr else ""
+        payload = self._payload(str(peer or ""))
         if not payload:
             return
         blob = encode_beacon(payload)
@@ -155,7 +190,7 @@ class _BeaconProtocol(asyncio.DatagramProtocol):
     async def _broadcast_loop(self):
         try:
             while True:
-                payload = self._payload_factory()
+                payload = self._payload()
                 if payload and self._transport:
                     blob = encode_beacon(payload)
                     try:

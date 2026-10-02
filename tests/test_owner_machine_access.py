@@ -280,6 +280,39 @@ def test_lan_hosts_drops_cgnat(monkeypatch):
     assert connectivity.lan_hosts() == ["192.168.1.12"]
 
 
+def test_interface_ipv4_addresses_lists_every_nic(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.mobile.wan_forward import interface_ipv4_addresses
+
+    class _Addr(SimpleNamespace):
+        pass
+
+    def fake_addrs():
+        return {
+            "eth0": [_Addr(family=__import__("socket").AF_INET, address="192.168.1.12")],
+            "wg0": [_Addr(family=__import__("socket").AF_INET, address="10.8.0.2")],
+            "lo": [_Addr(family=__import__("socket").AF_INET, address="127.0.0.1")],
+        }
+
+    monkeypatch.setattr("psutil.net_if_addrs", fake_addrs)
+    assert interface_ipv4_addresses() == ["192.168.1.12", "10.8.0.2"]
+
+
+def test_lan_hosts_unions_every_nic_when_default_route_is_vpn(monkeypatch):
+    from app.api import mobile
+
+    monkeypatch.setattr("app.mobile.wan_forward.interface_ipv4_addresses", lambda: ["10.8.0.2", "192.168.1.12"])
+    monkeypatch.setattr(mobile.socket, "gethostname", lambda: (_ for _ in ()).throw(OSError("no hostname")))
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            raise OSError("no udp")
+
+    monkeypatch.setattr(mobile.socket, "socket", _Boom)
+    assert mobile._lan_hosts() == ["10.8.0.2", "192.168.1.12"]
+
+
 def test_preferred_lan_ipv4_picks_home_lan_over_vpn(monkeypatch):
     from app.mobile import connectivity
 

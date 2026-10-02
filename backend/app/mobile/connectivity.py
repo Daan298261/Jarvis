@@ -218,7 +218,9 @@ class Connectivity:
 
     async def start_lan_beacon(self):
         try:
-            await self.lan_beacon.start(lambda: public_beacon_payload(self.snapshot()))
+            await self.lan_beacon.start(
+                lambda peer="": public_beacon_payload(self.snapshot(), prefer_host=peer or "")
+            )
         except Exception:
             pass
 

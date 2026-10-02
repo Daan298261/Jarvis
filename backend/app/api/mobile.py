@@ -14,6 +14,12 @@ router = APIRouter(prefix="/api/mobile", tags=["mobile"])
 def _lan_hosts() -> list[str]:
     found: set[str] = set()
     try:
+        from ..mobile.wan_forward import interface_ipv4_addresses
+
+        found.update(interface_ipv4_addresses())
+    except Exception:
+        pass
+    try:
         hostname = socket.gethostname()
         for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
             ip = info[4][0]
