@@ -1,7 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react"
 import { NeuralPresence } from "./renderers/NeuralPresence"
 import HumanoidPresence from "./renderers/HumanoidPresence"
-import ParticleBustPresence from "./renderers/ParticleBustPresence"
 import { supportsHumanoidRuntime } from "./renderers/humanoidRuntime"
 import { PresenceFallback } from "./PresenceFallback"
 import type { EffectivePresence, PersonaCloudVisual, PresenceMode, PresenceSnapshot, PresentationSettings } from "./presenceTypes"
@@ -87,20 +86,9 @@ export function PresenceHost({ snapshot, settings, size = 540, shapeId, personaV
     >
       {resolved.effective === "none" && staticFallback}
       {resolved.effective === "neural" && neuralFallback}
-      {(resolved.effective === "humanoid" || resolved.effective === "galaxy") && (
-        <PresenceErrorBoundary key="humanoid" fallback={neuralFallback}>
+      {(resolved.effective === "humanoid" || resolved.effective === "particle_bust" || resolved.effective === "galaxy") && (
+        <PresenceErrorBoundary key="morphable-presence" fallback={neuralFallback}>
           <HumanoidPresence snapshot={snapshot} settings={settings} size={size} shapeId={shapeId} personaVisual={personaVisual} />
-        </PresenceErrorBoundary>
-      )}
-      {resolved.effective === "particle_bust" && (
-        <PresenceErrorBoundary key="particle-bust" fallback={neuralFallback}>
-          <ParticleBustPresence
-            snapshot={snapshot}
-            settings={settings}
-            size={size}
-            shapeId={shapeId}
-            personaVisual={personaVisual}
-          />
         </PresenceErrorBoundary>
       )}
       {resolved.fallbackReason && (
