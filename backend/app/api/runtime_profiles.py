@@ -29,10 +29,7 @@ from ..inference.security_gates import (
     gate_is_enabled,
     get_gate_status,
     list_gate_statuses,
-    lock_gate,
     normalize_gate_role,
-    set_gate_password,
-    unlock_gate,
 )
 
 router = APIRouter(prefix="/api/runtime-profiles", tags=["runtime-profiles"])
