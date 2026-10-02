@@ -1,4 +1,5 @@
 import { isApiError } from "../api"
+import { updatePresentation } from "../presence/presentationSettings"
 import { installVoiceProfile } from "../tts/voiceProfiles"
 import { PERSONA_LABELS, selectNamedPersona, type NamedPersonaState } from "./namedPersonas"
 
@@ -10,6 +11,24 @@ export type ActivatePersonaOptions = {
 export async function activateNamedPersona(
   id: string,
   options: ActivatePersonaOptions = {},
+): Promise<NamedPersonaState> {
+  // A named persona owns the main figure as well as the voice. Apply the HUD
+  // mode optimistically so the existing particle stage starts morphing on the
+  // same click instead of leaving the generic humanoid on screen.
+  const presenceUpdate = updatePresentation({
+    shell: "hud",
+    requestedPresence: "particle_bust",
+  })
+  const personaUpdate = activatePersonaVoice(id, options)
+  const [presenceResult, personaResult] = await Promise.allSettled([presenceUpdate, personaUpdate])
+  if (personaResult.status === "rejected") throw personaResult.reason
+  if (presenceResult.status === "rejected") throw presenceResult.reason
+  return personaResult.value
+}
+
+async function activatePersonaVoice(
+  id: string,
+  options: ActivatePersonaOptions,
 ): Promise<NamedPersonaState> {
   const onProgress = options.onProgress
   try {
