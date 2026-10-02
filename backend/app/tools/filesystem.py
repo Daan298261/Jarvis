@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..config import LOCAL_NETWORK_SCOPE
 from .base import RiskLevel, Tool, ToolResult
 from .safety import resolve_allowed_path
 from .snapshots import create_snapshot, list_snapshots, restore_snapshot
@@ -18,6 +20,52 @@ _DIFF_LINE_LIMIT = 200
 
 def _allowed(context: dict[str, Any]) -> list[str]:
     return list(context.get("allowed_directories") or [])
+
+
+def _root_key(path: Path) -> str:
+    return os.path.normcase(str(path).replace("\\", "/")).rstrip("/") or "/"
+
+
+def existing_local_roots(allowed: list[str]) -> list[Path]:
+    """Resolved local workspace roots, excluding the LAN-share sentinel."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for raw in allowed:
+        text = str(raw or "").strip()
+        if not text or text == LOCAL_NETWORK_SCOPE:
+            continue
+        try:
+            path = Path(text).expanduser().resolve()
+        except OSError:
+            continue
+        if not path.exists():
+            continue
+        key = _root_key(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(path)
+    return roots
+
+
+def _system_volume_keys() -> set[str]:
+    """Whole-volume roots that would make an unscoped search walk the OS tree."""
+    keys: set[str] = set()
+    if os.name == "nt":
+        keys.add(_root_key(Path(Path.home().anchor)))
+    else:
+        keys.add("/")
+    return keys
+
+
+def search_workspace_roots(allowed: list[str]) -> list[Path]:
+    """Roots to walk for an unscoped search: extra drives and profile folders, not C:\\ or /."""
+    local = existing_local_roots(allowed)
+    if not local:
+        return []
+    skip = _system_volume_keys()
+    preferred = [path for path in local if _root_key(path) not in skip]
+    return preferred or local
 
 
 def _is_probably_text(path: Path) -> bool:
@@ -165,12 +213,14 @@ class FilesystemTool(Tool):
     description = (
         "Inspect and modify files and directories. Actions: list, search, read, write, edit, "
         "copy, move, rename, mkdir, delete, hash, stat, compare, recent. Use this for organizing "
-        "files, creating documents, and inspecting project trees. Prefer write/edit over delete. "
-        "compare shows a unified diff (or hashes for binaries). recent lists backup copies and "
-        "recent versions next to a file. snapshot copies a directory or file into data/backups "
-        "before mass edits; snapshots lists them; restore copies a snapshot back. Identical trees "
-        "are not snapshotted again. Binary files are supported via hash/stat/copy; read "
-        "returns a note for large binaries."
+        "files, creating documents, and inspecting project trees. Omit path on list to see every "
+        "allowed drive, mount, and folder (plus private LAN UNC). Omit path on search to look "
+        "across those folders and extra volumes without walking the OS drive root. Prefer "
+        "write/edit over delete. compare shows a unified diff (or hashes for binaries). recent "
+        "lists backup copies and recent versions next to a file. snapshot copies a directory or "
+        "file into data/backups before mass edits; snapshots lists them; restore copies a "
+        "snapshot back. Identical trees are not snapshotted again. Binary files are supported via "
+        "hash/stat/copy; read returns a note for large binaries."
     )
     risk = RiskLevel.MEDIUM
     # Per-action class resolved by RFC-0031; default UNKNOWN until action known.
@@ -200,7 +250,10 @@ class FilesystemTool(Tool):
                     "restore",
                 ],
             },
-            "path": {"type": "string", "description": "Primary path"},
+            "path": {
+                "type": "string",
+                "description": "Primary path. Omit on list/search to cover the whole allowed workspace.",
+            },
             "destination": {"type": "string", "description": "Second path for compare, or copy/move/rename/restore target"},
             "content": {"type": "string"},
             "pattern": {"type": "string", "description": "Glob or substring for search"},
@@ -219,6 +272,43 @@ class FilesystemTool(Tool):
 
     def _path(self, raw: str) -> Path:
         return resolve_allowed_path(raw, _allowed(self.context_getter()))
+
+    def _list_workspace(self, allowed: list[str]) -> ToolResult:
+        roots = existing_local_roots(allowed)
+        entries: list[str] = []
+        for item in roots:
+            try:
+                size = item.stat().st_size
+            except OSError:
+                size = 0
+            kind = "DIR" if item.is_dir() else "FILE"
+            entries.append(f"{kind:4} {size:10} {item}")
+        if LOCAL_NETWORK_SCOPE in allowed:
+            entries.append(
+                "SHARE          "
+                f"{LOCAL_NETWORK_SCOPE}  (private LAN UNC such as \\\\nas.local\\share)"
+            )
+        return ToolResult(
+            True,
+            "\n".join(entries) or "(empty)",
+            data={
+                "roots": [str(path) for path in roots],
+                "lan_shares": LOCAL_NETWORK_SCOPE in allowed,
+            },
+        )
+
+    def _search_workspace(self, allowed: list[str], pattern: str, *, recursive: bool) -> ToolResult:
+        matches: list[str] = []
+        for root in search_workspace_roots(allowed):
+            try:
+                found = root.rglob(pattern) if recursive else root.glob(pattern)
+                for item in found:
+                    matches.append(str(item))
+                    if len(matches) >= 400:
+                        return ToolResult(True, "\n".join(matches), data={"matches": matches, "truncated": True})
+            except OSError:
+                continue
+        return ToolResult(True, "\n".join(matches) or "No matches", data={"matches": matches})
 
     def _guard_coding_write(self, resolved: Path) -> Path:
         ctx = self.context_getter() or {}
@@ -268,7 +358,17 @@ class FilesystemTool(Tool):
                     f"Created snapshot {payload['id']} ({payload.get('files')} files, {payload.get('bytes')} bytes)",
                     data=payload,
                 )
-            path = self._path(kwargs.get("path") or "")
+            allowed = _allowed(ctx)
+            raw_path = str(kwargs.get("path") or "").strip()
+            if action in {"list", "search"} and not raw_path:
+                if action == "list":
+                    return self._list_workspace(allowed)
+                return self._search_workspace(
+                    allowed,
+                    str(kwargs.get("pattern") or "*"),
+                    recursive=bool(kwargs.get("recursive", True)),
+                )
+            path = self._path(raw_path)
             if action == "list":
                 if not path.exists():
                     return ToolResult(False, "", error="Path does not exist")
