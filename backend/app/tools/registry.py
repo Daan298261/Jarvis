@@ -66,7 +66,7 @@ class ToolRegistry:
             AppsTool(),
             OfficeTool(getter),
             GitTool(getter),
-            DockerTool(),
+            DockerTool(getter),
             WebFetchTool(getter),
             ExternalIngestTool(getter),
             InternalReferencesTool(),

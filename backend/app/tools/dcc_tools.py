@@ -9,6 +9,7 @@ from typing import Any
 
 from ..projects.paths import project_media_dir
 from .base import RiskLevel, Tool, ToolResult
+from .owner_paths import resolve_owner_file_path
 from .safety import resolve_allowed_path
 
 _BLENDER_INSTALL = (
@@ -30,6 +31,17 @@ def _allowed(context: dict[str, Any]) -> list[str]:
 
 def _resolve(raw: str, allowed: list[str]) -> Path:
     return resolve_allowed_path(raw, allowed) if allowed else Path(raw).expanduser().resolve()
+
+
+def dcc_output_path(source: Path, output_raw: str | None, allowed: list[str], suffix: str = ".stl") -> Path:
+    """Documents/<stem>.stl by default; a folder path (USB/`D:`) gets the filename appended."""
+    name = f"{source.stem or 'model'}{suffix if suffix.startswith('.') else '.' + suffix}"
+    return resolve_owner_file_path(
+        output_raw,
+        suggested_name=name,
+        allowed=allowed,
+        fallback_dirs=("Documents", "Desktop", "Downloads"),
+    )
 
 
 async def _run(argv: list[str], *, cwd: Path | None = None, timeout: int = 600) -> tuple[int, str, str]:
@@ -64,6 +76,7 @@ class BlenderTool(Tool):
     description = (
         "Run Blender headless against owner-allowed paths. "
         "Use background_python with a .py script, or export_mesh from a .blend file. "
+        "Omit output_path on export_mesh to save in Documents (USB/`D:` folder paths allowed). "
         "Returns the on-disk output path; missing Blender yields an install CTA, not success."
     )
     risk = RiskLevel.HIGH
@@ -73,7 +86,10 @@ class BlenderTool(Tool):
             "action": {"type": "string", "enum": ["background_python", "export_mesh"]},
             "script_path": {"type": "string", "description": "Python script for --background --python"},
             "blend_path": {"type": "string", "description": "Optional .blend to open"},
-            "output_path": {"type": "string", "description": "Export path (.stl, .obj, .glb, ...)"},
+            "output_path": {
+                "type": "string",
+                "description": "Export path (.stl, .obj, .glb, ...). Omit export_mesh to use Documents/<blend>.stl.",
+            },
             "project_id": {"type": "string", "description": "Optional portal project for RFC-0121 media placement"},
             "timeout_seconds": {"type": "integer", "default": 600},
         },
@@ -126,12 +142,12 @@ class BlenderTool(Tool):
             return ToolResult(True, text, data=data)
         if action == "export_mesh":
             blend_raw = kwargs.get("blend_path") or ""
-            output_raw = kwargs.get("output_path") or ""
-            if not blend_raw or not output_raw:
-                return ToolResult(False, "", error="export_mesh requires blend_path and output_path")
+            if not blend_raw:
+                return ToolResult(False, "", error="export_mesh requires blend_path")
             try:
-                blend = _resolve(blend_raw, allowed)
-                output = _resolve(output_raw, allowed)
+                blend = _resolve(str(blend_raw), allowed)
+                suffix = Path(str(kwargs.get("output_path") or "model.stl")).suffix or ".stl"
+                output = dcc_output_path(blend, kwargs.get("output_path"), allowed, suffix=suffix)
             except PermissionError as exc:
                 return ToolResult(False, "", error=str(exc))
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -165,6 +181,7 @@ class OpenScadTool(Tool):
     name = "openscad"
     description = (
         "Compile an OpenSCAD .scad file to a mesh/export on disk via `openscad -o <out> <in>`. "
+        "Omit output_path to save in Documents/<name>.stl (USB/`D:` folder paths allowed). "
         "Missing OpenSCAD returns an install CTA, not a fake mesh."
     )
     risk = RiskLevel.HIGH
@@ -172,11 +189,14 @@ class OpenScadTool(Tool):
         "type": "object",
         "properties": {
             "input_path": {"type": "string", "description": ".scad source file"},
-            "output_path": {"type": "string", "description": "Output mesh (.stl, .obj, .amf, ...)"},
+            "output_path": {
+                "type": "string",
+                "description": "Output mesh (.stl, .obj, .amf, ...). Omit to use Documents/<input>.stl.",
+            },
             "project_id": {"type": "string", "description": "Optional portal project for RFC-0121 media placement"},
             "timeout_seconds": {"type": "integer", "default": 300},
         },
-        "required": ["input_path", "output_path"],
+        "required": ["input_path"],
     }
 
     def __init__(self, context_getter) -> None:
@@ -189,7 +209,7 @@ class OpenScadTool(Tool):
         allowed = _allowed(self.context_getter() or {})
         try:
             src = _resolve(str(kwargs.get("input_path") or ""), allowed)
-            dest = _resolve(str(kwargs.get("output_path") or ""), allowed)
+            dest = dcc_output_path(src, kwargs.get("output_path"), allowed)
         except PermissionError as exc:
             return ToolResult(False, "", error=str(exc))
         if not src.exists():
