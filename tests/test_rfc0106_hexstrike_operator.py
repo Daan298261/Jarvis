@@ -345,3 +345,48 @@ async def test_operate_lan_inventory_empty_scope_starts_stopped_suite(operator_s
     assert job["status"] == "completed"
     assert started["count"] == 1
     assert job["result"]["scope_id"] == "lan"
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_catalog_available_when_suite_installed_without_host_nmap(
+    operator_store, monkeypatch
+):
+    from app.security import hexstrike_operator as hop
+
+    HEXSTRIKE._process = None
+    HEXSTRIKE._loopback_healthy = False
+    hop._CATALOG_CACHE = []
+
+    import shutil as _shutil
+
+    real_which = _shutil.which
+
+    def _which_no_nmap(name, *args, **kwargs):
+        if str(name).lower() == "nmap":
+            return None
+        return real_which(name, *args, **kwargs)
+
+    monkeypatch.setattr("app.security.hexstrike_operator.shutil.which", _which_no_nmap)
+    monkeypatch.setattr(
+        HEXSTRIKE,
+        "_base_status",
+        lambda: SimpleNamespace(installed=True, running=False, optional_stubs=[]),
+    )
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=False,
+            installed=True,
+            install_path=str(operator_store),
+            tools={},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+            optional_stubs=[],
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    catalog = await refresh_discovered_catalog(force=True)
+    lan = next(item for item in catalog if item["id"] == "defensive:lan_inventory")
+    assert lan["available"] is True
+    assert lan["missing_dependencies"] == []

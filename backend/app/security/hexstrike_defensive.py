@@ -5,9 +5,11 @@ forwarding arbitrary upstream paths, flags, commands, or MCP tools.
 """
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import re
+import shutil
 import socket
 import threading
 import uuid
@@ -343,6 +345,70 @@ async def _lookup_cve(cve_id: str) -> dict[str, Any]:
     return {"source": "NVD", "cve": cve}
 
 
+def parse_nmap_ping_hosts(text: str) -> list[dict[str, str]]:
+    hosts: list[dict[str, str]] = []
+    for line in (text or "").splitlines():
+        if not line.startswith("Nmap scan report for "):
+            continue
+        rest = line[len("Nmap scan report for ") :].strip()
+        hostname = ""
+        address = rest
+        if rest.endswith(")") and " (" in rest:
+            hostname, ip_part = rest.rsplit(" (", 1)
+            address = ip_part.rstrip(")")
+        hosts.append({"address": address, "hostname": hostname})
+    return hosts
+
+
+async def _host_nmap_ping_scan(target: str) -> dict[str, Any]:
+    binary = shutil.which("nmap")
+    if not binary:
+        raise RuntimeError(
+            "HexStrike is not running and nmap is not on PATH. "
+            "Install HexStrike or nmap to inventory the private LAN."
+        )
+    proc = await asyncio.create_subprocess_exec(
+        binary,
+        "-sn",
+        "-T3",
+        "--max-retries",
+        "1",
+        "--",
+        target,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host nmap ping scan timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "nmap failed").strip()[:400])
+    return {
+        "source": "host-nmap",
+        "target": target,
+        "hosts": parse_nmap_ping_hosts(text),
+        "stdout": text[:4000],
+    }
+
+
+async def _run_lan_inventory(scope: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    snapshot = await HEXSTRIKE.status(enrich=False)
+    if not snapshot.running:
+        snapshot = await HEXSTRIKE.ensure_started()
+    if snapshot.running:
+        return await HEXSTRIKE.post_defensive("api/tools/nmap", payload)
+    try:
+        return await _host_nmap_ping_scan(str(scope.get("value") or payload.get("target") or ""))
+    except RuntimeError as host_exc:
+        suite_err = (snapshot.last_error or "HexStrike is not running").strip()
+        raise RuntimeError(f"{suite_err} Host nmap fallback: {host_exc}") from host_exc
+
+
 async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
     capability = CAPABILITY_BY_ID.get((action or "").strip())
     if capability is None:
@@ -401,13 +467,9 @@ async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] 
     try:
         if capability.id == "threat_intel_lookup":
             result = await _lookup_cve(str(payload["cve_id"]))
+        elif capability.id == "lan_inventory":
+            result = await _run_lan_inventory(scope, payload)
         else:
-            if capability.id == "lan_inventory":
-                snapshot = await HEXSTRIKE.status(enrich=False)
-                if not snapshot.running:
-                    snapshot = await HEXSTRIKE.ensure_started()
-                if not snapshot.running:
-                    raise RuntimeError(snapshot.last_error or "HexStrike is not running")
             result = await HEXSTRIKE.post_defensive(capability.upstream_path, payload)
         if isinstance(result, dict):
             raw_pid = result.get("pid") or result.get("process_id")

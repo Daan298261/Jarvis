@@ -289,6 +289,62 @@ async def test_lan_inventory_uses_nic_cidr_when_scope_missing(blue_store, monkey
     assert job["scope_id"] == "lan"
 
 
+def test_parse_nmap_ping_hosts():
+    from app.security.hexstrike_defensive import parse_nmap_ping_hosts
+
+    hosts = parse_nmap_ping_hosts(
+        "Nmap scan report for nas (192.168.20.12)\nHost is up.\n"
+        "Nmap scan report for 192.168.20.1\n"
+    )
+    assert hosts == [
+        {"address": "192.168.20.12", "hostname": "nas"},
+        {"address": "192.168.20.1", "hostname": ""},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_uses_host_nmap_when_suite_unavailable(blue_store, monkeypatch):
+    upsert_scope("lan", kind="private_cidr", value="192.168.20.0/24", label="Home", attested_owned=True)
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=False, last_error="HexStrike AI is not installed.")
+
+    async def fake_start():
+        return SimpleNamespace(running=False, last_error="HexStrike AI is not installed.")
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "ensure_started", fake_start)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap" if str(name).lower() == "nmap" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for nas (192.168.20.12)\nHost is up.\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    async def fake_exec(*args, **kwargs):
+        assert args[0] == "/usr/bin/nmap"
+        assert "-sn" in args
+        assert args[-1] == "192.168.20.0/24"
+        assert "--" in args
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    job = await execute_defensive("lan_inventory", "lan")
+    assert job["status"] == "completed"
+    assert job["result"]["source"] == "host-nmap"
+    assert job["result"]["hosts"][0]["address"] == "192.168.20.12"
+
+
 @pytest.mark.asyncio
 async def test_operator_tool_lan_inventory_skips_suite_grant(monkeypatch):
     from app.tools.hexstrike_operator import HexStrikeOperatorTool

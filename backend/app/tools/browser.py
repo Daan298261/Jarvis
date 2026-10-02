@@ -4,6 +4,7 @@ import asyncio
 import base64
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from ..config import AppSettings, data_dir, load_settings
 from .base import RiskLevel, Tool, ToolResult
@@ -33,6 +34,63 @@ _ACTIONS_NEEDING_PAGE = {
 
 _NAMED_ROLES = ("button", "link", "tab", "menuitem", "checkbox", "radio")
 _GOTO_RETRIES = 3
+_INTERNAL_BROWSER_SCHEMES = ("about:", "chrome:", "devtools:", "data:")
+
+
+def redirect_chain_urls(response: Any, final_url: str = "") -> list[str]:
+    """Oldest-first hop URLs from a Playwright navigation response, plus the final page URL."""
+    hops: list[str] = []
+    req = getattr(response, "request", None) if response is not None else None
+    while req is not None:
+        url = str(getattr(req, "url", "") or "").strip()
+        if url:
+            hops.append(url)
+        req = getattr(req, "redirected_from", None)
+    hops.reverse()
+    final = str(final_url or "").strip()
+    if final and (not hops or hops[-1] != final):
+        hops.append(final)
+    return hops
+
+
+def gate_browser_url(url: str, action: str = "open") -> str | None:
+    """Return an error string when this hop is not allowed; None when it may proceed."""
+    cleaned = (url or "").strip()
+    if not cleaned or cleaned.lower().startswith(_INTERNAL_BROWSER_SCHEMES):
+        return None
+    scheme = (urlparse(cleaned).scheme or "").lower()
+    if scheme and scheme not in {"http", "https"}:
+        return "Blocked URL scheme. Only http and https URLs are allowed"
+    from ..policy.computer_permissions import evaluate_tool_permissions
+
+    gate = evaluate_tool_permissions("browser", {"url": cleaned, "action": action})
+    if gate.status == "deny":
+        return gate.reason
+    if gate.status == "ask":
+        return gate.reason or "Permission required before the browser can reach the network."
+    return None
+
+
+async def _abandon_disallowed_page(page, reason: str) -> None:
+    try:
+        await page.goto("about:blank", wait_until="domcontentloaded", timeout=5_000)
+    except Exception:
+        pass
+    raise PermissionError(reason)
+
+
+async def _assert_navigation_allowed(page, response: Any, action: str) -> None:
+    hops = redirect_chain_urls(response, str(getattr(page, "url", "") or ""))
+    for hop in hops:
+        blocked = gate_browser_url(hop, action)
+        if blocked:
+            await _abandon_disallowed_page(page, blocked)
+
+
+async def _assert_current_url_allowed(page, action: str) -> None:
+    blocked = gate_browser_url(str(getattr(page, "url", "") or ""), action)
+    if blocked:
+        await _abandon_disallowed_page(page, blocked)
 
 
 def browser_permission_url(action: str, kwargs: dict[str, Any] | None, current_url: str = "") -> str:
@@ -79,9 +137,12 @@ async def _goto_with_retry(page, url: str) -> None:
         raise ValueError("url is required")
     for attempt in range(_GOTO_RETRIES):
         try:
-            await page.goto(target, wait_until="domcontentloaded", timeout=30_000)
+            response = await page.goto(target, wait_until="domcontentloaded", timeout=30_000)
             await _wait_stable(page)
+            await _assert_navigation_allowed(page, response, "open")
             return
+        except PermissionError:
+            raise
         except Exception as exc:
             last_error = exc
             await asyncio.sleep(0.15 * (attempt + 1))
@@ -194,8 +255,6 @@ class BrowserTool(Tool):
         if action == "open" and not (kwargs.get("url") or "").strip():
             return ToolResult(False, "", error="url is required")
         if action == "open":
-            from urllib.parse import urlparse
-
             scheme = (urlparse(str(kwargs.get("url") or "")).scheme or "").lower()
             if scheme not in {"http", "https"}:
                 return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed")
@@ -276,6 +335,7 @@ class BrowserTool(Tool):
                     else:
                         return ToolResult(False, "", error="Provide name or selector")
                     await _wait_stable(page)
+                    await _assert_current_url_allowed(page, "open")
                     return ToolResult(True, f"Clicked. URL now {page.url}")
                 if action in {"type", "fill"}:
                     text = kwargs.get("text") or ""
@@ -293,6 +353,8 @@ class BrowserTool(Tool):
                     return ToolResult(True, "Typed into field")
                 if action == "press":
                     await page.keyboard.press(kwargs.get("key") or "Enter")
+                    await _wait_stable(page)
+                    await _assert_current_url_allowed(page, "open")
                     return ToolResult(True, f"Pressed {kwargs.get('key')}")
                 if action == "evaluate":
                     result = await page.evaluate(kwargs.get("script") or "() => document.title")

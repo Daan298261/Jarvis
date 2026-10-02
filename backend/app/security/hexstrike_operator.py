@@ -284,15 +284,31 @@ def _capabilities_from_mcp(*, suite_running: bool) -> list[dict[str, Any]]:
     return rows
 
 
+def _lan_inventory_missing(host_tool: str | None, *, suite_running: bool) -> list[str]:
+    if host_tool and shutil.which(host_tool):
+        return []
+    if suite_running:
+        return []
+    try:
+        if bool(HEXSTRIKE._base_status().installed):
+            return []
+    except Exception:
+        pass
+    return [host_tool] if host_tool else ["nmap"]
+
+
 def _capabilities_from_defensive(*, suite_running: bool) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in CAPABILITIES:
         host_tool = _DEFENSIVE_HOST_TOOLS.get(item.id)
         missing: list[str] = []
-        if host_tool and shutil.which(host_tool) is None:
+        if item.id == "lan_inventory":
+            missing = _lan_inventory_missing(host_tool, suite_running=suite_running)
+        elif host_tool and shutil.which(host_tool) is None:
             missing.append(host_tool)
         # threat_intel_lookup needs no local binary; still requires a live suite only for
         # other defensive actions that POST upstream — CVE lookup is Jarvis-side.
+        # lan_inventory can use HexStrike nmap or a host nmap ping-scan.
         needs_suite = item.id not in {"threat_intel_lookup", "lan_inventory"}
         available = (not missing) and (suite_running or not needs_suite)
         if needs_suite and not suite_running:
@@ -310,9 +326,13 @@ def _capabilities_from_defensive(*, suite_running: bool) -> list[dict[str, Any]]
                     ""
                     if available
                     else (
-                        f"Missing host tool `{host_tool}`."
-                        if host_tool and host_tool in missing
-                        else "HexStrike suite is not running."
+                        "Install nmap or HexStrike to inventory the private LAN."
+                        if item.id == "lan_inventory"
+                        else (
+                            f"Missing host tool `{host_tool}`."
+                            if host_tool and host_tool in missing
+                            else "HexStrike suite is not running."
+                        )
                     )
                 ),
                 "input_schema": {
