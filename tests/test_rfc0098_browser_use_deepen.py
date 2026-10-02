@@ -48,6 +48,7 @@ def test_browser_use_maps_to_internet_permission(permission_store):
     assert permission_ids_for_tool("browser_use", {"url": "http://192.168.0.10", "goal": "read"}) == [
         "network.local"
     ]
+    assert permission_ids_for_tool("browser_use", {"url": "file:///home/owner/Documents/notes.html", "goal": "read"}) == []
 
 
 @pytest.mark.asyncio
@@ -82,6 +83,34 @@ async def test_browser_use_runs_when_network_allowed(permission_store, monkeypat
     assert result.data["backend"] == "browser-use"
     assert result.data["url"] == "https://example.com"
     assert "done reading" in result.output
+
+
+@pytest.mark.asyncio
+async def test_browser_use_opens_local_file_on_extra_drive(tmp_path, monkeypatch, permission_store):
+    from app.tools.browser import resolve_browser_open_url
+    from app.tools.browser_use import BrowserUseTool
+    from app.tools import browser_use as browser_use_mod
+
+    html = tmp_path / "E" / "notes.html"
+    html.parent.mkdir(parents=True)
+    html.write_text("<html><body>usb</body></html>", encoding="utf-8")
+    expected = resolve_browser_open_url(str(html), [str(tmp_path)])
+    seen: dict[str, str | None] = {}
+
+    async def fake_run(goal, url, settings):
+        seen["url"] = url
+        seen["goal"] = goal
+        return ToolResult(True, f"opened {url}", data={"url": url})
+
+    monkeypatch.setattr(browser_use_mod, "_BACKEND.run", fake_run)
+    apply_grant("network.internet", "deny")
+    tool = BrowserUseTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(goal="summarize this page", url=str(html))
+    assert result.success, result.error
+    assert seen["url"] == expected
+    blocked = await tool.execute(goal="read passwd", url="file:///etc/passwd")
+    assert blocked.success is False
+    assert "outside allowed" in (blocked.error or "").lower() or "workspace" in (blocked.error or "").lower()
 
 
 @pytest.mark.asyncio

@@ -59,7 +59,7 @@ class ToolRegistry:
             TerminalTool(getter),
             PythonTool(getter),
             BrowserTool(getter),
-            BrowserUseTool(),
+            BrowserUseTool(getter),
             CodeWorkerTool(getter),
             OpenInterpreterTool(getter),
             DesktopTool(getter),
