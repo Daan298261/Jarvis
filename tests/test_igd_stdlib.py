@@ -7,6 +7,7 @@ import pytest
 from app.mobile.igd import (
     StdlibIGD,
     accept_ssdp_peer,
+    igd_auth_candidates,
     is_wan_connection_service,
     parse_igd_control,
     parse_ssdp_location,
@@ -317,6 +318,36 @@ def test_stdlib_igd_retries_http_digest_logon(monkeypatch):
     )
     assert router.externalipaddress() == "8.8.4.4"
     assert any(isinstance(item, httpx.DigestAuth) for item in auths)
+
+
+def test_igd_password_only_logon_tries_admin_then_empty_user():
+    from types import SimpleNamespace
+
+    from app.mobile.igd import apply_igd_logon, lan_igd_request
+
+    assert igd_auth_candidates("", "") == []
+    assert igd_auth_candidates("root", "secret") == [("root", "secret")]
+    assert igd_auth_candidates("", "secret") == [("admin", "secret"), ("", "secret")]
+    router = SimpleNamespace()
+    assert apply_igd_logon(router, "", "secret") == "admin"
+    assert router.username == "admin"
+    assert router.password == "secret"
+    assert apply_igd_logon(router, "", "") == ""
+
+    auths: list[object] = []
+
+    class Client:
+        def post(self, url, auth=None, **kwargs):
+            auths.append(auth)
+            if auth == ("admin", "secret"):
+                return SimpleNamespace(status_code=401, text="no", headers={})
+            if auth == ("", "secret"):
+                return SimpleNamespace(status_code=200, text="ok", headers={})
+            return SimpleNamespace(status_code=401, text="no", headers={})
+
+    response = lan_igd_request(Client(), "post", "http://192.168.1.1/ctl", "", "secret", content=b"")
+    assert response.status_code == 200
+    assert auths == [("admin", "secret"), ("", "secret")]
 
 
 def test_stdlib_igd_internal_client_follows_igd_subnet_not_vpn(monkeypatch):

@@ -192,7 +192,7 @@ export function MobileCompanionSetup() {
             <>
               {(wanForm.wan_method === "auto" || wanForm.wan_method === "upnp") && (
               <label>
-                Router IGD username (optional)
+                Router IGD username (optional; blank uses admin if you set a password)
                 <input
                   className="command"
                   value={wanForm.gateway_username}

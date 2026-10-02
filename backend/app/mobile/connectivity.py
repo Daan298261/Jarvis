@@ -69,13 +69,13 @@ def router_candidate(username: str = "", password: str = ""):
     try:
         import miniupnpc
 
+        from .igd import apply_igd_logon, igd_auth_candidates
+
         router = miniupnpc.UPnP()
-        router.discoverdelay = 2000 if username else 1500
+        router.discoverdelay = 2000 if igd_auth_candidates(username, password) else 1500
         router.discover()
         router.selectigd()
-        if username:
-            router.username = username
-            router.password = password or ""
+        apply_igd_logon(router, username, password)
         address = ipaddress.ip_address(router.externalipaddress())
         if address.version != 4 or not address.is_global:
             raise ValueError("Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access")

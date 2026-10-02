@@ -136,15 +136,47 @@ def _response_header(response, name: str) -> str:
     return str(getter(name) or getter(name.title()) or getter(name.lower()) or "")
 
 
+def igd_auth_candidates(username: str = "", password: str = "") -> list[tuple[str, str]]:
+    """HTTP identities for owner IGD logon. Never guesses a password.
+
+    A password with a blank username tries ``admin`` (typical home router), then
+    empty-user HTTP basic (``:password``). An explicit username is the only try.
+    """
+    user = (username or "").strip()
+    secret = password or ""
+    if user:
+        return [(user, secret)]
+    if secret:
+        return [("admin", secret), ("", secret)]
+    return []
+
+
+def apply_igd_logon(router, username: str = "", password: str = "") -> str:
+    """Attach the first IGD identity to a miniupnpc client. Returns the username used."""
+    candidates = igd_auth_candidates(username, password)
+    if not candidates:
+        return ""
+    user, secret = candidates[0]
+    router.username = user
+    router.password = secret
+    return user
+
+
 def lan_igd_request(client, method: str, url: str, username: str = "", password: str = "", **kwargs):
     """Owner IGD logon: HTTP basic first, then digest if the LAN box asks for it."""
-    auth = (username, password) if username else None
     sender = getattr(client, method)
-    response = sender(url, auth=auth, **kwargs)
-    challenge = _response_header(response, "www-authenticate").lower()
-    if response.status_code in {401, 403} and username and "digest" in challenge:
-        response = sender(url, auth=httpx.DigestAuth(username, password), **kwargs)
-    return response
+    candidates = igd_auth_candidates(username, password)
+    if not candidates:
+        return sender(url, auth=None, **kwargs)
+    last = None
+    for user, secret in candidates:
+        last = sender(url, auth=(user, secret), **kwargs)
+        challenge = _response_header(last, "www-authenticate").lower()
+        if last.status_code in {401, 403} and "digest" in challenge:
+            last = sender(url, auth=httpx.DigestAuth(user, secret), **kwargs)
+        if last.status_code not in {401, 403}:
+            return last
+    return last
 
 
 class StdlibIGD:
@@ -159,9 +191,8 @@ class StdlibIGD:
         self.password = password or ""
 
     def _auth(self) -> tuple[str, str] | None:
-        if self.username:
-            return (self.username, self.password)
-        return None
+        candidates = igd_auth_candidates(self.username, self.password)
+        return candidates[0] if candidates else None
 
     def _post(self, action: str, inner: str) -> str:
         envelope = soap_envelope(action, self.service_type, inner)
