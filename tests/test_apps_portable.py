@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.tools.apps import find_apps, launch_app, resolve_app
+from app.tools.apps import find_apps, launch_app, resolve_app, resolve_direct_app_path
 
 
 def _isolate_catalog(monkeypatch, roots: list[tuple[Path, int]]) -> None:
@@ -26,6 +26,23 @@ def test_resolve_portable_exe_on_extra_drive(tmp_path, monkeypatch):
     assert target is not None
     assert target.kind == "exe"
     assert Path(target.target) == exe
+
+
+def test_resolve_direct_path_on_extra_drive(tmp_path, monkeypatch):
+    extra = tmp_path / "E" / "bin"
+    extra.mkdir(parents=True)
+    exe = extra / "unique-usb-tool.exe"
+    exe.write_bytes(b"MZ")
+    _isolate_catalog(monkeypatch, [])
+    quoted = resolve_app(f'"{exe}"')
+    assert quoted is not None
+    assert Path(quoted.target) == exe.resolve()
+    direct = resolve_direct_app_path(str(exe))
+    assert direct is not None
+    assert Path(direct.target) == exe.resolve()
+    assert resolve_direct_app_path("cooltool") is None
+    missing = resolve_app(str(extra / "nope.exe"))
+    assert missing is None
 
 
 def test_resolve_desktop_shortcut(tmp_path, monkeypatch):

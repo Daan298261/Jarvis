@@ -5,7 +5,7 @@ from typing import Any
 from ..config import load_settings
 from ..workers.code import OpenHandsBackend
 from .base import RiskLevel, Tool, ToolResult
-from .safety import resolve_allowed_path
+from .owner_paths import resolve_project_dir
 
 _BACKEND = OpenHandsBackend()
 
@@ -15,7 +15,8 @@ class CodeWorkerTool(Tool):
     description = (
         "Optional software-engineering worker. Currently OpenHands when installed. "
         "Delegate large repository tasks here, then Jarvis must still inspect the diff and run tests. "
-        "If OpenHands is missing, use filesystem, python, git, and terminal instead."
+        "If OpenHands is missing, use filesystem, python, git, and terminal instead. "
+        "Omit path to work in Documents; a folder on USB/`D:` is accepted."
     )
     risk = RiskLevel.HIGH
     parameters = {
@@ -23,7 +24,10 @@ class CodeWorkerTool(Tool):
         "properties": {
             "action": {"type": "string", "enum": ["status", "delegate"]},
             "goal": {"type": "string", "description": "What the worker should change or fix"},
-            "path": {"type": "string", "description": "Repository or project directory"},
+            "path": {
+                "type": "string",
+                "description": "Repository or project directory (USB/`D:` allowed; omit for Documents)",
+            },
         },
         "required": ["action"],
     }
@@ -43,9 +47,8 @@ class CodeWorkerTool(Tool):
             return ToolResult(False, "", error="goal is required")
         context = self.context_getter() if self.context_getter else {}
         allowed = list(context.get("allowed_directories") or [])
-        raw_path = kwargs.get("path") or (allowed[0] if allowed else ".")
         try:
-            path = resolve_allowed_path(str(raw_path), allowed)
+            path = resolve_project_dir(kwargs.get("path"), allowed)
         except PermissionError as exc:
             return ToolResult(False, "", error=str(exc))
         settings = load_settings()

@@ -162,6 +162,26 @@ async def test_search_with_path_stays_in_that_folder(tmp_path):
     assert "other.txt" not in result.output
 
 
+async def test_write_without_path_uses_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="write", content="hello-owner", create_backup=False)
+    assert result.success, result.error
+    dest = docs / "note.txt"
+    assert dest.read_text(encoding="utf-8") == "hello-owner"
+
+
+async def test_write_into_extra_drive_folder(tmp_path):
+    extra = tmp_path / "E" / "Notes"
+    extra.mkdir(parents=True)
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="write", path=str(extra), content="on-usb", create_backup=False)
+    assert result.success, result.error
+    assert (extra / "note.txt").read_text(encoding="utf-8") == "on-usb"
+
+
 def test_safe_extract_target_rejects_zip_slip(tmp_path):
     dest = tmp_path / "out"
     dest.mkdir()

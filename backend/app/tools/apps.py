@@ -186,6 +186,32 @@ def _portable_kind(path: Path) -> str:
     return "exe"
 
 
+def _looks_like_app_path(raw: str) -> bool:
+    text = str(raw or "").strip().strip('"')
+    if not text:
+        return False
+    lower = text.lower()
+    if any(lower.endswith(suffix) for suffix in _APP_FILE_SUFFIXES | {".bat", ".cmd", ".com", ".msi"}):
+        return True
+    return "/" in text or "\\" in text or (len(text) >= 2 and text[1] == ":")
+
+
+def resolve_direct_app_path(raw_name: str) -> AppTarget | None:
+    """Open an explicit extra-drive / USB executable path without Start Menu matching."""
+    text = str(raw_name or "").strip().strip('"')
+    if not _looks_like_app_path(text):
+        return None
+    path = Path(text).expanduser()
+    try:
+        if not path.is_file():
+            return None
+        resolved = path.resolve()
+    except OSError:
+        return None
+    kind = _portable_kind(resolved)
+    return AppTarget(resolved.stem, kind, str(resolved), [resolved.stem.lower()])
+
+
 def _best_portable(query: str) -> tuple[int, Path] | None:
     best: tuple[int, Path] | None = None
     for root, max_depth in _portable_search_roots():
@@ -244,6 +270,9 @@ def _uwp_apps() -> list[tuple[str, str]]:
 
 
 def resolve_app(raw_name: str) -> AppTarget | None:
+    direct = resolve_direct_app_path(raw_name)
+    if direct is not None:
+        return direct
     query = normalize_app_name(raw_name)
     if not query:
         return None
@@ -332,6 +361,7 @@ async def launch_app(raw_name: str, *, elevated: bool = False, verify_seconds: f
             error=(
                 f"No installed app matches {raw_name!r} (searched Start Menu, App Paths, PATH, "
                 "Desktop, extra-drive Program Files / PortableApps, and Store apps). "
+                "Pass the full path of an .exe on USB/`D:` if it is not in those catalogs. "
                 "Use apps action=find to see close names."
             ),
         )
@@ -499,9 +529,9 @@ class AppsTool(Tool):
     description = (
         "Open, find, or close desktop applications by their normal name (\"steam\", \"spotify\", "
         "\"snipping tool\"). Resolves the name the way the Start menu does, then Desktop shortcuts "
-        "and Program Files / PortableApps on extra mounted drives, launches it like a "
-        "double-click, and confirms the app's process started. Use this instead of shell commands "
-        "for opening or closing programs. elevated=true runs it as administrator."
+        "and Program Files / PortableApps on extra mounted drives, or a full path to an .exe "
+        "on USB/`D:`. Launches it like a double-click, and confirms the app's process started. "
+        "Use this instead of shell commands for opening or closing programs. elevated=true runs it as administrator."
     )
     risk = RiskLevel.MEDIUM
     effect_class = "external"
@@ -509,7 +539,10 @@ class AppsTool(Tool):
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": ["open", "close", "find", "running"], "default": "open"},
-            "name": {"type": "string", "description": "App name as the owner said it"},
+            "name": {
+                "type": "string",
+                "description": "App name as the owner said it, or a full path to an .exe/.lnk on an extra drive",
+            },
             "elevated": {"type": "boolean", "default": False, "description": "Run as administrator"},
             "force": {"type": "boolean", "default": False, "description": "close: kill instead of asking to exit"},
         },

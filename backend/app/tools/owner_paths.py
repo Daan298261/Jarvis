@@ -72,3 +72,30 @@ def resolve_workspace_dir(raw: str | None, allowed: list[str]) -> str | None:
     if not allowed:
         return expanded
     return str(resolve_allowed_path(expanded, allowed))
+
+
+def default_workspace_dir(allowed: list[str]) -> Path:
+    """Documents (then Desktop/Downloads) when that folder is in the workspace."""
+    for name in ("Documents", "Desktop", "Downloads"):
+        candidate = Path.home() / name
+        try:
+            if not candidate.is_dir():
+                continue
+        except OSError:
+            continue
+        try:
+            return resolve_allowed_path(str(candidate), allowed)
+        except PermissionError:
+            continue
+    if allowed:
+        return resolve_allowed_path(allowed[0], allowed)
+    return Path.cwd()
+
+
+def resolve_project_dir(raw: str | None, allowed: list[str]) -> Path:
+    """Explicit extra-drive/USB folder, or Documents when path is omitted."""
+    text = str(raw or "").strip()
+    if text:
+        resolved = resolve_workspace_dir(text, allowed)
+        return Path(resolved) if resolved else resolve_allowed_path(text, allowed)
+    return default_workspace_dir(allowed)

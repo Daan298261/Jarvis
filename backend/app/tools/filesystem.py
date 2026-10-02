@@ -12,6 +12,7 @@ from typing import Any
 
 from ..config import LOCAL_NETWORK_SCOPE
 from .base import RiskLevel, Tool, ToolResult
+from .owner_paths import resolve_owner_file_path
 from .safety import resolve_allowed_path
 from .snapshots import create_snapshot, list_snapshots, restore_snapshot
 
@@ -318,7 +319,8 @@ class FilesystemTool(Tool):
         "see every allowed drive, mount, and folder (plus private LAN UNC). Omit path on search to "
         "look across those folders and extra volumes without walking the OS drive root. extract "
         "unpacks zip/tar archives onto an allowed folder (USB/`D:` included); omit destination to "
-        "create a folder next to the archive. Prefer write/edit over delete. compare shows a "
+        "create a folder next to the archive. Omit path on write to save Documents/note.txt; a "
+        "folder path (USB/`D:`) gets note.txt appended. Prefer write/edit over delete. compare shows a "
         "unified diff (or hashes for binaries). recent lists backup copies and recent versions "
         "next to a file. snapshot copies a directory or file into data/backups before mass edits; "
         "snapshots lists them; restore copies a snapshot back. Identical trees are not snapshotted "
@@ -355,7 +357,7 @@ class FilesystemTool(Tool):
             },
             "path": {
                 "type": "string",
-                "description": "Primary path. Omit on list/search to cover the whole allowed workspace.",
+                "description": "Primary path. Omit on list/search to cover the whole allowed workspace. Omit write to save Documents/note.txt.",
             },
             "destination": {
                 "type": "string",
@@ -474,6 +476,20 @@ class FilesystemTool(Tool):
                     str(kwargs.get("pattern") or "*"),
                     recursive=bool(kwargs.get("recursive", True)),
                 )
+            if action == "write":
+                path = resolve_owner_file_path(
+                    raw_path or None,
+                    suggested_name="note.txt",
+                    allowed=allowed,
+                    fallback_dirs=("Documents", "Desktop", "Downloads"),
+                )
+                path = self._guard_coding_write(path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if path.exists() and kwargs.get("create_backup", True):
+                    backup = path.with_suffix(path.suffix + f".bak-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}")
+                    shutil.copy2(path, backup)
+                path.write_text(kwargs.get("content") or "", encoding="utf-8")
+                return ToolResult(True, f"Wrote {path} ({path.stat().st_size} bytes)")
             path = self._path(raw_path)
             if action == "list":
                 if not path.exists():
@@ -498,14 +514,6 @@ class FilesystemTool(Tool):
                 except UnicodeDecodeError:
                     digest = hashlib.sha256(path.read_bytes()).hexdigest()
                     return ToolResult(True, f"Binary file ({path.stat().st_size} bytes). sha256={digest}")
-            if action == "write":
-                path = self._guard_coding_write(path)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                if path.exists() and kwargs.get("create_backup", True):
-                    backup = path.with_suffix(path.suffix + f".bak-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}")
-                    shutil.copy2(path, backup)
-                path.write_text(kwargs.get("content") or "", encoding="utf-8")
-                return ToolResult(True, f"Wrote {path} ({path.stat().st_size} bytes)")
             if action == "edit":
                 path = self._guard_coding_write(path)
                 if not path.exists():
