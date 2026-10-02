@@ -347,14 +347,18 @@ class Connectivity:
             listener.listen(128)
             listener.setblocking(False)
             try:
-                from .wan_forward import ensure_private_firewall_4781
+                from .wan_forward import ensure_companion_firewall
 
-                fw = await asyncio.to_thread(ensure_private_firewall_4781)
-                self.report(firewall_4781=fw)
-                if str(fw).startswith("failed"):
-                    self.report(limitation=f"Windows firewall did not allow inbound TCP 4781 ({fw})")
+                fw = await asyncio.to_thread(ensure_companion_firewall)
+                tcp = str(fw.get("tcp_4781") or "")
+                udp = str(fw.get("udp_4782") or "")
+                self.report(firewall_4781=tcp, firewall_4782=udp)
+                if tcp.startswith("failed"):
+                    self.report(limitation=f"Windows firewall did not allow inbound TCP 4781 ({tcp})")
+                elif udp.startswith("failed"):
+                    self.report(limitation=f"Windows firewall did not allow inbound UDP 4782 ({udp})")
             except Exception as exc:
-                self.report(firewall_4781="error", limitation=f"Windows firewall helper failed: {exc}"[:240])
+                self.report(firewall_4781="error", firewall_4782="error", limitation=f"Windows firewall helper failed: {exc}"[:240])
             settings = load_settings()
             config = uvicorn.Config(gateway_app(f"http://127.0.0.1:{settings.bind_port}"),
                 ssl_keyfile=identity["key"], ssl_certfile=identity["certificate"],

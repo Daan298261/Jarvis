@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Any
 
 PORT = 4781
+BEACON_PORT = 4782
 FIREWALL_RULE_NAME = "Jarvis companion TLS 4781"
+FIREWALL_BEACON_RULE_NAME = "Jarvis companion LAN beacon 4782"
 
 WAN_METHODS = frozenset({"auto", "upnp", "ssh_reverse", "gateway_ssh"})
 GATEWAY_PROFILES = frozenset({"openwrt_uci"})
@@ -105,6 +107,45 @@ def firewall_4781_upgrade_argv() -> list[str]:
     return ["netsh", "advfirewall", "firewall", "set", "rule", f"name={FIREWALL_RULE_NAME}", "new", "profile=any"]
 
 
+def firewall_4782_show_argv() -> list[str]:
+    return ["netsh", "advfirewall", "firewall", "show", "rule", f"name={FIREWALL_BEACON_RULE_NAME}"]
+
+
+def firewall_4782_add_argv() -> list[str]:
+    """Inbound UDP 4782 so the phone's LAN scanner can find this PC.
+
+    LanScanner broadcasts probes to this port. Without an inbound rule on a
+    Public-profile Wi-Fi network, TCP 4781 is reachable only after the owner
+    already typed the LAN IP; beacon discovery never gets a reply.
+    """
+    return [
+        "netsh",
+        "advfirewall",
+        "firewall",
+        "add",
+        "rule",
+        f"name={FIREWALL_BEACON_RULE_NAME}",
+        "dir=in",
+        "action=allow",
+        "protocol=UDP",
+        f"localport={BEACON_PORT}",
+        "profile=any",
+    ]
+
+
+def firewall_4782_upgrade_argv() -> list[str]:
+    return [
+        "netsh",
+        "advfirewall",
+        "firewall",
+        "set",
+        "rule",
+        f"name={FIREWALL_BEACON_RULE_NAME}",
+        "new",
+        "profile=any",
+    ]
+
+
 def firewall_4781_covers_all_profiles(show_stdout: str) -> bool:
     text = (show_stdout or "").lower()
     if "any" in text:
@@ -112,25 +153,29 @@ def firewall_4781_covers_all_profiles(show_stdout: str) -> bool:
     return "domain" in text and "private" in text and "public" in text
 
 
-def ensure_private_firewall_4781() -> str:
-    """Allow inbound TCP 4781 on every Windows firewall profile."""
+def _ensure_windows_firewall_rule(
+    name: str,
+    show_argv: list[str],
+    add_argv: list[str],
+    upgrade_argv: list[str],
+) -> str:
     if os.name != "nt":
         return "skipped"
     import subprocess
 
     check = subprocess.run(
-        firewall_4781_show_argv(),
+        show_argv,
         capture_output=True,
         text=True,
         timeout=8,
         check=False,
     )
     stdout = check.stdout or ""
-    if check.returncode == 0 and FIREWALL_RULE_NAME.lower() in stdout.lower():
+    if check.returncode == 0 and name.lower() in stdout.lower():
         if firewall_4781_covers_all_profiles(stdout):
             return "present"
         upgraded = subprocess.run(
-            firewall_4781_upgrade_argv(),
+            upgrade_argv,
             capture_output=True,
             text=True,
             timeout=8,
@@ -140,7 +185,7 @@ def ensure_private_firewall_4781() -> str:
             return "upgraded"
         return f"failed:{(upgraded.stderr or upgraded.stdout or '').strip()[:160]}"
     added = subprocess.run(
-        firewall_4781_add_argv(),
+        add_argv,
         capture_output=True,
         text=True,
         timeout=8,
@@ -149,6 +194,34 @@ def ensure_private_firewall_4781() -> str:
     if added.returncode != 0:
         return f"failed:{(added.stderr or added.stdout or '').strip()[:160]}"
     return "added"
+
+
+def ensure_private_firewall_4781() -> str:
+    """Allow inbound TCP 4781 on every Windows firewall profile."""
+    return _ensure_windows_firewall_rule(
+        FIREWALL_RULE_NAME,
+        firewall_4781_show_argv(),
+        firewall_4781_add_argv(),
+        firewall_4781_upgrade_argv(),
+    )
+
+
+def ensure_private_firewall_4782() -> str:
+    """Allow inbound UDP 4782 on every Windows firewall profile (LAN beacon)."""
+    return _ensure_windows_firewall_rule(
+        FIREWALL_BEACON_RULE_NAME,
+        firewall_4782_show_argv(),
+        firewall_4782_add_argv(),
+        firewall_4782_upgrade_argv(),
+    )
+
+
+def ensure_companion_firewall() -> dict[str, str]:
+    """TCP 4781 companion TLS plus UDP 4782 LAN beacon, every Windows profile."""
+    return {
+        "tcp_4781": ensure_private_firewall_4781(),
+        "udp_4782": ensure_private_firewall_4782(),
+    }
 
 
 def lookup_egress_ipv4() -> str:

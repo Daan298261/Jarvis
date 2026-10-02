@@ -107,9 +107,13 @@ def test_mobile_plan_uses_prepare_connection_not_tailscale():
     assert "Prepare connection" in script
     assert "UseRouterPortForward" in script
     assert "$Port = 4781" in script
+    assert "$BeaconPort = 4782" in script
     assert "profile=any" in script
     assert "upnpc" not in script
     assert "localport=$Port" in script
+    assert "localport=$BeaconPort" in script
+    assert "protocol=UDP" in script
+    assert "Jarvis companion LAN beacon 4782" in script
     assert "profile=private" not in script
     assert "Tailscale" not in script
     assert "winget install --id Tailscale" not in script
