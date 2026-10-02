@@ -347,7 +347,7 @@ async def test_activate_tab_blocks_wan_and_switches_lan(tmp_path, monkeypatch):
 def test_resolve_owner_file_path_defaults_to_downloads(tmp_path, monkeypatch):
     downloads = tmp_path / "Downloads"
     downloads.mkdir()
-    monkeypatch.setattr("app.tools.browser.Path.home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
     dest = resolve_owner_file_path(
         None,
         suggested_name="invoice.pdf",
@@ -389,6 +389,6 @@ def test_resolve_owner_file_path_rejects_outside_workspace(tmp_path):
 def test_owner_media_dir_prefers_existing_home_folder(tmp_path, monkeypatch):
     pictures = tmp_path / "Pictures"
     pictures.mkdir()
-    monkeypatch.setattr("app.tools.browser.Path.home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
     assert owner_media_dir("Pictures", "Downloads") == pictures
 

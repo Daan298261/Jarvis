@@ -213,13 +213,22 @@ class DesktopTool(Tool):
         "required": ["action"],
     }
 
+    def __init__(self, context_getter=None) -> None:
+        self.context_getter = context_getter or (lambda: {})
+
+    def _allowed(self) -> list[str]:
+        raw = self.context_getter() if callable(self.context_getter) else {}
+        if isinstance(raw, dict):
+            return list(raw.get("allowed_directories") or [])
+        return list(getattr(raw, "allowed_directories", None) or [])
+
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
         try:
             if action == "screenshot":
                 from .screenshot import capture_screen
 
-                path = capture_screen(kwargs.get("path"))
+                path = capture_screen(kwargs.get("path"), allowed=self._allowed())
                 return ToolResult(True, f"Saved screenshot to {path}", data={"path": path})
             if action == "apps":
                 import psutil
