@@ -35,6 +35,10 @@ def test_ssdp_and_control_url_parsing():
     control, service = parse_igd_control(DESC, "http://192.168.1.1:5000/rootDesc.xml")
     assert control == "http://192.168.1.1:5000/upnp/control/WANIPConn1"
     assert "WANIPConnection" in service
+    with pytest.raises(ValueError):
+        parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: http://8.8.8.8/desc.xml\r\n\r\n")
+    with pytest.raises(ValueError):
+        parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: https://evil.example/desc.xml\r\n\r\n")
 
 
 def test_soap_addportmapping_is_tcp_4781_only():
@@ -74,3 +78,49 @@ def test_lookup_egress_ipv4_accepts_global_and_rejects_private(monkeypatch):
 
 def test_windows_firewall_helper_skips_on_linux():
     assert ensure_private_firewall_4781() == "skipped"
+
+
+def test_stdlib_igd_maps_4781_and_treats_soap_fault_as_empty(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.mobile.connectivity import map_router, unmap_router
+
+    posts = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, content, headers, auth=None):
+            body = content.decode("utf-8")
+            posts.append(body)
+            action = headers["SOAPAction"]
+            if "GetSpecificPortMappingEntry" in action:
+                return SimpleNamespace(
+                    status_code=200,
+                    text="<s:Envelope><s:Body><s:Fault><faultcode>s:Client</faultcode></s:Fault></s:Body></s:Envelope>",
+                )
+            if "AddPortMapping" in action:
+                assert "4781" in body and "3600" in body and "192.168.1.12" in body
+                return SimpleNamespace(status_code=200, text="<s:Envelope><s:Body><u:AddPortMappingResponse/></s:Body></s:Envelope>")
+            if "DeletePortMapping" in action:
+                return SimpleNamespace(status_code=200, text="<ok/>")
+            raise AssertionError(action)
+
+    monkeypatch.setattr("app.mobile.igd.httpx.Client", FakeClient)
+    router = StdlibIGD(
+        "http://192.168.1.1:5000/upnp/control/WANIPConn1",
+        "urn:schemas-upnp-org:service:WANIPConnection:1",
+        "192.168.1.12",
+        username="admin",
+        password="secret",
+    )
+    map_router(router, "Jarvis-owned")
+    assert any("AddPortMapping" in item for item in posts)
+    unmap_router(router, "Jarvis-owned")

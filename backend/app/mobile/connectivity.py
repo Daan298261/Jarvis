@@ -56,7 +56,11 @@ def router_candidate(username: str = "", password: str = ""):
         if address.version != 4 or not address.is_global:
             raise ValueError("Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access")
         return router, str(address)
+    except ImportError as exc:
+        last_error = exc
     except Exception as exc:
+        if "no public IPv4" in str(exc).lower():
+            raise
         last_error = exc
     try:
         from .igd import stdlib_igd_candidate

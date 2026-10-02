@@ -10,6 +10,7 @@ import ipaddress
 import socket
 import xml.etree.ElementTree as ET
 from urllib.parse import urljoin, urlparse
+from xml.sax.saxutils import escape
 
 import httpx
 
@@ -23,13 +24,27 @@ _SSDP_ST = (
 )
 
 
+def require_lan_http_url(url: str) -> str:
+    """IGD control stays on the owner's LAN; never follow SSDP to a WAN host."""
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("IGD URL must be http(s) on the LAN")
+    host = parsed.hostname.strip().rstrip(".").lower()
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        if host in {"localhost"} or host.endswith((".local", ".home.arpa", ".lan")) or "." not in host:
+            return parsed.geturl()
+        raise ValueError("IGD URL host must be on the LAN")
+    if ip.is_loopback or ip.is_link_local or ip.is_private:
+        return parsed.geturl()
+    raise ValueError("IGD URL must not be a public address")
+
+
 def parse_ssdp_location(datagram: str) -> str:
     for raw in datagram.replace("\r\n", "\n").split("\n"):
         if raw.lower().startswith("location:"):
-            location = raw.split(":", 1)[1].strip()
-            parsed = urlparse(location)
-            if parsed.scheme in {"http", "https"} and parsed.hostname:
-                return location
+            return require_lan_http_url(raw.split(":", 1)[1].strip())
     raise ValueError("IGD advertisement had no LOCATION")
 
 
@@ -51,7 +66,7 @@ def parse_igd_control(xml_text: str, base_url: str) -> tuple[str, str]:
             elif name == "controlURL":
                 control = (child.text or "").strip()
         if service_type in {WANIP, WANPPP} and control:
-            return urljoin(base_url, control), service_type
+            return require_lan_http_url(urljoin(base_url, control)), service_type
     raise ValueError("IGD description has no WANIPConnection control URL")
 
 
@@ -73,12 +88,23 @@ def _soap_text(xml_text: str, tag: str) -> str:
     return ""
 
 
+def _is_soap_fault(xml_text: str) -> bool:
+    lowered = (xml_text or "").lower()
+    if "fault" in lowered and ("s:fault" in lowered or "soap:fault" in lowered or "<fault" in lowered):
+        return True
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return False
+    return any(_local_name(node.tag) == "Fault" for node in root.iter())
+
+
 class StdlibIGD:
     def __init__(self, control_url: str, service_type: str, lanaddr: str, username: str = "", password: str = ""):
         parsed = urlparse(control_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("IGD control URL must be http(s)")
-        self.control_url = control_url
+        self.control_url = require_lan_http_url(control_url)
         self.service_type = service_type or WANIP
         self.lanaddr = lanaddr
         self.username = username
@@ -101,7 +127,7 @@ class StdlibIGD:
                 },
                 auth=self._auth(),
             )
-        if response.status_code >= 400:
+        if response.status_code >= 400 or _is_soap_fault(response.text):
             raise RuntimeError(f"IGD {action} returned HTTP {response.status_code}")
         return response.text
 
@@ -121,9 +147,12 @@ class StdlibIGD:
         )
         try:
             text = self._post("GetSpecificPortMappingEntry", inner)
-        except RuntimeError:
+        except (RuntimeError, ET.ParseError):
             return None
-        host = _soap_text(text, "NewInternalClient")
+        try:
+            host = _soap_text(text, "NewInternalClient")
+        except ET.ParseError:
+            return None
         internal = _soap_text(text, "NewInternalPort") or str(port)
         desc = _soap_text(text, "NewPortMappingDescription")
         if not host:
@@ -143,7 +172,7 @@ class StdlibIGD:
             f"<NewInternalPort>{PORT}</NewInternalPort>"
             f"<NewInternalClient>{dest}</NewInternalClient>"
             "<NewEnabled>1</NewEnabled>"
-            f"<NewPortMappingDescription>{marker}</NewPortMappingDescription>"
+            f"<NewPortMappingDescription>{escape(str(marker)[:80])}</NewPortMappingDescription>"
             f"<NewLeaseDuration>{int(lease)}</NewLeaseDuration>"
         )
         self._post("AddPortMapping", inner)
@@ -163,28 +192,34 @@ class StdlibIGD:
             return
 
 
-def ssdp_search(timeout: float = 1.5) -> str:
-    payload = (
-        "M-SEARCH * HTTP/1.1\r\n"
-        "HOST: 239.255.255.250:1900\r\n"
-        'MAN: "ssdp:discover"\r\n'
-        "MX: 1\r\n"
-        f"ST: {_SSDP_ST[0]}\r\n"
-        "\r\n"
-    ).encode("ascii")
+def ssdp_search(timeout: float = 1.2) -> str:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.settimeout(timeout)
     try:
-        sock.sendto(payload, ("239.255.255.250", 1900))
-        data, _addr = sock.recvfrom(8192)
+        last_error: Exception | None = None
+        for st in _SSDP_ST:
+            payload = (
+                "M-SEARCH * HTTP/1.1\r\n"
+                "HOST: 239.255.255.250:1900\r\n"
+                'MAN: "ssdp:discover"\r\n'
+                "MX: 1\r\n"
+                f"ST: {st}\r\n"
+                "\r\n"
+            ).encode("ascii")
+            try:
+                sock.sendto(payload, ("239.255.255.250", 1900))
+                data, _addr = sock.recvfrom(8192)
+                return parse_ssdp_location(data.decode("utf-8", errors="replace"))
+            except Exception as exc:
+                last_error = exc
+        raise last_error or TimeoutError("No IGD SSDP response")
     finally:
         sock.close()
-    return parse_ssdp_location(data.decode("utf-8", errors="replace"))
 
 
 def stdlib_igd_candidate(username: str = "", password: str = "", lanaddr: str = "") -> tuple[StdlibIGD, str]:
     location = ssdp_search()
-    with httpx.Client(timeout=4, trust_env=False, follow_redirects=True) as client:
+    with httpx.Client(timeout=4, trust_env=False, follow_redirects=False) as client:
         description = client.get(location, auth=(username, password) if username else None)
     if description.status_code >= 400:
         raise RuntimeError(f"IGD description HTTP {description.status_code}")
