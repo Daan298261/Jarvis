@@ -70,8 +70,9 @@ _BLOCKED_TOKENS = (
 def hexstrike_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """Environment for the managed HexStrike suite process.
 
-    Same proxy-free child env as terminal/python so nuclei/gobuster/suite HTTP
-    use the OS default route. nmap still binds the home NIC via ``-S``/``-e``.
+    Same proxy-free child env as terminal/python so nuclei/suite HTTP use the OS
+    default route (not a leftover VPN HTTP_PROXY). nmap binds the home NIC via
+    ``-S``/``-e``. gobuster/ffuf/dirsearch get a loopback LAN proxy instead.
     """
     from ..tools.owner_paths import direct_child_env
 

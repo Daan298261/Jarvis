@@ -323,6 +323,31 @@ def discover_private_lan_cidrs() -> list[str]:
     return found
 
 
+def lan_bind_nic(target: str) -> tuple[str, str]:
+    """On-link RFC1918 (iface, source IP) for an IP, CIDR, or LAN hostname.
+
+    ``lan_scan_bind`` only accepts literal IPs. gobuster of ``http://nas.local/``
+    must still pin the home NIC after mDNS/DNS yields an RFC1918 address.
+    """
+    iface, source = lan_scan_bind(target)
+    if source:
+        return iface, source
+    host = bindable_lan_host(target) or (target or "").strip()
+    if not host:
+        return ("", "")
+    from ..mobile.wan_forward import lan_http_bind_for_url, lan_source_ipv4_for_peer
+
+    bind = lan_source_ipv4_for_peer(host)
+    if not bind:
+        bind = lan_http_bind_for_url(f"http://{host}")
+    if not bind:
+        return ("", "")
+    for name, interface in rfc1918_nic_addrs():
+        if str(interface.ip) == bind:
+            return (name, bind)
+    return ("", bind)
+
+
 def lan_scan_bind(target: str) -> tuple[str, str]:
     """This PC's (interface name, IPv4) on the same RFC1918 network as *target*.
 
@@ -480,6 +505,31 @@ def bind_hexstrike_nmap_payload(payload: dict[str, Any] | None) -> dict[str, Any
 
 
 _PD_SOURCE_TOOLS = frozenset({"nuclei", "httpx", "naabu"})
+# Tools with no source-bind CLI: forward HTTP through the process-local LAN proxy.
+_HTTP_PROXY_FLAG = {
+    "gobuster": "--proxy",
+    "ffuf": "-x",
+    "dirsearch": "--proxy",
+    "feroxbuster": "--proxy",
+    "sqlmap": "--proxy",
+    "nikto": "-useproxy",
+}
+_HTTP_PROXY_SKIP = {
+    "gobuster": frozenset({"-p", "--proxy"}),
+    "ffuf": frozenset({"-x"}),
+    "dirsearch": frozenset({"--proxy"}),
+    "feroxbuster": frozenset({"-p", "--proxy", "--replay-proxy"}),
+    "sqlmap": frozenset({"--proxy"}),
+    "nikto": frozenset({"-useproxy", "--useproxy"}),
+}
+
+
+def _tokens_have_flag(tokens: list[str], names: frozenset[str]) -> bool:
+    for token in tokens:
+        key = str(token).split("=", 1)[0]
+        if key in names:
+            return True
+    return False
 
 
 def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -487,8 +537,11 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
 
     nmap uses ``-S``/``-e``. ProjectDiscovery nuclei/httpx/naabu use ``-source-ip``
     / ``-interface``. masscan uses ``--source-ip``/``-e``. curl uses ``--interface``.
-    Public internet targets are left unchanged. Spaced Windows NIC names omit
-    ``-interface``/``-e`` (HexStrike ``additional_args.split()``).
+    gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto have no source-bind flag; they
+    get ``--proxy`` (or ``-x`` / ``-useproxy``) pointing at the loopback LAN proxy
+    which binds outbound to the home NIC. Public internet targets are left
+    unchanged. Spaced Windows NIC names omit ``-interface``/``-e`` (HexStrike
+    ``additional_args.split()``).
     """
     bound = dict(payload or {})
     stem = hexstrike_tool_stem(tool)
@@ -505,7 +558,7 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         return bound
 
     target = lan_bind_target(bound)
-    iface, source = lan_scan_bind(target)
+    iface, source = lan_bind_nic(target)
     if not source:
         return bound
     key = _hexstrike_args_key(bound)
@@ -530,6 +583,14 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         flags.extend(
             ["--interface", iface if hexstrike_nmap_can_bind_interface(iface) else source]
         )
+    elif stem in _HTTP_PROXY_FLAG:
+        skip = _HTTP_PROXY_SKIP.get(stem, frozenset({"--proxy", "-x"}))
+        if _tokens_have_flag(tokens, skip):
+            return bound
+        from .lan_http_proxy import ensure_lan_http_proxy
+
+        origin = ensure_lan_http_proxy()
+        flags.extend([_HTTP_PROXY_FLAG[stem], origin])
     else:
         return bound
     bound[key] = " ".join([*tokens, *flags]).strip()

@@ -368,6 +368,24 @@ def test_lan_scan_bind_pins_home_nic_not_vpn_or_cgnat(monkeypatch):
     assert nmap_lan_additional_args("192.168.50.0/24") == "-T3 -S 192.168.50.8"
 
 
+def test_lan_bind_nic_resolves_mdns_host_to_home_nic(monkeypatch):
+    import socket
+
+    from app.security.hexstrike_defensive import lan_bind_nic
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host in {"nas.local", "router.lan"}:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    assert lan_bind_nic("nas.local") == ("eth0", "192.168.1.12")
+    assert lan_bind_nic("http://router.lan/admin") == ("eth0", "192.168.1.12")
+    assert lan_bind_nic("192.168.1.50") == ("eth0", "192.168.1.12")
+
+
 @pytest.mark.asyncio
 async def test_lan_inventory_uses_host_nmap_when_windows_nic_name_has_space(blue_store, monkeypatch):
     from app.security.hexstrike_defensive import lan_inventory_uses_host_nmap
@@ -691,7 +709,18 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     public = bind_hexstrike_lan_payload("nuclei", {"target": "https://example.com", "additional_args": "-t cves/"})
     assert public["additional_args"] == "-t cves/"
     gobuster = bind_hexstrike_lan_payload("http:gobuster", {"url": "http://192.168.1.40/", "additional_args": "-w wordlist.txt"})
-    assert gobuster["additional_args"] == "-w wordlist.txt"
+    assert gobuster["additional_args"].startswith("-w wordlist.txt --proxy http://127.0.0.1:")
+    ffuf = bind_hexstrike_lan_payload("ffuf", {"url": "http://192.168.1.40/FUZZ", "additional_args": "-w wordlist.txt -p POST"})
+    assert ffuf["additional_args"].startswith("-w wordlist.txt -p POST -x http://127.0.0.1:")
+    dirsearch = bind_hexstrike_lan_payload("api/tools/dirsearch", {"url": "http://192.168.1.1/"})
+    assert dirsearch["additional_args"].startswith("--proxy http://127.0.0.1:")
+    already_proxy = bind_hexstrike_lan_payload(
+        "gobuster",
+        {"url": "http://192.168.1.40/", "additional_args": "-w w.txt --proxy http://127.0.0.1:9"},
+    )
+    assert already_proxy["additional_args"] == "-w w.txt --proxy http://127.0.0.1:9"
+    public_bust = bind_hexstrike_lan_payload("gobuster", {"url": "https://example.com/", "additional_args": "-w w.txt"})
+    assert public_bust["additional_args"] == "-w w.txt"
     already = bind_hexstrike_lan_payload(
         "nuclei",
         {"target": "192.168.1.40", "additional_args": "-source-ip 192.168.1.12"},

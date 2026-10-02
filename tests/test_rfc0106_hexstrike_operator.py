@@ -242,6 +242,47 @@ async def test_operate_http_nuclei_binds_lan_nic(operator_store, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_operate_http_gobuster_uses_lan_http_proxy(operator_store, monkeypatch):
+    from app.security.target_registry import add_target
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=True,
+            install_path=str(operator_store),
+            tools={"gobuster": "ok"},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr("app.security.target_registry.data_dir", lambda: operator_store)
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    add_target(kind="cidr", value="192.168.1.0/24", notes="home")
+    await refresh_discovered_catalog(force=True)
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/gobuster"
+        seen.append(payload)
+        return {"pid": 7, "status": "started"}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    job = await operate("http:gobuster", {"url": "http://192.168.1.40/", "additional_args": "-w wordlist.txt"})
+    assert job["status"] == "succeeded"
+    args = seen[0]["additional_args"]
+    assert args.startswith("-w wordlist.txt --proxy http://127.0.0.1:")
+    assert seen[0]["url"] == "http://192.168.1.40/"
+
+
+@pytest.mark.asyncio
 async def test_stop_operator_job_only_stops_tracked_pids(operator_store, monkeypatch):
     async def fake_status(*, enrich=True):
         return SimpleNamespace(
