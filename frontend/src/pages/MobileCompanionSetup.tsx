@@ -229,6 +229,15 @@ export function MobileCompanionSetup() {
                 />
               </label>
               <label>
+                Gateway SSH port
+                <input
+                  className="command"
+                  value={wanForm.gateway_port}
+                  inputMode="numeric"
+                  onChange={(event) => patchWan("gateway_port", event.target.value)}
+                />
+              </label>
+              <label>
                 Gateway identity file
                 <input
                   className="command"
@@ -265,6 +274,15 @@ export function MobileCompanionSetup() {
                   className="command"
                   value={wanForm.ssh_user}
                   onChange={(event) => patchWan("ssh_user", event.target.value)}
+                />
+              </label>
+              <label>
+                Reverse-tunnel SSH port
+                <input
+                  className="command"
+                  value={wanForm.ssh_port}
+                  inputMode="numeric"
+                  onChange={(event) => patchWan("ssh_port", event.target.value)}
                 />
               </label>
               <label>

@@ -35,6 +35,17 @@ describe("companion WAN prepare body", () => {
     assert.equal("gateway_password" in body, false)
   })
 
+  test("remote reverse tunnel includes ssh port", () => {
+    const body = wan.connectionPrepareBody(true, true, {
+      ...wan.EMPTY_WAN_FORM,
+      wan_method: "ssh_reverse",
+      ssh_host: "vpn.example.test",
+      ssh_user: "taco",
+      ssh_port: "2222",
+    })
+    assert.equal(body.ssh_port, 2222)
+  })
+
   test("snapshot hydrate never copies a stored password", () => {
     const form = wan.wanFormFromSnapshot({
       wan: { wan_method: "gateway_ssh", gateway_host: "192.168.1.1", gateway_password: "nope" },

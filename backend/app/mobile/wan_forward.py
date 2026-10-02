@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import shutil
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 PORT = 4781
 
@@ -38,17 +41,61 @@ def companion_wan_origin(host: str) -> str:
     return f"https://{host.strip()}:{PORT}"
 
 
-def discover_public_ipv4() -> str:
-    import miniupnpc
+def ensure_private_firewall_4781() -> str:
+    """Allow inbound TCP 4781 on the Windows private profile only."""
+    if os.name != "nt":
+        return "skipped"
+    import subprocess
 
-    router = miniupnpc.UPnP()
-    router.discoverdelay = 1500
-    router.discover()
-    router.selectigd()
-    address = ipaddress.ip_address(router.externalipaddress())
-    if address.version != 4 or not address.is_global:
-        raise ValueError("Router has no public IPv4 address")
-    return str(address)
+    name = "Jarvis companion TLS 4781"
+    check = subprocess.run(
+        ["netsh", "advfirewall", "firewall", "show", "rule", f"name={name}"],
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+    )
+    if check.returncode == 0 and name.lower() in (check.stdout or "").lower():
+        return "present"
+    added = subprocess.run(
+        [
+            "netsh",
+            "advfirewall",
+            "firewall",
+            "add",
+            "rule",
+            f"name={name}",
+            "dir=in",
+            "action=allow",
+            "protocol=TCP",
+            f"localport={PORT}",
+            "profile=private",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+    )
+    if added.returncode != 0:
+        return f"failed:{(added.stderr or added.stdout or '').strip()[:160]}"
+    return "added"
+
+
+def lookup_egress_ipv4() -> str:
+    """Best-effort public IPv4 of this network after a mapping already exists."""
+    urls = ("https://api.ipify.org", "https://ipv4.icanhazip.com")
+    last_error: Exception | None = None
+    for url in urls:
+        try:
+            with httpx.Client(timeout=3, trust_env=False, follow_redirects=True) as client:
+                text = client.get(url).text.strip()
+            address = ipaddress.ip_address(text.split()[0])
+            if address.version == 4 and address.is_global:
+                return str(address)
+            last_error = ValueError("egress lookup was not a public IPv4")
+        except Exception as exc:
+            last_error = exc
+    raise ValueError(str(last_error) if last_error else "Could not learn public IPv4")
 
 
 def _private_ipv4(value: str) -> str:
