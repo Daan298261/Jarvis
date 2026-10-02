@@ -5,7 +5,7 @@
 **Author:** Taco via Chief of Staff / Jarvis Architect  
 **Date:** 2026-09-18
 
-**Related (do not rewrite; cite, do not fork ports):** [RFC-0059](0059-android-companion-delivery.md) companion identity / TLS gateway (implemented). [RFC-0063](0063-companion-six-digit-pairing-codes.md) 6-digit codes (implemented). [RFC-0065](0065-companion-pc-endpoint-bringup.md) PC endpoint (implemented). [RFC-0074](0074-companion-pairing-streamline-and-qr.md) pairing + QR. [`ANDROID_CLIENT.md`](../../ANDROID_CLIENT.md) Link-device / WAN walkthrough (PWA `/phone` historically on Leader `:4780`). [`docs/android-companion.md`](../android-companion.md) native companion runbook. [`backend/app/mobile/connectivity.py`](../../backend/app/mobile/connectivity.py) `PORT = 4781`. [`backend/app/mobile/wan_forward.py`](../../backend/app/mobile/wan_forward.py) owner-opt-in WAN (`wan_method`, UPnP / SSH / gateway). [`backend/app/mobile/gateway.py`](../../backend/app/mobile/gateway.py) TLS ingress. [`backend/app/mobile/relay.py`](../../backend/app/mobile/relay.py) + `services/mobile-relay/`. [RFC-0108](0108-phone-companion-offline-ai-model.md) offline GGUF pack (sibling; pairing-complete popup uses this session).
+**Related (do not rewrite; cite, do not fork ports):** [RFC-0059](0059-android-companion-delivery.md) companion identity / TLS gateway (implemented). [RFC-0063](0063-companion-six-digit-pairing-codes.md) 6-digit codes (implemented). [RFC-0065](0065-companion-pc-endpoint-bringup.md) PC endpoint (implemented). [RFC-0074](0074-companion-pairing-streamline-and-qr.md) pairing + QR. [`ANDROID_CLIENT.md`](../../ANDROID_CLIENT.md) Link-device / WAN walkthrough (PWA `/phone` historically on Leader `:4780`). [`docs/android-companion.md`](../android-companion.md) native companion runbook. [`backend/app/mobile/connectivity.py`](../../backend/app/mobile/connectivity.py) `PORT = 4781`. [`backend/app/mobile/wan_forward.py`](../../backend/app/mobile/wan_forward.py) owner-opt-in WAN (`wan_method`, UPnP / SSH / gateway). [`backend/app/mobile/natpmp.py`](../../backend/app/mobile/natpmp.py) NAT-PMP (RFC 6886, UDP 5351). [`backend/app/mobile/pcp.py`](../../backend/app/mobile/pcp.py) PCP MAP (RFC 6887, TCP 4781). [`backend/app/mobile/gateway.py`](../../backend/app/mobile/gateway.py) TLS ingress. [`backend/app/mobile/relay.py`](../../backend/app/mobile/relay.py) + `services/mobile-relay/`. [RFC-0108](0108-phone-companion-offline-ai-model.md) offline GGUF pack (sibling; pairing-complete popup uses this session).
 
 This PR is **specs-only**. Product behavior for the next implement ticket. **Hard constraint:** no exploit recipes, PoCs, payloads, or attack steps in this RFC or in implement tests. Defensive product behavior only. Do **not** invent LE / Red / Purple / ATO gates. Do **not** take RFC-0122.
 
@@ -43,12 +43,14 @@ Owner-facing (Phone pairing / Network copy). One mode is active as the **path th
 
 | `wan_method` | Owner meaning | Product behavior (Prepare connection, `remote: true`) |
 | --- | --- | --- |
-| **`auto`** (default) | Try the easiest owner-supplied path in order | **UPnP / IGD** one-hour lease on TCP 4781 (`map_router`); if no lease, **gateway SSH** when gateway host + user + identity file are set; if still no path, **SSH reverse tunnel** when SSH host + user + identity file are set; then append **mobile-relay** endpoint if `JARVIS_RELAY_ENDPOINT` is configured. |
-| **`upnp`** | Router UPnP / IGD only | Same one-hour **TCP 4781** lease; optional **IGD username / password** when the router requires logon (stored in config; password **redacted** in snapshots as `gateway_password_set`). No gateway SSH or SSH reverse in this mode unless the owner switches method. |
+| **`auto`** (default) | Try owner-authorized paths in product order | **UPnP / IGD** one-hour lease on TCP 4781 (`miniupnpc` then stdlib IGD fallback); if no lease → **NAT-PMP** on this PC's **private** default gateway (RFC 6886, UDP 5351); if that fails → **PCP MAP** on the same gateway (RFC 6887, TCP 4781 only); if still no path → **gateway SSH** when configured → **SSH reverse tunnel** when configured; then append **mobile-relay** endpoint if `JARVIS_RELAY_ENDPOINT` is set. |
+| **`upnp`** | Router UPnP / IGD (and soft fall-through) | Same **UPnP / IGD** attempt and optional **IGD username / password** (password **redacted** in snapshots as `gateway_password_set`). If UPnP does **not** produce a lease, product **soft-falls through** to **NAT-PMP** then **PCP** on the private default gateway — not a hard stop. Does **not** continue to gateway SSH or SSH reverse unless the owner switches to **`auto`** or those dedicated methods. |
 | **`gateway_ssh`** | Log into **my** gateway over SSH (OpenWrt) | Owner-supplied gateway SSH host, user, identity file, optional SSH port; **`gateway_profile`** = `openwrt_uci` only. Product runs a bounded UCI batch that creates one named firewall redirect: WAN **TCP 4781** → private LAN IP → **4781**. **`wan_public_host`** must be a **public** hostname or global IPv4 the phone can dial; private-only dest IPs and LAN-only dial names are rejected (`is_public_dial_host`). Mapping without a public dial host still succeeds but endpoints stay LAN until the owner sets `wan_public_host`. |
 | **`ssh_reverse`** | SSH reverse tunnel to a host I control | Owner-supplied **public** SSH host, user, identity file, optional port. Product runs `ssh -N` with `-R 0.0.0.0:4781:127.0.0.1:4781`, `BatchMode=yes`, `ServerAliveInterval=30` / `ServerAliveCountMax=3`. Phone dials `https://<ssh_host>:4781` with the same TLS pin. While Prepare connection stays enabled, the connectivity worker **re-applies** the tunnel if the SSH process dies (no password on argv). |
 
-**Hard constraints (all `wan_method` values):** inbound companion WAN is **only TCP 4781**. No HTTP admin scraping, default-password guessing, or exploit recipes against arbitrary gateways. Credentials never appear on process argv; `gateway_password` is omitted from connection snapshots (`redact_wan_config`). SSH paths require an on-disk **identity file** (no keyboard-interactive password on the tunnel argv). Gateway SSH is **owner-initiated** login to a host the owner named — not wardialing.
+**NAT-PMP / PCP (UPnP fall-through and `auto` cascade):** Talk only to this PC's **private** default-gateway IPv4 (not a public gateway, not WAN scan). Map **only TCP 4781** for a one-hour lease; refuse CGNAT / non-global public IPv4 from the gateway; refuse PCP/NAT-PMP replies that map a port other than 4781; preserve foreign mappings already on 4781 (same rule as UPnP). Release mappings on shutdown / re-Prepare. Status `wan_path` may be `natpmp` or `pcp` with owner-facing labels alongside `upnp`.
+
+**Hard constraints (all `wan_method` values):** inbound companion WAN is **only TCP 4781** — never 4780, 8088, SSH, or router admin. No HTTP admin scraping, default-password guessing, or exploit recipes against arbitrary gateways. Credentials never appear on process argv; `gateway_password` is omitted from connection snapshots (`redact_wan_config`). SSH paths require an on-disk **identity file** (no keyboard-interactive password on the tunnel argv). Gateway SSH is **owner-initiated** login to a host the owner named — not wardialing.
 
 **Mobile-relay (no public IPv4, CGNAT, or owner declines router login).** Operator deploys `services/mobile-relay/` and sets `JARVIS_RELAY_URL` / `JARVIS_RELAY_CREDENTIAL` / `JARVIS_RELAY_ENDPOINT` ([`docs/android-companion.md`](../android-companion.md), `docs/examples/mobile-companion.env.example`). Leader opens an **outbound** tunnel; TLS still terminates on the **owner gateway**; relay does not see companion plaintext. Phone uses the relay HTTPS origin with the **same** `server_pin`. Relay is not a second pairing ceremony and not P3 swarm. Relay can combine with any `wan_method` when configured (endpoints list includes both).
 
@@ -61,13 +63,13 @@ Installer / wizard still **must not** silently WAN-expose anything (`INSTALLER.m
 - Gateway SSH: `gateway_host`, `gateway_port`, `gateway_user`, `gateway_identity_file`, `gateway_profile` (`openwrt_uci`), `wan_public_host`
 - SSH reverse: `ssh_host`, `ssh_port`, `ssh_user`, `ssh_identity_file`
 
-Connection status exposes `wan_path` (`upnp`, `gateway_ssh`, `ssh_reverse`) and owner-facing limitation text when no path is ready.
+Connection status exposes `wan_path` (`upnp`, `natpmp`, `pcp`, `gateway_ssh`, `ssh_reverse`) and owner-facing limitation text when no path is ready.
 
 ### 3. Leader listens continuously on the companion port
 
 While the Jarvis **Leader process is up**, the companion TLS gateway **listens on TCP 4781** without waiting for **Prepare connection**.
 
-- Prepare connection / remote-checkbox remains the owner path to enable **`wan_method` port-forward** (UPnP / gateway SSH / SSH reverse) and **relay** — not the path to start LAN listen.
+- Prepare connection / remote-checkbox remains the owner path to enable **`wan_method` port-forward** (UPnP / NAT-PMP / PCP / gateway SSH / SSH reverse) and **relay** — not the path to start LAN listen.
 - Listen is TLS-only (`gateway.py` + `server_identity`). Upstream stays `http://127.0.0.1:4780`. Allowlist stays `/api/companion/*`.
 - Leader down → nothing listens (expected). Leader up → `:4781` is up.
 - Existing `probe()` rule stays: unauthenticated `GET /api/companion/models` on the gateway must be **401**, not a 200 owner payload.
@@ -119,7 +121,7 @@ Owner cannot silently skip the cooldown from the phone. Desktop may show remaini
 
 - [ ] Specs-only in this PR (no product code)
 - [ ] Owner copy states when **LAN-only** vs **port-forward (TCP 4781 only)** vs **mobile-relay** apply; cites `:4781` / `:4780` as in this table
-- [ ] Owner-facing **`wan_method`** (`auto`, `upnp`, `ssh_reverse`, `gateway_ssh`) and connection API fields match §2; only TCP 4781 inbound; no credentials on argv; snapshot redaction
+- [ ] Owner-facing **`wan_method`** (`auto`, `upnp`, `ssh_reverse`, `gateway_ssh`) and connection API fields match §2; UPnP → NAT-PMP → PCP cascade and soft `upnp` fall-through documented; only TCP 4781 inbound; private gateway only for NAT-PMP/PCP; no credentials on argv; snapshot redaction
 - [ ] Leader **listens continuously** on the companion TLS port while the Leader process is up
 - [ ] Connections accepted **only** with existing pairing keys (RFC-0059/0063/0074); unauthenticated companion API remains 401
 - [ ] Continuous monitoring for impersonation / MITM using the signal table (no attack recipes)
@@ -132,7 +134,7 @@ Owner cannot silently skip the cooldown from the phone. Desktop may show remaini
 
 | Area | Paths |
 | --- | --- |
-| Backend (implement PR only) | `backend/app/mobile/gateway.py`, `connectivity.py`, `wan_forward.py`, `identity.py`, `relay.py`; startup so `:4781` listens with Leader; suspicion → event + 600s refuse |
+| Backend (implement PR only) | `backend/app/mobile/gateway.py`, `connectivity.py`, `wan_forward.py`, `natpmp.py`, `pcp.py`, `identity.py`, `relay.py`; startup so `:4781` listens with Leader; suspicion → event + 600s refuse |
 | Frontend (implement PR only) | Phone pairing / Network: mode copy + `detected-hack-attempt` + cooldown remaining |
 | Android (implement PR only) | Pin mismatch reporting into the same event path; RFC-0108 popup still after **successful** pair only |
 | Tests | `tests/test_mobile_connectivity.py`, `tests/test_companion_pairing.py`, new `tests/test_rfc0123_*.py` (401, cooldown, event shape — no attack scripts) |
@@ -150,4 +152,4 @@ Product implementation in this PR. RFC-0108 GGUF runtime (sibling). RFC-0122. He
 
 ## Implementation note
 
-Landed on `development` via #319 @ `a6977b74` (companion reachability / anti-impersonation, with the RFC-0108 amend). **WAN path-forward** (`wan_method`, UPnP optional IGD logon, OpenWrt gateway SSH, SSH reverse tunnel + reconnect) landed via #493 @ `ab4dc82` (owner-authorized; same §2 port and credential constraints). **Physical phone + WAN soak** (UPnP on real hardware, OpenWrt gateway SSH, SSH reverse on a public host, cellular dial) remains **desktop sign-off** — do not tick the RFC ledger closed for that residual. Acceptance checkboxes left open for WAN soak and the original specs-only box.
+Landed on `development` via #319 @ `a6977b74` (companion reachability / anti-impersonation, with the RFC-0108 amend). **WAN path-forward** (`wan_method`, UPnP optional IGD logon, OpenWrt gateway SSH, SSH reverse tunnel + reconnect) landed via #493 @ `ab4dc82` (owner-authorized; same §2 port and credential constraints). **NAT-PMP / PCP** on private default gateway (UPnP cascade + soft `upnp` fall-through) landed via #497 @ `516a83a3`. **Physical phone + WAN soak** (UPnP, NAT-PMP/PCP, OpenWrt gateway SSH, SSH reverse on a public host, cellular dial) remains **desktop sign-off** — do not tick the RFC ledger closed for that residual. Acceptance checkboxes left open for WAN soak and the original specs-only box.
