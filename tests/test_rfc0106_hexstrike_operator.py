@@ -25,11 +25,11 @@ from app.security.hexstrike_operator import (
 from app.tools.hexstrike_operator import HexStrikeOperatorTool
 from app.agent import tool_exposure
 
-
 @pytest.fixture
 def operator_store(jarvis_env, monkeypatch):
     tmp = jarvis_env["tmp"]
     monkeypatch.setattr("app.security.hexstrike_operator.data_dir", lambda: tmp)
+    monkeypatch.setattr("app.security.hexstrike_operator.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.security.hexstrike.data_dir", lambda: tmp)
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
@@ -133,7 +133,7 @@ async def test_operate_creates_job_and_uses_post_operator(operator_store, monkey
 
     monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
     job = await operate("http:scanner_one", {"mode": "inventory"})
-    assert job["status"] == "completed"
+    assert job["status"] == "succeeded"
     assert job["upstream_pid"] == 9911
     assert (operator_store / "hexstrike" / "jobs" / job["id"] / "result.json").is_file()
     assert any(action == "operate_started" for action, _ in events)
@@ -160,7 +160,7 @@ async def test_stop_operator_job_only_stops_tracked_pids(operator_store, monkeyp
     monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
     job = await operate("http:scanner_one", {"mode": "inventory"})
     stopped = await stop_operator_job(job["id"])
-    assert stopped["status"] == "stopped"
+    assert stopped["status"] == "cancelled"
     untracked = dict(job)
     untracked["id"] = "bbbbbbbb-bbbb-4ccc-dddd-bbbbbbbbbbbb"
     untracked["upstream_pid"] = None
@@ -177,8 +177,7 @@ def test_artifact_paths_stay_within_job_or_allowed_roots(operator_store, jarvis_
     inside = directory / "report.json"
     inside.write_text("{}", encoding="utf-8")
     assert artifact_path_allowed(inside)
-    outside = operator_store / "outside.txt"
-    outside.write_text("x", encoding="utf-8")
+    outside = Path("/tmp/jarvis-rfc0106-unrelated-outside/outside.txt")
     assert not artifact_path_allowed(outside)
 
 
@@ -210,12 +209,13 @@ async def test_hexstrike_operator_chat_tool_runs_operate(monkeypatch, operator_s
     )
 
     async def fake_operate(capability_id, arguments):
-        return {"id": "job-1", "capability_id": capability_id, "status": "completed"}
+        return {"id": "job-1", "capability_id": capability_id, "status": "succeeded", "error": "", "daybreak_jobs_hint": "Open Daybreak → Jobs for job job-1"}
 
     monkeypatch.setattr("app.tools.hexstrike_operator.operate", fake_operate)
     tool = HexStrikeOperatorTool(lambda: {})
     result = await tool.execute(operation="operate", capability_id="http:alpha", arguments={"x": 1})
     assert result.success is True
+    assert "Daybreak" in (result.data or {}).get("daybreak_jobs_hint", "")
 
 
 @pytest.mark.asyncio

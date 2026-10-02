@@ -115,26 +115,25 @@ def _require_permissions_grant(
 
 def _require_hexstrike_access(*allowed: str) -> str:
     from ..licensing.entitlements import (
-        HEXSTRIKE_ACCESS_BLUE,
         HEXSTRIKE_ACCESS_FULL,
         HEXSTRIKE_ACCESS_LOCKED,
         HEXSTRIKE_OPERATOR_LICENSE_MESSAGE,
-        HEXSTRIKE_PRO_MESSAGE,
         hexstrike_access_mode,
+        hexstrike_denied_message,
     )
 
     mode = hexstrike_access_mode()
     if mode == HEXSTRIKE_ACCESS_LOCKED:
-        raise HTTPException(status_code=403, detail=HEXSTRIKE_PRO_MESSAGE)
+        raise HTTPException(status_code=403, detail=hexstrike_denied_message())
     if allowed and mode not in allowed:
         raise HTTPException(status_code=403, detail=HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
     return mode
 
 
 def _require_hexstrike_module_entitlement() -> None:
-    from ..licensing.entitlements import HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL
+    from ..licensing.entitlements import HEXSTRIKE_ACCESS_FULL
 
-    _require_hexstrike_access(HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL)
+    _require_hexstrike_access(HEXSTRIKE_ACCESS_FULL)
 
 
 def _require_full_operator() -> None:
@@ -173,7 +172,6 @@ async def _status_payload() -> dict[str, Any]:
     payload["managed_jobs"] = list_defensive_jobs()
     payload["operator_jobs"] = list_operator_jobs()
     from ..licensing.entitlements import (
-        HEXSTRIKE_ACCESS_BLUE,
         HEXSTRIKE_ACCESS_LOCKED,
         hexstrike_access_payload,
     )
@@ -184,14 +182,16 @@ async def _status_payload() -> dict[str, Any]:
         payload["catalog"] = []
         payload["catalog_count"] = 0
         payload["capabilities"] = []
-        payload["operator"] = {"operator_ready": False, "reason": "pro_feature"}
+        payload["operator"] = {
+            "operator_ready": False,
+            "reason": "hexstrike_module_missing",
+            "discovery_ok": False,
+            "discovery_error": access.get("access_message") or "",
+        }
         payload["operator_jobs"] = []
         payload["managed_jobs"] = []
-    elif access["access_mode"] == HEXSTRIKE_ACCESS_BLUE:
-        defensive = [row for row in (payload.get("catalog") or []) if row.get("source") == "defensive"]
-        payload["catalog"] = defensive
-        payload["catalog_count"] = len(defensive)
-        payload["operator"] = {**operator_surface, "operator_ready": False, "reason": "blue_license"}
+        payload["discovery_ok"] = False
+        payload["discovery_error"] = access.get("access_message") or ""
     return payload
 
 
@@ -268,20 +268,80 @@ async def hexstrike_capabilities():
 
 
 @router.get("/tools")
-async def hexstrike_tools_catalog():
-    return catalog_snapshot()
+async def hexstrike_tools_catalog(offset: int = 0, limit: int = 0):
+    """Full discovered catalog with optional pagination (no silent top-N truncation)."""
+    from ..licensing.entitlements import HEXSTRIKE_ACCESS_LOCKED
+
+    snap = catalog_snapshot()
+    # Entitlement lock returns empty catalog + module reason (not a soft ok:true empty).
+    if snap.get("access_mode") == HEXSTRIKE_ACCESS_LOCKED:
+        return {
+            **snap,
+            "catalog": [],
+            "count": 0,
+            "offset": 0,
+            "limit": 0,
+            "truncated": False,
+            "has_more": False,
+            "discovery_ok": False,
+            "discovery_error": snap.get("access_message") or snap.get("discovery_error") or "",
+        }
+    # Technical discovery hard-fail: suite running but catalog empty / refresh broken.
+    # MCP handshake warnings are returned in discovery_error without blanking usable rows.
+    if (
+        snap.get("discovery_ok") is False
+        and snap.get("discovery_error")
+        and HEXSTRIKE.is_running
+        and not (snap.get("catalog") or [])
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": snap["discovery_error"],
+                "discovery_ok": False,
+                "count": 0,
+                "catalog": [],
+            },
+        )
+    catalog = list(snap.get("catalog") or [])
+    total = len(catalog)
+    start = max(0, int(offset or 0))
+    page_limit = int(limit or 0)
+    if page_limit > 0:
+        page = catalog[start : start + page_limit]
+    else:
+        page = catalog[start:]
+        page_limit = len(page)
+    return {
+        **snap,
+        "catalog": page,
+        "count": total,
+        "offset": start,
+        "limit": page_limit,
+        "truncated": False,
+        "has_more": (start + len(page)) < total,
+    }
 
 
 @router.post("/tools/refresh")
 async def hexstrike_tools_refresh():
     _require_full_operator()
     surface = await sync_operator_surface(register_mcp=True)
-    if not surface.get("operator_ready"):
+    if not surface.get("operator_ready") and not surface.get("catalog_count"):
         raise HTTPException(
             status_code=503,
-            detail=surface.get("mcp", {}).get("error") or "HexStrike operator surface is not ready",
+            detail=surface.get("discovery_error")
+            or surface.get("mcp", {}).get("error")
+            or "HexStrike operator surface is not ready",
         )
-    return {"catalog": discovered_catalog_safe(), "count": surface.get("catalog_count"), "operator": surface}
+    return {
+        "catalog": discovered_catalog_safe(),
+        "count": surface.get("catalog_count"),
+        "operator": surface,
+        "discovery_ok": surface.get("discovery_ok", True),
+        "discovery_error": surface.get("discovery_error") or "",
+        "truncated": False,
+    }
 
 
 @router.post("/tools/{tool_id}/install")
@@ -309,11 +369,9 @@ async def hexstrike_tool_install_job(job_id: str):
 
 @router.post("/operate")
 async def hexstrike_operate(body: HexStrikeOperateIn):
-    from ..licensing.entitlements import HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL
+    from ..licensing.entitlements import HEXSTRIKE_ACCESS_FULL
 
-    mode = _require_hexstrike_access(HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL)
-    if mode == HEXSTRIKE_ACCESS_BLUE and not str(body.capability_id).startswith("defensive:"):
-        _require_full_operator()
+    _require_hexstrike_access(HEXSTRIKE_ACCESS_FULL)
     if str(body.capability_id) == "defensive:lan_inventory":
         _require_permissions_grant(
             ["network.local"],
@@ -329,10 +387,15 @@ async def hexstrike_operate(body: HexStrikeOperateIn):
     snapshot = await HEXSTRIKE.status(enrich=False)
     if snapshot.running:
         surface = await sync_operator_surface(register_mcp=False)
-        if not surface.get("operator_ready") and not str(body.capability_id).startswith("defensive:"):
+        if (
+            not surface.get("operator_ready")
+            and not str(body.capability_id).startswith("defensive:")
+            and surface.get("discovery_ok") is False
+        ):
             raise HTTPException(
                 status_code=503,
-                detail="Refresh operator catalog before invoking discovered capabilities",
+                detail=surface.get("discovery_error")
+                or "Refresh operator catalog before invoking discovered capabilities",
             )
     try:
         return await operate(body.capability_id, body.arguments)

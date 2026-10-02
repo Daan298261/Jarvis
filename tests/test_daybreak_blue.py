@@ -131,12 +131,13 @@ def test_role_limited_tool_exposure(monkeypatch):
     assert "hexstrike_defensive" not in tool_exposure.tool_names_for("mixed", ["hexstrike_defensive"])
     assert "hexstrike_operator" not in tool_exposure.tool_names_for("mixed", ["hexstrike"])
 
+    # RFC-0196: blue constant alone no longer unlocks HexStrike tools — hexstrike module → full.
     monkeypatch.setattr(tool_exposure, "hexstrike_access_mode", lambda: HEXSTRIKE_ACCESS_BLUE)
-    assert "hexstrike_defensive" in tool_exposure.tool_names_for("mixed", ["hexstrike_defensive"])
-    assert "hexstrike_defensive" in tool_exposure.tool_names_for("mixed", security_role="blue-team")
+    assert "hexstrike_defensive" not in tool_exposure.tool_names_for("mixed", ["hexstrike_defensive"])
     assert "hexstrike_operator" not in tool_exposure.tool_names_for("mixed", ["hexstrike"])
 
     monkeypatch.setattr(tool_exposure, "hexstrike_access_mode", lambda: HEXSTRIKE_ACCESS_FULL)
+    assert "hexstrike_defensive" in tool_exposure.tool_names_for("mixed", ["hexstrike_defensive"])
     assert "hexstrike_operator" in tool_exposure.tool_names_for("mixed", ["hexstrike"])
 
 
@@ -145,11 +146,15 @@ async def test_defensive_tool_rechecks_role_gate_and_permissions(monkeypatch):
     context = {"security_role": ""}
     tool = HexStrikeDefensiveTool(lambda: context)
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "locked")
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_denied_message",
+        lambda now=None: "The installed license package does not include hexstrike.",
+    )
     denied = await tool.execute(action="host_baseline", scope_id="host")
     assert denied.success is False
-    assert "Pro feature" in (denied.error or "")
+    assert "hexstrike" in (denied.error or "").lower()
 
-    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "blue")
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
     monkeypatch.setattr(
         "app.tools.hexstrike_defensive.evaluate_permission",
         lambda permission: SimpleNamespace(status="allow"),
@@ -182,7 +187,7 @@ def test_defensive_permission_mapping_requires_cyber_and_blue():
 async def test_lan_inventory_does_not_require_hexstrike_suite_grant(monkeypatch):
     context = {"security_role": "blue-team"}
     tool = HexStrikeDefensiveTool(lambda: context)
-    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "blue")
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
 
     def eval_perm(permission):
         if permission == "cyber.hexstrike":
@@ -220,7 +225,7 @@ async def test_security_role_persists_and_is_returned(jarvis_env, monkeypatch):
     async with session_module.ENGINE.connect() as connection:
         columns = await connection.run_sync(lambda conn: {col["name"] for col in inspect(conn).get_columns("tasks")})
     assert "security_role" in columns
-    monkeypatch.setattr("app.agent.tool_exposure.hexstrike_access_mode", lambda: "blue")
+    monkeypatch.setattr("app.agent.tool_exposure.hexstrike_access_mode", lambda: "full")
     payload = _task_dict(task)
     assert payload["security_role"] == "blue-team"
     assert "hexstrike_defensive" in payload["allowed_tools"]

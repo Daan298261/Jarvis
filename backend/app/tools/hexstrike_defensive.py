@@ -37,14 +37,14 @@ class HexStrikeDefensiveTool(Tool):
     async def execute(self, **kwargs: Any) -> ToolResult:
         from ..licensing.entitlements import (
             HEXSTRIKE_ACCESS_LOCKED,
-            HEXSTRIKE_PRO_MESSAGE,
             hexstrike_access_mode,
+            hexstrike_denied_message,
         )
 
         mode = hexstrike_access_mode()
         if mode == HEXSTRIKE_ACCESS_LOCKED:
             audit_hexstrike("defensive_tool_denied", reason="unlicensed")
-            return ToolResult(False, "", error=HEXSTRIKE_PRO_MESSAGE)
+            return ToolResult(False, "", error=hexstrike_denied_message())
         action = str(kwargs.get("action") or "")
         capability = CAPABILITY_BY_ID.get(action)
         if capability is None:
