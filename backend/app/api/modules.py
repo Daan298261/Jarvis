@@ -39,7 +39,7 @@ class EnableBody(BaseModel):
 
 class DownloadBody(BaseModel):
     mode: Literal["clone", "zip"] = "clone"
-    dest: Literal["desktop_projects", "library", "documents_projects", "extra"] = "library"
+    dest: Literal["desktop_projects", "library", "documents_projects", "extra", "auto"] = "auto"
     dest_path: str = Field(default="", max_length=1024)
 
 

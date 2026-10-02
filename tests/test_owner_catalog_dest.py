@@ -38,3 +38,43 @@ def test_owner_project_roots_include_usb_projects(tmp_path, monkeypatch):
     roots = catalog_download.owner_project_roots()
     assert extra / "projects" in roots
     assert extra / "Jarvis" / "projects" in roots
+
+
+def test_dest_auto_uses_extra_when_library_volume_is_full(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    lib = tmp_path / "projects"
+    lib.mkdir()
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.modules.catalog_download.catalog_library_root", lambda: lib)
+
+    def fake_usage(path):
+        text = str(path)
+        if str(extra) in text:
+            return SimpleNamespace(free=200 * 1024**3, total=500 * 1024**3, used=0)
+        return SimpleNamespace(free=100 * 1024**2, total=20 * 1024**3, used=19 * 1024**3)
+
+    monkeypatch.setattr("app.modules.catalog_download.shutil.disk_usage", fake_usage)
+    assert catalog_download.preferred_catalog_dest() == "extra"
+    root = catalog_download._dest_root("auto")
+    assert root == extra / "Jarvis" / "projects"
+
+
+def test_dest_auto_stays_library_when_repo_volume_fits(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    lib = tmp_path / "projects"
+    lib.mkdir()
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.modules.catalog_download.catalog_library_root", lambda: lib)
+    monkeypatch.setattr(
+        "app.modules.catalog_download.shutil.disk_usage",
+        lambda path: SimpleNamespace(free=200 * 1024**3, total=500 * 1024**3, used=0),
+    )
+    assert catalog_download.preferred_catalog_dest() == "library"
+    root = catalog_download._dest_root("auto")
+    assert root == lib

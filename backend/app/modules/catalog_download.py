@@ -85,6 +85,31 @@ def extra_projects_root() -> Path | None:
     return best
 
 
+_CATALOG_NEED_BYTES = 2 * 1024**3
+
+
+def preferred_catalog_dest(*, need_bytes: int = _CATALOG_NEED_BYTES) -> str:
+    """`extra` when the repo volume cannot fit a clone and an extra drive can."""
+    try:
+        local_free = int(shutil.disk_usage(catalog_library_root()).free)
+    except OSError:
+        local_free = 0
+    extra = extra_projects_root()
+    extra_free = 0
+    if extra is not None:
+        probe = extra
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        try:
+            extra_free = int(shutil.disk_usage(probe).free)
+        except OSError:
+            extra_free = 0
+    required = int(need_bytes or 0)
+    if extra is not None and extra_free >= required and local_free < required:
+        return "extra"
+    return "library"
+
+
 def owner_project_roots() -> list[Path]:
     """Places the owner keeps clones: Documents, Desktop, extra drives, repo library."""
     roots: list[Path] = [
@@ -233,11 +258,14 @@ def _dest_root(dest: str, dest_path: str = "") -> Path:
             raise ValueError("dest_path must be a folder")
         resolved.mkdir(parents=True, exist_ok=True)
         return resolved
-    if dest == "desktop_projects":
+    key = str(dest or "auto").strip().lower() or "auto"
+    if key in {"auto", ""}:
+        key = preferred_catalog_dest()
+    if key == "desktop_projects":
         root = desktop_projects_root()
-    elif dest == "documents_projects":
+    elif key == "documents_projects":
         root = documents_projects_root()
-    elif dest == "extra":
+    elif key == "extra":
         root = extra_projects_root() or documents_projects_root()
     else:
         root = catalog_library_root()
@@ -343,7 +371,7 @@ async def start_download(
     entry_id: str,
     *,
     mode: str = "clone",
-    dest: str = "library",
+    dest: str = "auto",
     dest_path: str = "",
 ) -> DownloadJob:
     source = allowlisted_source(entry_id)

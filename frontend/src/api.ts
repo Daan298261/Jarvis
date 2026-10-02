@@ -5108,7 +5108,7 @@ export async function downloadModuleCatalogEntry(
   entryId: string,
   options?: {
     mode?: "clone" | "zip"
-    dest?: "desktop_projects" | "library" | "documents_projects" | "extra"
+    dest?: "desktop_projects" | "library" | "documents_projects" | "extra" | "auto"
     dest_path?: string
   },
 ): Promise<CybersecurityActionResult> {
@@ -5118,7 +5118,7 @@ export async function downloadModuleCatalogEntry(
       method: "POST",
       body: JSON.stringify({
         mode: options?.mode ?? "clone",
-        dest: options?.dest ?? "library",
+        dest: options?.dest ?? "auto",
         dest_path: options?.dest_path ?? "",
       }),
     },
