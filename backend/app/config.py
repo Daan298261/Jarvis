@@ -38,7 +38,8 @@ def queue_dir() -> Path:
 
 
 def runtime_dir() -> Path:
-    return repo_root() / "runtime" / "llama.cpp"
+    """llama.cpp folder. Extra-drive `Jarvis/runtime` when C: cannot fit a fresh install."""
+    return named_runtime_dir("llama.cpp", markers=("llama-server.exe", "llama-server"))
 
 
 def settings_path() -> Path:
@@ -702,6 +703,11 @@ def extra_volume_named_runtime_dirs(name: str) -> list[Path]:
     return out
 
 
+def _runtime_marker_path(root: Path, marker: str) -> Path:
+    parts = [part for part in str(marker or "").replace("\\", "/").split("/") if part and part != "."]
+    return root.joinpath(*parts) if parts else root
+
+
 def discover_named_runtime_dir(name: str, *, marker: str) -> Path | None:
     """Existing local or extra-drive sidecar that already has `marker`."""
     slug = str(name or "").strip()
@@ -711,11 +717,26 @@ def discover_named_runtime_dir(name: str, *, marker: str) -> Path | None:
     candidates = [repo_root() / "runtime" / slug, *extra_volume_named_runtime_dirs(slug)]
     for root in candidates:
         try:
-            if (root / needle).is_file():
+            if _runtime_marker_path(root, needle).is_file():
                 return root
         except OSError:
             continue
     return None
+
+
+def named_runtime_dir(
+    name: str,
+    *,
+    markers: str | tuple[str, ...] = "",
+    need_bytes: int = _RUNTIME_NEED_BYTES,
+) -> Path:
+    """Discover an existing sidecar, else `preferred_runtime_install_dir`."""
+    needles = markers if isinstance(markers, tuple) else ((markers,) if markers else ())
+    for needle in needles:
+        existing = discover_named_runtime_dir(name, marker=needle)
+        if existing is not None:
+            return existing
+    return preferred_runtime_install_dir(name, need_bytes=need_bytes)
 
 
 def preferred_runtime_install_dir(name: str, *, need_bytes: int = _RUNTIME_NEED_BYTES) -> Path:

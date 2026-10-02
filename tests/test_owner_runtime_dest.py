@@ -150,3 +150,83 @@ def test_supermemory_install_dir_discovers_existing_extra_binary(tmp_path, monke
     monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
     assert supermemory_runtime.install_dir() == found
     assert supermemory_runtime.binary_path() == found / "supermemory-server.exe"
+
+
+def test_runtime_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    extra = tmp_path / "USB"
+    repo.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", lambda path: _full_local_usage(path, extra))
+    dest = config.runtime_dir()
+    assert dest == extra / "Jarvis" / "runtime" / "llama.cpp"
+    from app.runtime_install import _llama_exe
+
+    assert _llama_exe() == dest / "llama-server.exe"
+
+
+def test_runtime_dir_discovers_existing_extra_llama_server(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "llama.cpp"
+    found.mkdir(parents=True)
+    (found / "llama-server.exe").write_bytes(b"")
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert config.runtime_dir() == found
+
+
+def test_runtime_dir_stays_local_when_repo_volume_fits(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    extra = tmp_path / "USB"
+    repo.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert config.runtime_dir() == repo / "runtime" / "llama.cpp"
+
+
+def test_optional_worker_root_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    from app.workers import install as install_mod
+
+    repo = tmp_path / "repo"
+    extra = tmp_path / "USB"
+    repo.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", lambda path: _full_local_usage(path, extra))
+    root = install_mod._optional_worker_root()
+    assert root == extra / "Jarvis" / "runtime" / "optional-workers"
+    assert root.is_dir()
+
+
+def test_optional_worker_root_discovers_existing_extra_ufo_clone(tmp_path, monkeypatch):
+    from app.workers import install as install_mod
+
+    repo = tmp_path / "repo"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "optional-workers"
+    head = found / "microsoft-ufo" / ".git"
+    head.mkdir(parents=True)
+    (head / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert install_mod._optional_worker_root() == found
+
+
+def test_discover_named_runtime_dir_joins_nested_marker(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    extra = tmp_path / "USB"
+    found = extra / "runtime" / "optional-workers"
+    head = found / "microsoft-ufo" / ".git"
+    head.mkdir(parents=True)
+    (head / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    assert config.discover_named_runtime_dir("optional-workers", marker="microsoft-ufo/.git/HEAD") == found

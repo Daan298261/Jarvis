@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from ..config import logs_dir, repo_root
+from ..config import logs_dir, named_runtime_dir
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +226,7 @@ def _write_pth(name: str, target: Path) -> Path:
 
 
 def _optional_worker_root() -> Path:
-    path = repo_root() / "runtime" / "optional-workers"
+    path = named_runtime_dir("optional-workers", markers=("microsoft-ufo/.git/HEAD",))
     path.mkdir(parents=True, exist_ok=True)
     return path
 
