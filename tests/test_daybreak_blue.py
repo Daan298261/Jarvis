@@ -700,6 +700,17 @@ def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch
     assert kept["HEXSTRIKE_PORT"] == "8888"
 
 
+def test_is_hexstrike_mcp_server_matches_upstream_and_script():
+    from app.security.hexstrike import is_hexstrike_mcp_server
+
+    assert is_hexstrike_mcp_server({"name": "hexstrike-upstream"})
+    assert is_hexstrike_mcp_server({"name": "hexstrike-upstream-http"})
+    assert is_hexstrike_mcp_server({"id": "hexstrike-ai"})
+    assert is_hexstrike_mcp_server({"command": "python", "args": ["/opt/hexstrike-ai/hexstrike_mcp.py", "--stdio"]})
+    assert not is_hexstrike_mcp_server({"name": "email", "command": "npx", "args": ["email-mcp"]})
+    assert not is_hexstrike_mcp_server(None)
+
+
 @pytest.mark.asyncio
 async def test_mcp_nmap_call_binds_home_nic(monkeypatch):
     from app.tools.mcp_runtime import MCP

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import re
@@ -7,6 +8,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .base import RiskLevel, Tool, ToolResult
 
@@ -130,12 +132,72 @@ def prepare_stdio_launch(server: dict[str, Any]) -> dict[str, Any]:
         if value is None:
             continue
         env[str(key)] = str(value)
+    from ..security.hexstrike import hexstrike_child_env, is_hexstrike_mcp_server
+
+    if is_hexstrike_mcp_server(server):
+        env = hexstrike_child_env(env)
     return {
         "command": command,
         "args": args,
         "cwd": cwd,
         "env": env,
     }
+
+
+def mcp_url_bypasses_env_proxy(url: str) -> bool:
+    """Loopback / RFC1918 MCP HTTP must not follow HTTP_PROXY (VPN steal-default)."""
+    from .safety import is_owner_local_host
+
+    host = (urlparse(str(url or "")).hostname or "").strip()
+    return bool(host) and is_owner_local_host(host)
+
+
+def _mcp_direct_http_client(**kwargs: Any):
+    """httpx/httpx2 client that ignores process proxy env (HexStrike loopback)."""
+    options = dict(kwargs)
+    options["trust_env"] = False
+    try:
+        from mcp.shared._httpx_utils import MCP_DEFAULT_SSE_READ_TIMEOUT, MCP_DEFAULT_TIMEOUT
+
+        import httpx2
+
+        options.setdefault("timeout", httpx2.Timeout(MCP_DEFAULT_TIMEOUT, read=MCP_DEFAULT_SSE_READ_TIMEOUT))
+        return httpx2.AsyncClient(**options)
+    except Exception:
+        import httpx
+
+        options.setdefault("timeout", 30.0)
+        return httpx.AsyncClient(**options)
+
+
+def _streamable_http_opener():
+    from mcp.client import streamable_http as module
+
+    return getattr(module, "streamablehttp_client", None) or getattr(module, "streamable_http_client")
+
+
+def streamable_http_proxy_bypass_param(server: dict[str, Any], opener: Any | None = None) -> str | None:
+    """Which opener kwarg binds a trust_env=False client for owner-local MCP HTTP."""
+    from ..security.hexstrike import is_hexstrike_mcp_server
+
+    url = str(server.get("url") or "")
+    if not mcp_url_bypasses_env_proxy(url) and not is_hexstrike_mcp_server(server):
+        return None
+    target = opener
+    if target is None:
+        try:
+            target = _streamable_http_opener()
+        except Exception:
+            return None
+    try:
+        names = set(inspect.signature(target).parameters)
+    except (TypeError, ValueError):
+        return None
+    if "http_client" in names:
+        return "http_client"
+    if "httpx_client_factory" in names:
+        return "httpx_client_factory"
+    return None
 
 
 @dataclass
@@ -245,10 +307,18 @@ class MCPRuntime:
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif transport in {"http", "sse", "streamable-http"}:
-                from mcp.client.streamable_http import streamablehttp_client
-
-                url = server.get("url")
-                read, write, _ = await stack.enter_async_context(streamablehttp_client(url))
+                opener = _streamable_http_opener()
+                url = str(server.get("url") or "")
+                kwargs: dict[str, Any] = {}
+                param = streamable_http_proxy_bypass_param(server, opener)
+                if param == "http_client":
+                    client = _mcp_direct_http_client()
+                    await stack.enter_async_context(client)
+                    kwargs["http_client"] = client
+                elif param == "httpx_client_factory":
+                    kwargs["httpx_client_factory"] = lambda **factory_kw: _mcp_direct_http_client(**factory_kw)
+                streams = await stack.enter_async_context(opener(url, **kwargs))
+                read, write = streams[0], streams[1]
             else:
                 await stack.aclose()
                 raise RuntimeError(f"Unsupported MCP transport {transport}")

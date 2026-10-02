@@ -85,6 +85,24 @@ def hexstrike_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def is_hexstrike_mcp_server(server: dict[str, Any] | None) -> bool:
+    """True when this MCP entry is HexStrike upstream (stdio or loopback HTTP).
+
+    The stdio client ``hexstrike_mcp.py`` talks to ``127.0.0.1:8888``. If it
+    inherits HTTP_PROXY, those loopback calls (and later LAN tool HTTP) go
+    through the VPN proxy instead of the home NIC.
+    """
+    if not isinstance(server, dict):
+        return False
+    name = str(server.get("name") or server.get("id") or "").strip().lower()
+    if "hexstrike" in name:
+        return True
+    parts = [str(server.get("command") or ""), str(server.get("url") or "")]
+    parts.extend(str(item) for item in (server.get("args") or []))
+    blob = " ".join(parts).lower()
+    return "hexstrike_mcp" in blob or "hexstrike-ai" in blob
+
+
 @dataclass
 class HexStrikeStatus:
     suite: str = HEXSTRIKE_SUITE_NAME

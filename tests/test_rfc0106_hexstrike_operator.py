@@ -89,6 +89,28 @@ async def test_mcp_registration_hook_builds_loopback_server_and_refreshes_runtim
     assert "127.0.0.1:8888" in stdio["args"][stdio["args"].index("--server") + 1]
 
 
+def test_hexstrike_mcp_stdio_launch_drops_http_proxy(operator_store, monkeypatch):
+    from app.tools.mcp_runtime import prepare_stdio_launch
+
+    install = operator_store / "hexstrike-ai"
+    install.mkdir()
+    (install / "hexstrike_mcp.py").write_text("# mcp entry\n", encoding="utf-8")
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:3128")
+    servers = build_hexstrike_mcp_server(
+        install_path=install,
+        python_executable="python",
+        host="127.0.0.1",
+        port=8888,
+    )
+    launch = prepare_stdio_launch(servers[0])
+    assert "HTTP_PROXY" not in launch["env"]
+    assert "https_proxy" not in launch["env"]
+    assert launch["env"]["HEXSTRIKE_HOST"] == "127.0.0.1"
+    assert launch["env"]["HEXSTRIKE_PORT"] == "8888"
+    assert "--stdio" in launch["args"]
+
+
 def test_mcp_registration_refuses_non_loopback_host(operator_store):
     servers = build_hexstrike_mcp_server(
         install_path=operator_store,

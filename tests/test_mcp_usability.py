@@ -98,6 +98,72 @@ def test_stdio_filesystem_mcp_includes_extra_drive(tmp_path, monkeypatch):
     assert launch["args"][1].startswith("@")
 
 
+def test_hexstrike_stdio_mcp_drops_proxy_email_keeps_it(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:8080")
+    monkeypatch.setenv("ALL_PROXY", "socks5://10.8.0.1:1080")
+    hex_launch = prepare_stdio_launch(
+        {
+            "name": "hexstrike-upstream",
+            "command": "python",
+            "args": ["/opt/hexstrike-ai/hexstrike_mcp.py", "--server", "http://127.0.0.1:8888", "--stdio"],
+            "env": {"HEXSTRIKE_HOST": "127.0.0.1", "HEXSTRIKE_PORT": "8888"},
+        }
+    )
+    assert "HTTP_PROXY" not in hex_launch["env"]
+    assert "https_proxy" not in hex_launch["env"]
+    assert "ALL_PROXY" not in hex_launch["env"]
+    assert hex_launch["env"]["HEXSTRIKE_HOST"] == "127.0.0.1"
+    assert hex_launch["env"]["HEXSTRIKE_PORT"] == "8888"
+
+    mail = prepare_stdio_launch(
+        {
+            "name": "email",
+            "command": "npm",
+            "args": ["exec", "--prefix", "mcp", "--", "email-mcp", "stdio"],
+            "env": {"FOO": "1"},
+        }
+    )
+    assert mail["env"]["HTTP_PROXY"] == "http://10.8.0.1:8080"
+    assert mail["env"]["FOO"] == "1"
+
+
+def test_loopback_mcp_http_bypasses_env_proxy():
+    from app.tools.mcp_runtime import mcp_url_bypasses_env_proxy, streamable_http_proxy_bypass_param
+
+    assert mcp_url_bypasses_env_proxy("http://127.0.0.1:8888/mcp")
+    assert mcp_url_bypasses_env_proxy("http://192.168.1.40:8888/mcp")
+    assert not mcp_url_bypasses_env_proxy("https://api.github.com/mcp")
+    assert not mcp_url_bypasses_env_proxy("")
+
+    def opener_with_client(url, *, http_client=None):
+        return url, http_client
+
+    hex_param = streamable_http_proxy_bypass_param(
+        {"name": "hexstrike-upstream-http", "url": "http://127.0.0.1:8888/mcp"},
+        opener_with_client,
+    )
+    assert hex_param == "http_client"
+    remote = streamable_http_proxy_bypass_param(
+        {"name": "email-http", "url": "https://mcp.gmail.example/mcp"},
+        opener_with_client,
+    )
+    assert remote is None
+    assert (
+        streamable_http_proxy_bypass_param(
+            {"name": "hexstrike-upstream-http", "url": "http://127.0.0.1:8888/mcp"}
+        )
+        == "http_client"
+    )
+
+
+def test_mcp_direct_http_client_ignores_trust_env():
+    from app.tools.mcp_runtime import _mcp_direct_http_client
+
+    client = _mcp_direct_http_client()
+    assert client.trust_env is False
+
+
 def test_mcp_tool_keys_are_openai_safe():
     key = mcp_tool_key("email", "send email!")
     assert key.startswith("mcp_email_")
