@@ -111,6 +111,9 @@ def build_browser_action_frame(
             "role": role,
             "name": name,
         }
+        href = str(raw.get("href") or raw.get("url") or "").strip()
+        if href:
+            backend_ref["href"] = href
         # Strip forbidden fast-path keys if a caller accidentally passed them.
         for key in ("selector", "css", "xpath", "script", "js", "javascript"):
             backend_ref.pop(key, None)
@@ -266,6 +269,7 @@ async def snapshot_browser_page(page: Any, *, max_nodes: int = 80) -> ActionFram
         role = str(node.get("role") or "")
         name = str(node.get("name") or "")
         if role and (name or role in {"textbox", "searchbox", "checkbox", "radio", "combobox"}):
+            hop = str(node.get("url") or node.get("href") or "").strip()
             nodes.append(
                 {
                     "role": role,
@@ -277,6 +281,7 @@ async def snapshot_browser_page(page: Any, *, max_nodes: int = 80) -> ActionFram
                     "checked": node.get("checked"),
                     "dom_id": str(node.get("id") or ""),
                     "tag": "",
+                    **({"href": hop} if hop else {}),
                 }
             )
         for child in node.get("children") or []:

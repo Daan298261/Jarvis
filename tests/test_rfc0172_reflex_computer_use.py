@@ -69,6 +69,15 @@ def test_action_frame_schema_browser_and_desktop():
     assert desktop.nodes[0].backend_ref["automation_id"] == "saveBtn"
 
 
+def test_browser_action_frame_keeps_href_not_selector():
+    frame = build_browser_action_frame(
+        [{"role": "link", "name": "Nas", "href": "http://192.168.1.20/share", "selector": "#x"}],
+        url="http://192.168.1.10/home",
+    )
+    assert frame.nodes[0].backend_ref.get("href") == "http://192.168.1.20/share"
+    assert "selector" not in frame.nodes[0].backend_ref
+
+
 def test_injected_fail_closed_client_refuses():
     """FailClosedDecideClient is test-injection only (not the tip default)."""
     client = FailClosedDecideClient()
@@ -576,6 +585,84 @@ async def test_browser_use_reflex_honors_internet_deny(tmp_path, monkeypatch):
     )
     assert result.success is False
     assert result.error
+
+
+@pytest.mark.asyncio
+async def test_inmemory_reflex_click_href_blocks_lan_to_wan(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.reflex_loop.runtime import run_reflex_with_inmemory_world
+    from app.tools.browser_use import BrowserUseTool
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.local", "always")
+    apply_grant("network.internet", "deny")
+    client = ScriptedDecideClient(
+        [
+            {"operation": "CLICK", "target_id": "t0"},
+            {"operation": "DONE", "done": True},
+        ]
+    )
+    set_reflex_decide_client(client)
+    start = "http://192.168.1.10/home"
+    result = await run_reflex_with_inmemory_world(
+        "open the public link",
+        surface=SurfaceKind.BROWSER,
+        nodes=[{"role": "link", "name": "Public", "href": "https://example.com/out"}],
+        identity=start,
+        enforce_permissions=True,
+    )
+    assert result.success is False
+    assert result.error
+    assert result.data.get("url") == start
+    set_reflex_decide_client(None)
+
+    tool_client = ScriptedDecideClient(
+        [
+            {"operation": "CLICK", "target_id": "t0"},
+            {"operation": "DONE", "done": True},
+        ]
+    )
+    set_reflex_decide_client(tool_client)
+    tool = BrowserUseTool()
+    tool_result = await tool.execute(
+        goal="open the public link",
+        mode="reflex",
+        url=start,
+        nodes=[{"role": "link", "name": "Public", "href": "https://example.com/out"}],
+    )
+    assert tool_result.success is False
+    assert tool_result.error
+    set_reflex_decide_client(None)
+
+
+@pytest.mark.asyncio
+async def test_inmemory_reflex_click_href_follows_lan_to_lan(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.reflex_loop.runtime import run_reflex_with_inmemory_world
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.local", "always")
+    apply_grant("network.internet", "deny")
+    client = ScriptedDecideClient(
+        [
+            {"operation": "CLICK", "target_id": "t0"},
+            {"operation": "DONE", "done": True},
+        ]
+    )
+    set_reflex_decide_client(client)
+    dest = "http://192.168.1.20/share"
+    result = await run_reflex_with_inmemory_world(
+        "open the NAS link",
+        surface=SurfaceKind.BROWSER,
+        nodes=[{"role": "link", "name": "Nas", "href": dest}],
+        identity="http://192.168.1.10/home",
+        enforce_permissions=True,
+    )
+    assert result.success is True
+    assert result.data.get("url") == dest
+    set_reflex_decide_client(None)
 
 
 @pytest.mark.asyncio

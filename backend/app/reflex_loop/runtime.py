@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+from urllib.parse import urljoin, urlparse
 
 from ..policy.computer_permissions import evaluate_permission
 from ..tools.base import ToolResult
@@ -12,6 +13,8 @@ from .executor import ReflexLoopExecutor
 from .reflex_client import get_reflex_decide_client, set_reflex_decide_client
 from .sandbox import DEFAULT_SANDBOX
 from .schema import ActionFrame, ActionNode, Operation, ReflexDecision, SurfaceKind
+
+_HTTP_SCHEMES = {"http", "https"}
 
 
 def permission_gate_for_surface(surface: SurfaceKind) -> Callable[[ReflexDecision, ActionFrame], str | None]:
@@ -47,6 +50,24 @@ def permission_gate_for_surface(surface: SurfaceKind) -> Callable[[ReflexDecisio
     return _gate
 
 
+def click_navigation_url(node: ActionNode, current: str) -> str:
+    """Resolve a clicked node's href against the current page URL. Empty if none."""
+    href = str((node.backend_ref or {}).get("href") or "").strip()
+    if not href:
+        return ""
+    return urljoin(current or "", href).strip()
+
+
+def _http_page_url(url: str) -> str:
+    cleaned = (url or "").strip()
+    if not cleaned:
+        return ""
+    scheme = (urlparse(cleaned).scheme or "").lower()
+    if scheme and scheme not in _HTTP_SCHEMES:
+        return ""
+    return cleaned
+
+
 async def run_reflex_with_inmemory_world(
     goal: str,
     *,
@@ -60,11 +81,13 @@ async def run_reflex_with_inmemory_world(
 ) -> ToolResult:
     """Execute one reflex loop against a provided node list (tests / dry-run)."""
     frame_holder: dict[str, ActionFrame] = {}
+    world = {"identity": identity}
 
     def _build() -> ActionFrame:
+        page = world["identity"]
         if surface == SurfaceKind.BROWSER:
-            return build_browser_action_frame(nodes, url=identity, title=title, page_id=identity)
-        return build_desktop_action_frame(nodes, app_id=identity, window_title=title)
+            return build_browser_action_frame(nodes, url=page, title=title, page_id=page)
+        return build_desktop_action_frame(nodes, app_id=page, window_title=title)
 
     async def observe() -> ActionFrame:
         frame = _build()
@@ -84,6 +107,18 @@ async def run_reflex_with_inmemory_world(
             # Mark click in meta for callers; node may disappear in richer worlds.
             item_meta = node.backend_ref.setdefault("_clicks", 0)
             node.backend_ref["_clicks"] = int(item_meta) + 1
+            if surface == SurfaceKind.BROWSER:
+                dest = click_navigation_url(node, world["identity"])
+                if dest:
+                    if enforce_permissions:
+                        from ..tools.browser import gate_browser_url
+
+                        blocked = gate_browser_url(dest, "open")
+                        if blocked:
+                            raise PermissionError(blocked)
+                    page = _http_page_url(dest)
+                    if page:
+                        world["identity"] = page
         return {"protocol_calls": 1, "ok": True}
 
     client = decide_client or get_reflex_decide_client()
@@ -100,6 +135,8 @@ async def run_reflex_with_inmemory_world(
     data["surface"] = surface.value
     # The world here is the caller's node list: nothing on screen was touched.
     data["simulated"] = True
+    if surface == SurfaceKind.BROWSER:
+        data["url"] = world["identity"]
     if result.success:
         return ToolResult(
             True,
@@ -216,6 +253,7 @@ async def run_reflex_benchmark() -> dict[str, Any]:
 __all__ = [
     "action_frame_from_browser_page",
     "action_frame_from_desktop_controls",
+    "click_navigation_url",
     "permission_gate_for_surface",
     "run_reflex_benchmark",
     "run_reflex_live_desktop",
