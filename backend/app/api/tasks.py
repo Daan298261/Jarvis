@@ -39,7 +39,7 @@ class TaskCreate(BaseModel):
     autonomy: str | None = None
     profile: str | None = None
     execution_mode: str | None = None
-    security_role: Literal["blue-team"] | None = None
+    security_role: Literal["blue-team", "red-team", "purple-team"] | None = None
     media_ids: list[str] = []
 
 
@@ -155,6 +155,7 @@ def _task_dict(
         "execution_mode": getattr(task, "execution_mode", None) or "balanced",
         "task_class": task_class,
         "security_role": security_role or None,
+        "requires_tool_execution": bool(security_role),
         "response_route": getattr(task, "response_route", "managed_task") or "managed_task",
         "first_response_ms": getattr(task, "first_response_ms", 0) or 0,
         "exposed_tools": exposed_tools,
@@ -209,6 +210,13 @@ def _task_dict(
 async def create_task(body: TaskCreate):
     prompt = body.prompt + _media_prompt_suffix(body.media_ids)
     try:
+        if body.security_role:
+            from ..security.security_agents import SecurityAgentDenied, assert_mode_entitled
+
+            try:
+                assert_mode_entitled(body.security_role)
+            except SecurityAgentDenied as exc:
+                raise HTTPException(403, str(exc)) from exc
         task = await AGENT.create_task(
             prompt,
             body.autonomy,
@@ -218,6 +226,8 @@ async def create_task(body: TaskCreate):
         )
     except KillSwitchActive as exc:
         raise HTTPException(409, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     return _task_dict(task)
 
 

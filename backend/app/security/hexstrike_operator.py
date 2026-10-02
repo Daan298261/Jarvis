@@ -669,12 +669,56 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
         hexstrike_access_mode,
         hexstrike_denied_message,
     )
+    from .target_registry import TargetDenied, assert_targets_allowed
 
     mode = hexstrike_access_mode()
     if mode == HEXSTRIKE_ACCESS_LOCKED:
         raise PermissionError(hexstrike_denied_message())
     if mode != HEXSTRIKE_ACCESS_FULL:
         raise PermissionError(HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
+    # RFC-0197: license + owner-attested target gates for security-agent operates.
+    try:
+        from ..tools.registry import REGISTRY
+
+        security_role = str((REGISTRY._context or {}).get("security_role") or "")
+    except Exception:
+        security_role = ""
+    if security_role in {"red-team", "purple-team"}:
+        from ..policy.cyber_ato import role_allowed
+        from .security_audit import audit_security_event
+
+        if security_role == "red-team" and not role_allowed("red-team"):
+            audit_security_event(
+                "invoke_denied",
+                reason="red_requires_law_enforcement",
+                capability_id=capability_id,
+                security_role=security_role,
+                source="hexstrike_operate",
+            )
+            audit_hexstrike("operate_denied", capability=capability_id, reason="red_requires_law_enforcement")
+            raise PermissionError(
+                "red-team requires the red-team module and law_enforcement=true on the same package"
+            )
+        if security_role == "purple-team" and not (role_allowed("blue-team") and role_allowed("red-team")):
+            audit_security_event(
+                "invoke_denied",
+                reason="purple_not_entitled",
+                capability_id=capability_id,
+                security_role=security_role,
+                source="hexstrike_operate",
+            )
+            audit_hexstrike("operate_denied", capability=capability_id, reason="purple_not_entitled")
+            raise PermissionError("purple-team requires blue-team and red-team (with law_enforcement) entitlements")
+    try:
+        assert_targets_allowed(
+            arguments,
+            security_role=security_role,
+            capability_id=capability_id,
+            source="hexstrike_operate",
+        )
+    except TargetDenied:
+        audit_hexstrike("operate_denied", capability=capability_id, reason="target_not_registered")
+        raise
     capability = _resolve_capability(capability_id)
     source = str(capability.get("source") or "")
     if source == "dependency" or str(capability_id).startswith("dep:"):

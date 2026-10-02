@@ -197,6 +197,10 @@ def is_plain_conversation(prompt: str) -> bool:
 def follow_up_stays_conversation(follow: str | None, *, security_role: str = "") -> bool:
     """Keep an existing chat thread conversational unless the follow-up is a tool task."""
     text = (follow or "").strip()
+    from ..security.security_agents import is_security_role
+
+    if is_security_role(security_role) and is_defensive_operator_prompt(text):
+        return False
     if security_role == "blue-team" and is_defensive_operator_prompt(text):
         return False
     if not text:
@@ -637,6 +641,11 @@ class WorkingState:
     model_escalation_count: int = 0
     router_action: str = ""
     coding_execution: dict[str, Any] = field(default_factory=dict)
+    # RFC-0197 security agents
+    requires_tool_execution: bool = False
+    cyber_execution: dict[str, Any] = field(default_factory=dict)
+    purple_phase: str = ""
+    purple_locked: bool = False
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"
@@ -667,6 +676,8 @@ class WorkingState:
             f"Goal: {self.goal or '(same as user request)'}\n"
             f"Task class: {self.task_class or 'mixed'}\n"
             f"Security role: {self.security_role or 'none'}\n"
+            f"Requires tool execution: {self.requires_tool_execution}\n"
+            f"Purple phase: {self.purple_phase or 'n/a'}\n"
             f"Acceptance criteria:\n{criteria}\n"
             f"Plan:\n{plan}\n"
             f"Current state: {self.current_state or 'starting'}\n"

@@ -115,12 +115,12 @@ Specs-only:
 
 Implement follow-up:
 
-- [ ] `purple-team` persisted on tasks; API to set security agent mode
-- [ ] Target registry CRUD + enforce on HexStrike operate and red/blue tool paths
-- [ ] Tool exposure maps per mode; verification rejects narration-only “completed” cyber tasks
+- [x] `purple-team` persisted on tasks; API to set security agent mode
+- [x] Target registry CRUD + enforce on HexStrike operate and red/blue tool paths
+- [x] Tool exposure maps per mode; verification rejects narration-only “completed” cyber tasks
 - [ ] Daybreak UX for mode + targets; Themis/Veles default binds
-- [ ] Purple phase machine + handoff artifacts
-- [ ] Unit tests: deny unlisted target, deny red without LE, purple phase transitions, audit lines
+- [x] Purple phase machine + handoff artifacts
+- [x] Unit tests: deny unlisted target, deny red without LE, purple phase transitions, audit lines
 - [ ] **Windows desktop soak**: attest lab target → blue defensive job via Themis → red scoped job via Veles (entitled) → purple handoff visible in UI
 
 ## Likely files
