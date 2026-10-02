@@ -71,9 +71,17 @@ _STARTED = False
 
 
 def pack_cache_dir() -> Path:
-    path = data_dir() / "companion-packs"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    from ..inference.lmstudio_catalog import resolved_cache_dir
+
+    local = data_dir() / "companion-packs"
+    dest = resolved_cache_dir(
+        "companion-packs",
+        local=local,
+        markers=tuple(str(pack["filename"]) for pack in COMPANION_PACK_CATALOG),
+        need_bytes=2 * 1024**3,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def pack_by_id(pack_id: str) -> dict[str, Any] | None:

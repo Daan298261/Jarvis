@@ -189,9 +189,17 @@ _AUTO_DOWNLOAD_HARD_CAP_BYTES = 500_000_000
 
 
 def voice_pack_cache_dir() -> Path:
-    path = data_dir() / "companion-voice-packs"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    from ..inference.lmstudio_catalog import resolved_cache_dir
+
+    local = data_dir() / "companion-voice-packs"
+    dest = resolved_cache_dir(
+        "companion-voice-packs",
+        local=local,
+        markers=tuple(str(pack["id"]) for pack in COMPANION_VOICE_PACK_CATALOG),
+        need_bytes=512 * 1024**2,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def voice_pack_by_id(pack_id: str) -> dict[str, Any] | None:

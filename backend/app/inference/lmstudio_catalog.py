@@ -188,20 +188,68 @@ def preferred_gguf_install_dir(relative_dir: str = "", *, need_bytes: int = 0) -
     return extra / str(relative_dir or "") if relative_dir else extra
 
 
-def extra_volume_named_model_dir(*relative: str, marker: str) -> Path | None:
-    """`tts/kokoro-82m` (or similar) under extra-volume model folders, if `marker` exists."""
+def extra_volume_named_model_dir(*relative: str, marker: str = "") -> Path | None:
+    """Named folder under extra-volume model roots, if `marker` exists (or the folder is non-empty)."""
     parts = [str(part).strip() for part in relative if str(part).strip()]
-    needle = str(marker or "").strip()
-    if not parts or not needle:
+    if not parts:
         return None
+    needle = str(marker or "").strip()
     for root in extra_volume_model_roots():
         candidate = root.joinpath(*parts)
         try:
-            if (candidate / needle).is_file():
+            if needle:
+                hit = candidate / needle
+                if hit.is_file() or hit.is_dir():
+                    return candidate
+            elif candidate.is_dir() and any(candidate.iterdir()):
                 return candidate
         except OSError:
             continue
     return None
+
+
+def resolved_cache_dir(
+    name: str,
+    *,
+    local: Path,
+    markers: tuple[str, ...] = (),
+    need_bytes: int,
+) -> Path:
+    """Keep `local` when that volume fits or already has files; else extra-drive `Jarvis/models/<name>`."""
+    slug = str(name or "").strip()
+    if not slug:
+        return local
+    for marker in markers:
+        try:
+            hit = local / marker
+            if hit.is_file() or hit.is_dir():
+                return local
+        except OSError:
+            continue
+    if not markers:
+        try:
+            if local.is_dir() and any(local.iterdir()):
+                return local
+        except OSError:
+            pass
+    for marker in markers or ("",):
+        extra = extra_volume_named_model_dir(slug, marker=marker)
+        if extra is not None:
+            return extra
+    required = int(need_bytes or 0)
+    try:
+        probe = local if local.exists() else local.parent
+        if not probe.exists():
+            from ..config import repo_root
+
+            probe = repo_root()
+        local_free = int(shutil.disk_usage(probe).free)
+    except OSError:
+        local_free = 0
+    extra_root = extra_volume_install_root(need_bytes=required)
+    if extra_root is not None and required > 0 and local_free < required:
+        return extra_root / slug
+    return local
 
 
 def extra_volume_file_named(filename: str) -> Path | None:

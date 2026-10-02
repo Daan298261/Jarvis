@@ -356,3 +356,89 @@ def test_playwright_install_reuses_extra_chromium(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.run", boom)
     runtime_install._install_playwright()
     assert (repo / ".venv" / ".playwright-chromium-ready").is_file()
+
+
+def _patch_model_disk(monkeypatch, extra: Path) -> None:
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(
+        "app.inference.lmstudio_catalog.shutil.disk_usage",
+        lambda path: _full_local_usage(path, extra),
+    )
+
+
+def test_companion_pack_cache_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.mobile import companion_offline
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(companion_offline, "data_dir", lambda: data)
+    _patch_model_disk(monkeypatch, extra)
+    dest = companion_offline.pack_cache_dir()
+    assert dest == extra / "Jarvis" / "models" / "companion-packs"
+    assert dest.is_dir()
+
+
+def test_companion_pack_cache_discovers_existing_extra_gguf(tmp_path, monkeypatch):
+    from app.mobile import companion_offline
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "models" / "companion-packs"
+    found.mkdir(parents=True)
+    (found / "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf").write_bytes(b"gguf")
+    monkeypatch.setattr(companion_offline, "data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
+    assert companion_offline.pack_cache_dir() == found
+
+
+def test_companion_voice_pack_cache_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.mobile import companion_voice_packs
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(companion_voice_packs, "data_dir", lambda: data)
+    _patch_model_disk(monkeypatch, extra)
+    dest = companion_voice_packs.voice_pack_cache_dir()
+    assert dest == extra / "Jarvis" / "models" / "companion-voice-packs"
+
+
+def test_whisper_models_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    from app.tts.voice_runtime_config import whisper_models_dir
+    from app.workers.voice import whisper_model_candidates
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    models.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    _patch_model_disk(monkeypatch, extra)
+    dest = whisper_models_dir()
+    assert dest == extra / "Jarvis" / "models" / "whisper"
+    roots = whisper_model_candidates()
+    assert any(str(dest) in str(path) for path in roots)
+
+
+def test_whisper_models_dir_discovers_existing_extra_base(tmp_path, monkeypatch):
+    from app.config import AppSettings, VoiceSettings
+    from app.tts.voice_runtime_config import resolved_faster_whisper_model, whisper_models_dir
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "models" / "whisper"
+    (found / "base").mkdir(parents=True)
+    (found / "base" / "model.bin").write_bytes(b"w")
+    monkeypatch.delenv("JARVIS_WHISPER_MODEL", raising=False)
+    monkeypatch.setattr(
+        "app.tts.voice_runtime_config.load_settings",
+        lambda: AppSettings(voice=VoiceSettings(whisper_model="")),
+    )
+    monkeypatch.setattr(config, "models_dir", lambda: models)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
+    assert whisper_models_dir() == found
+    assert resolved_faster_whisper_model() == str(found / "base")

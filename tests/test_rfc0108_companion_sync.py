@@ -16,6 +16,7 @@ from app.mobile import identity, store
 @pytest.fixture
 def mobile_env(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.mobile.companion_offline.data_dir", lambda: tmp_path)
     return tmp_path
 
 
