@@ -5,7 +5,9 @@ from app.tools.browser import (
     BrowserTool,
     activate_browser_tab,
     gate_browser_url,
+    owner_media_dir,
     redirect_chain_urls,
+    resolve_owner_file_path,
     _assert_current_url_allowed,
     _goto_with_retry,
     _run_and_gate_navigation,
@@ -340,3 +342,53 @@ async def test_activate_tab_blocks_wan_and_switches_lan(tmp_path, monkeypatch):
     finally:
         browser_mod._page = previous
         browser_mod._pages = previous_pages
+
+
+def test_resolve_owner_file_path_defaults_to_downloads(tmp_path, monkeypatch):
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    monkeypatch.setattr("app.tools.browser.Path.home", classmethod(lambda cls: tmp_path))
+    dest = resolve_owner_file_path(
+        None,
+        suggested_name="invoice.pdf",
+        allowed=[str(tmp_path)],
+        fallback_dirs=("Downloads",),
+    )
+    assert dest == downloads / "invoice.pdf"
+
+
+def test_resolve_owner_file_path_extra_drive_and_dir(tmp_path):
+    extra = tmp_path / "E" / "Photos"
+    extra.mkdir(parents=True)
+    dest = resolve_owner_file_path(
+        str(extra),
+        suggested_name="shot.png",
+        allowed=[str(tmp_path)],
+        fallback_dirs=("Downloads",),
+    )
+    assert dest == extra / "shot.png"
+    named = resolve_owner_file_path(
+        str(extra / "vacation.jpg"),
+        suggested_name="ignored.jpg",
+        allowed=[str(tmp_path)],
+    )
+    assert named == extra / "vacation.jpg"
+
+
+def test_resolve_owner_file_path_rejects_outside_workspace(tmp_path):
+    import pytest
+
+    with pytest.raises(PermissionError):
+        resolve_owner_file_path(
+            "/etc/passwd",
+            suggested_name="x.bin",
+            allowed=[str(tmp_path)],
+        )
+
+
+def test_owner_media_dir_prefers_existing_home_folder(tmp_path, monkeypatch):
+    pictures = tmp_path / "Pictures"
+    pictures.mkdir()
+    monkeypatch.setattr("app.tools.browser.Path.home", classmethod(lambda cls: tmp_path))
+    assert owner_media_dir("Pictures", "Downloads") == pictures
+

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from ..config import AppSettings, data_dir, load_settings
 from .base import RiskLevel, Tool, ToolResult
+from .safety import resolve_allowed_path
 
 _lock = asyncio.Lock()
 _playwright = None
@@ -35,6 +36,49 @@ _ACTIONS_NEEDING_PAGE = {
 _NAMED_ROLES = ("button", "link", "tab", "menuitem", "checkbox", "radio")
 _GOTO_RETRIES = 3
 _INTERNAL_BROWSER_SCHEMES = ("about:", "chrome:", "devtools:", "data:")
+
+
+def owner_media_dir(*names: str) -> Path:
+    """Owner Downloads/Pictures/Desktop when present; otherwise a Jarvis data folder."""
+    for name in names:
+        candidate = Path.home() / name
+        try:
+            if candidate.is_dir():
+                return candidate
+        except OSError:
+            continue
+    fallback = data_dir() / (names[0].lower() if names else "downloads")
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
+def resolve_owner_file_path(
+    raw: str | None,
+    *,
+    suggested_name: str,
+    allowed: list[str],
+    fallback_dirs: tuple[str, ...] = ("Downloads",),
+) -> Path:
+    """Save/open path under the allowed workspace. Default is the owner's Downloads folder."""
+    name = Path(str(suggested_name or "download").strip() or "download").name
+    if raw and str(raw).strip():
+        target = Path(str(raw).strip()).expanduser()
+        try:
+            is_dir = target.is_dir()
+        except OSError:
+            is_dir = False
+        if is_dir or str(raw).endswith(("/", "\\")):
+            target = target / name
+        return resolve_allowed_path(str(target), allowed)
+    dest = owner_media_dir(*fallback_dirs) / name
+    try:
+        return resolve_allowed_path(str(dest), allowed)
+    except PermissionError:
+        alt = data_dir() / (fallback_dirs[0].lower() if fallback_dirs else "downloads") / name
+        alt.parent.mkdir(parents=True, exist_ok=True)
+        if not allowed:
+            return alt
+        return resolve_allowed_path(str(alt), allowed)
 
 
 def redirect_chain_urls(response: Any, final_url: str = "") -> list[str]:
@@ -330,7 +374,10 @@ class BrowserTool(Tool):
             "task": {"type": "string", "description": "Natural-language browser task for Browser Use"},
             "key": {"type": "string"},
             "script": {"type": "string"},
-            "path": {"type": "string"},
+            "path": {
+                "type": "string",
+                "description": "download/screenshot/upload path. Omit download to use the owner's Downloads folder.",
+            },
             "index": {"type": "integer", "description": "Tab index for action=tabs (omit to list)"},
             "headless": {"type": "boolean"},
             "timeout_seconds": {"type": "integer", "default": 15},
@@ -340,6 +387,14 @@ class BrowserTool(Tool):
 
     def __init__(self, context_getter) -> None:
         self.context_getter = context_getter
+
+    def _allowed(self) -> list[str]:
+        raw = self.context_getter() if callable(self.context_getter) else {}
+        if isinstance(raw, AppSettings):
+            return list(raw.allowed_directories or [])
+        if isinstance(raw, dict):
+            return list(raw.get("allowed_directories") or [])
+        return []
 
     def _settings(self) -> AppSettings:
         raw = self.context_getter()
@@ -483,7 +538,12 @@ class BrowserTool(Tool):
                     return ToolResult(True, str(result))
                 if action == "screenshot":
                     await _assert_current_url_allowed(page, "open")
-                    out = Path(kwargs.get("path") or (data_dir() / "screenshots" / "browser.png"))
+                    out = resolve_owner_file_path(
+                        kwargs.get("path"),
+                        suggested_name="browser.png",
+                        allowed=self._allowed(),
+                        fallback_dirs=("Pictures", "Downloads"),
+                    )
                     out.parent.mkdir(parents=True, exist_ok=True)
                     await page.screenshot(path=str(out), full_page=False)
                     encoded = base64.b64encode(out.read_bytes()).decode("ascii")
@@ -516,19 +576,25 @@ class BrowserTool(Tool):
                         return await download_info.value
 
                     download = await _run_and_gate_navigation(page, _download(), "open")
-                    dest = Path(kwargs.get("path") or (data_dir() / "downloads" / download.suggested_filename))
+                    dest = resolve_owner_file_path(
+                        kwargs.get("path"),
+                        suggested_name=getattr(download, "suggested_filename", None) or "download",
+                        allowed=self._allowed(),
+                        fallback_dirs=("Downloads",),
+                    )
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     await download.save_as(str(dest))
-                    return ToolResult(True, f"Downloaded to {dest}")
+                    return ToolResult(True, f"Downloaded to {dest}", data={"path": str(dest)})
                 if action == "upload":
+                    source = resolve_allowed_path(str(kwargs.get("path") or ""), self._allowed())
                     await _run_and_gate_navigation(
                         page,
                         page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(
-                            kwargs.get("path")
+                            str(source)
                         ),
                         "open",
                     )
-                    return ToolResult(True, "Uploaded file")
+                    return ToolResult(True, f"Uploaded {source}")
                 return ToolResult(False, "", error=f"Unknown action {action}")
             except ModuleNotFoundError as exc:
                 return ToolResult(False, "", error=_browser_error(exc))
