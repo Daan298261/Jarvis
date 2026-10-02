@@ -176,7 +176,7 @@ def test_stdlib_igd_rejects_cgnat_and_explains_igd_logon(monkeypatch):
         def post(self, url, content, headers, auth=None):
             return SimpleNamespace(
                 status_code=200,
-                text="<s:Envelope><s:Body><NewExternalIPAddress>10.8.0.2</NewExternalIPAddress></s:Body></s:Envelope>",
+                text="<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body><NewExternalIPAddress>10.8.0.2</NewExternalIPAddress></s:Body></s:Envelope>",
             )
 
     monkeypatch.setattr("app.mobile.igd.httpx.Client", CgnatClient)

@@ -105,7 +105,10 @@ def soap_envelope(action: str, service_type: str, body: str) -> str:
 
 
 def _soap_text(xml_text: str, tag: str) -> str:
-    root = ET.fromstring(xml_text)
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return ""
     for node in root.iter():
         if _local_name(node.tag) == tag:
             return (node.text or "").strip()
