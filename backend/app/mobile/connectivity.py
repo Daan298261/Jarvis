@@ -704,10 +704,13 @@ class Connectivity:
     async def _refresh_lan_dial_endpoints(self) -> None:
         hosts = await asyncio.to_thread(lan_hosts)
         live = self._lan_endpoints(hosts)
-        merged = self._merge_live_lan_endpoints(live, list(self.state.get("endpoints") or []))
-        if merged:
-            await self.cover_phone_dial_hosts(*merged)
-        self.report(endpoints=merged)
+        current = list(self.state.get("endpoints") or [])
+        merged = self._merge_live_lan_endpoints(live, current)
+        if not merged:
+            return
+        await self.cover_phone_dial_hosts(*merged)
+        if merged != current:
+            self.report(endpoints=merged)
 
     async def _renew_wan_mapping(self, config) -> None:
         """Keep the one-hour UPnP/NAT-PMP/PCP lease and the OpenWrt redirect alive."""
@@ -788,6 +791,8 @@ class Connectivity:
                                     await self._renew_wan_mapping(config)
                                 except Exception:
                                     await self.apply_remote(config)
+                            else:
+                                await self._refresh_lan_dial_endpoints()
                 await asyncio.sleep(30)
         finally:
             await self.release_mapping()
