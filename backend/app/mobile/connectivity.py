@@ -546,8 +546,7 @@ class Connectivity:
 
                 lan_ip = mapping_lan_ipv4(hosts, str(wan.get("gateway_host") or gw or ""))
                 if (
-                    not inner_wan_unusable
-                    and method in {"auto", "gateway_ssh"}
+                    method in {"auto", "gateway_ssh"}
                     and gateway_ssh_configured(wan)
                 ):
                     self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
