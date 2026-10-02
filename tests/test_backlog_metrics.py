@@ -112,6 +112,17 @@ async def test_verify_code_rejects_outside_path(tmp_path):
     assert "outside allowed directories" in result.error
 
 
+async def test_verify_code_on_extra_drive(tmp_path):
+    extra = tmp_path / "E" / "code"
+    extra.mkdir(parents=True)
+    _init_repo(extra)
+    (extra / "readme.py").write_text("VALUE = 1\n", encoding="utf-8")
+    tool = VerifyCodeTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(path=str(extra), run_tests=False)
+    assert result.success, result.error
+    assert result.data.get("ok") is True
+
+
 def test_live_metrics_and_schema_parse():
     metrics = LiveTaskMetrics()
     metrics.note_model({"prompt_ms": 10, "predicted_ms": 20})

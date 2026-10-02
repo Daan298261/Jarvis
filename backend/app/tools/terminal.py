@@ -13,7 +13,7 @@ from typing import Any
 import psutil
 
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import resolve_workspace_dir
+from .owner_paths import workspace_cwd
 from .safety import classify_command, is_protected_process
 
 
@@ -179,7 +179,8 @@ class TerminalTool(Tool):
         "action=run (default) waits for the process. action=start returns a PID immediately; "
         "then use inspect/wait/kill with that pid to see if it is still alive and to collect output. "
         "inspect also works for other local PIDs. Captures stdout, stderr, exit code and duration. "
-        "Use working_directory when possible (USB/`D:` extra drives included). Do not use this to format disks or destroy backups."
+        "Omit working_directory to run in Documents. USB/`D:` extra drives are allowed. "
+        "Do not use this to format disks or destroy backups."
     )
     risk = RiskLevel.HIGH
     parameters = {
@@ -231,7 +232,7 @@ class TerminalTool(Tool):
         raw_cwd = kwargs.get("working_directory")
         allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
         try:
-            cwd = resolve_workspace_dir(raw_cwd, allowed) if raw_cwd else os.getcwd()
+            cwd = workspace_cwd(raw_cwd, allowed)
         except PermissionError as exc:
             return ToolResult(False, "", error=str(exc))
         if not cwd:

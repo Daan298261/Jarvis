@@ -182,6 +182,29 @@ async def test_write_into_extra_drive_folder(tmp_path):
     assert (extra / "note.txt").read_text(encoding="utf-8") == "on-usb"
 
 
+async def test_copy_without_destination_uses_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    src = tmp_path / "photo.jpg"
+    src.write_bytes(b"jpeg")
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="copy", path=str(src))
+    assert result.success, result.error
+    assert (docs / "photo.jpg").read_bytes() == b"jpeg"
+
+
+async def test_copy_into_extra_drive_folder(tmp_path):
+    extra = tmp_path / "E" / "Inbox"
+    extra.mkdir(parents=True)
+    src = tmp_path / "memo.txt"
+    src.write_text("bring usb", encoding="utf-8")
+    tool = FilesystemTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="copy", path=str(src), destination=str(extra))
+    assert result.success, result.error
+    assert (extra / "memo.txt").read_text(encoding="utf-8") == "bring usb"
+
+
 def test_safe_extract_target_rejects_zip_slip(tmp_path):
     dest = tmp_path / "out"
     dest.mkdir()

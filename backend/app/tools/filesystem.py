@@ -320,7 +320,8 @@ class FilesystemTool(Tool):
         "look across those folders and extra volumes without walking the OS drive root. extract "
         "unpacks zip/tar archives onto an allowed folder (USB/`D:` included); omit destination to "
         "create a folder next to the archive. Omit path on write to save Documents/note.txt; a "
-        "folder path (USB/`D:`) gets note.txt appended. Prefer write/edit over delete. compare shows a "
+        "folder path (USB/`D:`) gets note.txt appended. copy/move omit destination to save "
+        "Documents/<filename>; a folder path (USB/`D:`) gets the source name appended. Prefer write/edit over delete. compare shows a "
         "unified diff (or hashes for binaries). recent lists backup copies and recent versions "
         "next to a file. snapshot copies a directory or file into data/backups before mass edits; "
         "snapshots lists them; restore copies a snapshot back. Identical trees are not snapshotted "
@@ -361,7 +362,7 @@ class FilesystemTool(Tool):
             },
             "destination": {
                 "type": "string",
-                "description": "Second path for compare, copy/move/rename/restore, or extract folder. Omit extract to unpack next to the archive.",
+                "description": "Second path for compare, copy/move/rename/restore, or extract folder. Omit copy/move to save Documents/<filename>; a folder path (USB/`D:`) gets the source name. Omit extract to unpack next to the archive.",
             },
             "content": {"type": "string"},
             "pattern": {"type": "string", "description": "Glob or substring for search"},
@@ -380,6 +381,26 @@ class FilesystemTool(Tool):
 
     def _path(self, raw: str) -> Path:
         return resolve_allowed_path(raw, _allowed(self.context_getter()))
+
+    def _copy_dest(self, source: Path, dest_raw: str, allowed: list[str]) -> Path:
+        name = source.name or "copy"
+        text = str(dest_raw or "").strip()
+        if not text:
+            return resolve_owner_file_path(
+                None,
+                suggested_name=name,
+                allowed=allowed,
+                fallback_dirs=("Documents", "Desktop", "Downloads"),
+            )
+        as_dir = text.endswith(("/", "\\"))
+        dest = self._path(text.rstrip("/\\") if as_dir else text)
+        try:
+            as_dir = as_dir or dest.is_dir()
+        except OSError:
+            pass
+        if as_dir:
+            dest = dest / name
+        return dest
 
     def _list_workspace(self, allowed: list[str]) -> ToolResult:
         roots = existing_local_roots(allowed)
@@ -548,7 +569,11 @@ class FilesystemTool(Tool):
                     data={"destination": str(dest), "files": listing, "truncated": len(files) > 400},
                 )
             if action in {"copy", "move", "rename"}:
-                dest = self._path(kwargs.get("destination") or "")
+                dest_raw = str(kwargs.get("destination") or "").strip()
+                if action == "rename" and not dest_raw:
+                    return ToolResult(False, "", error="destination is required for rename")
+                dest = self._copy_dest(path, dest_raw, allowed)
+                dest = self._guard_coding_write(dest)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if action == "copy":
                     if path.is_dir():

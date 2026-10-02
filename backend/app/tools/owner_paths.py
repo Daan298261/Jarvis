@@ -99,3 +99,13 @@ def resolve_project_dir(raw: str | None, allowed: list[str]) -> Path:
         resolved = resolve_workspace_dir(text, allowed)
         return Path(resolved) if resolved else resolve_allowed_path(text, allowed)
     return default_workspace_dir(allowed)
+
+
+def workspace_cwd(raw: str | None, allowed: list[str]) -> str | None:
+    """Working directory for python/terminal. Omit path → Documents when the workspace is bound."""
+    text = str(raw or "").strip()
+    if text:
+        return resolve_workspace_dir(text, allowed)
+    if not allowed:
+        return None
+    return str(default_workspace_dir(allowed))

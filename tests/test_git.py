@@ -113,6 +113,15 @@ async def test_clone_into_extra_drive_folder_appends_repo_name(tmp_path):
     assert (dest / "readme.txt").read_text(encoding="utf-8") == "one\n"
 
 
+async def test_status_on_extra_drive_repo(tmp_path):
+    extra = tmp_path / "E"
+    extra.mkdir()
+    repo = await _repo(extra)
+    tool = _tool(tmp_path)
+    result = await tool.execute(action="status", path=str(repo))
+    assert result.success, result.error
+
+
 def test_git_repo_name_from_url_and_path():
     from app.tools.git_tools import git_repo_name
 

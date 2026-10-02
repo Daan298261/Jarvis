@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import resolve_workspace_dir
+from .owner_paths import resolve_workspace_dir, workspace_cwd
 from .safety import resolve_allowed_path
 
 _PY_ACTIONS = ("run_code", "run_file", "create_venv", "install")
@@ -59,8 +59,9 @@ class PythonTool(Tool):
         "install. Put the script in `code` (run_code) or an absolute `path` (run_file) — never "
         "inside `action`. For copying files or folders use filesystem action=copy instead of a "
         "script. Prefer create_venv for project-specific packages. working_directory should "
-        "be the project root when installing dependencies. working_directory, path, and venv_path "
-        "may be on extra drives (USB/`D:`) inside the allowed workspace."
+        "be the project root when installing dependencies. Omit working_directory to run in "
+        "Documents; USB/`D:` paths are allowed. working_directory, path, and venv_path "
+        "may be on extra drives inside the allowed workspace."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -85,6 +86,9 @@ class PythonTool(Tool):
 
     def _dir(self, raw: str | None) -> str | None:
         return resolve_workspace_dir(raw, self._allowed())
+
+    def _cwd(self, raw: str | None) -> str | None:
+        return workspace_cwd(raw, self._allowed())
 
     async def _run(self, args: list[str], cwd: str | None, timeout: int) -> ToolResult:
         started = time.time()
@@ -141,7 +145,7 @@ class PythonTool(Tool):
             return ToolResult(False, "", error=denied)
         action = kwargs.get("action")
         try:
-            cwd = self._dir(kwargs.get("working_directory"))
+            cwd = self._cwd(kwargs.get("working_directory"))
             timeout = int(kwargs.get("timeout_seconds") or 120)
             venv_raw = kwargs.get("venv_path")
             venv_path = self._dir(venv_raw) if venv_raw else None

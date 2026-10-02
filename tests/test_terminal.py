@@ -184,3 +184,28 @@ async def test_terminal_working_directory_on_extra_drive(tmp_path):
     )
     assert result.success, result.error
     assert "ok" in result.output
+
+
+async def test_python_omitted_cwd_uses_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    (docs / "here.txt").write_text("docs-cwd", encoding="utf-8")
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    tool = PythonTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(
+        action="run_code",
+        code="from pathlib import Path; print(Path.cwd()); print((Path.cwd()/'here.txt').read_text())",
+    )
+    assert result.success, result.error
+    assert "docs-cwd" in result.output
+
+
+async def test_terminal_omitted_cwd_uses_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    (docs / "here.txt").write_text("shell-docs", encoding="utf-8")
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    tool = TerminalTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(command="cat here.txt", shell="bash")
+    assert result.success, result.error
+    assert "shell-docs" in result.output
