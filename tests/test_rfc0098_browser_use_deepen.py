@@ -23,6 +23,7 @@ from app.workers.browser import (
     playwright_is_default,
     reset_browser_use_session,
     structured_payload_from_history,
+    visited_urls_from_history,
 )
 from app.workers.local_llm import local_browser_use_model
 from app.config import AppSettings
@@ -81,6 +82,53 @@ async def test_browser_use_runs_when_network_allowed(permission_store, monkeypat
     assert result.data["backend"] == "browser-use"
     assert result.data["url"] == "https://example.com"
     assert "done reading" in result.output
+
+
+@pytest.mark.asyncio
+async def test_browser_use_blocks_lan_to_wan_history_hops(permission_store, monkeypatch):
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    backend = BrowserUseBackend()
+    monkeypatch.setattr(backend, "available", lambda: True)
+
+    state = SimpleNamespace(url="https://example.test/leaked", title="Leaked", to_dict=lambda: {})
+    history = SimpleNamespace(
+        final_result=lambda: "should not leak",
+        history=[SimpleNamespace(state=state, model_output=None, result=[])],
+        structured_output=None,
+        agent_steps=lambda: [],
+    )
+
+    async def fake_invoke(task, settings, *, start_url=None):
+        assert start_url == "http://nas.local/status"
+        return history
+
+    monkeypatch.setattr(backend, "_invoke", fake_invoke)
+    reset = {"called": False}
+
+    async def fake_reset():
+        reset["called"] = True
+
+    monkeypatch.setattr("app.workers.browser.reset_browser_use_session_async", fake_reset)
+    result = await backend.run("read status", "http://nas.local/status")
+    assert result.success is False
+    assert "don't allow" in (result.error or "").lower()
+    assert "should not leak" not in (result.output or "")
+    assert reset["called"] is True
+
+
+def test_visited_urls_from_history_includes_navigate_actions():
+    action = SimpleNamespace(model_dump=lambda **_: {"navigate": {"url": "https://example.test/next"}})
+    item = SimpleNamespace(
+        state=SimpleNamespace(url="http://nas.local/a", title="", to_dict=lambda: {}),
+        model_output=SimpleNamespace(action=[action]),
+    )
+    history = SimpleNamespace(history=[item])
+    assert visited_urls_from_history(history, start_url="http://nas.local/") == [
+        "http://nas.local/",
+        "http://nas.local/a",
+        "https://example.test/next",
+    ]
 
 
 def test_structured_payload_from_history_collects_trace():

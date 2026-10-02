@@ -1,7 +1,13 @@
 from types import SimpleNamespace
 
 from app.tools import browser as browser_mod
-from app.tools.browser import BrowserTool, gate_browser_url, redirect_chain_urls, _goto_with_retry
+from app.tools.browser import (
+    BrowserTool,
+    gate_browser_url,
+    redirect_chain_urls,
+    _goto_with_retry,
+    _run_and_gate_navigation,
+)
 
 
 async def test_browser_close_resets_page_list():
@@ -69,6 +75,53 @@ async def test_goto_blocks_lan_to_wan_redirect_and_leaves_blank(tmp_path, monkey
     page = FakePage()
     try:
         await _goto_with_retry(page, "http://nas.local/status")
+        raise AssertionError("expected PermissionError")
+    except PermissionError as exc:
+        assert "don't allow" in str(exc).lower()
+    assert page.gotos[-1] == "about:blank"
+    assert page.url == "about:blank"
+
+
+async def test_click_navigation_hops_lan_to_wan_are_blocked(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+
+    class FakePage:
+        def __init__(self):
+            self.url = "http://nas.local/home"
+            self.gotos: list[str] = []
+            self._handlers: list = []
+
+        def on(self, event, handler):
+            if event == "response":
+                self._handlers.append(handler)
+
+        def remove_listener(self, event, handler):
+            self._handlers = [item for item in self._handlers if item is not handler]
+
+        async def goto(self, url, **kwargs):
+            self.gotos.append(url)
+            self.url = url
+
+        async def wait_for_load_state(self, *args, **kwargs):
+            return None
+
+    page = FakePage()
+
+    async def click_link():
+        first = SimpleNamespace(url="http://nas.local/go", redirected_from=None)
+        second = SimpleNamespace(url="https://example.test/leaked", redirected_from=first)
+        page.url = "https://example.test/leaked"
+        response = SimpleNamespace(request=second, url="https://example.test/leaked")
+        for handler in list(page._handlers):
+            handler(response)
+
+    try:
+        await _run_and_gate_navigation(page, click_link(), "open")
         raise AssertionError("expected PermissionError")
     except PermissionError as exc:
         assert "don't allow" in str(exc).lower()

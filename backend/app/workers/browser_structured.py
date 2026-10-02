@@ -124,6 +124,46 @@ def structured_payload_from_history(history: Any, *, start_url: str | None = Non
     }
 
 
+def visited_urls_from_history(history: Any, *, start_url: str | None = None) -> list[str]:
+    """Oldest-first unique URLs observed in a Browser Use history (start + step states)."""
+    seen: list[str] = []
+
+    def _add(raw: str) -> None:
+        url = (raw or "").strip()
+        if url and url not in seen:
+            seen.append(url)
+
+    _add(start_url or "")
+    items = getattr(history, "history", None) or []
+    for item in items:
+        state_url, _ = _state_fields(getattr(item, "state", None))
+        _add(state_url)
+        model_output = getattr(item, "model_output", None)
+        actions = getattr(model_output, "action", None) if model_output is not None else None
+        if not actions:
+            continue
+        for action in actions:
+            dump: Any = None
+            if hasattr(action, "model_dump"):
+                try:
+                    dump = action.model_dump(mode="json")
+                except Exception:
+                    dump = None
+            elif isinstance(action, dict):
+                dump = action
+            if not isinstance(dump, dict):
+                continue
+            for key in ("navigate", "go_to_url", "open", "goto"):
+                target = dump.get(key)
+                if isinstance(target, dict):
+                    _add(str(target.get("url") or ""))
+                elif isinstance(target, str):
+                    _add(target)
+            if isinstance(dump.get("url"), str):
+                _add(dump["url"])
+    return seen
+
+
 def format_browser_use_output(payload: dict[str, Any]) -> str:
     parts: list[str] = []
     if payload.get("title"):

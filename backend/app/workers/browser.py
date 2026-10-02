@@ -10,6 +10,7 @@ from .browser_structured import (
     browser_use_tool_result_data,
     format_browser_use_output,
     structured_payload_from_history,
+    visited_urls_from_history,
 )
 from .local_llm import local_browser_use_model, local_chat_openai_for_browser_use
 
@@ -165,6 +166,16 @@ class BrowserUseBackend:
                 error=f"Browser Use failed: {exc}. Fall back to the Playwright browser tool.",
             )
         structured = structured_payload_from_history(history, start_url=cleaned_url)
+        if not skip_permission_check:
+            hops = visited_urls_from_history(history, start_url=cleaned_url)
+            final_url = str(structured.get("url") or "").strip()
+            if final_url and final_url not in hops:
+                hops.append(final_url)
+            for hop in hops:
+                blocked = network_permission_block("browser_use", goal=cleaned_goal, url=hop)
+                if blocked:
+                    await reset_browser_use_session_async()
+                    return ToolResult(False, "", error=blocked)
         output = format_browser_use_output(structured)
         data = browser_use_tool_result_data(
             goal=cleaned_goal,
@@ -285,7 +296,7 @@ class BrowserUseBackend:
 
 
 # Re-export structured helpers for tests and ingest callers.
-from .browser_structured import browser_use_ingest_payload, browser_use_tool_result_data  # noqa: E402
+from .browser_structured import browser_use_ingest_payload, browser_use_tool_result_data, visited_urls_from_history  # noqa: E402
 
 __all__ = [
     "BrowserUseBackend",
@@ -298,4 +309,5 @@ __all__ = [
     "reset_browser_use_session",
     "reset_browser_use_session_async",
     "structured_payload_from_history",
+    "visited_urls_from_history",
 ]

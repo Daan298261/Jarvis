@@ -93,6 +93,44 @@ async def _assert_current_url_allowed(page, action: str) -> None:
         await _abandon_disallowed_page(page, blocked)
 
 
+async def _run_and_gate_navigation(page, coro, action: str = "open") -> None:
+    """Run an interaction, then re-gate every captured navigation hop plus the final URL."""
+    hops: list[str] = []
+
+    def _on_response(response: Any) -> None:
+        hops.extend(redirect_chain_urls(response, str(getattr(response, "url", "") or "")))
+
+    bound = False
+    adder = getattr(page, "on", None)
+    if callable(adder):
+        try:
+            adder("response", _on_response)
+            bound = True
+        except Exception:
+            bound = False
+    try:
+        await coro
+        await _wait_stable(page)
+    finally:
+        if bound:
+            for name in ("remove_listener", "off"):
+                remover = getattr(page, name, None)
+                if callable(remover):
+                    try:
+                        remover("response", _on_response)
+                        break
+                    except Exception:
+                        continue
+    ordered: list[str] = []
+    for hop in hops + [str(getattr(page, "url", "") or "")]:
+        if hop and hop not in ordered:
+            ordered.append(hop)
+    for hop in ordered:
+        blocked = gate_browser_url(hop, action)
+        if blocked:
+            await _abandon_disallowed_page(page, blocked)
+
+
 def browser_permission_url(action: str, kwargs: dict[str, Any] | None, current_url: str = "") -> str:
     """Use the open URL for follow-on actions so LAN pages stay network.local."""
     supplied = str((kwargs or {}).get("url") or "").strip()
@@ -317,25 +355,26 @@ class BrowserTool(Tool):
                         data={"action_frame": frame.as_dict()},
                     )
                 if action == "click":
-                    method = "selector"
-                    if kwargs.get("name"):
-                        name = kwargs["name"]
-                        clicked = False
-                        for role in ("button", "link", "tab"):
-                            try:
-                                await page.get_by_role(role, name=name).first.click(timeout=4000)
-                                clicked = True
-                                break
-                            except Exception:
-                                continue
-                        if not clicked:
-                            await page.get_by_text(name, exact=False).first.click(timeout=8000)
-                    elif kwargs.get("selector"):
-                        await page.locator(kwargs["selector"]).first.click(timeout=10000)
-                    else:
+                    if not kwargs.get("name") and not kwargs.get("selector"):
                         return ToolResult(False, "", error="Provide name or selector")
-                    await _wait_stable(page)
-                    await _assert_current_url_allowed(page, "open")
+
+                    async def _click() -> None:
+                        if kwargs.get("name"):
+                            name = kwargs["name"]
+                            clicked = False
+                            for role in ("button", "link", "tab"):
+                                try:
+                                    await page.get_by_role(role, name=name).first.click(timeout=4000)
+                                    clicked = True
+                                    break
+                                except Exception:
+                                    continue
+                            if not clicked:
+                                await page.get_by_text(name, exact=False).first.click(timeout=8000)
+                        else:
+                            await page.locator(kwargs["selector"]).first.click(timeout=10000)
+
+                    await _run_and_gate_navigation(page, _click(), "open")
                     return ToolResult(True, f"Clicked. URL now {page.url}")
                 if action in {"type", "fill"}:
                     text = kwargs.get("text") or ""
@@ -352,9 +391,9 @@ class BrowserTool(Tool):
                         await locator.type(text)
                     return ToolResult(True, "Typed into field")
                 if action == "press":
-                    await page.keyboard.press(kwargs.get("key") or "Enter")
-                    await _wait_stable(page)
-                    await _assert_current_url_allowed(page, "open")
+                    await _run_and_gate_navigation(
+                        page, page.keyboard.press(kwargs.get("key") or "Enter"), "open"
+                    )
                     return ToolResult(True, f"Pressed {kwargs.get('key')}")
                 if action == "evaluate":
                     result = await page.evaluate(kwargs.get("script") or "() => document.title")
