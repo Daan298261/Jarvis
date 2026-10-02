@@ -140,6 +140,46 @@ async def test_operate_creates_job_and_uses_post_operator(operator_store, monkey
 
 
 @pytest.mark.asyncio
+async def test_operate_http_nmap_binds_lan_nic(operator_store, monkeypatch):
+    from app.security.target_registry import add_target
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=True,
+            install_path=str(operator_store),
+            tools={"nmap": "ok"},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr("app.security.target_registry.data_dir", lambda: operator_store)
+    _nmap_on_path(monkeypatch)
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    add_target(kind="cidr", value="192.168.1.0/24", notes="home")
+    await refresh_discovered_catalog(force=True)
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        seen.append(payload)
+        return {"hosts": []}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    job = await operate("http:nmap", {"target": "192.168.1.0/24", "scan_type": "-sn"})
+    assert job["status"] == "succeeded"
+    assert seen[0]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+
+
+@pytest.mark.asyncio
 async def test_stop_operator_job_only_stops_tracked_pids(operator_store, monkeypatch):
     async def fake_status(*, enrich=True):
         return SimpleNamespace(

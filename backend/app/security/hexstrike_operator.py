@@ -823,8 +823,14 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
             if not tool_result.success:
                 job["error"] = tool_result.error or "MCP tool failed"
         else:
+            from .hexstrike import normalize_upstream_path
+            from .hexstrike_defensive import execute_operator_nmap
+
             path = str(capability.get("upstream_path") or "")
-            result = await HEXSTRIKE.post_operator(path, args)
+            if normalize_upstream_path(path) == "api/tools/nmap":
+                result = await execute_operator_nmap(args if isinstance(args, dict) else {})
+            else:
+                result = await HEXSTRIKE.post_operator(path, args)
             job["result"] = result if isinstance(result, dict) else {"value": result}
             if isinstance(result, dict):
                 raw_pid = result.get("pid") or result.get("process_id")

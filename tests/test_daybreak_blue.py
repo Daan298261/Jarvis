@@ -654,6 +654,87 @@ async def test_lan_inventory_suite_nmap_binds_home_nic(blue_store, monkeypatch):
     assert seen[1]["additional_args"] == "-T3 -S 10.8.0.2 -e wg0"
 
 
+def test_bind_hexstrike_nmap_payload_pins_lan_and_skips_public(monkeypatch):
+    from app.security.hexstrike_defensive import bind_hexstrike_nmap_payload
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    lan = bind_hexstrike_nmap_payload({"target": "192.168.1.0/24", "scan_type": "-sV"})
+    assert lan["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    assert lan["scan_type"] == "-sV"
+    spaced = bind_hexstrike_nmap_payload({"target": "192.168.50.12", "additional_args": "-T4"})
+    assert spaced["additional_args"] == "-T4 -S 192.168.50.8"
+    public = bind_hexstrike_nmap_payload({"target": "8.8.8.8", "additional_args": "-T3"})
+    assert public["additional_args"] == "-T3"
+
+
+@pytest.mark.asyncio
+async def test_operator_nmap_binds_home_nic(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_nmap
+
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        seen.append(payload)
+        return {"hosts": []}
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    result = await execute_operator_nmap({"target": "192.168.1.40", "scan_type": "-sV", "ports": "22,80"})
+    assert result == {"hosts": []}
+    assert seen[0]["target"] == "192.168.1.40"
+    assert seen[0]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    assert seen[0]["scan_type"] == "-sV"
+
+
+@pytest.mark.asyncio
+async def test_operator_nmap_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_nmap
+
+    async def fake_post(path, payload):
+        raise AssertionError(f"HexStrike nmap must not receive a spaced NIC name: {payload}")
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap" if str(name).lower() == "nmap" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for printer (192.168.50.20)\nHost is up.\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    result = await execute_operator_nmap(
+        {"target": "192.168.50.0/24", "scan_type": "-sT", "ports": "80,443", "additional_args": "-T4"}
+    )
+    assert result["source"] == "host-nmap"
+    assert result["hosts"][0]["address"] == "192.168.50.20"
+    argv = seen[0]
+    assert argv[0] == "/usr/bin/nmap"
+    assert "-sT" in argv
+    assert "-T4" in argv
+    assert argv[argv.index("-S") + 1] == "192.168.50.8"
+    assert argv[argv.index("-e") + 1] == "Ethernet 2"
+    assert argv[argv.index("-p") + 1] == "80,443"
+    assert argv[-1] == "192.168.50.0/24"
+
+
 @pytest.mark.asyncio
 async def test_operator_tool_lan_inventory_skips_suite_grant(jarvis_env, monkeypatch):
     from app.policy.computer_permissions import reset_computer_permission_state
