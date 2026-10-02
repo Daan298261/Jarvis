@@ -126,6 +126,25 @@ def _is_soap_fault(xml_text: str) -> bool:
     return any(_local_name(node.tag) == "Fault" for node in root.iter())
 
 
+def _response_header(response, name: str) -> str:
+    headers = getattr(response, "headers", None) or {}
+    getter = getattr(headers, "get", None)
+    if not callable(getter):
+        return ""
+    return str(getter(name) or getter(name.title()) or getter(name.lower()) or "")
+
+
+def lan_igd_request(client, method: str, url: str, username: str = "", password: str = "", **kwargs):
+    """Owner IGD logon: HTTP basic first, then digest if the LAN box asks for it."""
+    auth = (username, password) if username else None
+    sender = getattr(client, method)
+    response = sender(url, auth=auth, **kwargs)
+    challenge = _response_header(response, "www-authenticate").lower()
+    if response.status_code in {401, 403} and username and "digest" in challenge:
+        response = sender(url, auth=httpx.DigestAuth(username, password), **kwargs)
+    return response
+
+
 class StdlibIGD:
     def __init__(self, control_url: str, service_type: str, lanaddr: str, username: str = "", password: str = ""):
         parsed = urlparse(control_url)
@@ -146,14 +165,17 @@ class StdlibIGD:
         envelope = soap_envelope(action, self.service_type, inner)
         # LAN IGD boxes often present a self-signed certificate; the URL already passed require_lan_http_url.
         with httpx.Client(timeout=4, trust_env=False, follow_redirects=False, verify=False) as client:
-            response = client.post(
+            response = lan_igd_request(
+                client,
+                "post",
                 self.control_url,
+                self.username,
+                self.password,
                 content=envelope.encode("utf-8"),
                 headers={
                     "Content-Type": 'text/xml; charset="utf-8"',
                     "SOAPAction": f'"{self.service_type}#{action}"',
                 },
-                auth=self._auth(),
             )
         if response.status_code in {401, 403}:
             raise RuntimeError("IGD requires the owner router username and password")
@@ -267,7 +289,7 @@ def ssdp_search(timeout: float = 1.2) -> str:
 def stdlib_igd_candidate(username: str = "", password: str = "", lanaddr: str = "") -> tuple[StdlibIGD, str]:
     location = ssdp_search()
     with httpx.Client(timeout=4, trust_env=False, follow_redirects=False, verify=False) as client:
-        description = client.get(location, auth=(username, password) if username else None)
+        description = lan_igd_request(client, "get", location, username, password)
     if description.status_code in {401, 403}:
         raise RuntimeError("IGD requires the owner router username and password")
     if description.status_code >= 400:

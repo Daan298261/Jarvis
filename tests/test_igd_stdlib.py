@@ -182,3 +182,46 @@ def test_stdlib_igd_rejects_cgnat_and_explains_igd_logon(monkeypatch):
     monkeypatch.setattr("app.mobile.igd.httpx.Client", CgnatClient)
     with pytest.raises(ValueError, match="no public IPv4"):
         router.externalipaddress()
+
+
+def test_stdlib_igd_retries_http_digest_logon(monkeypatch):
+    from types import SimpleNamespace
+
+    import httpx
+
+    auths: list[object] = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, content, headers, auth=None):
+            auths.append(auth)
+            if isinstance(auth, httpx.DigestAuth):
+                return SimpleNamespace(
+                    status_code=200,
+                    text='<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><NewExternalIPAddress>8.8.4.4</NewExternalIPAddress></s:Body></s:Envelope>',
+                    headers={},
+                )
+            return SimpleNamespace(
+                status_code=401,
+                text="Unauthorized",
+                headers={"www-authenticate": 'Digest realm="IGD", nonce="abc", qop="auth"'},
+            )
+
+    monkeypatch.setattr("app.mobile.igd.httpx.Client", FakeClient)
+    router = StdlibIGD(
+        "http://192.168.1.1:5000/upnp/control/WANIPConn1",
+        "urn:schemas-upnp-org:service:WANIPConnection:1",
+        "192.168.1.12",
+        username="admin",
+        password="secret",
+    )
+    assert router.externalipaddress() == "8.8.4.4"
+    assert any(isinstance(item, httpx.DigestAuth) for item in auths)

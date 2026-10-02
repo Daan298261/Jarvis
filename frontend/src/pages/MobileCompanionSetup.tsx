@@ -119,7 +119,7 @@ export function MobileCompanionSetup() {
   async function startBuild(mode: "personalized" | "generic") {
     const created = await startCompanionBuild({
       mode,
-      endpoint: mode === "personalized" ? endpoint || connection?.endpoints[0] || "" : "",
+      endpoint: mode === "personalized" ? endpoint.trim() : "",
       prepareConnection: mode === "personalized",
       remote,
     })
