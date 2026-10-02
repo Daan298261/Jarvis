@@ -88,10 +88,21 @@ class JarvisApi(context: Context) {
         val incoming = (0 until values.length()).map { values.getString(it) }
         val addresses = TransportPolicy.mergeConnectionEndpoints(endpoints, incoming)
         if (addresses.isNotEmpty()) {
-            endpoints = addresses
-            endpoint = addresses.first()
-            prefs.edit().putString("endpoint", endpoint).putString("endpoints", JSONArray(addresses).toString()).apply()
+            persistEndpoints(addresses)
         }
+    }
+
+    fun absorbMatchingLanOrigin(discovered: String, discoveredPin: String): Boolean {
+        val merged = TransportPolicy.absorbMatchingLanOrigin(endpoints, pin, discovered, discoveredPin) ?: return false
+        if (merged.isEmpty()) return false
+        persistEndpoints(merged)
+        return true
+    }
+
+    private fun persistEndpoints(addresses: List<String>) {
+        endpoints = addresses
+        endpoint = addresses.first()
+        prefs.edit().putString("endpoint", endpoint).putString("endpoints", JSONArray(addresses).toString()).apply()
     }
 
     private fun publicKey() = Base64.encodeToString(keys.getCertificate(keyAlias).publicKey.encoded, Base64.NO_WRAP)
@@ -129,7 +140,7 @@ class JarvisApi(context: Context) {
         val challenge = JSONObject(raw("/challenge/$deviceId", authenticated = false).toString(Charsets.UTF_8))
         val proof = Signature.getInstance("SHA256withECDSA").run {
             initSign(keys.getKey(keyAlias, null) as java.security.PrivateKey)
-            update("jarvis-mobile-v1\n$deviceId\n${challenge.getString("challenge")}".toByteArray())
+            update("jarvis-mobile-v1\n$deviceId\n${challenge.getString(\"challenge\")}".toByteArray())
             Base64.encodeToString(sign(), Base64.NO_WRAP)
         }
         val result = JSONObject(raw("/session", "POST", JSONObject().put("device_id", deviceId).put("signature", proof).toString().toByteArray(), false).toString(Charsets.UTF_8))
