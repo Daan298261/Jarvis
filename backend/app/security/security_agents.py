@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 from ..policy.cyber_ato import role_allowed
 from .security_audit import audit_security_event
 
@@ -195,8 +195,19 @@ def mode_summary(mode: str) -> dict[str, Any]:
     }
 
 
+def security_jobs_root() -> Path:
+    path = resolved_data_sidecar_dir(
+        "security-jobs",
+        local=data_dir() / "security-jobs",
+        markers=(),
+        need_bytes=512 * 1024**2,
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def job_dir(task_id: str) -> Path:
-    path = data_dir() / "security-jobs" / (task_id or "unknown").strip()
+    path = security_jobs_root() / (task_id or "unknown").strip()
     path.mkdir(parents=True, exist_ok=True)
     return path
 

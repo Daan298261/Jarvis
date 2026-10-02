@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, live_allowed_directories, load_settings
+from ..config import data_dir, live_allowed_directories, load_settings, resolved_data_sidecar_dir
 from ..tools.mcp_runtime import MCP
 from .hexstrike import HEXSTRIKE, audit_hexstrike
 from .hexstrike_compat import ALWAYS_STUBBED_OPTIONALS, DISABLED_MESSAGE, package_is_stubbed
@@ -87,7 +87,12 @@ def _utcnow() -> str:
 
 
 def jobs_root() -> Path:
-    path = data_dir() / "hexstrike" / "jobs"
+    path = resolved_data_sidecar_dir(
+        "hexstrike-jobs",
+        local=data_dir() / "hexstrike" / "jobs",
+        markers=(),
+        need_bytes=512 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 

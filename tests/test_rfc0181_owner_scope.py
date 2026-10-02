@@ -240,3 +240,38 @@ async def test_get_settings_unions_plugged_in_drive_without_save(monkeypatch, tm
     payload = await get_settings()
     assert str(home) in payload["allowed_directories"]
     assert str(extra) in payload["allowed_directories"]
+
+
+@pytest.mark.asyncio
+async def test_system_info_unions_plugged_in_drive_without_save(monkeypatch, tmp_path):
+    from app.api.system import system_info
+    from app.config import AppSettings
+
+    home = tmp_path / "home"
+    extra = tmp_path / "E"
+    home.mkdir()
+    extra.mkdir()
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: [str(home), str(extra)])
+    monkeypatch.setattr(
+        "app.api.system.load_settings",
+        lambda: AppSettings(allowed_directories=[str(home)]),
+    )
+
+    async def fake_snapshot(_settings):
+        return {"loaded": False, "loading": False, "active_model": "", "last_error": ""}
+
+    monkeypatch.setattr("app.api.system.MANAGER.snapshot", fake_snapshot)
+    monkeypatch.setattr("app.api.system.hardware_dict", lambda: {})
+    monkeypatch.setattr("app.api.system.capability_snapshot", lambda: {})
+    monkeypatch.setattr("app.api.system.jarvis_mcp_manifest", lambda: {})
+    monkeypatch.setattr("app.api.system.acp_status", lambda: {})
+
+    async def fake_swarm():
+        return {}
+
+    monkeypatch.setattr("app.api.system.swarm_snapshot", fake_swarm)
+    payload = await system_info()
+    assert str(home) in payload["allowed_directories"]
+    assert str(extra) in payload["allowed_directories"]

@@ -870,3 +870,45 @@ def test_self_dev_session_uses_extra_when_data_volume_is_full(tmp_path, monkeypa
     dest = session_path()
     assert dest == extra / "Jarvis" / "runtime" / "self_dev" / "session.json"
     assert dest.parent.is_dir()
+
+
+def test_hexstrike_jobs_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.security.hexstrike_operator import jobs_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.security.hexstrike_operator.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = jobs_root()
+    assert dest == extra / "Jarvis" / "runtime" / "hexstrike-jobs"
+    assert dest.is_dir()
+
+
+def test_security_jobs_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.security.security_agents import security_jobs_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.security.security_agents.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = security_jobs_root()
+    assert dest == extra / "Jarvis" / "runtime" / "security-jobs"
+    assert dest.is_dir()
+
+
+def test_obsidian_index_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.memory.obsidian_vault import _index_path
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = _index_path()
+    assert dest == extra / "Jarvis" / "runtime" / "obsidian-index" / "lexical.json"
+    assert dest.parent.is_dir()

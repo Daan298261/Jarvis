@@ -5,7 +5,7 @@ import os
 import platform
 from typing import Any, Literal
 
-from ..config import load_settings
+from ..config import live_allowed_directories, load_settings
 from ..inference.manager import MANAGER
 from ..tts.engines import engine_availability, legacy_system_tts_available
 from ..workers.voice import voice_status
@@ -91,7 +91,11 @@ async def run_self_check() -> dict[str, Any]:
 
     from ..config import is_ephemeral_workspace_path, sanitize_allowed_directories
 
-    durable = [path for path in (settings.allowed_directories or []) if not is_ephemeral_workspace_path(path)]
+    durable = [
+        path
+        for path in live_allowed_directories(settings.allowed_directories)
+        if not is_ephemeral_workspace_path(path)
+    ]
     if durable:
         workspace_item = _item(
             "workspace",
