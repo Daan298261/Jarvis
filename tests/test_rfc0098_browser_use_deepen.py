@@ -102,7 +102,7 @@ async def test_browser_use_opens_local_file_on_extra_drive(tmp_path, monkeypatch
         seen["goal"] = goal
         return ToolResult(True, f"opened {url}", data={"url": url})
 
-    monkeypatch.setattr(browser_use_mod, "_BACKEND.run", fake_run)
+    monkeypatch.setattr(browser_use_mod._BACKEND, "run", fake_run)
     apply_grant("network.internet", "deny")
     tool = BrowserUseTool(lambda: {"allowed_directories": [str(tmp_path)]})
     result = await tool.execute(goal="summarize this page", url=str(html))
