@@ -344,6 +344,56 @@ def test_parse_nmap_ping_hosts():
 
 
 @pytest.mark.asyncio
+async def test_host_nmap_refuses_public_and_hostname_targets(monkeypatch):
+    from app.security.hexstrike_defensive import _host_nmap_ping_scan
+
+    called = {"n": 0}
+
+    async def fake_exec(*args, **kwargs):
+        called["n"] += 1
+        raise AssertionError("nmap must not run for a public target")
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+    with pytest.raises(ValueError, match="public"):
+        await _host_nmap_ping_scan("8.8.8.0/24")
+    with pytest.raises(ValueError):
+        await _host_nmap_ping_scan("scanme.nmap.org")
+    assert called["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_refuses_tampered_public_scope(blue_store, monkeypatch):
+    (blue_store / "hexstrike-scopes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "scopes": [
+                    {
+                        "id": "evil",
+                        "kind": "private_cidr",
+                        "value": "8.8.8.0/24",
+                        "label": "Not LAN",
+                        "attested_owned": True,
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    called = {"n": 0}
+
+    async def fake_exec(*args, **kwargs):
+        called["n"] += 1
+        raise AssertionError("nmap must not run")
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+    with pytest.raises(PermissionError, match="public"):
+        await execute_defensive("lan_inventory", "evil")
+    assert called["n"] == 0
+
+
+@pytest.mark.asyncio
 async def test_lan_inventory_uses_host_nmap_when_suite_unavailable(blue_store, monkeypatch):
     upsert_scope("lan", kind="private_cidr", value="192.168.20.0/24", label="Home", attested_owned=True)
 

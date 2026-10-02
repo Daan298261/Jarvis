@@ -360,7 +360,18 @@ def parse_nmap_ping_hosts(text: str) -> list[dict[str, str]]:
     return hosts
 
 
+def _require_private_lan_target(target: str) -> str:
+    """Host nmap and suite nmap may only ping RFC1918 / loopback / link-local."""
+    cleaned = (target or "").strip()
+    if not cleaned:
+        raise ValueError("LAN inventory target is required")
+    if "/" in cleaned:
+        return _private_network(cleaned, host=False)
+    return _private_network(cleaned, host=True)
+
+
 async def _host_nmap_ping_scan(target: str) -> dict[str, Any]:
+    cleaned = _require_private_lan_target(target)
     binary = shutil.which("nmap")
     if not binary:
         raise RuntimeError(
@@ -374,7 +385,7 @@ async def _host_nmap_ping_scan(target: str) -> dict[str, Any]:
         "--max-retries",
         "1",
         "--",
-        target,
+        cleaned,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -390,7 +401,7 @@ async def _host_nmap_ping_scan(target: str) -> dict[str, Any]:
         raise RuntimeError((err or text or "nmap failed").strip()[:400])
     return {
         "source": "host-nmap",
-        "target": target,
+        "target": cleaned,
         "hosts": parse_nmap_ping_hosts(text),
         "stdout": text[:4000],
     }
@@ -417,6 +428,14 @@ async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] 
     if capability.id == "lan_inventory":
         scope_id = resolve_lan_inventory_scope(scope_id)
     scope = get_scope(scope_id)
+    try:
+        scope = {
+            **scope,
+            "value": normalize_scope(str(scope.get("kind") or ""), str(scope.get("value") or "")),
+        }
+    except ValueError as exc:
+        audit_hexstrike("defensive_action_denied", capability=action, scope_id=scope_id, reason="scope_not_private")
+        raise PermissionError(str(exc)) from exc
     if scope.get("kind") not in capability.scope_kinds:
         audit_hexstrike("defensive_action_denied", capability=action, scope_id=scope_id, reason="scope_kind")
         raise PermissionError("scope kind is not valid for this defensive action")
