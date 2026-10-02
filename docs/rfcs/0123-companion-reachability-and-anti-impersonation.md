@@ -60,10 +60,34 @@ Installer / wizard still **must not** silently WAN-expose anything (`INSTALLER.m
 
 - `wan_method`: `auto` \| `upnp` \| `ssh_reverse` \| `gateway_ssh`
 - UPnP: `gateway_username`, `gateway_password` (optional IGD logon)
-- Gateway SSH: `gateway_host`, `gateway_port`, `gateway_user`, `gateway_identity_file`, `gateway_profile` (`openwrt_uci`), `wan_public_host`
+- Gateway SSH: `gateway_host`, `gateway_port`, `gateway_user`, `gateway_identity_file`, `gateway_profile` (`openwrt_uci`)
+- **`wan_public_host`:** optional **public** DNS name or global IPv4 the phone should dial (`is_public_dial_host`). Used for **OpenWrt gateway SSH**, and also for **`auto`** / **`upnp`** when the owner runs DynDNS or manual port-forward (see below). Phone pairing UI shows this field for **`auto`**, **`upnp`**, and **`gateway_ssh`** (not only gateway SSH).
 - SSH reverse: `ssh_host`, `ssh_port`, `ssh_user`, `ssh_identity_file`
 
+When `wan_public_host` is a valid public dial host, Prepare connection **advertises** `https://<wan_public_host>:4781` on the returned `endpoints` list and **SAN-covers** that name on the live gateway certificate — including **UPnP / NAT-PMP / PCP success** (alongside the mapped public IPv4) and **manual forward with no automatic lease** (mapping methods fail but the owner still named a public hostname; limitation copy tells them to confirm TCP 4781 → this PC).
+
+**NAT-PMP / PCP lease renewal:** the connectivity worker renews leases on a timer. If the gateway returns a **different** mapped public IPv4 on renew, product **re-runs Prepare** (`apply_remote`) so `endpoints` and gateway **SANs** stay aligned with the new WAN address (same TCP 4781-only rule).
+
 Connection status exposes `wan_path` (`upnp`, `natpmp`, `pcp`, `gateway_ssh`, `ssh_reverse`) and owner-facing limitation text when no path is ready.
+
+### 2a. Sticky companion dial order and gateway TLS SANs (landed #498)
+
+Phones may receive **multiple** HTTPS origins (LAN IP, mapped public IP, owner `wan_public_host`, relay). Routers **without hairpin NAT** often accept LAN dials but reject or TLS-mismatch when the phone tries the same public IP from inside the home network. Product behavior:
+
+**Dial ranking (`TransportPolicy` on Android):**
+
+| Mode | Order |
+| --- | --- |
+| **Cold** (no recent success) | Owner-supplied origins sorted by reachability: **public DNS** → **global IPv4 WAN** → **mobile-relay** → **private LAN** last. |
+| **Sticky** (`dialOrder`) | **Last successful** origin stays **first**; remaining candidates follow the cold rank. Example: after LAN works at home, LAN stays ahead of a listed public IP so a failed hairpin dial does not block LAN retry. |
+
+**HTTPS companion API:** On **connection errors** (timeouts, refused TCP, TLS handshake failures, **hostname verification** / SAN mismatch), the client walks the **full** sticky-ordered list. A bad WAN origin must not poison the rest of the owner-supplied list. Successful calls record the origin as sticky (`noteReachable` / in-request preference). Hostname verification **stays on**; a correct SPKI **pin alone is not enough** if the dial host is missing from the cert SAN.
+
+**Realtime voice (WSS):** Duplex voice opens `wss://…/api/companion/voice/realtime` on the **same** `candidateOrigins()` list as HTTPS, with the same Bearer + device headers (no query-string tokens). Connection failures walk the list like HTTPS.
+
+**`/connection` refresh:** When the app refreshes from `GET /connection`, it merges the server `endpoints` array into the local candidate list **without dropping LAN entries** and **without clearing** the sticky last-success origin (pin mismatch still aborts).
+
+**Leader gateway cert after mapping (`cover_phone_dial_hosts`):** After WAN Prepare produces phone-dial hosts, the Leader unions every dial IP/DNS (endpoint URLs, `wan_public_host`, mapped `public_ip`, relay hostname) onto the **live** gateway certificate SANs, **without changing** the SPKI pin (`server_pin`). TLS is reloaded on `:4781` with **`beacons=false`** so the **LAN beacon** keeps broadcasting. Mapping must not leave the phone dialing a public name or IP that the cert does not cover.
 
 ### 3. Leader listens continuously on the companion port
 
@@ -80,7 +104,7 @@ Reuse existing material — do not mint a parallel PKI:
 
 | Stage | What must be correct |
 | --- | --- |
-| Transport | TLS to the pinned `server_pin`; hostname/IP must be a cert SAN. |
+| Transport | TLS to the pinned `server_pin` with **hostname verification enabled**; every origin the phone dials must appear as a **cert SAN** (pin match without SAN is rejected). Leader reloads SANs after WAN mapping without rotating the pin (#498). |
 | Enroll | RFC-0063/0074 6-digit code (or unexpired legacy invitation) + phone P-256 Keystore public key; owner **fingerprint confirm** before `active`. |
 | Session | `Authorization: Bearer` session + `X-Jarvis-Device` matching that device (`identity.require_device`). Revoked / pending / expired → refuse. |
 | Routes | Only `/api/companion/*` on `:4781`. Enroll/session/challenge stay rate-limited as today. |
@@ -122,6 +146,9 @@ Owner cannot silently skip the cooldown from the phone. Desktop may show remaini
 - [ ] Specs-only in this PR (no product code)
 - [ ] Owner copy states when **LAN-only** vs **port-forward (TCP 4781 only)** vs **mobile-relay** apply; cites `:4781` / `:4780` as in this table
 - [ ] Owner-facing **`wan_method`** (`auto`, `upnp`, `ssh_reverse`, `gateway_ssh`) and connection API fields match §2; UPnP → NAT-PMP → PCP cascade and soft `upnp` fall-through documented; only TCP 4781 inbound; private gateway only for NAT-PMP/PCP; no credentials on argv; snapshot redaction
+- [ ] **`wan_public_host`** advertised and SAN-covered when a public dial host; UI field for `auto` / `upnp` / `gateway_ssh`; NAT-PMP/PCP public-IP change on renew re-Prepares endpoints + SANs
+- [ ] Android **sticky dial** (`dialOrder`): last success first, then WAN/relay, then LAN; HTTPS and voice WSS walk full origin list on connection/TLS errors; `/connection` refresh keeps sticky preference and LAN candidates
+- [ ] **`cover_phone_dial_hosts`**: union dial hosts onto gateway SAN, reload TLS without stopping LAN beacon; SPKI pin unchanged
 - [ ] Leader **listens continuously** on the companion TLS port while the Leader process is up
 - [ ] Connections accepted **only** with existing pairing keys (RFC-0059/0063/0074); unauthenticated companion API remains 401
 - [ ] Continuous monitoring for impersonation / MITM using the signal table (no attack recipes)
@@ -134,10 +161,10 @@ Owner cannot silently skip the cooldown from the phone. Desktop may show remaini
 
 | Area | Paths |
 | --- | --- |
-| Backend (implement PR only) | `backend/app/mobile/gateway.py`, `connectivity.py`, `wan_forward.py`, `natpmp.py`, `pcp.py`, `identity.py`, `relay.py`; startup so `:4781` listens with Leader; suspicion → event + 600s refuse |
-| Frontend (implement PR only) | Phone pairing / Network: mode copy + `detected-hack-attempt` + cooldown remaining |
-| Android (implement PR only) | Pin mismatch reporting into the same event path; RFC-0108 popup still after **successful** pair only |
-| Tests | `tests/test_mobile_connectivity.py`, `tests/test_companion_pairing.py`, new `tests/test_rfc0123_*.py` (401, cooldown, event shape — no attack scripts) |
+| Backend (implement PR only) | `backend/app/mobile/gateway.py`, `connectivity.py` (`cover_phone_dial_hosts`, renew → re-Prepare), `wan_forward.py`, `natpmp.py`, `pcp.py`, `identity.py`, `relay.py`; startup so `:4781` listens with Leader; suspicion → event + 600s refuse |
+| Frontend (implement PR only) | Phone pairing / Network: mode copy, `wan_public_host` for auto/upnp/gateway_ssh, `detected-hack-attempt` + cooldown remaining |
+| Android (implement PR only) | `TransportPolicy.kt`, `JarvisApi.kt` (sticky dial + HTTPS failover), `RealtimeVoiceSession.kt` (WSS failover), pin mismatch → same event path; RFC-0108 popup still after **successful** pair only |
+| Tests | `tests/test_mobile_connectivity.py` (SAN reload, `wan_public_host` advertise), `TransportPolicyTest.kt`, `tests/test_companion_pairing.py`, new `tests/test_rfc0123_*.py` (401, cooldown, event shape — no attack scripts) |
 | Docs | this RFC; RFC-0108 cross-link; `JARVIS_MASTER_PLAN.md` §59 |
 
 ## Out of scope
@@ -152,4 +179,4 @@ Product implementation in this PR. RFC-0108 GGUF runtime (sibling). RFC-0122. He
 
 ## Implementation note
 
-Landed on `development` via #319 @ `a6977b74` (companion reachability / anti-impersonation, with the RFC-0108 amend). **WAN path-forward** (`wan_method`, UPnP optional IGD logon, OpenWrt gateway SSH, SSH reverse tunnel + reconnect) landed via #493 @ `ab4dc82` (owner-authorized; same §2 port and credential constraints). **NAT-PMP / PCP** on private default gateway (UPnP cascade + soft `upnp` fall-through) landed via #497 @ `516a83a3`. **Physical phone + WAN soak** (UPnP, NAT-PMP/PCP, OpenWrt gateway SSH, SSH reverse on a public host, cellular dial) remains **desktop sign-off** — do not tick the RFC ledger closed for that residual. Acceptance checkboxes left open for WAN soak and the original specs-only box.
+Landed on `development` via #319 @ `a6977b74` (companion reachability / anti-impersonation, with the RFC-0108 amend). **WAN path-forward** (`wan_method`, UPnP optional IGD logon, OpenWrt gateway SSH, SSH reverse tunnel + reconnect) landed via #493 @ `ab4dc82` (owner-authorized; same §2 port and credential constraints). **NAT-PMP / PCP** on private default gateway (UPnP cascade + soft `upnp` fall-through) landed via #497 @ `516a83a3`. **RFC-0123 WAN methods doc** (`auto` / `upnp` / `gateway_ssh` / `ssh_reverse`, NAT-PMP/PCP cascade) amended via #494 @ `e7c78e5`. **Sticky LAN/WAN dial failover, WSS origin walk, gateway TLS SAN union (`cover_phone_dial_hosts`), `wan_public_host` advertise/SAN for UPnP and manual-forward, pairing UI hostname field** landed via #498 @ `05f4077c`. **Physical phone + WAN soak** (UPnP, NAT-PMP/PCP, OpenWrt gateway SSH, SSH reverse on a public host, cellular dial, hairpin vs sticky failover) remains **desktop sign-off** — do not tick the RFC ledger closed for that residual. Acceptance checkboxes left open for WAN soak and the original specs-only box.
