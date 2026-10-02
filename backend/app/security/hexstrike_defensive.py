@@ -164,7 +164,57 @@ def upsert_scope(scope_id: str, *, kind: str, value: str, label: str, attested_o
         rows.append(row)
         _write(_SCOPE_FILE, "scopes", rows)
     audit_hexstrike("scope_upserted", scope_id=ident, kind=normalized_kind)
+    # RFC-0197: keep owner-attested HexStrike scopes mirrored into the target registry.
+    _mirror_scope_to_target_registry(row)
     return row
+
+
+def _mirror_scope_to_target_registry(scope: dict[str, Any]) -> None:
+    """Best-effort bridge from RFC-0086 scopes → RFC-0197 security-targets.json."""
+    try:
+        from . import security_audit as security_audit_mod
+        from . import target_registry as tr
+    except Exception:
+        return
+    kind_map = {
+        "private_host": "ipv4",
+        "private_cidr": "cidr",
+        "local_path": "local_path",
+        "container_image": "container_image",
+        "local_infrastructure": "hostname",
+    }
+    scope_kind = str(scope.get("kind") or "")
+    registry_kind = kind_map.get(scope_kind)
+    if not registry_kind:
+        return
+    value = str(scope.get("value") or "")
+    if scope_kind == "local_infrastructure":
+        value = "localhost"
+    if not value:
+        return
+    # Use this module's data_dir so test patches stay isolated.
+    previous_tr = tr.data_dir
+    previous_audit = security_audit_mod.data_dir
+    tr.data_dir = data_dir
+    security_audit_mod.data_dir = data_dir
+    try:
+        if tr.is_registered_value(value):
+            return
+        target_id = str(scope.get("id") or "")
+        if target_id and any(str(row.get("id") or "") == target_id for row in tr.list_targets()):
+            target_id = ""
+        tr.add_target(
+            kind=registry_kind,
+            value=value,
+            notes=str(scope.get("label") or "hexstrike-scope")[:240],
+            target_id=target_id or None,
+        )
+    except Exception:
+        # Registry normalization may reject some private_host forms; ignore bridge failures.
+        return
+    finally:
+        tr.data_dir = previous_tr
+        security_audit_mod.data_dir = previous_audit
 
 
 def get_scope(scope_id: str) -> dict[str, Any]:
@@ -229,6 +279,36 @@ async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] 
     if scope.get("kind") not in capability.scope_kinds:
         audit_hexstrike("defensive_action_denied", capability=action, scope_id=scope_id, reason="scope_kind")
         raise PermissionError("scope kind is not valid for this defensive action")
+    # RFC-0197: default-deny third-party / non-local scopes not in the owner registry.
+    # local_infrastructure is this Jarvis host and does not need a registry row.
+    from . import security_audit as security_audit_mod
+    from . import target_registry as tr
+
+    scope_kind = str(scope.get("kind") or "")
+    scope_value = str(scope.get("value") or "")
+    if scope_kind != "local_infrastructure" and scope_value:
+        previous_tr = tr.data_dir
+        previous_audit = security_audit_mod.data_dir
+        tr.data_dir = data_dir
+        security_audit_mod.data_dir = data_dir
+        try:
+            tr.assert_value_allowed(
+                scope_value,
+                kind=None,
+                capability_id=capability.id,
+                source="hexstrike_defensive",
+            )
+        except tr.TargetDenied:
+            audit_hexstrike(
+                "defensive_action_denied",
+                capability=action,
+                scope_id=scope_id,
+                reason="target_not_registered",
+            )
+            raise
+        finally:
+            tr.data_dir = previous_tr
+            security_audit_mod.data_dir = previous_audit
     payload = _payload(capability, scope, options or {})
     job = {
         "id": str(uuid.uuid4()),
