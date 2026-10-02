@@ -332,3 +332,45 @@ def test_discover_includes_named_folder_and_loose_gguf_on_extra_volume(catalog_e
     clutter = extra / "Photos" / "vacation-not-a-model-Q4.gguf"
     with pytest.raises(KeyError):
         catalog.select_discovered_gguf(str(clutter))
+
+    async def fake_activate(profile, *, force=True):
+        from app.inference.manager import MANAGER
+
+        MANAGER.state.loaded = True
+        return MANAGER.state
+
+    monkeypatch.setattr("app.api.lmstudio.activate_runtime_profile", fake_activate)
+    client = TestClient(app)
+    select = client.post("/api/lmstudio/discovery/select", json={"path": str(named)})
+    assert select.status_code == 200
+    body = select.json()
+    assert body["gguf_path"] == str(named)
+    assert body.get("load", {}).get("loaded") is True
+    denied = client.post("/api/lmstudio/discovery/select", json={"path": str(clutter)})
+    assert denied.status_code == 404
+
+
+def test_preferred_gguf_install_dir_uses_extra_volume_when_models_full(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.inference import lmstudio_catalog as catalog
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    models.mkdir()
+    extra.mkdir()
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.models_dir", lambda: models)
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+
+    def fake_usage(path):
+        text = str(path)
+        if str(extra) in text:
+            return SimpleNamespace(free=200 * 1024**3, total=500 * 1024**3, used=0)
+        return SimpleNamespace(free=1 * 1024**3, total=50 * 1024**3, used=49 * 1024**3)
+
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", fake_usage)
+    dest = catalog.preferred_gguf_install_dir("Qwen3.5-27B-GGUF", need_bytes=20 * 1024**3)
+    assert dest == extra / "Jarvis" / "models" / "Qwen3.5-27B-GGUF"
+    local = catalog.preferred_gguf_install_dir("bootstrap", need_bytes=512)
+    assert local == models / "bootstrap"
