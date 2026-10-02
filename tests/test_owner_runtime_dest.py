@@ -814,3 +814,59 @@ def test_hf_download_uses_extra_hub_cache_when_os_volume_is_full(tmp_path, monke
     hub = extra / "Jarvis" / "models" / "huggingface" / "hub"
     assert seen["cache_dir"] == str(hub)
     assert Path(path).read_bytes() == b"gguf"
+
+
+def test_context_repos_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.memory.store import context_repos_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.memory.store.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = context_repos_root()
+    assert dest == extra / "Jarvis" / "runtime" / "context-repos"
+    assert dest.is_dir()
+
+
+def test_trajectories_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.trajectories.store import trajectories_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.trajectories.store.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = trajectories_root()
+    assert dest == extra / "Jarvis" / "runtime" / "trajectories"
+    assert dest.is_dir()
+
+
+def test_agent_suite_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.inference.live_agent_suite import agent_suite_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.inference.live_agent_suite.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = agent_suite_root()
+    assert dest == extra / "Jarvis" / "runtime" / "agent-suite"
+    assert dest.is_dir()
+
+
+def test_self_dev_session_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.agent.self_dev import session_path
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.agent.self_dev.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = session_path()
+    assert dest == extra / "Jarvis" / "runtime" / "self_dev" / "session.json"
+    assert dest.parent.is_dir()

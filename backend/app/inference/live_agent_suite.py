@@ -14,7 +14,7 @@ from ..agent.agent_benchmark import (
     prepare_case, record_case_result, summarize_results,
 )
 from ..agent.loop import AGENT
-from ..config import data_dir, load_settings
+from ..config import data_dir, load_settings, resolved_data_sidecar_dir
 from ..db.models import Task, ToolCallRecord
 from ..db.session import SessionLocal
 from .profiles import declared_profiles
@@ -22,6 +22,17 @@ from .manager import MANAGER
 
 _JOBS: dict[str, dict[str, Any]] = {}
 _RUNNING: asyncio.Task | None = None
+
+
+def agent_suite_root() -> Path:
+    path = resolved_data_sidecar_dir(
+        "agent-suite",
+        local=data_dir() / "agent-suite",
+        markers=(),
+        need_bytes=512 * 1024**2,
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def live_suite_status(job_id: str) -> dict[str, Any] | None:
@@ -54,7 +65,7 @@ async def _run_live_suite(job: dict[str, Any], cases: list) -> None:
             if MANAGER.state.profile != profile or not MANAGER.state.loaded:
                 raise RuntimeError(f"Could not load requested profile {profile}")
             for case in cases:
-                workspace = data_dir() / "agent-suite" / "live" / job["id"] / profile / case.id
+                workspace = agent_suite_root() / "live" / job["id"] / profile / case.id
                 context = prepare_case(case, workspace)
                 job["current"] = f"{profile}: {case.id}"
                 task = await AGENT.create_task(format_prompt(case, context), profile=profile, execution_mode="balanced")

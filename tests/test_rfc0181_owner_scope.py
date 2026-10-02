@@ -219,3 +219,24 @@ def test_environment_block_lists_live_extra_volume(monkeypatch, tmp_path):
     )
     text = _environment_block(AppSettings(allowed_directories=[str(tmp_path)]))
     assert str(extra) in text
+
+
+@pytest.mark.asyncio
+async def test_get_settings_unions_plugged_in_drive_without_save(monkeypatch, tmp_path):
+    from app.api.settings import get_settings
+    from app.config import AppSettings
+
+    home = tmp_path / "home"
+    extra = tmp_path / "E"
+    home.mkdir()
+    extra.mkdir()
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: [str(home), str(extra)])
+    monkeypatch.setattr(
+        "app.api.settings.load_settings",
+        lambda: AppSettings(allowed_directories=[str(home)]),
+    )
+    payload = await get_settings()
+    assert str(home) in payload["allowed_directories"]
+    assert str(extra) in payload["allowed_directories"]

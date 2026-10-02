@@ -5,7 +5,15 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from ..config import CommentAddressStyle, CommentFrequency, CommentSarcasm, PersonalObservations, load_settings, save_settings
+from ..config import (
+    CommentAddressStyle,
+    CommentFrequency,
+    CommentSarcasm,
+    PersonalObservations,
+    live_allowed_directories,
+    load_settings,
+    save_settings,
+)
 from ..inference.backends import suggested_port
 from ..tools.registry import REGISTRY
 
@@ -131,6 +139,7 @@ async def get_settings():
         voice = dict(voice)
         voice["voicestudio_api_key"] = "[configured]"
         payload["voice"] = voice
+    payload["allowed_directories"] = live_allowed_directories(payload.get("allowed_directories"))
     return payload
 
 

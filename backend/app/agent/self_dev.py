@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, load_settings, repo_root
+from ..config import data_dir, load_settings, repo_root, resolved_data_sidecar_dir
 from .worktrees import (
     WorktreeError,
     WorktreeSpec,
@@ -54,7 +54,12 @@ def stop_file() -> Path:
 
 
 def session_path() -> Path:
-    root = data_dir() / "self_dev"
+    root = resolved_data_sidecar_dir(
+        "self_dev",
+        local=data_dir() / "self_dev",
+        markers=(SESSION_NAME,),
+        need_bytes=256 * 1024**2,
+    )
     root.mkdir(parents=True, exist_ok=True)
     return root / SESSION_NAME
 
