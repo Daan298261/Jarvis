@@ -131,6 +131,23 @@ async def _assert_current_url_allowed(page, action: str) -> None:
         await _abandon_disallowed_page(page, blocked)
 
 
+def _set_active_page(page) -> None:
+    global _page, _pages
+    _page = page
+    if page is not None and page not in _pages:
+        _pages.append(page)
+
+
+async def activate_browser_tab(pages: list[Any], index: int, action: str = "open") -> Any:
+    """Switch to an existing tab after hop-gating its URL. Fail closed on a denied hop."""
+    if index < 0 or index >= len(pages):
+        raise IndexError(f"No tab at index {index}")
+    chosen = pages[index]
+    await _assert_current_url_allowed(chosen, action)
+    _set_active_page(chosen)
+    return chosen
+
+
 async def _run_and_gate_navigation(page, coro, action: str = "open") -> Any:
     """Run an interaction, then re-gate every captured hop, spawned tab, and final URL."""
     hops: list[str] = []
@@ -178,11 +195,7 @@ async def _run_and_gate_navigation(page, coro, action: str = "open") -> Any:
                 await _blank_page(item)
             raise PermissionError(blocked)
     if spawned:
-        global _page, _pages
-        newest = spawned[-1]
-        _page = newest
-        if newest not in _pages:
-            _pages.append(newest)
+        _set_active_page(spawned[-1])
     return result
 
 
@@ -318,6 +331,7 @@ class BrowserTool(Tool):
             "key": {"type": "string"},
             "script": {"type": "string"},
             "path": {"type": "string"},
+            "index": {"type": "integer", "description": "Tab index for action=tabs (omit to list)"},
             "headless": {"type": "boolean"},
             "timeout_seconds": {"type": "integer", "default": 15},
         },
@@ -389,8 +403,10 @@ class BrowserTool(Tool):
                     title = await page.title()
                     return ToolResult(True, f"Opened {page.url}\ntitle={title}")
                 if action == "title":
+                    await _assert_current_url_allowed(page, "open")
                     return ToolResult(True, f"URL: {page.url}\nTitle: {await page.title()}")
                 if action == "snapshot":
+                    await _assert_current_url_allowed(page, "open")
                     title = await page.title()
                     a11y = await page.locator("body").inner_text()
                     truncated = a11y[:8000]
@@ -400,6 +416,7 @@ class BrowserTool(Tool):
                         data={"url": page.url, "title": title},
                     )
                 if action == "action_frame":
+                    await _assert_current_url_allowed(page, "open")
                     # RFC-0172: atomic ActionFrame from DOM/a11y identity (no selector payload).
                     from ..reflex_loop.adapters import snapshot_browser_page
 
@@ -465,6 +482,7 @@ class BrowserTool(Tool):
                     page = _page or page
                     return ToolResult(True, str(result))
                 if action == "screenshot":
+                    await _assert_current_url_allowed(page, "open")
                     out = Path(kwargs.get("path") or (data_dir() / "screenshots" / "browser.png"))
                     out.parent.mkdir(parents=True, exist_ok=True)
                     await page.screenshot(path=str(out), full_page=False)
@@ -475,8 +493,20 @@ class BrowserTool(Tool):
                         data={"path": str(out), "image_base64": encoded[:80] + "...", "attach_image": str(out)},
                     )
                 if action == "tabs":
-                    pages = page.context.pages
-                    listing = "\n".join(f"{i}: {p.url}" for i, p in enumerate(pages))
+                    pages = list(getattr(getattr(page, "context", None), "pages", None) or [page])
+                    raw_index = kwargs.get("index")
+                    if raw_index is not None and str(raw_index).strip() != "":
+                        try:
+                            idx = int(raw_index)
+                        except (TypeError, ValueError):
+                            return ToolResult(False, "", error="tabs index must be an integer")
+                        try:
+                            page = await activate_browser_tab(pages, idx, "open")
+                        except IndexError as exc:
+                            return ToolResult(False, "", error=str(exc))
+                    listing = "\n".join(f"{i}: {item.url}" for i, item in enumerate(pages))
+                    if raw_index is not None and str(raw_index).strip() != "":
+                        return ToolResult(True, f"Switched to tab {int(raw_index)}: {page.url}\n{listing}")
                     return ToolResult(True, listing or "No tabs")
                 if action == "download":
                     async def _download() -> Any:

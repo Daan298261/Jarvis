@@ -3,8 +3,10 @@ from types import SimpleNamespace
 from app.tools import browser as browser_mod
 from app.tools.browser import (
     BrowserTool,
+    activate_browser_tab,
     gate_browser_url,
     redirect_chain_urls,
+    _assert_current_url_allowed,
     _goto_with_retry,
     _run_and_gate_navigation,
 )
@@ -291,6 +293,50 @@ async def test_spawned_lan_tab_becomes_active_page(tmp_path, monkeypatch):
         assert browser_mod._page is child
         assert child in browser_mod._pages
         assert child.url == "http://nas.local/share"
+    finally:
+        browser_mod._page = previous
+        browser_mod._pages = previous_pages
+
+
+async def test_snapshot_path_blocks_wan_url_after_spa_navigation(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    page = _HopPage("https://example.test/spa")
+    try:
+        await _assert_current_url_allowed(page, "open")
+        raise AssertionError("expected PermissionError")
+    except PermissionError as exc:
+        assert "don't allow" in str(exc).lower()
+    assert page.url == "about:blank"
+
+
+async def test_activate_tab_blocks_wan_and_switches_lan(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    lan = _HopPage("http://nas.local/home")
+    wan = _HopPage("https://example.test/leaked")
+    previous = browser_mod._page
+    previous_pages = list(browser_mod._pages)
+    browser_mod._page = lan
+    browser_mod._pages = [lan, wan]
+    try:
+        try:
+            await activate_browser_tab([lan, wan], 1, "open")
+            raise AssertionError("expected PermissionError")
+        except PermissionError as exc:
+            assert "don't allow" in str(exc).lower()
+        assert wan.url == "about:blank"
+        chosen = await activate_browser_tab([lan, wan], 0, "open")
+        assert chosen is lan
+        assert browser_mod._page is lan
     finally:
         browser_mod._page = previous
         browser_mod._pages = previous_pages
