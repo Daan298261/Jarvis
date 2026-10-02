@@ -331,3 +331,36 @@ def test_optional_worker_catalog_installable_for_missing_browser_use():
 def test_local_browser_use_model_prefers_settings():
     settings = AppSettings(browser={"browser_use_model": "Qwen3.5-27B", "headless": True})
     assert local_browser_use_model(settings) == "Qwen3.5-27B"
+
+
+def test_browser_use_session_kwargs_download_to_owner_downloads(tmp_path, monkeypatch):
+    from app.workers.browser import browser_use_session_kwargs, _browser_profile_with_downloads
+
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    profile_dir = tmp_path / "browser-use-profile"
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    kwargs = browser_use_session_kwargs(True, profile_dir)
+    assert kwargs["downloads_path"] == str(downloads)
+    assert kwargs["user_data_dir"] == str(profile_dir)
+    assert kwargs["keep_alive"] is True
+    assert kwargs["headless"] is True
+
+    captured: dict[str, object] = {}
+
+    class AcceptingProfile:
+        def __init__(self, **inner):
+            captured.update(inner)
+
+    profile = _browser_profile_with_downloads(AcceptingProfile, kwargs)
+    assert isinstance(profile, AcceptingProfile)
+    assert captured["downloads_path"] == str(downloads)
+
+    class StrictProfile:
+        def __init__(self, *, headless, keep_alive, user_data_dir):
+            captured.clear()
+            captured.update(headless=headless, keep_alive=keep_alive, user_data_dir=user_data_dir)
+
+    slim = _browser_profile_with_downloads(StrictProfile, kwargs)
+    assert isinstance(slim, StrictProfile)
+    assert "downloads_path" not in captured

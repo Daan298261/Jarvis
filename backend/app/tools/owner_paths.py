@@ -22,6 +22,18 @@ def owner_media_dir(*names: str) -> Path:
     return fallback
 
 
+def owner_downloads_dir() -> Path:
+    """Chromium / Browser Use download directory: the owner's Downloads folder."""
+    dest = owner_media_dir("Downloads")
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def chromium_download_launch_kwargs() -> dict[str, str | bool]:
+    """Playwright persistent-context kwargs so click-saves land in Downloads."""
+    return {"accept_downloads": True, "downloads_path": str(owner_downloads_dir())}
+
+
 def resolve_owner_file_path(
     raw: str | None,
     *,

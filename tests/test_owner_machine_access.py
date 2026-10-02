@@ -502,8 +502,13 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
             return None
 
     class FakeChromium:
+        last_kwargs = None
+
         async def launch_persistent_context(self, user_dir, **kwargs):
+            FakeChromium.last_kwargs = kwargs
             assert str(tmp_path / "browser-profile") == user_dir
+            assert kwargs.get("accept_downloads") is True
+            assert kwargs.get("downloads_path")
             ctx = FakeContext()
             ctx.pages = [FakePage()]
             return ctx

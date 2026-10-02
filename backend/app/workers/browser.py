@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
+from pathlib import Path
 from typing import Any
 
 from ..config import AppSettings, data_dir, load_settings
+from ..tools.owner_paths import owner_downloads_dir
 from .browser_structured import (
     browser_use_tool_result_data,
     format_browser_use_output,
@@ -62,6 +64,24 @@ async def reset_browser_use_session_async() -> None:
             return
         except Exception as exc:
             logger.debug("browser-use session %s failed during reset: %s", method_name, exc)
+
+
+def browser_use_session_kwargs(headless: bool, profile_dir: Path) -> dict[str, Any]:
+    """Browser Use session/profile kwargs; downloads go to the owner's Downloads folder."""
+    return {
+        "headless": headless,
+        "keep_alive": True,
+        "user_data_dir": str(profile_dir),
+        "downloads_path": str(owner_downloads_dir()),
+    }
+
+
+def _browser_profile_with_downloads(profile_cls: Any, kwargs: dict[str, Any]) -> Any:
+    try:
+        return profile_cls(**kwargs)
+    except TypeError:
+        slim = {key: value for key, value in kwargs.items() if key != "downloads_path"}
+        return profile_cls(**slim)
 
 
 def network_permission_block(tool_name: str, *, goal: str, url: str | None) -> str | None:
@@ -200,23 +220,20 @@ class BrowserUseBackend:
         profile_dir = data_dir() / "browser-use-profile"
         profile_dir.mkdir(parents=True, exist_ok=True)
         headless = bool(settings.browser.headless)
-        kwargs: dict[str, Any] = {"headless": headless, "user_data_dir": str(profile_dir)}
+        kwargs = browser_use_session_kwargs(headless, profile_dir)
         try:
             from browser_use import BrowserProfile
 
-            profile = BrowserProfile(
-                headless=headless,
-                keep_alive=True,
-                user_data_dir=str(profile_dir),
-            )
+            profile = _browser_profile_with_downloads(BrowserProfile, kwargs)
             return BrowserSession(browser_profile=profile)
         except (ImportError, TypeError):
             pass
         try:
-            return BrowserSession(**kwargs, keep_alive=True)
+            return BrowserSession(**kwargs)
         except TypeError:
+            slim = {key: value for key, value in kwargs.items() if key != "downloads_path"}
             try:
-                return BrowserSession(**kwargs)
+                return BrowserSession(**slim)
             except TypeError:
                 return BrowserSession(headless=headless)
 
@@ -302,6 +319,7 @@ __all__ = [
     "BrowserUseBackend",
     "DEFAULT_BROWSER_BACKEND",
     "browser_use_ingest_payload",
+    "browser_use_session_kwargs",
     "browser_use_tool_result_data",
     "format_browser_use_output",
     "network_permission_block",

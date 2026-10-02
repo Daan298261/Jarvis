@@ -392,3 +392,24 @@ def test_owner_media_dir_prefers_existing_home_folder(tmp_path, monkeypatch):
     monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
     assert owner_media_dir("Pictures", "Downloads") == pictures
 
+
+def test_chromium_downloads_land_in_owner_downloads(tmp_path, monkeypatch):
+    from app.tools.owner_paths import chromium_download_launch_kwargs, owner_downloads_dir
+
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    assert owner_downloads_dir() == downloads
+    launch = chromium_download_launch_kwargs()
+    assert launch["accept_downloads"] is True
+    assert launch["downloads_path"] == str(downloads)
+
+
+def test_chromium_downloads_fallback_when_home_folder_missing(tmp_path, monkeypatch):
+    from app.tools.owner_paths import owner_downloads_dir
+
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path / "missing-home"))
+    monkeypatch.setattr("app.tools.owner_paths.data_dir", lambda: tmp_path)
+    assert owner_downloads_dir() == tmp_path / "downloads"
+    assert (tmp_path / "downloads").is_dir()
+

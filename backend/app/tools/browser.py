@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from ..config import AppSettings, data_dir, load_settings
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import owner_media_dir, resolve_owner_file_path
+from .owner_paths import chromium_download_launch_kwargs, owner_media_dir, resolve_owner_file_path
 from .safety import resolve_allowed_path
 
 _lock = asyncio.Lock()
@@ -269,8 +269,8 @@ async def _ensure_page(headless: bool):
     _context = await _playwright.chromium.launch_persistent_context(
         str(user_dir),
         headless=headless,
-        accept_downloads=True,
         viewport={"width": 1400, "height": 900},
+        **chromium_download_launch_kwargs(),
     )
     _pages = list(_context.pages) or [await _context.new_page()]
     _page = _pages[0]
