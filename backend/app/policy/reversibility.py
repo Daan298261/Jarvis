@@ -222,6 +222,7 @@ _EXTERNAL_TOOLS = frozenset(
         "mobile_call",
         "hexstrike_operator",
         "hexstrike_defensive",
+        "lta_protected_folder",
         "mcp_call",
         "office",
         "apps",

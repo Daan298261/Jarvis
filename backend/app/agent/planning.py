@@ -131,6 +131,16 @@ _DEFENSIVE_OPERATOR_KEYWORDS = (
     "cve-",
     "defensive action",
     "run defense",
+    "protected folder",
+    "lta archive",
+    "lta protected",
+)
+
+# RFC-0198 product intent: "open this protected folder: <path>" / "unlock the LTA archive at <path>"
+_LTA_PROTECTED_FOLDER = re.compile(
+    r"(?is)\b(?:open|unlock)\s+(?:this\s+|the\s+)?"
+    r"(?:protected\s+folder|lta\s+(?:archive|folder|bundle)|lta)\b"
+    r"(?:\s+at)?\s*:?\s*(.+)$"
 )
 
 
@@ -138,7 +148,27 @@ def is_defensive_operator_prompt(text: str) -> bool:
     lowered = (text or "").strip().lower()
     if not lowered:
         return False
+    if lta_protected_folder_path(text):
+        return True
     return any(token in lowered for token in _DEFENSIVE_OPERATOR_KEYWORDS)
+
+
+def lta_protected_folder_path(prompt: str) -> str | None:
+    """Extract owner path from an LTA open/unlock utterance, if present."""
+    text = latest_user_utterance(prompt or "").strip()
+    if not text:
+        return None
+    match = _LTA_PROTECTED_FOLDER.search(text)
+    if not match:
+        return None
+    raw = match.group(1).strip().strip("\"'`")
+    raw = raw.rstrip(".!?").strip()
+    if not raw or len(raw) > 4000:
+        return None
+    # Reject obvious PEM paste attempts — redirect to local cert/vault picker.
+    if "BEGIN " in raw.upper() and "PRIVATE KEY" in raw.upper():
+        return None
+    return raw
 
 _WEATHER_RE = re.compile(
     r"\b(weather|forecast|temperature|temperatures|raining|rain|umbrella|humidity|windy)\b",
@@ -354,6 +384,9 @@ def simple_file_control(prompt: str) -> tuple[str, str, str] | None:
 def classify_task(prompt: str) -> str:
     if _CODING_SESSION.search(intent_text(prompt)):
         return "software engineering"
+    if lta_protected_folder_path(prompt):
+        # Blue/defensive LTA unlock — managed task with tool exposure (Themis-led).
+        return "mixed"
     if app_control_target(prompt):
         return "windows gui"
     if simple_file_control(prompt):
@@ -421,6 +454,8 @@ def route_request(prompt: str) -> RequestRoute:
     """Route before creating a durable agent loop or exposing its tool catalog."""
     if requests_agent_tools(prompt):
         return RequestRoute(MANAGED_TASK, classify_task(prompt))
+    if lta_protected_folder_path(prompt):
+        return RequestRoute(MANAGED_TASK, "mixed")
     if simple_app_control(prompt) or simple_file_control(prompt):
         return RequestRoute(MANAGED_TASK, classify_task(prompt))
     if is_weather_query(prompt):

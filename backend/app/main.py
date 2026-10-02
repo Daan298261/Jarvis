@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, reversibility, runtime_profiles, security_agents, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, lta, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, reversibility, runtime_profiles, security_agents, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -112,6 +112,7 @@ app.include_router(decision.router)
 app.include_router(capability_lab.router)
 app.include_router(cyber_ato.router)
 app.include_router(security_agents.router)
+app.include_router(lta.router)
 app.include_router(autonomy.router)
 app.include_router(automation_breaker.router)
 app.include_router(agent_policy.router)
