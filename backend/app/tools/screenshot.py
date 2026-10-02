@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import live_workspace_roots_from_context
+from ..config import live_tool_workspace_roots
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import resolve_owner_file_path
 from .safety import resolve_allowed_path
@@ -59,7 +59,7 @@ class ScreenshotTool(Tool):
         self.context_getter = context_getter or (lambda: {})
 
     def _allowed(self) -> list[str]:
-        return live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
+        return live_tool_workspace_roots(self.context_getter() if callable(self.context_getter) else None)
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")

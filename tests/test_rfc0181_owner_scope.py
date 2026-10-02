@@ -390,6 +390,39 @@ async def test_office_docker_screenshot_desktop_dcc_use_plugged_in_drive(monkeyp
     assert dcc_resolve(str(blend), dcc_allowed(stale)).resolve() == blend.resolve()
 
 
+def test_desktop_browser_use_screenshot_without_getter_union_extra_drive(monkeypatch, tmp_path):
+    from app.config import AppSettings, live_tool_workspace_roots
+    from app.tools.browser_use import BrowserUseTool
+    from app.tools.desktop import DesktopTool
+    from app.tools.screenshot import ScreenshotTool
+
+    home, extra, _stale = _stale_usb_context(monkeypatch, tmp_path)
+    monkeypatch.setattr("app.config.load_settings", lambda: AppSettings(allowed_directories=[str(home)]))
+    assert str(extra) in live_tool_workspace_roots({})
+    assert live_tool_workspace_roots({}) != []
+    assert str(extra) in DesktopTool()._allowed()
+    assert str(extra) in BrowserUseTool()._allowed()
+    assert str(extra) in ScreenshotTool()._allowed()
+
+
+@pytest.mark.asyncio
+async def test_external_ingest_browser_use_sees_plugged_in_drive(monkeypatch, tmp_path):
+    from app.tools.external_ingest import ExternalIngestTool
+
+    _home, extra, stale = _stale_usb_context(monkeypatch, tmp_path)
+    seen: dict[str, list[str]] = {}
+
+    async def fake_ingest(url, **kwargs):
+        seen["allowed"] = list(kwargs["browser_use_tool"]._allowed())
+        return {"title": "ok", "url": url}
+
+    monkeypatch.setattr("app.ingest.orchestrator.ingest_url", fake_ingest)
+    tool = ExternalIngestTool(lambda: stale)
+    result = await tool.execute(url="https://example.com/post")
+    assert result.success, result.error
+    assert str(extra) in seen["allowed"]
+
+
 async def test_verify_and_workers_use_plugged_in_drive_without_settings_save(monkeypatch, tmp_path):
     import subprocess
 

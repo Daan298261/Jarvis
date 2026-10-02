@@ -20,7 +20,7 @@ class IngestRequest(BaseModel):
 async def ingest_external_url(body: IngestRequest):
     ctx = REGISTRY._context
     browser = BrowserTool(lambda: ctx)
-    browser_use = BrowserUseTool()
+    browser_use = BrowserUseTool(lambda: ctx)
     try:
         return await ingest_url(
             body.url,

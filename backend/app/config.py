@@ -1012,3 +1012,15 @@ def live_workspace_roots_from_context(raw: Any = None) -> list[str]:
         return live_allowed_directories(list(raw.get("allowed_directories") or []))
     existing = list(getattr(raw, "allowed_directories", None) or [])
     return live_allowed_directories(existing if existing else None)
+
+
+def live_tool_workspace_roots(raw: Any = None) -> list[str]:
+    """Workspace roots for tools that deny paths when the allowlist is empty.
+
+    Terminal/python keep ``live_workspace_roots_from_context({})`` as unbound cwd.
+    Desktop screenshots, Browser Use file://, and ingest constructed without a
+    registry getter must load settings so a plugged-in USB is still in scope.
+    """
+    if raw is None or (isinstance(raw, dict) and "allowed_directories" not in raw):
+        return live_allowed_directories()
+    return live_workspace_roots_from_context(raw)

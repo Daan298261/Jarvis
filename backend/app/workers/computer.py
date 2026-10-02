@@ -210,8 +210,9 @@ class NativeWindowsBackend(ComputerUseBackend):
             )
         del timeout_seconds
         from ..tools.desktop import DesktopTool, parse_desktop_goal
+        from ..tools.registry import REGISTRY
 
-        tool = DesktopTool()
+        tool = DesktopTool(lambda: getattr(REGISTRY, "_context", None))
         data: dict[str, Any] = {"backend": self.id, "goal": goal, "app": app, "actions": []}
         parts: list[str] = []
         executed = False
@@ -572,10 +573,13 @@ async def run_reflex_computer_use(
                 ),
             )
         from ..tools.desktop import DesktopTool
+        from ..tools.registry import REGISTRY
         from ..reflex_loop.runtime import run_reflex_live_desktop
 
         if app:
-            focused = await DesktopTool().execute(action="focus", title=app)
+            focused = await DesktopTool(lambda: getattr(REGISTRY, "_context", None)).execute(
+                action="focus", title=app
+            )
             if not focused.success:
                 return ToolResult(False, focused.output or "", error=focused.error or "focus failed")
         return await run_reflex_live_desktop(text, app=str(app or ""))

@@ -52,7 +52,7 @@ class ExternalIngestTool(Tool):
         ctx = self.context_getter() or {}
         browser_settings = ctx if isinstance(ctx, dict) else {}
         browser = BrowserTool(lambda: browser_settings)
-        browser_use = BrowserUseTool()
+        browser_use = BrowserUseTool(lambda: browser_settings)
         try:
             payload = await ingest_url(
                 url,
