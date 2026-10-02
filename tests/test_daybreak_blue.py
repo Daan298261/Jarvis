@@ -346,20 +346,24 @@ async def test_lan_inventory_uses_host_nmap_when_suite_unavailable(blue_store, m
 
 
 @pytest.mark.asyncio
-async def test_operator_tool_lan_inventory_skips_suite_grant(monkeypatch):
+async def test_operator_tool_lan_inventory_skips_suite_grant(jarvis_env, monkeypatch):
+    from app.policy.computer_permissions import reset_computer_permission_state
     from app.tools.hexstrike_operator import HexStrikeOperatorTool
 
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: jarvis_env["tmp"])
+    reset_computer_permission_state()
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
 
     def eval_perm(permission):
         if permission == "cyber.hexstrike":
-            return SimpleNamespace(status="ask")
-        return SimpleNamespace(status="allow")
+            return SimpleNamespace(status="ask", reason="HexStrike suite permission required")
+        return SimpleNamespace(status="allow", reason="")
 
     monkeypatch.setattr("app.tools.hexstrike_operator.evaluate_permission", eval_perm)
+    monkeypatch.setattr("app.policy.approval_pending.evaluate_permission", eval_perm)
 
     async def fake_operate(capability_id, arguments):
-        return {"id": "job", "capability_id": capability_id, "status": "completed"}
+        return {"id": "job", "capability_id": capability_id, "status": "succeeded"}
 
     monkeypatch.setattr("app.tools.hexstrike_operator.operate", fake_operate)
     tool = HexStrikeOperatorTool(lambda: {})

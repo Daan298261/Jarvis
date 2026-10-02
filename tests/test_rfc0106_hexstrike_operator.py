@@ -342,7 +342,7 @@ async def test_operate_lan_inventory_empty_scope_starts_stopped_suite(operator_s
     monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
     await refresh_discovered_catalog(force=True)
     job = await operate("defensive:lan_inventory", {})
-    assert job["status"] == "completed"
+    assert job["status"] == "succeeded"
     assert started["count"] == 1
     assert job["result"]["scope_id"] == "lan"
 
