@@ -633,6 +633,128 @@ async def test_lan_only_refresh_updates_endpoints_without_waiting_for_wan_renew(
 
 
 @pytest.mark.asyncio
+async def test_lan_refresh_remaps_upnp_dest_without_waiting_for_wan_renew(tmp_path, monkeypatch):
+    import time
+
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection, Router
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    hosts = ["192.168.1.12"]
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: list(hosts))
+    router = Router()
+    router.wan_ip = "203.0.113.8"
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (router, "203.0.113.8"))
+    connection = FakeConnection()
+    result = await connection.configure(True, True)
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "upnp"
+    assert result.get("mapped_lan_ip") == "192.168.1.12"
+    assert router.added[-1][2] == "192.168.1.12"
+    maps_before = len(router.added)
+    held = time.time() + 1190
+    connection.report(next_renewal_at=held)
+    await connection._refresh_lan_dial_endpoints()
+    assert len(router.added) == maps_before
+    assert connection.state.get("next_renewal_at") == held
+    hosts[:] = ["192.168.1.40"]
+    router.lanaddr = "192.168.1.40"
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.state.get("mapped_lan_ip") == "192.168.1.40"
+    assert router.added[-1][2] == "192.168.1.40"
+    assert connection.state.get("next_renewal_at", 0) > held
+    assert "https://192.168.1.40:4781" in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" not in connection.state["endpoints"]
+    assert "https://203.0.113.8:4781" in connection.state["endpoints"]
+
+
+@pytest.mark.asyncio
+async def test_lan_refresh_remaps_gateway_ssh_dest_without_waiting_for_wan_renew(tmp_path, monkeypatch):
+    import time
+
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    hosts = ["192.168.1.12"]
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: list(hosts))
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+    seen: list[str] = []
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        del settings, public_host
+        seen.append(lan_ip)
+        return "https://home.example.test:4781", "Gateway SSH mapping applied; verify from outside this network"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    connection = FakeConnection()
+    result = await connection.configure(
+        True,
+        True,
+        {
+            "wan_method": "gateway_ssh",
+            "gateway_host": "192.168.1.1",
+            "gateway_user": "root",
+            "gateway_identity_file": str(key),
+            "wan_public_host": "home.example.test",
+        },
+    )
+    assert result.get("wan_path") == "gateway_ssh"
+    assert result.get("mapped_lan_ip") == "192.168.1.12"
+    assert seen == ["192.168.1.12"]
+    held = time.time() + 1190
+    connection.report(next_renewal_at=held)
+    hosts[:] = ["192.168.1.40"]
+    await connection._refresh_lan_dial_endpoints()
+    assert seen == ["192.168.1.12", "192.168.1.40"]
+    assert connection.state.get("mapped_lan_ip") == "192.168.1.40"
+    assert connection.state.get("next_renewal_at", 0) > held
+    assert "https://192.168.1.40:4781" in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" not in connection.state["endpoints"]
+    assert any(endpoint == "https://home.example.test:4781" for endpoint in connection.state["endpoints"])
+
+
+@pytest.mark.asyncio
+async def test_lan_refresh_remaps_natpmp_dest_without_waiting_for_wan_renew(tmp_path, monkeypatch):
+    import time
+
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    hosts = ["192.168.1.12"]
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: list(hosts))
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    seen: list[str] = []
+
+    def fake_natpmp(gw, lan):
+        seen.append(lan)
+        return "203.0.113.8"
+
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", fake_natpmp)
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_method": "auto"})
+    assert result.get("wan_path") == "natpmp"
+    assert result.get("mapped_lan_ip") == "192.168.1.12"
+    assert seen == ["192.168.1.12"]
+    held = time.time() + 1190
+    connection.report(next_renewal_at=held)
+    hosts[:] = ["192.168.1.40"]
+    await connection._refresh_lan_dial_endpoints()
+    assert seen == ["192.168.1.12", "192.168.1.40"]
+    assert connection.state.get("mapped_lan_ip") == "192.168.1.40"
+    assert connection.state.get("next_renewal_at", 0) > held
+    assert "https://192.168.1.40:4781" in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" not in connection.state["endpoints"]
+    assert "https://203.0.113.8:4781" in connection.state["endpoints"]
+
+
+@pytest.mark.asyncio
 async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     from app.mobile import connectivity, store
     from tests.test_mobile_connectivity import FakeConnection
@@ -694,7 +816,7 @@ async def test_pcp_is_used_when_natpmp_unavailable(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "app.mobile.pcp.apply_pcp",
-        lambda gw, lan, nonce=None: ("198.51.100.8", b"\\x11" * 12) if gw == "192.168.1.1" else (_ for _ in ()).throw(ValueError(gw)),
+        lambda gw, lan, nonce=None: ("198.51.100.8", bytes([0x11]) * 12) if gw == "192.168.1.1" else (_ for _ in ()).throw(ValueError(gw)),
     )
     connection = FakeConnection()
     result = await connection.configure(True, True, {"wan_method": "auto"})

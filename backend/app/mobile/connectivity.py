@@ -250,6 +250,8 @@ class Connectivity:
                 pass
             self.natpmp_gateway = None
             self.pcp_nonce = None
+        self.public_ip = None
+        self.report(mapped_lan_ip="")
         await REVERSE_TUNNEL.stop()
 
     async def on_security_cooldown(self):
@@ -472,7 +474,12 @@ class Connectivity:
                         self.public_ip = public_ip
                         endpoints.append(f"https://{public_ip}:{PORT}")
                         wan_path = "upnp"
-                        self.report(router="mapped", wan_path=wan_path, limitation="Router lease created; internet reachability still needs verification from outside this network")
+                        self.report(
+                            router="mapped",
+                            wan_path=wan_path,
+                            mapped_lan_ip=igd_mapping_dest(router),
+                            limitation="Router lease created; internet reachability still needs verification from outside this network",
+                        )
                 except Exception as exc:
                     await asyncio.to_thread(unmap_router, router, config["marker"])
                     self.router = None
@@ -509,6 +516,7 @@ class Connectivity:
                             self.report(
                                 router="mapped",
                                 wan_path=wan_path,
+                                mapped_lan_ip=lan_ip,
                                 limitation="NAT-PMP lease created; internet reachability still needs verification from outside this network",
                             )
                     except Exception as nat_exc:
@@ -531,6 +539,7 @@ class Connectivity:
                                 self.report(
                                     router="mapped",
                                     wan_path=wan_path,
+                                    mapped_lan_ip=lan_ip,
                                     limitation="PCP lease created; internet reachability still needs verification from outside this network",
                                 )
                         except Exception as pcp_exc:
@@ -701,7 +710,32 @@ class Connectivity:
                 merged.append(endpoint)
         return merged
 
-    async def _refresh_lan_dial_endpoints(self) -> None:
+    def _live_wan_dest_ip(self) -> str:
+        """Internal client the live WAN method would map TCP 4781 to right now."""
+        path = str(self.state.get("wan_path") or "")
+        if self.router:
+            return igd_mapping_dest(self.router)
+        if self.natpmp_gateway:
+            return preferred_lan_ipv4(self.natpmp_gateway)
+        if path == "gateway_ssh":
+            from .wan_forward import default_gateway_ipv4, mapping_lan_ipv4, wan_settings_from_config
+
+            wan = wan_settings_from_config(self.config())
+            gw = str(wan.get("gateway_host") or "")
+            if not gw:
+                try:
+                    gw = default_gateway_ipv4()
+                except Exception:
+                    gw = ""
+            return mapping_lan_ipv4(lan_hosts(), gw)
+        return ""
+
+    def _wan_mapping_dest_changed(self) -> bool:
+        previous = str(self.state.get("mapped_lan_ip") or "")
+        dest = self._live_wan_dest_ip()
+        return bool(previous and dest and dest != previous)
+
+    async def _refresh_lan_dial_endpoints(self, *, remap_wan: bool = True) -> None:
         hosts = await asyncio.to_thread(lan_hosts)
         live = self._lan_endpoints(hosts)
         current = list(self.state.get("endpoints") or [])
@@ -711,6 +745,8 @@ class Connectivity:
         await self.cover_phone_dial_hosts(*merged)
         if merged != current:
             self.report(endpoints=merged)
+        if remap_wan and self._wan_mapping_dest_changed():
+            await self._renew_wan_mapping(self.config())
 
     async def _renew_wan_mapping(self, config) -> None:
         """Keep the one-hour UPnP/NAT-PMP/PCP lease and the OpenWrt redirect alive."""
@@ -740,7 +776,7 @@ class Connectivity:
             self.report(mapped_lan_ip=lan)
         elif path == "gateway_ssh":
             await self._renew_gateway_ssh(config)
-        await self._refresh_lan_dial_endpoints()
+        await self._refresh_lan_dial_endpoints(remap_wan=False)
         self.report(next_renewal_at=time.time() + 1200)
 
     async def run(self):
@@ -792,7 +828,10 @@ class Connectivity:
                                 except Exception:
                                     await self.apply_remote(config)
                             else:
-                                await self._refresh_lan_dial_endpoints()
+                                try:
+                                    await self._refresh_lan_dial_endpoints()
+                                except Exception:
+                                    await self.apply_remote(config)
                 await asyncio.sleep(30)
         finally:
             await self.release_mapping()
