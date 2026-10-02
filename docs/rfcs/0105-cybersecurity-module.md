@@ -6,7 +6,7 @@
 **Date:** 2026-09-17
 
 **Parent:** RFC-0095 Instagram collection ingest + Module Catalog Download.  
-**Related (read only; do not rewrite):** RFC-0006 hierarchical workers. RFC-0007 domain/workspace packs. RFC-0009 runtime portability. RFC-0024 skill lifecycle. RFC-0050 HUD / presence. RFC-0078 / RFC-0086 HexStrike (HUD panel **pattern** — **not** “HexStrike forever” as the only cyber surface; do not rewrite `HudHexStrikeSuite` in this module’s tickets). **RFC-0106** HexStrike full operator control (sibling embedded suite; do **not** collapse these six members into HexStrike, and do not replace HexStrike with this module). RFC-0090 optional-worker Install now. RFC-0094 Settings IA (Voice/Appearance left-bar; Advanced is **not** this module’s home). `SECURITY_AGENTS.md` (related reading only).
+**Related (read only; do not rewrite):** RFC-0006 hierarchical workers. RFC-0007 domain/workspace packs. RFC-0009 runtime portability. RFC-0024 skill lifecycle. RFC-0050 HUD / presence. RFC-0078 / RFC-0086 HexStrike (HUD panel **pattern** — **not** “HexStrike forever” as the only cyber surface; do not rewrite `HudHexStrikeSuite` in this module’s tickets). **RFC-0106** HexStrike full operator control (sibling embedded suite; do **not** collapse these six members into HexStrike, and do not replace HexStrike with this module). **RFC-0196** / **RFC-0197** Anzu 1.0 HexStrike chain + blue/red/purple agents (orchestrate module members; do not collapse). RFC-0090 optional-worker Install now. RFC-0094 Settings IA (Voice/Appearance left-bar; Advanced is **not** this module’s home). `SECURITY_AGENTS.md` (related reading only).
 
 This PR is **specs-only**. Product code is a follow-up implement ticket. Do not edit `frontend/src/` or backend in this PR. Local clones belong under Architect’s `projects/` library — **not** committed here.
 
@@ -142,7 +142,7 @@ Skill packs are resources of module `cybersecurity`, not butler persona (RFC-009
 
 ## Out of scope
 
-- Gating / authorization (LE, Red, Purple, ATO, officer procedures) — **deferred to owner**; not specified here.
+- Gating / authorization (LE, Red, Purple, ATO, officer procedures) — **deferred to owner** in this RFC; **owner-scoped cyber agent authorization** is now specified in [RFC-0197](0197-blue-red-purple-security-agents.md) (no exploit docs here).
 - Product implementation in this PR.
 - Settings Advanced / Packs as the **primary** UX (Daybreak is required).
 - Backend worker-hook implementation in the Jarvis UX Daybreak ticket (that is D1, after CoS names it).

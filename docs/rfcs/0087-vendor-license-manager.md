@@ -45,3 +45,5 @@ Architect edits to `SECURITY_AGENTS.md` / `INSTALLER.md`; HexStrike payload prox
 ## Notes
 
 Depends on RFC-0086 ATO runtime. Desktop sign-off: PyInstaller onefile on the Windows release machine.
+
+**Amended 2026-10-02:** Customer-delivered sealed files applied during Setup are specified in [RFC-0199](0199-installer-license-auto-apply.md) (verify path unchanged; issuer private key still vendor-only).

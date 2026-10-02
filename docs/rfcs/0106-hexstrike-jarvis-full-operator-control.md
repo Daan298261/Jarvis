@@ -13,6 +13,8 @@ This PR is **specs-only**. Product code is a follow-up implement ticket. Do not 
 
 **Intent precedence:** For HexStrike **operation**, **RFC-0106 wins** over thinner “Blue-only enum / no MCP / no command proxy / ordinary Jarvis cannot operate HexStrike” wording in RFC-0086 (and the matching RFC-0078 decision §4 / RFC-0048 gateway bullets). Keep loopback bind and install pinning where they protect the host. Remove the product stance that Jarvis cannot drive HexStrike’s real operator surface.
 
+**Amended 2026-10-02:** [RFC-0196](0196-hexstrike-operator-chain-anzu-1.md) is the **Anzu 1.0 quality gate** for implement tickets (streaming jobs into Daybreak, error honesty, explicit anti-stub rules). Ledger status here remains **implemented**; unchecked desktop soak and any gap vs 0196 are closed in follow-up implement waves — **no new §58 tick** for 0196 alone.
+
 **Hard constraint for this spec and for implement PRs:** do **not** include exploit recipes, PoCs, payload samples, or step-by-step attack procedures — not in this RFC, not in help text, not in tests as copy-pastable tradecraft.
 
 ## Problem
