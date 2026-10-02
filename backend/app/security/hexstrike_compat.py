@@ -7,14 +7,17 @@ are outside Jarvis's defensive surface. This shim:
 - refuses to start unless core Flask/requests/psutil are present
 - stubs the proxy/browser extras so the reviewed server can bind loopback
 - never installs mitmproxy, pwntools, or angr
+- records which extras are stubbed so Jarvis status/catalog never call them "running"
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 REQUIRED_MODULES = ("flask", "requests", "psutil")
 PROXY_STUBS = (
@@ -38,9 +41,15 @@ BROWSER_STUBS = (
     "selenium.common.exceptions",
 )
 
+STUB_MARKER = "__jarvis_hexstrike_stub__"
+STUB_MANIFEST_NAME = "optional-stubs.json"
+
 DISABLED_MESSAGE = (
     "HexStrike proxy/browser extras are disabled in the Jarvis managed environment"
 )
+
+# Packages Jarvis intentionally stubs / refuses to treat as live operator deps.
+ALWAYS_STUBBED_OPTIONALS = ("mitmproxy", "selenium")
 
 
 class DisabledExtraError(RuntimeError):
@@ -82,20 +91,114 @@ def _ensure_required() -> None:
         )
 
 
+def stub_manifest_path(state_root: Path | str | None = None) -> Path:
+    if state_root is None:
+        env = (os.environ.get("JARVIS_HEXSTRIKE_STATE_DIR") or "").strip()
+        root = Path(env) if env else Path.cwd() / "jarvis-state"
+    else:
+        root = Path(state_root)
+    return root / STUB_MANIFEST_NAME
+
+
+def write_stub_manifest(stubbed: list[str], state_root: Path | str) -> Path:
+    """Persist which optional packages are stubs (never live/running)."""
+    root = Path(state_root)
+    root.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "status": "unavailable",
+        "stubbed": sorted({str(item).strip().lower() for item in stubbed if str(item).strip()}),
+        "message": DISABLED_MESSAGE,
+        "invokable": False,
+    }
+    target = stub_manifest_path(root)
+    temp = target.with_suffix(".tmp")
+    temp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temp.replace(target)
+    return target
+
+
+def read_stub_manifest(state_root: Path | str | None = None) -> dict[str, Any]:
+    """Read the stub honesty manifest. Missing file → empty (no live claim)."""
+    path = stub_manifest_path(state_root)
+    if not path.is_file():
+        return {
+            "version": 1,
+            "status": "unavailable",
+            "stubbed": [],
+            "message": "",
+            "invokable": False,
+            "present": False,
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "version": 1,
+            "status": "unavailable",
+            "stubbed": list(ALWAYS_STUBBED_OPTIONALS),
+            "message": DISABLED_MESSAGE,
+            "invokable": False,
+            "present": True,
+            "corrupt": True,
+        }
+    if not isinstance(payload, dict):
+        return {
+            "version": 1,
+            "status": "unavailable",
+            "stubbed": list(ALWAYS_STUBBED_OPTIONALS),
+            "message": DISABLED_MESSAGE,
+            "invokable": False,
+            "present": True,
+            "corrupt": True,
+        }
+    stubbed = payload.get("stubbed") or []
+    cleaned = [str(item).strip().lower() for item in stubbed if str(item).strip()]
+    return {
+        "version": int(payload.get("version") or 1),
+        "status": "unavailable",
+        "stubbed": cleaned,
+        "message": str(payload.get("message") or DISABLED_MESSAGE),
+        "invokable": False,
+        "present": True,
+    }
+
+
+def package_is_stubbed(name: str, stubbed: list[str] | tuple[str, ...] | None = None) -> bool:
+    """True when a tool/package name is covered by an active Jarvis optional stub."""
+    needle = (name or "").strip().lower().replace("-", "_")
+    if not needle:
+        return False
+    active = stubbed if stubbed is not None else ALWAYS_STUBBED_OPTIONALS
+    for stub in active:
+        token = str(stub).strip().lower().replace("-", "_")
+        if not token:
+            continue
+        if needle == token or needle.startswith(f"{token}.") or token in needle.split("_") or token in needle.split("."):
+            return True
+        if token in needle:
+            return True
+    return False
+
+
 def _install_stub_tree(names: tuple[str, ...]) -> None:
     created: dict[str, types.ModuleType] = {}
     for name in names:
         if name in sys.modules:
-            created[name] = sys.modules[name]
+            module = sys.modules[name]
+            setattr(module, STUB_MARKER, True)
+            created[name] = module
             continue
         module = types.ModuleType(name)
         module.__dict__["__path__"] = []  # mark as package
+        setattr(module, STUB_MARKER, True)
         sys.modules[name] = module
         created[name] = module
         parent_name, _, child = name.rpartition(".")
         if parent_name and parent_name in sys.modules:
             setattr(sys.modules[parent_name], child, module)
     for module in created.values():
+        setattr(module, STUB_MARKER, True)
         for attr in (
             "By",
             "DumpMaster",
@@ -117,6 +220,8 @@ def install_optional_stubs(*, force: bool = False) -> list[str]:
         if force:
             raise ImportError("forced stub")
         import mitmproxy  # noqa: F401
+        if getattr(sys.modules.get("mitmproxy"), STUB_MARKER, False):
+            stubbed.append("mitmproxy")
     except Exception:
         _install_stub_tree(PROXY_STUBS)
         stubbed.append("mitmproxy")
@@ -124,6 +229,8 @@ def install_optional_stubs(*, force: bool = False) -> list[str]:
         if force:
             raise ImportError("forced stub")
         import selenium  # noqa: F401
+        if getattr(sys.modules.get("selenium"), STUB_MARKER, False):
+            stubbed.append("selenium")
     except Exception:
         _install_stub_tree(BROWSER_STUBS)
         stubbed.append("selenium")
@@ -137,11 +244,12 @@ def launch_reviewed_server(server: Path, argv: list[str] | None = None) -> None:
     if path.name != "hexstrike_server.py":
         raise SystemExit("refusing to launch an unexpected server file")
     _ensure_required()
-    install_optional_stubs(force=True)
+    stubbed = install_optional_stubs(force=True)
     state_root = Path(
         os.environ.get("JARVIS_HEXSTRIKE_STATE_DIR", path.parent / "jarvis-state")
     ).resolve()
     state_root.mkdir(parents=True, exist_ok=True)
+    write_stub_manifest(stubbed or list(ALWAYS_STUBBED_OPTIONALS), state_root)
     source = path.read_text(encoding="utf-8")
     replacements = {
         'base_dir: str = "/tmp/hexstrike_envs"': f"base_dir: str = {str(state_root / 'python-envs')!r}",

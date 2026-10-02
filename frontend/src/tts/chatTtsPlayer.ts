@@ -22,6 +22,7 @@ let activeFinish: (() => void) | null = null
 let playbackEpoch = 0
 let pumpRunning = false
 const speechQueue: QueuedSpeech[] = []
+const prefetchByText = new Map<string, Promise<Blob>>()
 
 function releaseMedia(): void {
   detachVoiceAnalyser()
@@ -40,6 +41,7 @@ function releaseMedia(): void {
 /** Stop active and queued chat speech immediately (barge-in). */
 export function stopChatTts(): void {
   playbackEpoch += 1
+  prefetchByText.clear()
   while (speechQueue.length) speechQueue.shift()?.resolve()
   const finish = activeFinish
   activeFinish = null
@@ -47,19 +49,47 @@ export function stopChatTts(): void {
   finish?.()
 }
 
+function speakPayload(text: string): { text: string; voice_profile_id?: string } {
+  const payload: { text: string; voice_profile_id?: string } = {
+    text: text.slice(0, MAX_SPEAK_CHARS),
+  }
+  const voiceProfileId = getActiveVoiceProfileId()
+  if (voiceProfileId) payload.voice_profile_id = voiceProfileId
+  return payload
+}
+
+function fetchSpeakBlob(text: string): Promise<Blob> {
+  const cached = prefetchByText.get(text)
+  if (cached) {
+    prefetchByText.delete(text)
+    return cached
+  }
+  return fetchAudio("/api/voice/speak", {
+    method: "POST",
+    body: JSON.stringify(speakPayload(text)),
+  })
+}
+
+function prefetchNext(epoch: number): void {
+  const next = speechQueue[0]
+  if (!next || epoch !== playbackEpoch || prefetchByText.has(next.text)) return
+  prefetchByText.set(
+    next.text,
+    fetchAudio("/api/voice/speak", {
+      method: "POST",
+      body: JSON.stringify(speakPayload(next.text)),
+    }).catch((error) => {
+      prefetchByText.delete(next.text)
+      throw error
+    }),
+  )
+}
+
 async function play(item: QueuedSpeech, epoch: number): Promise<void> {
   item.opts?.onStart?.()
   try {
-    const payload: { text: string; voice_profile_id?: string } = {
-      text: item.text.slice(0, MAX_SPEAK_CHARS),
-    }
-    const voiceProfileId = getActiveVoiceProfileId()
-    if (voiceProfileId) payload.voice_profile_id = voiceProfileId
-
-    const blob = await fetchAudio("/api/voice/speak", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    })
+    const blob = await fetchSpeakBlob(item.text)
+    prefetchNext(epoch)
     // 204 from /api/voice/speak: nothing speakable after sanitizing (e.g. only code).
     if (epoch !== playbackEpoch || blob.size === 0) return
 
@@ -112,6 +142,7 @@ export function queueChatSpeech(text: string, opts?: SpeakOpts): Promise<void> {
   const epoch = playbackEpoch
   return new Promise<void>((resolve) => {
     speechQueue.push({ text: trimmed, opts, resolve })
+    prefetchNext(epoch)
     void pump(epoch)
   })
 }

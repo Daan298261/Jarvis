@@ -21,14 +21,14 @@ export function AppearanceVoiceSettingsPane({ settings }: AppearanceVoiceSetting
   return (
     <>
       <div id="settings-appearance" className="card grid settings-pane-card">
-        <h2>Appearance</h2>
+        <h3>Appearance</h3>
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Theme, shell, presence, rendering, attention, and motion — shared with the Daybreak HUD.
         </p>
         <AppearanceSettingsPane settings={settings} />
       </div>
       <section id="settings-voice" className="settings-section" aria-labelledby="settings-voice-heading">
-        <h2 id="settings-voice-heading">Voice &amp; Speech</h2>
+        <h3 id="settings-voice-heading">Voice &amp; Speech</h3>
         <VoiceSettingsPane />
       </section>
     </>

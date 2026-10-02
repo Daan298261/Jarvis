@@ -15,19 +15,24 @@ from ..providers.completion_text import empty_generation_error
 from .chat_delivery import (
     OWNER_CHAT_CHANNEL,
     clear_stream_speak_state,
+    mark_stream_spoken,
     maybe_enqueue_streaming_social_tts,
+    pending_chat_tts_text,
     publish_owner_text,
     stream_speak_offset,
 )
 from .weather import weather_system_message
 from ..events import BUS
 from ..agent.front_responder import (
+    TwoLaneTiming,
     generate_front_reply,
     is_safe_front_speech,
     last_front_timing,
     note_front_audio,
+    record_front_timing,
     resolve_front_model_id,
     run_two_lane_chat,
+    terminal_front_completes_turn,
 )
 from ..agent.planning import requests_agent_tools
 from ..agent.segmented_input import condense_segments
@@ -142,21 +147,43 @@ def _ensure_conversation(conversation_id: str | None) -> str:
     return cid
 
 
-def _owner_messages(conversation_id: str, user_text: str, briefing: str | None = None) -> list[ChatMessage]:
-    history = _conversations[conversation_id]
-    messages = [
-        ChatMessage(role="system", content=OWNER_CHAT_SYSTEM),
-    ]
+async def compose_owner_turn_messages(
+    conversation_id: str,
+    user_text: str,
+    briefing: str | None = None,
+) -> tuple[list[ChatMessage], "TurnWorkingSet"]:
+    """Build the owner-chat inference prompt via RFC-0107 turn working set (no skip-if-empty)."""
+    from ..agent.turn_working_set import TurnWorkingSet, apply_working_set_to_system, compose_turn_working_set
+
+    history = list(_conversations.get(conversation_id, []))
+    prompt = (user_text or "").strip()
+    # Same composer as the agent loop: vault provenance, empty-miss surface, installable search.
+    # needs_tools=False keeps dialogue from advertising executable tool schemas; installable
+    # offers and vault hits still enter the system prefix via compose_turn_working_set.
+    turn_ws = await compose_turn_working_set(
+        prompt,
+        task_class="conversation",
+        agent_id="owner",
+        recent_messages=history,
+        needs_tools=False,
+        include_vault=True,
+        include_memory=True,
+    )
+    system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws)
+    messages: list[ChatMessage] = [ChatMessage(role="system", content=system)]
     if briefing:
         messages.append(ChatMessage(role="system", content=briefing))
-    from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
+    messages.extend(turn_ws.recent_turns)
+    messages.append(ChatMessage(role="user", content=prompt))
+    return messages, turn_ws
 
-    if public_binding_status().get("bound"):
-        vault_block = vault_prompt_block(user_text.strip())
-        if vault_block:
-            messages.append(ChatMessage(role="system", content=vault_block))
-    messages.extend(history)
-    messages.append(ChatMessage(role="user", content=user_text.strip()))
+
+async def _owner_messages(
+    conversation_id: str,
+    user_text: str,
+    briefing: str | None = None,
+) -> list[ChatMessage]:
+    messages, _working = await compose_owner_turn_messages(conversation_id, user_text, briefing)
     return messages
 
 
@@ -174,7 +201,15 @@ async def stream_owner_chat(
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
 
-    if requests_agent_tools(cleaned):
+    from ..agent.planning import route_request, simple_app_control, simple_file_control
+    from ..agent.request_routing import evaluate_request_route
+    from .session_personality import detect_mode_from_text
+
+    intake_route = await evaluate_request_route(cleaned, route_request(cleaned))
+    if requests_agent_tools(cleaned) or simple_app_control(cleaned) or simple_file_control(cleaned) or (
+        intake_route.kind == "managed_task" and intake_route.task_class != "conversation"
+        and not detect_mode_from_text(cleaned)
+    ):
         from ..agent.loop import AGENT
 
         try:
@@ -258,6 +293,7 @@ async def stream_owner_chat(
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
     front_spoken_early = False
+    front_text_emitted = False
 
     prefetched_front = await generate_front_reply(
         cleaned,
@@ -265,43 +301,130 @@ async def stream_owner_chat(
         settings=settings,
         turn_started=turn_started,
     )
-    if (
+    front_safe = bool(
         prefetched_front.text
         and prefetched_front.action != "silent_skip"
-        and settings.front_responder.speak_immediately
         and is_safe_front_speech(prefetched_front.action, prefetched_front.text)
-    ):
-        spoken = (
-            prefetched_front.text
-            if prefetched_front.text.endswith((".", "!", "?"))
-            else f"{prefetched_front.text}."
-        )
-        early_id = maybe_enqueue_streaming_social_tts(
-            spoken,
-            source="owner_chat",
-            stream_key=stream_key,
-            user_prompt=cleaned,
-        )
-        if not early_id:
-            delivery = await publish_owner_text(
-                prefetched_front.text,
+    )
+    if front_safe:
+        # Emit ONLY validated sanitized text — never raw model chunks / JSON envelopes.
+        safe_text = (prefetched_front.text or "").strip()
+        chunks = [safe_text] if safe_text else []
+        for chunk in chunks:
+            if not chunk:
+                continue
+            front_text_emitted = True
+            yield {
+                "type": "delta",
+                "conversation_id": cid,
+                "text": chunk,
+                "lane": "front",
+            }
+        if (
+            settings.front_responder.speak_immediately
+            and not front_spoken_early
+        ):
+            spoken = (
+                prefetched_front.text
+                if prefetched_front.text.endswith((".", "!", "?"))
+                else f"{prefetched_front.text}."
+            )
+            early_id = maybe_enqueue_streaming_social_tts(
+                spoken,
                 source="owner_chat",
-                speak=True,
+                stream_key=stream_key,
                 user_prompt=cleaned,
             )
-            if delivery.get("tts_id"):
-                early_tts_ids.append(str(delivery["tts_id"]))
-        else:
-            early_tts_ids.append(early_id)
-            await BUS.publish_ephemeral(
-                OWNER_CHAT_CHANNEL,
-                "chat_tts",
-                "Speak reply",
-                prefetched_front.text,
-                stage="owner_chat",
-            )
-        note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
-        front_spoken_early = True
+            if not early_id:
+                delivery = await publish_owner_text(
+                    prefetched_front.text,
+                    source="owner_chat",
+                    speak=True,
+                    user_prompt=cleaned,
+                )
+                if delivery.get("tts_id"):
+                    early_tts_ids.append(str(delivery["tts_id"]))
+                    # publish_owner_text does not advance the stream cursor;
+                    # mark it so the final reply path cannot re-speak.
+                    mark_stream_spoken(stream_key, len(prefetched_front.text))
+            else:
+                early_tts_ids.append(early_id)
+                await BUS.publish_ephemeral(
+                    OWNER_CHAT_CHANNEL,
+                    "chat_tts",
+                    "Speak reply",
+                    pending_chat_tts_text(early_id) or spoken,
+                    stage="owner_chat",
+                )
+            audio_ms = (time.perf_counter() - turn_started) * 1000
+            note_front_audio(None, audio_ms)
+            prefetched_front.first_audio_ms = audio_ms
+            front_spoken_early = True
+
+        # final_basic / ask_clarification: complete without loading the worker —
+        # unless RFC-0107 requires the vault working set (bound + vault-relevant).
+        if terminal_front_completes_turn(prefetched_front.action):
+            from ..memory.obsidian_vault import vault_ask_requires_working_set
+
+            if not vault_ask_requires_working_set(cleaned):
+                reply = prefetched_front.text.strip()
+                timing = TwoLaneTiming(
+                    front_model=prefetched_front.model or resolve_front_model_id(settings),
+                    front_action=prefetched_front.action,
+                    queue_ms=max(0.0, (time.perf_counter() - turn_started) * 1000),
+                    front_first_text_ms=prefetched_front.first_text_ms,
+                    front_complete_ms=prefetched_front.complete_ms,
+                    front_first_audio_ms=prefetched_front.first_audio_ms,
+                    tts_first_audio_ms=prefetched_front.first_audio_ms,
+                )
+                recorded = record_front_timing(timing.as_dict())
+                _conversations[cid].append(ChatMessage(role="user", content=worker_text))
+                _conversations[cid].append(ChatMessage(role="assistant", content=reply))
+                from ..projects.portal_store import save_owner_conversation
+
+                await save_owner_conversation(
+                    cid,
+                    _conversations[cid],
+                    title=cleaned[:120],
+                )
+                try:
+                    from ..memory.obsidian_vault import mirror_owner_chat_turn
+
+                    mirror_owner_chat_turn(
+                        conversation_id=cid,
+                        user_text=worker_text,
+                        assistant_text=reply,
+                    )
+                except Exception:
+                    pass
+                # Already spoken above when speak_immediately; only fill remainder.
+                delivery = await publish_owner_text(
+                    reply,
+                    source="owner_chat",
+                    speak=True,
+                    user_prompt=cleaned,
+                    tts_char_offset=stream_speak_offset(stream_key),
+                )
+                clear_stream_speak_state(stream_key)
+                tts_id = (
+                    early_tts_ids[0]
+                    if early_tts_ids and not delivery.get("tts_id")
+                    else delivery.get("tts_id")
+                )
+                yield {
+                    "type": "done",
+                    "conversation_id": cid,
+                    "text": reply,
+                    "tts_id": tts_id,
+                    "early_tts_ids": early_tts_ids,
+                    "front_action": prefetched_front.action,
+                    "timing": recorded,
+                    "slow_nudges": 0,
+                    "background_verify": False,
+                    "front_terminal": True,
+                }
+                return
+            # Fall through to worker so compose_turn_working_set runs with vault hits.
 
     if not MANAGER.provider or not MANAGER.state.loaded:
         try:
@@ -321,7 +444,7 @@ async def stream_owner_chat(
         yield {"type": "error", "detail": "Inference model is not loaded"}
         return
 
-    worker_messages = _owner_messages(cid, cleaned, briefing)
+    worker_messages = await _owner_messages(cid, cleaned, briefing)
     if intake.strategy == "compress":
         async def _segment_progress(index: int, total: int) -> None:
             await BUS.publish_ephemeral(
@@ -406,6 +529,9 @@ async def stream_owner_chat(
             yield delta
 
     async def on_delta(lane: str, delta: str) -> None:
+        # Front text/TTS already left the gate; do not re-append or re-speak it.
+        if lane == "front" and (front_text_emitted or front_spoken_early):
+            return
         parts.append(delta)
         model_id = resolve_front_model_id(settings) if lane == "front" else worker_model
         await BUS.publish_ephemeral(
@@ -448,11 +574,13 @@ async def stream_owner_chat(
         ):
             kind = event.get("type")
             if kind == "delta":
+                if event.get("lane") == "front" and front_text_emitted:
+                    continue
                 yield {"type": "delta", "conversation_id": cid, "text": event.get("text") or "", "lane": event.get("lane")}
             elif kind == "front_response_completed":
                 front = event.get("reply")
                 text = getattr(front, "text", "") or ""
-                if text and not parts:
+                if text and not parts and not front_text_emitted:
                     yield {"type": "delta", "conversation_id": cid, "text": text, "lane": "front"}
                 if (
                     front
@@ -476,16 +604,22 @@ async def stream_owner_chat(
                         )
                         if delivery.get("tts_id"):
                             early_tts_ids.append(str(delivery["tts_id"]))
+                            mark_stream_spoken(stream_key, len(front.text or ""))
                     elif early_id:
                         early_tts_ids.append(early_id)
                         await BUS.publish_ephemeral(
                             OWNER_CHAT_CHANNEL,
                             "chat_tts",
                             "Speak reply",
-                            front.text,
+                            pending_chat_tts_text(early_id) or front.text,
                             stage="owner_chat",
                         )
                     note_front_audio(None, (time.perf_counter() - turn_started) * 1000)
+                    if front:
+                        front.first_audio_ms = max(
+                            float(getattr(front, "first_audio_ms", 0.0) or 0.0),
+                            (time.perf_counter() - turn_started) * 1000,
+                        )
             elif kind == "done":
                 done = event
     except Exception as exc:
@@ -511,9 +645,10 @@ async def stream_owner_chat(
         try:
             from ..memory.obsidian_vault import mirror_owner_chat_turn
 
+            # Mirror what the worker (and next-turn composer) actually saw.
             mirror_owner_chat_turn(
                 conversation_id=cid,
-                user_text=cleaned,
+                user_text=worker_text,
                 assistant_text=reply,
             )
         except Exception:
@@ -527,23 +662,32 @@ async def stream_owner_chat(
         )
         clear_stream_speak_state(stream_key)
         tts_id = early_tts_ids[0] if early_tts_ids and not delivery.get("tts_id") else delivery.get("tts_id")
-        schedule_background_verification(
-            cleaned,
-            reply,
-            source="owner_chat",
-            speak=True,
-            conversation_id=cid,
-        )
+        # Direct front terminal turns skip verify (#481); otherwise apply RFC-0167 admission.
+        front_action = (done or {}).get("front_action") or prefetched_front.action
+        verify_scheduled = False
+        if not terminal_front_completes_turn(str(front_action or "")):
+            from ..agent.planning import route_request
+
+            route = route_request(cleaned)
+            verify_scheduled = schedule_background_verification(
+                cleaned,
+                reply,
+                source="owner_chat",
+                speak=True,
+                conversation_id=cid,
+                route_kind=route.kind,
+                task_class=route.task_class,
+            )
         yield {
             "type": "done",
             "conversation_id": cid,
             "text": reply,
             "tts_id": tts_id,
             "early_tts_ids": early_tts_ids,
-            "front_action": (done or {}).get("front_action"),
+            "front_action": front_action,
             "timing": (done or {}).get("timing") or last_front_timing(),
             "slow_nudges": nudge_meta.get("nudges", 0),
-            "background_verify": True,
+            "background_verify": bool(verify_scheduled),
         }
     else:
         clear_stream_speak_state(stream_key)

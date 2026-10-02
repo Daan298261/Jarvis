@@ -289,12 +289,18 @@ export function isTaskRunning(status: string): boolean {
 export function taskStatusLine(task: {
   status: string
   stage?: string | null
+  current_activity?: string | null
   current_action?: string | null
   current_tool?: string | null
   waiting_for_confirmation?: boolean
+  execution_phase?: string | null
 }): string {
-  if (task.waiting_for_confirmation) return "Waiting for your approval"
-  if (task.current_action) return task.current_action
+  if (task.waiting_for_confirmation || (task.execution_phase || "").toUpperCase() === "WAITING_APPROVAL") {
+    return "Waiting for your approval"
+  }
+  const activity = (task.current_activity || "").trim()
+  if (activity && !/^thinking/i.test(activity)) return activity
+  if (task.current_action && !/^thinking/i.test(task.current_action)) return task.current_action
   if (task.current_tool) return `Using ${task.current_tool}…`
   if (task.stage) return task.stage
   if (isTaskRunning(task.status)) return "Working…"

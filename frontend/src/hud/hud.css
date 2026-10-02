@@ -332,6 +332,40 @@ html[data-session-mode="concise"] .hud-top::after {
   padding: 16px 8px;
 }
 
+.hud-task-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(62, 207, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(8, 14, 22, 0.7);
+}
+
+.hud-task-activity {
+  margin: 0 0 8px;
+  border: 1px solid rgba(62, 207, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(8, 14, 22, 0.55);
+  overflow: hidden;
+}
+
+.hud-task-activity > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: rgba(170, 190, 210, 0.75);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hud-task-activity .task-activity {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .hud-bubble {
   margin-bottom: 8px;
   padding: 8px 10px;

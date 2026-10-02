@@ -85,8 +85,9 @@ def start_dependency_install(dep_id: str, *, install_path: str = "") -> dict[str
             from .hexstrike_operator import refresh_discovered_catalog
 
             await refresh_discovered_catalog(force=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Do not swallow silently — surface on the install job for honesty.
+            job["detail"] = (job.get("detail") or "") + f"\ncatalog refresh failed: {exc}"[:400]
 
     task = asyncio.create_task(_runner())
     _INSTALL_TASKS[job_id] = task

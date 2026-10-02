@@ -728,6 +728,7 @@ class InferenceManager:
             self.state.loading = False
             self.state.pid = backend.pid
             await self.refresh_resources()
+            self._invalidate_status_cache()
             return self.state
 
         if self.backend:
@@ -779,6 +780,7 @@ class InferenceManager:
         self.state.load_time_seconds = round(time.time() - started, 2)
         self.provider = self._make_provider(settings, advertised)
         await self.refresh_resources()
+        self._invalidate_status_cache()
         return self.state
 
     def _apply_profile_state(
@@ -826,7 +828,17 @@ class InferenceManager:
             self.state.pid = None
             self.state.vision_loaded = False
             self.state.mmproj_path = ""
+            self._invalidate_status_cache()
             return self.state
+
+    @staticmethod
+    def _invalidate_status_cache() -> None:
+        try:
+            from .status_monitor import STATUS_MONITOR
+
+            STATUS_MONITOR.invalidate()
+        except Exception:
+            pass
 
     async def apply_context(self, settings: AppSettings, context_size: int, *, allow_shrink: bool = False) -> int:
         """Set the live context window. Mid-task callers pass allow_shrink=False so we only grow.
@@ -863,25 +875,33 @@ class InferenceManager:
             return int(self.state.context_size or current)
         return int(self.state.context_size or target)
 
+    @staticmethod
+    def _probe_nvidia_smi_memory() -> str:
+        """Sync nvidia-smi probe — always run via asyncio.to_thread from the event loop."""
+        import subprocess
+
+        return subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+
     async def refresh_resources(self) -> None:
         try:
-            import subprocess
-
-            out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            ).stdout.strip()
+            # Never block the FastAPI event loop on a hung/slow nvidia-smi (5s timeout).
+            out = await asyncio.to_thread(self._probe_nvidia_smi_memory)
             if out:
                 self.state.vram_used_mib = int(float(out.splitlines()[0].strip()))
         except Exception:
             pass
         try:
             if self.state.pid:
-                proc = psutil.Process(self.state.pid)
-                self.state.ram_used_gb = round(proc.memory_info().rss / (1024**3), 2)
+                ram_gb = await asyncio.to_thread(
+                    lambda: round(psutil.Process(self.state.pid).memory_info().rss / (1024**3), 2)
+                )
+                self.state.ram_used_gb = ram_gb
         except Exception:
             pass
 
@@ -896,11 +916,49 @@ class InferenceManager:
             "ram_offload": offload,
         }
 
-    async def snapshot(self, settings: AppSettings) -> dict[str, Any]:
-        await self.refresh_resources()
-        healthy = False
-        if self.provider:
-            healthy = await self.provider.health()
+    def live_state_overlay(self) -> dict[str, Any]:
+        """Cheap in-memory fields for status-cache readers (no GPU/HTTP probes)."""
+        settings = load_settings()
+        profile = resolve_profile(self.state.profile or settings.inference.profile)
+        active_model = None
+        if self.state.loaded:
+            active_model = (
+                self.provider.model
+                if self.provider
+                else self.provider_model(settings, self.state.advertised_models)
+            )
+        return {
+            "loaded": self.state.loaded,
+            "loading": self.state.loading,
+            "last_error": self.state.last_error,
+            "profile": self.state.profile or profile.name,
+            "pid": self.state.pid,
+            "model_path": self.state.model_path,
+            "mmproj_path": self.state.mmproj_path,
+            "vision_loaded": self.state.vision_loaded,
+            "context_size": self.state.context_size if self.state.loaded else _default_load_context(profile),
+            "server_n_ctx": self.state.server_n_ctx,
+            "load_time_seconds": self.state.load_time_seconds,
+            "tokens_per_second": self.state.generation_tps,
+            "prompt_tokens_per_second": self.state.prompt_tps,
+            "advertised_models": self.state.advertised_models or [],
+            "health_path": self.state.health_path,
+            "remote_model": self.state.remote_model or settings.inference.remote_model,
+            "inference_backend": self.state.backend,
+            "manages_process": self.state.manages_process,
+            "family": (self.state.family or profile.family) if self.state.loaded else profile.family,
+            "thinking_mode": (
+                self.state.thinking_mode or profile.thinking_mode or ("selective" if profile.thinking else "off")
+            ),
+            "quantization": self.state.quant or profile.quant,
+            "active_model": active_model,
+        }
+
+    def unprobed_snapshot(self, settings: AppSettings) -> dict[str, Any]:
+        """Fail-closed status payload when no successful probe has ever completed."""
+        return self._assemble_snapshot(settings, healthy=False)
+
+    def _assemble_snapshot(self, settings: AppSettings, *, healthy: bool) -> dict[str, Any]:
         profile = resolve_profile(self.state.profile or settings.inference.profile)
         context_target = min(
             int(settings.inference.context_size or 32768),
@@ -917,14 +975,14 @@ class InferenceManager:
         return {
             "loaded": self.state.loaded,
             "loading": self.state.loading,
-            "healthy": healthy,
+            "healthy": bool(healthy),
             "active_model": (
                 (self.provider.model if self.provider else self.provider_model(settings, self.state.advertised_models))
                 if self.state.loaded
                 else None
             ),
             "official_model": profile.repo,
-            "family": self.state.family or profile.family if self.state.loaded else profile.family,
+            "family": (self.state.family or profile.family) if self.state.loaded else profile.family,
             "thinking_mode": (
                 self.state.thinking_mode or profile.thinking_mode or ("selective" if profile.thinking else "off")
             ),
@@ -979,6 +1037,27 @@ class InferenceManager:
                 "note": "Tasks start at 8K or 16K and expand toward the RAM-aware cap when the live prompt is under pressure.",
             },
         }
+
+    async def live_snapshot(self, settings: AppSettings) -> dict[str, Any]:
+        """Full probe path: GPU/process resources + provider health. Used by the monitor."""
+        await self.refresh_resources()
+        healthy = False
+        if self.provider:
+            healthy = await self.provider.health()
+        return self._assemble_snapshot(settings, healthy=healthy)
+
+    async def snapshot(self, settings: AppSettings, *, live: bool = False) -> dict[str, Any]:
+        """Status readers prefer the cached monitor snapshot unless ``live=True``.
+
+        Only the process-wide ``MANAGER`` singleton participates in the shared
+        status cache. Ad-hoc ``InferenceManager()`` instances always probe live
+        so unit tests and one-off managers cannot read another instance's state.
+        """
+        if live or self is not MANAGER:
+            return await self.live_snapshot(settings)
+        from .status_monitor import STATUS_MONITOR
+
+        return await STATUS_MONITOR.get_snapshot(settings)
 
     async def record_timings(self, timings: dict[str, Any]) -> None:
         if not timings:

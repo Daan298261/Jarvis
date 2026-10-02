@@ -7,6 +7,7 @@ from app.persona.chat_delivery import (
     enqueue_chat_tts,
     maybe_enqueue_streaming_social_tts,
     pending_chat_tts,
+    pending_chat_tts_text,
     reset_chat_delivery,
     stream_speak_offset,
 )
@@ -104,6 +105,8 @@ def test_streaming_social_tts_enqueues_first_sentence_only():
     assert len(pending_chat_tts()) == 1
     assert pending_chat_tts()[-1]["partial"] is True
     assert pending_chat_tts()[-1]["text"].startswith("Certainly")
+    assert pending_chat_tts_text(second) == pending_chat_tts()[-1]["text"]
+    assert "All is well" not in pending_chat_tts_text(second)
 
     third = maybe_enqueue_streaming_social_tts(
         "Certainly. One moment while I look. All is well.",

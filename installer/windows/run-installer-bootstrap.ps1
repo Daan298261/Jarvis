@@ -15,7 +15,21 @@ param(
 
     [switch]$SkipLlamaDownload,
 
+    [switch]$InstallLocalLLM,
+
     [switch]$InstallExpert27B,
+
+    [switch]$SkipKokoro,
+
+    [switch]$SkipPersonaVoices,
+
+    [switch]$InstallWhisper,
+
+    [switch]$InstallVoiceStudio,
+
+    [switch]$InstallPocketTTS,
+
+    [switch]$InstallUmiBrain,
 
     [string]$VoiceProfiles = ""
 )
@@ -43,7 +57,14 @@ $argList = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $bootstrap)
 if ($SkipHeavyPrepare) { $argList += "-SkipHeavyPrepare" }
 if ($SkipModelDownload) { $argList += "-SkipModelDownload" }
 if ($SkipLlamaDownload) { $argList += "-SkipLlamaDownload" }
+if ($InstallLocalLLM) { $argList += "-InstallLocalLLM" }
 if ($InstallExpert27B) { $argList += "-InstallExpert27B" }
+if ($SkipKokoro) { $argList += "-SkipKokoro" }
+if ($SkipPersonaVoices) { $argList += "-SkipPersonaVoices" }
+if ($InstallWhisper) { $argList += "-InstallWhisper" }
+if ($InstallVoiceStudio) { $argList += "-InstallVoiceStudio" }
+if ($InstallPocketTTS) { $argList += "-InstallPocketTTS" }
+if ($InstallUmiBrain) { $argList += "-InstallUmiBrain" }
 if ($VoiceProfiles.Trim()) { $argList += "-VoiceProfiles"; $argList += $VoiceProfiles.Trim() }
 
 Write-BootstrapLog "run-installer-bootstrap start MaxMinutes=$MaxMinutes SkipHeavyPrepare=$SkipHeavyPrepare"

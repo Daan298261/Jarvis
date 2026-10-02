@@ -73,7 +73,10 @@ def speech_safe(text: str) -> str:
     if not cleaned or _TECHNICAL_DUMP.search(cleaned):
         return ""
     cleaned = _FENCED.sub(" ", cleaned)
-    cleaned = _INLINE_CODE.sub(lambda m: m.group(1) if len(m.group(1)) <= 40 and " " not in m.group(1).strip() else " ", cleaned)
+    cleaned = _INLINE_CODE.sub(
+        lambda m: m.group(1).strip() if 0 < len(m.group(1).strip()) <= 40 else " ",
+        cleaned,
+    )
     cleaned = name_paths_and_links(cleaned)
     cleaned = _TABLE_RULE.sub(" ", cleaned)
     cleaned = _HEADING.sub("", cleaned)

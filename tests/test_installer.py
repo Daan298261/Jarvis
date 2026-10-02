@@ -33,8 +33,16 @@ def test_bootstrap_covers_required_steps():
         ".venv",
         "requirements.txt",
         "ensure-ttspythonpackages",
+        "ensure-layapythonpackage",
+        "laya==0.3.21",
         "ensure-kokorovoice",
         "ensure-personavoices",
+        "ensure-whispermodel",
+        ".jarvis_faster_whisper_dir",
+        "ensure-voicestudio",
+        "ensure-pockettts",
+        "ensure-umiollamabrain",
+        "ensure-ollamacli",
         "install-persona-voices.py",
         "kokoro",
         "soundfile",
@@ -116,6 +124,18 @@ def test_installer_offers_voice_model_checkboxes():
     assert "neural voice" in _read(README).lower()
 
 
+def test_installer_registers_elevated_logon_task():
+    iss = _read(ISS)
+    assert 'Name: "elevatedlogon"' in iss
+    assert "RegisterLogonTask" in iss
+    assert "JarvisElevatedBackend" in iss
+    assert "Tasks: elevatedlogon" in iss
+    assert 'Flags: checkedonce' in iss
+    start = (REPO_ROOT / "start-jarvis.ps1").read_text(encoding="utf-8")
+    assert "Verb RunAs" in start
+    assert "JarvisElevatedBackend" in start
+
+
 def test_bootstrap_27b_is_optional_switch_only():
     text = _read(BOOTSTRAP)
     assert "InstallExpert27B" in text
@@ -136,6 +156,16 @@ def test_jarvis_iss_wiring():
     assert "force-stop-jarvis.ps1" in text
     assert "Start Jarvis" in text
     assert "Stop Jarvis" in text
+    assert "dl_kokoro" in text
+    assert "dl_personavoices" in text
+    assert "dl_whisper" in text
+    assert "dl_voicestudio" in text
+    assert "dl_pockettts" in text
+    assert "dl_umi_brain" in text
+    assert "-InstallWhisper" in text
+    assert "-InstallVoiceStudio" in text
+    assert "-InstallPocketTTS" in text
+    assert "-InstallUmiBrain" in text
     lower = text.lower()
     assert "models" in lower and "excludes" in lower
     assert "release\\" in lower or "release\\*" in lower

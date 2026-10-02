@@ -3,6 +3,7 @@ import { galaxyStatusText } from "../galaxyPresence"
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
 import { MorphablePresenceStage } from "./MorphablePresenceStage"
+import { preparePortraitCloud } from "./shapes/portraitCloud"
 import "./humanoid-presence.css"
 
 type HumanoidPresenceProps = {
@@ -21,6 +22,14 @@ function phaseLabel(phase: PresencePhase): string {
 
 export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }: HumanoidPresenceProps) {
   const galaxy = settings.requestedPresence === "galaxy"
+  const [referenceShape, setReferenceShape] = useState<string>()
+  useEffect(() => {
+    let cancelled = false
+    if (!galaxy) preparePortraitCloud("/presence/jarvis-original/humanoid.webp", "humanoid")
+      .then(id => { if (!cancelled) setReferenceShape(id) })
+      .catch(error => console.warn("Humanoid artwork unavailable; retaining procedural figure", error))
+    return () => { cancelled = true }
+  }, [galaxy])
   const [meter, setMeter] = useState({ level: 0, attached: false })
 
   useEffect(() => {
@@ -48,9 +57,9 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
     <MorphablePresenceStage
       snapshot={snapshot}
       settings={settings}
-      shapeId={shapeId}
+      shapeId={!galaxy && (!shapeId || shapeId === "humanoid_bust") ? referenceShape || "humanoid_bust" : shapeId}
       personaVisual={personaVisual}
-      className={`jarvis-presence jarvis-presence-humanoid${galaxy ? " galaxy" : ""}`}
+      className={`jarvis-presence jarvis-presence-stage jarvis-presence-humanoid${galaxy ? " galaxy" : ""}`}
       ariaLabel={`ANZU particle presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
     >
       {snapshot.phase === "offline" && <span className="jarvis-presence-broken-ring" aria-hidden="true" />}

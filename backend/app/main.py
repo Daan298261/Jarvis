@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, runtime_profiles, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
+from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, reversibility, runtime_profiles, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
@@ -93,6 +93,7 @@ app.include_router(runtime_profiles.router)
 app.include_router(hexstrike.router)
 app.include_router(permissions.router)
 app.include_router(approvals.router)
+app.include_router(reversibility.router)
 app.include_router(computer_use.router)
 app.include_router(lmstudio.router)
 app.include_router(packs.router)
@@ -302,6 +303,12 @@ async def startup() -> None:
 
     QUEUE_WATCHER.start()
     mobile_runtime.start()
+    try:
+        from .inference.status_monitor import STATUS_MONITOR
+
+        STATUS_MONITOR.start()
+    except Exception:
+        logging.debug("Model status monitor start skipped", exc_info=True)
     await QUEUE_WATCHER.process_pending()
     try:
         from .tts.warm_start import schedule_tts_warm_start
@@ -368,6 +375,12 @@ async def _auto_start_crucix() -> None:
 @app.on_event("shutdown")
 async def shutdown() -> None:
     QUEUE_WATCHER.stop()
+    try:
+        from .inference.status_monitor import STATUS_MONITOR
+
+        STATUS_MONITOR.stop()
+    except Exception:
+        logging.debug("Model status monitor stop skipped", exc_info=True)
     await WHATSAPP_PAIRING.close()
     await mobile_runtime.stop()
     try:

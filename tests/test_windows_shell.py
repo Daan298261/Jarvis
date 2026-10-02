@@ -13,11 +13,30 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def test_tray_defines_start_jarvis_and_full_control():
+    """Start stays a normal launch; full control is the separate UAC path."""
+    text = _read(TRAY_SCRIPT)
+    start = text.split("function Start-Jarvis", 1)
+    full = text.split("function Enable-FullControl", 1)
+    assert len(start) == 2, "jarvis-tray.ps1 must define function Start-Jarvis"
+    assert len(full) == 2, "jarvis-tray.ps1 must define function Enable-FullControl"
+    start_body = start[1].split("\nfunction ", 1)[0]
+    full_body = full[1].split("\nfunction ", 1)[0]
+    assert "Verb RunAs" not in start_body
+    assert "-NoBrowser" in start_body
+    assert "start-jarvis.ps1" in text
+    assert "Verb RunAs" in full_body
+    assert "RegisterLogonTask" in full_body
+    assert "{ Start-Jarvis }" in text
+    assert "{ Enable-FullControl }" in text
+
+
 def test_tray_helper_exists_with_required_menu():
     assert TRAY_SCRIPT.is_file()
     text = _read(TRAY_SCRIPT)
     for needle in (
         "Open portal",
+        "Allow full PC control",
         "Start",
         "Stop",
         "Quit",
@@ -44,7 +63,14 @@ def test_start_jarvis_allows_voice_only_without_gguf():
     assert "Press Enter to close" in text
     assert "RegisterLogonTask" in text
     assert "Register-ScheduledTask" in text
+    assert "Verb RunAs" in text
+    assert "JarvisElevatedBackend" in text
     assert "-ErrorAction Stop" in text
+    assert "Remove-Item Env:JARVIS_SKIP_MODEL" in text
+    assert "Start-ElevatedJarvisCopy" in text
+    assert "JARVIS_SKIP_ELEVATION_PROMPT" in text
+    assert "Windows will ask once" in text
+    assert "Allow full PC control" in _read(TRAY_SCRIPT)
 
 
 def test_stop_jarvis_still_mentions_llama_server():
@@ -64,6 +90,7 @@ def test_jarvis_iss_uninstall_stops_processes():
     lower = text.lower()
     assert "stop-jarvis.ps1" in lower
     assert "includetray" in lower.replace("-", "")
+    assert "JarvisElevatedBackend" in text
 
 
 def test_jarvis_iss_modify_stops_processes_via_prepare_to_install():

@@ -19,9 +19,9 @@ export type SelfCheckSnapshot = {
 
 const STORAGE_KEY = "jarvis.boot-check.v1"
 const POLL_MS = 450
-const MIN_MS = 2400
-const READY_HOLD_MS = 1800
-const MAX_MS = 14000
+const MIN_MS = 400
+const READY_HOLD_MS = 400
+const MAX_MS = 3000
 
 type BootNovaProps = {
   enabled: boolean
@@ -56,22 +56,28 @@ export function BootNova({ enabled, children }: BootNovaProps) {
   const [visible, setVisible] = useState(() => enabled && (forceReplay() || !readDone()))
   const [leaving, setLeaving] = useState(false)
   const [snapshot, setSnapshot] = useState<SelfCheckSnapshot | null>(null)
-  const [phase, setPhase] = useState<"initializing" | "ready">("initializing")
+  const [phase, setPhase] = useState<"initializing" | "ready" | "degraded">("initializing")
 
   useEffect(() => {
     if (!visible) return
     const started = performance.now()
     let cancelled = false
+    let finished = false
     let timer: number | null = null
+    let holdTimer: number | undefined
+    let exitTimer: number | undefined
+    const controller = new AbortController()
 
     const finish = (next: SelfCheckSnapshot | null) => {
-      if (cancelled) return
+      if (cancelled || finished) return
+      finished = true
+      controller.abort()
       setSnapshot(next)
-      setPhase("ready")
-      window.setTimeout(() => {
+      setPhase(next?.working_order ? "ready" : "degraded")
+      holdTimer = window.setTimeout(() => {
         if (cancelled) return
         setLeaving(true)
-        window.setTimeout(() => {
+        exitTimer = window.setTimeout(() => {
           if (cancelled) return
           markDone()
           setVisible(false)
@@ -82,11 +88,12 @@ export function BootNova({ enabled, children }: BootNovaProps) {
     const poll = async () => {
       let latest: SelfCheckSnapshot | null = null
       try {
-        latest = await api<SelfCheckSnapshot>("/api/system/self-check")
-        if (!cancelled) setSnapshot(latest)
+        latest = await api<SelfCheckSnapshot>("/api/system/self-check", { signal: controller.signal })
+        if (!cancelled && !finished) setSnapshot(latest)
       } catch {
         latest = null
       }
+      if (cancelled || finished) return
       const elapsed = performance.now() - started
       const complete = Boolean(latest && latest.working_order && latest.overall !== "initializing")
       if (complete && elapsed >= MIN_MS) {
@@ -100,9 +107,15 @@ export function BootNova({ enabled, children }: BootNovaProps) {
       timer = window.setTimeout(() => { void poll() }, POLL_MS)
     }
 
+    // A hung HTTP request must not trap the owner behind the boot overlay.
+    const deadline = window.setTimeout(() => finish(null), MAX_MS)
     void poll()
     return () => {
       cancelled = true
+      controller.abort()
+      window.clearTimeout(deadline)
+      window.clearTimeout(holdTimer)
+      window.clearTimeout(exitTimer)
       if (timer != null) window.clearTimeout(timer)
     }
   }, [visible])
@@ -140,6 +153,8 @@ export function BootNova({ enabled, children }: BootNovaProps) {
                     All systems
                     <span>in working order</span>
                   </>
+                ) : phase === "degraded" ? (
+                  <>Opening workspace<span>Some checks are unavailable</span></>
                 ) : (
                   <>
                     <span className="boot-nova-colon">:</span>

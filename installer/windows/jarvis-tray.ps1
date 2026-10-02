@@ -24,6 +24,16 @@ function Open-Portal {
     Start-Process $PortalUrl
 }
 
+function Enable-FullControl {
+    Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $StartScript,
+        "-RegisterLogonTask",
+        "-NoBrowser"
+    ) -WorkingDirectory $Root
+}
+
 function Start-Jarvis {
     Start-Process -FilePath "powershell.exe" -ArgumentList @(
         "-NoProfile",
@@ -54,6 +64,7 @@ $script:notify.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $null = $menu.Items.Add("Open portal", $null, { Open-Portal })
+$null = $menu.Items.Add("Allow full PC control", $null, { Enable-FullControl })
 $null = $menu.Items.Add("Start", $null, { Start-Jarvis })
 $null = $menu.Items.Add("Stop", $null, { Stop-Jarvis })
 $null = $menu.Items.Add("Quit", $null, { Quit-Tray })

@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react"
-import { isApiError } from "../api"
-import { installVoiceProfile, loadVoiceProfileCatalog, type VoiceProfileCatalog } from "../tts/voiceProfiles"
+import { loadVoiceProfileCatalog, type VoiceProfileCatalog } from "../tts/voiceProfiles"
+import { activateNamedPersona } from "./activateNamedPersona"
 import {
   PERSONA_LABELS,
   PERSONA_VISUALS,
   resetNamedPersona,
   ROSTER_IDS,
   savePersonaAppearance,
-  selectNamedPersona,
+  updateNamedPersonaPrefs,
   useNamedPersonas,
   type PersonaAppearance,
 } from "./namedPersonas"
@@ -52,20 +52,8 @@ export function NamedPersonaControls() {
     setError("")
     setProgress("")
     try {
-      try {
-        await selectNamedPersona(id)
-      } catch (err) {
-        if (!isApiError(err) || err.status !== 409) throw err
-        const detail = (err.body as { detail?: { error?: string; profile_id?: string } } | null)?.detail
-        if (detail?.error !== "install_required" && detail?.error !== "tts_unavailable") throw err
-        const profileId = detail.profile_id
-        if (!profileId) throw err
-        setProgress(`Downloading the neural voice for ${PERSONA_LABELS[id] || id}…`)
-        const result = await installVoiceProfile(profileId)
-        if (!result.installed) throw new Error(result.detail || `Could not install ${profileId}.`)
-        await selectNamedPersona(id)
-      }
-      setVoiceCatalog(await loadVoiceProfileCatalog())
+      await activateNamedPersona(id, { onProgress: setProgress })
+      void loadVoiceProfileCatalog().then(setVoiceCatalog).catch(() => undefined)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update the named persona.")
     } finally {
@@ -121,34 +109,90 @@ export function NamedPersonaControls() {
       <div className="named-persona-roster" role="group" aria-label="Named persona avatars">
         {options.map((persona) => {
           const selected = persona.id === (pendingId || active?.id || "anzu")
+          const row = state?.personas.find((item) => item.id === persona.id)
+          const isDefault = row?.is_default ?? persona.id === (state?.default_id || "anzu")
+          const isPinned = row?.is_pinned ?? (state?.pinned_ids || []).includes(persona.id)
           return (
-            <button
-              key={persona.id}
-              type="button"
-              className={`named-persona-card${selected ? " active" : ""}`}
-              aria-pressed={selected}
-              title={persona.role || `${persona.label} persona`}
-              disabled={busy}
-              onClick={() => void choose(persona.id)}
-            >
-              <SpecialistShapeMark
-                shapeId={persona.presence_shape_id}
-                color={persona.default_colors.orb}
-                label={`${persona.label} avatar`}
-                size={46}
-              />
-              <span>{persona.label}</span>
-            </button>
+            <div key={persona.id} className={`named-persona-card-wrap${selected ? " active" : ""}`}>
+              <button
+                type="button"
+                className={`named-persona-card${selected ? " active" : ""}`}
+                aria-pressed={selected}
+                title={persona.role || `${persona.label} persona`}
+                disabled={busy}
+                onClick={() => void choose(persona.id)}
+              >
+                <SpecialistShapeMark
+                  personaId={persona.id}
+                  shapeId={persona.presence_shape_id}
+                  color={persona.default_colors.orb}
+                  label={`${persona.label} avatar`}
+                  size={46}
+                />
+                <span>{persona.label}</span>
+              </button>
+              <div className="named-persona-card-actions">
+                <button
+                  type="button"
+                  className={`named-persona-icon-btn${isDefault ? " on" : ""}`}
+                  title={isDefault ? "Default persona on startup" : "Make default on startup"}
+                  aria-pressed={isDefault}
+                  aria-label={isDefault ? "Default persona on startup" : "Make default on startup"}
+                  disabled={busy || isDefault}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void run(() => updateNamedPersonaPrefs(persona.id, { setAsDefault: true }))
+                  }}
+                >
+                  Default
+                </button>
+                <button
+                  type="button"
+                  className={`named-persona-icon-btn${isPinned ? " on" : ""}`}
+                  title={isPinned ? "Unpin from HUD bar" : "Pin to HUD bar"}
+                  aria-pressed={isPinned}
+                  aria-label={isPinned ? "Unpin from HUD bar" : "Pin to HUD bar"}
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void run(() => updateNamedPersonaPrefs(persona.id, { pin: !isPinned }))
+                  }}
+                >
+                  Pin
+                </button>
+              </div>
+            </div>
           )
         })}
       </div>
-      <p className="settings-note">Shape and voice travel together.</p>
+      <p className="settings-note">
+        Default sets who loads on startup; Pin puts up to{" "}
+        {state?.max_pinned ?? 5} personas on the HUD top bar.
+      </p>
+      {active?.id && (
+        <button
+          type="button"
+          className="btn secondary"
+          disabled={busy || (active.is_default ?? active.id === (state?.default_id || "anzu"))}
+          onClick={() => void run(() => updateNamedPersonaPrefs(active.id, { setAsDefault: true }))}
+        >
+          {(active.is_default ?? active.id === (state?.default_id || "anzu"))
+            ? `${active.label} is the default persona`
+            : `Make ${active.label} the default`}
+        </button>
+      )}
       {active?.id && activeVoice && !activeVoice.available && (
         <button type="button" className="btn secondary" disabled={busy} onClick={() => void choose(active.id)}>
           Get {active.label} neural voice
         </button>
       )}
       {progress && <p className="settings-note" role="status">{progress}</p>}
+      {pendingId && !progress && (
+        <p className="named-persona-switch-status" role="status">
+          <span className="named-persona-switch-pulse" aria-hidden="true" />
+          Morphing to {PERSONA_LABELS[pendingId] || pendingId}…
+        </p>
+      )}
       {appearance && active && (
         <div className="named-persona-overrides">
           <label>

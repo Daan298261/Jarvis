@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from ..inference.hotswap import activate_runtime_profile, parse_runtime_endpoint
+from ..inference.runtime_profiles import get_runtime_profile
 from ..persona.named_persona import (
     NamedPersonaBindError,
     apply_main_persona,
     attach_specialist,
+    persist_persona_preferences,
     public_state,
+    resolve_persona_id,
     update_appearance,
 )
+from ..inference.ollama_runtime import ensure_local_ollama
+from ..persona.persona_brain import brain_runtime_name_for_persona, reflex_verify_brain_runtime
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/named-personas", tags=["named-personas"])
 
@@ -35,6 +45,49 @@ class NamedPersonaPut(BaseModel):
     as_specialist: bool = False
     reset: bool = False
     appearance: AppearanceIn | None = None
+    activate_brain: bool = True
+    apply: bool = True
+    set_as_default: bool = False
+    pin: bool | None = None
+
+
+async def _maybe_activate_persona_brain(raw_persona_id: str) -> None:
+    try:
+        persona_id = resolve_persona_id(raw_persona_id, required=True)
+    except NamedPersonaBindError:
+        return
+    runtime_name = brain_runtime_name_for_persona(persona_id)
+    if not runtime_name:
+        return
+    profile = get_runtime_profile(runtime_name) or get_runtime_profile(f"recommended-{runtime_name}")
+    if profile is None or not profile.enabled:
+        return
+    if not reflex_verify_brain_runtime(persona_id=persona_id, runtime_name=runtime_name):
+        logger.info(
+            "persona_brain_reflex_declined persona=%s runtime=%s",
+            persona_id,
+            runtime_name,
+        )
+        return
+    if (profile.provider or "").strip().lower() == "ollama":
+        host, port = parse_runtime_endpoint(profile.endpoint)
+        boot = await ensure_local_ollama(host=host, port=port, model=profile.model)
+        if not boot.get("ok"):
+            logger.warning(
+                "persona_brain_ollama_prepare_failed persona=%s detail=%s",
+                persona_id,
+                boot.get("detail"),
+            )
+            return
+    try:
+        await activate_runtime_profile(profile, force=True)
+    except Exception as exc:
+        logger.warning(
+            "persona_brain_activate_failed persona=%s runtime=%s detail=%s",
+            persona_id,
+            runtime_name,
+            str(exc)[:240],
+        )
 
 
 def _http(exc: NamedPersonaBindError) -> HTTPException:
@@ -51,7 +104,7 @@ async def get_named_personas() -> dict:
 
 
 @router.put("")
-async def put_named_personas(body: NamedPersonaPut) -> dict:
+async def put_named_personas(body: NamedPersonaPut, background_tasks: BackgroundTasks) -> dict:
     patch = body.appearance.model_dump(exclude_none=True) if body.appearance is not None else None
     try:
         if body.as_specialist:
@@ -60,9 +113,22 @@ async def put_named_personas(body: NamedPersonaPut) -> dict:
             if body.reset or patch:
                 update_appearance(body.id, patch, reset=body.reset)
             return await attach_specialist(body.id, body.task_id or "")
-        apply_main_persona(body.id, reset=body.reset)
-        if patch:
-            update_appearance(body.id, patch, reset=False)
+        if body.set_as_default or body.pin is not None:
+            persist_persona_preferences(
+                body.id,
+                set_as_default=body.set_as_default,
+                pin=body.pin,
+            )
+        if body.apply:
+            apply_main_persona(body.id, reset=body.reset)
+            if patch:
+                update_appearance(body.id, patch, reset=False)
+            if body.activate_brain:
+                # Shape, palette and neural voice are the visible persona switch.
+                # Optional model hotswap must not hold that response (or the HUD) hostage.
+                background_tasks.add_task(_maybe_activate_persona_brain, body.id)
+        elif patch:
+            update_appearance(body.id, patch, reset=body.reset)
         return public_state()
     except NamedPersonaBindError as exc:
         raise _http(exc) from exc

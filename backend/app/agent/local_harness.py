@@ -178,6 +178,30 @@ def resolve_tool_names(policy: LocalHarnessPolicy) -> list[str]:
     return names
 
 
+def _cybersecurity_skill_requested(policy: LocalHarnessPolicy, goal: str, member_key: str) -> bool:
+    """RFC-0105: inject module skill packs on demand only — never dump all names every turn."""
+    needle = (member_key or "").strip().lower()
+    texts = [
+        (policy.task_class or "").strip().lower(),
+        (goal or "").strip().lower(),
+    ]
+    texts.extend((skill_id or "").strip().lower() for skill_id in policy.skill_ids)
+    joined = " ".join(t for t in texts if t)
+    if any(token in joined for token in ("cybersecurity", "pentest", "red-team", "blue-team")):
+        return True
+    if needle and needle in joined:
+        return True
+    for skill_id in policy.skill_ids:
+        key = (skill_id or "").strip().lower()
+        if not key:
+            continue
+        if key == f"module:cybersecurity:{needle}" or key == needle:
+            return True
+        if key.startswith("module:cybersecurity:"):
+            return True
+    return False
+
+
 def load_skill_blocks(policy: LocalHarnessPolicy, goal: str = "") -> list[str]:
     """Load compact skill guidance blocks on demand from task class and explicit ids."""
     blocks: list[str] = []
@@ -200,6 +224,9 @@ def load_skill_blocks(policy: LocalHarnessPolicy, goal: str = "") -> list[str]:
         seen.add("testing")
     for key, hint in SKILL_HINTS.items():
         if not key.startswith("module:cybersecurity:") or key in seen:
+            continue
+        member = key.split(":", 2)[-1]
+        if not _cybersecurity_skill_requested(policy, goal, member):
             continue
         blocks.append(hint)
         seen.add(key)

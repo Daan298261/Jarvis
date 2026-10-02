@@ -187,6 +187,34 @@ def package_version() -> str | None:
         return None
 
 
+def ensure_package() -> str:
+    """Install the pinned ``laya`` wheel when missing. Never pip-installs under pytest."""
+    import os
+    import subprocess
+    import sys
+
+    current = package_version()
+    if current == LAYA_PACKAGE_VERSION:
+        return current
+    hint = f"pip install laya=={LAYA_PACKAGE_VERSION}"
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        raise RuntimeError(f"The 'laya' package is not installed ({hint})")
+    cmd = [sys.executable, "-m", "pip", "install", f"laya=={LAYA_PACKAGE_VERSION}"]
+    try:
+        subprocess.check_call(cmd)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(f"Could not install laya=={LAYA_PACKAGE_VERSION}: {exc}") from exc
+    import importlib
+
+    importlib.invalidate_caches()
+    current = package_version()
+    if current != LAYA_PACKAGE_VERSION:
+        raise RuntimeError(
+            f"laya {current or 'missing'} after {hint}; Jarvis pins laya=={LAYA_PACKAGE_VERSION}"
+        )
+    return current
+
+
 def write_test_install(
     *,
     encoder_bytes: bytes | None = None,
@@ -229,11 +257,7 @@ def write_test_install(
 
 def install_managed(*, token: str | None = None) -> dict[str, Any]:
     """Download the pinned checkpoint into the Jarvis data dir and verify every digest."""
-    version = package_version()
-    if version is None:
-        raise RuntimeError("The 'laya' package is not installed (pip install laya==%s)" % LAYA_PACKAGE_VERSION)
-    if version != LAYA_PACKAGE_VERSION:
-        raise RuntimeError(f"laya {version} is installed; Jarvis pins laya=={LAYA_PACKAGE_VERSION}")
+    version = ensure_package()
     from huggingface_hub import snapshot_download
 
     snapshot = Path(

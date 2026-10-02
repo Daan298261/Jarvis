@@ -1,6 +1,7 @@
 # RFC-0094: Settings menu information architecture
 
-**Status:** implemented
+**Status:** implemented  
+**Amended:** 2026-09-30 — **canonical Settings IA restored: separate first-class Appearance and Voice.** This amend **overrides** [RFC-0113](0113-admin-settings-submenu-1-4.md) composed Settings nav id `appearance-voice` and the RFC-0175 lock that `SETTINGS_SUBMENUS` stays `appearance-voice`. HUD was already split (Persona / Voice / Appearance) and **stays split**. Status of the #267 six-group land stays **implemented**. The **restore of Settings `voice` + `appearance` as primary nav ids** is **accepted, not implemented** — do not ledger-tick implemented from this specs amend.  
 **Queue item:** (none — no new §58 checkbox; implement is a Desktop HUD + Settings IA follow-up after CoS names it)
 **Author:** Jarvis Architect
 **Date:** 2026-09-16
@@ -8,6 +9,51 @@
 **Related (do not rewrite):** RFC-0050 presence / presentation (Appearance concepts). RFC-0061/0062 speak toggle + voice catalog (picker **layout** only). RFC-0074 companion pairing. RFC-0079 computer-use permissions. RFC-0086 HexStrike suite (**do not** redesign). **RFC-0092 neural TTS default / no silent SAPI** stays Sol-priority — this RFC must **not** fold it (no TTS engine, default, catalog ranking, or speak-filter changes). RFC-0093 installer force-stop is unrelated.
 
 This PR is **specs-only**. Product code is a follow-up implement ticket. Do not edit `frontend/src/` or backend in this PR.
+
+## Amend (2026-09-30) — canonical Settings IA: separate Appearance vs Voice
+
+**Winner.** One IA for **Desktop HUD + portal Settings**. Tip product (`settingsSubmenus.ts`) composed Settings into `appearance-voice` per RFC-0113 while the HUD stayed split (Persona / Voice / Appearance). That Settings/HUD mismatch is the conflict. **RFC-0094 wins for Voice vs Appearance.** RFC-0113’s composed Settings pane is **superseded**. RFC-0175’s “keep `appearance-voice`” lock is **superseded**.
+
+**Why this wins (verified against tip RFCs):**
+
+- Owner HUD is already three first-class menus: Persona, Voice, Appearance (`AppearancePresenceControls`). Combining Settings while HUD is split is the heap RFC-0094 removed.
+- Anzu roster binds `voice_profile_id` on persona select (RFC-0137). Voice catalog, speak-chat, and pack install live on **Voice**. Presence profiles, Galaxy ADD, colors, glow, and the named-persona **visual** select live on **Appearance**. Combining those in one Settings dump hides the bind.
+- RFC-0113 itself forbade re-merging the **HUD**. Extending that split to Settings is the consistent IA.
+
+### Canonical groups (Desktop + portal)
+
+| Id | Label | Intent |
+| --- | --- | --- |
+| `appearance` | Appearance | Theme / presence **style-profile** (RFC-0195: not competing stages) / shell / rendering / attention / motion / named-persona **visual** (RFC-0137 select + colors/glow/scale). Galaxy ADD lives here. |
+| `voice` | Voice | Speak-chat toggle, `VoiceProfilePicker`, install links, per-persona `voice_profile_id` override. **Not** neural-engine work (RFC-0092). |
+| `phone-pairing` | Phone Pairing | **Keep RFC-0113.** First-class Settings home for companion pairing. Reuse existing pairing; do not fork APIs. |
+| `models` | Models & Inference | RFC-0094 `models` intent; RFC-0113 label **Models & Inference** may stay. |
+| `network` | Network & Swarm | RFC-0113 label **may stay**. LAN / auth / private key. Pairing chrome lives on Phone Pairing (link back allowed). Deep-link `/swarm`. |
+| `integrations` | Integrations | Unchanged (deep-link `/mcp`). |
+| `advanced` | Advanced | Unchanged. Do not bury Voice or Appearance here. |
+
+**HUD (unchanged split):** Persona, Voice, Appearance remain first-class. Deep-links: Voice → `/settings/voice`; Appearance → `/settings/appearance`. **Forbidden:** HUD or Settings as a single “Appearance & Voice” dump; deep-link only to `/settings/appearance-voice`.
+
+**Routes:**
+
+- Canonical: `/settings/appearance`, `/settings/voice`, `/settings/phone-pairing`, `/settings/models`, `/settings/network`, `/settings/integrations`, `/settings/advanced` (same family as today; do not invent a parallel `/admin/settings` tree unless the whole Settings family moves — pick one).
+- `/settings/appearance-voice` **redirects**: default → `/settings/appearance`; `#voice` / `?section=voice` → `/settings/voice`.
+- `/settings/voice` and `/settings/appearance` are **canonical again** (RFC-0113 demotion to aliases is **void**).
+- Last-submenu persistence: migrate stored `appearance-voice` → `appearance` (unless the hash was voice). First visit with no memory opens **`voice`** (original RFC-0094). Unknown values fall back to `voice`.
+
+**Persona vs Voice vs Appearance:** Selecting a named persona still binds shape **and** voice together (RFC-0137). After that, Appearance can override visuals; Voice can override the neural pack (fail-closed, no SAPI). Do not move `VoiceProfilePicker` into Appearance on Settings. Do not move presence mode/profile controls into Voice.
+
+### Acceptance (this amend — unchecked until implement + Desktop HUD soak)
+
+- [ ] Settings nav shows **Appearance** and **Voice** as **two** first-class groups (not `Appearance & Voice`).
+- [ ] HUD keeps Persona / Voice / Appearance split; deep-links hit `/settings/voice` and `/settings/appearance`.
+- [ ] Phone Pairing, Models & Inference, Network & Swarm, Integrations, Advanced remain as above.
+- [ ] `/settings/appearance-voice` redirects; bookmarks to `/settings/voice` and `/settings/appearance` open those panes.
+- [ ] Last-submenu migrates `appearance-voice`; first visit opens Voice.
+- [ ] RFC-0092 not folded. HexStrike HUD behavior unchanged.
+- [ ] Specs-only in this amend PR. Implement follow-up: pytest + frontend build. Desktop HUD soak residual.
+
+**Will not:** re-merge HUD; put Voice under Appearance on Settings; delete Phone Pairing; dump inference keys; implement RFC-0195 visuals in the Settings IA ticket.
 
 ## Problem
 

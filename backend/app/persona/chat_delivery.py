@@ -122,6 +122,16 @@ def stream_speak_offset(stream_key: str) -> int:
     return _stream_spoken_through.get(stream_key, 0)
 
 
+def mark_stream_spoken(stream_key: str, through: int) -> None:
+    """Advance the speak cursor so later TTS skips an already-spoken prefix."""
+    key = (stream_key or "").strip()
+    if not key or through <= 0:
+        return
+    current = _stream_spoken_through.get(key, 0)
+    if through > current:
+        _stream_spoken_through[key] = through
+
+
 def clear_stream_speak_state(stream_key: str | None = None) -> None:
     if stream_key is None:
         _stream_spoken_through.clear()
@@ -210,6 +220,14 @@ def maybe_enqueue_streaming_social_tts(
 def pending_chat_tts(limit: int = 10) -> list[dict[str, Any]]:
     items = list(_pending_tts)[-limit:]
     return [item.as_dict() for item in items]
+
+
+def pending_chat_tts_text(item_id: str) -> str:
+    """Return the queued speak text for an early TTS id (first sentence, not the full front line)."""
+    for item in _pending_tts:
+        if item.id == item_id:
+            return item.text
+    return ""
 
 
 def pop_chat_tts(item_id: str) -> dict[str, Any] | None:

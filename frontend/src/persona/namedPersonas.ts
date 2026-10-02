@@ -23,11 +23,16 @@ export type NamedPersona = {
   voice_profile_requested?: string | null
   default_colors: { orb: string; accent: string }
   appearance: PersonaAppearance
+  is_default?: boolean
+  is_pinned?: boolean
 }
 
 export type NamedPersonaState = {
   active: NamedPersona
   personas: NamedPersona[]
+  default_id?: string
+  pinned_ids?: string[]
+  max_pinned?: number
 }
 
 const PHRASE: Record<string, string> = {
@@ -44,12 +49,13 @@ const PHRASE: Record<string, string> = {
   eir: "looking after the house",
   maia: "growing the audience",
   vulcan: "working the systems",
+  umi: "reasoning deeply",
 
 }
 
 export const ROSTER_IDS = [
   "anzu", "mestor", "nabu", "enki", "veles", "themis", "aegir",
-  "bragi", "hermes", "heimdall", "eir", "maia", "vulcan",
+  "bragi", "hermes", "heimdall", "eir", "maia", "vulcan", "umi",
 ] as const
 
 export type NamedPersonaId = typeof ROSTER_IDS[number]
@@ -73,12 +79,13 @@ export const PERSONA_VISUALS: Record<NamedPersonaId, {
   eir: { shapeId: "breath_leaf", orbColor: "#6EE7B7", accentColor: "#FDA4AF" },
   maia: { shapeId: "star_social", orbColor: "#FB7185", accentColor: "#F472B6" },
   vulcan: { shapeId: "forge_core", orbColor: "#EA580C", accentColor: "#DC2626" },
+  umi: { shapeId: "memory_rings", orbColor: "#7C3AED", accentColor: "#A78BFA" },
 }
 
 export const PERSONA_LABELS: Record<string, string> = {
   anzu: "Anzu", mestor: "Mestor", nabu: "Nabu", enki: "Enki", veles: "Veles",
   themis: "Themis", aegir: "Aegir", bragi: "Bragi", hermes: "Hermes",
-  heimdall: "Heimdall", eir: "Eir", maia: "Maia", vulcan: "Vulcan",
+  heimdall: "Heimdall", eir: "Eir", maia: "Maia", vulcan: "Vulcan", umi: "Umi",
 }
 
 export function canonicalizePersonaId(raw: string): string {
@@ -116,9 +123,42 @@ export async function loadNamedPersonas(): Promise<NamedPersonaState> {
 }
 
 export async function selectNamedPersona(id: string): Promise<NamedPersonaState> {
+  const previous = cache
+  const canonicalId = canonicalizePersonaId(id)
+  const selected = previous?.personas.find((persona) => persona.id === canonicalId)
+  if (previous && selected) publish({ ...previous, active: selected })
+  const controller = new AbortController()
+  const deadline = window.setTimeout(() => controller.abort(), 2500)
+  try {
+    const state = await api<NamedPersonaState>("/api/named-personas", {
+      method: "PUT",
+      body: JSON.stringify({ id: canonicalId }),
+      signal: controller.signal,
+    })
+    publish(state)
+    return state
+  } catch (error) {
+    // Keep the optimistic visual selection. A slow backend must not make the
+    // avatar snap back or leave the whole appearance panel locked.
+    if (controller.signal.aborted) {
+      throw new Error(`${PERSONA_LABELS[canonicalId] || canonicalId} is active locally; Jarvis did not confirm the saved persona in time.`)
+    }
+    throw error
+  } finally {
+    window.clearTimeout(deadline)
+  }
+}
+
+export async function updateNamedPersonaPrefs(
+  id: string,
+  prefs: { setAsDefault?: boolean; pin?: boolean; apply?: boolean },
+): Promise<NamedPersonaState> {
+  const body: Record<string, unknown> = { id, apply: prefs.apply ?? false }
+  if (prefs.setAsDefault) body.set_as_default = true
+  if (prefs.pin !== undefined) body.pin = prefs.pin
   const state = await api<NamedPersonaState>("/api/named-personas", {
     method: "PUT",
-    body: JSON.stringify({ id }),
+    body: JSON.stringify(body),
   })
   publish(state)
   return state
@@ -130,7 +170,7 @@ export async function savePersonaAppearance(
 ): Promise<NamedPersonaState> {
   const state = await api<NamedPersonaState>("/api/named-personas", {
     method: "PUT",
-    body: JSON.stringify({ id, appearance }),
+    body: JSON.stringify({ id, appearance, apply: false }),
   })
   publish(state)
   return state

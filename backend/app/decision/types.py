@@ -14,6 +14,7 @@ ProviderName = Literal["rules", "laya", "jev", "generative"]
 REFLEX_DECISION_CLASSES: frozenset[str] = frozenset(
     {
         "persona_model_routing",
+        "request_routing",
         "tool_shortlist",
         "tool_selection",
         "complexity_escalation",

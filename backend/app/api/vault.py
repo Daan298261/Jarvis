@@ -32,11 +32,13 @@ class VaultSearchIn(BaseModel):
 
 
 class VaultActIn(BaseModel):
-    action: Literal["open", "read", "create", "append", "edit"]
+    action: Literal["open", "read", "create", "append", "edit", "resolve", "neighborhood", "follow"]
     rel_path: str = ""
     content: str = ""
     query: str = ""
     force: bool = False
+    hops: int = Field(default=1, ge=0, le=2)
+    memory_pointer: str = ""
 
 
 class VaultSyncIn(BaseModel):
@@ -84,6 +86,7 @@ async def vault_search(body: VaultSearchIn) -> dict[str, Any]:
                 "excerpt": h.excerpt,
                 "content_hash": h.content_hash,
                 "score": h.score,
+                "provenance": h.provenance,
             }
             for h in hits
         ],
@@ -99,6 +102,8 @@ async def vault_act(body: VaultActIn) -> dict[str, Any]:
             content=body.content,
             query=body.query,
             force=body.force,
+            hops=body.hops,
+            memory_pointer=body.memory_pointer.strip() or None,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

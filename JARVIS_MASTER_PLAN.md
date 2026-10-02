@@ -2172,7 +2172,7 @@ Canonical RFC bodies live under `docs/rfcs/`. Do not rewrite them from the maste
 - [x] RFC-0172 Reflex-first browser/computer-use fast loop — implemented (#408 @ `8f81e589`; tip wire follow-up + live a11y soak residual; 0145/0151 soft)
 - [x] RFC-0173 Skill Forge — verified trace to reusable skill — implemented (#414 @ `e442b331`; portal #416 @ `ebcdf9da`; no residual)
 - [x] RFC-0174 Multi-agent rooms, blackboard, handoff and deadlock — implemented (#413 @ `13740066`; portal #417 @ `2cb6c0b2`; live multi-model room Desktop soak residual)
-- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU / live WebGL soak vs refs A/B/C + real webcam face attract)
+- [x] RFC-0175 Galaxy presence option, chat voice waveform, and Advanced controls — implemented (#419 @ `444e50c9`; amend 2026-09-25 morph implemented #425 @ `063a5ee1`; residual: Desktop GPU / live WebGL soak vs **RFC-0195** humanoid rest + viewport-fill + refs B/C + webcam attract; idle-hide / 680∶480 primary stage superseded 2026-09-30; soak AC unchecked)
 - [x] RFC-0176 Shared dot appearance profiles — implemented (#428 @ `7ecfdcf0`; specs #426 @ `d792ed47`; harness row closed #433 @ `a128942` via #430 preview; no residual)
 - [x] RFC-0177 Shared dot persona motion cues — implemented (#429 @ `f0ea9e40`; specs #426 @ `d792ed47`; status line #433 @ `a128942`; no residual)
 - [x] RFC-0178 Adaptive dot rendering and persona framing — implemented (#430 @ `ae582af2` including low-tier WebGL bypass #432 @ `f51d5b3`; residual: Windows desktop GPU sign-off, low measured FPS in #430)
@@ -2956,6 +2956,56 @@ Comment-scrape follow-up on the Git Radar reel (batch n29) resolved a caption li
 Reason:
 
 The caption link is a real agent-harness SDK. Leaving it unscored, or filing it as a persona, would either drop the research or stand up a second orchestrator.
+
+---
+
+Decision: RFC-0194 presence idle free-float and framing implemented
+
+[RFC-0194](docs/rfcs/0194-restore-presence-idle-and-framing.md) is **implemented** on development via #466 @ `9bd2481211c2e27c17b6229a3468711a732c8b42` (squash; pre-squash yaw-frame harden head `6a236b1`). Fixes idle free-float (`lifecycleMorphTarget("idle") === 0`), AABB framing + geometric center offset, Neural/Humanoid ~680∶480 aspect lock, and yaw-frame fit offset harden (`presenceFitYawFrameOffset` / shared `PRESENCE_DEFAULT_FRAMING_YAW`). Quality bar **Anzu 1.0**. Full intent for the code path. No stubs. **Residual:** Desktop GPU / live WebGL soak (Galaxy ADD star layer + free-float idle → engaged figure). AC unchecked; Architect-signed; cloud cannot sign. No §58 RFC-0194 checkbox was filed (do not invent one). No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #466 landed on development; Desktop GPU soak stays residual like RFC-0175.
+
+---
+
+Decision: RFC-0195 visual acceptance + RFC-0094 Settings Appearance vs Voice (accepted amends)
+
+[RFC-0195](docs/rfcs/0195-visual-acceptance-and-presence-stage.md) is **accepted** (specs only). It **overrides** RFC-0194 idle identity-hide (`lifecycleMorphTarget("idle") === 0`) and the 920×680∶480 **primary** stage, and **overrides** RFC-0175 live rest as Ref A anonymous free-float. Crop-protection (AABB + geometric center) stays. Rest is a recognizably humanoid / winning-figure silhouette; engage still morphs/tightens; one viewport-filling WebGL renderer plus style/profile controls; APEX is public orb-and-graph only; golden captures for the 13 canonical personas plus side-injected Umi `opus_tide` (must not reuse Nabu `memory_rings`). [RFC-0094](docs/rfcs/0094-settings-menu-information-architecture.md) 2026-09-30 amend is the **canonical Settings IA**: separate first-class **Appearance** and **Voice** on Desktop + portal (HUD already split). RFC-0113 composed `appearance-voice` Settings nav is **superseded**; Phone Pairing / Network & Swarm remain. RFC-0175/0194/0051/0050/0069/0176/0178/0136-APEX/0137/0138 carry matching amend notes. Statuses stay honest: 0195 **accepted**; 0094 restore **accepted not implemented**; 0175/0194 **implemented** for prior lands; Desktop soak AC **unchecked**. No new §58 checkbox. No product code in this ledger line. Pointer: [`docs/audits/2026-09-30-visual-acceptance-and-settings-ia.md`](docs/audits/2026-09-30-visual-acceptance-and-settings-ia.md). Queued harden (next seats, not this PR): (a) model-status cached bg monitor; (b) RFC-0195 silhouette/framing/bloom implement (UX/Desktop, Grok 4.6); (c) RFC-0117 dedicated tiny seat.
+
+Reason:
+
+Taco / CoS 2026-09-30: product must match owner intent on the glass (identity at rest, viewport presence, one stage) and one Settings IA that matches the HUD split. Implementers must not restore idle-hide, a 920px primary stage, or a combined Appearance & Voice Settings dump.
+
+---
+
+Decision: RFC-0031 reversibility-first action gates implemented
+
+[RFC-0031](docs/rfcs/0031-reversibility-first-action-gates.md) is **implemented** on development via #476 @ `a50c7adf7c2f8467e51c464520e7b83b8915dc90` (squash; pre-squash APPROVE_WITH_RESIDUALS harden head `fca13da7`). Authorize → RFC-0027 firewall ordering hook → reversibility / unforgeable `ApprovalGrant` / park-resume / durable undo. Real filesystem + settings reverse executors (`undo_restore.py`); `snapshot_required` fail-closed before mutation; undo registration failures logged + BUS + observation (no silent `except: pass`); apply refuses with honest `not_implemented` when reverse payload missing (never fake `undone`). `tests/test_rfc0031_reversibility_gates.py` covers model self-confirm forge, file/settings undo, destructive/credential/external gates, timeout/reject, stale conflict, composite reverse order. Full intent for the backend path. No stubs for landed reverse paths. **Residuals (AC unchecked):** full RFC-0027 privacy-gateway / REDACT / egress (separate ticket; ordering hook only); portal/HUD undo chrome + NL undo surface; terminal/apps reverse executors (`not_implemented` until wired); Desktop live soak (irreversible pause → grant → resume with real model — cloud cannot sign). No §57 rewrite. No new §58 checkbox (none was filed for 0031). No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #476 squash-landed on `development` tip `a50c7adf`; residuals stay honest.
+
+---
+
+Decision: RFC-0117 tiny front-chat responder hardened (#481)
+
+[RFC-0117](docs/rfcs/0117-tiny-front-chat-responder.md) (tiny front-chat responder — Wave B speed) stays **implemented**. Harden landed on `development` via #481 @ `c50a65341fc6f3522b3d58a681a107bedd321e0a` (squash; pre-squash head `fc198f64093d56bc05e204248a07a69a7abaed5f`, D2 peer APPROVE). Owner-chat terminal `final_basic` / `ask_clarification` complete without `MANAGER.load` / `ensure_context` / two-lane worker; first text + safe TTS leave immediately; ack/handoff emit before the worker; `record_front_timing` preserves early audio timings; double-speak guard. Prior lane remains specs #303 (`49f6af4`) + implement #305 (`4eb25d9`). **Number collision:** `docs/rfcs/0117-durable-state-journal-rollback.md` is a different RFC (durable mutation journal), already implemented via #380 (`049874c7`). This tick does not retick that file. **Residual (AC unchecked):** Windows Desktop first-visible / first-audible soak across ≥2 larger models (cloud cannot sign). Stale #479 task-loop residual was scrubbed before #481 land — do not reopen it (that hard bypass is RFC-0085). No §57 rewrite. No new §58 checkbox. No product code in this ledger PR. RFC-0195 and RFC-0107 are not flipped.
+
+Reason:
+
+CoS asked Architect to ledger-tick the tiny front-chat responder after #481 squash-landed on `development` tip `c50a653`; Desktop soak stays residual.
+
+---
+
+Decision: RFC-0085 universal task fast path hard bypass (#479)
+
+[RFC-0085](docs/rfcs/0085-universal-task-fastpath.md) stays **implemented**. Hard bypass landed on `development` via #479 @ `f2c150b127d76260e0d030a44c44948d24f298ea` (squash; pre-squash head `e0612996148e63c747de9105523d7b737e56b012`, D1 peer APPROVE). Warm-model terminal `final_basic` / `ask_clarification` on `direct_reply`, and lean `direct_lookup`, skip heavy route / watchdog / verify / tool catalog; misses fail closed. `task_fastpath.py`, diagnostics hit/miss, `tests/test_rfc0085_fastpath_hard_bypass.py`. Original stage remains #235 (`954e01f`). **Residuals (AC unchecked):** interactive budget for the whole direct reply (front `timeout_ms` is not that budget); full task-record timing (no queue-delay or verifier-timing columns — row still has `response_route`, `first_response_ms`, `model_ms`, `tool_ms`); direct-lookup weather briefing is still awaited before the front acknowledgement (weather stays the only `direct_lookup`, conversational under RFC-0084). Desktop first-useful-response soak is unsigned (no desktop checkbox was filed; do not invent one). The 2026-09-23 catch-up in this log (warm direct replies still pay a worker + background verify) is superseded for terminal fronts only. No §57 rewrite. No new §58 checkbox. No product code in this ledger PR.
+
+Reason:
+
+CoS asked Architect to ledger-tick after #479 squash-landed on `development`; interactive budget, full timing, and Desktop soak stay honest.
 
 ---
 

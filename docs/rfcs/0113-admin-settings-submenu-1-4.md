@@ -1,6 +1,7 @@
 # RFC-0113: Admin > Settings submenu structure for 1.4
 
 **Status:** accepted  
+**Amended:** 2026-09-30 — **composed Settings `appearance-voice` is superseded.** Canonical Voice vs Appearance split is [RFC-0094](0094-settings-menu-information-architecture.md) 2026-09-30 amend. HUD split was already required here and **stays**. Phone Pairing, Network & Swarm naming, and pairing redirects in this RFC **remain in force**. Status stays **accepted** (not implemented). Do not flip implemented from this amend.  
 **Queue item:** (none — no new §58 checkbox; implement is a named follow-up after CoS names it)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17
@@ -11,6 +12,25 @@
 This PR is **specs-only**. Product code is a follow-up implement ticket. Full intent; **no stubs / soft-fail** (leaving Phone Pairing only on `/companion-pairing` with no Settings home, breaking `/settings/voice` bookmarks, or undoing the Daybreak Voice/Appearance HUD split, is a fail).
 
 **Recommended implement model:** Composer 2.5 (1.4 §2 — routing/component composition + backwards-compatible redirects).
+
+## Amend (2026-09-30) — this RFC no longer owns Voice vs Appearance composition
+
+**Superseded (do not implement):**
+
+- The 1.4 tree row **Appearance & Voice** and nav id `appearance-voice` as a **primary** Settings group (Problem diagram, Decision §1 first row, Decision §4 composed `AppearanceVoiceSettingsPane`, AC “Settings nav shows Appearance & Voice”, AC “Appearance & Voice is a composed pane”).
+- Decision §1 sentence that RFC-0094 ids `voice` and `appearance` **cease to be primary Settings nav ids**.
+- Redirects that send `/settings/voice` and `/settings/appearance` **into** a composed Appearance & Voice pane as the canonical home.
+- Last-submenu migration `voice` / `appearance` → `appearance-voice`.
+- Bare `/settings` first visit opening Appearance & Voice.
+
+**Still in force from this RFC:**
+
+- Phone Pairing first-class Settings home (`phone-pairing`); `/companion-pairing` redirect; do not duplicate pairing APIs.
+- Network **& Swarm** naming; pairing chrome not dumped back into Network as the only home; deep-link `/swarm`.
+- HUD Voice / Appearance **stay split** (this file already forbade HUD merge — that rule **wins** and now applies to Settings too via RFC-0094).
+- Shared pane components; RFC-0092 not folded; HexStrike unchanged.
+
+**Canonical IA:** [RFC-0094](0094-settings-menu-information-architecture.md) Amend 2026-09-30. Implementers follow that table. A worker that re-ships `appearance-voice` as the only Settings home **fails**.
 
 ## Problem
 
@@ -50,7 +70,7 @@ Reuse the current Settings submenu infrastructure (`settingsSubmenus.ts`, `Setti
 | `integrations` | Integrations | Unchanged intent (deep-link `/mcp`). |
 | `advanced` | Advanced | Unchanged intent (autonomy, permissions, license, …). |
 
-RFC-0094 ids `voice` and `appearance` **cease to be primary Settings nav ids**. They remain **redirect aliases** (section 3). HUD compact Voice / Appearance components stay; they may deep-link to `/settings/appearance-voice` (and optionally `#voice` / `#appearance` inside the composed pane).
+RFC-0094 ids `voice` and `appearance` **remain primary Settings nav ids** (2026-09-30 amend). The 1.4 sentence that they cease to be primary is **void**. HUD compact Voice / Appearance stay. They deep-link to `/settings/voice` and `/settings/appearance`.
 
 ### 2. Canonical routes
 
@@ -84,10 +104,13 @@ Existing routes must keep working:
 
 ```text
 /settings/voice
-  -> canonical Appearance & Voice (and focus Voice & Speech if a hash/anchor exists)
+  -> canonical Voice pane (RFC-0094 2026-09-30). NOT Appearance & Voice.
 
 /settings/appearance
-  -> canonical Appearance & Voice (focus Appearance if a hash/anchor exists)
+  -> canonical Appearance pane (RFC-0094 2026-09-30). NOT Appearance & Voice.
+
+/settings/appearance-voice
+  -> /settings/appearance (or /settings/voice if #voice)
 
 /companion-pairing
   -> canonical Phone Pairing
@@ -96,13 +119,15 @@ Existing routes must keep working:
   -> canonical Network & Swarm route (same id; still required so bookmarks/HUD Away targets do not 404)
 ```
 
-Also keep RFC-0094 aliases that still make sense: `/settings#voice`, `?section=voice` → Appearance & Voice; `?section=appearance` → Appearance & Voice; `?section=network` → Network. Last-opened submenu persistence (`jarvis.settings.last_submenu`) **still works**: migrate stored `voice` / `appearance` → `appearance-voice`; unknown values fall back to Appearance & Voice (1.4 first visit). Do not drop persistence.
+Also keep RFC-0094 aliases: `/settings#voice`, `?section=voice` → **Voice**; `?section=appearance` → **Appearance**; `?section=network` → Network. Last-opened submenu persistence (`jarvis.settings.last_submenu`) **still works**: migrate stored `appearance-voice` → `appearance` (Voice if the stored hash was voice); **do not** migrate `voice` / `appearance` into `appearance-voice`. Unknown values fall back to **Voice**. Do not drop persistence.
 
-Bare `/settings` restores last pane; first visit with no memory opens **Appearance & Voice**.
+Bare `/settings` restores last pane; first visit with no memory opens **Voice** (RFC-0094).
 
 ### 4. Appearance + Voice composition
 
-Create a composed pane, e.g. `frontend/src/settings/AppearanceVoiceSettingsPane.tsx`:
+**2026-09-30 SUPERSEDED.** Do not create `AppearanceVoiceSettingsPane` as the Settings home. Reuse `AppearanceSettingsPane` and `VoiceSettingsPane` as **separate** panes under ids `appearance` and `voice` (RFC-0094 amend). HUD compact Voice / Appearance stay split. Deep-links go to `/settings/voice` and `/settings/appearance`.
+
+~~Create a composed pane, e.g. `frontend/src/settings/AppearanceVoiceSettingsPane.tsx`:~~ (historical; do not implement)
 
 ```tsx
 export function AppearanceVoiceSettingsPane(...) {
@@ -137,15 +162,19 @@ Settings remains under **Admin**. If the implementer adopts `/admin/settings/...
 ## Acceptance criteria
 
 - [ ] Specs-only in this PR (no product code)
-- [ ] Settings nav shows Appearance & Voice, Phone Pairing, Models & Inference, Network & Swarm, Integrations, Advanced
-- [ ] Appearance & Voice is a composed pane of existing Appearance + Voice components (not a new dump, not a HUD merge)
+- [ ] Settings nav shows Appearance & Voice, Phone Pairing, Models & Inference, Network & Swarm, Integrations, Advanced  
+  **2026-09-30 SUPERSEDED** for the Appearance & Voice compose. Replace with RFC-0094 split: Appearance, Voice, Phone Pairing, Models & Inference, Network & Swarm, Integrations, Advanced.
+- [ ] Appearance & Voice is a composed pane of existing Appearance + Voice components (not a new dump, not a HUD merge)  
+  **2026-09-30 SUPERSEDED.** Do not compose. Keep `AppearanceSettingsPane` and `VoiceSettingsPane` as **separate** Settings homes.
 - [ ] Daybreak left-bar / Desktop HUD **keep** first-class Voice and Appearance groups (RFC-0094)
 - [ ] Phone Pairing is reachable **under Settings**; pairing logic is reused, not forked
-- [ ] Legacy `/settings/voice` redirects to Appearance & Voice (1.4 §12 test 11)
+- [ ] Legacy `/settings/voice` redirects to Appearance & Voice (1.4 §12 test 11)  
+  **2026-09-30 SUPERSEDED.** `/settings/voice` is canonical Voice (RFC-0094). `/settings/appearance-voice` redirects **out**.
 - [ ] Legacy appearance route redirects correctly (test 12)
 - [ ] Existing `/companion-pairing` deep links remain functional via redirect (tests 13–14)
 - [ ] `/settings/network` reaches the canonical Network & Swarm route
-- [ ] Last-selected submenu persistence still works, including migration of stored `voice`/`appearance` (test 15)
+- [ ] Last-selected submenu persistence still works, including migration of stored `voice`/`appearance` (test 15)  
+  **2026-09-30:** migrate stored `appearance-voice` → `appearance` (or Voice if the hash was voice). Do **not** migrate `voice`/`appearance` into `appearance-voice`.
 - [ ] One routing convention (`/admin/settings/...` **or** `/settings/...`), used consistently; the other family redirects if both exist
 - [ ] HexStrike left-bar / suite behavior unchanged; RFC-0092 not implemented here
 - [ ] Implement follow-up: `python3 -m pytest`; `npm --prefix frontend run build` (and lint if TS changed)

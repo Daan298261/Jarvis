@@ -233,8 +233,12 @@ export const DesktopBridge = {
     if (!invoke) return null
     try {
       return (await invoke("obsidian_embed_start", { bounds })) as ObsidianEmbedStatus
-    } catch {
-      return null
+    } catch (err) {
+      return {
+        state: "failed",
+        message: err instanceof Error ? err.message : String(err || "Obsidian embed failed"),
+        obsidian_hwnd: null,
+      }
     }
   },
 
@@ -243,8 +247,12 @@ export const DesktopBridge = {
     if (!invoke) return null
     try {
       return (await invoke("obsidian_embed_resize", { bounds })) as ObsidianEmbedStatus
-    } catch {
-      return null
+    } catch (err) {
+      return {
+        state: "failed",
+        message: err instanceof Error ? err.message : String(err || "Obsidian resize failed"),
+        obsidian_hwnd: null,
+      }
     }
   },
 
@@ -253,8 +261,12 @@ export const DesktopBridge = {
     if (!invoke) return null
     try {
       return (await invoke("obsidian_embed_stop")) as ObsidianEmbedStatus
-    } catch {
-      return null
+    } catch (err) {
+      return {
+        state: "failed",
+        message: err instanceof Error ? err.message : String(err || "Obsidian stop failed"),
+        obsidian_hwnd: null,
+      }
     }
   },
 

@@ -72,6 +72,19 @@ class PersonalityPreset:
 
 
 MODEL_CANDIDATES: dict[str, ModelCandidate] = {
+    "umi-opus-9b-ollama": ModelCandidate(
+        key="umi-opus-9b-ollama",
+        label="Umi · Qwen3.5 9B Opus reasoning (Ollama)",
+        model_id="hf.co/TheCidSama/Qwen3.5-9b-Claude-4.8-Opus-reasoning",
+        role="primary",
+        runtime="ollama",
+        quantization="ollama",
+        weight_gb=None,
+        context_limit=32768,
+        uncensored=False,
+        license_id="check-upstream",
+        notes="Named persona Umi brain; pair with pocket_tts_alba_en_v1. Requires Ollama on :11434.",
+    ),
     "qwen38-9b-heretic-q6": ModelCandidate(
         key="qwen38-9b-heretic-q6",
         label="Qwen3.8 9B Distill Uncensored — Q6",

@@ -28,9 +28,9 @@ from .planning import (
 
 RUNTIME_ROLE = "front_responder"
 ANSWER_TIER = 1
-FRONT_MAX_TOKENS_MIN = 128
-FRONT_MAX_TOKENS_MAX = 1024
-FRONT_MAX_TOKENS_DEFAULT = 512
+FRONT_MAX_TOKENS_MIN = 96
+FRONT_MAX_TOKENS_MAX = 160
+FRONT_MAX_TOKENS_DEFAULT = 128
 FRONT_USER_TEXT_SOFT_LIMIT = 1600
 DEEPER_RESULT_LABEL = "Deeper result"
 
@@ -73,15 +73,6 @@ If the hint action is ask_clarification, ask one short clarifying question.
 If the hint action is handoff_notice, say a stronger model is taking over.
 Never say the work is done. Never describe tool execution.
 Return only the spoken reply text, not JSON and not a plan."""
-
-
-def front_system_prompt() -> str:
-    from ..persona.session_personality import session_personality_system_addendum
-
-    addendum = session_personality_system_addendum()
-    if not addendum:
-        return FRONT_SYSTEM
-    return f"{FRONT_SYSTEM}\n\n{addendum}"
 
 
 _FAKE_DONE = re.compile(
@@ -226,8 +217,19 @@ def last_front_timing() -> dict[str, Any]:
 
 
 def record_front_timing(timing: dict[str, Any]) -> dict[str, Any]:
+    """Record per-turn front timings, preserving earlier audio marks.
+
+    Immediate TTS often notes ``front_first_audio_ms`` / ``tts_first_audio_ms``
+    before the two-lane worker finishes. A later ``done`` write must not wipe
+    those fields with zeros.
+    """
     global _last_timing, _timings
     payload = dict(timing)
+    previous = _last_timing or {}
+    for key in ("front_first_audio_ms", "tts_first_audio_ms"):
+        incoming = payload.get(key)
+        if not incoming and previous.get(key):
+            payload[key] = previous[key]
     _last_timing = payload
     _timings.append(payload)
     _timings[:] = _timings[-12:]
@@ -275,6 +277,11 @@ def resolve_front_model_id(settings: AppSettings | None = None) -> str:
 
 def worker_required(action: str) -> bool:
     return action in {"ack_continue", "handoff_notice", "silent_skip"}
+
+
+def terminal_front_completes_turn(action: str) -> bool:
+    """True when the front lane alone finishes the owner turn (no worker)."""
+    return action in {"final_basic", "ask_clarification"}
 
 
 def is_unsafe_front_claim(text: str) -> bool:
@@ -544,13 +551,13 @@ async def generate_front_reply(
     timeout_s = cfg.timeout_ms / 1000.0
     deadline = time.perf_counter() + timeout_s
     try:
-        async for delta in _iter_chat_stream(
+        async for delta in _deadline_stream(_iter_chat_stream(
             chat,
             messages,
             temperature=cfg.temperature,
             max_tokens=cfg.max_tokens,
             thinking=False,
-        ):
+        ), timeout_s):
             if time.perf_counter() > deadline:
                 break
             if not delta:
@@ -723,6 +730,17 @@ async def run_two_lane_chat(
     timing.front_action = front.action
     timing.front_first_text_ms = front.first_text_ms
     timing.front_complete_ms = front.complete_ms
+    if front.first_audio_ms:
+        timing.front_first_audio_ms = front.first_audio_ms
+        timing.tts_first_audio_ms = front.first_audio_ms
+    elif last_front_timing().get("front_first_audio_ms"):
+        # Early speak may have noted audio before this lane finished.
+        prior_audio = float(last_front_timing().get("front_first_audio_ms") or 0.0)
+        if prior_audio:
+            timing.front_first_audio_ms = prior_audio
+            timing.tts_first_audio_ms = float(
+                last_front_timing().get("tts_first_audio_ms") or prior_audio
+            )
     if front.action == "silent_skip" or (not front.text and front.skipped):
         yield {"type": "front_response_skipped", "front_action": front.action, "reply": front}
     else:
@@ -852,6 +870,16 @@ def _distinct_front_model(settings: AppSettings, front_model: str) -> bool:
     return bool(front_model and loaded and front_model != loaded)
 
 
+async def _deadline_stream(stream: AsyncIterator[str], timeout_s: float) -> AsyncIterator[str]:
+    """Bound even a provider that never yields its first token."""
+    try:
+        async with asyncio.timeout(timeout_s):
+            async for delta in stream:
+                yield delta
+    finally:
+        await stream.aclose()
+
+
 async def _iter_chat_stream(provider: Any, messages: list[ChatMessage], **kwargs: Any) -> AsyncIterator[str]:
     kwargs.setdefault("thinking", False)
     stream = provider.chat_stream(messages, **kwargs)
@@ -890,7 +918,8 @@ async def emit_context_switch_keep_busy(
             if front.text and is_safe_front_speech(front.action, front.text):
                 text = front.text
         except Exception:
-            pass
+            # Keep the static handoff line; never invent a success claim.
+            text = CONTEXT_SWITCH_KEEP_BUSY
     if on_spoken:
         maybe = on_spoken(text)
         if asyncio.iscoroutine(maybe):

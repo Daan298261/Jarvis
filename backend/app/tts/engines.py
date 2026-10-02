@@ -17,6 +17,14 @@ from .kokoro_adapter import (
     kokoro_package_ready,
     kokoro_runtime_state,
 )
+from .pocket_tts_adapter import (
+    is_pocket_tts_available,
+    pocket_tts_runtime_state,
+)
+from .voicestudio_adapter import (
+    is_voicestudio_available,
+    voicestudio_runtime_state,
+)
 
 CHATTERBOX_MODEL_DIR = models_dir() / "tts" / "chatterbox-turbo"
 CHATTERBOX_HF_REPO = "ResembleAI/chatterbox"
@@ -107,6 +115,10 @@ def is_engine_available(engine_id: str) -> bool:
     key = (engine_id or "").strip().lower()
     if key in {"kokoro"}:
         return is_kokoro_available()
+    if key in {"voicestudio", "voice_studio", "omni_voice", "omnivoice"}:
+        return is_voicestudio_available()
+    if key in {"pocket_tts", "pocket-tts", "pockettts"}:
+        return is_pocket_tts_available()
     if key in {"piper"}:
         return is_piper_available()
     if key in {"chatterbox", "chatterbox-turbo", "chatterbox_turbo"}:
@@ -122,6 +134,10 @@ def engine_chain_for_profile(profile: Any) -> list[str]:
     primary = resolve_engine_id(profile.tts)
     if primary == "chatterbox":
         return ["chatterbox", "kokoro"]
+    if primary in {"voicestudio", "voice_studio", "omni_voice", "omnivoice"}:
+        return ["voicestudio", "kokoro"]
+    if primary in {"pocket_tts", "pocket-tts", "pockettts"}:
+        return ["pocket_tts", "kokoro"]
     if primary == "kokoro":
         return ["kokoro"]
     if primary == "piper":
@@ -151,9 +167,15 @@ def primary_tts_backend() -> str | None:
 
 def engine_availability() -> dict[str, Any]:
     kokoro_state = kokoro_runtime_state()
+    vs_state = voicestudio_runtime_state()
+    pt_state = pocket_tts_runtime_state()
     return {
         "kokoro": kokoro_state.ready,
         "kokoro_installable": is_kokoro_installable(),
+        "voicestudio": is_voicestudio_available(),
+        "voicestudio_runtime": vs_state.to_dict(),
+        "pocket_tts": is_pocket_tts_available(),
+        "pocket_tts_runtime": pt_state.to_dict(),
         "piper": is_piper_available(),
         "chatterbox": is_chatterbox_available(),
         "system": legacy_system_tts_available(),

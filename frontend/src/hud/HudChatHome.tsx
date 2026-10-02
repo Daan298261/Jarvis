@@ -10,7 +10,9 @@ import { parseConfirmationPayload } from "../chat/PermissionPrompt"
 import { AppearancePresenceControls } from "../presence/AppearancePresenceControls"
 import { getActiveCustomComposition, useCustomPresence } from "../presence/customPresence"
 import { PresenceHost } from "../presence/PresenceHost"
-import { personaCardSentence, useNamedPersonas } from "../persona/namedPersonas"
+import { PinnedPersonaDock } from "../persona/PinnedPersonaDock"
+import { PERSONA_VISUALS, personaCardSentence, useNamedPersonas } from "../persona/namedPersonas"
+import { personaPortraitForId } from "../persona/personaPortraits"
 import { derivePresenceSnapshot } from "../presence/presenceState"
 import { usePresentationSettings } from "../presence/presentationSettings"
 import { galaxyFigureShapeId, isGalaxyPresenceEffective } from "../presence/galaxyPresence"
@@ -52,7 +54,12 @@ function taskDetail(
   if (threadActive) return MOOD_COPY[mood].detail
   if (!task) return MOOD_COPY[mood].detail
   if (task.status === "failed") return task.error || "The current task needs attention"
+  const activity = task.current_activity || task.current_action
+  const phase = task.execution_phase
   const title = task.title || task.prompt?.slice(0, 72)
+  if (activity && title) return `${title} · ${activity}`
+  if (activity) return activity
+  if (title && phase) return `${title} · ${phase.toLowerCase().replaceAll("_", " ")}`
   if (title) return `${title} · ${task.status}`
   return MOOD_COPY[mood].detail
 }
@@ -101,11 +108,18 @@ export function HudChatHome() {
   })
   const activePersona = namedPersonas?.active
   const personaShape = activePersona?.presence_shape_id || undefined
-  const resolvedShapeId = resolvePresenceShapeId(
+  const personaResolvedShapeId = resolvePresenceShapeId(
     hexStrikeActive,
     customPresence.activeShapeId,
     namedPersonas ? personaShape : "stormbird",
   )
+  // The built-in Humanoid button is an explicit visual choice, not an alias
+  // for the active persona. Mythic persona figures live in particle_bust.
+  const resolvedShapeId = !hexStrikeActive
+    && !customPresence.activeShapeId
+    && presentation.requestedPresence === "humanoid"
+    ? "humanoid_bust"
+    : personaResolvedShapeId
   const cardSentence = moodState.task
     ? (moodState.task.persona_card_sentence
       || personaCardSentence(activePersona?.id || "anzu", moodState.task.specialist_persona_ids || []))
@@ -128,6 +142,9 @@ export function HudChatHome() {
   const customComposition = !hexStrikeActive && shapeId.startsWith("custom_ui_")
     ? getActiveCustomComposition()
     : null
+  const effectivePersonaId = activePersona?.id || "anzu"
+  const effectivePersonaVisual = PERSONA_VISUALS[effectivePersonaId as keyof typeof PERSONA_VISUALS]
+    || PERSONA_VISUALS.anzu
   const personaVisual = !hexStrikeActive
     ? customComposition
       ? {
@@ -137,15 +154,16 @@ export function HudChatHome() {
           animation: activePersona?.appearance?.animation ?? 0.7,
           scale: activePersona?.appearance?.scale ?? 1,
         }
-      : activePersona?.appearance
-        ? {
-            orbColor: activePersona.appearance.orb_color,
-            accentColor: activePersona.appearance.accent_color,
-            glow: activePersona.appearance.glow,
-            animation: activePersona.appearance.animation,
-            scale: activePersona.appearance.scale,
-          }
-        : undefined
+      : {
+          personaId: effectivePersonaId,
+          personaLabel: activePersona?.label || "Anzu",
+          portraitUrl: personaPortraitForId(effectivePersonaId),
+          orbColor: activePersona?.appearance?.orb_color || effectivePersonaVisual.orbColor,
+          accentColor: activePersona?.appearance?.accent_color || effectivePersonaVisual.accentColor,
+          glow: activePersona?.appearance?.glow ?? 0.82,
+          animation: activePersona?.appearance?.animation ?? 0.72,
+          scale: activePersona?.appearance?.scale ?? 1,
+        }
     : undefined
   const threadActive = Boolean(moodState.task?.messages?.length)
   const copy = MOOD_COPY[mood]
@@ -154,6 +172,7 @@ export function HudChatHome() {
     <div
       className={`hud-home${hexStrikeActive ? " hexstrike-active" : ""}${hexStrikeActive && !showHexSuite ? " hex-suite-collapsed" : ""}${galaxyEffective ? " galaxy-effective" : ""}`}
     >
+      <PinnedPersonaDock />
       <div className="jarvis-presence-controls-split">
         <AppearancePresenceControls settings={presentation} />
       </div>

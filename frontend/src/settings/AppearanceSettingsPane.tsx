@@ -5,14 +5,20 @@ import { useHudOverlayOptional } from "../hud/hudOverlayContext"
 import { NamedPersonaControls } from "../persona/NamedPersonaControls"
 import { SessionPersonalityControls } from "../personality/SessionPersonalityControls"
 import { CustomPresencePanel } from "../presence/CustomPresencePanel"
+import { PresenceModePreview } from "../presence/PresenceModePreview"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
+  /** HUD Appearance menu hides persona editors (those live under Persona). */
+  showPersona?: boolean
 }
 
-export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps) {
+const APEX_ASSISTIVE =
+  "Public MIT APEX-UI orb and reasoning graph, adapted for Jarvis. Jarvis does not include APEX's separately hosted private humanoid figure."
+
+export function AppearanceSettingsPane({ settings, showPersona = true }: AppearanceSettingsPaneProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
   const { active: hexStrikeActive, profile: hexstrikeProfile } = useHexStrikeSuiteActive()
@@ -25,7 +31,7 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
       await updatePresentation(patch)
       setMessage(note)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save presentation settings.")
+      setMessage(error instanceof Error ? error.message : "Appearance changed locally; the saved setting could not be confirmed.")
     } finally {
       setBusy(false)
     }
@@ -56,27 +62,33 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
 
   return (
     <div className="settings-appearance-pane">
-      <div className="jarvis-presence-mode-row" role="group" aria-label="Jarvis interface">
+      <p className="jarvis-presence-mode-lede" id="jarvis-presence-mode-help">
+        Presence modes are style and profile controls on one shared renderer. Previews match the live look for each profile.
+      </p>
+      <div className="jarvis-presence-mode-row" role="group" aria-label="Jarvis interface" aria-describedby="jarvis-presence-mode-help">
         <button
           type="button"
           disabled={busy}
           className={selected === "classic" ? "active" : ""}
           onClick={() => apply({ shell: "classic", requestedPresence: "none" })}
         >
-          Classic
+          <PresenceModePreview mode="classic" />
+          Classic portal
         </button>
         <button
           type="button"
           disabled={busy}
           className={selected === "neural" ? "active" : ""}
-          title="The APEX-UI orb and reasoning graph adapted for Jarvis."
+          title={APEX_ASSISTIVE}
+          aria-describedby="jarvis-apex-ui-help"
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "neural" },
-              "APEX orb and reasoning graph active. Jarvis uses its existing Neural HUD renderer.",
+              "APEX UI · orb + graph active on the shared presence stage.",
             )
           }
         >
+          <PresenceModePreview mode="neural" />
           APEX UI · orb + graph
         </button>
         <button
@@ -86,10 +98,11 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "humanoid" },
-              "Humanoid presence active. Jarvis will fall back to Neural if WebGL is unavailable.",
+              "Humanoid profile active on the shared presence stage. Jarvis falls back to APEX UI · orb + graph if WebGL is unavailable.",
             )
           }
         >
+          <PresenceModePreview mode="humanoid" />
           Humanoid HUD · built in
         </button>
         <button
@@ -99,11 +112,12 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "particle_bust" },
-              "Particle bust active. Jarvis will fall back to Neural if WebGL is unavailable.",
+              "Live mythic persona figure active. Persona selections morph immediately on the shared particle stage.",
             )
           }
         >
-          Particle bust · experimental
+          <PresenceModePreview mode="particle_bust" />
+          Mythic persona · live
         </button>
         <button
           type="button"
@@ -112,6 +126,7 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           title={hexstrikeProfile ? undefined : "HexStrike suite runtime is not installed"}
           onClick={() => void activateHexStrike()}
         >
+          <PresenceModePreview mode="hexstrike" />
           HexStrike · Daybreak
         </button>
         <button
@@ -121,16 +136,24 @@ export function AppearanceSettingsPane({ settings }: AppearanceSettingsPaneProps
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "galaxy" },
-              "Galaxy presence active. Jarvis will fall back to Neural if WebGL is unavailable.",
+              "Galaxy starfield ADD active on the shared presence stage. Jarvis falls back to APEX UI · orb + graph if WebGL is unavailable.",
             )
           }
         >
+          <PresenceModePreview mode="galaxy" />
           Galaxy
         </button>
       </div>
+      <p className="jarvis-presence-mode-apex-help" id="jarvis-apex-ui-help">
+        {APEX_ASSISTIVE}
+      </p>
 
-      <SessionPersonalityControls />
-      <NamedPersonaControls />
+      {showPersona && (
+        <>
+          <SessionPersonalityControls />
+          <NamedPersonaControls />
+        </>
+      )}
       <CustomPresencePanel settings={settings} />
 
       <label>

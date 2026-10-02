@@ -22,6 +22,20 @@ A public clone can start as a **household voice chatbot** (Kokoro) without a 9B/
 
 The project is being developed toward a larger vision: a coordinated network of devices with specialized agents, persistent services, and configurable autonomy. **The current Windows desktop agent is the foundation; the full swarm and autonomous-operator vision are ongoing development, not features promised in this release.**
 
+## Interface
+
+| Owner HUD | Particle humanoid |
+| :---: | :---: |
+| ![Jarvis owner HUD with particle humanoid](docs/screenshots/humanoid-hud.png) | ![Cinematic particle humanoid showcase](docs/screenshots/humanoid-showcase.png) |
+
+| Anzu — storm bird | Nabu — owl of knowledge |
+| :---: | :---: |
+| ![Anzu storm-bird particle avatar](docs/screenshots/anzu-stormbird.png) | ![Nabu owl particle avatar](docs/screenshots/nabu-owl.png) |
+
+![Named-persona picker in the Jarvis HUD](docs/screenshots/persona-gallery.png)
+
+The presence is a live WebGL dot cloud: it forms, breathes, reacts to assistant state, and morphs between the humanoid and each persona-specific mythical avatar.
+
 ## What Jarvis does
 
 | Capability | Description |

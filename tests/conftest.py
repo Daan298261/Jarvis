@@ -69,6 +69,17 @@ def _obsidian_vault_hygiene_after_test():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _model_status_monitor_hygiene_after_test():
+    yield
+    try:
+        from app.inference.status_monitor import STATUS_MONITOR
+
+        STATUS_MONITOR.reset_for_tests()
+    except Exception:
+        pass
+
+
 @pytest.fixture
 def allow_loopback_api(monkeypatch):
     """TestClient host is not loopback; skip HTTP owner-key auth for HexStrike API tests."""

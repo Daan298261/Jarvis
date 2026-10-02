@@ -172,6 +172,85 @@ export async function fetchAudioWithMetadata(path: string, init?: RequestInit): 
   }
 }
 
+export type VerificationResult =
+  | "VERIFIED"
+  | "VERIFICATION_FAILED"
+  | "PARTIALLY_VERIFIED"
+  | "NOT_VERIFIED"
+  | string
+
+export type VerificationCheck = {
+  type?: string
+  target?: string
+  result?: string
+  severity?: string
+  evidence?: string
+  remediation?: string
+}
+
+export type VerificationSummary = {
+  result: VerificationResult
+  verifier?: string | { type?: string; name?: string }
+  checks?: Array<string | VerificationCheck>
+  evidence_refs?: string[]
+  warnings?: string[]
+  timestamp?: string | null
+  answer_changed_by_verification?: boolean
+}
+
+export type TaskProgressUnits = {
+  completed_units: number
+  total_units: number
+  unit_type: string
+}
+
+export type TaskPhaseHistoryEntry = {
+  phase: string
+  task_id?: string
+  started_at?: string | null
+  ended_at?: string | null
+  source?: string
+  blocking_reason?: string | null
+}
+
+export type TaskChildExecution = {
+  dominant_phase?: string
+  active_workers?: number
+  waiting_workers?: number
+  child_count?: number
+  children?: Array<{ id?: string; status?: string; execution_phase?: string }>
+}
+
+export type TaskExternalWait = {
+  kind?: string
+  detail?: string
+} | null
+
+export type TaskObservability = {
+  task_id?: string
+  execution_phase?: string
+  current_activity?: string
+  current_action?: string
+  progress?: TaskProgressUnits | null
+  phase_history?: TaskPhaseHistoryEntry[]
+  verification_summary?: VerificationSummary
+  external_wait?: TaskExternalWait
+  decision_inbox_item?: CodingDecisionInboxItem | null
+  decision_inbox_item_id?: string | null
+  decision_inbox_link_error?: { code?: string; message?: string } | null
+  phase_started_at?: string | null
+  phase_elapsed_seconds?: number
+  stale_phase_warning?: boolean
+  stale_phase_threshold_seconds?: number
+  child_execution?: TaskChildExecution
+  approval?: {
+    waiting_for_confirmation?: boolean
+    confirmation_payload?: unknown
+    decision_inbox_item_id?: string | null
+    decision_inbox_link_error?: { code?: string; message?: string } | null
+  }
+}
+
 export type Task = {
   id: string
   title: string
@@ -187,6 +266,8 @@ export type Task = {
   allowed_tools?: string[]
   acceptance_criteria?: string
   current_action: string
+  /** Prefer over `current_action` for owner-facing activity lines (RFC-0026). */
+  current_activity?: string
   current_tool: string
   active_worker?: string
   result: string
@@ -213,14 +294,18 @@ export type Task = {
   confirmation_payload?: unknown
   specialist_persona_ids?: string[]
   persona_card_sentence?: string
-  verification_summary?: {
-    result: "VERIFIED" | "VERIFICATION_FAILED" | "PARTIALLY_VERIFIED" | "NOT_VERIFIED" | string
-    verifier: string
-    checks: string[]
-    evidence_refs: string[]
-    warnings: string[]
-    timestamp?: string | null
-  }
+  verification_summary?: VerificationSummary
+  progress?: TaskProgressUnits | null
+  external_wait?: TaskExternalWait
+  decision_inbox_item?: CodingDecisionInboxItem | null
+  decision_inbox_item_id?: string | null
+  decision_inbox_link_error?: { code?: string; message?: string } | null
+  phase_started_at?: string | null
+  phase_elapsed_seconds?: number
+  stale_phase_warning?: boolean
+  stale_phase_threshold_seconds?: number
+  phase_history?: TaskPhaseHistoryEntry[]
+  child_execution?: TaskChildExecution
   events?: { kind: string; title: string; detail: string; stage: string; phase?: string; source?: string; created_at: string }[]
   messages?: { role: "user" | "assistant" | string; content: string }[]
 }

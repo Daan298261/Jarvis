@@ -41,7 +41,7 @@ function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNo
   if (id === "appearance") {
     return (
       <div className="jarvis-presence-controls-body">
-        <AppearanceSettingsPane settings={settings} />
+        <AppearanceSettingsPane settings={settings} showPersona={false} />
         <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
           <Link to={appearanceVoiceSettingsPath("appearance")}>Open full Appearance settings</Link>
         </p>

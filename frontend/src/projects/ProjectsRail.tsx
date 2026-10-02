@@ -1,8 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { NavLink } from "react-router-dom"
 import type { Task } from "../api"
-import { TaskHeartbeat } from "../components/TaskActivity"
-import { phaseLabel } from "../taskStatus"
+import { TaskStatusMeta } from "../components/TaskStatusMeta"
 import type { PortalProject } from "../projects"
 
 type ChatRow = { conversation_id: string; title: string; project_id?: string }
@@ -231,10 +230,9 @@ export function ProjectsRail({
                           onClick={onCloseNav}
                         >
                           <span className="rail-item-title">{task ? taskLabel(task) : "Open task"}</span>
-                          {task && ["queued", "running", "waiting"].includes(task.state || task.status) && (
+                          {task && (
                             <span className="rail-item-meta">
-                              <TaskHeartbeat task={task} label={false} />
-                              {phaseLabel(task)}
+                              <TaskStatusMeta task={task} showElapsed={false} />
                             </span>
                           )}
                         </NavLink>
@@ -345,11 +343,8 @@ export function ProjectsRail({
                 >
                   <span className="rail-item-title">{taskLabel(task)}</span>
                   <span className="rail-item-meta">
-                    {["queued", "running", "waiting"].includes(task.state || task.status) && (
-                      <TaskHeartbeat task={task} label={false} />
-                    )}
-                    {phaseLabel(task)}
-                    {grouped ? ` · ${grouped.name}` : ""}
+                    <TaskStatusMeta task={task} showElapsed={false} />
+                    {grouped ? <span className="task-status-children">· {grouped.name}</span> : null}
                   </span>
                 </NavLink>
                 {projects.length > 0 && (

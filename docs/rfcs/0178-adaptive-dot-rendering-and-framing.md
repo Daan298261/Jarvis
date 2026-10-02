@@ -1,10 +1,11 @@
 # RFC-0178: Adaptive dot rendering and persona framing
 
 **Status:** implemented
+**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) strengthens **silhouette / bloom / overexposure** as acceptance, not FPS alone. Status stays **implemented** for #430/#432. Windows GPU soak stays **unchecked**. Do not ledger-tick implemented from this amend.
 **Implemented:** #430 @ `ae582af2d842f436fb69c0345d9c0717a6f66a83` (deterministic spatial LOD, frame-time hysteresis, separate layer budgets, responsive fit, harness summaries), including follow-up #432 @ `f51d5b3edb74bb3533979490b0de7a4e2c32fca1` (auto lowest tier renders through WebGL and bypasses composer, bloom, and post-processing; reduced pixel ratio and sample budgets stay). That bypass is in this RFC's decision, so #432 is part of the implement, not an open residual. Development tip at this ledger is the post-#431 reconcile `cbbf2ef5f7c1695bab1134dfa52ebf141ec6d094`.
 **Specs:** #426 @ `d792ed4749bfc5857e8f1a55435b2b4d99714d28`.
 **Quality bar:** **Anzu 1.0**. Full intent. No stubs / soft-fail.
-**Residuals:** Windows desktop GPU review of visual clarity and sustained performance stays unchecked. #430 body: desktop GPU sign-off remains pending because measured FPS in that run was low. #432 does not close that sign-off. Cloud VMs cannot sign it off.
+**Residuals:** Windows desktop GPU review of visual clarity and sustained performance stays unchecked. **RFC-0195:** overexposed-slab / unreadable silhouette fails even at high FPS. #430 body: desktop GPU sign-off remains pending because measured FPS in that run was low. #432 does not close that sign-off. Cloud VMs cannot sign it off.
 **Author:** Codex
 **Date:** 2026-09-25
 
@@ -17,7 +18,7 @@ The implement is **multibillion-company grade** and the user-facing stretch is *
 
 ## Problem
 
-A strong point-cloud look depends on the silhouette staying legible at the actual display size while glow, point count, and pixel ratio stay within the device's rendering budget. Jarvis has quality presets and per-shape framing, but no shared contract that makes every persona fit consistently across viewport shapes and adapts dot quality without damaging distinctive features. Matching APEX's reported ~300,000 dots is not a useful target by itself; the required quality is a readable figure at a stable frame cost.
+A strong point-cloud look depends on the silhouette staying legible at the actual display size while glow, point count, and pixel ratio stay within the device's rendering budget. Jarvis has quality presets and per-shape framing, but no shared contract that makes every persona fit consistently across viewport shapes and adapts dot quality without damaging distinctive features. Matching APEX's reported ~300,000 dots is not a useful target by itself; the required quality is a readable figure at a stable frame cost. **RFC-0195:** 165 FPS / ~94k particles that still read as an overexposed slab (Mestor) **fail** this RFC’s visual-clarity residual.
 
 ## Decision
 
@@ -33,7 +34,7 @@ Maintain the same silhouette and dominant features when fidelity changes. `effic
 - [x] Separate figure, field, and Galaxy-star budgets are observable and do not steal samples from one another.
 - [x] Resizing does not remount the presence or restart an active RFC-0175 morph; background tabs stop unnecessary animation work.
 - [x] The harness exposes frame-time and sample-count summaries while any registered persona shape and performance preset is selected.
-- [ ] Windows desktop GPU review signs off visual clarity and sustained performance.
+- [ ] Windows desktop GPU review signs off visual clarity and sustained performance. **RFC-0195:** a Mestor-like overexposed slab (unreadable silhouette) **fails** even at high FPS / high particle count. Bloom and particle alpha are optimized for **readable silhouette first**, then FPS. Viewport-fill framing (no 920×680∶480 primary stage) is in RFC-0195; this RFC still owns adaptive tiers and hysteresis.
 - [x] Reduced motion and WebGL failure keep the current accessible status and fallback behavior.
 
 ## Likely files

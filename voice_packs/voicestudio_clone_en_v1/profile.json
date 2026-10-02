@@ -1,0 +1,27 @@
+{
+  "id": "voicestudio_clone_en_v1",
+  "archetype": "household_butler",
+  "display_name": "VoiceStudio local clone (flexible)",
+  "license": "permissive_stock",
+  "provenance": "debpalash/voicestudio local multi-engine voice studio (16 TTS / 11 ASR engines, local API).",
+  "tts": {
+    "engine_id": "voicestudio",
+    "engine_hint": "voicestudio",
+    "model_id": "voicestudio-local",
+    "speaker_ref": "default",
+    "pack_path": "voice_packs/voicestudio_clone_en_v1",
+    "vram_class": "balanced",
+    "latency_class": "interactive",
+    "license": "MIT",
+    "offline": true,
+    "quality_tier": "expressive",
+    "speaking_rate": 1.0
+  },
+  "persona_hooks": {
+    "register": "british_understated",
+    "humour": "dry"
+  },
+  "sample_utterance": "Voice systems online via VoiceStudio.",
+  "vram_class": "balanced",
+  "builtin": true
+}

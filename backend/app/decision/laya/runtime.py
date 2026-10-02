@@ -112,6 +112,15 @@ def _persist_enabled(enabled: bool, warm: bool) -> None:
         )
     except OSError as exc:
         log.warning("Could not persist Laya enabled flag: %s", exc)
+    try:
+        from ...config import load_settings, save_settings
+
+        settings = load_settings()
+        settings.decision.laya_enabled = bool(enabled)
+        settings.decision.laya_warm = bool(warm)
+        save_settings(settings)
+    except Exception as exc:  # noqa: BLE001 - settings stay optional beside enabled.json
+        log.warning("Could not persist Laya settings: %s", exc)
 
 
 def status() -> dict[str, Any]:
@@ -150,6 +159,7 @@ def _load_agent() -> None:
     global _AGENT
     started = time.perf_counter()
     try:
+        pins.ensure_package()
         import laya  # type: ignore[import-not-found]
 
         directory = pins.model_dir()

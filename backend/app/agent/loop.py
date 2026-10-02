@@ -4,11 +4,14 @@ import asyncio
 import base64
 import hashlib
 import json
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("jarvis.agent.loop")
 
 from openai import APIConnectionError, APIStatusError
 
@@ -38,13 +41,16 @@ from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool
 from ..providers.openai_compat import OpenAICompatProvider
 from ..providers.tool_call_compat import validate_turn_calls
 from ..policy.authorize import AuthorizationResult
-from ..policy.action_gate import gate_tool_call
+from ..policy.action_gate import _to_authorization, gate_side_effect, gate_tool_call
+from ..policy.approval_grant import decide_approval_request
 from ..policy.computer_permissions import (
     confirmation_payload_for_tool,
     consume_once_grants,
     evaluate_tool_permissions,
     permission_ids_for_tool,
 )
+from ..policy.reversibility_gate import register_post_success_undo
+from ..policy.undo_restore import capture_prior_for_effect
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, classify_command, is_destructive_operation, needs_confirmation
@@ -90,6 +96,8 @@ from .escalation import (
 )
 from .planning import (
     CONVERSATION_CLASS,
+    DIRECT_LOOKUP,
+    DIRECT_REPLY,
     MANAGED_TASK,
     RequestRoute,
     WorkingState,
@@ -109,7 +117,9 @@ from .planning import (
 )
 from ..persona.chat_delivery import (
     clear_stream_speak_state,
+    mark_stream_spoken,
     maybe_enqueue_streaming_social_tts,
+    pending_chat_tts_text,
     publish_owner_text,
     stream_speak_offset,
 )
@@ -129,6 +139,14 @@ from .front_responder import (
     note_front_audio,
     run_two_lane_chat,
     worker_required,
+)
+from .task_fastpath import (
+    TERMINAL_FRONT_ACTIONS,
+    admit_fastpath,
+    admit_lookup_fastpath,
+    note_fastpath_decision,
+    resolve_route_kind,
+    should_skip_background_verify,
 )
 from .worker_progress import (
     clear_worker_progress_for_task,
@@ -233,21 +251,35 @@ def _authorization_observation(result: AuthorizationResult) -> str:
     return f"ERROR: Authorization denied: {result.reason}\n{payload}"
 
 
+def _tool_risk(name: str, arguments: dict[str, Any] | None) -> tuple[RiskLevel, str | None, str | None]:
+    tool_meta = REGISTRY.tools.get(name)
+    risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
+    args = arguments if isinstance(arguments, dict) else {}
+    command = args.get("command")
+    if command:
+        command_risk = classify_command(str(command))
+        # TerminalTool defaults to HIGH as a catalog hint; per-command classification
+        # must win so routine echo/pytest are not treated as UNKNOWN high-consequence.
+        if (name or "").strip().lower() == "terminal":
+            risk = command_risk
+        else:
+            risk = max(risk, command_risk, key=lambda item: list(RiskLevel).index(item))
+    action = args.get("action")
+    if is_destructive_operation(name, args, command if isinstance(command, str) else None):
+        risk = RiskLevel.IRREVERSIBLE
+    return risk, str(action) if action is not None else None, str(command) if command is not None else None
+
+
 def _tool_authorization(
     name: str,
     arguments: dict[str, Any],
     *,
     approved: bool = False,
     profile_id: str | None = None,
+    grant_id: str | None = None,
+    task_id: str | None = None,
 ) -> AuthorizationResult:
-    tool_meta = REGISTRY.tools.get(name)
-    risk = tool_meta.risk if tool_meta else RiskLevel.MEDIUM
-    command = arguments.get("command") if isinstance(arguments, dict) else None
-    if command:
-        risk = max(risk, classify_command(command), key=lambda item: list(RiskLevel).index(item))
-    action = arguments.get("action") if isinstance(arguments, dict) else None
-    if is_destructive_operation(name, arguments, command):
-        risk = RiskLevel.IRREVERSIBLE
+    risk, action, _command = _tool_risk(name, arguments)
     return gate_tool_call(
         name,
         action=action,
@@ -255,6 +287,30 @@ def _tool_authorization(
         risk=risk,
         profile_id=profile_id,
         approved=approved,
+        grant_id=grant_id,
+        task_id=task_id,
+    )
+
+
+def _side_effect_decision(
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    grant_id: str | None = None,
+    task_id: str | None = None,
+    profile_id: str | None = None,
+    park_if_needed: bool = True,
+):
+    risk, action, _command = _tool_risk(name, arguments)
+    return gate_side_effect(
+        name,
+        action=action,
+        arguments=arguments if isinstance(arguments, dict) else None,
+        risk=risk,
+        profile_id=profile_id,
+        grant_id=grant_id,
+        task_id=task_id,
+        park_if_needed=park_if_needed,
     )
 
 
@@ -344,7 +400,9 @@ class AgentRuntime:
                     return existing
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
-        route = route_request(prompt)
+        from .request_routing import evaluate_request_route
+
+        route = await evaluate_request_route(prompt, route_request(prompt))
         task_class = route.task_class
         if security_role == "blue-team" and route.kind != "managed_task":
             task_class = classify_task(prompt)
@@ -453,7 +511,92 @@ class AgentRuntime:
                     except PermissionError as exc:
                         approved = False
                         await BUS.publish(task_id, "confirm", "Permission grant refused", str(exc)[:1500], stage="act")
+
+                # RFC-0031: human confirm creates an unforgeable ApprovalGrant.
+                # Model/tool confirmed=true never reaches this path.
+                # If grant_id is already attached (API decide path), do not re-decide.
+                pending_approval_id = payload.get("pending_approval_id")
+                if approved and payload.get("grant_id"):
+                    pass
+                elif approved and pending_approval_id:
+                    try:
+                        outcome = decide_approval_request(
+                            str(pending_approval_id),
+                            decision="always" if mode == "always" else "allow_once",
+                            origin_channel="ui",
+                            actor="owner",
+                            session_id=task_id,
+                        )
+                        grant = outcome.get("grant") or {}
+                        if grant.get("id"):
+                            payload["grant_id"] = grant["id"]
+                            payload["action_id"] = grant.get("action_id")
+                    except Exception as exc:  # noqa: BLE001
+                        approved = False
+                        await BUS.publish(
+                            task_id,
+                            "confirm",
+                            "ApprovalGrant refused",
+                            str(exc)[:1500],
+                            stage="act",
+                        )
+                elif approved and not payload.get("grant_id"):
+                    # Legacy destructive/permission pause without prior park: mint grant now.
+                    try:
+                        from ..policy.approval_grant import action_id_for, park_approval_request
+
+                        tool_name = str(payload.get("name") or "")
+                        arguments = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
+                        action = str(arguments.get("action") or "")
+                        target = str(
+                            arguments.get("path")
+                            or arguments.get("command")
+                            or arguments.get("url")
+                            or ""
+                        )[:500]
+                        action_id = action_id_for(tool_name, action, target, task_id=task_id)
+                        parked = park_approval_request(
+                            action_id=action_id,
+                            tool_name=tool_name,
+                            action=action,
+                            scope={"legacy_confirm": True},
+                            target=target,
+                            task_id=task_id,
+                            reason="legacy confirmation upgraded to ApprovalGrant",
+                        )
+                        outcome = decide_approval_request(
+                            parked["id"],
+                            decision="always" if mode == "always" else "allow_once",
+                            origin_channel="ui",
+                            actor="owner",
+                            session_id=task_id,
+                        )
+                        grant = outcome.get("grant") or {}
+                        if grant.get("id"):
+                            payload["grant_id"] = grant["id"]
+                            payload["action_id"] = grant.get("action_id")
+                            payload["pending_approval_id"] = parked["id"]
+                    except Exception as exc:  # noqa: BLE001
+                        await BUS.publish(
+                            task_id,
+                            "confirm",
+                            "ApprovalGrant mint failed",
+                            str(exc)[:1500],
+                            stage="act",
+                        )
             if not approved:
+                pending_approval_id = payload.get("pending_approval_id")
+                if pending_approval_id:
+                    try:
+                        decide_approval_request(
+                            str(pending_approval_id),
+                            decision="deny",
+                            origin_channel="ui",
+                            actor="owner",
+                            session_id=task_id,
+                        )
+                    except Exception:
+                        pass
                 task.status = "cancelled"
                 task.stage = "cancelled"
                 task.waiting_for_confirmation = False
@@ -462,6 +605,7 @@ class AgentRuntime:
                 return task
             task.waiting_for_confirmation = False
             task.status = "running"
+            task.confirmation_payload = json.dumps(payload)
             await session.commit()
         self._start_runner(task_id, self._run(task_id, continue_existing=True, pending_tool=payload))
         return task
@@ -681,12 +825,13 @@ class AgentRuntime:
         stream_key: str,
         turn_started: float,
         source: str = "task_chat",
-    ) -> None:
+    ) -> bool:
+        """Speak a front ack immediately. Returns True when TTS was actually enqueued."""
         settings = load_settings()
         if not settings.front_responder.speak_immediately:
-            return
+            return False
         if not front or not is_safe_front_speech(front.action, front.text):
-            return
+            return False
         spoken = front.text if front.text.endswith((".", "!", "?")) else f"{front.text}."
         early_id = maybe_enqueue_streaming_social_tts(
             spoken,
@@ -696,10 +841,16 @@ class AgentRuntime:
         )
         audio_ms = max(0.0, (time.perf_counter() - turn_started) * 1000)
         if early_id:
-            await BUS.publish(task_id, "chat_tts", "Speak reply", front.text, stage="chat")
+            await BUS.publish(
+                task_id,
+                "chat_tts",
+                "Speak reply",
+                pending_chat_tts_text(early_id) or spoken,
+                stage="chat",
+            )
             note_front_audio(None, audio_ms)
             front.first_audio_ms = audio_ms
-            return
+            return True
         delivery = await publish_owner_text(
             front.text,
             source=source,
@@ -707,9 +858,14 @@ class AgentRuntime:
             user_prompt=prompt,
         )
         if delivery.get("tts_id"):
+            # Advance the stream cursor so the final merged reply cannot re-speak
+            # this front prefix (publish_owner_text does not do it itself).
+            mark_stream_spoken(stream_key, len(front.text or ""))
             await BUS.publish(task_id, "chat_tts", "Speak reply", front.text, stage="chat")
             note_front_audio(None, audio_ms)
             front.first_audio_ms = audio_ms
+            return True
+        return False
 
     async def _persist_front_partial(
         self,
@@ -816,13 +972,24 @@ class AgentRuntime:
                         current_action=front.text[:120],
                     )
         except Exception:
+            # BUS chat_tts alone does not enqueue speech — publish_owner_text does.
+            ack_text = task_acknowledgement(prompt)
             await BUS.publish(
                 task_id,
                 "chat_tts",
                 "Acknowledged",
-                task_acknowledgement(prompt),
+                ack_text,
                 stage="understand",
             )
+            try:
+                await publish_owner_text(
+                    ack_text,
+                    source="task_chat",
+                    speak=True,
+                    user_prompt=prompt,
+                )
+            except Exception:
+                log.debug("Managed front fallback ack failed for %s", task_id, exc_info=True)
 
     async def _run_conversation(
         self,
@@ -848,42 +1015,52 @@ class AgentRuntime:
             if message.role in {"user", "assistant"} and (message.content or "").strip()
         ]
         user_text = (extra_prompt or "").strip() or prompt
-        messages = [ChatMessage(role="system", content=OWNER_CHAT_SYSTEM), *prior]
-        briefing = await weather_system_message(user_text)
-        if briefing:
-            messages.insert(1, ChatMessage(role="system", content=briefing))
-        from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
+        from ..agent.turn_working_set import (
+            MAX_RECENT_CHARS,
+            MAX_RECENT_TURNS,
+            apply_working_set_to_system,
+            bound_recent_turns,
+            compose_turn_working_set,
+        )
 
-        if public_binding_status().get("bound"):
-            vault_block = vault_prompt_block(user_text)
-            if vault_block:
-                messages.insert(1, ChatMessage(role="system", content=vault_block))
-        last = prior[-1] if prior else None
-        if last is None or last.role != "user" or (last.content or "").strip() != user_text:
-            messages.append(ChatMessage(role="user", content=user_text))
+        # Bound history only — do NOT await vault/Supermemory before routing/front.
+        # Simple replies must not wait on memory timeouts.
+        prior = bound_recent_turns(prior)
+        if len(prior) > MAX_RECENT_TURNS:
+            prior = prior[-MAX_RECENT_TURNS:]
+        used = 0
+        bounded: list[ChatMessage] = []
+        for message in reversed(prior):
+            size = len(message.content or "") + 24
+            if bounded and used + size > MAX_RECENT_CHARS:
+                break
+            bounded.append(message)
+            used += size
+        prior = list(reversed(bounded))
+
+        briefing = await weather_system_message(user_text)
 
         from ..inference.answer_routing import prepare_answer_route
         from ..inference.model_escalation import schedule_orchestrator_restore
+        from ..tts.speech_safe import speech_safe
 
-        warm = ()
-        if MANAGER.state.loaded and MANAGER.state.profile:
-            warm = (MANAGER.state.profile,)
-        profile_name, messages, _route_decision, _switched = await prepare_answer_route(
-            task_id,
-            user_message=user_text,
-            working=working,
-            settings=settings,
-            profile_name=profile.name,
-            history=prior,
-            messages=messages,
-            tools_available=True,
-            vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
-            new_user_turn=True,
-            warm_models=warm,
-        )
-        profile = resolve_profile(profile_name)
-        await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
+        stored_route = ""
+        async with SessionLocal() as session:
+            task_row = await session.get(Task, task_id)
+            if task_row is not None:
+                stored_route = str(getattr(task_row, "response_route", "") or "")
+        route_kind = resolve_route_kind(user_text, stored_route=stored_route)
 
+        # Lean prompt for fast-path only — vault/Supermemory compose happens after miss.
+        lean_messages: list[ChatMessage] = [ChatMessage(role="system", content=OWNER_CHAT_SYSTEM), *prior]
+        if briefing:
+            lean_messages.insert(1, ChatMessage(role="system", content=briefing))
+        last = prior[-1] if prior else None
+        if last is None or last.role != "user" or (last.content or "").strip() != user_text:
+            lean_messages.append(ChatMessage(role="user", content=user_text))
+
+        # RFC-0085 hard bypass: front reply before vault/tool/Supermemory retrieval and
+        # before heavy answer-routing. Terminal fronts complete here without memory wait.
         prefetched_front = await generate_front_reply(
             user_text,
             history=prior,
@@ -901,17 +1078,16 @@ class AgentRuntime:
                 "Front response",
                 json.dumps(prefetched_front.as_dict(), ensure_ascii=False)[:4000],
             )
-            await self._speak_front_reply(
+            front_spoken_early = await self._speak_front_reply(
                 task_id,
                 prefetched_front,
                 prompt=prompt,
                 stream_key=stream_key,
                 turn_started=turn_started,
             )
-            front_spoken_early = True
             await self._persist_front_partial(
                 task_id,
-                messages,
+                lean_messages,
                 prefetched_front.text,
                 first_response_ms=prefetched_front.first_text_ms or 0.0,
                 current_action="Checking details…"
@@ -919,21 +1095,125 @@ class AgentRuntime:
                 else "Replying",
             )
 
-        from ..tts.speech_safe import speech_safe
-
-        spoken_front = speech_safe(prefetched_front.text or "")
-        model_ready = bool(MANAGER.provider and MANAGER.state.loaded)
-        if spoken_front and not model_ready and prefetched_front.action == "final_basic":
+        terminal = admit_fastpath(
+            user_text,
+            route_kind=route_kind,
+            front_action=prefetched_front.action,
+            front_text=prefetched_front.text,
+        )
+        if terminal.admitted:
+            note_fastpath_decision(terminal, task_id=task_id)
+            await BUS.publish(
+                task_id,
+                "fastpath",
+                "Fast path hit",
+                json.dumps(terminal.as_dict(), ensure_ascii=False)[:1500],
+                stage="chat",
+            )
+            spoken_front = speech_safe(prefetched_front.text or "") or (prefetched_front.text or "").strip()
+            first_ms = float(prefetched_front.first_text_ms or 0.0)
+            complete_ms = float(prefetched_front.complete_ms or first_ms or 0.0)
+            if complete_ms:
+                metrics.note_model_elapsed(max(1.0, complete_ms))
+            await BUS.publish(
+                task_id,
+                "response_timing",
+                "Response timing",
+                (
+                    f"First word {first_ms / 1000:.2f}s · completed {complete_ms / 1000:.2f}s\n"
+                    + json.dumps(
+                        {
+                            "fastpath": True,
+                            "fastpath_reason": terminal.reason,
+                            "first_word_s": round(first_ms / 1000, 2),
+                            "completed_s": round(complete_ms / 1000, 2),
+                            "front_action": prefetched_front.action,
+                            "stages_skipped": list(terminal.stages_skipped),
+                        },
+                        ensure_ascii=False,
+                    )
+                )[:4000],
+                stage="chat",
+            )
+            # Terminal front has no independent verification evidence.
+            working.verified = False
             await self._complete(
                 task_id,
-                [*messages, ChatMessage(role="assistant", content=spoken_front)],
+                [*lean_messages, ChatMessage(role="assistant", content=spoken_front)],
                 spoken_front,
-                spoken_front,
+                "",
                 working,
                 metrics,
             )
             return
 
+        lookup = admit_lookup_fastpath(user_text, route_kind=route_kind, briefing=briefing)
+        if lookup.admitted:
+            note_fastpath_decision(lookup, task_id=task_id)
+            await BUS.publish(
+                task_id,
+                "fastpath",
+                "Fast path hit",
+                json.dumps(lookup.as_dict(), ensure_ascii=False)[:1500],
+                stage="chat",
+            )
+            await self._run_direct_lookup_fastpath(
+                task_id,
+                prompt=prompt,
+                user_text=user_text,
+                messages=lean_messages,
+                profile_name=profile.name,
+                settings=settings,
+                working=working,
+                metrics=metrics,
+                turn_started=turn_started,
+                stream_key=stream_key,
+                first_response_ms=float(prefetched_front.first_text_ms or 0.0),
+            )
+            return
+
+        miss_decision = terminal if route_kind == DIRECT_REPLY else lookup
+        note_fastpath_decision(miss_decision, task_id=task_id)
+        await BUS.publish(
+            task_id,
+            "fastpath",
+            "Fast path miss",
+            json.dumps(miss_decision.as_dict(), ensure_ascii=False)[:1500],
+            stage="chat",
+        )
+
+        # Fast-path miss: retrieve vault/tools/Supermemory only now (does not delay first reply).
+        turn_ws = await compose_turn_working_set(
+            user_text,
+            task_class=CONVERSATION_CLASS,
+            agent_id="owner",
+            recent_messages=prior,
+            needs_tools=False,
+        )
+        prior = list(turn_ws.recent_turns)
+        if len(prior) > MAX_RECENT_TURNS:
+            prior = prior[-MAX_RECENT_TURNS:]
+        system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws)
+        messages = [ChatMessage(role="system", content=system), *prior]
+        if briefing:
+            messages.insert(1, ChatMessage(role="system", content=briefing))
+        last = prior[-1] if prior else None
+        if last is None or last.role != "user" or (last.content or "").strip() != user_text:
+            messages.append(ChatMessage(role="user", content=user_text))
+        # Fail closed: a terminal front that could not be admitted must not
+        # suppress the worker (empty/unsafe text would otherwise soft-complete).
+        if (
+            prefetched_front.action in TERMINAL_FRONT_ACTIONS
+            and miss_decision.reason in {"empty_front_text", "unsafe_front_speech", "missing_front_action"}
+        ):
+            prefetched_front.action = "silent_skip"
+            prefetched_front.skipped = True
+            prefetched_front.text = ""
+            front_spoken_early = False
+
+        # RFC-0127: start the 60s progress watchdog before heavy answer routing /
+        # model load so slow prepare_answer_route (e.g. hotswap after hard-bypass
+        # miss) cannot leave the owner silent past the first progress deadline.
         progress_watch = asyncio.create_task(
             run_worker_progress_watchdog(
                 task_id,
@@ -942,120 +1222,140 @@ class AgentRuntime:
                 should_continue=lambda: task_still_running(task_id),
             )
         )
-
-        if not MANAGER.provider or not MANAGER.state.loaded:
-            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-            await MANAGER.load(settings, profile_name)
+        done: dict[str, Any] | None = None
         first_response_ms = prefetched_front.first_text_ms or 0.0
-        model_started = time.perf_counter()
+        model_started = turn_started
         front_text = prefetched_front.text or ""
         front_action = prefetched_front.action or ""
         worker_started = False
         spoken_parts: list[str] = []
 
-        from ..persona.inference_context import ensure_context_for_messages, model_lane_event_payload
-        from ..agent.front_responder import resolve_front_model_id
-
-        async def _expand_notice(before: int, after: int) -> None:
-            front = await generate_front_reply(
-                user_text,
-                history=prior,
-                settings=settings,
-                turn_started=turn_started or model_started,
-            )
-            if front.text:
-                await self._speak_front_reply(
-                    task_id,
-                    front,
-                    prompt=prompt,
-                    stream_key=stream_key,
-                    turn_started=turn_started or model_started,
-                )
-            await BUS.publish(
+        try:
+            warm = ()
+            if MANAGER.state.loaded and MANAGER.state.profile:
+                warm = (MANAGER.state.profile,)
+            profile_name, messages, _route_decision, _switched = await prepare_answer_route(
                 task_id,
-                "model_lane",
-                "Context resize",
-                model_lane_event_payload(
-                    lane="system",
-                    model=resolve_front_model_id(settings),
-                    text=f"Expanding context {before} → {after}",
-                ),
-                stage="model",
-                persist=False,
+                user_message=user_text,
+                working=working,
+                settings=settings,
+                profile_name=profile.name,
+                history=prior,
+                messages=messages,
+                tools_available=True,
+                vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
+                new_user_turn=True,
+                warm_models=warm,
             )
+            profile = resolve_profile(profile_name)
+            await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
 
-        await ensure_context_for_messages(
-            messages,
-            settings=settings,
-            profile_name=profile.name,
-            on_expanding=_expand_notice,
-            task_id=task_id,
-        )
-        profile = resolve_profile(MANAGER.state.profile or profile.name)
+            if not MANAGER.provider or not MANAGER.state.loaded:
+                await BUS.publish(task_id, "stage", "Loading local model", stage="model")
+                await MANAGER.load(settings, profile_name)
+            model_started = time.perf_counter()
 
-        async def worker_stream():
-            async for delta in MANAGER.chat_stream(
-                messages,
-                temperature=profile.temperature,
-                top_p=profile.top_p,
-                top_k=profile.top_k,
-                max_tokens=owner_chat_max_tokens(profile),
-                thinking=False,
-            ):
-                yield delta
-
-        async def on_delta(lane: str, delta: str) -> None:
-            nonlocal first_response_ms
-            if not delta:
-                return
-            if lane == "worker":
-                mark_worker_useful_owner_text(task_id)
-            spoken_parts.append(delta)
-            elapsed = max(0.0, (time.perf_counter() - (turn_started or model_started)) * 1000)
-            if not first_response_ms:
-                first_response_ms = elapsed
-                await self._update(task_id, first_response_ms=round(first_response_ms, 1))
-            accumulated = "".join(spoken_parts)
-            early_id = maybe_enqueue_streaming_social_tts(
-                accumulated,
-                source="task_chat",
-                stream_key=stream_key,
-                user_prompt=prompt,
-            )
-            if early_id:
-                await BUS.publish(
-                    task_id,
-                    "chat_tts",
-                    "Speak reply",
-                    accumulated[: stream_speak_offset(stream_key)],
-                    stage="chat",
-                )
-                note_front_audio(None, elapsed)
-            from ..persona.inference_context import model_lane_event_payload
+            from ..persona.inference_context import ensure_context_for_messages, model_lane_event_payload
             from ..agent.front_responder import resolve_front_model_id
 
-            lane_model = resolve_front_model_id(settings) if lane == "front" else str(
-                getattr(MANAGER.provider, "model", "") or profile.name
-            )
-            await BUS.publish(
-                task_id,
-                "assistant_delta",
-                "Reply",
-                delta,
-                stage="chat",
-                persist=False,
-            )
-            await BUS.publish(
-                task_id,
-                "model_lane",
-                f"{lane} output",
-                model_lane_event_payload(lane=lane, model=lane_model, text=delta[:240]),
-                stage="chat",
-                persist=False,
-            )
+            async def _expand_notice(before: int, after: int) -> None:
+                front = await generate_front_reply(
+                    user_text,
+                    history=prior,
+                    settings=settings,
+                    turn_started=turn_started or model_started,
+                )
+                if front.text:
+                    await self._speak_front_reply(
+                        task_id,
+                        front,
+                        prompt=prompt,
+                        stream_key=stream_key,
+                        turn_started=turn_started or model_started,
+                    )
+                await BUS.publish(
+                    task_id,
+                    "model_lane",
+                    "Context resize",
+                    model_lane_event_payload(
+                        lane="system",
+                        model=resolve_front_model_id(settings),
+                        text=f"Expanding context {before} → {after}",
+                    ),
+                    stage="model",
+                    persist=False,
+                )
 
-        try:
-            done: dict[str, Any] | None = None
+            await ensure_context_for_messages(
+                messages,
+                settings=settings,
+                profile_name=profile.name,
+                on_expanding=_expand_notice,
+                task_id=task_id,
+            )
+            profile = resolve_profile(MANAGER.state.profile or profile.name)
+
+            async def worker_stream():
+                async for delta in MANAGER.chat_stream(
+                    messages,
+                    temperature=profile.temperature,
+                    top_p=profile.top_p,
+                    top_k=profile.top_k,
+                    max_tokens=owner_chat_max_tokens(profile),
+                    thinking=False,
+                ):
+                    yield delta
+
+            async def on_delta(lane: str, delta: str) -> None:
+                nonlocal first_response_ms
+                if not delta:
+                    return
+                if lane == "worker":
+                    mark_worker_useful_owner_text(task_id)
+                spoken_parts.append(delta)
+                elapsed = max(0.0, (time.perf_counter() - (turn_started or model_started)) * 1000)
+                if not first_response_ms:
+                    first_response_ms = elapsed
+                    await self._update(task_id, first_response_ms=round(first_response_ms, 1))
+                accumulated = "".join(spoken_parts)
+                early_id = maybe_enqueue_streaming_social_tts(
+                    accumulated,
+                    source="task_chat",
+                    stream_key=stream_key,
+                    user_prompt=prompt,
+                )
+                if early_id:
+                    await BUS.publish(
+                        task_id,
+                        "chat_tts",
+                        "Speak reply",
+                        accumulated[: stream_speak_offset(stream_key)],
+                        stage="chat",
+                    )
+                    note_front_audio(None, elapsed)
+                from ..persona.inference_context import model_lane_event_payload
+                from ..agent.front_responder import resolve_front_model_id
+
+                lane_model = resolve_front_model_id(settings) if lane == "front" else str(
+                    getattr(MANAGER.provider, "model", "") or profile.name
+                )
+                await BUS.publish(
+                    task_id,
+                    "assistant_delta",
+                    "Reply",
+                    delta,
+                    stage="chat",
+                    persist=False,
+                )
+                await BUS.publish(
+                    task_id,
+                    "model_lane",
+                    f"{lane} output",
+                    model_lane_event_payload(lane=lane, model=lane_model, text=delta[:240]),
+                    stage="chat",
+                    persist=False,
+                )
+
             async for event in run_two_lane_chat(
                 user_text,
                 history=prior,
@@ -1090,7 +1390,7 @@ class AgentRuntime:
                                 current_action="Checking details…" if front.action in {"ack_continue", "handoff_notice"} else "Replying",
                             )
                         if not front_spoken_early:
-                            await self._speak_front_reply(
+                            front_spoken_early = await self._speak_front_reply(
                                 task_id,
                                 front,
                                 prompt=prompt,
@@ -1165,14 +1465,17 @@ class AgentRuntime:
             user_prompt=prompt,
             tts_char_offset=stream_speak_offset(stream_key),
         )
-        from .background_verify import schedule_background_verification
+        if not should_skip_background_verify(route_kind):
+            from .background_verify import schedule_background_verification
 
-        schedule_background_verification(
-            user_text,
-            content,
-            source="task_chat",
-            task_id=task_id,
-        )
+            schedule_background_verification(
+                user_text,
+                content,
+                source="task_chat",
+                task_id=task_id,
+                route_kind=route_kind,
+                task_class=getattr(working, "task_class", None) or CONVERSATION_CLASS,
+            )
         clear_stream_speak_state(stream_key)
         schedule_orchestrator_restore(settings)
         await BUS.publish(
@@ -1197,8 +1500,149 @@ class AgentRuntime:
             messages[-1] = ChatMessage(role="assistant", content=content)
         else:
             messages.append(ChatMessage(role="assistant", content=content))
-        working.verified = True
-        await self._complete(task_id, messages, content, content, working, metrics)
+        # Conversation answer is not independent verification evidence.
+        working.verified = False
+        await self._complete(task_id, messages, content, "", working, metrics)
+
+    async def _run_direct_lookup_fastpath(
+        self,
+        task_id: str,
+        *,
+        prompt: str,
+        user_text: str,
+        messages: list[ChatMessage],
+        profile_name: str | None,
+        settings: AppSettings,
+        working: WorkingState,
+        metrics: LiveTaskMetrics,
+        turn_started: float,
+        stream_key: str,
+        first_response_ms: float = 0.0,
+    ) -> None:
+        """RFC-0085 direct_lookup: briefing + one answer call; no tools/verify/two-lane."""
+        await self._update(task_id, stage="act", current_action="Checking the forecast…")
+        await BUS.publish(
+            task_id,
+            "stage",
+            "Direct lookup",
+            "Using the dedicated weather briefing path",
+            stage="act",
+        )
+        profile = resolve_profile(profile_name)
+        if not MANAGER.provider or not MANAGER.state.loaded:
+            await BUS.publish(task_id, "stage", "Loading local model", stage="model")
+            await MANAGER.load(settings, profile.name)
+            profile = resolve_profile(MANAGER.state.profile or profile.name)
+        if not MANAGER.provider:
+            err = "Inference model is not loaded for direct lookup"
+            await self._update(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=err,
+                result=err,
+                **metrics.as_fields(),
+            )
+            await BUS.publish(task_id, "failed", "Direct lookup failed", err, stage="failed")
+            return
+
+        model_started = time.perf_counter()
+        parts: list[str] = []
+        try:
+            async for delta in MANAGER.chat_stream(
+                messages,
+                temperature=profile.temperature,
+                top_p=profile.top_p,
+                top_k=profile.top_k,
+                max_tokens=owner_chat_max_tokens(profile),
+                thinking=False,
+            ):
+                if not delta:
+                    continue
+                parts.append(delta)
+                if not first_response_ms:
+                    first_response_ms = max(0.0, (time.perf_counter() - turn_started) * 1000)
+                    await self._update(task_id, first_response_ms=round(first_response_ms, 1))
+                await BUS.publish(
+                    task_id,
+                    "assistant_delta",
+                    "Reply",
+                    delta,
+                    stage="chat",
+                    persist=False,
+                )
+        except Exception as exc:
+            err = str(exc)
+            await self._update(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=err,
+                result=err,
+                **metrics.as_fields(),
+            )
+            await BUS.publish(task_id, "failed", "Direct lookup failed", err, stage="failed")
+            return
+
+        content = "".join(parts).strip()
+        if not content:
+            err = empty_generation_error()
+            await self._update(
+                task_id,
+                status="failed",
+                stage="failed",
+                error=err,
+                result=err,
+                **metrics.as_fields(),
+            )
+            await BUS.publish(task_id, "failed", "Direct lookup failed", err, stage="failed")
+            return
+
+        model_ms = max(0.0, (time.perf_counter() - model_started) * 1000)
+        metrics.note_model_elapsed(max(1.0, model_ms))
+        await publish_owner_text(
+            content,
+            source="task_chat",
+            speak=True,
+            user_prompt=prompt,
+            tts_char_offset=stream_speak_offset(stream_key),
+        )
+        await BUS.publish(
+            task_id,
+            "response_timing",
+            "Response timing",
+            (
+                f"First word {(first_response_ms or 0) / 1000:.2f}s · completed {model_ms / 1000:.2f}s\n"
+                + json.dumps(
+                    {
+                        "fastpath": True,
+                        "fastpath_reason": "direct_lookup_briefing",
+                        "first_word_s": round((first_response_ms or 0) / 1000, 2),
+                        "completed_s": round(model_ms / 1000, 2),
+                        "route_kind": DIRECT_LOOKUP,
+                    },
+                    ensure_ascii=False,
+                )
+            )[:4000],
+            stage="chat",
+        )
+        clear_stream_speak_state(stream_key)
+        if messages and messages[-1].role == "assistant":
+            messages[-1] = ChatMessage(role="assistant", content=content)
+        else:
+            messages.append(ChatMessage(role="assistant", content=content))
+        # Direct lookup has no independent verification — never treat the answer as evidence.
+        working.verified = False
+        not_verified = json.dumps(
+            {
+                "result": "NOT_VERIFIED",
+                "checks": [],
+                "warnings": ["direct_lookup produced an answer without independent verification evidence"],
+                "answer_changed_by_verification": False,
+            },
+            ensure_ascii=False,
+        )
+        await self._complete(task_id, messages, content, not_verified, working, metrics)
 
     async def _run_simple_app_control(
         self,
@@ -1383,7 +1827,9 @@ class AgentRuntime:
             if spill:
                 active_prompt = f"{gate_text[:1200]}\n\n{spill}"
         metrics = LiveTaskMetrics()
-        follow_route = route_request(extra_prompt or prompt) if extra_prompt else None
+        from .request_routing import evaluate_request_route
+
+        follow_route = await evaluate_request_route(extra_prompt, route_request(extra_prompt)) if extra_prompt else None
         if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
             if follow_up_stays_conversation(extra_prompt, security_role=working.security_role):
                 working.task_class = CONVERSATION_CLASS
@@ -1449,12 +1895,19 @@ class AgentRuntime:
                     )
                 )
             elif not continue_existing:
+                ack_text = task_acknowledgement(extra_prompt or prompt)
                 await BUS.publish(
                     task_id,
                     "chat_tts",
                     "Acknowledged",
-                    task_acknowledgement(extra_prompt or prompt),
+                    ack_text,
                     stage="understand",
+                )
+                await publish_owner_text(
+                    ack_text,
+                    source="task_chat",
+                    speak=True,
+                    user_prompt=extra_prompt or prompt,
                 )
         await self._update(task_id, exposed_tools=_exposed_csv(working, extra_prompt or prompt))
         policy = resolve_execution_policy(execution_mode)
@@ -1630,6 +2083,27 @@ class AgentRuntime:
         if existing and continue_existing:
             messages = existing
             if extra_prompt:
+                # RFC-0107 Wave B: refresh vault working set for the follow-up ask —
+                # continue_existing must not keep a stale or empty vault block.
+                follow_ws = await compose_turn_working_set(
+                    extra_prompt,
+                    task_class=working.task_class,
+                    extra_capabilities=working.requested_tools,
+                    security_role=working.security_role,
+                    agent_id="owner",
+                    recent_messages=existing,
+                    needs_tools=working.ingress_needs_tools,
+                )
+                from .turn_working_set import replace_vault_block_in_system
+
+                for idx, message in enumerate(messages):
+                    if message.role == "system":
+                        refreshed = replace_vault_block_in_system(
+                            message.content if isinstance(message.content, str) else "",
+                            follow_ws.vault_block,
+                        )
+                        messages[idx] = ChatMessage(role="system", content=refreshed)
+                        break
                 follow_up_grounding = maybe_docs_first(DocsFirstContext(user_message=extra_prompt))
                 if follow_up_grounding and follow_up_grounding.prompt_block():
                     for idx, message in enumerate(messages):
@@ -1706,6 +2180,7 @@ class AgentRuntime:
                 extra_capabilities=working.requested_tools,
                 security_role=working.security_role,
                 agent_id="owner",
+                recent_messages=existing,
                 needs_tools=working.ingress_needs_tools,
             )
             if working.ingress_needs_tools is False and not turn_ws.tool_schemas:
@@ -1810,6 +2285,7 @@ class AgentRuntime:
         if pending_tool:
             pending_name = pending_tool["name"]
             pending_args = pending_tool["arguments"] if isinstance(pending_tool.get("arguments"), dict) else {}
+            pending_grant_id = pending_tool.get("grant_id")
             await speak_progress(task_id, pending_name, pending_args)
             result_text = await self._execute_tool(
                 task_id,
@@ -1817,7 +2293,8 @@ class AgentRuntime:
                 pending_args,
                 autonomy,
                 settings,
-                approved=True,
+                approved=bool(pending_grant_id),
+                grant_id=str(pending_grant_id) if pending_grant_id else None,
             )
             messages.append(
                 ChatMessage(
@@ -2225,17 +2702,50 @@ class AgentRuntime:
                             messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=denied))
                             working.note_tool(name, denied, False)
                             continue
-                        if _tool_needs_operator_pause(autonomy, risk, command, name, arguments):
+                        side = _side_effect_decision(
+                            name,
+                            arguments if isinstance(arguments, dict) else {},
+                            task_id=task_id,
+                            park_if_needed=True,
+                        )
+                        if side.requires_approval or (
+                            not side.allowed
+                            and _tool_needs_operator_pause(autonomy, risk, command, name, arguments)
+                        ):
                             metrics.note_confirmation()
                             irreversible = needs_confirmation(
                                 autonomy, risk, command, tool_name=name, arguments=arguments
-                            )
+                            ) or side.effect.destructive_effect
                             payload = confirmation_payload_for_tool(
                                 call_id=call["id"],
                                 name=name,
                                 arguments=arguments,
                                 irreversible=irreversible,
                             )
+                            payload["pending_approval_id"] = side.pending_approval_id
+                            payload["action_id"] = side.action_id
+                            payload["reversibility"] = side.effect.reversibility.value
+                            payload["rfc0031"] = True
+                            if not side.pending_approval_id:
+                                # Ensure a parked request exists even if pause came from legacy path.
+                                from ..policy.approval_grant import action_id_for, park_approval_request
+
+                                target = side.effect.target
+                                action_id = side.action_id or action_id_for(
+                                    name, side.effect.action, target, task_id=task_id
+                                )
+                                parked = park_approval_request(
+                                    action_id=action_id,
+                                    tool_name=name,
+                                    action=side.effect.action,
+                                    scope={"call_id": call["id"]},
+                                    target=target,
+                                    task_id=task_id,
+                                    reason=side.reason,
+                                    effect=side.effect.as_dict(),
+                                )
+                                payload["pending_approval_id"] = parked["id"]
+                                payload["action_id"] = action_id
                             await self._update(
                                 task_id,
                                 status="waiting",
@@ -2250,10 +2760,25 @@ class AgentRuntime:
                                 task_id,
                                 "confirm",
                                 f"Confirmation required for {name}",
-                                json.dumps(arguments)[:1500],
+                                json.dumps(
+                                    {
+                                        "arguments": arguments,
+                                        "pending_approval_id": payload.get("pending_approval_id"),
+                                        "reversibility": payload.get("reversibility"),
+                                        "reason": side.reason,
+                                    },
+                                    default=str,
+                                )[:1500],
                                 stage="act",
                             )
                             return
+                        if not side.allowed:
+                            observation = _authorization_observation(_tool_authorization(name, arguments))
+                            messages.append(
+                                ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation)
+                            )
+                            working.note_tool(name, observation, False)
+                            continue
                         await self._update(task_id, current_tool=name, current_action=f"Running {name}")
                         await BUS.publish(task_id, "tool", f"Running {name}", json.dumps(arguments)[:1500], stage="act")
                         await speak_progress(task_id, name, arguments)
@@ -2472,8 +2997,16 @@ class AgentRuntime:
         *,
         approved: bool = False,
         profile_id: str | None = None,
+        grant_id: str | None = None,
     ) -> str:
-        authz = _tool_authorization(name, arguments, approved=approved, profile_id=profile_id)
+        authz = _tool_authorization(
+            name,
+            arguments,
+            approved=approved,
+            profile_id=profile_id,
+            grant_id=grant_id,
+            task_id=task_id,
+        )
         if not authz.allowed:
             return _authorization_observation(authz)
         text, _ = await self._execute_tool_ex(
@@ -2484,6 +3017,7 @@ class AgentRuntime:
             settings,
             approved=approved,
             profile_id=profile_id,
+            grant_id=grant_id,
         )
         return text
 
@@ -2499,19 +3033,108 @@ class AgentRuntime:
         *,
         approved: bool = False,
         profile_id: str | None = None,
+        grant_id: str | None = None,
     ) -> tuple[str, str | None]:
-        authz = _tool_authorization(name, arguments, approved=approved, profile_id=profile_id)
+        # Prefer gate_tool_call (via _tool_authorization) so existing hooks/tests that
+        # monkeypatch app.agent.loop.gate_tool_call still observe the deny/allow boundary.
+        authz = _tool_authorization(
+            name,
+            arguments,
+            approved=approved,
+            profile_id=profile_id,
+            grant_id=grant_id,
+            task_id=task_id,
+        )
         if not authz.allowed:
             return _authorization_observation(authz), None
+        decision = _side_effect_decision(
+            name,
+            arguments,
+            grant_id=grant_id,
+            task_id=task_id,
+            profile_id=profile_id,
+            park_if_needed=False,
+        )
+        if grant_id:
+            from ..policy.approval_grant import consume_grant
+
+            try:
+                consume_grant(grant_id)
+            except KeyError:
+                pass
         consume_once_grants(permission_ids_for_tool(name, arguments))
         started = datetime.now(timezone.utc)
+
+        # RFC-0031: capture restorable prior_state BEFORE mutation when required.
+        prior_state: dict[str, Any] = {
+            "kind": "metadata_only",
+            "target": decision.effect.target,
+            "tool_name": name,
+            "action": decision.effect.action,
+            "restorable": False,
+        }
+        needs_snapshot = bool(decision.effect.snapshot_required) or (
+            decision.effect.side_effecting
+            and decision.effect.reversibility.value in {"REVERSIBLE", "COMPENSATABLE"}
+            and name in {"filesystem", "settings", "config"}
+        )
+        if needs_snapshot and decision.allowed:
+            try:
+                prior_state = capture_prior_for_effect(
+                    name,
+                    action=decision.effect.action,
+                    arguments=arguments if isinstance(arguments, dict) else {},
+                    snapshot_required=bool(decision.effect.snapshot_required),
+                )
+            except Exception as exc:  # noqa: BLE001 — fail closed when snapshot required
+                if decision.effect.snapshot_required:
+                    log.error(
+                        "rfc0031 snapshot_required capture failed tool=%s action=%s task=%s: %s",
+                        name,
+                        decision.effect.action,
+                        task_id,
+                        exc,
+                    )
+                    try:
+                        await BUS.publish(
+                            task_id,
+                            "error",
+                            "Undo snapshot capture failed",
+                            str(exc)[:1500],
+                            stage="act",
+                        )
+                    except Exception:
+                        pass
+                    REGISTRY._context.pop("approval_grant_id", None)
+                    return (
+                        "ERROR: Reversible action blocked — could not capture undo snapshot: "
+                        f"{exc}\n"
+                        + json.dumps(
+                            {
+                                "rfc0031": {
+                                    "code": "snapshot_capture_failed",
+                                    "tool": name,
+                                    "action": decision.effect.action,
+                                    "snapshot_required": True,
+                                }
+                            }
+                        ),
+                        None,
+                    )
+                log.warning(
+                    "rfc0031 prior capture skipped tool=%s action=%s: %s",
+                    name,
+                    decision.effect.action,
+                    exc,
+                )
 
         async def _run_tool_inner() -> tuple[str, str | None, bool, str]:
             async with SessionLocal() as session:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
             REGISTRY._context["task_id"] = task_id
-            REGISTRY._context["approved"] = approved
+            REGISTRY._context["approved"] = bool(grant_id) or approved
+            REGISTRY._context["approval_grant_id"] = grant_id or ""
             if name == "read_ingress":
                 result = await REGISTRY.execute(name, arguments, task_id=task_id)
             elif security_role:
@@ -2581,6 +3204,88 @@ class AgentRuntime:
                     Checkpoint(task_id=task_id, kind="git", path=arguments.get("path") or "", note=text[:500])
                 )
             await session.commit()
+        if success and decision.allowed:
+            undo_note = ""
+            try:
+                action_name = str(decision.effect.action or "").strip().lower()
+                args = arguments if isinstance(arguments, dict) else {}
+                source_path = str(args.get("path") or decision.effect.target or "").strip()
+                dest_path = str(args.get("destination") or args.get("to") or "").strip()
+                # Live undo precondition compares against this digest at undo time.
+                digest_path = dest_path if action_name in {"copy", "move", "rename"} and dest_path else source_path
+                post_digest = hashlib.sha256(
+                    f"{name}:{action_name}:{digest_path or decision.effect.target}:{text[:200]}".encode()
+                ).hexdigest()[:32]
+                if digest_path:
+                    try:
+                        p = Path(digest_path).expanduser()
+                        if p.is_file():
+                            post_digest = hashlib.sha256(p.read_bytes()).hexdigest()
+                        elif p.is_dir():
+                            hasher = hashlib.sha256()
+                            for item in sorted(p.rglob("*")):
+                                if item.is_file():
+                                    rel = item.relative_to(p).as_posix()
+                                    hasher.update(f"{rel}:{item.stat().st_size}".encode())
+                            post_digest = hasher.hexdigest()
+                        elif not p.exists() and action_name == "delete":
+                            post_digest = "missing"
+                    except OSError:
+                        pass
+                record = register_post_success_undo(
+                    decision,
+                    prior_state=prior_state,
+                    post_state={
+                        "target": decision.effect.target,
+                        "kind": prior_state.get("kind"),
+                        "digest_path": digest_path or decision.effect.target,
+                        "destination_path": dest_path or prior_state.get("destination_path"),
+                        "expected_digest": post_digest,
+                    },
+                    task_id=task_id,
+                    run_id=task_id,
+                    step_key=step_key,
+                )
+                if record is None and decision.effect.snapshot_required:
+                    raise RuntimeError("snapshot_required action produced no undo record")
+            except Exception as exc:  # noqa: BLE001 — never silent swallow
+                log.exception(
+                    "rfc0031 undo registration failed tool=%s action=%s task=%s step=%s",
+                    name,
+                    decision.effect.action,
+                    task_id,
+                    step_key,
+                )
+                try:
+                    await BUS.publish(
+                        task_id,
+                        "error",
+                        "Undo registration failed",
+                        str(exc)[:1500],
+                        stage="act",
+                    )
+                except Exception:
+                    pass
+                undo_note = (
+                    "\nERROR: Undo registration failed after successful side effect: "
+                    f"{exc}\n"
+                    + json.dumps(
+                        {
+                            "rfc0031": {
+                                "code": "undo_registration_failed",
+                                "tool": name,
+                                "action": decision.effect.action,
+                                "snapshot_required": bool(decision.effect.snapshot_required),
+                                "step_key": step_key,
+                            }
+                        }
+                    )
+                )
+                # Surface into the tool observation so the owner/agent sees it.
+                text = f"{text}{undo_note}"
+                success = False if decision.effect.snapshot_required else success
+                error = str(exc) if decision.effect.snapshot_required else error
+        REGISTRY._context.pop("approval_grant_id", None)
         return text, attach
 
     async def _maybe_consult_expert(

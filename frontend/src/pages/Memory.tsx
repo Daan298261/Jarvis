@@ -178,8 +178,9 @@ export function MemoryPage() {
           <div style={{ flex: 1, minWidth: 260 }}>
             <h2 style={{ margin: 0 }}>Semantic memory module</h2>
             <p className="lede" style={{ marginBottom: 8 }}>
-              Supermemory runs locally for semantic recall. ContextRepo stays authoritative and is always the fallback;
-              Obsidian stays your editable knowledge vault.
+              Supermemory runs locally for semantic recall. ContextRepo stays authoritative and is always the fallback.
+              Your editable vault lives in the{" "}
+              <Link to="/obsidian">Obsidian</Link> pane (real Obsidian — not this Memory page).
             </p>
             {supermemory && (
               <div className="lede" style={{ margin: 0 }}>

@@ -121,6 +121,7 @@ class ToolRegistry:
                     "risk": tool.risk.value,
                     "effect_class": getattr(tool, "effect_class", "internal"),
                     "replay_policy": getattr(tool, "replay_policy", None),
+                    "reversibility": getattr(tool, "reversibility", "UNKNOWN"),
                 }
             )
         return out

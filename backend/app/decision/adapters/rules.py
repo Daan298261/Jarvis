@@ -94,7 +94,11 @@ def decide(
     for question in questions:
         qid = question.id
         if question.type == "choice":
-            if qid in {"tool_select", "tool_shortlist"} or decision_class in {
+            if qid == "request_route":
+                baseline = str(state.get("baseline_route") or "managed_task")
+                pick = baseline if baseline in question.choices else question.choices[-1]
+                answers[qid] = _answer_choice(qid, pick, 0.9)
+            elif qid in {"tool_select", "tool_shortlist"} or decision_class in {
                 "tool_selection",
                 "tool_shortlist",
             }:
@@ -114,7 +118,11 @@ def decide(
             ):
                 # Prefer explicit state hint, else first non-empty choice.
                 hinted = str(state.get("preferred_profile") or state.get("active_persona") or "")
-                if hinted and hinted in question.choices:
+                persona = str(state.get("active_persona") or "").strip().lower()
+                if persona == "umi" and "umi-opus-9b" in question.choices:
+                    answers[qid] = _answer_choice(qid, "umi-opus-9b", 0.92)
+                    hard_rule = True
+                elif hinted and hinted in question.choices:
                     answers[qid] = _answer_choice(qid, hinted, 0.9)
                     hard_rule = True
                 else:

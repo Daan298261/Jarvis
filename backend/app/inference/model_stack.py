@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from ..persona.persona_brain import UMI_OLLAMA_MODEL
 from .profile_roles import infer_runtime_role_and_tier
 from .runtime_profiles import (
     PRIVACY_LOCAL_ONLY,
@@ -38,6 +39,7 @@ class SpecialistModel:
     description: str = ""
     ship_runtime_template: bool = True
     manual_gate: bool = False
+    inference_profile: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,7 +64,7 @@ class SpecialistModel:
             privacy_class=self.privacy_class,
             cost_ceiling_usd=0.0 if self.is_local else None,
             capability_tags=self.capability_tags,
-            model_profile=None,
+            model_profile=self.inference_profile,
             specialization_tags=self.specialization_tags,
             is_local=self.is_local,
             description=self.description,
@@ -81,6 +83,29 @@ class RoleRoutingSpec:
 
 
 MODEL_CATALOG: dict[str, SpecialistModel] = {
+    "umi-opus-9b": SpecialistModel(
+        key="umi-opus-9b",
+        runtime_profile_name="umi-opus-9b",
+        label="Umi · Qwen3.5 9B Opus reasoning",
+        model_id=UMI_OLLAMA_MODEL,
+        role="orchestrator",
+        provider="ollama",
+        endpoint="127.0.0.1:11434",
+        context_limit=32768,
+        quantization="ollama",
+        capability_tags=("llm_inference", "text", "agentic", "tool-use", "reasoning"),
+        specialization_tags=("orchestration", "agentic", "umi"),
+        is_local=True,
+        privacy_class=PRIVACY_LOCAL_ONLY,
+        enabled_by_default=True,
+        description=(
+            "Main brain for the Umi persona via loopback Ollama. "
+            "Install with the Jarvis installer Umi brain option; Jarvis pulls and probes the model automatically."
+        ),
+        ship_runtime_template=True,
+        manual_gate=False,
+        inference_profile="balanced",
+    ),
     "ornith-orchestrator": SpecialistModel(
         key="ornith-orchestrator",
         runtime_profile_name="ornith_9b",
@@ -272,7 +297,7 @@ MODEL_CATALOG: dict[str, SpecialistModel] = {
 ROLE_SPECS: dict[str, RoleRoutingSpec] = {
     "orchestrator": RoleRoutingSpec(
         role="orchestrator",
-        preferred_profiles=("ornith_9b", "balanced", "fast"),
+        preferred_profiles=("umi-opus-9b", "ornith_9b", "balanced", "fast"),
         required_capabilities=("llm_inference", "text"),
         specialization="orchestration",
     ),

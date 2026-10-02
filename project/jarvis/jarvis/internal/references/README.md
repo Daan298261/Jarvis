@@ -17,6 +17,7 @@ This directory is the **primary** corpus for RFC-0060 docs-first grounding. When
 | [setup-pitfalls.md](setup-pitfalls.md) | Install, LAN, models, GPU, lifecycle, secrets |
 | [companion-pc-endpoint.md](companion-pc-endpoint.md) | PC Leader `:4780` / mobile gateway `:4781` bring-up |
 | [companion-realtime-voice.md](companion-realtime-voice.md) | RFC-0064 duplex voice session summary |
+| [presence-hud-centering.md](presence-hud-centering.md) | Idle free-float, framing center, neural aspect |
 | [humanoid-runtime.md](humanoid-runtime.md) | Humanoid presence runtime setup |
 | [spec-summaries/](spec-summaries/) | Short digests of key RFCs and root specs |
 | [help-topics/](help-topics/) | In-app Help guides (phone pairing, custom models, swarms, autonomy) |

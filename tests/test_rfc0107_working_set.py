@@ -13,16 +13,19 @@ from app.tools.registry import REGISTRY
 @pytest.fixture
 def vault_with_decoy(tmp_path, monkeypatch):
     data_root = tmp_path / "obsidian-meta"
+    vault_root = tmp_path / "vault"
     data_root.mkdir(parents=True, exist_ok=True)
+    vault_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: data_root)
     stop_watch()
     reset_vault_store()
-    bind_vault(str(tmp_path), init_layout=True)
-    (tmp_path / "Decoy.md").write_text(
+    bind_vault(str(vault_root), init_layout=True)
+    stop_watch()
+    (vault_root / "Decoy.md").write_text(
         "RFC0107_DECOY_UNIQUE_MARKER_SHOULD_NOT_APPEAR_IN_PROMPT\n" * 50,
         encoding="utf-8",
     )
-    (tmp_path / "Projects" / "deploy.md").write_text(
+    (vault_root / "Projects" / "deploy.md").write_text(
         "# Deploy\n\nkubernetes rollout for production\n",
         encoding="utf-8",
     )
@@ -30,7 +33,7 @@ def vault_with_decoy(tmp_path, monkeypatch):
 
     index_file("Decoy.md")
     index_file("Projects/deploy.md")
-    yield tmp_path
+    yield vault_root
     unbind_vault()
     reset_vault_store()
 
@@ -91,7 +94,12 @@ async def test_vault_hit_in_working_set_only(vault_with_decoy):
         include_memory=False,
     )
     assert "kubernetes" in ws.vault_block.lower() or "deploy" in ws.vault_block.lower()
+    assert ws.vault_hits
+    assert all(h.rel_path and h.content_hash for h in ws.vault_hits)
+    assert any(h.heading for h in ws.vault_hits)
     assert "RFC0107_DECOY" not in ws.serialized_prompt_text()
+    assert "#" in ws.vault_block  # path#heading provenance marker
+    assert "hash:" in ws.vault_block
 
 
 def test_compact_identity_is_short():

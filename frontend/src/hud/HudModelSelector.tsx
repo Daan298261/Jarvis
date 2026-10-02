@@ -80,6 +80,19 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const [assignIndex, setAssignIndex] = useState<number | null>(null)
 
   const transferring = busySlot !== null || busyLocalId !== null || !!model?.loading
+  const [loadElapsed, setLoadElapsed] = useState(0)
+
+  useEffect(() => {
+    if (!transferring) {
+      setLoadElapsed(0)
+      return
+    }
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      setLoadElapsed(Math.floor((Date.now() - started) / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [transferring])
 
   const persistSlots = useCallback((next: HudModelSlotsV1) => {
     setSlotsState(next)
@@ -364,20 +377,19 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
         aria-controls={menuId}
         aria-busy={transferring}
         onClick={() => setOpenState(!open)}
-        title="Model hotswap (HUD_MODEL_HOTSWAP)"
+        title="Switch local model"
       >
         <span className="hud-model-trigger-label">{headline}</span>
         <span className="hud-model-trigger-meta">{subline}</span>
       </button>
 
       {open && (
-        <div className="hud-model-menu" id={menuId} role="dialog" aria-label="Model hotswap">
+        <div className="hud-model-menu" id={menuId} role="dialog" aria-label="Switch local model">
           <div className="hud-model-menu-head">
-            <span className="hud-model-menu-title">Hotswap</span>
+            <span className="hud-model-menu-title">Model</span>
             <button
               type="button"
               className="hud-icon-btn hud-model-config-toggle"
-              disabled={transferring}
               onClick={() => {
                 setConfigure((c) => !c)
                 setAssignIndex(null)
@@ -389,7 +401,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
 
           {transferring && (
             <p className="hud-model-transferring" role="status">
-              Loading model…
+              Loading model{loadElapsed > 0 ? ` (${loadElapsed}s)` : ""}… You can close this menu.
             </p>
           )}
 

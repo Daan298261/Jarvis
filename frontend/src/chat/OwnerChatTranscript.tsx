@@ -26,8 +26,10 @@ type OwnerChatTranscriptProps = {
   prompt?: string | null
   status: string
   stage?: string | null
+  current_activity?: string | null
   current_action?: string | null
   current_tool?: string | null
+  execution_phase?: string | null
   waiting_for_confirmation?: boolean
   confirmation_payload?: unknown
   result?: string | null
@@ -45,8 +47,10 @@ export function OwnerChatTranscript({
   prompt,
   status,
   stage,
+  current_activity,
   current_action,
   current_tool,
+  execution_phase,
   waiting_for_confirmation,
   confirmation_payload,
   result,
@@ -98,8 +102,10 @@ export function OwnerChatTranscript({
   const statusLine = taskStatusLine({
     status,
     stage,
+    current_activity,
     current_action,
     current_tool,
+    execution_phase,
     waiting_for_confirmation: approvalDecisionOpen ? waiting_for_confirmation : false,
   })
 

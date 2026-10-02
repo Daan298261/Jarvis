@@ -1,10 +1,7 @@
+@import "./presence-stage.css";
+
 .jarvis-presence-humanoid {
   position: relative;
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  min-width: 0;
-  margin-inline: auto;
   isolation: isolate;
   overflow: hidden;
   background:
@@ -13,26 +10,7 @@
     #02050a;
   mask-image: linear-gradient(180deg, transparent, black 4%, black 94%, transparent);
 }
-.jarvis-presence-host:has(.jarvis-presence-humanoid) {
-  width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
-  flex: 1 1 auto;
-  height: 100%;
-  max-height: none;
-}
 
-.hud-orb-zone:has(.jarvis-presence-humanoid) {
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: none;
-  justify-content: center;
-}
 .hud-orb-zone:has(.jarvis-presence-humanoid) .hud-orb-caption { margin-top: -8px; }
 
 .jarvis-presence-humanoid.galaxy,
@@ -65,6 +43,52 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+
+.jarvis-presence-particle canvas {
+  opacity: 1;
+}
+
+.jarvis-mythic-avatar-shell {
+  --mythic-primary: #67dcff;
+  --mythic-accent: #d4a017;
+  position: absolute;
+  inset: 5% 10% 9%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  animation: mythic-avatar-arrive 340ms cubic-bezier(.2, .82, .25, 1) both;
+}
+
+.jarvis-mythic-avatar-shell::before {
+  content: "";
+  position: absolute;
+  width: min(58dvh, 46vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--mythic-primary) 28%, transparent), transparent 62%),
+    conic-gradient(from 180deg, transparent, color-mix(in srgb, var(--mythic-accent) 15%, transparent), transparent 28%);
+  filter: blur(18px);
+  opacity: 0.75;
+}
+
+.jarvis-mythic-avatar-shell img {
+  position: relative;
+  width: min(58dvh, 46vw);
+  height: min(58dvh, 46vw);
+  max-width: 760px;
+  max-height: 760px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 0 16px color-mix(in srgb, var(--mythic-primary) 62%, transparent))
+    drop-shadow(0 0 38px color-mix(in srgb, var(--mythic-accent) 24%, transparent));
+}
+
+@keyframes mythic-avatar-arrive {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); filter: blur(7px); }
+  to { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
 }
 
 /* Faint TEM-style chrome — decorative only, does not compete with chat. */
@@ -149,35 +173,11 @@
   box-shadow: 0 0 12px #ffac36;
 }
 
-/* The desktop canvas is the scene, including on ultrawide displays. */
-@media (min-aspect-ratio: 21/9) {
-  .jarvis-presence-humanoid,
-  .jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-    max-height: none;
-  }
-
-  .hud-orb-zone:has(.jarvis-presence-humanoid) {
-    max-height: none;
-  }
-}
-
 @media (max-width: 760px) {
-  .jarvis-presence-humanoid,
-  .jarvis-presence-host:has(.jarvis-presence-humanoid) .jarvis-presence-humanoid {
-    height: clamp(340px, 56dvh, 600px);
-    max-height: 62dvh;
-  }
   .jarvis-humanoid-label { font-size: 8px; gap: 8px; }
   .jarvis-humanoid-hud-tr { font-size: 7px; }
   .jarvis-humanoid-hud-tl,
   .jarvis-humanoid-hud-bl { width: 28px; height: 28px; }
-}
-
-@media (max-height: 650px) and (min-width: 761px) {
-  .jarvis-presence-humanoid { height: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

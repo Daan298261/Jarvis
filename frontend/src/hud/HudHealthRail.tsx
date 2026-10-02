@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode } from "../api"
-import { HudLmStudioCatalog } from "../lmstudio/HudLmStudioCatalog"
 import { SETUP_PROBLEM_WORKING } from "../setup/ownerFacing"
 import type { HealthIssue } from "./systemHealth"
 
@@ -104,9 +103,13 @@ export function HudHealthRail({
             href={healthIssues[0]?.href || "/system"}
           />
         )}
-      </div>
-      <div className="hud-catalog-panel">
-        <HudLmStudioCatalog />
+        <HealthCard
+          title="Model"
+          tone={model?.loaded ? "ok" : model?.loading ? "warn" : "warn"}
+          value={model?.loading ? "Loading" : model?.loaded ? "Loaded" : "Not loaded"}
+          detail="Use the Model menu in the top bar, or open the Model page."
+          href="/model"
+        />
       </div>
     </aside>
   )

@@ -4,8 +4,9 @@ import { api, apiForm, fetchAudio, getPrivateKey, setPrivateKey, type Task } fro
 import { parseConfirmationPayload, PermissionPrompt } from "../chat/PermissionPrompt"
 import { usePendingApprovals } from "../chat/pendingApprovals"
 import { MobileCompanionSetup } from "./MobileCompanionSetup"
-import { TaskHeartbeat } from "../components/TaskActivity"
-import { phaseLabel } from "../taskStatus"
+import { TaskActivityPanel, TaskHeartbeat } from "../components/TaskActivity"
+import { TaskStatusMeta, TaskVerificationBadge } from "../components/TaskStatusMeta"
+import { activityLabel, phaseLabel } from "../taskStatus"
 
 type VoiceStatus = { stt_ready?: boolean; tts_ready?: boolean; detail?: string }
 
@@ -218,14 +219,24 @@ export function PhonePage() {
           <>
             <div className="kv">
               <b>Task</b><span>{active.title}</span>
-              <b>State</b><span><span className={`badge ${active.state || active.status}`}>{phaseLabel(active)}</span> <TaskHeartbeat task={active} /></span>
+              <b>Lifecycle</b><span><span className={`badge ${active.state || active.status}`}>{active.state || active.status}</span> <TaskHeartbeat task={active} /></span>
+              <b>Phase</b><span className={`badge ${active.execution_phase ? "running" : (active.state || active.status)}`}>{phaseLabel(active)}</span>
               <b>Started</b><span>{(active.started_at || active.created_at)?.replace("T", " ").slice(0, 19)}</span>
               <b>Elapsed</b><span>{Math.round(active.elapsed_seconds ?? active.duration_seconds ?? 0)}s</span>
-              <b>Action</b><span>{active.current_action || "—"}</span>
+              <b>Activity</b><span>{activityLabel(active) || "—"}</span>
               <b>Tool</b><span>{active.current_tool || "—"}</span>
               <b>Worker</b><span>{active.active_worker || "Jarvis agent"}</span>
               <b>Last progress</b><span>{active.last_progress_at?.replace("T", " ").slice(0, 19) || "—"}</span>
-              <b>Verified</b><span>{active.verification ? "yes" : "pending"}</span>
+              <b>Verification</b><span><TaskVerificationBadge task={active} />{!active.verification_summary && !active.verification ? " —" : ""}</span>
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <TaskStatusMeta task={active} />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <TaskActivityPanel
+                task={active}
+                elapsed={Math.round(active.elapsed_seconds ?? active.duration_seconds ?? 0)}
+              />
             </div>
             {active.result && <div className="report" style={{ marginTop: 12 }}>{active.result.slice(0, 600)}</div>}
             {active.error && <p className="lede" style={{ marginTop: 12 }}>{active.error}</p>}

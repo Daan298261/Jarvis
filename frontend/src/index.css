@@ -295,6 +295,12 @@ h2 { font-size: 18px; margin: 0 0 12px; }
   font-size: 12px;
   text-transform: capitalize;
 }
+.task-activity-head {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
 .task-activity-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 .task-activity-grid {
   display: grid;
@@ -322,6 +328,106 @@ h2 { font-size: 18px; margin: 0 0 12px; }
 .task-heartbeat.stale { color: var(--bad); }
 .task-heartbeat.stale .task-heartbeat-dot { background: var(--bad); }
 .rail-item-meta .task-heartbeat { margin-right: 5px; }
+.task-status-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.task-status-meta .badge { font-size: 10px; }
+.task-status-activity,
+.task-status-progress,
+.task-status-elapsed,
+.task-status-children {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28ch;
+}
+.task-status-inbox-link {
+  color: var(--gold);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.task-status-inbox-link:hover { text-decoration: underline; }
+.badge.phase-badge { text-transform: capitalize; }
+.badge.verification-badge.verified { background: rgba(61,186,122,.15); color: var(--ok); }
+.badge.verification-badge.verification-failed { background: rgba(212,101,90,.15); color: var(--bad); }
+.badge.verification-badge.partially-verified { background: rgba(212,160,23,.15); color: var(--gold); }
+.badge.verification-badge.not-verified { background: #222; color: var(--muted); }
+.verification-summary {
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+}
+.verification-summary > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+  padding: 9px 12px;
+}
+.verification-summary-line {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.verification-detail { padding: 0 12px 12px; }
+.verification-checks,
+.verification-warnings,
+.verification-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.verification-checks > b,
+.verification-warnings > b,
+.verification-evidence > b,
+.task-phase-history > summary span:first-child,
+.task-child-execution > summary span:first-child {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.verification-check {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0e1217;
+  color: var(--text);
+}
+.verification-check.tone-pass { border-color: rgba(61,186,122,.35); }
+.verification-check.tone-fail { border-color: rgba(212,101,90,.4); }
+.verification-check em { color: var(--muted); font-style: normal; font-size: 11px; }
+.verification-summary.verified > summary .badge { color: var(--ok); }
+.verification-summary.verification-failed > summary .badge { color: var(--bad); }
+.verification-summary.partially-verified > summary .badge { color: var(--gold); }
+.task-phase-history,
+.task-child-execution {
+  border-top: 1px solid var(--line);
+}
+.task-phase-history > summary,
+.task-child-execution > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  cursor: pointer;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.task-obs-error { padding: 0 12px 10px; color: var(--bad); }
 .task-recent-actions { padding: 0 12px 10px; }
 .task-recent-actions > div {
   display: grid;
@@ -334,9 +440,6 @@ h2 { font-size: 18px; margin: 0 0 12px; }
 }
 .task-recent-actions span, .task-recent-actions em { color: var(--muted); font-style: normal; }
 .task-recent-actions strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.verification-summary { display: flex; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--line); font-size: 11px; }
-.verification-summary b { color: var(--ok); white-space: nowrap; }
-.verification-summary span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-approval-bar { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 8px; padding: 10px 12px; border: 1px solid rgba(212,101,90,.5); border-radius: 10px; font-size: 12px; }
 .chat-thread {
   flex: 1;

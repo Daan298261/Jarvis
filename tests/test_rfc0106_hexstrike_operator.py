@@ -33,7 +33,13 @@ def operator_store(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.security.hexstrike.data_dir", lambda: tmp)
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
-    return tmp
+    # Align process flags with mocked status(running=True) so catalog honesty matches.
+    HEXSTRIKE._process = SimpleNamespace(pid=1, returncode=None)
+    HEXSTRIKE._loopback_healthy = True
+    yield tmp
+    HEXSTRIKE._process = None
+    HEXSTRIKE._loopback_healthy = False
+    HEXSTRIKE._health = {}
 
 
 
@@ -226,6 +232,18 @@ async def test_operate_rejects_dependency_catalog_rows(operator_store, monkeypat
 
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
     monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    # Guaranteed-missing host tool — do not assume the CI/dev machine lacks nmap.
+    import shutil as _shutil
+
+    real_which = _shutil.which
+
+    def _which_missing_nmap(name):
+        if str(name).lower() == "nmap":
+            return None
+        return real_which(name)
+
+    monkeypatch.setattr("app.security.hexstrike_operator.shutil.which", _which_missing_nmap)
+    monkeypatch.setattr("app.security.hexstrike_tools.shutil.which", _which_missing_nmap)
     await refresh_discovered_catalog(force=True)
     with pytest.raises(ValueError, match="install via POST"):
         await operate("dep:nmap", {})

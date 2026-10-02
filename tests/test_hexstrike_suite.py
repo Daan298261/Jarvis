@@ -80,6 +80,9 @@ def test_hexstrike_status_endpoint_without_install(jarvis_env, monkeypatch, allo
     assert body["shape_id"] == "hex_aegis"
     assert body["installed"] is False
     assert body["running"] is False
+    assert body.get("optional_extras_available") is False
+    assert body.get("stub_status") == "unavailable"
+    assert "mitmproxy" in (body.get("optional_stubs") or [])
 
 
 def test_hexstrike_upstream_denies_command(jarvis_env, monkeypatch, allow_loopback_api):

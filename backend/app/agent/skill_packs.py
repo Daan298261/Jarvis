@@ -10,6 +10,7 @@ _SKILL_MANIFEST_NAMES = ("SKILL.md", "skill.md", "Skill.md")
 
 
 def scan_skill_md_names(root: Path, *, limit: int = 500) -> list[str]:
+    """List skill pack *names* only (parent dirs of SKILL.md). No body content."""
     names: list[str] = []
     if not root.is_dir():
         return names
@@ -17,6 +18,9 @@ def scan_skill_md_names(root: Path, *, limit: int = 500) -> list[str]:
         if len(names) >= limit:
             break
         if path.name not in _SKILL_MANIFEST_NAMES:
+            continue
+        # Skip VCS / dependency trees
+        if any(part in {".git", "node_modules", "__pycache__", ".venv", "venv"} for part in path.parts):
             continue
         rel_parent = path.parent.relative_to(root)
         label = str(rel_parent) if str(rel_parent) != "." else path.parent.name
@@ -38,6 +42,7 @@ def register_module_pack(module_id: str, member_id: str, names: list[str], *, ro
     bucket[member] = {"names": list(names), "root": root}
     hint_key = f"module:{key}:{member}"
     if names:
+        # Names only in the hint — never paste SKILL.md bodies into the prompt.
         SKILL_HINTS[hint_key] = (
             f"Cybersecurity skill pack ({member}) exposes {len(names)} skill manifest(s): "
             + ", ".join(names[:12])
@@ -46,6 +51,12 @@ def register_module_pack(module_id: str, member_id: str, names: list[str], *, ro
         )
     else:
         SKILL_HINTS.pop(hint_key, None)
+
+
+def listed_module_packs(module_id: str = "cybersecurity") -> dict[str, list[str]]:
+    """Return registered pack name lists (for tests / catalog)."""
+    bucket = _MODULE_PACKS.get(module_id, {})
+    return {member: list(row.get("names") or []) for member, row in bucket.items()}
 
 
 def clear_module_packs(module_id: str) -> None:

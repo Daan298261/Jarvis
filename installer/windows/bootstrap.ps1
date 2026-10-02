@@ -26,6 +26,24 @@
 .PARAMETER SkipHeavyPrepare
   Upgrade/repair hint only. Missing runtimes, packages, llama.cpp, and models are still installed.
 
+.PARAMETER SkipKokoro
+  Skip downloading Kokoro-82M neural voice weights.
+
+.PARAMETER SkipPersonaVoices
+  Skip preparing persona neural voice packs entirely.
+
+.PARAMETER InstallWhisper
+  Ensure faster-whisper package and download Whisper base model into models/whisper/.
+
+.PARAMETER InstallVoiceStudio
+  Configure VoiceStudio integration and clone debpalash/voicestudio repo if requested.
+
+.PARAMETER InstallPocketTTS
+  Install pocket-tts lightweight CPU neural TTS package into the venv.
+
+.PARAMETER InstallUmiBrain
+  Install Ollama (when missing), pull the Umi Opus-reasoning brain, Pocket TTS, and Alba voice pack.
+
 .PARAMETER VoiceProfiles
   Comma-separated neural voice profile ids to prepare (butler_original_v1, dry_butler_original_v1,
   tactical_aide_original_v1, synthetic_command_original_v1, chatterbox_expressive_en_v1).
@@ -37,6 +55,12 @@ param(
     [switch]$SkipModelDownload,
     [switch]$SkipLlamaDownload,
     [switch]$SkipHeavyPrepare,
+    [switch]$SkipKokoro,
+    [switch]$SkipPersonaVoices,
+    [switch]$InstallWhisper,
+    [switch]$InstallVoiceStudio,
+    [switch]$InstallPocketTTS,
+    [switch]$InstallUmiBrain,
     [string]$VoiceProfiles = "",
     [int]$StepTimeoutMinutes = 45
 )
@@ -322,6 +346,36 @@ if wrong:
     Write-Ok "Kokoro TTS Python packages ready."
 }
 
+function Ensure-LayaPythonPackage([string]$VenvPython) {
+    # RFC-0171: always-on harm veto needs the pinned laya wheel in the post-install venv.
+    $marker = Join-Path $Root ".venv\.jarvis-laya-python-ready"
+    $check = @"
+import importlib.metadata
+expected = '0.3.21'
+try:
+    actual = importlib.metadata.version('laya')
+except importlib.metadata.PackageNotFoundError:
+    actual = 'missing'
+if actual != expected:
+    raise SystemExit(f'laya={actual} (expected {expected})')
+"@
+    if (Test-PythonImport -VenvPython $VenvPython -Code $check) {
+        if (-not (Test-Path $marker)) {
+            New-Item -ItemType File -Force -Path $marker | Out-Null
+        }
+        Write-Skip "Laya decision package (laya==0.3.21)"
+        return
+    }
+    Write-Host "    Ensuring Laya decision package (laya==0.3.21)..."
+    Invoke-ProcessWithTimeout -Label "pip laya" -FilePath $VenvPython -Arguments @(
+        "-m", "pip", "install", "laya==0.3.21"
+    ) -TimeoutMinutes ($StepTimeoutMinutes * 2)
+    & $VenvPython -c $check
+    if ($LASTEXITCODE -ne 0) { throw "Laya package is still missing after pip install." }
+    New-Item -ItemType File -Force -Path $marker | Out-Null
+    Write-Ok "Laya decision package ready."
+}
+
 function Ensure-Playwright([string]$VenvPython) {
     $marker = Join-Path $Root ".venv\.playwright-chromium-ready"
     if (Test-Path $marker) {
@@ -534,6 +588,114 @@ function Ensure-PersonaVoices([string]$VenvPython) {
     }
 }
 
+function Ensure-WhisperModel([string]$VenvPython) {
+    Write-Host "    Ensuring Whisper STT (faster-whisper and base model)..."
+    try {
+        Invoke-ProcessWithTimeout -Label "pip faster-whisper" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "faster-whisper", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
+        $whisperDir = Join-Path $Root "models\whisper"
+        New-Item -ItemType Directory -Force -Path $whisperDir | Out-Null
+        $baseBin = Join-Path $whisperDir "base"
+        if (-not (Test-Path $baseBin)) {
+            Write-Host "    Downloading faster-whisper base model..."
+            Invoke-HfDownload -VenvPython $VenvPython `
+                -RepoId "Systran/faster-whisper-base" `
+                -Includes @() `
+                -LocalDir $baseBin
+            Write-Ok "Whisper base model downloaded."
+        } else {
+            Write-Skip "Whisper base model"
+        }
+        if (Test-Path $baseBin) {
+            Set-Content -Encoding ascii -Path (Join-Path $whisperDir ".jarvis_faster_whisper_dir") -Value $baseBin
+        }
+    } catch {
+        Write-BootstrapLog "whisper setup pending: $($_.Exception.Message)"
+        Write-Warning "Whisper setup failed or was skipped: $($_.Exception.Message)"
+    }
+}
+
+function Ensure-VoiceStudio([string]$VenvPython) {
+    Write-Host "    Ensuring debpalash/voicestudio integration..."
+    $vsDir = Join-Path $Root "tools\voicestudio"
+    if (Test-Path $vsDir) {
+        Write-Skip "debpalash/voicestudio directory"
+        return
+    }
+    if (Test-Command git) {
+        Write-Host "    Cloning debpalash/voicestudio into tools\voicestudio..."
+        try {
+            Invoke-ProcessWithTimeout -Label "git clone voicestudio" -FilePath "git" -Arguments @("clone", "--depth", "1", "https://github.com/debpalash/VoiceStudio.git", $vsDir) -TimeoutMinutes $StepTimeoutMinutes
+            Write-Ok "VoiceStudio repository cloned."
+        } catch {
+            Write-BootstrapLog "VoiceStudio clone failed: $($_.Exception.Message)"
+            Write-Warning "VoiceStudio clone failed: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Warning "git is not installed; VoiceStudio can be downloaded manually from https://github.com/debpalash/voicestudio"
+    }
+}
+
+function Ensure-PocketTTS([string]$VenvPython) {
+    Write-Host "    Ensuring Pocket TTS (pip install pocket-tts)..."
+    try {
+        Invoke-ProcessWithTimeout -Label "pip pocket-tts" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "pocket-tts", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
+        Write-Ok "Pocket TTS installed."
+    } catch {
+        Write-BootstrapLog "Pocket TTS install failed: $($_.Exception.Message)"
+        Write-Warning "Pocket TTS install failed: $($_.Exception.Message)"
+    }
+}
+
+function Ensure-OllamaCli {
+    if (Test-Command ollama) {
+        Write-Ok "Ollama CLI present."
+        return $true
+    }
+    if (Test-Command winget) {
+        Write-Host "    Installing Ollama via winget..."
+        try {
+            Invoke-ProcessWithTimeout -Label "winget ollama" -FilePath "winget" -Arguments @(
+                "install", "--id", "Ollama.Ollama", "-e",
+                "--accept-source-agreements", "--accept-package-agreements"
+            ) -TimeoutMinutes $StepTimeoutMinutes
+        } catch {
+            Write-BootstrapLog "Ollama winget install failed: $($_.Exception.Message)"
+        }
+    }
+    if (Test-Command ollama) {
+        Write-Ok "Ollama installed."
+        return $true
+    }
+    Write-Warning "Ollama is not available. Install it from https://ollama.com/download then re-run setup."
+    return $false
+}
+
+function Ensure-UmiOllamaBrain([string]$VenvPython) {
+    $model = "hf.co/TheCidSama/Qwen3.5-9b-Claude-4.8-Opus-reasoning"
+    Write-Host "    Umi brain: Ollama + Pocket TTS + Alba voice pack..."
+    if (-not (Ensure-OllamaCli)) {
+        return
+    }
+    Ensure-PocketTTS -VenvPython $VenvPython
+    $voiceScript = Join-Path $ScriptDir "install-persona-voices.py"
+    if (Test-Path $voiceScript) {
+        try {
+            Invoke-ProcessWithTimeout -Label "umi pocket voice pack" -FilePath $VenvPython -Arguments @($voiceScript, "pocket_tts_alba_en_v1") -TimeoutMinutes $StepTimeoutMinutes
+        } catch {
+            Write-BootstrapLog "Umi voice pack failed: $($_.Exception.Message)"
+            Write-Warning "Umi voice pack could not be prepared; download it later from Persona settings."
+        }
+    }
+    Write-Host "    Pulling Umi brain weights into Ollama (one-time; may take several minutes)..."
+    try {
+        Invoke-ProcessWithTimeout -Label "ollama pull umi brain" -FilePath "ollama" -Arguments @("pull", $model) -TimeoutMinutes 120
+        Write-Ok "Umi Ollama brain ready."
+    } catch {
+        Write-BootstrapLog "Umi Ollama pull failed: $($_.Exception.Message)"
+        Write-Warning "Umi brain pull did not finish. Jarvis will retry when you select the Umi persona."
+    }
+}
+
 function Test-NvidiaDriver {
     if (-not (Test-Command nvidia-smi)) {
         Write-Host "    WARNING: nvidia-smi not found. Install an NVIDIA CUDA 13-capable driver for GPU inference." -ForegroundColor Yellow
@@ -573,6 +735,7 @@ Write-Step "Python environment and packages"
 $venvPython = Ensure-Venv -PythonExe $pythonExe
 Ensure-PipPackages -VenvPython $venvPython
 Ensure-TtsPythonPackages -VenvPython $venvPython
+Ensure-LayaPythonPackage -VenvPython $venvPython
 Ensure-Playwright -VenvPython $venvPython
 
 Write-Step "Web portal"
@@ -583,8 +746,38 @@ Ensure-LlamaCpp
 
 Write-Step "AI model weights"
 Ensure-DefaultModels -VenvPython $venvPython
-Ensure-KokoroVoice -VenvPython $venvPython
-Ensure-PersonaVoices -VenvPython $venvPython
+
+if (-not $SkipKokoro) {
+    Ensure-KokoroVoice -VenvPython $venvPython
+} else {
+    Write-Skip "Household voice (Kokoro-82M skipped by user option)"
+}
+
+if (-not $SkipPersonaVoices) {
+    Ensure-PersonaVoices -VenvPython $venvPython
+} else {
+    Write-Skip "Persona neural voices (skipped by user option)"
+}
+
+if ($InstallWhisper) {
+    Write-Step "Whisper speech-to-text"
+    Ensure-WhisperModel -VenvPython $venvPython
+}
+
+if ($InstallVoiceStudio) {
+    Write-Step "VoiceStudio integration"
+    Ensure-VoiceStudio -VenvPython $venvPython
+}
+
+if ($InstallPocketTTS) {
+    Write-Step "Pocket TTS lightweight speech"
+    Ensure-PocketTTS -VenvPython $venvPython
+}
+
+if ($InstallUmiBrain) {
+    Write-Step "Umi persona brain (Ollama + Pocket TTS)"
+    Ensure-UmiOllamaBrain -VenvPython $venvPython
+}
 
 Write-Step "Finishing"
 New-Item -ItemType Directory -Force -Path `

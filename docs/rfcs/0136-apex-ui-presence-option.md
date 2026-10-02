@@ -1,6 +1,7 @@
 # RFC-0136: Expose APEX orb-and-graph presence
 
 **Status:** accepted  
+**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) makes this naming **mandatory** in product copy and forbids presenting APEX as the Jarvis **humanoid** reference. Status stays **accepted** (do not flip implemented from this amend). Numbering collision: installer zombie-kill is the other `0136-zombie-kill-setup-next-and-start.md`; **this file** is the APEX presence option.  
 **Author:** Codex  
 **Date:** 2026-09-25
 
@@ -10,13 +11,14 @@ Jarvis already vendors the MIT-licensed APEX-UI orb and reasoning graph and expo
 
 ## Decision
 
-Name the existing neural orb-and-graph option “APEX UI · orb + graph” in Appearance, retaining the existing `neural` stored value and renderer for saved settings and compatibility. Clarify the option in assistive text and preserve Jarvis branding and current availability semantics.
+Name the existing neural orb-and-graph option **“APEX UI · orb + graph”** in Appearance, retaining the existing `neural` stored value. Assistive text must say this is the **public MIT APEX-UI orb and reasoning graph**, adapted for Jarvis, and that Jarvis **does not** include APEX’s separately hosted private humanoid. **RFC-0195:** this control is a **style/profile** on the shared presence renderer, not a competing humanoid stage. Stop presenting APEX as the humanoid reference.
 
 ## Acceptance criteria
 
 - [ ] Appearance exposes the existing APEX orb + reasoning graph renderer under an explicit selectable label.
 - [ ] Existing saved `neural` settings continue to select the same renderer.
 - [ ] The label does not imply Jarvis includes APEX’s separately hosted humanoid figure.
+- [ ] Preview for this control matches the live orb-and-graph profile (RFC-0195 accurate previews), not a humanoid bust thumbnail.
 - [ ] Frontend production build succeeds.
 
 ## Likely files

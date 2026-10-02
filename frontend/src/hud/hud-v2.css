@@ -859,16 +859,14 @@ html[data-session-mode] .hud-app {
 
 .hud-orb-state.alert { color: var(--hud-orange); }
 
-/* Humanoid mode is a full-stage scene. HUD copy and chat float above it. */
+/* Full-stage presence profiles share one viewport-filling orb zone. */
 @media (min-width: 761px) {
-  .hud-center:has(.jarvis-presence-humanoid),
-  .hud-center:has(.jarvis-presence-neural) {
+  .hud-center:has(.jarvis-presence-stage) {
     align-items: stretch;
     overflow: hidden;
   }
 
-  .hud-home:has(.jarvis-presence-humanoid),
-  .hud-home:has(.jarvis-presence-neural) {
+  .hud-home:has(.jarvis-presence-stage) {
     position: relative;
     display: grid;
     grid-template-columns: minmax(140px, var(--hud-menu-track)) minmax(0, 1fr);
@@ -879,8 +877,7 @@ html[data-session-mode] .hud-app {
     overflow: hidden;
   }
 
-  .hud-home:has(.jarvis-presence-humanoid) > .hud-orb-zone,
-  .hud-home:has(.jarvis-presence-neural) > .hud-orb-zone {
+  .hud-home:has(.jarvis-presence-stage) > .hud-orb-zone {
     position: absolute;
     inset: 0 0 0 var(--hud-menu-track);
     width: auto;
@@ -891,8 +888,7 @@ html[data-session-mode] .hud-app {
     grid-row: 1;
   }
 
-  .hud-home:has(.jarvis-presence-humanoid) .hud-orb-caption,
-  .hud-home:has(.jarvis-presence-neural) .hud-orb-caption {
+  .hud-home:has(.jarvis-presence-stage) .hud-orb-caption {
     position: absolute;
     left: 50%;
     bottom: clamp(146px, 17dvh, 210px);
@@ -901,8 +897,7 @@ html[data-session-mode] .hud-app {
     transform: translateX(-50%);
   }
 
-  .hud-home:has(.jarvis-presence-humanoid) > .hud-chat,
-  .hud-home:has(.jarvis-presence-neural) > .hud-chat {
+  .hud-home:has(.jarvis-presence-stage) > .hud-chat {
     position: relative;
     z-index: 8;
     left: auto;
@@ -1177,6 +1172,40 @@ html[data-session-mode] .hud-app {
   background: transparent;
   scrollbar-width: thin;
   mask-image: linear-gradient(to bottom, transparent 0, black 18px, black calc(100% - 12px), transparent 100%);
+}
+
+.hud-task-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 5px 8px;
+  border: 1px solid rgba(142, 219, 241, 0.1);
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.72);
+}
+
+.hud-task-activity {
+  margin: 0 0 6px;
+  border: 1px solid rgba(142, 219, 241, 0.08);
+  border-radius: 10px;
+  background: rgba(8, 12, 18, 0.55);
+  overflow: hidden;
+}
+
+.hud-task-activity > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: rgba(170, 190, 210, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hud-task-activity .task-activity {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .hud-bubble {
@@ -1709,8 +1738,7 @@ html[data-session-mode] .hud-app {
     max-height: min(54dvh, 40vw);
   }
 
-  .hud-orb-zone:has(.jarvis-presence-humanoid),
-  .hud-orb-zone:has(.jarvis-presence-neural) {
+  .hud-orb-zone:has(.jarvis-presence-stage) {
     flex: 1 1 auto;
     min-height: 0;
     max-height: none;
@@ -1724,10 +1752,6 @@ html[data-session-mode] .hud-app {
   .hud-composer {
     padding: clamp(10px, 1.1vw, 14px) clamp(12px, 1.2vw, 16px);
     border-radius: clamp(18px, 1.6vw, 24px);
-  }
-
-  .jarvis-apex-presence {
-    width: min(calc(var(--jarvis-apex-size) * 1.05), min(78vw, 920px));
   }
 }
 

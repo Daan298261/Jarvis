@@ -1,51 +1,11 @@
+@import "./presence-stage.css";
+
 .jarvis-apex-presence {
-  --jarvis-apex-size: 540px;
+  --jarvis-apex-orb-scale: 0.42;
   position: relative;
-  width: min(calc(var(--jarvis-apex-size) * 1.15), 92vw);
-  aspect-ratio: 680 / 480;
   display: block;
   isolation: isolate;
-}
-
-.jarvis-presence-host:has(.jarvis-presence-neural) {
-  width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-}
-
-.jarvis-presence-host:has(.jarvis-presence-neural) .jarvis-presence-neural {
-  flex: 1 1 auto;
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  aspect-ratio: unset;
-}
-
-.hud-orb-zone:has(.jarvis-presence-neural) {
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: none;
-  justify-content: center;
-}
-
-.hud-orb-zone:has(.jarvis-presence-neural) .jarvis-presence-neural {
-  width: 100%;
-  height: 100%;
-}
-
-.hud-orb-zone:has(.jarvis-presence-neural) .jarvis-apex-vendored-orb {
-  width: min(74%, 920px);
-  max-height: min(72%, 640px);
-}
-
-.jarvis-presence-neural canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
+  background: transparent;
 }
 
 .jarvis-apex-reasoning-web {
@@ -58,9 +18,9 @@
 .jarvis-apex-vendored-orb {
   position: absolute;
   left: 50%;
-  top: 50%;
+  top: 46%;
   z-index: 2;
-  width: 74%;
+  width: min(42%, 520px);
   aspect-ratio: 900 / 520;
   transform: translate(-50%, -50%);
   pointer-events: none;
@@ -140,12 +100,8 @@
 }
 
 @media (max-width: 760px) {
-  .jarvis-apex-presence {
-    width: min(calc(var(--jarvis-apex-size) * 1.05), 98vw);
-  }
-
   .jarvis-apex-vendored-orb {
-    width: 82%;
+    width: min(52%, 360px);
   }
 
   .jarvis-apex-presence-legend {

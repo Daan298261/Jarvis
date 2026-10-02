@@ -3,17 +3,36 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from ..memory.obsidian_vault import public_binding_status, vault_prompt_block
+from ..memory.obsidian_vault import (
+    VaultHit,
+    hits_are_orientation_only,
+    public_binding_status,
+    query_looks_vault_relevant,
+    vault_hits_to_prompt_block,
+    vault_turn_hits,
+)
 from ..persona.pack import compact_identity_instructions
 from ..providers.base import ChatMessage
+from .compaction import VAULT_MARKER
 from .tool_exposure import describe_exposure, schemas_for, tool_names_for
+from .tool_retrieval import MAX_RETRIEVED_TOOLS
 
 
 MAX_RECENT_TURNS = 8
 MAX_RECENT_CHARS = 6000
+# Hard cap on schemas that enter the turn (CLASS_TOOLS may seed; unused catalog stays out).
+MAX_WORKING_SET_TOOLS = max(8, MAX_RETRIEVED_TOOLS + 2)
+
+# vault_retrieval values — structured status so tests never rely on soft string checks alone.
+VAULT_RETRIEVAL_SKIPPED = "skipped"
+VAULT_RETRIEVAL_UNBOUND = "unbound"
+VAULT_RETRIEVAL_HITS = "hits"
+VAULT_RETRIEVAL_ORIENTATION = "orientation"
+VAULT_RETRIEVAL_MISS = "miss"
+VAULT_RETRIEVAL_IDLE = "idle"
 
 
 @dataclass
@@ -23,6 +42,30 @@ class InstallableToolOffer:
     install_api: str
     download_api: str
     reason: str
+
+
+@dataclass
+class VaultHitProvenance:
+    rel_path: str
+    heading: str
+    content_hash: str
+    excerpt: str
+    title: str = ""
+    provenance: str = "vault_lexical"
+    score: float = 0.0
+
+    @classmethod
+    def from_hit(cls, hit: VaultHit) -> "VaultHitProvenance":
+        heading = (hit.heading or hit.title or hit.rel_path).strip()
+        return cls(
+            rel_path=hit.rel_path,
+            heading=heading,
+            content_hash=hit.content_hash,
+            excerpt=(hit.excerpt or "")[:400],
+            title=hit.title or "",
+            provenance=hit.provenance,
+            score=float(hit.score or 0.0),
+        )
 
 
 @dataclass
@@ -37,6 +80,11 @@ class TurnWorkingSet:
     tool_names: list[str] = field(default_factory=list)
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
     installable_offers: list[InstallableToolOffer] = field(default_factory=list)
+    vault_hits: list[VaultHitProvenance] = field(default_factory=list)
+    # Always filled by per-ask search (even when schemas are withheld for Q&A).
+    searched_tool_names: list[str] = field(default_factory=list)
+    # RFC-0107 Wave B: structured retrieve outcome (not décor / skip-if-empty prose).
+    vault_retrieval: str = VAULT_RETRIEVAL_SKIPPED
 
     def serialized_prompt_text(self) -> str:
         """Concatenated text that enters the model (for acceptance tests)."""
@@ -52,8 +100,14 @@ class TurnWorkingSet:
         parts.append(json.dumps(self.tool_schemas, sort_keys=True))
         return "\n".join(p for p in parts if p)
 
+    def vault_provenance_dicts(self) -> list[dict[str, Any]]:
+        return [asdict(hit) for hit in self.vault_hits]
 
-def _bound_recent_turns(messages: list[ChatMessage]) -> list[ChatMessage]:
+    def has_vault_hits(self) -> bool:
+        return self.vault_retrieval == VAULT_RETRIEVAL_HITS and bool(self.vault_hits)
+
+
+def bound_recent_turns(messages: list[ChatMessage]) -> list[ChatMessage]:
     if not messages:
         return []
     kept: list[ChatMessage] = []
@@ -70,6 +124,10 @@ def _bound_recent_turns(messages: list[ChatMessage]) -> list[ChatMessage]:
         kept.append(message)
         used += size
     return list(reversed(kept))
+
+
+# Back-compat alias used by owner chat / tests.
+_bound_recent_turns = bound_recent_turns
 
 
 async def _memory_facts_block(agent_id: str, query: str) -> str:
@@ -150,6 +208,57 @@ def _installable_lines(offers: list[InstallableToolOffer]) -> str:
     return "\n".join(lines)
 
 
+def _cap_tool_names(names: list[str], prompt: str) -> list[str]:
+    """Keep CLASS_TOOLS seed + search hits, but never serialize an unbounded catalog."""
+    if len(names) <= MAX_WORKING_SET_TOOLS:
+        return names
+    from .tool_retrieval import score_tool
+
+    ranked = sorted(
+        enumerate(names),
+        key=lambda pair: (-score_tool(prompt, pair[1], ""), pair[0]),
+    )
+    keep = {name for _idx, name in ranked[:MAX_WORKING_SET_TOOLS]}
+    # Preserve original order for stable prompts.
+    return [name for name in names if name in keep]
+
+
+def _cap_schemas(schemas: list[dict[str, Any]], allowed_names: set[str]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for item in schemas:
+        name = str(item.get("function", {}).get("name") or "")
+        if name in {"request_tools", "request_capability"} or name in allowed_names:
+            out.append(item)
+    return out
+
+
+def _compose_vault_working_set(prompt: str) -> tuple[str, list[VaultHitProvenance], str]:
+    """Bound vault → retrieve with provenance; vault-relevant asks must not be empty-by-construction.
+
+    Returns ``(block, provenanced_hits, vault_retrieval_status)``.
+    """
+    status = public_binding_status()
+    if not status.get("bound"):
+        return "", [], VAULT_RETRIEVAL_UNBOUND
+    hits = vault_turn_hits(prompt, limit=6)
+    provenanced = [VaultHitProvenance.from_hit(hit) for hit in hits]
+    block = vault_hits_to_prompt_block(hits)
+    if provenanced:
+        if hits_are_orientation_only(hits):
+            return block, provenanced, VAULT_RETRIEVAL_ORIENTATION
+        return block, provenanced, VAULT_RETRIEVAL_HITS
+    if query_looks_vault_relevant(prompt):
+        # Soft-fail empty retrieval is a product fail: surface an explicit miss with bind status
+        # so the orchestrator cannot pretend the vault was unused because compose skipped it.
+        block = (
+            "Linked vault memory (RFC-0107): vault is bound and this ask looks vault-relevant, "
+            f"but no indexed excerpts matched (notes={status.get('note_count', 0)}). "
+            "Use vault_memory search/resolve — do not invent vault content."
+        )
+        return block, [], VAULT_RETRIEVAL_MISS
+    return "", [], VAULT_RETRIEVAL_IDLE
+
+
 async def compose_turn_working_set(
     user_message: str,
     *,
@@ -162,7 +271,12 @@ async def compose_turn_working_set(
     include_memory: bool = True,
     needs_tools: bool | None = None,
 ) -> TurnWorkingSet:
+    from .tool_retrieval import suggest_tools_for_prompt
+
     prompt = (user_message or "").strip()
+    # RFC-0107 §7: every owner ask runs internal search over installed tools,
+    # even when this turn withholds executable schemas (factual Q&A / conversation).
+    searched = suggest_tools_for_prompt(prompt, security_role=security_role)
     names = tool_names_for(
         task_class,
         extra_capabilities,
@@ -170,6 +284,7 @@ async def compose_turn_working_set(
         prompt=prompt,
         needs_tools=needs_tools,
     )
+    names = _cap_tool_names(names, prompt)
     schemas = schemas_for(
         task_class,
         extra_capabilities,
@@ -177,7 +292,9 @@ async def compose_turn_working_set(
         prompt=prompt,
         needs_tools=needs_tools,
     )
+    schemas = _cap_schemas(schemas, set(names))
     offers = _installable_offers(prompt)
+    # Rebuild exposure from the capped working set so the prompt never advertises dumped tools.
     exposure = describe_exposure(
         task_class,
         extra_capabilities,
@@ -185,13 +302,33 @@ async def compose_turn_working_set(
         prompt=prompt,
         needs_tools=needs_tools,
     )
+    if names and "retrieved for this turn" in exposure:
+        listed = ", ".join(names)
+        exposure = "\n".join(
+            [
+                f"Tool exposure: retrieved for this turn ({task_class or 'task'}): {listed}.",
+                "The full tool catalog is not kept in context. If you need another capability "
+                "(browser, desktop, office, docker, git, screenshot, terminal, python, web_fetch, mcp), "
+                "call request_tools or request_capability with that name rather than inventing a tool.",
+            ]
+            + ([line for line in exposure.splitlines() if line.startswith("Matching optional")][:1])
+        )
+    elif not names and searched:
+        exposure = (
+            exposure
+            + "\nPer-ask tool search matched: "
+            + ", ".join(searched)
+            + ". Schemas withheld for this Q&A turn; call request_capability to opt in."
+        )
     install_lines = _installable_lines(offers)
     if install_lines:
         exposure = exposure + "\n\n" + install_lines
 
     vault_block = ""
-    if include_vault and public_binding_status().get("bound"):
-        vault_block = vault_prompt_block(prompt)
+    vault_hits: list[VaultHitProvenance] = []
+    vault_retrieval = VAULT_RETRIEVAL_SKIPPED
+    if include_vault:
+        vault_block, vault_hits, vault_retrieval = _compose_vault_working_set(prompt)
 
     memory_block = ""
     if include_memory:
@@ -204,10 +341,13 @@ async def compose_turn_working_set(
         vault_block=vault_block,
         memory_facts_block=memory_block,
         tool_exposure_block=exposure,
-        recent_turns=_bound_recent_turns(recent_messages or []),
+        recent_turns=bound_recent_turns(recent_messages or []),
         tool_names=names,
         tool_schemas=schemas,
         installable_offers=offers,
+        vault_hits=vault_hits,
+        searched_tool_names=searched,
+        vault_retrieval=vault_retrieval,
     )
 
 
@@ -223,6 +363,20 @@ def apply_working_set_to_system(system_prompt: str, working: TurnWorkingSet) -> 
     if not prefix.strip():
         return system_prompt
     return prefix + "\n\n" + system_prompt
+
+
+def replace_vault_block_in_system(system_prompt: str, vault_block: str) -> str:
+    """Swap the Linked vault memory paragraph(s) for a freshly composed block (agent continue)."""
+    parts = [p for p in (system_prompt or "").split("\n\n") if p.strip()]
+    kept = [p for p in parts if not p.strip().startswith(VAULT_MARKER)]
+    cleaned = "\n\n".join(kept).strip()
+    block = (vault_block or "").strip()
+    if not block:
+        return cleaned
+    if not cleaned:
+        return block
+    # Keep vault near the head so follow-ups see it before long task body text.
+    return block + "\n\n" + cleaned
 
 
 def working_set_chat_messages(working: TurnWorkingSet) -> list[ChatMessage]:
