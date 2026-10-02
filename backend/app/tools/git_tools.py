@@ -15,6 +15,7 @@ from ..agent.worktrees import (
     worktree_status,
 )
 from .base import RiskLevel, Tool, ToolResult
+from .owner_paths import resolve_owner_file_path
 from .safety import resolve_allowed_path
 
 
@@ -22,12 +23,26 @@ _CHECKPOINT_RE = re.compile(r"^jarvis-checkpoint-[0-9]{8}T[0-9]{6}Z$")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
+def git_repo_name(url: str) -> str:
+    """Folder name for a clone destination from a remote URL or local path."""
+    text = str(url or "").strip().rstrip("/\\")
+    text = text.split("?")[0].split("#")[0]
+    name = Path(text).name or "repo"
+    if name.lower().endswith(".git"):
+        name = name[:-4]
+    name = Path(name).name.strip() or "repo"
+    if name in {".", ".."}:
+        name = "repo"
+    return name
+
+
 class GitTool(Tool):
     name = "git"
     description = (
         "Inspect, clone, and checkpoint git repositories. Actions: clone, fetch, pull, status, "
         "diff, branch, log, search, checkpoint, list_checkpoints, restore. clone copies a remote "
-        "or local repo into an allowed folder (including extra drives). fetch/pull update an "
+        "or local repo into an allowed folder (including extra drives). Omit path to clone into "
+        "Documents/<repo>. A folder path (USB/`D:`) gets <repo> appended. fetch/pull update an "
         "existing repo and honor internet/LAN deny. checkpoint creates a recoverable backup "
         "branch named jarvis-checkpoint-* without resetting the working tree."
     )
@@ -58,7 +73,7 @@ class GitTool(Tool):
             },
             "path": {
                 "type": "string",
-                "description": "Repo working tree, or clone destination directory",
+                "description": "Repo working tree, or clone destination. Omit clone to use Documents/<repo>. A folder path is allowed.",
             },
             "url": {"type": "string", "description": "clone: https URL or local repo path"},
             "query": {"type": "string"},
@@ -93,10 +108,13 @@ class GitTool(Tool):
         dest_raw = str(kwargs.get("path") or "").strip()
         if not url:
             return ToolResult(False, "", error="url is required for clone")
-        if not dest_raw:
-            return ToolResult(False, "", error="path is required for clone (destination directory)")
         allowed = self._allowed()
-        dest = resolve_allowed_path(dest_raw, allowed)
+        dest = resolve_owner_file_path(
+            dest_raw or None,
+            suggested_name=git_repo_name(url),
+            allowed=allowed,
+            fallback_dirs=("Documents", "Desktop", "Downloads"),
+        )
         source = url
         if looks_remote_git_source(url):
             denied = self._network_denied({**kwargs, "action": "clone", "url": url})

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from .base import RiskLevel, Tool, ToolResult
+from .owner_paths import resolve_workspace_dir
+from .safety import resolve_allowed_path
 
 _PY_ACTIONS = ("run_code", "run_file", "create_venv", "install")
 
@@ -57,7 +59,8 @@ class PythonTool(Tool):
         "install. Put the script in `code` (run_code) or an absolute `path` (run_file) — never "
         "inside `action`. For copying files or folders use filesystem action=copy instead of a "
         "script. Prefer create_venv for project-specific packages. working_directory should "
-        "be the project root when installing dependencies."
+        "be the project root when installing dependencies. working_directory, path, and venv_path "
+        "may be on extra drives (USB/`D:`) inside the allowed workspace."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -73,6 +76,15 @@ class PythonTool(Tool):
         },
         "required": ["action"],
     }
+
+    def __init__(self, context_getter=None) -> None:
+        self.context_getter = context_getter or (lambda: {})
+
+    def _allowed(self) -> list[str]:
+        return list((self.context_getter() or {}).get("allowed_directories") or [])
+
+    def _dir(self, raw: str | None) -> str | None:
+        return resolve_workspace_dir(raw, self._allowed())
 
     async def _run(self, args: list[str], cwd: str | None, timeout: int) -> ToolResult:
         started = time.time()
@@ -128,9 +140,13 @@ class PythonTool(Tool):
         if denied:
             return ToolResult(False, "", error=denied)
         action = kwargs.get("action")
-        cwd = kwargs.get("working_directory")
-        timeout = int(kwargs.get("timeout_seconds") or 120)
-        venv_path = kwargs.get("venv_path")
+        try:
+            cwd = self._dir(kwargs.get("working_directory"))
+            timeout = int(kwargs.get("timeout_seconds") or 120)
+            venv_raw = kwargs.get("venv_path")
+            venv_path = self._dir(venv_raw) if venv_raw else None
+        except PermissionError as exc:
+            return ToolResult(False, "", error=str(exc))
         py = self._python_bin(venv_path)
         try:
             if action == "run_code":
@@ -153,7 +169,10 @@ class PythonTool(Tool):
                 path = kwargs.get("path")
                 if not path:
                     return ToolResult(False, "", error="path is required")
-                resolved = self._resolve_script(str(path), cwd)
+                resolved = self._resolve_script(str(Path(str(path)).expanduser()), cwd)
+                allowed = self._allowed()
+                if allowed:
+                    resolved = Path(resolve_allowed_path(str(resolved), allowed))
                 if not resolved.is_file():
                     return ToolResult(
                         False,
@@ -168,6 +187,9 @@ class PythonTool(Tool):
                 path = Path(kwargs.get("venv_path") or kwargs.get("path") or ".venv")
                 if cwd:
                     path = Path(cwd) / path if not path.is_absolute() else path
+                allowed = self._allowed()
+                if allowed:
+                    path = Path(resolve_allowed_path(str(path.expanduser()), allowed))
                 venv.EnvBuilder(with_pip=True).create(str(path))
                 return ToolResult(True, f"Created virtualenv at {path}")
             if action == "install":

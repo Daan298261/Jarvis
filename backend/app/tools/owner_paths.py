@@ -61,3 +61,14 @@ def resolve_owner_file_path(
         if not allowed:
             return alt
         return resolve_allowed_path(str(alt), allowed)
+
+
+def resolve_workspace_dir(raw: str | None, allowed: list[str]) -> str | None:
+    """Expand ~ and, when the workspace is bound, keep the path on an allowed drive."""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    expanded = str(Path(text).expanduser())
+    if not allowed:
+        return expanded
+    return str(resolve_allowed_path(expanded, allowed))

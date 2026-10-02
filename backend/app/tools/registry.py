@@ -56,8 +56,8 @@ class ToolRegistry:
         getter: Callable[[], dict[str, Any]] = self._live_context
         items = [
             FilesystemTool(getter),
-            TerminalTool(),
-            PythonTool(),
+            TerminalTool(getter),
+            PythonTool(getter),
             BrowserTool(getter),
             BrowserUseTool(),
             CodeWorkerTool(getter),

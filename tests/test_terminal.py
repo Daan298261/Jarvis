@@ -138,3 +138,49 @@ async def test_terminal_git_pull_honors_internet_deny(tmp_path, monkeypatch):
     result = await tool.execute(command="git pull origin main", shell="bash")
     assert result.success is False
     assert ran["n"] == 0
+
+
+async def test_python_working_directory_on_extra_drive(tmp_path):
+    extra = tmp_path / "E" / "code"
+    extra.mkdir(parents=True)
+    (extra / "marker.txt").write_text("usb", encoding="utf-8")
+    tool = PythonTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(
+        action="run_code",
+        code="from pathlib import Path; print(Path.cwd()); print((Path.cwd()/'marker.txt').read_text())",
+        working_directory=str(extra),
+    )
+    assert result.success, result.error
+    assert "usb" in result.output
+    outside = await tool.execute(
+        action="run_code",
+        code="print(1)",
+        working_directory="/etc",
+    )
+    assert outside.success is False
+    assert "outside allowed directories" in (outside.error or "")
+
+
+async def test_python_run_file_on_extra_drive(tmp_path):
+    extra = tmp_path / "D" / "scripts"
+    extra.mkdir(parents=True)
+    script = extra / "hello.py"
+    script.write_text("print('from-usb')\n", encoding="utf-8")
+    tool = PythonTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(action="run_file", path=str(script))
+    assert result.success, result.error
+    assert "from-usb" in result.output
+
+
+async def test_terminal_working_directory_on_extra_drive(tmp_path):
+    extra = tmp_path / "E" / "shell"
+    extra.mkdir(parents=True)
+    (extra / "here.txt").write_text("ok", encoding="utf-8")
+    tool = TerminalTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(
+        command="cat here.txt",
+        shell="bash",
+        working_directory=str(extra),
+    )
+    assert result.success, result.error
+    assert "ok" in result.output

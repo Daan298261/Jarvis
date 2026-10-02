@@ -13,6 +13,7 @@ from typing import Any
 import psutil
 
 from .base import RiskLevel, Tool, ToolResult
+from .owner_paths import resolve_workspace_dir
 from .safety import classify_command, is_protected_process
 
 
@@ -178,7 +179,7 @@ class TerminalTool(Tool):
         "action=run (default) waits for the process. action=start returns a PID immediately; "
         "then use inspect/wait/kill with that pid to see if it is still alive and to collect output. "
         "inspect also works for other local PIDs. Captures stdout, stderr, exit code and duration. "
-        "Use working_directory when possible. Do not use this to format disks or destroy backups."
+        "Use working_directory when possible (USB/`D:` extra drives included). Do not use this to format disks or destroy backups."
     )
     risk = RiskLevel.HIGH
     parameters = {
@@ -204,6 +205,9 @@ class TerminalTool(Tool):
         "required": [],
     }
 
+    def __init__(self, context_getter=None) -> None:
+        self.context_getter = context_getter or (lambda: {})
+
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = (kwargs.get("action") or "run").lower()
         if kwargs.get("background") and action == "run":
@@ -224,7 +228,14 @@ class TerminalTool(Tool):
         if denied:
             return ToolResult(False, "", error=denied)
         shell = adapt_shell(command, (kwargs.get("shell") or default_shell()).lower())
-        cwd = kwargs.get("working_directory") or os.getcwd()
+        raw_cwd = kwargs.get("working_directory")
+        allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
+        try:
+            cwd = resolve_workspace_dir(raw_cwd, allowed) if raw_cwd else os.getcwd()
+        except PermissionError as exc:
+            return ToolResult(False, "", error=str(exc))
+        if not cwd:
+            cwd = os.getcwd()
         timeout = int(kwargs.get("timeout_seconds") or 120)
         risk = classify_command(command)
         approved = bool(kwargs.get("_approved")) or _approved_from_context()
