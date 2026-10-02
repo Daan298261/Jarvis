@@ -4,10 +4,12 @@ import asyncio
 import os
 import platform
 import re
+import shlex
 import shutil
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import psutil
@@ -49,11 +51,79 @@ _CMD_IDIOMS = re.compile(
     r"(?i)\b(?:findstr\b|find\s+/[a-z]|dir\s+/[a-z]|tasklist\b|where\.exe\b|"
     r"wmic\b|netstat\b|type\s+[A-Za-z]:|copy\s+\S+\s+\S+|del\s+/|rmdir\s+/)"
 )
+_UNSAFE_SHELL = re.compile(r"[;&|`$<>\n]")
+_PROXY_FLAGS = frozenset({"-x", "--proxy", "--interface", "--local-addr", "--bind-address"})
 
 
 def search_miss_ok(command: str, code: int) -> bool:
     """Exit 1 from findstr/grep means 'not found', not a broken command."""
     return int(code or 0) == 1 and bool(_SEARCH_COMMAND.search(command or ""))
+
+
+def _http_target_from_argv(parts: list[str]) -> str:
+    for item in parts[1:]:
+        text = str(item or "").strip().strip("'\"")
+        if not text or text.startswith("-"):
+            continue
+        if text.lower().startswith(("http://", "https://")):
+            return text
+        host = text.split("/", 1)[0]
+        if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?", host):
+            return text
+        lowered = host.lower().rstrip(".")
+        if lowered.endswith((".local", ".lan", ".home.arpa")):
+            return text
+    return ""
+
+
+def _lan_bind_for_http_target(target: str) -> str:
+    from ..mobile.wan_forward import lan_http_bind_for_url, lan_source_ipv4_for_peer
+
+    text = str(target or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        return lan_http_bind_for_url(text)
+    bind = lan_source_ipv4_for_peer(text.split(":", 1)[0])
+    if bind:
+        return bind
+    return lan_http_bind_for_url(f"http://{text}")
+
+
+def lan_bound_http_argv(command: str) -> list[str] | None:
+    """Real curl/wget of an on-link RFC1918 URL, sourced from that NIC.
+
+    PowerShell aliases ``curl`` to Invoke-WebRequest, which cannot bind a source
+    IP. A VPN default route would steal the hop to the home gateway. Skip pipes
+    and explicit proxies.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = Path(parts[0]).name.lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if name not in {"curl", "wget"}:
+        return None
+    flags = {part.split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if flags & _PROXY_FLAGS:
+        return None
+    bind = _lan_bind_for_http_target(_http_target_from_argv(parts))
+    if not bind:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    rest = parts[1:]
+    if name == "wget":
+        return [exe, f"--bind-address={bind}", *rest]
+    return [exe, "--interface", bind, *rest]
 
 
 def adapt_shell(command: str, shell: str) -> str:
@@ -98,6 +168,9 @@ def _python_args(command: str) -> list[str]:
 
 
 def _command_args(command: str, shell: str) -> list[str] | ToolResult:
+    bound = lan_bound_http_argv(command)
+    if bound:
+        return bound
     if shell == "powershell":
         exe = shutil.which("powershell") or shutil.which("pwsh")
         if not exe:

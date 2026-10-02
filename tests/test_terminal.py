@@ -1,5 +1,5 @@
 from app.tools.python_exec import PythonTool
-from app.tools.terminal import TerminalTool, _command_args, _python_args, default_shell
+from app.tools.terminal import TerminalTool, _command_args, _python_args, default_shell, lan_bound_http_argv
 
 
 def test_python_shell_uses_dash_c_for_snippets():
@@ -237,3 +237,42 @@ async def test_python_child_does_not_see_http_proxy(tmp_path, monkeypatch):
     assert result.success, result.error
     assert "NO" in result.output
     assert "HAS" not in result.output
+
+
+def _home_vpn_nics():
+    import socket
+    from types import SimpleNamespace
+
+    return {
+        "eth0": [
+            SimpleNamespace(family=socket.AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+        ],
+        "wg0": [
+            SimpleNamespace(family=socket.AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+        ],
+    }
+
+
+def test_lan_curl_binds_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"curl", "wget"} else None,
+    )
+    curl = lan_bound_http_argv("curl -s http://192.168.1.50/status")
+    assert curl is not None
+    assert curl[0] == "/usr/bin/curl"
+    assert curl[1:3] == ["--interface", "192.168.1.12"]
+    assert curl[-1] == "http://192.168.1.50/status"
+    wget = lan_bound_http_argv("wget http://192.168.1.50/status")
+    assert wget is not None
+    assert wget[1] == "--bind-address=192.168.1.12"
+    header = lan_bound_http_argv("curl -H User-Agent:jarvis http://192.168.1.1/")
+    assert header is not None
+    assert header[1:3] == ["--interface", "192.168.1.12"]
+    assert lan_bound_http_argv("curl https://example.com/") is None
+    assert lan_bound_http_argv("curl --interface eth0 http://192.168.1.50/") is None
+    assert lan_bound_http_argv("curl http://192.168.1.50/ | cat") is None
+    powershell = _command_args("curl -s http://192.168.1.50/", "powershell")
+    assert powershell[0] == "/usr/bin/curl"
+    assert "--interface" in powershell
