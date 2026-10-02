@@ -926,3 +926,187 @@ def test_queue_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
     dest = queue_root()
     assert dest == extra / "Jarvis" / "runtime" / "queue"
     assert (dest / "pending").is_dir()
+
+
+def test_runtime_profiles_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.inference.runtime_profiles import runtime_profiles_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = runtime_profiles_root()
+    assert dest == extra / "Jarvis" / "runtime" / "runtime-profiles"
+    assert dest.is_dir()
+
+
+def test_runtime_profiles_root_discovers_existing_extra_registry(tmp_path, monkeypatch):
+    from app.inference.runtime_profiles import runtime_profiles_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "runtime-profiles"
+    found.mkdir(parents=True)
+    (found / "registry.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert runtime_profiles_root() == found
+
+
+def test_lmstudio_catalog_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.inference.lmstudio_catalog import catalog_store_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.inference.lmstudio_catalog.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = catalog_store_root()
+    assert dest == extra / "Jarvis" / "runtime" / "lmstudio-catalog"
+    assert dest.is_dir()
+
+
+def test_lmstudio_catalog_discovers_existing_extra_state(tmp_path, monkeypatch):
+    from app.inference.lmstudio_catalog import catalog_store_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "lmstudio-catalog"
+    found.mkdir(parents=True)
+    (found / "user_state.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("app.inference.lmstudio_catalog.data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert catalog_store_root() == found
+
+
+def test_hexstrike_catalog_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.security.hexstrike_operator import _catalog_path
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.security.hexstrike_operator.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = _catalog_path()
+    assert dest == extra / "Jarvis" / "runtime" / "hexstrike-catalog" / "catalog.json"
+    assert dest.parent.is_dir()
+
+
+def test_hexstrike_catalog_discovers_existing_extra_file(tmp_path, monkeypatch):
+    from app.security.hexstrike_operator import _catalog_path
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "hexstrike-catalog"
+    found.mkdir(parents=True)
+    (found / "catalog.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("app.security.hexstrike_operator.data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert _catalog_path() == found / "catalog.json"
+
+
+def test_recovery_journal_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.recovery import store as recovery_store
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(recovery_store, "_DB_PATH", None)
+    monkeypatch.setattr("app.recovery.store.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = recovery_store.recovery_db_path()
+    assert dest == extra / "Jarvis" / "runtime" / "recovery" / "journal.db"
+    assert dest.parent.is_dir()
+
+
+def test_recovery_journal_discovers_existing_extra_db(tmp_path, monkeypatch):
+    from app.recovery import store as recovery_store
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "recovery"
+    found.mkdir(parents=True)
+    (found / "journal.db").write_bytes(b"")
+    monkeypatch.setattr(recovery_store, "_DB_PATH", None)
+    monkeypatch.setattr("app.recovery.store.data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert recovery_store.recovery_db_path() == found / "journal.db"
+
+
+def test_lta_extract_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.security.lta_archive import jobs_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.security.lta_archive.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = jobs_root()
+    assert dest == extra / "Jarvis" / "runtime" / "lta-extract"
+    assert dest.is_dir()
+
+
+def test_lta_extract_discovers_existing_extra_index(tmp_path, monkeypatch):
+    from app.security.lta_archive import jobs_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "lta-extract"
+    found.mkdir(parents=True)
+    (found / "index.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("app.security.lta_archive.data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert jobs_root() == found
+
+
+def test_packs_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.packs.store import packs_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.packs.store.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = packs_root()
+    assert dest == extra / "Jarvis" / "runtime" / "packs"
+    assert dest.is_dir()
+
+
+def test_skills_root_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.skills.store import skills_root
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.skills.store.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = skills_root()
+    assert dest == extra / "Jarvis" / "runtime" / "skills"
+    assert (dest / "candidates").is_dir()
+
+
+def test_supermemory_data_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.modules import supermemory_runtime
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = supermemory_runtime.data_path()
+    assert dest == extra / "Jarvis" / "runtime" / "supermemory-data"
+    assert dest.is_dir()

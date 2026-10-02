@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import load_settings
+from ..config import data_dir, load_settings, resolved_data_sidecar_dir
 from ..hardware import detect_hardware
 from .backends import suggested_port
 from .runtime_profiles import (
@@ -68,9 +68,12 @@ def catalog_data_path() -> Path:
 
 
 def catalog_store_root() -> Path:
-    from ..config import data_dir
-
-    path = data_dir() / "lmstudio-catalog"
+    path = resolved_data_sidecar_dir(
+        "lmstudio-catalog",
+        local=data_dir() / "lmstudio-catalog",
+        markers=(USER_STATE_FILE,),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 

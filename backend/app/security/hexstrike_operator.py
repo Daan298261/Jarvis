@@ -49,13 +49,17 @@ _AVAILABLE_STATUSES = frozenset({"ok", "ready", "available", "installed", "true"
 _JOB_ID_RE = re.compile(r"^[a-f0-9-]{8,64}$", re.IGNORECASE)
 _LOCK = threading.RLock()
 _CATALOG_CACHE: list[dict[str, Any]] = []
-_CATALOG_PATH_NAME = "hexstrike/catalog.json"
 
 
 def _catalog_path() -> Path:
-    path = data_dir() / _CATALOG_PATH_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    path = resolved_data_sidecar_dir(
+        "hexstrike-catalog",
+        local=data_dir() / "hexstrike",
+        markers=("catalog.json",),
+        need_bytes=256 * 1024**2,
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path / "catalog.json"
 
 
 def _persist_catalog(rows: list[dict[str, Any]]) -> None:

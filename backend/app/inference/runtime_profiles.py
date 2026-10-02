@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 from .profiles import PROFILES, ModelProfile
 from .profile_roles import infer_runtime_role_and_tier
 
@@ -82,7 +82,12 @@ class RuntimeProfile:
 
 
 def runtime_profiles_root() -> Path:
-    path = data_dir() / "runtime-profiles"
+    path = resolved_data_sidecar_dir(
+        "runtime-profiles",
+        local=data_dir() / "runtime-profiles",
+        markers=(RUNTIME_REGISTRY_NAME,),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 

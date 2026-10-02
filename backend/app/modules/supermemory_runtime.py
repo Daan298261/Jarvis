@@ -36,7 +36,14 @@ def binary_path() -> Path:
 
 
 def data_path() -> Path:
-    return app_config.data_dir() / "supermemory"
+    path = app_config.resolved_data_sidecar_dir(
+        "supermemory-data",
+        local=app_config.data_dir() / "supermemory",
+        markers=(),
+        need_bytes=512 * 1024**2,
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _local_endpoint() -> tuple[str, int]:
