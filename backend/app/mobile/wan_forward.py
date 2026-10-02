@@ -227,7 +227,7 @@ def parse_proc_net_route(text: str) -> str:
             continue
         raw = int(parts[2], 16)
         address = ipaddress.IPv4Address(raw.to_bytes(4, "little"))
-        if address.is_private and not address.is_loopback:
+        if is_rfc1918_ipv4(str(address)):
             return str(address)
     raise ValueError("No private default gateway")
 
@@ -243,7 +243,7 @@ def parse_windows_route_print(text: str) -> str:
             address = ipaddress.ip_address(parts[2])
         except ValueError:
             continue
-        if address.version == 4 and address.is_private and not address.is_loopback:
+        if address.version == 4 and is_rfc1918_ipv4(str(address)):
             return str(address)
     raise ValueError("No private default gateway")
 

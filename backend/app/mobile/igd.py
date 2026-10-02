@@ -15,7 +15,7 @@ from xml.sax.saxutils import escape
 
 import httpx
 
-from .wan_forward import PORT
+from .wan_forward import PORT, is_rfc1918_ipv4
 
 WANIP = "urn:schemas-upnp-org:service:WANIPConnection:1"
 WANPPP = "urn:schemas-upnp-org:service:WANPPPConnection:1"
@@ -47,7 +47,9 @@ def require_lan_http_url(url: str) -> str:
         if host in {"localhost"} or host.endswith((".local", ".home.arpa", ".lan")) or "." not in host:
             return parsed.geturl()
         raise ValueError("IGD URL host must be on the LAN")
-    if ip.is_loopback or ip.is_link_local or ip.is_private:
+    if ip.is_loopback or ip.is_link_local:
+        return parsed.geturl()
+    if is_rfc1918_ipv4(str(ip)):
         return parsed.geturl()
     raise ValueError("IGD URL must not be a public address")
 
@@ -73,7 +75,7 @@ def accept_ssdp_peer(addr: tuple) -> bool:
         ip = ipaddress.ip_address(addr[0])
     except (ValueError, TypeError, IndexError):
         return False
-    return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
+    return bool(ip.is_loopback or ip.is_link_local or is_rfc1918_ipv4(str(ip)))
 
 
 def parse_igd_control(xml_text: str, base_url: str) -> tuple[str, str]:
@@ -215,7 +217,7 @@ class StdlibIGD:
         if int(ext_port) != PORT or str(protocol).upper() != "TCP" or int(int_port) != PORT:
             raise ValueError("Only TCP 4781 may be mapped")
         dest = ipaddress.ip_address(str(lanaddr))
-        if dest.version != 4 or not dest.is_private or dest.is_loopback:
+        if not is_rfc1918_ipv4(str(dest)):
             raise ValueError("IGD internal client must be a private LAN IPv4 address")
         inner = (
             "<NewRemoteHost></NewRemoteHost>"
@@ -299,7 +301,7 @@ def stdlib_igd_candidate(username: str = "", password: str = "", lanaddr: str = 
     if not host:
         raise ValueError("No private LAN IPv4 for IGD internal client")
     dest = ipaddress.ip_address(host)
-    if dest.version != 4 or not dest.is_private or dest.is_loopback:
+    if not is_rfc1918_ipv4(str(dest)):
         raise ValueError("IGD internal client must be a private LAN IPv4 address")
     router = StdlibIGD(control, service, str(dest), username, password)
     return router, router.externalipaddress()

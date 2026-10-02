@@ -45,9 +45,12 @@ def test_ssdp_and_control_url_parsing():
     with pytest.raises(ValueError):
         parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: http://8.8.8.8/desc.xml\r\n\r\n")
     with pytest.raises(ValueError):
+        parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: http://100.64.0.1/desc.xml\r\n\r\n")
+    with pytest.raises(ValueError):
         parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: https://evil.example/desc.xml\r\n\r\n")
     assert accept_ssdp_peer(("192.168.1.1", 1900))
     assert not accept_ssdp_peer(("8.8.8.8", 1900))
+    assert not accept_ssdp_peer(("100.64.0.1", 1900))
     assert is_wan_connection_service("urn:schemas-upnp-org:service:WANIPConnection:2")
     v2 = DESC.replace("WANIPConnection:1", "WANIPConnection:2")
     control, service = parse_igd_control(v2, "http://192.168.1.1:5000/rootDesc.xml")
@@ -68,6 +71,8 @@ def test_soap_addportmapping_is_tcp_4781_only():
         router.addportmapping(22, "TCP", "192.168.1.12", 22, "Jarvis", "", 3600)
     with pytest.raises(ValueError):
         router.addportmapping(4781, "TCP", "8.8.8.8", 4781, "Jarvis", "", 3600)
+    with pytest.raises(ValueError):
+        router.addportmapping(4781, "TCP", "100.64.1.8", 4781, "Jarvis", "", 3600)
 
 
 def test_lookup_egress_ipv4_accepts_global_and_rejects_private(monkeypatch):

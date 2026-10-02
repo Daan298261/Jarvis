@@ -152,8 +152,31 @@ def test_default_gateway_parsers_and_openwrt_user_fallback():
         "eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
     )
     assert parse_proc_net_route(proc) == "192.168.1.1"
+    cgnat_then_lan = (
+        "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+        "wwan0\t00000000\t01004064\t0003\t0\t0\t50\t00000000\t0\t0\t0\n"
+        "eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
+    )
+    assert parse_proc_net_route(cgnat_then_lan) == "192.168.1.1"
+    cgnat_only = (
+        "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+        "wwan0\t00000000\t01004064\t0003\t0\t0\t50\t00000000\t0\t0\t0\n"
+    )
+    with pytest.raises(ValueError):
+        parse_proc_net_route(cgnat_only)
     printed = "Network Destination        Netmask          Gateway       Interface  Metric\n          0.0.0.0          0.0.0.0      192.168.0.1     192.168.0.12     25\n"
     assert parse_windows_route_print(printed) == "192.168.0.1"
+    dual = (
+        "Network Destination        Netmask          Gateway       Interface  Metric\n"
+        "          0.0.0.0          0.0.0.0      100.64.0.1      100.64.1.8      25\n"
+        "          0.0.0.0          0.0.0.0      192.168.1.1     192.168.1.12    35\n"
+    )
+    assert parse_windows_route_print(dual) == "192.168.1.1"
+    with pytest.raises(ValueError):
+        parse_windows_route_print(
+            "Network Destination        Netmask          Gateway       Interface  Metric\n"
+            "          0.0.0.0          0.0.0.0      100.64.0.1      100.64.1.8      25\n"
+        )
     assert resolved_gateway_user({"gateway_profile": "openwrt_uci"}) == "root"
     assert resolved_gateway_user({"gateway_username": "admin"}) == "admin"
     assert resolved_gateway_host({"gateway_host": "192.168.1.1"}) == "192.168.1.1"

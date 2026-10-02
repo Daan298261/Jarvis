@@ -19,10 +19,10 @@ _UNSUPPORTED_VERSION = 1
 
 
 def require_private_gateway(host: str) -> str:
-    address = ipaddress.ip_address((host or "").strip())
-    if address.version != 4 or not address.is_private or address.is_loopback:
+    text = (host or "").strip()
+    if not is_rfc1918_ipv4(text):
         raise ValueError("NAT-PMP gateway must be a private LAN IPv4 address")
-    return str(address)
+    return text
 
 
 def encode_public_ip_request() -> bytes:

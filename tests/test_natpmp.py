@@ -23,6 +23,8 @@ def test_natpmp_packets_are_tcp_4781_only():
     assert lifetime == 3600
     with pytest.raises(ValueError):
         require_private_gateway("8.8.8.8")
+    with pytest.raises(ValueError):
+        require_private_gateway("100.64.0.1")
     assert require_private_gateway("192.168.1.1") == "192.168.1.1"
 
 
