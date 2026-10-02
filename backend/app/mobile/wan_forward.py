@@ -180,7 +180,7 @@ def mapping_lan_ipv4(hosts, gateway: str = "") -> str:
             for host in candidates:
                 if ipaddress.ip_address(host) in net:
                     return host
-    return candidates[0]
+    return ""
 
 
 def mapped_address_is_egress(mapped_ip: str) -> bool:

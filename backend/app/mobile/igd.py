@@ -15,7 +15,7 @@ from xml.sax.saxutils import escape
 
 import httpx
 
-from .wan_forward import PORT, is_rfc1918_ipv4
+from .wan_forward import PORT, is_rfc1918_ipv4, mapping_lan_ipv4
 
 WANIP = "urn:schemas-upnp-org:service:WANIPConnection:1"
 WANPPP = "urn:schemas-upnp-org:service:WANPPPConnection:1"
@@ -297,9 +297,20 @@ def stdlib_igd_candidate(username: str = "", password: str = "", lanaddr: str = 
     if description.status_code >= 400:
         raise RuntimeError(f"IGD description HTTP {description.status_code}")
     control, service = parse_igd_control(description.text, location)
-    host = lanaddr.strip()
-    if not is_rfc1918_ipv4(host):
-        host = _udp_lan_ipv4()
+    igd_host = urlparse(location).hostname or ""
+    hosts: list[str] = []
+    try:
+        from ..api.mobile import _lan_hosts
+
+        hosts.extend(host for host in _lan_hosts() if is_rfc1918_ipv4(host))
+    except Exception:
+        pass
+    if lanaddr.strip():
+        hosts.append(lanaddr.strip())
+    udp = _udp_lan_ipv4()
+    if udp:
+        hosts.append(udp)
+    host = mapping_lan_ipv4(hosts, igd_host)
     if not is_rfc1918_ipv4(host):
         raise ValueError("No private LAN IPv4 for IGD internal client")
     dest = ipaddress.ip_address(host)

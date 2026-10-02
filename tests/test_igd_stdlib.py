@@ -290,3 +290,37 @@ def test_stdlib_igd_retries_http_digest_logon(monkeypatch):
     )
     assert router.externalipaddress() == "8.8.4.4"
     assert any(isinstance(item, httpx.DigestAuth) for item in auths)
+
+
+def test_stdlib_igd_internal_client_follows_igd_subnet_not_vpn(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.mobile.igd import stdlib_igd_candidate
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, auth=None, **kwargs):
+            return SimpleNamespace(status_code=200, text=DESC, headers={})
+
+        def post(self, url, content, headers, auth=None):
+            return SimpleNamespace(
+                status_code=200,
+                text='<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><NewExternalIPAddress>8.8.4.4</NewExternalIPAddress></s:Body></s:Envelope>',
+                headers={},
+            )
+
+    monkeypatch.setattr("app.mobile.igd.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.mobile.igd.ssdp_search", lambda: "http://192.168.1.1:5000/rootDesc.xml")
+    monkeypatch.setattr("app.api.mobile._lan_hosts", lambda: ["10.8.0.2", "192.168.1.12"])
+    monkeypatch.setattr("app.mobile.igd._udp_lan_ipv4", lambda: "10.8.0.2")
+    router, public = stdlib_igd_candidate(lanaddr="10.8.0.2")
+    assert public == "8.8.4.4"
+    assert router.lanaddr == "192.168.1.12"
