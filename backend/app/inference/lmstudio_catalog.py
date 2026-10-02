@@ -132,6 +132,28 @@ def extra_volume_model_roots() -> list[Path]:
     return roots
 
 
+def extra_volume_file_named(filename: str) -> Path | None:
+    """Find a named GGUF (including mmproj) on extra-volume model folders or roots."""
+    needle = str(filename or "").strip()
+    if not needle:
+        return None
+    lower = needle.lower()
+    for root in extra_volume_model_roots():
+        try:
+            for path in root.rglob(needle):
+                if path.is_file():
+                    return path
+            for path in root.rglob("*.gguf"):
+                if path.is_file() and path.name.lower() == lower:
+                    return path
+        except OSError:
+            continue
+    for path in extra_volume_loose_ggufs():
+        if path.name.lower() == lower:
+            return path
+    return None
+
+
 def extra_volume_loose_ggufs() -> list[Path]:
     """`*.gguf` sitting on an extra volume root (not nested in Photos, etc.)."""
     from ..config import extra_volume_roots

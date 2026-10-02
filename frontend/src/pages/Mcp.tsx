@@ -8,6 +8,7 @@ type McpServer = {
   name: string
   transport?: string
   command?: string
+  cwd?: string
   url?: string
   status?: string
   tools?: string[]
@@ -32,7 +33,8 @@ export function McpPage() {
   const [name, setName] = useState("filesystem")
   const [transport, setTransport] = useState("stdio")
   const [command, setCommand] = useState("npx")
-  const [args, setArgs] = useState("-y @modelcontextprotocol/server-filesystem C:/Users/daanv/Desktop")
+  const [args, setArgs] = useState("-y @modelcontextprotocol/server-filesystem")
+  const [cwd, setCwd] = useState("")
   const [url, setUrl] = useState("")
 
   async function refresh(probe = false) {
@@ -75,7 +77,8 @@ export function McpPage() {
             <div>
               <strong>{server.name}</strong>
               <div className="lede" style={{ margin: 0 }}>
-                {server.transport} {server.command || server.url} · {server.status || "not probed"}
+                {server.transport} {server.command || server.url}
+                {server.cwd ? ` · ${server.cwd}` : ""} · {server.status || "not probed"}
                 {server.agent_exposed ? " · attached to agent" : ""}
               </div>
               {!!server.tools?.length && (
@@ -156,6 +159,11 @@ export function McpPage() {
                 <>
                   <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="command" />
                   <input value={args} onChange={(e) => setArgs(e.target.value)} placeholder="args" />
+                  <input
+                    value={cwd}
+                    onChange={(e) => setCwd(e.target.value)}
+                    placeholder="working folder (Documents or USB/D:)"
+                  />
                 </>
               ) : (
                 <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://127.0.0.1:3000" />
@@ -163,7 +171,15 @@ export function McpPage() {
               <button className="btn" onClick={async () => {
                 await api("/api/mcp", {
                   method: "POST",
-                  body: JSON.stringify({ name, transport, command, args: args.split(" ").filter(Boolean), url, enabled: true }),
+                  body: JSON.stringify({
+                    name,
+                    transport,
+                    command,
+                    args: args.split(" ").filter(Boolean),
+                    cwd: cwd.trim() || undefined,
+                    url,
+                    enabled: true,
+                  }),
                 })
                 void refresh()
               }}>Add MCP server</button>

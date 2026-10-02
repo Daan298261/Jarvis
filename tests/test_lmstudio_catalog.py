@@ -255,6 +255,7 @@ def test_lmstudio_catalog_sources_exclude_hardcoded_usernames():
         repo / "backend" / "app" / "api" / "model.py",
         repo / "backend" / "app" / "inference" / "hotswap.py",
         repo / "backend" / "app" / "persona" / "owner_chat.py",
+        repo / "frontend" / "src" / "pages" / "Mcp.tsx",
     ]
     banned_username = "daanv"
     for path in targets:

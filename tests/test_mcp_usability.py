@@ -24,6 +24,39 @@ def test_stdio_launch_rewrites_relative_mcp_prefix():
     assert launch["env"]["FOO"] == "1"
 
 
+def test_stdio_launch_uses_extra_volume_cwd_and_path_args(tmp_path, monkeypatch):
+    from app.config import repo_root
+
+    extra = tmp_path / "USB" / "mcp-email"
+    extra.mkdir(parents=True)
+    script = extra / "run.py"
+    script.write_text("print(1)\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.config.live_allowed_directories",
+        lambda existing=None: [str(tmp_path / "USB")],
+    )
+    launch = prepare_stdio_launch(
+        {
+            "command": str(script),
+            "args": ["--root", str(extra)],
+            "cwd": str(extra),
+        }
+    )
+    assert Path(launch["cwd"]).resolve() == extra.resolve()
+    assert Path(launch["command"]).resolve() == script.resolve()
+    assert Path(launch["args"][1]).resolve() == extra.resolve()
+
+    denied = prepare_stdio_launch(
+        {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+            "cwd": str(tmp_path / "outside"),
+        }
+    )
+    assert Path(denied["cwd"]).resolve() == repo_root().resolve()
+    assert denied["args"][1].startswith("@")
+
+
 def test_mcp_tool_keys_are_openai_safe():
     key = mcp_tool_key("email", "send email!")
     assert key.startswith("mcp_email_")

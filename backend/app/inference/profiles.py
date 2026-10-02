@@ -226,12 +226,26 @@ def declared_profiles() -> list[ModelProfile]:
 
 def profile_gguf(profile: ModelProfile) -> Path:
     if profile.absolute_path:
-        return Path(profile.absolute_path)
-    return models_dir() / profile.repo_dir / profile.filename
+        bound = Path(profile.absolute_path)
+        if bound.exists():
+            return bound
+    local = models_dir() / profile.repo_dir / profile.filename
+    if local.exists():
+        return local
+    from .lmstudio_catalog import extra_volume_file_named
+
+    extra = extra_volume_file_named(profile.filename)
+    return extra if extra is not None else local
 
 
 def mmproj_path(profile: ModelProfile) -> Path:
-    return models_dir() / profile.repo_dir / profile.mmproj_filename
+    local = models_dir() / profile.repo_dir / profile.mmproj_filename
+    if not profile.mmproj_filename or local.exists():
+        return local
+    from .lmstudio_catalog import extra_volume_file_named
+
+    extra = extra_volume_file_named(profile.mmproj_filename)
+    return extra if extra is not None else local
 
 
 def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:

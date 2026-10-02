@@ -15,6 +15,17 @@ log = logging.getLogger(__name__)
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9_-]+")
 
 
+def _looks_like_fs_path(arg: str) -> bool:
+    text = str(arg or "")
+    if not text or text.startswith(("@", "-", "http:", "https:")):
+        return False
+    if text.startswith("/") or text.startswith("\\\\") or text.startswith("./") or text.startswith("../"):
+        return True
+    if len(text) >= 3 and text[1] == ":" and text[0].isalpha():
+        return True
+    return "\\" in text
+
+
 def mcp_prefix_dir() -> Path:
     from ..config import repo_root
 
@@ -29,7 +40,8 @@ def mcp_tool_key(server_name: str, tool_name: str) -> str:
 
 def prepare_stdio_launch(server: dict[str, Any]) -> dict[str, Any]:
     """Make stdio MCP launches independent of process CWD."""
-    from ..config import repo_root
+    from ..config import live_allowed_directories, repo_root
+    from .safety import resolve_allowed_path
 
     root = repo_root()
     prefix = mcp_prefix_dir()
@@ -38,6 +50,32 @@ def prepare_stdio_launch(server: dict[str, Any]) -> dict[str, Any]:
     for index, arg in enumerate(args):
         if arg in {"mcp", "./mcp"} and index > 0 and args[index - 1] == "--prefix":
             args[index] = str(prefix)
+    allowed = live_allowed_directories()
+    cwd = str(root)
+    raw_cwd = str(server.get("cwd") or "").strip()
+    if raw_cwd and allowed:
+        try:
+            resolved_cwd = resolve_allowed_path(raw_cwd, allowed)
+            if resolved_cwd.is_dir():
+                cwd = str(resolved_cwd)
+        except (PermissionError, OSError):
+            cwd = str(root)
+    if _looks_like_fs_path(command) and allowed:
+        try:
+            command = str(resolve_allowed_path(command, allowed))
+        except (PermissionError, OSError):
+            pass
+    if allowed:
+        rewritten: list[str] = []
+        for arg in args:
+            if not _looks_like_fs_path(arg):
+                rewritten.append(arg)
+                continue
+            try:
+                rewritten.append(str(resolve_allowed_path(arg, allowed)))
+            except (PermissionError, OSError):
+                rewritten.append(arg)
+        args = rewritten
     env_in = server.get("env") or {}
     env = {str(key): str(value) for key, value in os.environ.items() if value is not None}
     for key, value in env_in.items():
@@ -47,7 +85,7 @@ def prepare_stdio_launch(server: dict[str, Any]) -> dict[str, Any]:
     return {
         "command": command,
         "args": args,
-        "cwd": str(root),
+        "cwd": cwd,
         "env": env,
     }
 
