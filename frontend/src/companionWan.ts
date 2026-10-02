@@ -85,6 +85,7 @@ export function connectionPrepareBody(
 
 export function wanPathLabel(path: string | undefined, router: string | undefined): string {
   if (path === "upnp") return "Router mapped with UPnP (TCP 4781, one-hour lease)"
+  if (path === "natpmp") return "Router mapped with NAT-PMP (TCP 4781, one-hour lease)"
   if (path === "gateway_ssh") return "Router mapped over gateway SSH (TCP 4781)"
   if (path === "ssh_reverse" || router === "tunneled") return "SSH reverse tunnel to your host (TCP 4781)"
   if (router === "mapped") return "Router mapped for companion TLS (TCP 4781)"
