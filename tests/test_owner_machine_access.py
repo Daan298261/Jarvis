@@ -606,6 +606,33 @@ async def test_upnp_renew_refreshes_lan_endpoint_after_dhcp(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_lan_only_refresh_updates_endpoints_without_waiting_for_wan_renew(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from app.mobile.lan_beacon import public_beacon_payload
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    hosts = ["192.168.1.12"]
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: list(hosts))
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    connection = FakeConnection()
+    result = await connection.configure(True, False)
+    assert result["state"] == "ready"
+    assert result.get("remote") is False
+    assert "https://192.168.1.12:4781" in result["endpoints"]
+    hosts[:] = ["192.168.1.40"]
+    await connection._refresh_lan_dial_endpoints()
+    assert "https://192.168.1.40:4781" in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" not in connection.state["endpoints"]
+    beacon = public_beacon_payload(connection.snapshot())
+    assert beacon["https"] == "https://192.168.1.40:4781"
+    hosts[:] = []
+    kept = list(connection.state["endpoints"])
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.state["endpoints"] == kept
+
+
+@pytest.mark.asyncio
 async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     from app.mobile import connectivity, store
     from tests.test_mobile_connectivity import FakeConnection
@@ -667,7 +694,7 @@ async def test_pcp_is_used_when_natpmp_unavailable(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "app.mobile.pcp.apply_pcp",
-        lambda gw, lan, nonce=None: ("198.51.100.8", b"\x11" * 12) if gw == "192.168.1.1" else (_ for _ in ()).throw(ValueError(gw)),
+        lambda gw, lan, nonce=None: ("198.51.100.8", b"\\x11" * 12) if gw == "192.168.1.1" else (_ for _ in ()).throw(ValueError(gw)),
     )
     connection = FakeConnection()
     result = await connection.configure(True, True, {"wan_method": "auto"})
