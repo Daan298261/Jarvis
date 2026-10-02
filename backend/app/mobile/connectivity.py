@@ -64,27 +64,73 @@ def preferred_lan_ipv4(gateway: str = "") -> str:
     return mapping_lan_ipv4(lan_hosts(), gw)
 
 
+def _miniupnpc_client(multicastif: str = ""):
+    import miniupnpc
+
+    if not multicastif:
+        return miniupnpc.UPnP()
+    try:
+        return miniupnpc.UPnP(multicastif)
+    except TypeError:
+        try:
+            return miniupnpc.UPnP(multicastif=multicastif)
+        except TypeError:
+            client = miniupnpc.UPnP()
+            for attr in ("multicastif", "lanaddr"):
+                try:
+                    setattr(client, attr, multicastif)
+                except Exception:
+                    continue
+            return client
+
+
+def _upnp_multicast_ifs() -> list[str]:
+    """Home LAN NIC first, then other RFC1918 NICs, then unbound default discover."""
+    from .wan_forward import interface_ipv4_addresses, is_rfc1918_ipv4, mapping_lan_ipv4, rfc1918_mapping_gateways
+
+    nics = [ip for ip in interface_ipv4_addresses() if is_rfc1918_ipv4(ip)]
+    ordered: list[str] = []
+    try:
+        for gw in rfc1918_mapping_gateways():
+            dest = mapping_lan_ipv4(nics, gw)
+            if dest and dest not in ordered:
+                ordered.append(dest)
+    except Exception:
+        pass
+    for ip in nics:
+        if ip not in ordered:
+            ordered.append(ip)
+    if not ordered:
+        return [""]
+    return [*ordered, ""]
+
+
 def router_candidate(username: str = "", password: str = ""):
     last_error: Exception | None = None
     try:
-        import miniupnpc
-
         from .igd import apply_igd_logon, igd_auth_candidates
 
-        router = miniupnpc.UPnP()
-        router.discoverdelay = 2000 if igd_auth_candidates(username, password) else 1500
-        router.discover()
-        router.selectigd()
-        apply_igd_logon(router, username, password)
-        address = ipaddress.ip_address(router.externalipaddress())
-        if address.version != 4 or not address.is_global:
-            raise ValueError("Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access")
-        return router, str(address)
+        delay = 2000 if igd_auth_candidates(username, password) else 1500
+        for iface in _upnp_multicast_ifs():
+            try:
+                router = _miniupnpc_client(iface)
+                router.discoverdelay = delay
+                router.discover()
+                router.selectigd()
+                apply_igd_logon(router, username, password)
+                address = ipaddress.ip_address(router.externalipaddress())
+                if address.version != 4 or not address.is_global:
+                    last_error = ValueError(
+                        "Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access"
+                    )
+                    continue
+                return router, str(address)
+            except ImportError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                continue
     except ImportError as exc:
-        last_error = exc
-    except Exception as exc:
-        if "no public IPv4" in str(exc).lower():
-            raise
         last_error = exc
     try:
         from .igd import stdlib_igd_candidate
