@@ -30,6 +30,8 @@ One RFC, three product facts:
 
 **Will not:** invent new LE / Red / Purple / ATO officer-procedure rules beyond “entitlement comes from the signed license package” and the existing RFC-0086/0087 fields. Rewrite RFC-0106 operator control. Put `JarvisLicenseManager` or issuer private keys in the customer Inno payload. Ship product code in this PR. Take RFC-0118.
 
+**Amended 2026-10-02:** [RFC-0199](0199-installer-license-auto-apply.md) covers **customer sidecar** `.jarvis-license` next to Setup at install time (auto-apply). That is distinct from §3 vendor `Jarvis-unrestricted.jarvis-license` in `installer/windows/dist/`.
+
 ### 1. License package is the sole capability gate
 
 **Source of truth for product modules** is the installed License Manager / ATO package (sealed `.jarvis-license` / installed ATO), not a password file:

@@ -44,3 +44,5 @@ Final pricing levels, payment processor integration, DRM of customer-owned model
 Inspiration: Zoey BYO Architect/local license direction. Recommendation: ADAPT.
 
 Landed on `cursor/local-qwen-desktop-agent`: backend PR #66 (`7b44ebe`) — license entitlement only, not a `RemoteOpenAICompatibleBackend` rewrite; portal UI PR #82 (`93e0555`).
+
+**Amended 2026-10-02:** Windows install-time import of a sidecar `.jarvis-license` is specified in [RFC-0199](0199-installer-license-auto-apply.md); commercial lease validation here is unchanged.
