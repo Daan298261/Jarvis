@@ -17,7 +17,7 @@ from openai import APIConnectionError, APIStatusError
 
 from ..coding.usage import record_task_usage
 from ..config import AppSettings, load_settings
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
@@ -342,6 +342,7 @@ class AgentRuntime:
         self._heartbeat_tasks: dict[str, asyncio.Task] = {}
         self._last_heartbeat: dict[str, datetime] = {}
         self._cancel = set()
+        self._front_tasks: dict[str, asyncio.Task] = {}
 
     async def _heartbeat_loop(self, task_id: str) -> None:
         try:
@@ -619,15 +620,39 @@ class AgentRuntime:
         if running:
             running.cancel()
 
+    async def _await_managed_front(self, task_id: str) -> None:
+        front = self._front_tasks.pop(task_id, None)
+        if front is None:
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(front), timeout=2.0)
+        except (TimeoutError, asyncio.CancelledError, Exception):
+            return
+
     async def _update(self, task_id: str, **fields: Any) -> None:
+        incoming_status = fields.get("status")
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if not task:
                 return
-            incoming_status = fields.get("status")
-            # Front-lane acks are fire-and-forget. A late SAFE_ACK must not replace
-            # the terminal failure/completion the worker already committed.
+            session.expire(task)
+            await session.refresh(task)
             if task.status in _TERMINAL_TASK_STATUSES and incoming_status not in _TERMINAL_TASK_STATUSES:
+                return
+            if incoming_status not in _TERMINAL_TASK_STATUSES:
+                values = dict(fields)
+                values["updated_at"] = utcnow()
+                if incoming_status == "running" and not task.started_at:
+                    values["started_at"] = utcnow()
+                await session.execute(
+                    update(Task)
+                    .where(
+                        Task.id == task_id,
+                        Task.status.in_(("queued", "running", "waiting")),
+                    )
+                    .values(**values)
+                )
+                await session.commit()
                 return
             for key, value in fields.items():
                 setattr(task, key, value)
@@ -706,6 +731,7 @@ class AgentRuntime:
                     await BUS.publish(task_id, "progress", "Coding/3D contract blocked chat-only completion", block[:1500], stage="act")
                     return False
                 persist_execution_evidence(task_id, working)
+        await self._await_managed_front(task_id)
         fields = {
             "status": "completed",
             "stage": "completed",
@@ -739,6 +765,7 @@ class AgentRuntime:
         stage: str = "failed",
     ) -> None:
         spoken = plain_failure(error)
+        await self._await_managed_front(task_id)
         fields: dict[str, Any] = {
             "status": "failed",
             "stage": "failed",
@@ -1893,7 +1920,7 @@ class AgentRuntime:
                 )
             )
             if settings.front_responder.enabled:
-                asyncio.create_task(
+                self._front_tasks[task_id] = asyncio.create_task(
                     self._run_managed_front_lane(
                         task_id,
                         extra_prompt or prompt,
