@@ -249,16 +249,18 @@ export function MobileCompanionSetup() {
                   onChange={(event) => patchWan("gateway_identity_file", event.target.value)}
                 />
               </label>
-              <label>
-                Public hostname the phone should dial
-                <input
-                  className="command"
-                  value={wanForm.wan_public_host}
-                  placeholder="home.example.com"
-                  onChange={(event) => patchWan("wan_public_host", event.target.value)}
-                />
-              </label>
             </>
+          )}
+          {(wanForm.wan_method === "auto" || wanForm.wan_method === "upnp" || wanForm.wan_method === "gateway_ssh") && (
+            <label>
+              Public hostname the phone should dial
+              <input
+                className="command"
+                value={wanForm.wan_public_host}
+                placeholder="home.example.com"
+                onChange={(event) => patchWan("wan_public_host", event.target.value)}
+              />
+            </label>
           )}
           {(wanForm.wan_method === "auto" || wanForm.wan_method === "ssh_reverse") && (
             <>

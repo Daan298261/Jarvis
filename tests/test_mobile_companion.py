@@ -250,10 +250,15 @@ async def test_gateway_does_not_expose_owner_or_desktop_api(mobile_env):
 
 
 def test_gateway_pin_survives_certificate_renewal(mobile_env):
-    from app.mobile.gateway import server_identity
+    from app.mobile.gateway import identity_covers, server_identity
     first = server_identity(["192.168.1.2"])
     second = server_identity(["192.168.1.2", "jarvis.example.com"])
     assert first["server_pin"] == second["server_pin"]
+    assert identity_covers(second, ["192.168.1.2", "jarvis.example.com", "127.0.0.1"])
+    wan = server_identity(["8.8.8.8"])
+    assert wan["server_pin"] == first["server_pin"]
+    assert identity_covers(wan, ["192.168.1.2", "8.8.8.8", "jarvis.example.com"])
+    assert not identity_covers(first, ["203.0.113.8"])
 
 
 @pytest.mark.asyncio

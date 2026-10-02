@@ -13,6 +13,7 @@ import os
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
@@ -24,6 +25,35 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
 from .store import root
+
+
+def _hostname_values(hostnames) -> list[str]:
+    values: list[str] = []
+    for hostname in hostnames or []:
+        text = str(hostname or "").strip()
+        if text:
+            values.append(text)
+    return values
+
+
+def certificate_san_hosts(cert_path: str | os.PathLike[str]) -> set[str]:
+    """Hostnames and IP strings present on the gateway certificate SAN."""
+    previous = x509.load_pem_x509_certificate(Path(cert_path).read_bytes())
+    try:
+        names = previous.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    except x509.ExtensionNotFound:
+        return set()
+    return {str(name.value) for name in names}
+
+
+def identity_covers(identity: dict, hostnames: list[str]) -> bool:
+    """True when every phone-dial host is already a SAN on this identity."""
+    cert = (identity or {}).get("certificate")
+    if not cert:
+        return False
+    have = certificate_san_hosts(cert)
+    needed = set(_hostname_values(hostnames))
+    return bool(needed) and needed <= have
 
 
 def server_identity(hostnames: list[str]):
@@ -39,15 +69,10 @@ def server_identity(hostnames: list[str]):
             output.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
     public = key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     names = []
+    collected = _hostname_values(hostnames)
     if cert_path.exists():
-        previous = x509.load_pem_x509_certificate(cert_path.read_bytes())
-        hostnames = list(hostnames)
-        try:
-            previous_names = previous.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
-            hostnames += [str(name.value) for name in previous_names]
-        except x509.ExtensionNotFound:
-            pass
-    for hostname in set(hostnames + ["localhost", "127.0.0.1"]):
+        collected += list(certificate_san_hosts(cert_path))
+    for hostname in set(collected + ["localhost", "127.0.0.1"]):
         try:
             names.append(x509.IPAddress(ipaddress.ip_address(hostname)))
         except ValueError:

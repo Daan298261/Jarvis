@@ -89,6 +89,8 @@ async def test_router_is_mapped_only_after_gateway_auth_check(network_env, monke
     assert result["local_verified"]
     assert not result["remote_verified"]  # A lease does not prove WAN connectivity.
     assert result["endpoints"] == ["https://192.168.1.12:4781", "https://8.8.8.8:4781"]
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["192.168.1.12", "8.8.8.8"])
     result = await connection.configure(False, False)
     assert result["endpoints"] == ["https://192.168.1.12:4781"]
     assert router.deleted == [(4781, "TCP")]
@@ -115,6 +117,33 @@ async def test_router_failure_keeps_lan_available(network_env, monkeypatch):
     assert result["state"] == "ready" and result["local_verified"]
     assert "carrier NAT" in result["limitation"]
     assert result["endpoints"] == ["https://192.168.1.12:4781"]
+
+
+@pytest.mark.asyncio
+async def test_upnp_lease_advertises_owner_public_hostname(network_env, monkeypatch):
+    router = Router()
+    monkeypatch.setattr(connectivity, "router_candidate", lambda: (router, "8.8.8.8"))
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_public_host": "home.example.test"})
+    assert result["state"] == "ready"
+    assert "https://8.8.8.8:4781" in result["endpoints"]
+    assert "https://home.example.test:4781" in result["endpoints"]
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["8.8.8.8", "home.example.test", "192.168.1.12"])
+
+
+@pytest.mark.asyncio
+async def test_public_hostname_is_advertised_without_automatic_mapping(network_env, monkeypatch):
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_public_host": "home.example.test"})
+    assert result["state"] == "ready"
+    assert "https://home.example.test:4781" in result["endpoints"]
+    assert "public hostname" in (result.get("limitation") or "").lower()
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["home.example.test", "192.168.1.12"])
 
 
 @pytest.mark.asyncio
@@ -180,3 +209,54 @@ async def test_managed_gateway_serves_real_tls_and_shuts_down(network_env, monke
         await connection.stop_gateway()
         server.should_exit = True
         await running
+
+
+@pytest.mark.asyncio
+async def test_cover_phone_dial_hosts_reloads_tls_without_stopping_beacon(network_env):
+    from app.mobile.gateway import identity_covers, server_identity
+
+    class Reloading(FakeConnection):
+        def __init__(self):
+            super().__init__()
+            self.restarts = 0
+            self.stopped_beacons = []
+
+        async def start_gateway(self, identity, beacons=True):
+            self.opened = True
+            self.restarts += 1
+            if self.server_task is None or self.server_task.done():
+                async def hold():
+                    await asyncio.sleep(3600)
+                self.server_task = asyncio.create_task(hold())
+
+        async def stop_gateway(self, beacons=True):
+            self.opened = False
+            self.stopped_beacons.append(beacons)
+            if self.server_task:
+                self.server_task.cancel()
+                await asyncio.gather(self.server_task, return_exceptions=True)
+            self.server_task = None
+
+    connection = Reloading()
+    connection.identity = server_identity(["192.168.1.12"])
+    await connection.start_gateway(connection.identity)
+    try:
+        pin = connection.identity["server_pin"]
+        assert not identity_covers(connection.identity, ["8.8.8.8"])
+        await connection.cover_phone_dial_hosts("https://8.8.8.8:4781")
+        assert identity_covers(connection.identity, ["192.168.1.12", "8.8.8.8"])
+        assert connection.identity["server_pin"] == pin
+        assert connection.restarts >= 2
+        assert connection.stopped_beacons[-1] is False
+        await connection.cover_phone_dial_hosts("8.8.8.8")
+        assert connection.restarts >= 2
+    finally:
+        if connection.server_task:
+            connection.server_task.cancel()
+            await asyncio.gather(connection.server_task, return_exceptions=True)
+
+
+def test_dial_host_reads_origin_or_bare_name():
+    assert connectivity.dial_host("https://8.8.8.8:4781") == "8.8.8.8"
+    assert connectivity.dial_host("vpn.example.test") == "vpn.example.test"
+    assert connectivity.dial_host("") == ""

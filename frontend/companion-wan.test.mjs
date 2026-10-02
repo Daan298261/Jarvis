@@ -74,4 +74,12 @@ describe("companion WAN prepare body", () => {
     assert.equal(form.gateway_host, "192.168.1.1")
     assert.equal(form.gateway_password, "")
   })
+
+  test("remote auto sends the owner public hostname", () => {
+    const body = wan.connectionPrepareBody(true, true, {
+      ...wan.EMPTY_WAN_FORM,
+      wan_public_host: "home.example.test",
+    })
+    assert.equal(body.wan_public_host, "home.example.test")
+  })
 })

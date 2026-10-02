@@ -191,6 +191,8 @@ async def test_ssh_reverse_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     assert result["state"] == "ready"
     assert "https://vpn.example.test:4781" in result["endpoints"]
     assert result.get("wan_path") == "ssh_reverse"
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["vpn.example.test", "192.168.1.12"])
 
 
 @pytest.mark.asyncio
@@ -247,7 +249,8 @@ async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypa
         return "https://home.example.test:4781", "mapped"
 
     monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
-    result = await FakeConnection().configure(
+    connection = FakeConnection()
+    result = await connection.configure(
         True,
         True,
         {"wan_method": "auto", "gateway_password": "router-pass", "wan_public_host": "home.example.test"},
@@ -256,6 +259,8 @@ async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypa
     assert result.get("wan_path") == "gateway_ssh"
     assert seen["password"] == "router-pass"
     assert "https://home.example.test:4781" in result["endpoints"]
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["home.example.test", "192.168.1.12"])
 
 
 @pytest.mark.asyncio
@@ -268,10 +273,13 @@ async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
     monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
     monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda gw, lan: "203.0.113.8" if gw == "192.168.1.1" else (_ for _ in ()).throw(ValueError(gw)))
-    result = await FakeConnection().configure(True, True, {"wan_method": "auto"})
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_method": "auto"})
     assert result["state"] == "ready"
     assert result.get("wan_path") == "natpmp"
     assert "https://203.0.113.8:4781" in result["endpoints"]
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["203.0.113.8", "192.168.1.12"])
 
 
 @pytest.mark.asyncio
@@ -291,10 +299,13 @@ async def test_pcp_is_used_when_natpmp_unavailable(tmp_path, monkeypatch):
         "app.mobile.pcp.apply_pcp",
         lambda gw, lan, nonce=None: ("198.51.100.8", b"\x11" * 12) if gw == "192.168.1.1" else (_ for _ in ()).throw(ValueError(gw)),
     )
-    result = await FakeConnection().configure(True, True, {"wan_method": "auto"})
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_method": "auto"})
     assert result["state"] == "ready"
     assert result.get("wan_path") == "pcp"
     assert "https://198.51.100.8:4781" in result["endpoints"]
+    from app.mobile.gateway import identity_covers
+    assert identity_covers(connection.identity, ["198.51.100.8", "192.168.1.12"])
 
 
 def test_ssh_askpass_prints_secret_without_argv(tmp_path, monkeypatch):
