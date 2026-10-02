@@ -599,3 +599,82 @@ def test_piper_voices_dir_discovers_existing_extra_onnx(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
     monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
     assert resolved_piper_voices_dir() == found
+
+
+def _patch_runtime_disk(monkeypatch, extra: Path) -> None:
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", lambda path: _full_local_usage(path, extra))
+
+
+def test_playwright_user_data_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = config.playwright_user_data_dir()
+    assert dest == extra / "Jarvis" / "runtime" / "browser-profile"
+    assert dest.is_dir()
+
+
+def test_playwright_user_data_dir_discovers_existing_extra_profile(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "browser-profile"
+    (found / "Default").mkdir(parents=True)
+    (found / "Local State").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config, "data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert config.playwright_user_data_dir() == found
+
+
+def test_browser_use_user_data_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = config.browser_use_user_data_dir()
+    assert dest == extra / "Jarvis" / "runtime" / "browser-use-profile"
+    assert dest.is_dir()
+
+
+def test_browser_use_user_data_dir_discovers_existing_extra_profile(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "browser-use-profile"
+    (found / "Default").mkdir(parents=True)
+    monkeypatch.setattr(config, "data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert config.browser_use_user_data_dir() == found
+
+
+def test_default_vault_path_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.memory.obsidian_vault import default_vault_path
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = default_vault_path()
+    assert dest == extra / "Jarvis" / "runtime" / "vault"
+
+
+def test_default_vault_path_discovers_existing_extra_vault(tmp_path, monkeypatch):
+    from app.memory.obsidian_vault import default_vault_path
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "vault"
+    (found / "Home").mkdir(parents=True)
+    (found / "Home" / "Jarvis.md").write_text("# Jarvis\n", encoding="utf-8")
+    monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: data)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert default_vault_path() == found

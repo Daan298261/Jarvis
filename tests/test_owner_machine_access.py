@@ -530,7 +530,7 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
     from app.tools import browser as browser_mod
     from app.tools.browser import BrowserTool
 
-    monkeypatch.setattr(browser_mod, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
 
     class FakePage:
         url = "https://example.com/"

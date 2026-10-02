@@ -464,7 +464,15 @@ def _init_managed_layout(root: Path) -> None:
 
 
 def default_vault_path() -> Path:
-    return data_dir() / "vault"
+    """`data/vault`, or extra-drive `Jarvis/runtime/vault` when C: cannot fit."""
+    from ..config import resolved_data_sidecar_dir
+
+    return resolved_data_sidecar_dir(
+        "vault",
+        local=data_dir() / "vault",
+        markers=(".obsidian", "Home", "Projects", "_Config"),
+        need_bytes=1024**3,
+    )
 
 
 def ensure_default_vault(*, configured_path: str = "", init_layout: bool = True) -> dict[str, Any]:

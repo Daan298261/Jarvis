@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..config import AppSettings, data_dir, load_settings
+from ..config import AppSettings, browser_use_user_data_dir, load_settings
 from ..tools.owner_paths import owner_downloads_dir
 from .browser_structured import (
     browser_use_tool_result_data,
@@ -220,8 +220,7 @@ class BrowserUseBackend:
 
         apply_playwright_browsers_path()
         BrowserSession = self._browser_session_class()
-        profile_dir = data_dir() / "browser-use-profile"
-        profile_dir.mkdir(parents=True, exist_ok=True)
+        profile_dir = browser_use_user_data_dir()
         headless = bool(settings.browser.headless)
         kwargs = browser_use_session_kwargs(headless, profile_dir)
         try:

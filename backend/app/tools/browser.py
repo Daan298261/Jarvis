@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from ..config import AppSettings, data_dir, load_settings
+from ..config import AppSettings, load_settings, playwright_user_data_dir
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import chromium_download_launch_kwargs, owner_media_dir, resolve_owner_file_path
 from .safety import resolve_allowed_path
@@ -326,8 +326,7 @@ async def _ensure_page(headless: bool):
 
     apply_playwright_browsers_path()
     _playwright = await async_playwright().start()
-    user_dir = data_dir() / "browser-profile"
-    user_dir.mkdir(parents=True, exist_ok=True)
+    user_dir = playwright_user_data_dir()
     _context = await _playwright.chromium.launch_persistent_context(
         str(user_dir),
         headless=headless,

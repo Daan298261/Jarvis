@@ -717,7 +717,8 @@ def discover_named_runtime_dir(name: str, *, marker: str) -> Path | None:
     candidates = [repo_root() / "runtime" / slug, *extra_volume_named_runtime_dirs(slug)]
     for root in candidates:
         try:
-            if _runtime_marker_path(root, needle).is_file():
+            hit = _runtime_marker_path(root, needle)
+            if hit.is_file() or hit.is_dir():
                 return root
         except OSError:
             continue
@@ -756,7 +757,81 @@ def preferred_runtime_install_dir(name: str, *, need_bytes: int = _RUNTIME_NEED_
     return extra / slug
 
 
+_DATA_SIDECAR_NEED_BYTES = 1024**3
 _PLAYWRIGHT_NEED_BYTES = 1024**3
+
+
+def resolved_data_sidecar_dir(
+    name: str,
+    *,
+    local: Path,
+    markers: tuple[str, ...] = (),
+    need_bytes: int = _DATA_SIDECAR_NEED_BYTES,
+) -> Path:
+    """Keep `local` when that volume fits or already has files; else extra-drive `Jarvis/runtime/<name>`."""
+    slug = str(name or "").strip()
+    if not slug:
+        return local
+    for marker in markers:
+        try:
+            hit = _runtime_marker_path(local, marker)
+            if hit.is_file() or hit.is_dir():
+                return local
+        except OSError:
+            continue
+    if not markers:
+        try:
+            if local.is_dir() and any(local.iterdir()):
+                return local
+        except OSError:
+            pass
+    for marker in markers or ("",):
+        for candidate in extra_volume_named_runtime_dirs(slug):
+            try:
+                if marker:
+                    hit = _runtime_marker_path(candidate, marker)
+                    if hit.is_file() or hit.is_dir():
+                        return candidate
+                elif candidate.is_dir() and any(candidate.iterdir()):
+                    return candidate
+            except OSError:
+                continue
+    required = int(need_bytes or 0)
+    try:
+        probe = local if local.exists() else local.parent
+        if not probe.exists():
+            probe = repo_root()
+        local_free = int(shutil.disk_usage(probe).free)
+    except OSError:
+        local_free = 0
+    extra_root = extra_volume_runtime_root(need_bytes=required)
+    if extra_root is not None and required > 0 and local_free < required:
+        return extra_root / slug
+    return local
+
+
+def playwright_user_data_dir() -> Path:
+    """Playwright persistent profile. Extra-drive `Jarvis/runtime/browser-profile` when C: cannot fit."""
+    dest = resolved_data_sidecar_dir(
+        "browser-profile",
+        local=data_dir() / "browser-profile",
+        markers=("Local State", "Default"),
+        need_bytes=_DATA_SIDECAR_NEED_BYTES,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def browser_use_user_data_dir() -> Path:
+    """Browser Use profile. Extra-drive `Jarvis/runtime/browser-use-profile` when C: cannot fit."""
+    dest = resolved_data_sidecar_dir(
+        "browser-use-profile",
+        local=data_dir() / "browser-use-profile",
+        markers=("Local State", "Default"),
+        need_bytes=_DATA_SIDECAR_NEED_BYTES,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def default_playwright_browsers_dir() -> Path:
