@@ -41,18 +41,35 @@ def lan_hosts():
 
 
 def router_candidate(username: str = "", password: str = ""):
-    import miniupnpc
-    router = miniupnpc.UPnP()
-    router.discoverdelay = 2000 if username else 1500
-    router.discover()
-    router.selectigd()
-    if username:
-        router.username = username
-        router.password = password or ""
-    address = ipaddress.ip_address(router.externalipaddress())
-    if address.version != 4 or not address.is_global:
-        raise ValueError("Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access")
-    return router, str(address)
+    last_error: Exception | None = None
+    try:
+        import miniupnpc
+
+        router = miniupnpc.UPnP()
+        router.discoverdelay = 2000 if username else 1500
+        router.discover()
+        router.selectigd()
+        if username:
+            router.username = username
+            router.password = password or ""
+        address = ipaddress.ip_address(router.externalipaddress())
+        if address.version != 4 or not address.is_global:
+            raise ValueError("Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access")
+        return router, str(address)
+    except ImportError as exc:
+        last_error = exc
+    except Exception as exc:
+        if "no public IPv4" in str(exc).lower():
+            raise
+        last_error = exc
+    try:
+        from .igd import stdlib_igd_candidate
+
+        lan = next(iter(lan_hosts()), "")
+        return stdlib_igd_candidate(username, password, lanaddr=lan)
+    except Exception as exc:
+        last_error = exc
+    raise ValueError(str(last_error) if last_error else "No IGD available")
 
 
 def owned_mapping(mapping, host, marker):
@@ -216,6 +233,12 @@ class Connectivity:
             listener.bind(("0.0.0.0", PORT))
             listener.listen(128)
             listener.setblocking(False)
+            try:
+                from .wan_forward import ensure_private_firewall_4781
+
+                await asyncio.to_thread(ensure_private_firewall_4781)
+            except Exception:
+                pass
             settings = load_settings()
             config = uvicorn.Config(gateway_app(f"http://127.0.0.1:{settings.bind_port}"),
                 ssl_keyfile=identity["key"], ssl_certfile=identity["certificate"],
@@ -358,6 +381,13 @@ class Connectivity:
                     self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
                     try:
                         public_host = wan.get("wan_public_host") or public_ip or ""
+                        if not public_host:
+                            try:
+                                from .wan_forward import lookup_egress_ipv4
+
+                                public_host = await asyncio.to_thread(lookup_egress_ipv4)
+                            except Exception:
+                                public_host = ""
                         mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=str(public_host or ""))
                         wan_path = "gateway_ssh"
                         if mapped:
