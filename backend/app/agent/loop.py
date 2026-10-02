@@ -314,6 +314,9 @@ def _side_effect_decision(
     )
 
 
+_TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
 def _tool_needs_operator_pause(
     autonomy: str,
     risk: RiskLevel,
@@ -620,6 +623,11 @@ class AgentRuntime:
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if not task:
+                return
+            incoming_status = fields.get("status")
+            # Front-lane acks are fire-and-forget. A late SAFE_ACK must not replace
+            # the terminal failure/completion the worker already committed.
+            if task.status in _TERMINAL_TASK_STATUSES and incoming_status not in _TERMINAL_TASK_STATUSES:
                 return
             for key, value in fields.items():
                 setattr(task, key, value)

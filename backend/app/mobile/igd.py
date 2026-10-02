@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import time
 import xml.etree.ElementTree as ET
 from urllib.parse import urljoin, urlparse
 from xml.sax.saxutils import escape
@@ -18,9 +19,19 @@ from .wan_forward import PORT
 
 WANIP = "urn:schemas-upnp-org:service:WANIPConnection:1"
 WANPPP = "urn:schemas-upnp-org:service:WANPPPConnection:1"
+WAN_SERVICES = frozenset(
+    {
+        "urn:schemas-upnp-org:service:WANIPConnection:1",
+        "urn:schemas-upnp-org:service:WANIPConnection:2",
+        "urn:schemas-upnp-org:service:WANPPPConnection:1",
+        "urn:schemas-upnp-org:service:WANPPPConnection:2",
+    }
+)
 _SSDP_ST = (
     "urn:schemas-upnp-org:service:WANIPConnection:1",
+    "urn:schemas-upnp-org:service:WANIPConnection:2",
     "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
+    "urn:schemas-upnp-org:device:InternetGatewayDevice:2",
 )
 
 
@@ -52,6 +63,19 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+def is_wan_connection_service(service_type: str) -> bool:
+    return (service_type or "").strip() in WAN_SERVICES
+
+
+def accept_ssdp_peer(addr: tuple) -> bool:
+    """SSDP replies must come from the owner's LAN, not a public advertiser."""
+    try:
+        ip = ipaddress.ip_address(addr[0])
+    except (ValueError, TypeError, IndexError):
+        return False
+    return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
+
+
 def parse_igd_control(xml_text: str, base_url: str) -> tuple[str, str]:
     root = ET.fromstring(xml_text)
     for service in root.iter():
@@ -65,7 +89,7 @@ def parse_igd_control(xml_text: str, base_url: str) -> tuple[str, str]:
                 service_type = (child.text or "").strip()
             elif name == "controlURL":
                 control = (child.text or "").strip()
-        if service_type in {WANIP, WANPPP} and control:
+        if is_wan_connection_service(service_type) and control:
             return require_lan_http_url(urljoin(base_url, control)), service_type
     raise ValueError("IGD description has no WANIPConnection control URL")
 
@@ -127,6 +151,8 @@ class StdlibIGD:
                 },
                 auth=self._auth(),
             )
+        if response.status_code in {401, 403}:
+            raise RuntimeError("IGD requires the owner router username and password")
         if response.status_code >= 400 or _is_soap_fault(response.text):
             raise RuntimeError(f"IGD {action} returned HTTP {response.status_code}")
         return response.text
@@ -194,9 +220,11 @@ class StdlibIGD:
 
 def ssdp_search(timeout: float = 1.2) -> str:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.settimeout(timeout)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.settimeout(0.25)
+    deadline = time.monotonic() + max(0.4, float(timeout))
+    last_error: Exception | None = None
     try:
-        last_error: Exception | None = None
         for st in _SSDP_ST:
             payload = (
                 "M-SEARCH * HTTP/1.1\r\n"
@@ -208,7 +236,22 @@ def ssdp_search(timeout: float = 1.2) -> str:
             ).encode("ascii")
             try:
                 sock.sendto(payload, ("239.255.255.250", 1900))
-                data, _addr = sock.recvfrom(8192)
+            except Exception as exc:
+                last_error = exc
+        while time.monotonic() < deadline:
+            try:
+                data, addr = sock.recvfrom(8192)
+            except TimeoutError:
+                continue
+            except socket.timeout:
+                continue
+            except Exception as exc:
+                last_error = exc
+                continue
+            if not accept_ssdp_peer(addr):
+                last_error = ValueError("IGD advertisement was not from the LAN")
+                continue
+            try:
                 return parse_ssdp_location(data.decode("utf-8", errors="replace"))
             except Exception as exc:
                 last_error = exc
@@ -221,6 +264,8 @@ def stdlib_igd_candidate(username: str = "", password: str = "", lanaddr: str = 
     location = ssdp_search()
     with httpx.Client(timeout=4, trust_env=False, follow_redirects=False) as client:
         description = client.get(location, auth=(username, password) if username else None)
+    if description.status_code in {401, 403}:
+        raise RuntimeError("IGD requires the owner router username and password")
     if description.status_code >= 400:
         raise RuntimeError(f"IGD description HTTP {description.status_code}")
     control, service = parse_igd_control(description.text, location)
