@@ -38,6 +38,11 @@ object TransportPolicy {
         return distinct.sortedWith(compareBy({ reachabilityRank(it) }, { it }))
     }
 
+    fun mergeConnectionEndpoints(existing: Iterable<String>, incoming: Iterable<String>): List<String> =
+        orderedForReachability(
+            (incoming + existing).mapNotNull { runCatching { origin(it) }.getOrNull() },
+        ).take(8)
+
     fun localIpv4Addresses(): List<String> = runCatching {
         NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
             .filter { nic ->

@@ -157,4 +157,17 @@ class TransportPolicyTest {
         assertEquals(2, TransportPolicy.reachabilityRank("https://nas.lan:4781"))
         assertEquals(0, TransportPolicy.reachabilityRank("https://home.example.test:4781"))
     }
+
+    @Test fun connectionRefreshKeepsLanWhenServerListsWanFirst() {
+        val lan = "https://10.2.0.2:4781"
+        val wan = "https://203.0.113.4:4781"
+        val dns = "https://home.example.test:4781"
+        val merged = TransportPolicy.mergeConnectionEndpoints(listOf(lan), listOf(dns, wan))
+        assertEquals(dns, merged[0])
+        assertEquals(wan, merged[1])
+        assertEquals(lan, merged.last())
+        val unchanged = TransportPolicy.mergeConnectionEndpoints(listOf(lan, wan), emptyList())
+        assertEquals(lan, unchanged.last())
+        assertTrue(wan in unchanged)
+    }
 }

@@ -85,9 +85,8 @@ class JarvisApi(context: Context) {
         val settings = json("/connection")
         if (settings.optString("server_pin") != pin) return
         val values = settings.optJSONArray("endpoints") ?: return
-        val addresses = TransportPolicy.orderedForReachability(
-            (0 until values.length()).map { values.getString(it) },
-        ).take(8)
+        val incoming = (0 until values.length()).map { values.getString(it) }
+        val addresses = TransportPolicy.mergeConnectionEndpoints(endpoints, incoming)
         if (addresses.isNotEmpty()) {
             endpoints = addresses
             endpoint = addresses.first()
