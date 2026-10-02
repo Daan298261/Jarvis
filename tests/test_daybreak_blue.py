@@ -232,6 +232,63 @@ async def test_lan_inventory_starts_suite_without_hexstrike_grant(blue_store, mo
     assert started["count"] == 1
 
 
+def test_discover_private_lan_cidrs_skips_cgnat_and_public(monkeypatch):
+    from types import SimpleNamespace
+
+    import socket
+
+    from app.security.hexstrike_defensive import discover_private_lan_cidrs
+
+    def fake_addrs():
+        return {
+            "wlan0": [
+                SimpleNamespace(family=socket.AF_INET, address="192.168.20.12", netmask="255.255.255.0"),
+            ],
+            "wwan0": [
+                SimpleNamespace(family=socket.AF_INET, address="100.64.1.8", netmask="255.192.0.0"),
+            ],
+            "eth0": [
+                SimpleNamespace(family=socket.AF_INET, address="8.8.8.8", netmask="255.255.255.0"),
+            ],
+        }
+
+    monkeypatch.setattr("psutil.net_if_addrs", fake_addrs)
+    assert discover_private_lan_cidrs() == ["192.168.20.0/24"]
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_uses_nic_cidr_when_scope_missing(blue_store, monkeypatch):
+    from types import SimpleNamespace
+
+    import socket
+
+    from app.security.hexstrike_defensive import discover_private_lan_cidrs, execute_defensive
+
+    def fake_addrs():
+        return {
+            "wlan0": [
+                SimpleNamespace(family=socket.AF_INET, address="10.2.0.5", netmask="255.255.0.0"),
+            ],
+        }
+
+    monkeypatch.setattr("psutil.net_if_addrs", fake_addrs)
+    assert discover_private_lan_cidrs() == ["10.2.0.0/16"]
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        assert payload["target"] == "10.2.0.0/16"
+        return {"hosts": []}
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    job = await execute_defensive("lan_inventory", "")
+    assert job["status"] == "completed"
+    assert job["scope_id"] == "lan"
+
+
 @pytest.mark.asyncio
 async def test_operator_tool_lan_inventory_skips_suite_grant(monkeypatch):
     from app.tools.hexstrike_operator import HexStrikeOperatorTool

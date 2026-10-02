@@ -82,4 +82,10 @@ describe("companion WAN prepare body", () => {
     })
     assert.equal(body.wan_public_host, "home.example.test")
   })
+
+  test("internet prepare defaults include auto WAN method", () => {
+    const body = wan.connectionPrepareBody(true, true, wan.EMPTY_WAN_FORM)
+    assert.equal(body.remote, true)
+    assert.equal(body.wan_method, "auto")
+  })
 })

@@ -134,7 +134,9 @@ class Connectivity:
 
         payload = {**self.state, "heartbeat_at": time.time(), "worker": "Jarvis desktop"}
         payload.update(GUARD.snapshot())
-        payload["wan"] = redact_wan_config(self.config())
+        cfg = self.config()
+        payload["wan"] = redact_wan_config(cfg)
+        payload["remote"] = bool(cfg.get("remote"))
         return payload
 
     def config(self):

@@ -31,6 +31,7 @@ type Connection = {
   remote_verified?: boolean
   wan_path?: string
   wan?: Record<string, unknown>
+  remote?: boolean
   updated_at?: number
 }
 
@@ -60,7 +61,7 @@ export function MobileCompanionSetup() {
   const [devices, setDevices] = useState<Device[]>([])
   const [endpoint, setEndpoint] = useState("")
   const [connection, setConnection] = useState<Connection | null>(null)
-  const [remote, setRemote] = useState(false)
+  const [remote, setRemote] = useState(true)
   const [wanForm, setWanForm] = useState<WanForm>(EMPTY_WAN_FORM)
   const [build, setBuild] = useState<CompanionBuildJob | null>(null)
   const [error, setError] = useState("")
@@ -71,6 +72,7 @@ export function MobileCompanionSetup() {
 
   function applyConnection(next: Connection) {
     setConnection(next)
+    if (typeof next.remote === "boolean") setRemote(next.remote)
     setWanForm((current) => {
       const dirty = Boolean(
         current.ssh_host ||
@@ -164,7 +166,7 @@ export function MobileCompanionSetup() {
       </p>
       <label>
         <input type="checkbox" checked={remote} onChange={(event) => setRemote(event.target.checked)} /> Enable
-        encrypted internet access when supported
+        encrypted internet access (TCP 4781 via UPnP, NAT-PMP, PCP, gateway SSH, or reverse tunnel)
       </label>
       {remote && (
         <div className="grid" style={{ marginTop: 12, gap: 8 }}>

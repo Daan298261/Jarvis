@@ -71,7 +71,7 @@ class HexStrikeActionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: str = Field(min_length=1, max_length=80)
-    scope_id: str = Field(min_length=1, max_length=80)
+    scope_id: str = Field(default="", max_length=80)
     options: HexStrikeActionOptions = Field(default_factory=HexStrikeActionOptions)
 
 

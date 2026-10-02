@@ -8,6 +8,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+import socket
 import threading
 import uuid
 from dataclasses import asdict, dataclass
@@ -27,6 +28,12 @@ _CONTAINER_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+|@sha256:[
 _CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
 SCOPE_KINDS = frozenset({"private_host", "private_cidr", "local_path", "container_image", "local_infrastructure"})
+DEFAULT_LAN_SCOPE_ID = "lan"
+_RFC1918 = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
 
 
 @dataclass(frozen=True)
@@ -224,6 +231,72 @@ def get_scope(scope_id: str) -> dict[str, Any]:
     return scope
 
 
+def discover_private_lan_cidrs() -> list[str]:
+    """RFC1918 CIDRs from this PC's interfaces — owner LAN only, never CGNAT or public."""
+    try:
+        import psutil
+    except ImportError:
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    for _name, addrs in psutil.net_if_addrs().items():
+        for addr in addrs:
+            if getattr(addr, "family", None) != socket.AF_INET:
+                continue
+            ip_text = (getattr(addr, "address", None) or "").split("%", 1)[0]
+            mask = getattr(addr, "netmask", None) or "255.255.255.0"
+            try:
+                interface = ipaddress.IPv4Interface(f"{ip_text}/{mask}")
+            except ValueError:
+                continue
+            if not any(interface.ip in net for net in _RFC1918):
+                continue
+            if interface.network.prefixlen < 8 or interface.network.prefixlen > 30:
+                continue
+            cidr = str(interface.network)
+            if cidr in seen:
+                continue
+            seen.add(cidr)
+            found.append(cidr)
+    return found
+
+
+def ensure_default_lan_scope() -> dict[str, Any]:
+    existing = next(
+        (
+            row
+            for row in list_scopes()
+            if row.get("id") == DEFAULT_LAN_SCOPE_ID and row.get("enabled", True)
+        ),
+        None,
+    )
+    if existing and existing.get("kind") in {"private_host", "private_cidr"}:
+        return existing
+    cidrs = discover_private_lan_cidrs()
+    if not cidrs:
+        raise ValueError("No RFC1918 interface found; register a private LAN scope first")
+    return upsert_scope(
+        DEFAULT_LAN_SCOPE_ID,
+        kind="private_cidr",
+        value=cidrs[0],
+        label="This PC's LAN",
+        attested_owned=True,
+    )
+
+
+def resolve_lan_inventory_scope(scope_id: str) -> str:
+    ident = (scope_id or "").strip()
+    if not ident or ident in {"default", "local"}:
+        return str(ensure_default_lan_scope()["id"])
+    try:
+        get_scope(ident)
+        return ident
+    except KeyError:
+        if ident == DEFAULT_LAN_SCOPE_ID:
+            return str(ensure_default_lan_scope()["id"])
+        raise
+
+
 def list_jobs() -> list[dict[str, Any]]:
     with _LOCK:
         return _read(_JOB_FILE, "jobs")[-100:]
@@ -275,6 +348,8 @@ async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] 
     if capability is None:
         audit_hexstrike("defensive_action_denied", capability=action, reason="unknown_action")
         raise ValueError("unknown defensive action")
+    if capability.id == "lan_inventory":
+        scope_id = resolve_lan_inventory_scope(scope_id)
     scope = get_scope(scope_id)
     if scope.get("kind") not in capability.scope_kinds:
         audit_hexstrike("defensive_action_denied", capability=action, scope_id=scope_id, reason="scope_kind")
