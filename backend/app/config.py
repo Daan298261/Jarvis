@@ -646,3 +646,15 @@ def sanitize_allowed_directories(existing: list[str] | None) -> list[str]:
             seen.add(key)
             cleaned.append(item)
     return cleaned
+
+
+def live_allowed_directories(existing: list[str] | None = None) -> list[str]:
+    """Saved workspace plus currently mounted owner drives (USB, D:, /media).
+
+    Tool registry already unions on each call. LTA recovery, HexStrike local
+    evidence, and the security target registry must use this too so a plugged-in
+    volume is usable without a settings save.
+    """
+    if existing is None:
+        existing = list(getattr(load_settings(), "allowed_directories", None) or [])
+    return sanitize_allowed_directories(list(existing or []))

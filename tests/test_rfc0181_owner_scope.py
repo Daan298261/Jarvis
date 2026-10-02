@@ -156,3 +156,37 @@ def test_live_context_unions_drive_without_settings_save(monkeypatch, tmp_path):
     live = registry._live_context()
     assert str(second) in live["allowed_directories"]
     assert str(second) in registry._context["allowed_directories"]
+
+
+def test_lta_and_hexstrike_accept_plugged_in_drive_without_settings_save(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from app.config import live_allowed_directories
+    from app.security.hexstrike_defensive import normalize_scope
+    from app.security.hexstrike_operator import artifact_path_allowed
+    from app.security.lta_archive import assert_path_allowed
+    from app.security.target_registry import normalize_target
+
+    home = tmp_path / "home"
+    extra = tmp_path / "E"
+    home.mkdir()
+    extra.mkdir()
+    manifest = extra / "manifest.xml"
+    manifest.write_text("<LTA/>", encoding="utf-8")
+    evidence = extra / "evidence.bin"
+    evidence.write_bytes(b"x")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: [str(home), str(extra)])
+    saved = [str(home)]
+    stale = SimpleNamespace(allowed_directories=saved)
+    monkeypatch.setattr("app.security.lta_archive.load_settings", lambda: stale)
+    monkeypatch.setattr("app.security.hexstrike_defensive.load_settings", lambda: stale)
+    monkeypatch.setattr("app.security.hexstrike_operator.load_settings", lambda: stale)
+    monkeypatch.setattr("app.security.target_registry.load_settings", lambda: stale)
+    roots = live_allowed_directories(saved)
+    assert str(extra) in roots
+    assert assert_path_allowed(str(manifest)).resolve() == manifest.resolve()
+    assert Path(normalize_scope("local_path", str(extra))).resolve() == extra.resolve()
+    assert artifact_path_allowed(evidence)
+    assert Path(normalize_target("local_path", str(extra))).resolve() == extra.resolve()

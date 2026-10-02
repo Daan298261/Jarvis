@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, default_allowed_directories, load_settings
+from ..config import data_dir, live_allowed_directories, load_settings
 from .hexstrike import HEXSTRIKE, audit_hexstrike
 
 _SCOPE_FILE = "hexstrike-scopes.json"
@@ -104,7 +104,7 @@ def _local_path(value: str) -> str:
         raise ValueError("local evidence paths must be absolute")
     resolved = candidate.resolve(strict=False)
     settings = load_settings()
-    roots = settings.allowed_directories or default_allowed_directories()
+    roots = live_allowed_directories(settings.allowed_directories)
     from ..config import LOCAL_NETWORK_SCOPE
     from ..tools.safety import _is_unc_path, _private_lan_unc
 

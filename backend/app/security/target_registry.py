@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, default_allowed_directories, load_settings
+from ..config import data_dir, live_allowed_directories, load_settings
 from .security_audit import audit_security_event
 
 _LOCK = threading.RLock()
@@ -96,7 +96,7 @@ def _normalize_local_path(value: str) -> str:
         raise TargetRegistryError("local_path targets must be absolute")
     resolved = candidate.resolve(strict=False)
     settings = load_settings()
-    roots = settings.allowed_directories or default_allowed_directories()
+    roots = live_allowed_directories(settings.allowed_directories)
     from ..config import LOCAL_NETWORK_SCOPE
 
     allowed = [Path(root).expanduser().resolve(strict=False) for root in roots if root != LOCAL_NETWORK_SCOPE]

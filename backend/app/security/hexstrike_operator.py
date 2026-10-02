@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, default_allowed_directories, load_settings
+from ..config import data_dir, live_allowed_directories, load_settings
 from ..tools.mcp_runtime import MCP
 from .hexstrike import HEXSTRIKE, audit_hexstrike
 from .hexstrike_compat import ALWAYS_STUBBED_OPTIONALS, DISABLED_MESSAGE, package_is_stubbed
@@ -113,7 +113,7 @@ def artifact_path_allowed(candidate: Path) -> bool:
     from ..config import LOCAL_NETWORK_SCOPE
     from ..tools.safety import _is_unc_path, _private_lan_unc
 
-    roots = settings.allowed_directories or default_allowed_directories()
+    roots = live_allowed_directories(settings.allowed_directories)
     if LOCAL_NETWORK_SCOPE in roots and _is_unc_path(str(candidate)) and _private_lan_unc(str(candidate)):
         return True
     allowed = []
