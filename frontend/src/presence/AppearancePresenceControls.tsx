@@ -4,7 +4,7 @@ import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { HudCybersecurityModule } from "../hud/HudCybersecurityModule"
 import { AppearanceSettingsPane } from "../settings/AppearanceSettingsPane"
 import { NamedPersonaControls } from "../persona/NamedPersonaControls"
-import { appearanceVoiceSettingsPath } from "../settings/settingsSubmenus"
+import { appearanceSettingsPath, voiceSettingsPath } from "../settings/settingsSubmenus"
 import type { PresentationSettings } from "./presenceTypes"
 
 type AppearancePresenceControlsProps = {
@@ -33,7 +33,7 @@ function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNo
       <div className="jarvis-presence-controls-body jarvis-presence-controls-body-voice">
         <VoiceProfilePicker />
         <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
-          <Link to={appearanceVoiceSettingsPath("voice")}>Open full Voice settings</Link>
+          <Link to={voiceSettingsPath()}>Open full Voice settings</Link>
         </p>
       </div>
     )
@@ -43,7 +43,7 @@ function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNo
       <div className="jarvis-presence-controls-body">
         <AppearanceSettingsPane settings={settings} showPersona={false} />
         <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
-          <Link to={appearanceVoiceSettingsPath("appearance")}>Open full Appearance settings</Link>
+          <Link to={appearanceSettingsPath()}>Open full Appearance settings</Link>
         </p>
       </div>
     )
