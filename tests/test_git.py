@@ -234,4 +234,5 @@ async def test_git_tool_child_uses_lan_http_proxy_not_vpn(tmp_path, monkeypatch)
     env = seen.get("env") or {}
     assert env.get("HTTP_PROXY", "").startswith("http://127.0.0.1:")
     assert "10.8.0.1" not in env.get("HTTP_PROXY", "")
+    assert "lan_ssh.py" in (env.get("GIT_SSH_COMMAND") or "")
 

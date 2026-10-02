@@ -63,6 +63,18 @@ def python_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def git_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Git HTTP uses the LAN proxy; git SSH uses BindAddress on on-link RFC1918."""
+    env = lan_http_child_env(base)
+    try:
+        from .lan_ssh import git_ssh_command
+
+        env["GIT_SSH_COMMAND"] = git_ssh_command()
+    except Exception:
+        return env
+    return env
+
+
 def owner_media_dir(*names: str) -> Path:
     """Owner Downloads/Pictures/Desktop when present; otherwise a Jarvis data folder."""
     for name in names:

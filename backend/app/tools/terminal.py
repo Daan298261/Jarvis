@@ -201,6 +201,37 @@ def lan_bound_http_argv(command: str) -> list[str] | None:
     return [exe, "--interface", bind, *rest]
 
 
+def lan_bound_ssh_argv(command: str) -> list[str] | None:
+    """OpenSSH of an on-link RFC1918 host, sourced from that NIC.
+
+    ``ssh -b`` is bind-address; scp/sftp ``-b`` is not. Use ``BindAddress`` for
+    ssh/scp/sftp. Skip pipes, ProxyJump, and explicit binds.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = Path(parts[0]).name.lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if name not in {"ssh", "scp", "sftp"}:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    from .lan_ssh import with_lan_ssh_bind
+
+    bound = with_lan_ssh_bind([exe, *parts[1:]])
+    if bound[1:2] != ["-o"] or not str(bound[2] if len(bound) > 2 else "").startswith("BindAddress="):
+        return None
+    return bound
+
+
 def adapt_shell(command: str, shell: str) -> str:
     """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
     chosen = (shell or default_shell()).strip().lower()
@@ -282,7 +313,7 @@ def _child_env(args: list[str]) -> dict[str, str]:
 
 
 def _command_args(command: str, shell: str) -> list[str] | ToolResult:
-    bound = lan_bound_http_argv(command)
+    bound = lan_bound_http_argv(command) or lan_bound_ssh_argv(command)
     if bound:
         return bound
     py = python_direct_argv(command)

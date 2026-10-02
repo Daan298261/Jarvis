@@ -5,6 +5,7 @@ from app.tools.terminal import (
     _python_args,
     default_shell,
     lan_bound_http_argv,
+    lan_bound_ssh_argv,
     python_direct_argv,
 )
 
@@ -333,3 +334,24 @@ def test_wget_without_binary_falls_back_to_curl_on_lan(monkeypatch):
     assert argv[0] == "/usr/bin/curl"
     assert argv[1:3] == ["--interface", "192.168.1.12"]
     assert argv[-1] == "http://192.168.1.50/status"
+
+
+def test_lan_ssh_binds_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"ssh", "scp", "sftp"} else None,
+    )
+    ssh = lan_bound_ssh_argv("ssh -p 22 taco@192.168.1.50")
+    assert ssh is not None
+    assert ssh[0] == "/usr/bin/ssh"
+    assert ssh[1:3] == ["-o", "BindAddress=192.168.1.12"]
+    assert ssh[-1] == "taco@192.168.1.50"
+    scp = lan_bound_ssh_argv("scp a.txt user@192.168.1.1:/tmp/a.txt")
+    assert scp is not None
+    assert scp[1:3] == ["-o", "BindAddress=192.168.1.12"]
+    assert lan_bound_ssh_argv("ssh git@github.com") is None
+    assert lan_bound_ssh_argv("ssh taco@192.168.1.1 | cat") is None
+    powershell = _command_args("ssh taco@192.168.1.50", "powershell")
+    assert powershell[0] == "/usr/bin/ssh"
+    assert "BindAddress=192.168.1.12" in powershell
