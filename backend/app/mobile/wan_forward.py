@@ -637,6 +637,9 @@ def openwrt_redirect_script(lan_ip: str) -> str:
         f"uci set firewall.jarvis_companion_4781.dest_port='{PORT}'\n"
         "uci set firewall.jarvis_companion_4781.proto='tcp'\n"
         "uci set firewall.jarvis_companion_4781.target='DNAT'\n"
+        "uci set firewall.jarvis_companion_4781.enabled='1'\n"
+        "uci set firewall.jarvis_companion_4781.reflection='1'\n"
+        "uci set firewall.jarvis_companion_4781.reflection_src='internal'\n"
         "uci commit firewall\n"
         "/etc/init.d/firewall reload\n"
     )

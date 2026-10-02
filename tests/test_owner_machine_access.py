@@ -112,6 +112,9 @@ def test_openwrt_script_maps_only_companion_port_on_private_lan():
     assert "src_dport='4781'" in script
     assert "dest_port='4781'" in script
     assert "dest_ip='192.168.1.12'" in script
+    assert "reflection='1'" in script
+    assert "reflection_src='internal'" in script
+    assert "enabled='1'" in script
     assert "4780" not in script
     assert "22" not in script.split("src_dport")[0]  # no ssh dport
     with pytest.raises(ValueError):
