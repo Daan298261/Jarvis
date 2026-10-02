@@ -1584,6 +1584,55 @@ async def test_browser_open_uses_data_dir_profile(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_browser_opens_plugged_in_drive_without_settings_save(monkeypatch, tmp_path):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.tools import browser as browser_mod
+    from app.tools.browser import BrowserTool, resolve_browser_open_url
+
+    home = tmp_path / "home"
+    extra = tmp_path / "E"
+    home.mkdir()
+    extra.mkdir()
+    html = extra / "clip.html"
+    html.write_text("<html><body>usb</body></html>", encoding="utf-8")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: [str(home), str(extra)])
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    expected = resolve_browser_open_url(str(html), [str(home), str(extra)])
+
+    class FakePage:
+        url = "about:blank"
+
+        async def goto(self, url, **kwargs):
+            FakePage.url = url
+            return None
+
+        async def title(self):
+            return "usb"
+
+        async def wait_for_load_state(self, *args, **kwargs):
+            return None
+
+    async def fake_ensure(headless):
+        return FakePage()
+
+    monkeypatch.setattr(browser_mod, "_page", None)
+    monkeypatch.setattr(browser_mod, "_context", None)
+    monkeypatch.setattr(browser_mod, "_playwright", None)
+    monkeypatch.setattr(browser_mod, "_browser", None)
+    monkeypatch.setattr(browser_mod, "_pages", [])
+    monkeypatch.setattr(browser_mod, "_ensure_page", fake_ensure)
+    monkeypatch.setattr(browser_mod, "_allowed_override", None)
+    tool = BrowserTool(lambda: {"allowed_directories": [str(home)], "browser": {"headless": True}})
+    result = await tool.execute(action="open", url=str(html))
+    assert result.success, result.error
+    assert FakePage.url == expected
+
+
+@pytest.mark.asyncio
 async def test_browser_open_names_missing_chromium(monkeypatch):
     from app.tools import browser as browser_mod
     from app.tools.browser import BrowserTool

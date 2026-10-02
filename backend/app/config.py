@@ -992,3 +992,21 @@ def live_allowed_directories(existing: list[str] | None = None) -> list[str]:
     if existing is None:
         existing = list(getattr(load_settings(), "allowed_directories", None) or [])
     return sanitize_allowed_directories(list(existing or []))
+
+
+def live_workspace_roots_from_context(raw: Any = None) -> list[str]:
+    """Tool context or AppSettings → live owner workspace (USB / D: / /media union).
+
+    Browser file:// gates and tools that skip ToolRegistry._live_context still need
+    a plugged-in volume without a settings save.
+    """
+    if raw is None:
+        return live_allowed_directories()
+    if isinstance(raw, AppSettings):
+        return live_allowed_directories(list(raw.allowed_directories or []))
+    if isinstance(raw, dict):
+        if "allowed_directories" in raw:
+            return live_allowed_directories(list(raw.get("allowed_directories") or []))
+        return live_allowed_directories()
+    existing = list(getattr(raw, "allowed_directories", None) or [])
+    return live_allowed_directories(existing if existing else None)

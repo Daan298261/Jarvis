@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from ..config import AppSettings, load_settings, playwright_user_data_dir
+from ..config import AppSettings, live_workspace_roots_from_context, load_settings, playwright_user_data_dir
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import chromium_download_launch_kwargs, owner_media_dir, resolve_owner_file_path
 from .safety import resolve_allowed_path
@@ -78,19 +78,18 @@ def resolve_browser_open_url(raw: str, allowed: list[str]) -> str:
 
 
 def _browser_allowed() -> list[str]:
-    if _allowed_override:
-        return list(_allowed_override)
+    if _allowed_override is not None:
+        return live_workspace_roots_from_context({"allowed_directories": list(_allowed_override)})
     try:
         from .registry import REGISTRY
 
-        allowed = list((getattr(REGISTRY, "_context", {}) or {}).get("allowed_directories") or [])
-        if allowed:
-            return allowed
+        live = getattr(REGISTRY, "_live_context", None)
+        if callable(live):
+            return live_workspace_roots_from_context(live())
+        return live_workspace_roots_from_context(getattr(REGISTRY, "_context", {}) or {})
     except Exception:
         pass
-    from ..config import default_allowed_directories
-
-    return default_allowed_directories()
+    return live_workspace_roots_from_context()
 
 
 def redirect_chain_urls(response: Any, final_url: str = "") -> list[str]:
@@ -413,11 +412,7 @@ class BrowserTool(Tool):
 
     def _allowed(self) -> list[str]:
         raw = self.context_getter() if callable(self.context_getter) else {}
-        if isinstance(raw, AppSettings):
-            return list(raw.allowed_directories or [])
-        if isinstance(raw, dict):
-            return list(raw.get("allowed_directories") or [])
-        return []
+        return live_workspace_roots_from_context(raw)
 
     def _settings(self) -> AppSettings:
         raw = self.context_getter()

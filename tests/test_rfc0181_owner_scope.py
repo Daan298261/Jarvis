@@ -190,6 +190,10 @@ def test_lta_and_hexstrike_accept_plugged_in_drive_without_settings_save(monkeyp
     assert Path(normalize_scope("local_path", str(extra))).resolve() == extra.resolve()
     assert artifact_path_allowed(evidence)
     assert Path(normalize_target("local_path", str(extra))).resolve() == extra.resolve()
+    from app.config import AppSettings, live_workspace_roots_from_context
+
+    assert str(extra) in live_workspace_roots_from_context({"allowed_directories": saved})
+    assert str(extra) in live_workspace_roots_from_context(AppSettings(allowed_directories=saved))
 
 
 def test_extra_volume_roots_expand_media_and_skip_os_volume(monkeypatch, tmp_path):

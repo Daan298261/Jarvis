@@ -114,6 +114,36 @@ async def test_browser_use_opens_local_file_on_extra_drive(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_browser_use_opens_plugged_in_drive_without_settings_save(tmp_path, monkeypatch, permission_store):
+    from app.tools.browser import resolve_browser_open_url
+    from app.tools.browser_use import BrowserUseTool
+    from app.tools import browser_use as browser_use_mod
+
+    home = tmp_path / "home"
+    extra = tmp_path / "E"
+    home.mkdir()
+    extra.mkdir()
+    html = extra / "notes.html"
+    html.write_text("<html><body>usb</body></html>", encoding="utf-8")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: [str(home), str(extra)])
+    expected = resolve_browser_open_url(str(html), [str(home), str(extra)])
+    seen: dict[str, str | None] = {}
+
+    async def fake_run(goal, url, settings):
+        seen["url"] = url
+        return ToolResult(True, f"opened {url}", data={"url": url})
+
+    monkeypatch.setattr(browser_use_mod._BACKEND, "run", fake_run)
+    apply_grant("network.internet", "deny")
+    tool = BrowserUseTool(lambda: {"allowed_directories": [str(home)]})
+    result = await tool.execute(goal="summarize this page", url=str(html))
+    assert result.success, result.error
+    assert seen["url"] == expected
+
+
+@pytest.mark.asyncio
 async def test_browser_use_blocks_lan_to_wan_history_hops(permission_store, monkeypatch):
     apply_grant("network.internet", "deny")
     apply_grant("network.local", "always")

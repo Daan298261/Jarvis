@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 from urllib.parse import urlparse
 
-from ..config import load_settings
+from ..config import live_workspace_roots_from_context, load_settings
 from ..reflex_loop.schema import SurfaceKind
 from ..workers.browser import BrowserUseBackend
 from .base import RiskLevel, Tool, ToolResult
@@ -48,7 +48,7 @@ class BrowserUseTool(Tool):
 
     def _allowed(self) -> list[str]:
         raw = self.context_getter() if callable(self.context_getter) else {}
-        return list((raw or {}).get("allowed_directories") or [])
+        return live_workspace_roots_from_context(raw)
 
     def _resolve_start_url(self, url: str | None) -> str | None:
         text = str(url or "").strip()
