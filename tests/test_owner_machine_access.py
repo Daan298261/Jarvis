@@ -23,7 +23,7 @@ from app.mobile.wan_forward import (
     reverse_tunnel_argv,
 )
 from app.tools.safety import resolve_allowed_path
-from app.tools.owner_paths import direct_child_env
+from app.tools.owner_paths import direct_child_env, python_child_env
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +86,16 @@ def test_direct_child_env_drops_proxy_keeps_path(monkeypatch):
     assert "http_proxy" not in kept
     assert kept["PATH"] == "/usr/bin"
     assert kept["HOME"] == "/home/taco"
+
+
+def test_python_child_env_uses_lan_proxy_not_vpn(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:3128")
+    env = python_child_env()
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert env["HTTPS_PROXY"] == env["HTTP_PROXY"]
+    assert env["http_proxy"] == env["HTTP_PROXY"]
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
 
 
 def test_reverse_tunnel_argv_is_batch_mode_and_4781_only(tmp_path, monkeypatch):

@@ -16,7 +16,7 @@ import psutil
 
 from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import direct_child_env, workspace_cwd
+from .owner_paths import direct_child_env, python_child_env, workspace_cwd
 from .safety import classify_command, is_protected_process
 
 
@@ -53,6 +53,10 @@ _CMD_IDIOMS = re.compile(
 )
 _UNSAFE_SHELL = re.compile(r"[;&|`$<>\n]")
 _PROXY_FLAGS = frozenset({"-x", "--proxy", "--interface", "--local-addr", "--bind-address"})
+_IWR_NAMES = frozenset({"invoke-webrequest", "iwr", "invoke-restmethod", "irm"})
+_IWR_URI_FLAGS = frozenset({"-uri", "-url"})
+_IWR_OUT_FLAGS = frozenset({"-outfile"})
+_IWR_IGNORE_FLAGS = frozenset({"-usebasicparsing"})
 
 
 def search_miss_ok(command: str, code: int) -> bool:
@@ -90,13 +94,81 @@ def _lan_bind_for_http_target(target: str) -> str:
     return lan_http_bind_for_url(f"http://{text}")
 
 
-def lan_bound_http_argv(command: str) -> list[str] | None:
-    """Real curl/wget of an on-link RFC1918 URL, sourced from that NIC.
+def _curl_lan_argv(url: str, *, outfile: str = "") -> list[str] | None:
+    bind = _lan_bind_for_http_target(url)
+    if not bind:
+        return None
+    exe = shutil.which("curl") or shutil.which("curl.exe")
+    if not exe:
+        return None
+    argv = [exe, "--interface", bind, "-sL"]
+    if outfile:
+        argv.extend(["-o", outfile])
+    argv.append(url)
+    return argv
 
-    PowerShell aliases ``curl`` to Invoke-WebRequest, which cannot bind a source
-    IP. A VPN default route would steal the hop to the home gateway. Skip pipes
-    and explicit proxies.
+
+def _iwr_lan_argv(command: str) -> list[str] | None:
+    """PowerShell IWR/iwr/irm of an on-link RFC1918 URL → curl --interface.
+
+    Invoke-WebRequest cannot bind a source IP. On Windows, ``wget`` without
+    wget.exe is the same alias.
     """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = Path(parts[0]).name.lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if name not in _IWR_NAMES:
+        return None
+    url = ""
+    outfile = ""
+    index = 1
+    while index < len(parts):
+        token = str(parts[index]).strip().strip("'\"")
+        key = token.lower()
+        if key in _IWR_URI_FLAGS:
+            if index + 1 >= len(parts):
+                return None
+            url = str(parts[index + 1]).strip().strip("'\"")
+            index += 2
+            continue
+        if key in _IWR_OUT_FLAGS:
+            if index + 1 >= len(parts):
+                return None
+            outfile = str(parts[index + 1]).strip().strip("'\"")
+            index += 2
+            continue
+        if key in _IWR_IGNORE_FLAGS:
+            index += 1
+            continue
+        if token.startswith("-"):
+            return None
+        if not url:
+            url = token
+            index += 1
+            continue
+        return None
+    return _curl_lan_argv(url, outfile=outfile)
+
+
+def lan_bound_http_argv(command: str) -> list[str] | None:
+    """Real curl/wget/IWR of an on-link RFC1918 URL, sourced from that NIC.
+
+    PowerShell aliases ``curl``/``wget`` to Invoke-WebRequest, which cannot bind
+    a source IP. A VPN default route would steal the hop to the home gateway.
+    Skip pipes and explicit proxies.
+    """
+    iwr = _iwr_lan_argv(command)
+    if iwr:
+        return iwr
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
         return None
@@ -114,15 +186,18 @@ def lan_bound_http_argv(command: str) -> list[str] | None:
     flags = {part.split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
     if flags & _PROXY_FLAGS:
         return None
-    bind = _lan_bind_for_http_target(_http_target_from_argv(parts))
+    url = _http_target_from_argv(parts)
+    bind = _lan_bind_for_http_target(url)
     if not bind:
         return None
     exe = shutil.which(name) or shutil.which(f"{name}.exe")
-    if not exe:
-        return None
     rest = parts[1:]
     if name == "wget":
-        return [exe, f"--bind-address={bind}", *rest]
+        if exe:
+            return [exe, f"--bind-address={bind}", *rest]
+        return _curl_lan_argv(url)
+    if not exe:
+        return None
     return [exe, "--interface", bind, *rest]
 
 
@@ -165,6 +240,15 @@ def _python_args(command: str) -> list[str]:
     if looks_like_file:
         return [python, *stripped.split()]
     return [python, "-c", command]
+
+
+def _child_env(args: list[str]) -> dict[str, str]:
+    name = Path(args[0]).name.lower() if args else ""
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if name in {"python", "python3", "py"}:
+        return python_child_env()
+    return direct_child_env()
 
 
 def _command_args(command: str, shell: str) -> list[str] | ToolResult:
@@ -329,7 +413,7 @@ class TerminalTool(Tool):
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 cwd=cwd,
-                env=direct_child_env(),
+                env=_child_env(args),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -362,7 +446,7 @@ class TerminalTool(Tool):
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 cwd=cwd,
-                env=direct_child_env(),
+                env=_child_env(args),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

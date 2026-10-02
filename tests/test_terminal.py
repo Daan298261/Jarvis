@@ -211,32 +211,32 @@ async def test_terminal_omitted_cwd_uses_documents(tmp_path, monkeypatch):
     assert "shell-docs" in result.output
 
 
-async def test_terminal_child_does_not_see_http_proxy(tmp_path, monkeypatch):
+async def test_terminal_python_uses_lan_http_proxy_not_vpn(tmp_path, monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
     monkeypatch.setenv("https_proxy", "http://10.8.0.1:8080")
     tool = TerminalTool(lambda: {"allowed_directories": [str(tmp_path)]})
     result = await tool.execute(
-        command="import os; print('HAS' if os.environ.get('HTTP_PROXY') or os.environ.get('https_proxy') else 'NO')",
+        command="import os; print(os.environ.get('HTTP_PROXY') or '')",
         shell="python",
         working_directory=str(tmp_path),
     )
     assert result.success, result.error
-    assert "NO" in result.output
-    assert "HAS" not in result.output
+    assert "10.8.0.1" not in result.output
+    assert "http://127.0.0.1:" in result.output
 
 
-async def test_python_child_does_not_see_http_proxy(tmp_path, monkeypatch):
+async def test_python_child_uses_lan_http_proxy_not_vpn(tmp_path, monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
     monkeypatch.setenv("https_proxy", "http://10.8.0.1:8080")
     tool = PythonTool(lambda: {"allowed_directories": [str(tmp_path)]})
     result = await tool.execute(
         action="run_code",
-        code="import os; print('HAS' if os.environ.get('HTTP_PROXY') or os.environ.get('https_proxy') else 'NO')",
+        code="import os; print(os.environ.get('HTTP_PROXY') or '')",
         working_directory=str(tmp_path),
     )
     assert result.success, result.error
-    assert "NO" in result.output
-    assert "HAS" not in result.output
+    assert "10.8.0.1" not in result.output
+    assert "http://127.0.0.1:" in result.output
 
 
 def _home_vpn_nics():
@@ -276,3 +276,26 @@ def test_lan_curl_binds_home_nic_not_vpn(monkeypatch):
     powershell = _command_args("curl -s http://192.168.1.50/", "powershell")
     assert powershell[0] == "/usr/bin/curl"
     assert "--interface" in powershell
+    iwr = lan_bound_http_argv("Invoke-WebRequest -Uri http://192.168.1.1/ -UseBasicParsing")
+    assert iwr is not None
+    assert iwr[0] == "/usr/bin/curl"
+    assert iwr[1:3] == ["--interface", "192.168.1.12"]
+    assert iwr[-1] == "http://192.168.1.1/"
+    irm = lan_bound_http_argv('iwr -Uri "http://192.168.1.50/status" -OutFile page.html')
+    assert irm is not None
+    assert "-o" in irm and "page.html" in irm
+    assert lan_bound_http_argv("iwr https://example.com/") is None
+    assert lan_bound_http_argv("Invoke-WebRequest -Uri http://192.168.1.1/ -Headers @{a=1}") is None
+
+
+def test_wget_without_binary_falls_back_to_curl_on_lan(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: "/usr/bin/curl" if name in {"curl", "curl.exe"} else None,
+    )
+    argv = lan_bound_http_argv("wget http://192.168.1.50/status")
+    assert argv is not None
+    assert argv[0] == "/usr/bin/curl"
+    assert argv[1:3] == ["--interface", "192.168.1.12"]
+    assert argv[-1] == "http://192.168.1.50/status"

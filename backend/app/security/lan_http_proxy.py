@@ -1,10 +1,11 @@
 """Loopback HTTP proxy that sources RFC1918 hops from the on-link NIC.
 
 HexStrike gobuster/ffuf/dirsearch (and sqlmap/nikto/feroxbuster) have no
-``--source-ip`` flag. A VPN default route would steal directory brute-force of
-the NAS or gateway. This process-local proxy listens on 127.0.0.1 and connects
-to on-link RFC1918 peers with ``SO_BINDTODEVICE``-equivalent ``bind(lan_ip)``.
-Public internet destinations are refused.
+``--source-ip`` flag. Python ``requests``/urllib/httpx honor HTTP_PROXY.
+A VPN default route would steal those hops to the NAS or gateway. This
+process-local proxy listens on 127.0.0.1, binds outbound to the home NIC
+for on-link RFC1918 peers, and uses the OS default route for public
+internet so owner Python can both scan the LAN and browse the web.
 """
 from __future__ import annotations
 
@@ -72,16 +73,20 @@ def resolve_ipv4(host: str) -> str:
 
 
 def connect_lan(host: str, port: int, *, timeout: float = 30.0) -> socket.socket:
-    """TCP connect to a private peer, sourced from this PC's on-link RFC1918 NIC."""
+    """TCP connect; bind the on-link RFC1918 NIC for LAN peers, else default route."""
     ip = resolve_ipv4(host)
-    if not peer_allowed(ip):
-        raise PermissionError("lan http proxy only forwards private LAN addresses")
     dest_port = int(port)
     if dest_port < 1 or dest_port > 65535:
         raise ValueError("invalid port")
-    from ..mobile.wan_forward import lan_source_ipv4_for_peer
+    bind = ""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        addr = None
+    if addr is not None and addr.version == 4 and peer_allowed(ip) and not addr.is_loopback:
+        from ..mobile.wan_forward import lan_source_ipv4_for_peer
 
-    bind = lan_source_ipv4_for_peer(ip)
+        bind = lan_source_ipv4_for_peer(ip)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     if bind:
@@ -134,9 +139,6 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             port = int(port_text or 443)
             sock = connect_lan(host, port)
-        except PermissionError:
-            self.send_error(403, "Public destinations are not forwarded")
-            return
         except Exception:
             self.send_error(502, "Tunnel failed")
             return
@@ -201,9 +203,6 @@ class _Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         try:
             sock = connect_lan(host, port)
-        except PermissionError:
-            self.send_error(403, "Public destinations are not forwarded")
-            return
         except Exception:
             self.send_error(502, "Upstream connect failed")
             return

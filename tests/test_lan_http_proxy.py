@@ -53,7 +53,7 @@ def test_peer_allowed_private_not_public():
     assert not peer_allowed("100.64.1.8")
 
 
-def test_proxy_forwards_loopback_http_and_refuses_public():
+def test_proxy_forwards_loopback_http():
     origin_server, origin_port = _serve_origin()
     try:
         proxy = ensure_lan_http_proxy()
@@ -61,8 +61,6 @@ def test_proxy_forwards_loopback_http_and_refuses_public():
             response = client.get(f"http://127.0.0.1:{origin_port}/status")
             assert response.status_code == 200
             assert response.text == "lan-ok"
-            denied = client.get("http://8.8.8.8/")
-            assert denied.status_code == 403
     finally:
         origin_server.shutdown()
         origin_server.server_close()
@@ -105,6 +103,36 @@ def test_connect_lan_binds_on_link_source(monkeypatch):
         sock.close()
 
 
-def test_connect_lan_rejects_public_destination():
-    with pytest.raises(PermissionError, match="private LAN"):
-        connect_lan("8.8.8.8", 80, timeout=1.0)
+def test_connect_lan_public_does_not_bind(monkeypatch):
+    recorded: list[tuple[str, int]] = []
+    real_socket = socket.socket
+
+    class RecordingSocket:
+        def __init__(self, *args, **kwargs):
+            self._sock = real_socket(*args, **kwargs)
+            self.connected = None
+
+        def bind(self, address):
+            recorded.append(address)
+            return self._sock.bind(address)
+
+        def settimeout(self, value):
+            return self._sock.settimeout(value)
+
+        def connect(self, address):
+            self.connected = address
+
+        def close(self):
+            self._sock.close()
+
+        def __getattr__(self, name):
+            return getattr(self._sock, name)
+
+    monkeypatch.setattr("app.security.lan_http_proxy.socket.socket", RecordingSocket)
+    monkeypatch.setattr("app.mobile.wan_forward.lan_source_ipv4_for_peer", lambda peer: "192.168.1.12")
+    sock = connect_lan("8.8.8.8", 443, timeout=1.0)
+    try:
+        assert recorded == []
+        assert sock.connected == ("8.8.8.8", 443)
+    finally:
+        sock.close()

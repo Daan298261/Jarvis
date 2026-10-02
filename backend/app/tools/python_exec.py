@@ -11,7 +11,7 @@ from typing import Any
 
 from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import direct_child_env, resolve_workspace_dir, workspace_cwd
+from .owner_paths import python_child_env, resolve_workspace_dir, workspace_cwd
 from .safety import resolve_allowed_path
 
 _PY_ACTIONS = ("run_code", "run_file", "create_venv", "install")
@@ -96,7 +96,7 @@ class PythonTool(Tool):
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=cwd,
-            env=direct_child_env(),
+            env=python_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

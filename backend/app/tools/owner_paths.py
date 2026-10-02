@@ -27,6 +27,30 @@ def direct_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def python_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Python HTTP uses Jarvis's loopback proxy so LAN binds the home NIC.
+
+    ``requests`` / urllib / httpx honor HTTP_PROXY and cannot take ``--interface``.
+    After dropping a leftover VPN proxy, point them at the process-local proxy
+    which sources RFC1918 from the on-link NIC and sends public internet on the
+    OS default route.
+    """
+    env = direct_child_env(base)
+    try:
+        from ..security.lan_http_proxy import ensure_lan_http_proxy
+
+        origin = ensure_lan_http_proxy()
+    except Exception:
+        return env
+    if not origin:
+        return env
+    env["HTTP_PROXY"] = origin
+    env["HTTPS_PROXY"] = origin
+    env["http_proxy"] = origin
+    env["https_proxy"] = origin
+    return env
+
+
 def owner_media_dir(*names: str) -> Path:
     """Owner Downloads/Pictures/Desktop when present; otherwise a Jarvis data folder."""
     for name in names:
