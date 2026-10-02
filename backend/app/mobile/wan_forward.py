@@ -274,8 +274,7 @@ def ssh_executable() -> str:
     raise RuntimeError("OpenSSH client is not installed; cannot create an SSH reverse tunnel")
 
 
-def parse_proc_net_route(text: str) -> str:
-    """Home-LAN RFC1918 default gateway from /proc/net/route (skips CGNAT and VPN steal-default)."""
+def _proc_net_route_candidates(text: str) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     lines = (text or "").splitlines()
     for line in lines[1:]:
@@ -293,10 +292,10 @@ def parse_proc_net_route(text: str) -> str:
             except ValueError:
                 metric = 0
         found.append((metric, str(address)))
-    return _home_lan_default_gateway(found)
+    return found
 
 
-def parse_windows_route_print(text: str) -> str:
+def _windows_route_print_candidates(text: str) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     for line in (text or "").splitlines():
         parts = line.split()
@@ -317,18 +316,49 @@ def parse_windows_route_print(text: str) -> str:
             except ValueError:
                 metric = 0
         found.append((metric, str(address)))
-    return _home_lan_default_gateway(found)
+    return found
+
+
+def _rfc1918_defaults_ordered(candidates: list[tuple[int, str]]) -> list[str]:
+    """Home-LAN first (highest metric), then other RFC1918 defaults; skip duplicates."""
+    ordered = sorted(candidates, key=lambda item: (-item[0], item[1]))
+    out: list[str] = []
+    seen: set[str] = set()
+    for _metric, gateway in ordered:
+        if gateway in seen:
+            continue
+        seen.add(gateway)
+        out.append(gateway)
+    return out
+
+
+def parse_proc_net_route(text: str) -> str:
+    """Home-LAN RFC1918 default gateway from /proc/net/route (skips CGNAT and VPN steal-default)."""
+    return _home_lan_default_gateway(_proc_net_route_candidates(text))
+
+
+def parse_proc_net_route_gateways(text: str) -> list[str]:
+    return _rfc1918_defaults_ordered(_proc_net_route_candidates(text))
+
+
+def parse_windows_route_print(text: str) -> str:
+    return _home_lan_default_gateway(_windows_route_print_candidates(text))
+
+
+def parse_windows_route_print_gateways(text: str) -> list[str]:
+    return _rfc1918_defaults_ordered(_windows_route_print_candidates(text))
 
 
 def _home_lan_default_gateway(candidates: list[tuple[int, str]]) -> str:
     """Pick the on-link home router, not a VPN that stole 0.0.0.0 with metric 0–1."""
-    if not candidates:
+    ordered = _rfc1918_defaults_ordered(candidates)
+    if not ordered:
         raise ValueError("No private default gateway")
-    return max(candidates, key=lambda item: (item[0], item[1]))[1]
+    return ordered[0]
 
 
-def default_gateway_ipv4() -> str:
-    """Home LAN router — not a VPN that stole the default route with a lower metric."""
+def rfc1918_default_gateways() -> list[str]:
+    """RFC1918 default-route gateways, home LAN first, then other on-link routers."""
     if os.name == "nt":
         import subprocess
 
@@ -339,11 +369,19 @@ def default_gateway_ipv4() -> str:
             timeout=8,
             check=False,
         )
-        return parse_windows_route_print((printed.stdout or "") + "\n" + (printed.stderr or ""))
+        return parse_windows_route_print_gateways((printed.stdout or "") + "\n" + (printed.stderr or ""))
     route = Path("/proc/net/route")
     if route.is_file():
-        return parse_proc_net_route(route.read_text(encoding="utf-8", errors="replace"))
-    raise ValueError("No private default gateway")
+        return parse_proc_net_route_gateways(route.read_text(encoding="utf-8", errors="replace"))
+    return []
+
+
+def default_gateway_ipv4() -> str:
+    """Home LAN router — not a VPN that stole the default route with a lower metric."""
+    gateways = rfc1918_default_gateways()
+    if not gateways:
+        raise ValueError("No private default gateway")
+    return gateways[0]
 
 
 def resolved_gateway_host(settings: dict[str, Any]) -> str:

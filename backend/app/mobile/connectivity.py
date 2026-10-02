@@ -490,66 +490,84 @@ class Connectivity:
                     self.report(router="unavailable", limitation=str(exc)[:240])
             gw = ""
             if config["remote"] and not self.router and not inner_wan_unusable and method in {"auto", "upnp"}:
-                from .wan_forward import default_gateway_ipv4
+                from .wan_forward import default_gateway_ipv4, mapping_lan_ipv4, rfc1918_default_gateways
 
+                gateways: list[str] = []
                 try:
-                    gw = default_gateway_ipv4()
+                    gateways = [item for item in rfc1918_default_gateways() if item]
+                except Exception:
+                    gateways = []
+                try:
+                    primary = default_gateway_ipv4()
                 except Exception as exc:
-                    prior = self.state.get("limitation") or ""
-                    extra = str(exc)[:240]
-                    self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
-                from .wan_forward import mapping_lan_ipv4
-
-                lan_ip = mapping_lan_ipv4(hosts, gw)
-                if gw:
-                    self.report(activity="Trying NAT-PMP on this PC's default gateway for TCP 4781")
+                    primary = ""
+                    if not gateways:
+                        prior = self.state.get("limitation") or ""
+                        extra = str(exc)[:240]
+                        self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
+                else:
+                    if primary:
+                        gateways = [primary, *[item for item in gateways if item != primary]]
+                gw = gateways[0] if gateways else ""
+                nat_errors: list[str] = []
+                for candidate in gateways:
+                    lan_ip = mapping_lan_ipv4(hosts, candidate)
+                    if not lan_ip:
+                        continue
+                    self.report(activity=f"Trying NAT-PMP on {candidate} for TCP 4781")
                     try:
                         from .natpmp import apply_natpmp
 
-                        public_ip = await asyncio.to_thread(apply_natpmp, gw, lan_ip)
+                        public_ip = await asyncio.to_thread(apply_natpmp, candidate, lan_ip)
                         if not await asyncio.to_thread(mapped_address_is_egress, public_ip):
                             inner_wan_unusable = True
                             self.natpmp_gateway = None
                             self.report(router="unavailable", limitation=double_nat_limit)
-                        else:
-                            self.natpmp_gateway = gw
-                            self.pcp_nonce = None
-                            self.public_ip = public_ip
-                            endpoints.append(f"https://{public_ip}:{PORT}")
-                            wan_path = "natpmp"
-                            self.report(
-                                router="mapped",
-                                wan_path=wan_path,
-                                mapped_lan_ip=lan_ip,
-                                limitation="NAT-PMP lease created; internet reachability still needs verification from outside this network",
-                            )
+                            break
+                        gw = candidate
+                        self.natpmp_gateway = candidate
+                        self.pcp_nonce = None
+                        self.public_ip = public_ip
+                        endpoints.append(f"https://{public_ip}:{PORT}")
+                        wan_path = "natpmp"
+                        self.report(
+                            router="mapped",
+                            wan_path=wan_path,
+                            mapped_lan_ip=lan_ip,
+                            limitation="NAT-PMP lease created; internet reachability still needs verification from outside this network",
+                        )
+                        break
                     except Exception as nat_exc:
-                        self.report(activity="Trying PCP MAP on this PC's default gateway for TCP 4781")
+                        self.report(activity=f"Trying PCP MAP on {candidate} for TCP 4781")
                         try:
                             from .pcp import apply_pcp
 
-                            public_ip, nonce = await asyncio.to_thread(apply_pcp, gw, lan_ip, None)
+                            public_ip, nonce = await asyncio.to_thread(apply_pcp, candidate, lan_ip, None)
                             if not await asyncio.to_thread(mapped_address_is_egress, public_ip):
                                 inner_wan_unusable = True
                                 self.natpmp_gateway = None
                                 self.pcp_nonce = None
                                 self.report(router="unavailable", limitation=double_nat_limit)
-                            else:
-                                self.natpmp_gateway = gw
-                                self.pcp_nonce = nonce
-                                self.public_ip = public_ip
-                                endpoints.append(f"https://{public_ip}:{PORT}")
-                                wan_path = "pcp"
-                                self.report(
-                                    router="mapped",
-                                    wan_path=wan_path,
-                                    mapped_lan_ip=lan_ip,
-                                    limitation="PCP lease created; internet reachability still needs verification from outside this network",
-                                )
+                                break
+                            gw = candidate
+                            self.natpmp_gateway = candidate
+                            self.pcp_nonce = nonce
+                            self.public_ip = public_ip
+                            endpoints.append(f"https://{public_ip}:{PORT}")
+                            wan_path = "pcp"
+                            self.report(
+                                router="mapped",
+                                wan_path=wan_path,
+                                mapped_lan_ip=lan_ip,
+                                limitation="PCP lease created; internet reachability still needs verification from outside this network",
+                            )
+                            break
                         except Exception as pcp_exc:
-                            prior = self.state.get("limitation") or ""
-                            extra = f"{nat_exc}; {pcp_exc}"[:240]
-                            self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
+                            nat_errors.append(f"{candidate}: {nat_exc}; {pcp_exc}")
+                if not wan_path and nat_errors:
+                    prior = self.state.get("limitation") or ""
+                    extra = "; ".join(nat_errors)[:240]
+                    self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
             if config["remote"] and not wan_path:
                 from .wan_forward import apply_gateway_ssh, apply_ssh_reverse, gateway_ssh_configured, wan_settings_from_config
 

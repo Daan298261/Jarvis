@@ -202,6 +202,10 @@ def test_default_gateway_parsers_and_openwrt_user_fallback():
         "          0.0.0.0          0.0.0.0      192.168.1.1     192.168.1.12    35\n"
     )
     assert parse_windows_route_print(vpn_win) == "192.168.1.1"
+    from app.mobile.wan_forward import parse_proc_net_route_gateways, parse_windows_route_print_gateways
+
+    assert parse_proc_net_route_gateways(vpn_then_lan) == ["192.168.1.1", "10.8.0.1"]
+    assert parse_windows_route_print_gateways(vpn_win) == ["192.168.1.1", "10.8.0.1"]
     with pytest.raises(ValueError):
         parse_windows_route_print(
             "Network Destination        Netmask          Gateway       Interface  Metric\n"
@@ -1138,6 +1142,33 @@ async def test_natpmp_uses_home_router_when_vpn_has_lower_metric(tmp_path, monke
     assert seen == {"gw": "192.168.1.1", "lan": "192.168.1.12"}
     assert "https://192.168.1.12:4781" in result["endpoints"]
     assert "https://10.8.0.2:4781" in result["endpoints"]
+
+
+@pytest.mark.asyncio
+async def test_natpmp_falls_through_to_second_rfc1918_gateway(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.8.0.2", "192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_default_gateways", lambda: ["10.8.0.1", "192.168.1.1"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "10.8.0.1")
+    seen: list[tuple[str, str]] = []
+
+    def fake_natpmp(gw, lan):
+        seen.append((gw, lan))
+        if gw != "192.168.1.1":
+            raise TimeoutError(f"no NAT-PMP on {gw}")
+        return "203.0.113.8"
+
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", fake_natpmp)
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    result = await FakeConnection().configure(True, True, {"wan_method": "auto"})
+    assert result.get("wan_path") == "natpmp"
+    assert seen[0] == ("10.8.0.1", "10.8.0.2")
+    assert seen[-1] == ("192.168.1.1", "192.168.1.12")
+    assert "https://203.0.113.8:4781" in result["endpoints"]
 
 
 @pytest.mark.asyncio
