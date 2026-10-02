@@ -120,6 +120,7 @@ export function SettingsPage() {
       case "voice":
         return (
           <section className="settings-section" aria-labelledby="settings-voice-heading">
+            <h3 id="settings-voice-heading">Voice &amp; Speech</h3>
             <VoiceSettingsPane />
           </section>
         )
