@@ -18,8 +18,36 @@ def test_private_unc_host_classification():
     assert _private_lan_unc(r"\\nas.lan\share\game.exe")
     assert _private_lan_unc(r"\\192.168.1.12\media\game.exe")
     assert _private_lan_unc(r"\\nas\media\game.exe")
+    assert _private_lan_unc(r"\\wsl.localhost\Ubuntu\home\taco\notes.md")
+    assert _private_lan_unc(r"\\wsl$\Ubuntu\home\taco\notes.md")
+    assert _private_lan_unc(r"\\host.docker.internal\share\app.exe")
+    assert _private_lan_unc(r"\\localhost\c$\Windows")
     assert not _private_lan_unc(r"\\8.8.8.8\share\game.exe")
     assert not _private_lan_unc(r"\\public.example.com\share\game.exe")
+    assert not _private_lan_unc(r"\\files.example.com\share\game.exe")
+
+
+def test_wsl_localhost_unc_resolves_under_lan_scope():
+    allowed = [LOCAL_NETWORK_SCOPE]
+    resolved = resolve_allowed_path(r"\\wsl.localhost\Ubuntu\home\taco\notes.md", allowed)
+    text = str(resolved).replace("/", "\\").lower()
+    assert "wsl.localhost" in text
+    assert "notes.md" in text
+    docker = resolve_allowed_path(r"\\host.docker.internal\projects\app", allowed)
+    assert "host.docker.internal" in str(docker).replace("/", "\\").lower()
+    with pytest.raises(PermissionError):
+        resolve_allowed_path(r"\\wsl.localhost\Ubuntu\home", [str(Path.home())])
+
+
+def test_wsl_localhost_browse_is_local_network_not_internet():
+    assert permission_ids_for_tool("browser", {"url": "http://wsl.localhost:3000/"}) == ["network.local"]
+    assert permission_ids_for_tool("web_fetch", {"url": "http://wsl.localhost:8080/health"}) == ["network.local"]
+    assert permission_ids_for_tool(
+        "browser_use",
+        {"goal": "open the Vite app at http://wsl.localhost:5173"},
+    ) == ["network.local"]
+    assert permission_ids_for_tool("browser", {"url": "http://host.docker.internal:8080"}) == ["network.local"]
+    assert permission_ids_for_tool("web_fetch", {"url": "https://example.com"}) == ["network.internet"]
 
 
 def test_owner_scope_covers_steam_and_local_shares(tmp_path):

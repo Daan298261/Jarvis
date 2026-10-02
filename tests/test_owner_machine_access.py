@@ -232,6 +232,9 @@ def test_wan_origin_rejects_lan_and_accepts_public_hosts():
     assert not is_public_dial_host("192.168.1.1")
     assert not is_public_dial_host("100.64.1.8")
     assert not is_public_dial_host("router.local")
+    assert not is_public_dial_host("wsl.localhost")
+    assert not is_public_dial_host("host.docker.internal")
+    assert not is_public_dial_host("app.localhost")
     with pytest.raises(ValueError):
         companion_wan_origin("192.168.1.1")
     assert companion_wan_origin("home.example.test") == "https://home.example.test:4781"
@@ -397,6 +400,12 @@ def test_web_fetch_lan_http_binds_home_nic_not_vpn(monkeypatch):
         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.50", 80))],
     )
     assert lan_http_bind_for_url("http://nas.local/media") == "192.168.1.12"
+    monkeypatch.setattr(
+        "app.mobile.wan_forward.socket.getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
+    )
+    assert lan_http_bind_for_url("http://wsl.localhost:3000/") == ""
+    assert lan_http_bind_for_url("http://host.docker.internal:8080/") == ""
 
 
 @pytest.mark.asyncio

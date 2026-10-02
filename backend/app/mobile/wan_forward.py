@@ -27,7 +27,9 @@ def is_public_dial_host(host: str) -> bool:
     text = (host or "").strip().lower().rstrip(".")
     if not text or "/" in text or "\\" in text or "@" in text or ":" in text:
         return False
-    if text in {"localhost", "router", "gateway"} or text.endswith((".local", ".home.arpa", ".lan")):
+    from ..tools.safety import is_owner_local_host
+
+    if is_owner_local_host(text) or text in {"router", "gateway"}:
         return False
     try:
         ip = ipaddress.ip_address(text)

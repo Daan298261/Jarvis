@@ -6,7 +6,6 @@ Blue isolate is a containment playbook, not a kick/deauth executor.
 """
 from __future__ import annotations
 
-import ipaddress
 import json
 import re
 import threading
@@ -30,16 +29,6 @@ INTERNET_TOOLS = frozenset({"browser", "browser_use", "web_fetch", "external_ing
 SHELL_NETWORK_TOOLS = frozenset({"python", "terminal", "open_interpreter"})
 RDP_MARKERS = ("rdp", "mstsc", "remote desktop", "xfreerdp")
 NODE_KEYS = ("node_id", "hostname", "worker_node", "target_node", "rdp_host")
-
-_PRIVATE_NETS = (
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
-)
 
 _OUTBOUND_RE = re.compile(
     r"https?://|"
@@ -394,6 +383,8 @@ def _blob(arguments: dict[str, Any] | None) -> str:
 
 
 def _host_is_local(value: str) -> bool:
+    from ..tools.safety import is_owner_local_host
+
     text = (value or "").strip().lower()
     if not text:
         return False
@@ -401,12 +392,7 @@ def _host_is_local(value: str) -> bool:
     parsed = urlparse(text if "://" in text else f"//{text}", scheme="http")
     if parsed.hostname:
         host = parsed.hostname
-    host = host.split("%")[0]
-    try:
-        addr = ipaddress.ip_address(host)
-    except ValueError:
-        return host.endswith((".local", ".home.arpa", ".lan")) or host in {"localhost", "host.docker.internal"} or (bool(host) and "." not in host)
-    return any(addr in net for net in _PRIVATE_NETS)
+    return is_owner_local_host(host.split("%")[0])
 
 
 def looks_local_network(arguments: dict[str, Any] | None) -> bool:
@@ -428,7 +414,7 @@ def looks_local_network(arguments: dict[str, Any] | None) -> bool:
                 return True
         stripped = re.sub(r"https?://[^\s\"']+", " ", text, flags=re.I)
         for token in re.findall(
-            r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[A-Za-z0-9._-]+\.(?:local|lan|home\.arpa)\b",
+            r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[A-Za-z0-9._-]+\.(?:local|lan|home\.arpa|localhost)\b",
             stripped,
             flags=re.I,
         ):
