@@ -262,6 +262,12 @@ class BrowserUseBackend:
                 started = start()
                 if hasattr(started, "__await__"):
                     await started
+                try:
+                    from ..tools.browser import install_browser_use_lan_intercept
+
+                    await install_browser_use_lan_intercept(session)
+                except Exception as exc:
+                    logger.debug("Browser Use LAN intercept skipped: %s", exc)
                 async with _SESSION_LOCK:
                     _SESSION_STARTED = True
             except Exception as exc:

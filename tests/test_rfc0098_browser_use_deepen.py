@@ -282,6 +282,36 @@ async def test_shared_browser_session_reuses_single_instance(permission_store, m
 
 
 @pytest.mark.asyncio
+async def test_shared_browser_session_installs_lan_intercept(permission_store, monkeypatch):
+    import app.workers.browser as browser_mod
+    from app.tools.browser import handle_browser_lan_route
+
+    await browser_mod.reset_browser_use_session_async()
+    apply_grant("network.internet", "always")
+    backend = BrowserUseBackend()
+
+    class FakeContext:
+        def __init__(self):
+            self.routes = []
+
+        async def route(self, pattern, handler):
+            self.routes.append((pattern, handler))
+
+    class FakeSession:
+        def __init__(self):
+            self.browser_context = FakeContext()
+
+        async def start(self):
+            return None
+
+    session = FakeSession()
+    monkeypatch.setattr(backend, "_build_browser_session", lambda _settings: session)
+    started = await backend._shared_browser_session(AppSettings())
+    assert started is session
+    assert session.browser_context.routes == [("**/*", handle_browser_lan_route)]
+
+
+@pytest.mark.asyncio
 async def test_run_marks_session_reused_on_second_invoke(permission_store, monkeypatch):
     import app.workers.browser as browser_mod
 

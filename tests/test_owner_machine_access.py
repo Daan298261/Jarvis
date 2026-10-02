@@ -475,6 +475,124 @@ async def test_browser_lan_route_fetches_from_home_nic_not_vpn(monkeypatch):
     assert ctx.routes == [("**/*", handle_browser_lan_route)]
 
 
+async def test_browser_use_lan_intercept_playwright_and_cdp(monkeypatch):
+    import asyncio
+    import base64
+    from types import SimpleNamespace
+
+    import httpx
+
+    from app.tools.browser import (
+        handle_browser_lan_route,
+        handle_cdp_lan_paused,
+        install_browser_use_lan_intercept,
+    )
+
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+            "wg0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+            ],
+        },
+    )
+
+    class FakeContext:
+        def __init__(self):
+            self.routes = []
+
+        async def route(self, pattern, handler):
+            self.routes.append((pattern, handler))
+
+    class PlaywrightSession:
+        def __init__(self):
+            self.browser_context = FakeContext()
+
+    pw = PlaywrightSession()
+    await install_browser_use_lan_intercept(pw)
+    assert pw.browser_context.routes == [("**/*", handle_browser_lan_route)]
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="nas-ok")
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            seen["local_address"] = getattr(getattr(kwargs.get("transport"), "_pool", None), "_local_address", None)
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("httpx.AsyncClient", Client)
+
+    class FetchOps:
+        def __init__(self):
+            self.calls = []
+
+        async def enable(self, params=None, session_id=None):
+            self.calls.append(("enable", params, session_id))
+
+        async def continueRequest(self, params=None, session_id=None):
+            self.calls.append(("continueRequest", params, session_id))
+
+        async def fulfillRequest(self, params=None, session_id=None):
+            self.calls.append(("fulfillRequest", params, session_id))
+
+        async def failRequest(self, params=None, session_id=None):
+            self.calls.append(("failRequest", params, session_id))
+
+    class FetchReg:
+        def __init__(self):
+            self.paused = None
+
+        def requestPaused(self, callback):
+            self.paused = callback
+
+    class FakeCDP:
+        def __init__(self):
+            self.send = SimpleNamespace(Fetch=FetchOps())
+            self.register = SimpleNamespace(Fetch=FetchReg())
+
+    class CdpSession:
+        def __init__(self):
+            self._cdp_client_root = FakeCDP()
+
+        @property
+        def cdp_client(self):
+            return self._cdp_client_root
+
+    cdp_session = CdpSession()
+    await install_browser_use_lan_intercept(cdp_session)
+    fetch = cdp_session.cdp_client.send.Fetch
+    assert fetch.calls[0][0] == "enable"
+    assert fetch.calls[0][1]["patterns"][0]["urlPattern"] == "http://*"
+    assert callable(cdp_session.cdp_client.register.Fetch.paused)
+
+    await handle_cdp_lan_paused(
+        cdp_session.cdp_client,
+        {"requestId": "wan", "request": {"url": "https://example.com/", "method": "GET", "headers": {}}},
+    )
+    assert fetch.calls[-1][0] == "continueRequest"
+    await handle_cdp_lan_paused(
+        cdp_session.cdp_client,
+        {"requestId": "lan", "request": {"url": "http://192.168.1.50/status", "method": "GET", "headers": {}}},
+    )
+    assert fetch.calls[-1][0] == "fulfillRequest"
+    fulfilled = fetch.calls[-1][1]
+    assert fulfilled["responseCode"] == 200
+    assert base64.b64decode(fulfilled["body"]) == b"nas-ok"
+    assert seen["local_address"] == "192.168.1.12"
+
+    cdp_session.cdp_client.register.Fetch.paused(
+        {"requestId": "wan2", "request": {"url": "https://example.com/other", "method": "GET", "headers": {}}}
+    )
+    await asyncio.sleep(0)
+    assert any(item[0] == "continueRequest" and item[1].get("requestId") == "wan2" for item in fetch.calls)
+
+
 def test_udp_lan_ipv4_ignores_cgnat(monkeypatch):
     from app.mobile import igd
 

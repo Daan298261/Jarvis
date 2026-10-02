@@ -421,6 +421,207 @@ async def install_browser_lan_route(context: Any) -> None:
     await route("**/*", handle_browser_lan_route)
 
 
+_BROWSER_USE_LAN_FETCH_PATTERNS = (
+    {"urlPattern": "http://*"},
+    {"urlPattern": "https://*"},
+)
+_browser_use_lan_sessions: set[int] = set()
+
+
+def playwright_contexts_from_browser_use_session(session: Any) -> list[Any]:
+    """Playwright BrowserContext objects owned by an older Browser Use session."""
+    found: list[Any] = []
+    seen: set[int] = set()
+
+    def _take(obj: Any) -> None:
+        if obj is None or id(obj) in seen:
+            return
+        if not callable(getattr(obj, "route", None)):
+            return
+        seen.add(id(obj))
+        found.append(obj)
+
+    for name in ("browser_context", "context", "playwright_browser_context", "pw_context"):
+        _take(getattr(session, name, None))
+    browser = getattr(session, "browser", None)
+    for ctx in list(getattr(browser, "contexts", None) or []):
+        _take(ctx)
+    _take(browser)
+    return found
+
+
+def cdp_clients_from_browser_use_session(session: Any) -> list[Any]:
+    """Root CDP clients from current Browser Use (cdp_use / CDP Fetch)."""
+    found: list[Any] = []
+    seen: set[int] = set()
+    for name in ("cdp_client", "_cdp_client_root"):
+        try:
+            obj = getattr(session, name, None)
+        except Exception:
+            continue
+        if obj is None or id(obj) in seen:
+            continue
+        if getattr(obj, "send", None) is None and getattr(obj, "register", None) is None:
+            continue
+        seen.add(id(obj))
+        found.append(obj)
+    return found
+
+
+async def _await_maybe(result: Any) -> Any:
+    if hasattr(result, "__await__"):
+        return await result
+    return result
+
+
+async def _cdp_fetch_call(client: Any, method: str, params: dict[str, Any], session_id: Any = None) -> None:
+    fetch = getattr(getattr(client, "send", None), "Fetch", None)
+    op = getattr(fetch, method, None)
+    if not callable(op):
+        return
+    kwargs: dict[str, Any] = {"params": params}
+    if session_id is not None:
+        kwargs["session_id"] = session_id
+    try:
+        await _await_maybe(op(**kwargs))
+        return
+    except TypeError:
+        pass
+    try:
+        await _await_maybe(op(params, session_id) if session_id is not None else op(params))
+    except TypeError:
+        await _await_maybe(op(params))
+
+
+def _cdp_request_url(event: Any) -> str:
+    if not isinstance(event, dict):
+        event = getattr(event, "__dict__", {}) or {}
+    request = event.get("request") or event.get("Request") or {}
+    if not isinstance(request, dict):
+        request = getattr(request, "__dict__", {}) or {}
+    return str(request.get("url") or event.get("url") or "")
+
+
+async def handle_cdp_lan_paused(client: Any, event: Any, session_id: Any = None) -> None:
+    """CDP Fetch.requestPaused: fulfill on-link LAN from the home NIC; continue the internet."""
+    if not isinstance(event, dict):
+        event = getattr(event, "__dict__", {}) or {}
+    request_id = event.get("requestId") or event.get("request_id")
+    if not request_id:
+        return
+    request = event.get("request") or {}
+    if not isinstance(request, dict):
+        request = getattr(request, "__dict__", {}) or {}
+    url = _cdp_request_url(event)
+    if not browser_lan_bind_for_url(url):
+        await _cdp_fetch_call(client, "continueRequest", {"requestId": request_id}, session_id)
+        return
+    try:
+        headers = request.get("headers") or {}
+        if not isinstance(headers, dict):
+            headers = {}
+        payload = await fetch_browser_lan_url(
+            url,
+            method=str(request.get("method") or "GET"),
+            headers={str(key): str(value) for key, value in headers.items()},
+            body=request.get("postData") or request.get("post_data"),
+        )
+        response_headers = [
+            {"name": str(key), "value": str(value)} for key, value in (payload.get("headers") or {}).items()
+        ]
+        body = payload.get("body") or b""
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        await _cdp_fetch_call(
+            client,
+            "fulfillRequest",
+            {
+                "requestId": request_id,
+                "responseCode": int(payload.get("status") or 200),
+                "responseHeaders": response_headers,
+                "body": base64.b64encode(bytes(body)).decode("ascii"),
+            },
+            session_id,
+        )
+    except Exception:
+        await _cdp_fetch_call(
+            client,
+            "failRequest",
+            {"requestId": request_id, "errorReason": "Failed"},
+            session_id,
+        )
+
+
+def _register_cdp_request_paused(client: Any) -> None:
+    register = getattr(getattr(client, "register", None), "Fetch", None)
+    paused = getattr(register, "requestPaused", None)
+    if not callable(paused):
+        return
+
+    def _on_paused(event: Any, session_id: Any = None) -> None:
+        task = handle_cdp_lan_paused(client, event, session_id)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(task)
+            return
+        loop.create_task(task)
+
+    paused(_on_paused)
+
+
+async def _enable_cdp_lan_fetch(client: Any, session_id: Any = None) -> None:
+    await _cdp_fetch_call(
+        client,
+        "enable",
+        {"patterns": [dict(item) for item in _BROWSER_USE_LAN_FETCH_PATTERNS]},
+        session_id,
+    )
+
+
+async def install_browser_use_lan_intercept(session: Any) -> None:
+    """VPN-proof LAN http(s) for Browser Use (Playwright route or CDP Fetch)."""
+    if session is None:
+        return
+    marker = id(session)
+    if marker in _browser_use_lan_sessions:
+        return
+    installed = False
+    try:
+        for context in playwright_contexts_from_browser_use_session(session):
+            await install_browser_lan_route(context)
+            installed = True
+        clients = cdp_clients_from_browser_use_session(session)
+        for client in clients:
+            _register_cdp_request_paused(client)
+            await _enable_cdp_lan_fetch(client)
+            installed = True
+        getter = getattr(session, "get_or_create_cdp_session", None)
+        focus = getattr(session, "agent_focus_target_id", None)
+        root = clients[0] if clients else None
+        if callable(getter) and focus and root is not None:
+            cdp_session = None
+            try:
+                cdp_session = await _await_maybe(getter(focus, focus=False))
+            except TypeError:
+                try:
+                    cdp_session = await _await_maybe(getter(focus))
+                except Exception:
+                    cdp_session = None
+            except Exception:
+                cdp_session = None
+            if cdp_session is not None:
+                inner = getattr(cdp_session, "cdp_client", None) or root
+                session_id = getattr(cdp_session, "session_id", None)
+                if inner is not None:
+                    _register_cdp_request_paused(inner)
+                    await _enable_cdp_lan_fetch(inner, session_id)
+        if installed:
+            _browser_use_lan_sessions.add(marker)
+    except Exception:
+        return
+
+
 async def _ensure_page(headless: bool):
     global _playwright, _browser, _context, _page, _pages
     if _page:
