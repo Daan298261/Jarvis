@@ -38,7 +38,9 @@ async def test_git_checkpoint_keeps_working_tree(tmp_path):
     extra = repo / "untracked.txt"
     extra.write_text("also stay\n", encoding="utf-8")
 
-    result = await GitTool().execute(action="checkpoint", path=str(repo))
+    result = await GitTool(lambda: {"allowed_directories": [str(tmp_path)]}).execute(
+        action="checkpoint", path=str(repo)
+    )
     assert result.success, result.error
     assert "Backup branch" in result.output
     assert tracked.read_text(encoding="utf-8") == "dirty working tree\n"

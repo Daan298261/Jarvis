@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import socket
 from typing import Any
+from urllib.parse import urlsplit
 
 BEACON_PORT = 4782
 BEACON_MAGIC = b"JARVIS1\n"
@@ -57,17 +59,34 @@ def parse_beacon(raw: bytes) -> dict[str, Any] | None:
     }
 
 
+def prefer_lan_https(endpoints: list[str], prefer_host: str = "") -> str:
+    """LAN beacons must advertise an RFC1918 / .local origin, not the public hairpin."""
+    values = [str(item).rstrip("/") for item in endpoints if item]
+    if not values:
+        return ""
+    if prefer_host:
+        for item in values:
+            if prefer_host in item:
+                return item
+    for item in values:
+        host = (urlsplit(item).hostname or "").strip().lower().rstrip(".")
+        if host.endswith((".local", ".lan", ".home.arpa")) or host in {"localhost", "router", "gateway"}:
+            return item
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        if ip.version == 4 and ip.is_private and not ip.is_loopback and not ip.is_link_local:
+            return item
+    return values[0]
+
+
 def public_beacon_payload(snapshot: dict[str, Any], *, prefer_host: str = "") -> dict[str, Any] | None:
     pin = str(snapshot.get("server_pin") or "").strip().lower()
     endpoints = [str(item).rstrip("/") for item in (snapshot.get("endpoints") or []) if item]
     if len(pin) != 64 or not endpoints:
         return None
-    chosen = endpoints[0]
-    if prefer_host:
-        for item in endpoints:
-            if prefer_host in item:
-                chosen = item
-                break
+    chosen = prefer_lan_https(endpoints, prefer_host)
     return {
         "https": chosen,
         "server_pin": pin,

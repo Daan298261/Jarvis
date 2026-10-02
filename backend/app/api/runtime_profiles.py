@@ -9,7 +9,7 @@ from ..inference.model_stack import (
     routing_preferences_for_role,
 )
 from ..config import load_settings
-from ..inference.hotswap import activate_runtime_profile
+from ..inference.hotswap import activate_runtime_profile, runtime_activation_snapshot
 from ..inference.runtime_profiles import (
     create_runtime_profile,
     delete_runtime_profile,
@@ -29,10 +29,7 @@ from ..inference.security_gates import (
     gate_is_enabled,
     get_gate_status,
     list_gate_statuses,
-    lock_gate,
     normalize_gate_role,
-    set_gate_password,
-    unlock_gate,
 )
 
 router = APIRouter(prefix="/api/runtime-profiles", tags=["runtime-profiles"])
@@ -404,13 +401,10 @@ async def activate_profile(profile_id: str):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:500]) from exc
-    settings = load_settings()
-    from ..inference.status_monitor import STATUS_MONITOR
-
     return {
         "ok": True,
         "profile": profile.as_dict(),
-        "load": await STATUS_MONITOR.get_snapshot(settings, force_refresh=True),
+        "load": runtime_activation_snapshot(),
     }
 
 

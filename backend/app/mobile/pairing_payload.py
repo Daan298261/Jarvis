@@ -23,6 +23,15 @@ def _is_lan_ip(host: str) -> bool:
     )
 
 
+def _is_lan_host(host: str) -> bool:
+    text = (host or "").strip().lower().rstrip(".")
+    if not text:
+        return False
+    if text in {"localhost", "router", "gateway"} or text.endswith((".local", ".lan", ".home.arpa")):
+        return True
+    return _is_lan_ip(text)
+
+
 def order_phone_reachable_endpoints(endpoints: list[str]) -> list[str]:
     """Prefer relay hostnames and public IPs before RFC1918 LAN addresses."""
     ranked: list[tuple[int, str]] = []
@@ -30,7 +39,7 @@ def order_phone_reachable_endpoints(endpoints: list[str]) -> list[str]:
         try:
             origin = value.rstrip("/")
             host = urlsplit(origin).hostname or ""
-            if _is_lan_ip(host):
+            if _is_lan_host(host):
                 rank = 2
             else:
                 try:

@@ -48,3 +48,5 @@ WhatsApp contact/chat allowlist editing, OAuth client registration, email inbox 
 ## Notes
 
 The live Gmail and WhatsApp sign-in checks require a Windows desktop and user-owned accounts. Automated tests use fakes and must not contact either provider.
+
+**Amended 2026-10-02:** [RFC-0199](0199-installer-license-auto-apply.md) extends Windows Setup to detect a customer `.jarvis-license` beside `JarvisSetup.exe`, copy into residence, and auto-apply on first start (separate implement ticket; onboarding integrations step unchanged).

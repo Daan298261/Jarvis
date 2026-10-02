@@ -514,6 +514,32 @@ def save_settings(settings: AppSettings) -> None:
 
 LOCAL_NETWORK_SCOPE = "<local-network-shares>"
 
+# Virtual Linux filesystems that are not owner "drives".
+_POSIX_SKIP_FSTYPES = frozenset(
+    {
+        "proc",
+        "sysfs",
+        "cgroup",
+        "cgroup2",
+        "devtmpfs",
+        "devpts",
+        "securityfs",
+        "pstore",
+        "bpf",
+        "tracefs",
+        "debugfs",
+        "configfs",
+        "fusectl",
+        "mqueue",
+        "hugetlbfs",
+        "overlay",
+        "nsfs",
+        "autofs",
+        "rpc_pipefs",
+        "binfmt_misc",
+    }
+)
+
 
 def _windows_owner_drives() -> list[Path]:
     """Expose mounted scannable drives to the local owner within OS account ACLs."""
@@ -530,8 +556,31 @@ def _windows_owner_drives() -> list[Path]:
     for index in range(26):
         if mask & (1 << index):
             root = f"{chr(65 + index)}:\\"
-            if kernel32.GetDriveTypeW(root) in {2, 3, 4, 5}:  # removable, fixed, mapped, optical
+            # removable, fixed, remote/mapped, optical, ramdisk
+            if kernel32.GetDriveTypeW(root) in {2, 3, 4, 5, 6}:
                 roots.append(Path(root))
+    return roots
+
+
+def _posix_owner_roots() -> list[Path]:
+    """Every real mount the owner can already see through the OS account."""
+    if os.name == "nt":
+        return []
+    roots: list[Path] = [Path("/")]
+    try:
+        import psutil
+
+        for part in psutil.disk_partitions(all=False):
+            fstype = (part.fstype or "").lower()
+            if fstype in _POSIX_SKIP_FSTYPES:
+                continue
+            mount = Path(part.mountpoint)
+            if mount.exists():
+                roots.append(mount)
+    except Exception:
+        for extra in (Path("/media"), Path("/mnt"), Path("/run/media")):
+            if extra.exists():
+                roots.append(extra)
     return roots
 
 
@@ -547,10 +596,21 @@ def default_allowed_directories() -> list[str]:
         repo_root(),
         data_dir(),
         *_windows_owner_drives(),
+        *_posix_owner_roots(),
     ]
-    roots = [str(path) for path in candidates if path.exists()]
-    if os.name == "nt":
-        roots.append(LOCAL_NETWORK_SCOPE)
+    roots: list[str] = []
+    seen: set[str] = set()
+    for path in candidates:
+        if not path.exists():
+            continue
+        text = str(path)
+        key = text.replace("/", "\\").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(text)
+    # Private LAN shares (Windows UNC / POSIX //host/share) for cyberdefense and media.
+    roots.append(LOCAL_NETWORK_SCOPE)
     return roots
 
 

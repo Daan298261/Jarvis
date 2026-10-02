@@ -115,34 +115,61 @@ def needs_confirmation(
     return risk == RiskLevel.IRREVERSIBLE or is_destructive_operation(tool_name, arguments, command)
 
 
-def _private_lan_unc(path: str) -> bool:
-    """Only named LAN shares; never silently send Windows credentials to WAN UNC hosts."""
-    drive = PureWindowsPath(path).drive
-    if not drive.startswith("\\\\"):
-        return False
-    host = drive.lstrip("\\").split("\\", 1)[0].lower()
+def _unc_host(path: str) -> str | None:
+    text = str(path or "").replace("/", "\\")
+    if not text.startswith("\\\\"):
+        return None
+    host = text.lstrip("\\").split("\\", 1)[0].lower()
     if not host or host in {".", "?"}:
+        return None
+    return host
+
+
+def _private_lan_unc(path: str) -> bool:
+    """Only named LAN shares; never silently send credentials to WAN UNC hosts."""
+    host = _unc_host(path)
+    if not host:
         return False
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        return host == "localhost" or host.endswith((".local", ".home.arpa")) or "." not in host
-    return ip.is_loopback or ip.is_link_local or ip in ipaddress.ip_network("10.0.0.0/8") or ip in ipaddress.ip_network("172.16.0.0/12") or ip in ipaddress.ip_network("192.168.0.0/16") or ip in ipaddress.ip_network("fc00::/7")
+        return host == "localhost" or host.endswith((".local", ".home.arpa", ".lan")) or "." not in host
+    return (
+        ip.is_loopback
+        or ip.is_link_local
+        or ip in ipaddress.ip_network("10.0.0.0/8")
+        or ip in ipaddress.ip_network("172.16.0.0/12")
+        or ip in ipaddress.ip_network("192.168.0.0/16")
+        or ip in ipaddress.ip_network("fc00::/7")
+    )
+
+
+def _is_unc_path(path: str) -> bool:
+    return _unc_host(path) is not None
 
 
 def resolve_allowed_path(path: str, allowed: list[str]) -> Path:
-    if os.name == "nt" and PureWindowsPath(path).drive.startswith("\\\\"):
+    if _is_unc_path(path):
         if LOCAL_NETWORK_SCOPE in allowed and _private_lan_unc(path):
             # Normalize .. lexically within the share; Path.resolve would contact
             # the remote host before authorization and can stall an offline share.
-            return Path(ntpath.normpath(path))
+            normalized = ntpath.normpath(str(path).replace("/", "\\"))
+            if os.name == "nt":
+                return Path(normalized)
+            return Path("//" + normalized.lstrip("\\").replace("\\", "/"))
         explicit = any(
-            PureWindowsPath(root).drive.startswith("\\\\")
-            and PureWindowsPath(path).is_relative_to(PureWindowsPath(root))
+            _is_unc_path(root)
+            and PureWindowsPath(path.replace("/", "\\")).is_relative_to(
+                PureWindowsPath(root.replace("/", "\\"))
+            )
             for root in allowed
         )
         if not explicit:
             raise PermissionError(f"Path {path} is outside allowed directories")
+        normalized = ntpath.normpath(str(path).replace("/", "\\"))
+        if os.name == "nt":
+            return Path(normalized)
+        return Path("//" + normalized.lstrip("\\").replace("\\", "/"))
     target = Path(path).expanduser().resolve()
     if not allowed:
         raise PermissionError("No workspace directories are configured")

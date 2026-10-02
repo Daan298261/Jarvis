@@ -23,7 +23,11 @@ from app.licensing.vendor_issuer import (
     issue_release_unrestricted_license,
     validate_unrestricted_license_payload,
 )
-from app.persona.hexstrike_overview import HEXSTRIKE_LOAD_OVERVIEW
+from app.persona.hexstrike_overview import (
+    HEXSTRIKE_LOAD_OVERVIEW,
+    maybe_publish_hexstrike_load_overview,
+    reset_hexstrike_overview_state,
+)
 from app.policy.cyber_ato import AtoError, issue_license, verify_license
 
 
@@ -110,6 +114,27 @@ def test_module_blocked_reason_points_at_package(license_env):
     assert module_entitlement_blocked_reason("hexstrike") is not None
     issue_license(law_enforcement=False, modules=["hexstrike"], valid_days=30, install=True)
     assert module_entitlement_blocked_reason("hexstrike") is None
+
+
+@pytest.mark.asyncio
+async def test_hexstrike_overview_publishes_once_per_suite_pid(monkeypatch):
+    published: list[str] = []
+
+    async def _capture(text: str, **kwargs):
+        published.append(text)
+
+    monkeypatch.setattr(
+        "app.persona.hexstrike_overview.publish_owner_text",
+        _capture,
+    )
+    reset_hexstrike_overview_state()
+    assert await maybe_publish_hexstrike_load_overview(process_pid=4242) is True
+    assert await maybe_publish_hexstrike_load_overview(process_pid=4242) is False
+    assert len(published) == 1
+    assert published[0] == HEXSTRIKE_LOAD_OVERVIEW
+    reset_hexstrike_overview_state()
+    assert await maybe_publish_hexstrike_load_overview(process_pid=4243) is True
+    assert len(published) == 2
 
 
 def test_overview_copy_is_product_level_not_tradecraft():

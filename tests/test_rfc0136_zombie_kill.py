@@ -42,7 +42,12 @@ def test_force_stop_does_not_claim_success_without_port_recheck():
 
 def test_jarvis_iss_next_runs_force_stop_on_install_method_page():
     text = _read(ISS)
-    next_fn = text[text.index("function NextButtonClick") : text.index("function ResolveForceStopScript")]
+    # ResolveForceStopScript is defined *above* NextButtonClick; slice to the
+    # next Pascal function that follows NextButtonClick instead.
+    start = text.index("function NextButtonClick")
+    rest = text[start + len("function NextButtonClick") :]
+    end_rel = rest.index("\nfunction ")
+    next_fn = text[start : start + len("function NextButtonClick") + end_rel]
     lower = next_fn.lower()
     assert "forcestopjarvisunder" in lower.replace("_", "")
     assert "rfc-0136" in lower

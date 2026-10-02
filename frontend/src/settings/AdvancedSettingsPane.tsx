@@ -137,6 +137,10 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
           />
         </label>
         <label>Allowed directories (one per line)
+          <p className="lede" style={{ margin: "0 0 8px" }}>
+            Default is every local drive or mount plus private LAN shares. Leave this list empty to keep
+            that full-machine workspace. Narrow it only when you want a smaller sandbox.
+          </p>
           <textarea
             className="field"
             rows={4}

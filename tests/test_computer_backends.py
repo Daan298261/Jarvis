@@ -38,6 +38,8 @@ async def test_native_backend_run_focuses_and_inspects(monkeypatch):
                 "Window: Notepad\n- Save (Button id=saveBtn)",
                 data={"controls": [{"name": "Save", "automation_id": "saveBtn"}]},
             )
+        if action == "click":
+            return ToolResult(True, "Clicked Save")
         return ToolResult(False, "", error=f"unexpected {action}")
 
     monkeypatch.setattr("app.tools.desktop.DesktopTool.execute", fake_execute)
@@ -46,8 +48,8 @@ async def test_native_backend_run_focuses_and_inspects(monkeypatch):
     assert result.data["backend"] == "windows_ui"
     assert result.data["inspect_ok"] is True
     assert "Focused Notepad" in result.output
-    assert "named desktop controls" in result.output.lower()
-    assert [item["action"] for item in calls] == ["focus", "inspect"]
+    assert "Clicked Save" in result.output
+    assert [item["action"] for item in calls] == ["focus", "inspect", "click"]
 
 
 async def test_native_backend_run_lists_windows_when_focus_fails(monkeypatch):

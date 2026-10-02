@@ -109,6 +109,7 @@ export function personaCardSentence(mainId: string, specialistIds: string[]): st
 }
 
 let cache: NamedPersonaState | null = null
+let selectionRevision = 0
 const listeners = new Set<(state: NamedPersonaState | null) => void>()
 
 function publish(state: NamedPersonaState | null) {
@@ -117,8 +118,11 @@ function publish(state: NamedPersonaState | null) {
 }
 
 export async function loadNamedPersonas(): Promise<NamedPersonaState> {
+  const revision = selectionRevision
   const state = await api<NamedPersonaState>("/api/named-personas")
-  publish(state)
+  // A mount-time catalog request can finish after the user has already picked
+  // another persona. Never let that older response snap the avatar back.
+  if (revision === selectionRevision) publish(state)
   return state
 }
 
@@ -126,27 +130,16 @@ export async function selectNamedPersona(id: string): Promise<NamedPersonaState>
   const previous = cache
   const canonicalId = canonicalizePersonaId(id)
   const selected = previous?.personas.find((persona) => persona.id === canonicalId)
+  const revision = ++selectionRevision
   if (previous && selected) publish({ ...previous, active: selected })
-  const controller = new AbortController()
-  const deadline = window.setTimeout(() => controller.abort(), 2500)
-  try {
-    const state = await api<NamedPersonaState>("/api/named-personas", {
-      method: "PUT",
-      body: JSON.stringify({ id: canonicalId }),
-      signal: controller.signal,
-    })
-    publish(state)
-    return state
-  } catch (error) {
-    // Keep the optimistic visual selection. A slow backend must not make the
-    // avatar snap back or leave the whole appearance panel locked.
-    if (controller.signal.aborted) {
-      throw new Error(`${PERSONA_LABELS[canonicalId] || canonicalId} is active locally; Jarvis did not confirm the saved persona in time.`)
-    }
-    throw error
-  } finally {
-    window.clearTimeout(deadline)
-  }
+  // A 409 is intentionally allowed to reach activateNamedPersona, which
+  // installs the required neural pack and retries without losing this visual.
+  const state = await api<NamedPersonaState>("/api/named-personas", {
+    method: "PUT",
+    body: JSON.stringify({ id: canonicalId }),
+  })
+  if (revision === selectionRevision) publish(state)
+  return state
 }
 
 export async function updateNamedPersonaPrefs(

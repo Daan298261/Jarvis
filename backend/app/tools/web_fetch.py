@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -11,6 +12,8 @@ from .safety import resolve_allowed_path
 
 _ALLOWED_SCHEMES = {"http", "https"}
 _MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+_FETCH_ATTEMPTS = 3
+_RETRY_STATUS = {502, 503, 504}
 
 
 class WebFetchTool(Tool):
@@ -55,6 +58,13 @@ class WebFetchTool(Tool):
         method = (kwargs.get("method") or "GET").upper()
         if method not in {"GET", "POST", "HEAD"}:
             return ToolResult(False, "", error=f"Unsupported method {method}")
+        from ..policy.computer_permissions import evaluate_tool_permissions
+
+        gate = evaluate_tool_permissions("web_fetch", {"url": url, "method": method})
+        if gate.status == "deny":
+            return ToolResult(False, "", error=gate.reason)
+        if gate.status == "ask":
+            return ToolResult(False, "", error=gate.reason or "Permission required before fetching from the network.")
         limit = int(kwargs.get("max_chars") or 12000)
         timeout = float(kwargs.get("timeout_seconds") or 30)
         headers = {"User-Agent": "JarvisLocal/1.0"}
@@ -80,7 +90,25 @@ class WebFetchTool(Tool):
                     request_kwargs["json"] = json_body
                 elif body is not None:
                     request_kwargs["content"] = body
-                response = await client.request(method, url, **request_kwargs)
+                last_error: Exception | None = None
+                response = None
+                for attempt in range(_FETCH_ATTEMPTS):
+                    try:
+                        response = await client.request(method, url, **request_kwargs)
+                    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+                        last_error = exc
+                        await asyncio.sleep(0.15 * (attempt + 1))
+                        continue
+                    if (
+                        method in {"GET", "HEAD"}
+                        and response.status_code in _RETRY_STATUS
+                        and attempt + 1 < _FETCH_ATTEMPTS
+                    ):
+                        await asyncio.sleep(0.15 * (attempt + 1))
+                        continue
+                    break
+                if response is None:
+                    raise last_error or RuntimeError("web_fetch failed")
             content_type = response.headers.get("content-type") or ""
             raw = getattr(response, "content", None)
             if raw is None:

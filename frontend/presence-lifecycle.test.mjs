@@ -196,12 +196,19 @@ test("all named personas expose their own registered visual avatar", async () =>
   assert.match(controls, /SpecialistShapeMark/)
 })
 
-test("humanoid and mythic persona modes keep distinct visual contracts", async () => {
+test("persona selection activates mythic mode on the shared morphable stage", async () => {
   const home = await readFile(new URL("./src/hud/HudChatHome.tsx", import.meta.url), "utf8")
   const settings = await readFile(new URL("./src/settings/AppearanceSettingsPane.tsx", import.meta.url), "utf8")
+  const activation = await readFile(new URL("./src/persona/activateNamedPersona.ts", import.meta.url), "utf8")
+  const host = await readFile(new URL("./src/presence/PresenceHost.tsx", import.meta.url), "utf8")
   assert.match(home, /presentation\.requestedPresence === "humanoid"/)
   assert.match(home, /\? "humanoid_bust"/)
   assert.match(settings, /Mythic persona · live/)
+  assert.match(activation, /requestedPresence: "particle_bust"/)
+  assert.match(activation, /Promise\.allSettled/)
+  assert.match(host, /resolved\.effective === "particle_bust"/)
+  assert.doesNotMatch(host, /ParticleBustPresence/)
+  assert.match(host, /key="morphable-presence"/)
   assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.42)
 })
 

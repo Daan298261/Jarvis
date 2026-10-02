@@ -38,7 +38,7 @@ async def test_git_checkpoint_keeps_working_tree(tmp_path):
     untracked = tmp_path / "scratch.txt"
     untracked.write_text("keep me\n", encoding="utf-8")
 
-    tool = GitTool()
+    tool = GitTool(lambda: {"allowed_directories": [str(tmp_path)]})
     result = await tool.execute(action="checkpoint", path=str(tmp_path))
     assert result.success, result.error
     assert "Working tree was not modified" in result.output

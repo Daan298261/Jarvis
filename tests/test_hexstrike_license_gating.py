@@ -1,7 +1,7 @@
+"""License-package HexStrike gating after RFC-0196 (module entitlement, not LE/password)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
-
 from pathlib import Path
 
 import pytest
@@ -13,9 +13,9 @@ from app.licensing.entitlements import (
     HEXSTRIKE_ACCESS_FULL,
     HEXSTRIKE_ACCESS_LOCKED,
     HEXSTRIKE_OPERATOR_LICENSE_MESSAGE,
-    HEXSTRIKE_PRO_MESSAGE,
     hexstrike_access_mode,
     hexstrike_access_payload,
+    hexstrike_denied_message,
 )
 from app.main import app
 from app.policy.cyber_ato import AtoStatus
@@ -36,59 +36,69 @@ def _ato(**overrides: object) -> AtoStatus:
         renewal_due=False,
         can_issue=False,
         package_class="",
+        modules=["blue-team"],
+        reason="",
+        clock_rollback=False,
     )
     values.update(overrides)
     return AtoStatus(**values)  # type: ignore[arg-type]
 
 
 def test_hexstrike_access_locked_without_license(monkeypatch):
-    monkeypatch.setattr(
-        "app.licensing.entitlements.evaluate",
-        lambda now=None: _ato(installed=False, valid=False, in_person_verified=False),
-    )
+    status = _ato(installed=False, valid=False, in_person_verified=False, modules=[])
+    monkeypatch.setattr("app.policy.cyber_ato.evaluate", lambda now=None: status)
+    monkeypatch.setattr("app.licensing.entitlements.evaluate", lambda now=None: status)
     assert hexstrike_access_mode() == HEXSTRIKE_ACCESS_LOCKED
     payload = hexstrike_access_payload()
     assert payload["operator_allowed"] is False
     assert payload["blue_allowed"] is False
-    assert "Pro feature" in payload["access_message"]
+    assert "hexstrike" in payload["access_message"].lower() or "license" in payload["access_message"].lower()
 
 
-def test_hexstrike_access_blue_for_ordinary_license(monkeypatch):
-    monkeypatch.setattr("app.licensing.entitlements.evaluate", lambda now=None: _ato())
-    assert hexstrike_access_mode() == HEXSTRIKE_ACCESS_BLUE
+def test_hexstrike_access_locked_without_hexstrike_module(monkeypatch):
+    status = _ato(modules=["blue-team"])
+    monkeypatch.setattr("app.policy.cyber_ato.evaluate", lambda now=None: status)
+    monkeypatch.setattr("app.licensing.entitlements.evaluate", lambda now=None: status)
+    assert hexstrike_access_mode() == HEXSTRIKE_ACCESS_LOCKED
     payload = hexstrike_access_payload()
-    assert payload["blue_allowed"] is True
     assert payload["operator_allowed"] is False
-    assert "unrestricted or law-enforcement" in payload["access_message"]
+    assert "hexstrike" in payload["access_message"].lower()
 
 
-def test_hexstrike_access_full_for_law_enforcement(monkeypatch):
-    monkeypatch.setattr(
-        "app.licensing.entitlements.evaluate",
-        lambda now=None: _ato(law_enforcement=True, red_team=True),
-    )
+def test_hexstrike_access_full_when_module_present(monkeypatch):
+    status = _ato(modules=["blue-team", "hexstrike"], law_enforcement=False)
+    monkeypatch.setattr("app.policy.cyber_ato.evaluate", lambda now=None: status)
+    monkeypatch.setattr("app.licensing.entitlements.evaluate", lambda now=None: status)
     assert hexstrike_access_mode() == HEXSTRIKE_ACCESS_FULL
     assert hexstrike_access_payload()["operator_allowed"] is True
 
 
-def test_hexstrike_access_full_for_unrestricted_package(monkeypatch):
-    monkeypatch.setattr(
-        "app.licensing.entitlements.evaluate",
-        lambda now=None: _ato(package_class="owner_unrestricted"),
+def test_hexstrike_access_full_for_unrestricted_package_with_modules(monkeypatch):
+    status = _ato(
+        package_class="owner_unrestricted",
+        modules=["blue-team", "red-team", "hexstrike", "computer-use"],
+        law_enforcement=True,
     )
+    monkeypatch.setattr("app.policy.cyber_ato.evaluate", lambda now=None: status)
+    monkeypatch.setattr("app.licensing.entitlements.evaluate", lambda now=None: status)
     assert hexstrike_access_mode() == HEXSTRIKE_ACCESS_FULL
 
 
-def test_status_api_locked_is_pro_message_without_catalog(jarvis_env, monkeypatch, allow_loopback_api):
+def test_status_api_locked_names_module(jarvis_env, monkeypatch, allow_loopback_api):
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_LOCKED)
     monkeypatch.setattr(
         "app.licensing.entitlements.hexstrike_access_payload",
         lambda now=None: {
             "access_mode": "locked",
-            "access_message": HEXSTRIKE_PRO_MESSAGE,
+            "access_message": "The installed license package does not include hexstrike.",
             "operator_allowed": False,
             "blue_allowed": False,
+            "hexstrike_module": False,
         },
+    )
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_denied_message",
+        lambda now=None: "The installed license package does not include hexstrike.",
     )
     monkeypatch.setattr("app.security.hexstrike.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
@@ -96,14 +106,18 @@ def test_status_api_locked_is_pro_message_without_catalog(jarvis_env, monkeypatc
     body = client.get("/api/hexstrike").json()
     assert body["access_mode"] == "locked"
     assert body["catalog"] == []
-    assert "Pro feature" in body["access_message"]
+    assert "hexstrike" in body["access_message"].lower()
     start = client.post("/api/hexstrike/start")
     assert start.status_code == 403
-    assert "Pro feature" in start.json()["detail"]
+    assert "hexstrike" in start.json()["detail"].lower()
 
 
-def test_operate_http_capability_requires_full_license(jarvis_env, monkeypatch, allow_loopback_api):
-    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_BLUE)
+def test_operate_requires_hexstrike_module(jarvis_env, monkeypatch, allow_loopback_api):
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_LOCKED)
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_denied_message",
+        lambda now=None: "The installed license package does not include hexstrike.",
+    )
     monkeypatch.setattr(
         "app.policy.computer_permissions.evaluate_permission",
         lambda permission: SimpleNamespace(status="allow"),
@@ -114,26 +128,44 @@ def test_operate_http_capability_requires_full_license(jarvis_env, monkeypatch, 
         json={"capability_id": "http:scanner_one", "arguments": {}},
     )
     assert response.status_code == 403
-    assert "unrestricted or law-enforcement" in response.json()["detail"]
+    assert "hexstrike" in response.json()["detail"].lower()
 
 
-def test_tools_refresh_requires_full_license(jarvis_env, monkeypatch, allow_loopback_api):
-    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_BLUE)
+def test_tools_refresh_requires_hexstrike_module(jarvis_env, monkeypatch, allow_loopback_api):
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_LOCKED)
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_denied_message",
+        lambda now=None: "The installed license package does not include hexstrike.",
+    )
     client = TestClient(app)
     response = client.post("/api/hexstrike/tools/refresh")
     assert response.status_code == 403
 
 
-def test_catalog_snapshot_blue_keeps_only_defensive(monkeypatch):
-    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_BLUE)
+def test_catalog_snapshot_locked_is_empty(monkeypatch):
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_LOCKED)
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_denied_message",
+        lambda now=None: "The installed license package does not include hexstrike.",
+    )
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_access_payload",
+        lambda now=None: {
+            "access_mode": "locked",
+            "access_message": "The installed license package does not include hexstrike.",
+            "operator_allowed": False,
+            "blue_allowed": False,
+            "hexstrike_module": False,
+        },
+    )
     snap = catalog_snapshot()
-    assert snap["access_mode"] == "blue"
-    assert all(row.get("source") == "defensive" for row in snap["catalog"])
-    assert snap["count"] >= 1
+    assert snap["access_mode"] == "locked"
+    assert snap["catalog"] == []
+    assert snap["discovery_ok"] is False
 
 
 @pytest.mark.asyncio
-async def test_sync_skips_mcp_unless_full(monkeypatch):
+async def test_sync_registers_mcp_when_full(monkeypatch):
     registered = {"called": False}
 
     async def fake_status(*, enrich=True):
@@ -150,12 +182,15 @@ async def test_sync_skips_mcp_unless_full(monkeypatch):
         return SimpleNamespace(as_dict=lambda: {"ok": True})
 
     async def fake_refresh(*, force=True):
-        return [{"id": "defensive:host_baseline", "source": "defensive"}]
+        return [
+            {"id": "defensive:host_baseline", "source": "defensive"},
+            {"id": "http:extra", "source": "http"},
+        ]
 
     monkeypatch.setattr("app.security.hexstrike.HEXSTRIKE.status", fake_status)
     monkeypatch.setattr("app.security.hexstrike_operator.register_hexstrike_mcp", fake_register)
     monkeypatch.setattr("app.security.hexstrike_operator.refresh_discovered_catalog", fake_refresh)
-    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_BLUE)
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_LOCKED)
     surface = await sync_operator_surface(register_mcp=True)
     assert registered["called"] is False
     assert surface["mcp"]["ok"] is False
@@ -166,29 +201,38 @@ async def test_sync_skips_mcp_unless_full(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_defensive_tool_pro_message_when_locked(monkeypatch):
+async def test_defensive_tool_module_message_when_locked(monkeypatch):
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_LOCKED)
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_denied_message",
+        lambda now=None: "The installed license package does not include hexstrike.",
+    )
     tool = HexStrikeDefensiveTool(lambda: {})
     result = await tool.execute(action="host_baseline", scope_id="host")
     assert result.success is False
-    assert result.error == HEXSTRIKE_PRO_MESSAGE
+    assert "hexstrike" in (result.error or "").lower()
 
 
 @pytest.mark.asyncio
-async def test_operator_tool_blue_license_message(monkeypatch):
-    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_BLUE)
+async def test_operator_tool_locked_names_module(monkeypatch):
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_LOCKED)
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_denied_message",
+        lambda now=None: "The installed license package does not include hexstrike.",
+    )
     tool = HexStrikeOperatorTool(lambda: {})
     result = await tool.execute(operation="status")
     assert result.success is False
-    assert result.error == HEXSTRIKE_OPERATOR_LICENSE_MESSAGE
+    assert "hexstrike" in (result.error or "").lower()
 
 
-def test_daybreak_hud_shows_pro_copy_and_license_gating():
+def test_daybreak_hud_shows_module_gating():
     source = Path("frontend/src/hud/HudHexStrikeSuite.tsx").read_text(encoding="utf-8")
-    assert "Pro feature" in source
-    assert "HexStrike Blue · defensive suite" in source
     assert "Open License" in source
     assert "access_mode" in source
+    assert "hexstrike" in source.lower()
+    assert "Operate" in source
+    assert "Jobs" in source
 
 
 def test_tool_exposure_matrix(monkeypatch):
@@ -197,9 +241,10 @@ def test_tool_exposure_matrix(monkeypatch):
     assert "hexstrike_defensive" not in mixed
     assert "hexstrike_operator" not in mixed
 
+    # Legacy blue constant no longer unlocks tools under RFC-0196.
     monkeypatch.setattr(tool_exposure, "hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_BLUE)
     blue = tool_exposure.tool_names_for("mixed", ["hexstrike", "hexstrike_defensive"])
-    assert "hexstrike_defensive" in blue
+    assert "hexstrike_defensive" not in blue
     assert "hexstrike_operator" not in blue
 
     monkeypatch.setattr(tool_exposure, "hexstrike_access_mode", lambda: HEXSTRIKE_ACCESS_FULL)
@@ -209,7 +254,11 @@ def test_tool_exposure_matrix(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_operate_locked_raises_pro(monkeypatch):
+async def test_operate_locked_raises_module_message(monkeypatch):
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: HEXSTRIKE_ACCESS_LOCKED)
-    with pytest.raises(PermissionError, match="Pro feature"):
+    monkeypatch.setattr(
+        "app.licensing.entitlements.hexstrike_denied_message",
+        lambda now=None: "The installed license package does not include hexstrike.",
+    )
+    with pytest.raises(PermissionError, match="hexstrike"):
         await operate("defensive:host_baseline", {})

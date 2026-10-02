@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from ..licensing.entitlements import HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL, hexstrike_access_mode
+from ..licensing.entitlements import HEXSTRIKE_ACCESS_FULL, hexstrike_access_mode
+from ..security.security_agents import mode_tools, normalize_role
 from ..tools.mcp_runtime import MCP
 from ..tools.registry import REGISTRY
 
@@ -84,18 +85,32 @@ MCP_CAPABILITY = "mcp"
 RESTRICTED_TOOLS = frozenset({"hexstrike_defensive", "hexstrike_operator"})
 
 
-def _enabled_native(security_role: str = "") -> list[str]:
+def _hexstrike_tools_for_role(security_role: str) -> set[str]:
+    """RFC-0197: which HexStrike tools a security-agent mode may drive."""
+    role = normalize_role(security_role) or ""
     mode = hexstrike_access_mode()
+    # RFC-0196: only full hexstrike entitlement unlocks tools (legacy BLUE is locked).
+    if mode != HEXSTRIKE_ACCESS_FULL:
+        return set()
+    if role == "red-team":
+        return {"hexstrike_operator"}
+    if role == "purple-team":
+        # Phase machine further restricts at execute time; exposure includes both.
+        return {"hexstrike_operator", "hexstrike_defensive"}
+    if role == "blue-team":
+        return {"hexstrike_operator", "hexstrike_defensive"}
+    # Non-security tasks: license unlocks operator (RFC-0196) without role bind.
+    return {"hexstrike_operator", "hexstrike_defensive"}
+
+
+def _enabled_native(security_role: str = "") -> list[str]:
+    allowed_hex = _hexstrike_tools_for_role(security_role)
     names: list[str] = []
     for name, tool in REGISTRY.tools.items():
         if not tool.enabled or name == ESCAPE_TOOL:
             continue
-        if name == "hexstrike_defensive":
-            if mode in {HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL}:
-                names.append(name)
-            continue
-        if name == "hexstrike_operator":
-            if mode == HEXSTRIKE_ACCESS_FULL:
+        if name in {"hexstrike_defensive", "hexstrike_operator"}:
+            if name in allowed_hex:
                 names.append(name)
             continue
         names.append(name)
@@ -167,7 +182,13 @@ def tool_names_for(
             continue
         if name not in wanted:
             wanted.append(name)
-    if security_role == "blue-team" and "hexstrike_defensive" not in wanted:
+    role = normalize_role(security_role)
+    if role is not None:
+        # RFC-0197: security agent modes expose their tool map (must execute, not narrate).
+        for name in mode_tools(role):
+            if name not in wanted:
+                wanted.append(name)
+    elif security_role == "blue-team" and "hexstrike_defensive" not in wanted:
         wanted.append("hexstrike_defensive")
     enabled = set(_enabled_native(security_role))
     names = [name for name in wanted if name in enabled]

@@ -17,7 +17,7 @@ from openai import APIConnectionError, APIStatusError
 
 from ..coding.usage import record_task_usage
 from ..config import AppSettings, load_settings
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
@@ -84,6 +84,13 @@ from .coding_contract import (
     init_coding_execution,
     note_contract_tool,
     persist_execution_evidence,
+)
+from .cyber_execution import (
+    applies_cyber_tool_execution,
+    cyber_completion_blocked_message,
+    cyber_execution_satisfied,
+    init_cyber_execution,
+    note_cyber_tool,
 )
 from .forensic import professional_prompt_block
 from .escalation import (
@@ -314,6 +321,9 @@ def _side_effect_decision(
     )
 
 
+_TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
 def _tool_needs_operator_pause(
     autonomy: str,
     risk: RiskLevel,
@@ -339,6 +349,7 @@ class AgentRuntime:
         self._heartbeat_tasks: dict[str, asyncio.Task] = {}
         self._last_heartbeat: dict[str, datetime] = {}
         self._cancel = set()
+        self._front_tasks: dict[str, asyncio.Task] = {}
 
     async def _heartbeat_loop(self, task_id: str) -> None:
         try:
@@ -404,7 +415,18 @@ class AgentRuntime:
 
         route = await evaluate_request_route(prompt, route_request(prompt))
         task_class = route.task_class
-        if security_role == "blue-team" and route.kind != "managed_task":
+        from ..security.security_agents import (
+            assert_mode_entitled,
+            init_purple,
+            is_security_role,
+            normalize_role,
+        )
+
+        role = normalize_role(security_role) if security_role else None
+        if role is not None:
+            assert_mode_entitled(role)
+            security_role = role
+        if is_security_role(security_role) and route.kind != "managed_task":
             task_class = classify_task(prompt)
             route = RequestRoute(MANAGED_TASK, task_class)
         REGISTRY.apply_settings(settings)
@@ -422,6 +444,8 @@ class AgentRuntime:
             response_route=route.kind,
             exposed_tools=",".join(tool_names_for(task_class, security_role=security_role or "", prompt=prompt)),
         )
+        if role == "purple-team":
+            init_purple(task.id)
         async with SessionLocal() as session:
             session.add(task)
             await session.commit()
@@ -616,10 +640,39 @@ class AgentRuntime:
         if running:
             running.cancel()
 
+    async def _await_managed_front(self, task_id: str) -> None:
+        front = self._front_tasks.pop(task_id, None)
+        if front is None:
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(front), timeout=2.0)
+        except (TimeoutError, asyncio.CancelledError, Exception):
+            return
+
     async def _update(self, task_id: str, **fields: Any) -> None:
+        incoming_status = fields.get("status")
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if not task:
+                return
+            session.expire(task)
+            await session.refresh(task)
+            if task.status in _TERMINAL_TASK_STATUSES and incoming_status not in _TERMINAL_TASK_STATUSES:
+                return
+            if incoming_status not in _TERMINAL_TASK_STATUSES:
+                values = dict(fields)
+                values["updated_at"] = utcnow()
+                if incoming_status == "running" and not task.started_at:
+                    values["started_at"] = utcnow()
+                await session.execute(
+                    update(Task)
+                    .where(
+                        Task.id == task_id,
+                        Task.status.in_(("queued", "running", "waiting")),
+                    )
+                    .values(**values)
+                )
+                await session.commit()
                 return
             for key, value in fields.items():
                 setattr(task, key, value)
@@ -698,6 +751,32 @@ class AgentRuntime:
                     await BUS.publish(task_id, "progress", "Coding/3D contract blocked chat-only completion", block[:1500], stage="act")
                     return False
                 persist_execution_evidence(task_id, working)
+            if getattr(working, "requires_tool_execution", False) or applies_cyber_tool_execution(
+                working.security_role, prompt
+            ):
+                if not cyber_execution_satisfied(working):
+                    block = cyber_completion_blocked_message(working)
+                    messages.append(ChatMessage(role="user", content=block))
+                    await self._update(
+                        task_id,
+                        status="running",
+                        stage="act",
+                        result=block,
+                        verification="",
+                        current_action="RFC-0197: cyber tool/job evidence required",
+                        conversation_json=serialize_messages(messages),
+                        compact_memory=working.dumps(),
+                        **(metrics.as_fields() if metrics else {}),
+                    )
+                    await BUS.publish(
+                        task_id,
+                        "progress",
+                        "Security-agent verify blocked narration-only completion",
+                        block[:1500],
+                        stage="act",
+                    )
+                    return False
+        await self._await_managed_front(task_id)
         fields = {
             "status": "completed",
             "stage": "completed",
@@ -731,6 +810,7 @@ class AgentRuntime:
         stage: str = "failed",
     ) -> None:
         spoken = plain_failure(error)
+        await self._await_managed_front(task_id)
         fields: dict[str, Any] = {
             "status": "failed",
             "stage": "failed",
@@ -1768,6 +1848,12 @@ class AgentRuntime:
             if not working.task_class:
                 working.task_class = task.task_class or classify_task(prompt)
             working.security_role = getattr(task, "security_role", "") or ""
+            if working.security_role == "purple-team":
+                from ..security.security_agents import load_purple_state
+
+                purple = load_purple_state(task_id)
+                working.purple_phase = purple.phase
+                working.purple_locked = purple.locked
         gate_text = (extra_prompt or prompt).strip()
         active_prompt = gate_text or prompt
         if gate_text and not continue_existing:
@@ -1885,7 +1971,7 @@ class AgentRuntime:
                 )
             )
             if settings.front_responder.enabled:
-                asyncio.create_task(
+                self._front_tasks[task_id] = asyncio.create_task(
                     self._run_managed_front_lane(
                         task_id,
                         extra_prompt or prompt,
@@ -2063,6 +2149,8 @@ class AgentRuntime:
         ):
             init_coding_execution(working)
             skill_requires_verify = True
+        if applies_cyber_tool_execution(working.security_role, active_prompt):
+            init_cyber_execution(working, requires_tool_execution=True)
         metrics = LiveTaskMetrics()
         already_escalated = bool(getattr(working, "escalated", False))
         critic_rejected = False
@@ -2810,12 +2898,14 @@ class AgentRuntime:
                             from ..security.blue_watch import note_tool_outcome
 
                             note_tool_outcome(task_id, name, arguments, observation, failed=True)
+                            note_cyber_tool(working, name, arguments, observation, success=False)
                         else:
                             consecutive_failures = 0
                             failures_by_tool.pop(name, None)
                             recovering = False
                             await BUS.publish(task_id, "observation", f"{name} finished", observation[:1500], stage="observe")
                             note_contract_tool(working, name, arguments, observation, success=True)
+                            note_cyber_tool(working, name, arguments, observation, success=True)
                         working.note_tool(name, observation, not failed)
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
@@ -3132,9 +3222,26 @@ class AgentRuntime:
             async with SessionLocal() as session:
                 task = await session.get(Task, task_id)
                 security_role = getattr(task, "security_role", "") if task else ""
+            # RFC-0197 purple: no parallel red+blue tools — only active phase set.
+            if security_role == "purple-team" and name in {"hexstrike_operator", "hexstrike_defensive"}:
+                from ..security.security_agents import load_purple_state, mode_tools
+
+                purple = load_purple_state(task_id)
+                if purple.locked:
+                    return "ERROR: purple phase is locked after owner stop", None, False, "purple_locked"
+                allowed = set(mode_tools("purple-team", purple_phase=purple.phase))
+                if name not in allowed:
+                    return (
+                        f"ERROR: tool {name} is not allowed in purple {purple.phase} phase "
+                        "(no parallel red+blue tools)",
+                        None,
+                        False,
+                        "purple_phase_tool_denied",
+                    )
             REGISTRY._context["task_id"] = task_id
             REGISTRY._context["approved"] = bool(grant_id) or approved
             REGISTRY._context["approval_grant_id"] = grant_id or ""
+            REGISTRY._context["security_role"] = security_role or ""
             if name == "read_ingress":
                 result = await REGISTRY.execute(name, arguments, task_id=task_id)
             elif security_role:

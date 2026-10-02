@@ -110,8 +110,17 @@ def artifact_path_allowed(candidate: Path) -> bool:
     if resolved == job_root or resolved.is_relative_to(job_root):
         return True
     settings = load_settings()
+    from ..config import LOCAL_NETWORK_SCOPE
+    from ..tools.safety import _is_unc_path, _private_lan_unc
+
     roots = settings.allowed_directories or default_allowed_directories()
-    allowed = [Path(root).expanduser().resolve(strict=False) for root in roots]
+    if LOCAL_NETWORK_SCOPE in roots and _is_unc_path(str(candidate)) and _private_lan_unc(str(candidate)):
+        return True
+    allowed = []
+    for root in roots:
+        if root == LOCAL_NETWORK_SCOPE:
+            continue
+        allowed.append(Path(root).expanduser().resolve(strict=False))
     return any(resolved == root or resolved.is_relative_to(root) for root in allowed)
 
 
@@ -463,6 +472,8 @@ async def sync_operator_surface(*, register_mcp: bool = True) -> dict[str, Any]:
             "reason": "suite_not_running",
             "catalog_count": len(discovered_catalog()),
             "mcp": {"ok": False, "error": "suite not running"},
+            "discovery_ok": False,
+            "discovery_error": "HexStrike suite is not running",
         }
     from pathlib import Path
 
@@ -473,7 +484,7 @@ async def sync_operator_surface(*, register_mcp: bool = True) -> dict[str, Any]:
 
         if hexstrike_access_mode() != HEXSTRIKE_ACCESS_FULL:
             register_mcp = False
-            mcp_payload = {"ok": False, "error": "full operator license required for HexStrike MCP"}
+            mcp_payload = {"ok": False, "error": "hexstrike module required for HexStrike MCP"}
         else:
             result = await register_hexstrike_mcp(
                 install_path=install,
@@ -482,16 +493,40 @@ async def sync_operator_surface(*, register_mcp: bool = True) -> dict[str, Any]:
                 port=snapshot.port,
             )
             mcp_payload = result.as_dict()
-    catalog = await refresh_discovered_catalog(force=True)
+    try:
+        catalog = await refresh_discovered_catalog(force=True)
+    except Exception as exc:
+        error = f"catalog discovery failed: {exc}"[:400]
+        audit_hexstrike("catalog_refresh_failed", error=error)
+        return {
+            "operator_ready": False,
+            "catalog_count": 0,
+            "mcp": mcp_payload,
+            "catalog_stale": True,
+            "discovery_ok": False,
+            "discovery_error": error,
+        }
     mcp_ok = bool(mcp_payload.get("ok")) if register_mcp else True
     if register_mcp and not mcp_ok:
         mcp_payload["error"] = mcp_payload.get("error") or mcp_registration_error()
-    operator_ready = mcp_ok and len(catalog) > len(CAPABILITIES)
+    discovery_error = ""
+    if register_mcp and not mcp_ok:
+        # Surface MCP handshake failure honestly; HTTP/host rows may still be usable.
+        discovery_error = str(mcp_payload.get("error") or "HexStrike MCP handshake failed")
+    if not catalog:
+        discovery_error = discovery_error or (
+            "HexStrike discovery returned an empty catalog while the suite is running"
+        )
+    # Operator ready when any discoverable rows exist; MCP is additive, not a hard ceiling.
+    non_mcp = [row for row in catalog if row.get("source") != "mcp"]
+    operator_ready = len(catalog) > 0 and (mcp_ok or len(non_mcp) > 0)
     return {
         "operator_ready": operator_ready,
         "catalog_count": len(catalog),
         "mcp": mcp_payload,
         "catalog_stale": False,
+        "discovery_ok": not bool(discovery_error) or len(catalog) > 0,
+        "discovery_error": discovery_error,
     }
 
 
@@ -520,14 +555,29 @@ def catalog_snapshot() -> dict[str, Any]:
         HEXSTRIKE_ACCESS_LOCKED,
         hexstrike_access_mode,
         hexstrike_access_payload,
+        hexstrike_denied_message,
     )
 
     catalog = discovered_catalog()
     mode = hexstrike_access_mode()
+    discovery_error = ""
+    discovery_ok = True
     if mode == HEXSTRIKE_ACCESS_LOCKED:
         catalog = []
+        discovery_ok = False
+        discovery_error = hexstrike_denied_message()
     elif mode == HEXSTRIKE_ACCESS_BLUE:
         catalog = [row for row in catalog if row.get("source") == "defensive"]
+    else:
+        mcp_err = mcp_registration_error()
+        suite_running = bool(HEXSTRIKE.is_running)
+        if suite_running and catalog_is_stale() and not catalog:
+            discovery_error = "HexStrike catalog is stale; refresh discovery after suite start or dependency install"
+            discovery_ok = False
+        elif suite_running and mcp_err:
+            # Surface MCP error without pretending empty-ok; keep rows if present.
+            discovery_error = mcp_err
+            discovery_ok = bool(catalog)
     payload = {
         "catalog": catalog,
         "count": len(catalog),
@@ -539,6 +589,9 @@ def catalog_snapshot() -> dict[str, Any]:
         "optional_stubs": list(ALWAYS_STUBBED_OPTIONALS),
         "optional_extras_available": False,
         "stub_status": "unavailable",
+        "discovery_ok": discovery_ok,
+        "discovery_error": discovery_error,
+        "truncated": False,
     }
     payload.update(hexstrike_access_payload())
     return payload
@@ -562,23 +615,112 @@ def _resolve_capability(capability_id: str) -> dict[str, Any]:
     return match
 
 
+def _claimed_artifact_paths(result: Any) -> list[Path]:
+    """Collect artifact paths declared by an upstream/tool result (never invent)."""
+    paths: list[Path] = []
+    if not isinstance(result, dict):
+        return paths
+    for key in ("artifact_paths", "artifacts", "files"):
+        raw = result.get(key)
+        if isinstance(raw, str) and raw.strip():
+            paths.append(Path(raw))
+        elif isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, str) and item.strip():
+                    paths.append(Path(item))
+                elif isinstance(item, dict):
+                    candidate = item.get("path") or item.get("file") or item.get("name")
+                    if isinstance(candidate, str) and candidate.strip() and ("/" in candidate or "\\" in candidate):
+                        paths.append(Path(candidate))
+    single = result.get("artifact") or result.get("artifact_path") or result.get("output_path")
+    if isinstance(single, str) and single.strip():
+        paths.append(Path(single))
+    return paths
+
+
+def _verify_claimed_artifacts(job: dict[str, Any], result: Any) -> None:
+    """Missing claimed artifact under allowed roots → failed (RFC-0196 §4.3)."""
+    missing: list[str] = []
+    allowed_missing_outside = False
+    for path in _claimed_artifact_paths(result):
+        if not artifact_path_allowed(path):
+            # Outside Jarvis-owned roots — do not open; treat as failed claim.
+            missing.append(str(path))
+            allowed_missing_outside = True
+            continue
+        try:
+            resolved = path.expanduser().resolve(strict=False)
+        except OSError:
+            missing.append(str(path))
+            continue
+        if not resolved.is_file():
+            missing.append(str(path))
+    if missing:
+        job["status"] = "failed"
+        prefix = "artifact path outside allowed roots" if allowed_missing_outside else "missing artifact"
+        job["error"] = f"{prefix}: {', '.join(missing[:8])}"[:400]
+
+
 async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     from ..licensing.entitlements import (
-        HEXSTRIKE_ACCESS_BLUE,
         HEXSTRIKE_ACCESS_FULL,
         HEXSTRIKE_ACCESS_LOCKED,
         HEXSTRIKE_OPERATOR_LICENSE_MESSAGE,
-        HEXSTRIKE_PRO_MESSAGE,
         hexstrike_access_mode,
+        hexstrike_denied_message,
     )
+    from .target_registry import TargetDenied, assert_targets_allowed
 
     mode = hexstrike_access_mode()
     if mode == HEXSTRIKE_ACCESS_LOCKED:
-        raise PermissionError(HEXSTRIKE_PRO_MESSAGE)
+        raise PermissionError(hexstrike_denied_message())
+    if mode != HEXSTRIKE_ACCESS_FULL:
+        raise PermissionError(HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
+    # RFC-0197: license + owner-attested target gates for security-agent operates.
+    try:
+        from ..tools.registry import REGISTRY
+
+        security_role = str((REGISTRY._context or {}).get("security_role") or "")
+    except Exception:
+        security_role = ""
+    if security_role in {"red-team", "purple-team"}:
+        from ..policy.cyber_ato import role_allowed
+        from .security_audit import audit_security_event
+
+        if security_role == "red-team" and not role_allowed("red-team"):
+            audit_security_event(
+                "invoke_denied",
+                reason="red_requires_law_enforcement",
+                capability_id=capability_id,
+                security_role=security_role,
+                source="hexstrike_operate",
+            )
+            audit_hexstrike("operate_denied", capability=capability_id, reason="red_requires_law_enforcement")
+            raise PermissionError(
+                "red-team requires the red-team module and law_enforcement=true on the same package"
+            )
+        if security_role == "purple-team" and not (role_allowed("blue-team") and role_allowed("red-team")):
+            audit_security_event(
+                "invoke_denied",
+                reason="purple_not_entitled",
+                capability_id=capability_id,
+                security_role=security_role,
+                source="hexstrike_operate",
+            )
+            audit_hexstrike("operate_denied", capability=capability_id, reason="purple_not_entitled")
+            raise PermissionError("purple-team requires blue-team and red-team (with law_enforcement) entitlements")
+    try:
+        assert_targets_allowed(
+            arguments,
+            security_role=security_role,
+            capability_id=capability_id,
+            source="hexstrike_operate",
+        )
+    except TargetDenied:
+        audit_hexstrike("operate_denied", capability=capability_id, reason="target_not_registered")
+        raise
     capability = _resolve_capability(capability_id)
     source = str(capability.get("source") or "")
-    if source != "defensive" and mode != HEXSTRIKE_ACCESS_FULL:
-        raise PermissionError(HEXSTRIKE_OPERATOR_LICENSE_MESSAGE)
     if source == "dependency" or str(capability_id).startswith("dep:"):
         raise ValueError("dependency rows install via POST /api/hexstrike/tools/{id}/install, not operate")
     if capability.get("stub") or package_is_stubbed(str(capability_id)):
@@ -615,6 +757,7 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
         "artifact_paths": [],
         "result": {},
         "error": "",
+        "daybreak_jobs_hint": f"Open Daybreak → Jobs for job {job_id}",
     }
     _save_job(job)
     _append_job_log(job_id, f"operate start capability={capability_id}")
@@ -629,14 +772,25 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
             options = args.get("options") if isinstance(args.get("options"), dict) else {}
             legacy = await execute_defensive(action, scope_id, options)
             job["result"] = legacy
-            job["status"] = legacy.get("status", "completed")
+            legacy_status = str(legacy.get("status") or "succeeded")
+            if legacy_status in {"completed", "ok", "success", "succeeded"}:
+                job["status"] = "succeeded"
+            elif legacy_status in {"failed", "error"}:
+                job["status"] = "failed"
+                job["error"] = str(legacy.get("error") or legacy.get("detail") or "defensive action failed")[:400]
+            elif legacy_status in {"cancelled", "canceled", "stopped"}:
+                job["status"] = "cancelled"
+            else:
+                job["status"] = "succeeded" if not legacy.get("error") else "failed"
+                if job["status"] == "failed":
+                    job["error"] = str(legacy.get("error") or legacy_status)[:400]
             job["upstream_pid"] = legacy.get("upstream_pid")
         elif source == "mcp":
             key = str(capability.get("mcp_tool_key") or "")
             tool_result = await MCP.call(key, args)
             payload = {"ok": tool_result.success, "output": tool_result.output, "error": tool_result.error}
             job["result"] = payload
-            job["status"] = "completed" if tool_result.success else "failed"
+            job["status"] = "succeeded" if tool_result.success else "failed"
             if not tool_result.success:
                 job["error"] = tool_result.error or "MCP tool failed"
         else:
@@ -647,20 +801,43 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
                 raw_pid = result.get("pid") or result.get("process_id")
                 if isinstance(raw_pid, int):
                     job["upstream_pid"] = raw_pid
-            job["status"] = "completed"
+                if result.get("error") or result.get("ok") is False:
+                    job["status"] = "failed"
+                    job["error"] = str(result.get("error") or result.get("message") or "upstream reported failure")[:400]
+                else:
+                    job["status"] = "succeeded"
+            else:
+                job["status"] = "succeeded"
+        if job["status"] == "succeeded":
+            _verify_claimed_artifacts(job, job.get("result"))
         result_path = job_directory(job_id) / "result.json"
         result_path.write_text(json.dumps(job["result"], indent=2, default=str) + "\n", encoding="utf-8")
-        job["artifact_paths"] = [str(result_path)]
+        artifact_paths = [str(result_path)]
+        for claimed in _claimed_artifact_paths(job.get("result")):
+            try:
+                resolved = claimed.expanduser().resolve(strict=False)
+            except OSError:
+                continue
+            if resolved.is_file() and artifact_path_allowed(resolved):
+                artifact_paths.append(str(resolved))
+        job["artifact_paths"] = list(dict.fromkeys(artifact_paths))
+        _append_job_log(job_id, f"operate finished status={job['status']}")
     except Exception as exc:
         job["status"] = "failed"
         job["error"] = str(exc)[:400]
         _append_job_log(job_id, f"operate failed: {job['error']}")
-        raise
-    finally:
+        # Persist failed job for Daybreak Jobs / chat — do not soft-omit the job id.
         job["finished_at"] = _utcnow()
         job["log_tail"] = _tail_job_log(job_id)
         _save_job(job)
         audit_hexstrike("operate_finished", job_id=job_id, status=job["status"])
+        return job
+    finally:
+        if job.get("finished_at") is None:
+            job["finished_at"] = _utcnow()
+            job["log_tail"] = _tail_job_log(job_id)
+            _save_job(job)
+            audit_hexstrike("operate_finished", job_id=job_id, status=job["status"])
     return job
 
 
@@ -671,7 +848,7 @@ async def stop_operator_job(job_id: str) -> dict[str, Any]:
         audit_hexstrike("operator_stop_denied", job_id=job_id, reason="untracked_pid")
         raise PermissionError("only Jarvis-tracked HexStrike jobs can be stopped")
     result = await HEXSTRIKE.post_operator(f"api/processes/terminate/{pid}", {})
-    job["status"] = "stopped"
+    job["status"] = "cancelled"
     job["finished_at"] = _utcnow()
     job["result"] = result if isinstance(result, dict) else {"value": result}
     job["log_tail"] = _tail_job_log(job_id)
@@ -681,18 +858,21 @@ async def stop_operator_job(job_id: str) -> dict[str, Any]:
 
 
 def operator_status_extras() -> dict[str, Any]:
-    catalog = discovered_catalog()
+    snap = catalog_snapshot()
     base = HEXSTRIKE._base_status()
     return {
-        "catalog": catalog,
-        "catalog_count": len(catalog),
-        "catalog_stale": catalog_is_stale(),
+        "catalog": snap.get("catalog") or [],
+        "catalog_count": snap.get("count") or 0,
+        "catalog_stale": snap.get("catalog_stale"),
         "jobs": list_operator_jobs(),
-        "mcp": mcp_registration_status(),
-        "mcp_error": mcp_registration_error(),
-        "missing_host_tools": missing_host_tools(),
+        "mcp": snap.get("mcp") or {},
+        "mcp_error": snap.get("mcp_error") or "",
+        "missing_host_tools": snap.get("missing_host_tools") or [],
         "optional_stubs": list(base.optional_stubs or ALWAYS_STUBBED_OPTIONALS),
         "stub_status": base.stub_status or "unavailable",
         "stub_message": base.stub_message or DISABLED_MESSAGE,
         "optional_extras_available": False,
+        "discovery_ok": snap.get("discovery_ok", True),
+        "discovery_error": snap.get("discovery_error") or "",
+        "truncated": False,
     }

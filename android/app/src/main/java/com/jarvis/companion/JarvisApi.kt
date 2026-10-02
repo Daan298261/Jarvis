@@ -4,7 +4,12 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -43,6 +48,8 @@ class JarvisApi(context: Context) {
     }.getOrDefault(emptyList())
     @Volatile private var preferred = ""
     @Volatile private var preferredAt = 0L
+    private val failedLock = Any()
+    private var failedOrigins: List<Pair<String, Long>> = emptyList()
     @Volatile private var cachedClient: Pair<String, OkHttpClient>? = null
     private var token = ""
     private var expiresAt = 0L
@@ -69,6 +76,7 @@ class JarvisApi(context: Context) {
         pin = publicPin.lowercase()
         if (changed) { deviceId = ""; token = ""; expiresAt = 0; endpoints = emptyList(); cachedClient = null }
         preferred = ""; preferredAt = 0
+        synchronized(failedLock) { failedOrigins = emptyList() }
         endpoints = ordered.ifEmpty { listOf(endpoint) }
         prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).putString("endpoints", JSONArray(endpoints).toString()).apply()
     }
@@ -77,10 +85,13 @@ class JarvisApi(context: Context) {
         val settings = json("/connection")
         if (settings.optString("server_pin") != pin) return
         val values = settings.optJSONArray("endpoints") ?: return
-        val addresses = (0 until values.length()).map { TransportPolicy.origin(values.getString(it)) }.distinct().take(8)
+        val addresses = TransportPolicy.orderedForReachability(
+            (0 until values.length()).map { values.getString(it) },
+        ).take(8)
         if (addresses.isNotEmpty()) {
             endpoints = addresses
-            prefs.edit().putString("endpoints", JSONArray(addresses).toString()).apply()
+            endpoint = addresses.first()
+            prefs.edit().putString("endpoint", endpoint).putString("endpoints", JSONArray(addresses).toString()).apply()
         }
     }
 
@@ -129,7 +140,43 @@ class JarvisApi(context: Context) {
 
     suspend fun ensureSession() = session()
     fun accessToken(): String = token
-    fun preferredOrigin(): String = TransportPolicy.origin(preferred.ifBlank { endpoint })
+    fun preferredOrigin(): String = candidateOrigins().firstOrNull() ?: TransportPolicy.origin(endpoint)
+
+    fun candidateOrigins(): List<String> = TransportPolicy.dialOrder(
+        preferred.takeIf { it.isNotBlank() },
+        endpoints + endpoint,
+        TransportPolicy.localIpv4Addresses(),
+        recentFailures(),
+    )
+
+    fun noteReachable(origin: String) {
+        val address = TransportPolicy.origin(origin)
+        preferred = address
+        preferredAt = System.currentTimeMillis()
+        synchronized(failedLock) {
+            failedOrigins = failedOrigins.filter { it.first != address }
+        }
+    }
+
+    fun noteUnreachable(origin: String) {
+        noteFailed(origin)
+    }
+
+    private fun noteFailed(origin: String) {
+        val address = runCatching { TransportPolicy.origin(origin) }.getOrDefault(origin)
+        val now = System.currentTimeMillis()
+        synchronized(failedLock) {
+            failedOrigins = (failedOrigins.filter { now - it.second < 30_000 && it.first != address } + (address to now)).takeLast(8)
+        }
+    }
+
+    private fun recentFailures(): List<String> {
+        val now = System.currentTimeMillis()
+        synchronized(failedLock) {
+            failedOrigins = failedOrigins.filter { now - it.second < 30_000 }
+            return failedOrigins.map { it.first }
+        }
+    }
     fun pinnedClient(): OkHttpClient {
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
         val expectedPin = pin
@@ -165,34 +212,147 @@ class JarvisApi(context: Context) {
     ): ByteArray = withContext(Dispatchers.IO) {
         if (authenticated) session()
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
-        val client = pinnedClient()
-        val requestId = if (path == "/messages" && body != null) runCatching { JSONObject(body.toString(Charsets.UTF_8)).optString("request_id") }.getOrNull() else null
-        val retry = TransportPolicy.replayable(method, path, requestId)
-        val failover = retry || TransportPolicy.pairingFailover(path)
         val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }
-        val addresses = TransportPolicy.orderedForReachability(
-            listOfNotNull(recent) + endpoints + endpoint,
-        ).let { if (failover) it else it.take(1) }
+        val locals = TransportPolicy.localIpv4Addresses()
+        val addresses = TransportPolicy.dialOrder(
+            recent,
+            endpoints + endpoint,
+            locals,
+            recentFailures(),
+        )
+        val client = pinnedClient().newBuilder()
+            .connectTimeout(TransportPolicy.connectTimeoutMs(addresses.size), TimeUnit.MILLISECONDS)
+            .build()
+        if (TransportPolicy.mayRaceOrigins(method, path, addresses, locals) && addresses.size > 1) {
+            return@withContext raceOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
+        }
+        sequentialOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
+    }
+
+    private fun sequentialOrigins(
+        client: OkHttpClient,
+        addresses: List<String>,
+        path: String,
+        method: String,
+        body: ByteArray?,
+        authenticated: Boolean,
+        contentType: String,
+        filename: String?,
+        extraHeaders: Map<String, String>,
+    ): ByteArray {
         var failure: java.io.IOException? = null
         for (address in addresses) {
+            try {
+                return callOrigin(client, address, path, method, body, authenticated, contentType, filename, extraHeaders)
+            } catch (error: java.io.IOException) {
+                noteFailed(address)
+                failure = error
+            }
+        }
+        throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
+    }
+
+    private suspend fun raceOrigins(
+        client: OkHttpClient,
+        addresses: List<String>,
+        path: String,
+        method: String,
+        body: ByteArray?,
+        authenticated: Boolean,
+        contentType: String,
+        filename: String?,
+        extraHeaders: Map<String, String>,
+    ): ByteArray = coroutineScope {
+        val outcomes = Channel<Result<ByteArray>>(Channel.UNLIMITED)
+        val calls = mutableListOf<okhttp3.Call>()
+        val jobs = addresses.mapIndexed { index, address ->
+            launch {
+                if (index > 0) delay(200L * index)
+                val call = client.newCall(
+                    originRequest(address, path, method, body, authenticated, contentType, filename, extraHeaders),
+                )
+                synchronized(calls) { calls.add(call) }
+                try {
+                    outcomes.send(Result.success(readOrigin(call, address)))
+                } catch (error: CancellationException) {
+                    call.cancel()
+                    throw error
+                } catch (error: java.io.IOException) {
+                    noteFailed(address)
+                    outcomes.send(Result.failure(error))
+                } catch (error: Throwable) {
+                    outcomes.send(Result.failure(error))
+                }
+            }
+        }
+        var remaining = addresses.size
+        var failure: java.io.IOException? = null
+        while (remaining > 0) {
+            remaining -= 1
+            val next = outcomes.receive()
+            val error = next.exceptionOrNull()
+            if (error is ApiException) {
+                jobs.forEach { it.cancel() }
+                synchronized(calls) { calls.forEach { it.cancel() } }
+                throw error
+            }
+            if (next.isSuccess) {
+                jobs.forEach { it.cancel() }
+                synchronized(calls) { calls.forEach { it.cancel() } }
+                return@coroutineScope next.getOrThrow()
+            }
+            if (error is java.io.IOException) failure = error
+        }
+        throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
+    }
+
+    private fun originRequest(
+        address: String,
+        path: String,
+        method: String,
+        body: ByteArray?,
+        authenticated: Boolean,
+        contentType: String,
+        filename: String?,
+        extraHeaders: Map<String, String>,
+    ): Request {
         val request = Request.Builder().url("${TransportPolicy.origin(address)}/api/companion$path")
         if (authenticated) request.header("Authorization", "Bearer $token").header("X-Jarvis-Device", deviceId)
         if (filename != null) request.header("X-Filename", filename.filter { it.code in 32..126 }.take(200))
         extraHeaders.forEach { (key, value) -> request.header(key, value) }
         request.method(method, if (method == "GET") null else (body ?: ByteArray(0)).toRequestBody(contentType.toMediaType()))
-        try { client.newCall(request.build()).execute().use { response ->
+        return request.build()
+    }
+
+    private fun callOrigin(
+        client: OkHttpClient,
+        address: String,
+        path: String,
+        method: String,
+        body: ByteArray?,
+        authenticated: Boolean,
+        contentType: String,
+        filename: String?,
+        extraHeaders: Map<String, String>,
+    ): ByteArray = readOrigin(
+        client.newCall(originRequest(address, path, method, body, authenticated, contentType, filename, extraHeaders)),
+        address,
+    )
+
+    private fun readOrigin(call: okhttp3.Call, address: String): ByteArray {
+        call.execute().use { response ->
             val result = response.body?.bytes() ?: ByteArray(0)
             if (!response.isSuccessful) {
-                if (response.code == 401) { token = ""; expiresAt = 0 }
+                if (response.code == 401) {
+                    token = ""
+                    expiresAt = 0
+                }
                 val reason = runCatching { JSONObject(result.toString(Charsets.UTF_8)).optString("detail") }.getOrDefault("")
                 throw ApiException(response.code, reason.ifEmpty { "Jarvis returned ${response.code}" })
             }
-            preferred = address; preferredAt = System.currentTimeMillis()
-            return@withContext result
-        } } catch (error: javax.net.ssl.SSLException) { throw error }
-        catch (error: java.io.IOException) { failure = error }
+            noteReachable(address)
+            return result
         }
-        throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
     }
 
     companion object {

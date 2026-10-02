@@ -96,6 +96,7 @@ CATALOG: tuple[PermissionSpec, ...] = (
         "HexStrike AI suite",
         "Start and view the HexStrike cybersecurity suite through Jarvis. Command/payload endpoints stay blocked.",
         "ask",
+        gated="hexstrike",
     ),
     PermissionSpec(
         "blue.static_rules",
@@ -389,7 +390,7 @@ def _host_is_local(value: str) -> bool:
     try:
         addr = ipaddress.ip_address(host)
     except ValueError:
-        return host.endswith((".local", ".home.arpa")) or host in {"localhost", "host.docker.internal"} or (bool(host) and "." not in host)
+        return host.endswith((".local", ".home.arpa", ".lan")) or host in {"localhost", "host.docker.internal"} or (bool(host) and "." not in host)
     return any(addr in net for net in _PRIVATE_NETS)
 
 
@@ -433,25 +434,28 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
     if any(
         isinstance((arguments or {}).get(key), str)
-        and str((arguments or {})[key]).startswith("\\\\")
+        and (str((arguments or {})[key]).startswith("\\\\") or str((arguments or {})[key]).startswith("//"))
         for key in ("path", "destination", "working_directory")
     ):
         pending.append("network.local")
-    if name in {"hexstrike", "hexstrike_suite", "hexstrike_defensive", "hexstrike_operator"}:
+    if name in {"hexstrike", "hexstrike_suite", "hexstrike_operator"}:
         pending.append("cyber.hexstrike")
     if name == "hexstrike_defensive":
+        action = str((arguments or {}).get("action") or "")
+        if action != "lan_inventory":
+            pending.append("cyber.hexstrike")
         action_permissions = {
-            "lan_inventory": "blue.active_response",
+            "lan_inventory": "network.local",
             "container_scan": "blue.static_rules",
             "iac_scan": "blue.static_rules",
             "host_baseline": "blue.static_rules",
             "forensic_inspection": "blue.static_rules",
             "threat_intel_lookup": "blue.static_rules",
         }
-        permission = action_permissions.get(str((arguments or {}).get("action") or ""))
+        permission = action_permissions.get(action)
         if permission:
             pending.append(permission)
-        if str((arguments or {}).get("action") or "") == "threat_intel_lookup":
+        if action == "threat_intel_lookup":
             pending.append("network.internet")
     # unique, stable order following catalog
     order = [spec.id for spec in CATALOG]

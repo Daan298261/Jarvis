@@ -158,7 +158,7 @@ async def test_git_checkpoint_keeps_working_tree(tmp_path):
     (tmp_path / "tracked.txt").write_text("two", encoding="utf-8")
     (tmp_path / "new.txt").write_text("untracked", encoding="utf-8")
 
-    tool = GitTool()
+    tool = GitTool(lambda: {"allowed_directories": [str(tmp_path)]})
     result = await tool.execute(action="checkpoint", path=str(tmp_path))
     assert result.success, result.error
     assert "Working tree was not reset" in result.output

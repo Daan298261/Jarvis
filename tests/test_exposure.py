@@ -107,11 +107,12 @@ async def test_agent_sends_only_exposed_tools(jarvis_env):
     )
     await AGENT._tasks[created.id]
     assert provider.tool_sets
-    first = set(provider.tool_sets[0])
-    assert "filesystem" in first
-    assert "request_capability" in first
-    assert "office" not in first
-    assert "docker" not in first
+    # Call 0 may be an ingress turn with no tools; assert the first exposed set.
+    exposed = next((set(names) for names in provider.tool_sets if names), set())
+    assert "filesystem" in exposed
+    assert "request_capability" in exposed
+    assert "office" not in exposed
+    assert "docker" not in exposed
     assert (jarvis_env["tmp"] / "note.txt").read_text(encoding="utf-8") == "READY"
 
 

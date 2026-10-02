@@ -231,3 +231,25 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Fal
         previous_context_limit=previous_context if previous_context > 0 else None,
     )
     return MANAGER.state
+
+
+def runtime_activation_snapshot() -> dict:
+    """Return the authoritative in-memory state immediately after hotswap.
+
+    Activation already waited for the selected backend to become ready. Do not
+    hold the Play response behind another full status probe; that made the HUD
+    look stuck for tens of seconds on otherwise successful local switches.
+    """
+    snapshot = MANAGER.live_state_overlay()
+    snapshot["healthy"] = bool(
+        snapshot.get("loaded")
+        and not snapshot.get("loading")
+        and not snapshot.get("last_error")
+    )
+    try:
+        from .status_monitor import STATUS_MONITOR
+
+        STATUS_MONITOR.invalidate()
+    except Exception:
+        pass
+    return snapshot

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -151,6 +152,57 @@ async def test_coding_session_fails_plainly_when_the_model_cannot_load(jarvis_en
     finished = await _finished(task.id)
     assert finished.status == "failed"
     assert "language model" in (finished.result or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_front_lane_does_not_clobber_terminal_model_load_failure(jarvis_env, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.agent.front_responder import SAFE_ACK, FrontReply
+    from app.agent.loop import AGENT
+    from app.db.models import Task
+    from app.db.session import SessionLocal
+
+    task_id = "front-must-not-clobber-fail"
+    failure = "The language model isn't ready."
+    async with SessionLocal() as session:
+        session.add(
+            Task(
+                id=task_id,
+                title="start a coding session on the jarvis repo",
+                prompt="start a coding session on the jarvis repo",
+                status="failed",
+                stage="failed",
+                task_class="software engineering",
+                response_route="managed_task",
+                result=failure,
+                error="The language model could not be loaded: gguf missing",
+            )
+        )
+        await session.commit()
+
+    monkeypatch.setattr(
+        "app.agent.loop.generate_front_reply",
+        AsyncMock(return_value=FrontReply(action="ack_continue", text=SAFE_ACK, model="front")),
+    )
+
+    async def no_tts(*_a, **_k):
+        return {}
+
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", no_tts)
+
+    await AGENT._run_managed_front_lane(
+        task_id,
+        "start a coding session on the jarvis repo",
+        jarvis_env["settings"],
+        turn_started=time.perf_counter(),
+    )
+    async with SessionLocal() as session:
+        row = await session.get(Task, task_id)
+        assert row is not None
+        assert row.status == "failed"
+        assert "language model" in (row.result or "").lower()
+        assert SAFE_ACK not in (row.result or "")
 
 
 def test_paths_do_not_decide_the_task_class():

@@ -132,14 +132,16 @@ def suggest_tools_for_prompt(
 ) -> list[str]:
     """Enabled tools that aid this message. Does not return the full catalog."""
     ranked: list[tuple[int, str]] = []
-    blue = security_role == "blue-team"
+    from ..security.security_agents import is_security_role
+
+    security_agent = is_security_role(security_role) or security_role == "blue-team"
     restricted = _restricted()
     for name, tool in REGISTRY.tools.items():
         if not tool.enabled:
             continue
         if name in {"request_tools", "request_capability"}:
             continue
-        if name in restricted and not blue:
+        if name in restricted and not security_agent:
             continue
         extra = (*_alias_terms(name), *_SEARCH_TERMS.get(name, ()))
         score = score_tool(prompt, name, tool.description or "", extra)

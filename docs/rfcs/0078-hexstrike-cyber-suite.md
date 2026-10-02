@@ -8,6 +8,8 @@
 
 **Related (do not rewrite):** RFC-0048 HexStrike gateway boundary; RFC-0069 presence shape catalog; RFC-0073 HUD model hotswap; `SECURITY_AGENTS.md` §3.4.
 
+**Amended 2026-10-02:** [RFC-0196](0196-hexstrike-operator-chain-anzu-1.md) defines the Anzu 1.0 **end-to-end operator chain** (discovery, streaming jobs, error honesty, anti-stub implement bar) on top of this suite shell. Status here stays **implemented**; do not re-tick ledger for 0196.
+
 ## Problem
 
 Taco wants HexStrike AI as a first-class **cybersecurity suite** in Jarvis: pick it in the HUD ModelSelector like a model, start the HexStrike application in the background, and operate it through the Jarvis HUD. RFC-0048 specified a Jarvis-controlled gateway but did not ship a suite profile, process supervisor, or HUD surface. HexStrike’s upstream project is an MCP + loopback API (default `:8888`); it does not ship a first-class web UI on mainline.

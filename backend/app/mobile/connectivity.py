@@ -17,7 +17,7 @@ import uvicorn
 from fastapi import HTTPException
 
 from .companion_security import GUARD
-from .gateway import gateway_app, server_identity
+from .gateway import gateway_app, identity_covers, server_identity
 from .lan_beacon import LanBeaconServer, public_beacon_payload
 from .store import database, get, put
 
@@ -34,22 +34,52 @@ def origin(value: str) -> str:
     return value.rstrip("/")
 
 
+def dial_host(value: str) -> str:
+    """Hostname or IP the phone would present in SNI / hostname verification."""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        return (urlsplit(text).hostname or "").strip()
+    return text.split("/")[0].strip()
+
+
 def lan_hosts():
     from ..api.mobile import _lan_hosts
     return [host for host in _lan_hosts() if ipaddress.ip_address(host).is_private
             and not ipaddress.ip_address(host).is_loopback and not ipaddress.ip_address(host).is_link_local]
 
 
-def router_candidate():
-    import miniupnpc
-    router = miniupnpc.UPnP()
-    router.discoverdelay = 1500
-    router.discover()
-    router.selectigd()
-    address = ipaddress.ip_address(router.externalipaddress())
-    if address.version != 4 or not address.is_global:
-        raise ValueError("Router has no public IPv4 address; hosted relay is needed for remote access")
-    return router, str(address)
+def router_candidate(username: str = "", password: str = ""):
+    last_error: Exception | None = None
+    try:
+        import miniupnpc
+
+        router = miniupnpc.UPnP()
+        router.discoverdelay = 2000 if username else 1500
+        router.discover()
+        router.selectigd()
+        if username:
+            router.username = username
+            router.password = password or ""
+        address = ipaddress.ip_address(router.externalipaddress())
+        if address.version != 4 or not address.is_global:
+            raise ValueError("Router has no public IPv4 address; hosted relay or SSH reverse tunnel is needed for remote access")
+        return router, str(address)
+    except ImportError as exc:
+        last_error = exc
+    except Exception as exc:
+        if "no public IPv4" in str(exc).lower():
+            raise
+        last_error = exc
+    try:
+        from .igd import stdlib_igd_candidate
+
+        lan = next(iter(lan_hosts()), "")
+        return stdlib_igd_candidate(username, password, lanaddr=lan)
+    except Exception as exc:
+        last_error = exc
+    raise ValueError(str(last_error) if last_error else "No IGD available")
 
 
 def owned_mapping(mapping, host, marker):
@@ -86,6 +116,8 @@ class Connectivity:
         self.marker = ""
         self.identity = None
         self.public_ip = None
+        self.natpmp_gateway = None
+        self.pcp_nonce = None
         self.remote_prepared = False
         self.state = {
             "state": "starting",
@@ -98,8 +130,11 @@ class Connectivity:
         self.state.update(changes, updated_at=time.time())
 
     def snapshot(self):
+        from .wan_forward import redact_wan_config
+
         payload = {**self.state, "heartbeat_at": time.time(), "worker": "Jarvis desktop"}
         payload.update(GUARD.snapshot())
+        payload["wan"] = redact_wan_config(self.config())
         return payload
 
     def config(self):
@@ -108,21 +143,32 @@ class Connectivity:
                 "enabled": True,
                 "remote": False,
                 "marker": "Jarvis-" + str(uuid.uuid4()),
+                "wan_method": "auto",
             }
 
-    async def configure(self, enabled: bool, remote: bool):
+    async def configure(self, enabled: bool, remote: bool, extras: dict | None = None):
         if self.lock.locked():
             raise HTTPException(409, "Connection setup is already running")
         async with self.lock:
             config = self.config()
             config.update(enabled=enabled, remote=remote)
+            if extras:
+                from .wan_forward import WAN_METHODS
+
+                for key, value in extras.items():
+                    if value is None:
+                        continue
+                    if key == "wan_method" and str(value).strip().lower() not in WAN_METHODS:
+                        raise HTTPException(400, "Unknown WAN method")
+                    config[key] = value
             with database() as db:
                 put(db, "network", "config", config)
             await self.apply_remote(config)
         return self.snapshot()
 
-    async def stop_gateway(self):
-        await self.stop_lan_beacon()
+    async def stop_gateway(self, beacons: bool = True):
+        if beacons:
+            await self.stop_lan_beacon()
         external = bool(getattr(self, "_uses_external_listener", False))
         if self.server and not external:
             self.server.should_exit = True
@@ -152,12 +198,30 @@ class Connectivity:
             pass
 
     async def release_mapping(self):
+        from .wan_forward import REVERSE_TUNNEL
+
         if self.router:
             try:
                 await asyncio.to_thread(unmap_router, self.router, self.marker)
             except Exception:
                 pass  # Finite lease expires if the router is unavailable during shutdown.
             self.router = None
+        if self.natpmp_gateway:
+            try:
+                lan = next(iter(lan_hosts()), "")
+                if self.pcp_nonce:
+                    from .pcp import delete_pcp
+
+                    await asyncio.to_thread(delete_pcp, self.natpmp_gateway, lan, self.pcp_nonce)
+                else:
+                    from .natpmp import delete_natpmp
+
+                    await asyncio.to_thread(delete_natpmp, self.natpmp_gateway, lan)
+            except Exception:
+                pass
+            self.natpmp_gateway = None
+            self.pcp_nonce = None
+        await REVERSE_TUNNEL.stop()
 
     async def on_security_cooldown(self):
         await self.stop_gateway()
@@ -185,11 +249,11 @@ class Connectivity:
 
         self.server_task = asyncio.create_task(_hold(), name="jarvis-companion-gateway-external")
 
-    async def start_gateway(self, identity):
+    async def start_gateway(self, identity, beacons: bool = True):
         from ..config import load_settings
         if self.server and self.server_task and not self.server_task.done() and self.server.started:
             return
-        await self.stop_gateway()
+        await self.stop_gateway(beacons=beacons)
         # Bind ourselves so port conflicts raise OSError instead of Uvicorn's SystemExit.
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         addr_in_use = getattr(errno, "WSAEADDRINUSE", 10048)
@@ -197,6 +261,15 @@ class Connectivity:
             listener.bind(("0.0.0.0", PORT))
             listener.listen(128)
             listener.setblocking(False)
+            try:
+                from .wan_forward import ensure_private_firewall_4781
+
+                fw = await asyncio.to_thread(ensure_private_firewall_4781)
+                self.report(firewall_4781=fw)
+                if str(fw).startswith("failed"):
+                    self.report(limitation=f"Windows firewall did not allow inbound TCP 4781 ({fw})")
+            except Exception as exc:
+                self.report(firewall_4781="error", limitation=f"Windows firewall helper failed: {exc}"[:240])
             settings = load_settings()
             config = uvicorn.Config(gateway_app(f"http://127.0.0.1:{settings.bind_port}"),
                 ssl_keyfile=identity["key"], ssl_certfile=identity["certificate"],
@@ -261,6 +334,26 @@ class Connectivity:
             server_pin=identity["server_pin"],
         )
 
+    async def cover_phone_dial_hosts(self, *hosts: str):
+        """RFC-0123: every phone-dial IP/DNS name must be a SAN on the live gateway cert."""
+        extra = [dial_host(host) for host in hosts]
+        extra = [host for host in extra if host]
+        if not extra:
+            return self.identity
+        current = self.identity
+        if current and identity_covers(current, extra):
+            return current
+        identity = await asyncio.to_thread(server_identity, extra)
+        self.identity = identity
+        external = bool(getattr(self, "_uses_external_listener", False))
+        running = bool(self.server_task and not self.server_task.done())
+        if running and not external:
+            await self.stop_gateway(beacons=False)
+            await self.start_gateway(identity, beacons=False)
+            await self.probe(f"https://127.0.0.1:{PORT}", identity)
+        self.report(server_pin=identity["server_pin"])
+        return identity
+
     async def apply_remote(self, config):
         """Prepare connection: port-forward lease and relay only (gateway already listens)."""
         await self.release_mapping()
@@ -280,17 +373,31 @@ class Connectivity:
         hosts = await asyncio.to_thread(lan_hosts)
         relay = os.environ.get("JARVIS_RELAY_ENDPOINT", "") if config["remote"] else ""
         endpoints = self._lan_endpoints(hosts)
+        wan_path = ""
         try:
             relay = origin(relay) if relay else ""
             if relay:
                 hosts.append(urlsplit(relay).hostname)
             if config["remote"]:
+                from .wan_forward import wan_settings_from_config
+
+                wan = wan_settings_from_config(config)
+                method = wan["wan_method"]
                 self.report(activity="Checking router support for encrypted remote access", router="discovering")
-                try:
-                    router, public_ip = await asyncio.to_thread(router_candidate)
-                    hosts.append(public_ip)
-                except Exception as exc:
-                    self.report(router="unavailable", limitation=str(exc)[:240])
+                if method in {"auto", "upnp"}:
+                    try:
+                        try:
+                            router, public_ip = await asyncio.to_thread(
+                                router_candidate,
+                                wan.get("gateway_username") or "",
+                                wan.get("gateway_password") or "",
+                            )
+                        except TypeError:
+                            router, public_ip = await asyncio.to_thread(router_candidate)
+                        hosts.append(public_ip)
+                    except Exception as exc:
+                        self.report(router="unavailable", limitation=str(exc)[:240])
+                        router, public_ip = None, None
             if not self.identity or GUARD.cooldown_active():
                 await self.ensure_gateway_listening()
             identity = self.identity
@@ -301,17 +408,149 @@ class Connectivity:
             endpoints = self._lan_endpoints([host for host in hosts if host != public_ip and host != relay_hostname])
             self.report(local_verified=True, server_pin=identity["server_pin"], endpoints=endpoints)
             await self.start_lan_beacon()
+            wan_path = ""
+            inner_wan_unusable = False
+            from .wan_forward import mapped_address_is_egress
+
+            double_nat_limit = (
+                "Router mapping is not this network's public IPv4 (typical of double NAT). "
+                "Inner-router forwards will not reach a phone off this LAN; trying the next owner method."
+            )
             if router:
                 self.report(activity="Requesting a one-hour lease for the TLS gateway")
                 try:
                     await asyncio.to_thread(map_router, router, config["marker"])
-                    self.router, self.marker = router, config["marker"]
-                    self.public_ip = public_ip
-                    endpoints.append(f"https://{public_ip}:{PORT}")
-                    self.report(router="mapped", limitation="Router lease created; internet reachability still needs verification from outside this network")
+                    if not await asyncio.to_thread(mapped_address_is_egress, public_ip):
+                        await asyncio.to_thread(unmap_router, router, config["marker"])
+                        self.router = None
+                        inner_wan_unusable = True
+                        self.report(router="unavailable", limitation=double_nat_limit)
+                    else:
+                        self.router, self.marker = router, config["marker"]
+                        self.public_ip = public_ip
+                        endpoints.append(f"https://{public_ip}:{PORT}")
+                        wan_path = "upnp"
+                        self.report(router="mapped", wan_path=wan_path, limitation="Router lease created; internet reachability still needs verification from outside this network")
                 except Exception as exc:
                     await asyncio.to_thread(unmap_router, router, config["marker"])
+                    self.router = None
                     self.report(router="unavailable", limitation=str(exc)[:240])
+            if config["remote"] and not self.router and not inner_wan_unusable and method in {"auto", "upnp"}:
+                from .wan_forward import default_gateway_ipv4
+
+                gw = ""
+                lan_ip = (hosts[0] if hosts else "") or ""
+                try:
+                    gw = default_gateway_ipv4()
+                except Exception as exc:
+                    prior = self.state.get("limitation") or ""
+                    extra = str(exc)[:240]
+                    self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
+                if gw:
+                    self.report(activity="Trying NAT-PMP on this PC's default gateway for TCP 4781")
+                    try:
+                        from .natpmp import apply_natpmp
+
+                        public_ip = await asyncio.to_thread(apply_natpmp, gw, lan_ip)
+                        if not await asyncio.to_thread(mapped_address_is_egress, public_ip):
+                            inner_wan_unusable = True
+                            self.natpmp_gateway = None
+                            self.report(router="unavailable", limitation=double_nat_limit)
+                        else:
+                            self.natpmp_gateway = gw
+                            self.pcp_nonce = None
+                            self.public_ip = public_ip
+                            endpoints.append(f"https://{public_ip}:{PORT}")
+                            wan_path = "natpmp"
+                            self.report(
+                                router="mapped",
+                                wan_path=wan_path,
+                                limitation="NAT-PMP lease created; internet reachability still needs verification from outside this network",
+                            )
+                    except Exception as nat_exc:
+                        self.report(activity="Trying PCP MAP on this PC's default gateway for TCP 4781")
+                        try:
+                            from .pcp import apply_pcp
+
+                            public_ip, nonce = await asyncio.to_thread(apply_pcp, gw, lan_ip, None)
+                            if not await asyncio.to_thread(mapped_address_is_egress, public_ip):
+                                inner_wan_unusable = True
+                                self.natpmp_gateway = None
+                                self.pcp_nonce = None
+                                self.report(router="unavailable", limitation=double_nat_limit)
+                            else:
+                                self.natpmp_gateway = gw
+                                self.pcp_nonce = nonce
+                                self.public_ip = public_ip
+                                endpoints.append(f"https://{public_ip}:{PORT}")
+                                wan_path = "pcp"
+                                self.report(
+                                    router="mapped",
+                                    wan_path=wan_path,
+                                    limitation="PCP lease created; internet reachability still needs verification from outside this network",
+                                )
+                        except Exception as pcp_exc:
+                            prior = self.state.get("limitation") or ""
+                            extra = f"{nat_exc}; {pcp_exc}"[:240]
+                            self.report(limitation=(f"{prior} {extra}").strip() if prior else extra)
+            if config["remote"] and not wan_path:
+                from .wan_forward import apply_gateway_ssh, apply_ssh_reverse, gateway_ssh_configured, wan_settings_from_config
+
+                wan = wan_settings_from_config(config)
+                method = wan["wan_method"]
+                lan_ip = (hosts[0] if hosts else "") or ""
+                if (
+                    not inner_wan_unusable
+                    and method in {"auto", "gateway_ssh"}
+                    and gateway_ssh_configured(wan)
+                ):
+                    self.report(activity="Logging into the owner gateway over SSH to map TCP 4781")
+                    try:
+                        public_host = wan.get("wan_public_host") or public_ip or ""
+                        if not public_host:
+                            try:
+                                from .wan_forward import lookup_egress_ipv4
+
+                                public_host = await asyncio.to_thread(lookup_egress_ipv4)
+                            except Exception:
+                                public_host = ""
+                        mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=str(public_host or ""))
+                        wan_path = "gateway_ssh"
+                        if mapped:
+                            endpoints.append(mapped)
+                        self.report(router="mapped", wan_path=wan_path, limitation=detail)
+                    except Exception as exc:
+                        self.report(router="unavailable", limitation=str(exc)[:240])
+                if not wan_path and method in {"auto", "ssh_reverse"} and wan["ssh_host"] and wan["ssh_user"]:
+                    self.report(activity="Opening an SSH reverse tunnel for companion TLS")
+                    try:
+                        mapped = await apply_ssh_reverse(wan)
+                        endpoints.append(mapped)
+                        wan_path = "ssh_reverse"
+                        prior = self.state.get("limitation") or ""
+                        detail = "SSH reverse tunnel is up; the phone should use the SSH host on TCP 4781"
+                        self.report(
+                            router="tunneled",
+                            wan_path=wan_path,
+                            limitation=(f"{prior} {detail}").strip() if prior else detail,
+                        )
+                    except Exception as exc:
+                        self.report(router="unavailable", limitation=str(exc)[:240])
+            if config.get("remote"):
+                from .wan_forward import companion_wan_origin, is_public_dial_host
+
+                named = str(config.get("wan_public_host") or "").strip()
+                if is_public_dial_host(named):
+                    origin_name = companion_wan_origin(named)
+                    if origin_name not in endpoints:
+                        endpoints.append(origin_name)
+            await self.cover_phone_dial_hosts(
+                *endpoints,
+                relay,
+                str(public_ip or ""),
+                str(self.public_ip or ""),
+            )
+            identity = self.identity or identity
             if relay:
                 try:
                     await self.probe(relay, identity)
@@ -319,9 +558,20 @@ class Connectivity:
                     self.report(remote_verified=True)
                 except Exception:
                     self.report(limitation="Configured relay did not reach this gateway; check relay service and credentials")
-            if config["remote"] and not relay and not self.router:
+            if config["remote"] and not relay and not self.router and not wan_path:
                 prior = self.state.get("limitation") or ""
-                self.report(limitation=(prior + ". Hosted relay is not configured on this installation.").strip(". "))
+                named = str(config.get("wan_public_host") or "").strip()
+                if named:
+                    extra = (
+                        " Automatic router mapping was not created. Using the owner public hostname; "
+                        "confirm the router forwards TCP 4781 to this PC."
+                    )
+                else:
+                    extra = (
+                        " No UPnP, NAT-PMP, or PCP lease, gateway SSH, SSH reverse tunnel, or hosted relay is ready. "
+                        "Set SSH reverse-tunnel or OpenWrt gateway credentials, or JARVIS_RELAY_ENDPOINT."
+                    )
+                self.report(limitation=(prior + extra).strip())
             self.remote_prepared = True
             self.report(
                 state="ready",
@@ -351,6 +601,8 @@ class Connectivity:
                             cooldown_remaining_seconds=GUARD.cooldown_remaining_seconds(),
                         )
                     else:
+                        from .wan_forward import REVERSE_TUNNEL, apply_ssh_reverse, wan_settings_from_config
+
                         if not self.server_task or self.server_task.done():
                             try:
                                 await self.ensure_gateway_listening()
@@ -358,10 +610,26 @@ class Connectivity:
                                 self.report(state="failed", activity=str(exc)[:300])
                         config = self.config()
                         if config["enabled"]:
+                            tunnel_dead = self.state.get("wan_path") == "ssh_reverse" and not REVERSE_TUNNEL.alive()
                             if self.state.get("state") == "cooldown":
                                 pass
                             elif self.state.get("state") != "ready" or not self.remote_prepared:
                                 await self.apply_remote(config)
+                            elif tunnel_dead:
+                                try:
+                                    mapped = await apply_ssh_reverse(wan_settings_from_config(config))
+                                    endpoints = list(self.state.get("endpoints") or [])
+                                    if mapped not in endpoints:
+                                        endpoints.append(mapped)
+                                    self.report(
+                                        router="tunneled",
+                                        wan_path="ssh_reverse",
+                                        endpoints=endpoints,
+                                        limitation="SSH reverse tunnel reconnected",
+                                        next_renewal_at=time.time() + 1200,
+                                    )
+                                except Exception:
+                                    await self.apply_remote(config)
                             elif time.time() >= self.state.get("next_renewal_at", 0):
                                 try:
                                     await self.probe(f"https://127.0.0.1:{PORT}", self.identity)
@@ -369,6 +637,22 @@ class Connectivity:
                                         if await asyncio.to_thread(self.router.externalipaddress) != self.public_ip:
                                             raise RuntimeError("Router address changed")
                                         await asyncio.to_thread(map_router, self.router, self.marker)
+                                    elif self.natpmp_gateway:
+                                        lan = next(iter(lan_hosts()), "")
+                                        if self.pcp_nonce:
+                                            from .pcp import apply_pcp
+
+                                            public_ip, nonce = await asyncio.to_thread(
+                                                apply_pcp, self.natpmp_gateway, lan, self.pcp_nonce
+                                            )
+                                            self.pcp_nonce = nonce
+                                        else:
+                                            from .natpmp import apply_natpmp
+
+                                            public_ip = await asyncio.to_thread(apply_natpmp, self.natpmp_gateway, lan)
+                                        if public_ip != self.public_ip:
+                                            raise RuntimeError("Mapped public address changed")
+                                        self.public_ip = public_ip
                                     self.report(next_renewal_at=time.time() + 1200)
                                 except Exception:
                                     await self.apply_remote(config)

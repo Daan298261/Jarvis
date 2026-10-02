@@ -527,6 +527,29 @@ class Build(BaseModel):
 class ConnectionSetup(BaseModel):
     enabled: bool = True
     remote: bool = True
+    wan_method: Literal["auto", "upnp", "ssh_reverse", "gateway_ssh"] | None = None
+    ssh_host: str | None = Field(default=None, max_length=255)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_user: str | None = Field(default=None, max_length=64)
+    ssh_identity_file: str | None = Field(default=None, max_length=1024)
+    gateway_host: str | None = Field(default=None, max_length=255)
+    gateway_port: int | None = Field(default=None, ge=1, le=65535)
+    gateway_user: str | None = Field(default=None, max_length=64)
+    gateway_identity_file: str | None = Field(default=None, max_length=1024)
+    gateway_profile: Literal["openwrt_uci"] | None = None
+    gateway_username: str | None = Field(default=None, max_length=64)
+    gateway_password: str | None = Field(default=None, max_length=256)
+    wan_public_host: str | None = Field(default=None, max_length=255)
+
+
+@owner_router.post("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
+async def connection_setup(body: ConnectionSetup):
+    from ..mobile.connectivity import CONNECTIVITY
+
+    extras = body.model_dump(exclude={"enabled", "remote"}, exclude_none=True)
+    if extras:
+        return await CONNECTIVITY.configure(body.enabled, body.remote, extras)
+    return await CONNECTIVITY.configure(body.enabled, body.remote)
 
 
 @owner_router.get("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
@@ -541,18 +564,17 @@ def infrastructure_status():
     return infrastructure_readiness()
 
 
-@owner_router.post("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
-async def connection_setup(body: ConnectionSetup):
-    from ..mobile.connectivity import CONNECTIVITY
-    return await CONNECTIVITY.configure(body.enabled, body.remote)
-
-
 @router.get("/connection")
 def device_connection_status(device=Device):
     from ..mobile.connectivity import CONNECTIVITY
     # Only already-paired devices may discover additional endpoints with this same pin.
     snapshot = CONNECTIVITY.snapshot()
-    return {key: snapshot[key] for key in ("endpoints", "server_pin") if key in snapshot}
+    from ..mobile.pairing_payload import order_phone_reachable_endpoints
+
+    payload = {key: snapshot[key] for key in ("endpoints", "server_pin") if key in snapshot}
+    if "endpoints" in payload:
+        payload["endpoints"] = order_phone_reachable_endpoints(list(payload.get("endpoints") or []))
+    return payload
 
 
 @owner_router.post("/builds", dependencies=[Depends(require_owner_private_key)])
@@ -564,11 +586,14 @@ async def build_apk(body: Build):
         # Full-featured companion APK for releases / sideload; pair in the app after install.
         return await start("", [], generic=True)
 
-    prepared = CONNECTIVITY.snapshot().get("endpoints", [])
-    endpoint = body.endpoint or (prepared[0] if prepared else "")
+    from ..mobile.pairing_payload import order_phone_reachable_endpoints
+
+    prepared = order_phone_reachable_endpoints(list(CONNECTIVITY.snapshot().get("endpoints") or []))
+    custom = (body.endpoint or "").strip()
+    endpoint = custom or (prepared[0] if prepared else "")
     if not endpoint and body.prepare_connection:
         snapshot = await CONNECTIVITY.configure(True, body.remote)
-        prepared = snapshot.get("endpoints", [])
+        prepared = order_phone_reachable_endpoints(list(snapshot.get("endpoints") or []))
         endpoint = prepared[0] if prepared else ""
     try:
         endpoint = origin(endpoint)
@@ -577,7 +602,8 @@ async def build_apk(body: Build):
             400,
             "Prepare a connection first, supply an HTTPS gateway origin, or build a generic companion APK.",
         ) from exc
-    return await start(endpoint, prepared if endpoint in prepared else [], generic=False)
+    ordered = order_phone_reachable_endpoints(list(dict.fromkeys([endpoint, *prepared])))
+    return await start(endpoint, ordered, generic=False)
 
 
 @owner_router.get("/builds/{job_id}", dependencies=[Depends(require_owner_private_key)])

@@ -472,8 +472,40 @@
   color: var(--hex-gold);
 }
 
+.hex-job-status.succeeded {
+  color: #8fd9a8;
+}
+
 .hex-job-status.failed {
   color: #ff9b7a;
+}
+
+.hex-job-status.cancelled {
+  color: #b8c0cc;
+}
+
+.hex-artifact-link {
+  color: var(--hex-cyan);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hex-catalog-avail {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8fd9a8;
+}
+
+.hex-catalog-list li.missing .hex-catalog-avail {
+  color: #ff9b7a;
+}
+
+.hex-catalog-guidance {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: #b8c0cc;
+  opacity: 0.9;
 }
 
 .hex-job-cap {

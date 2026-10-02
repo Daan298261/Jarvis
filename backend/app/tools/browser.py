@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+from pathlib import Path
 from typing import Any
 
-from ..config import AppSettings, load_settings
+from ..config import AppSettings, data_dir, load_settings
 from .base import RiskLevel, Tool, ToolResult
 
 _lock = asyncio.Lock()
@@ -31,6 +33,59 @@ _ACTIONS_NEEDING_PAGE = {
 
 _NAMED_ROLES = ("button", "link", "tab", "menuitem", "checkbox", "radio")
 _GOTO_RETRIES = 3
+
+
+def browser_permission_url(action: str, kwargs: dict[str, Any] | None, current_url: str = "") -> str:
+    """Use the open URL for follow-on actions so LAN pages stay network.local."""
+    supplied = str((kwargs or {}).get("url") or "").strip()
+    if supplied:
+        return supplied
+    if action != "open":
+        return str(current_url or "").strip()
+    return ""
+
+
+def _browser_error(exc: BaseException) -> str:
+    if isinstance(exc, ModuleNotFoundError):
+        return "Playwright is not installed on this PC, so I cannot open a browser."
+    text = str(exc)
+    lowered = text.lower()
+    if "executable doesn't exist" in lowered or "playwright install" in lowered:
+        return (
+            "Chromium is not installed for Playwright on this PC. "
+            "Install it with playwright install chromium."
+        )
+    return text
+
+
+def _title_payload(url: str, title: str) -> str:
+    return f"URL: {url}\nTitle: {title}"
+
+
+async def _wait_stable(page, timeout_ms: int = 1500) -> None:
+    try:
+        await page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    except Exception:
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+        except Exception:
+            return
+
+
+async def _goto_with_retry(page, url: str) -> None:
+    last_error: Exception | None = None
+    target = (url or "").strip()
+    if not target:
+        raise ValueError("url is required")
+    for attempt in range(_GOTO_RETRIES):
+        try:
+            await page.goto(target, wait_until="domcontentloaded", timeout=30_000)
+            await _wait_stable(page)
+            return
+        except Exception as exc:
+            last_error = exc
+            await asyncio.sleep(0.15 * (attempt + 1))
+    raise last_error or RuntimeError(f"Failed to open {target}")
 
 
 async def _ensure_page(headless: bool):
@@ -138,13 +193,39 @@ class BrowserTool(Tool):
                 return await _close_browser()
         if action == "open" and not (kwargs.get("url") or "").strip():
             return ToolResult(False, "", error="url is required")
+        if action == "open":
+            from urllib.parse import urlparse
+
+            scheme = (urlparse(str(kwargs.get("url") or "")).scheme or "").lower()
+            if scheme not in {"http", "https"}:
+                return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed")
         if action not in _ACTIONS_NEEDING_PAGE:
             return ToolResult(False, "", error=f"Unknown action {action}")
 
-        settings = self.context_getter()
+        from ..policy.computer_permissions import evaluate_tool_permissions
+
+        current = ""
+        try:
+            if _page is not None:
+                current = str(getattr(_page, "url", "") or "")
+        except Exception:
+            current = ""
+        gate = evaluate_tool_permissions(
+            "browser",
+            {"url": browser_permission_url(action, kwargs, current), "action": action},
+        )
+        if gate.status == "deny":
+            return ToolResult(False, "", error=gate.reason)
+        if gate.status == "ask":
+            return ToolResult(False, "", error=gate.reason or "Permission required before the browser can reach the network.")
+
+        ctx = self.context_getter() if callable(self.context_getter) else {}
         headless = kwargs.get("headless")
         if headless is None:
-            headless = bool((settings.get("browser") or {}).get("headless", False))
+            if isinstance(ctx, dict):
+                headless = bool((ctx.get("browser") or {}).get("headless", False))
+            else:
+                headless = bool(getattr(getattr(ctx, "browser", None), "headless", False))
         async with _lock:
             try:
                 if action == "close":
@@ -243,5 +324,7 @@ class BrowserTool(Tool):
                     await page.locator(kwargs.get("selector") or "input[type=file]").set_input_files(kwargs.get("path"))
                     return ToolResult(True, "Uploaded file")
                 return ToolResult(False, "", error=f"Unknown action {action}")
+            except ModuleNotFoundError as exc:
+                return ToolResult(False, "", error=_browser_error(exc))
             except Exception as exc:
-                return ToolResult(False, "", error=str(exc))
+                return ToolResult(False, "", error=_browser_error(exc))

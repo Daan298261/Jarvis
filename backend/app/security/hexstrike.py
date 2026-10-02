@@ -275,6 +275,43 @@ def resolve_python(install: Path, explicit: str = "") -> str:
     return sys.executable
 
 
+def classify_loopback_http_error(exc: BaseException, *, suite_running: bool) -> str:
+    """Distinguish not-running / connection refused / timeout for owner-visible errors (RFC-0196 §5)."""
+    if not suite_running:
+        return "HexStrike suite is not running"
+    text = str(exc).lower()
+    name = type(exc).__name__.lower()
+    if isinstance(exc, httpx.ConnectError) or "connect" in name:
+        if "refused" in text or "actively refused" in text or "errno 111" in text or "winerror 10061" in text:
+            return "HexStrike loopback connection refused (server not accepting connections on the configured port)"
+        return f"HexStrike loopback connection failed: {exc}"[:400]
+    if isinstance(exc, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException)) or "timeout" in name:
+        return "HexStrike loopback request timed out"
+    if isinstance(exc, httpx.HTTPError):
+        return f"HexStrike loopback HTTP error: {exc}"[:400]
+    return str(exc)[:400]
+
+
+def _upstream_error_message(response: httpx.Response) -> str:
+    """Prefer upstream body over a bare status code."""
+    excerpt = ""
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            for key in ("error", "message", "detail", "stderr"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    excerpt = value.strip()
+                    break
+        elif isinstance(payload, str) and payload.strip():
+            excerpt = payload.strip()
+    except ValueError:
+        excerpt = (response.text or "").strip()
+    if excerpt:
+        return f"HexStrike returned HTTP {response.status_code}: {excerpt[:350]}"
+    return f"HexStrike returned HTTP {response.status_code}"
+
+
 class HexStrikeManager:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
@@ -416,8 +453,14 @@ class HexStrikeManager:
             if current.running:
                 await self._enrich(current)
                 return current
-            from ..policy.cyber_ato import license_blocks
+            from ..licensing.entitlements import hexstrike_denied_message
+            from ..policy.cyber_ato import license_blocks, licensed_module_allowed
 
+            if not licensed_module_allowed("hexstrike"):
+                self.last_error = hexstrike_denied_message()
+                current.last_error = self.last_error
+                audit_hexstrike("start_denied", reason="hexstrike_module_missing")
+                return current
             blocked = license_blocks("hexstrike")
             if blocked:
                 self.last_error = blocked
@@ -460,7 +503,12 @@ class HexStrikeManager:
                     install = Path(snapshot.install_path)
                     surface = await sync_operator_surface(register_mcp=True)
                     if not surface.get("operator_ready"):
-                        hint = surface.get("mcp", {}).get("error") or surface.get("reason") or "operator surface not ready"
+                        hint = (
+                            surface.get("discovery_error")
+                            or surface.get("mcp", {}).get("error")
+                            or surface.get("reason")
+                            or "operator surface not ready"
+                        )
                         self.last_error = f"HexStrike server is up but operator surface failed: {hint}"[:400]
                         snapshot.last_error = self.last_error
                         audit_hexstrike("operator_surface_failed", detail=surface)
@@ -655,10 +703,13 @@ class HexStrikeManager:
             raise PermissionError(f"HexStrike gateway does not allow {method} /{cleaned}")
         snapshot = await self.status(enrich=False)
         if not snapshot.running:
-            raise RuntimeError("HexStrike is not running")
+            raise RuntimeError("HexStrike suite is not running")
         url = f"http://{snapshot.host}:{snapshot.port}/{cleaned}"
-        async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
-            response = await client.request(method.upper(), url, content=body or None)
+        try:
+            async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+                response = await client.request(method.upper(), url, content=body or None)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(classify_loopback_http_error(exc, suite_running=True)) from exc
         content_type = response.headers.get("content-type", "application/json")
         audit_hexstrike("proxy", method=method, path=cleaned, status=response.status_code)
         return response.status_code, response.content, content_type
@@ -671,13 +722,16 @@ class HexStrikeManager:
             raise PermissionError(f"HexStrike operator gateway does not allow POST /{cleaned}")
         snapshot = await self.status(enrich=False)
         if not snapshot.running:
-            raise RuntimeError("HexStrike is not running")
+            raise RuntimeError("HexStrike suite is not running")
         url = f"http://{snapshot.host}:{snapshot.port}/{cleaned}"
-        async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
-            response = await client.post(url, json=payload)
+        try:
+            async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+                response = await client.post(url, json=payload)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(classify_loopback_http_error(exc, suite_running=True)) from exc
         audit_hexstrike("operator_proxy", path=cleaned, status=response.status_code)
         if response.status_code >= 400:
-            raise RuntimeError(f"HexStrike returned HTTP {response.status_code}")
+            raise RuntimeError(_upstream_error_message(response))
         try:
             return response.json()
         except ValueError:

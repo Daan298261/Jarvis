@@ -410,6 +410,31 @@ begin
       Log('Warning: failed to write OwnedPaths SetupExe');
 end;
 
+procedure StageLicenseSidecar(const InstallDir: String);
+var
+  ResultCode: Integer;
+  Script: String;
+  Params: String;
+begin
+  Script := AddBackslash(InstallDir) + 'installer\windows\stage-license-sidecar.ps1';
+  if not FileExists(Script) then
+  begin
+    Log('stage-license-sidecar.ps1 not found; skipping license sidecar detection');
+    Exit;
+  end;
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Script + '" -InstallerDir "' + ExpandConstant('{src}') +
+    '" -AppRoot "' + InstallDir + '"';
+  Log('RFC-0199: staging license sidecar from installer directory ' + ExpandConstant('{src}'));
+  if Exec('powershell.exe', Params, InstallDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Log('stage-license-sidecar.ps1 finished with code ' + IntToStr(ResultCode));
+    if ResultCode <> 0 then
+      Log('License sidecar invalid or staging failed — see logs\installer-sidecar.log');
+  end
+  else
+    Log('Failed to launch stage-license-sidecar.ps1');
+end;
+
 function ResolveCleanReinstallScript(const AppDir: String): String;
 begin
   Result := ExpandConstant('{tmp}\clean-reinstall-jarvis.ps1');
@@ -521,6 +546,8 @@ begin
     if Voices <> '' then
       Params := Params + ' -VoiceProfiles "' + Voices + '"';
   end;
+  Params := Params + ' -InstallerDir "' + ExpandConstant('{src}') + '"';
+  Params := Params + ' -AppRoot "' + ExpandConstant('{app}') + '"';
   Result := Params;
 end;
 

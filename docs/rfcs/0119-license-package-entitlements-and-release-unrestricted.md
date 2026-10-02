@@ -1,6 +1,6 @@
 # RFC-0119: License-package entitlements, release unrestricted license, HexStrike overview
 
-**Status:** accepted  
+**Status:** implemented  
 **Queue item:** (none — no new §58 checkbox; implement is a follow-up after CoS names it)  
 **Author:** Taco via Chief of Staff / Cursor  
 **Date:** 2026-09-18
@@ -29,6 +29,8 @@ One RFC, three product facts:
 3. When HexStrike is **selected and loaded**, Jarvis gives **one short** spoken and/or chat **product overview**. No exploit recipes.
 
 **Will not:** invent new LE / Red / Purple / ATO officer-procedure rules beyond “entitlement comes from the signed license package” and the existing RFC-0086/0087 fields. Rewrite RFC-0106 operator control. Put `JarvisLicenseManager` or issuer private keys in the customer Inno payload. Ship product code in this PR. Take RFC-0118.
+
+**Amended 2026-10-02:** [RFC-0199](0199-installer-license-auto-apply.md) covers **customer sidecar** `.jarvis-license` next to Setup at install time (auto-apply). That is distinct from §3 vendor `Jarvis-unrestricted.jarvis-license` in `installer/windows/dist/`.
 
 ### 1. License package is the sole capability gate
 
@@ -145,13 +147,13 @@ Specs-only in **this** PR:
 
 Implement follow-up (separate named ticket; not this PR):
 
-- [ ] Entitlements evaluator + `/api/license/entitlements` + License page reflect package `modules[]` **and** those ids actually gate HexStrike / Daybreak / Blue / Red / catalog modules
-- [ ] Password unlock APIs / Model-page password forms no longer unlock capability; leftover password state cannot override the package
-- [ ] `gate_is_enabled` (or successor) reads the license package; tests that previously posted a password to unlock Blue/Red/HexStrike are rewritten
-- [ ] `build-installer.ps1` (or the documented script it calls) writes `dist/Jarvis-unrestricted.jarvis-license` covering the full catalog + LE; missing/incomplete file fails the cut; `Jarvis.iss` still excludes it
-- [ ] HexStrike select/load publishes the canned overview once (chat + TTS when voice is up); tests assert the copy has no exploit/payload/attack-step recipes and is not a tool-by-tool how-to
-- [ ] Help topic no longer tells the owner to unlock a password gate
-- [ ] Unit tests: `python3 -m pytest`; `npm --prefix frontend run build` (and lint if TS changed)
+- [x] Entitlements evaluator + `/api/license/entitlements` + License page reflect package `modules[]` **and** those ids actually gate HexStrike / Daybreak / Blue / Red / catalog modules
+- [x] Password unlock APIs / Model-page password forms no longer unlock capability; leftover password state cannot override the package
+- [x] `gate_is_enabled` (or successor) reads the license package; tests that previously posted a password to unlock Blue/Red/HexStrike are rewritten
+- [x] `build-installer.ps1` (or the documented script it calls) writes `dist/Jarvis-unrestricted.jarvis-license` covering the full catalog + LE; missing/incomplete file fails the cut; `Jarvis.iss` still excludes it
+- [x] HexStrike select/load publishes the canned overview once (chat + TTS when voice is up); tests assert the copy has no exploit/payload/attack-step recipes and is not a tool-by-tool how-to
+- [x] Help topic no longer tells the owner to unlock a password gate
+- [x] Unit tests: `python3 -m pytest`; `npm --prefix frontend run build` (and lint if TS changed)
 - [ ] Windows desktop sign-off: install owner-unrestricted from `dist/`, confirm HexStrike/Daybreak/Blue/Red follow the package (not a password), hear/see the overview on suite load. Cloud VMs cannot sign this off
 
 ## Likely files

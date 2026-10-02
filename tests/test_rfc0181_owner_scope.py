@@ -15,6 +15,7 @@ from app.tools.safety import _private_lan_unc, resolve_allowed_path
 
 def test_private_unc_host_classification():
     assert _private_lan_unc(r"\\nas.local\share\game.exe")
+    assert _private_lan_unc(r"\\nas.lan\share\game.exe")
     assert _private_lan_unc(r"\\192.168.1.12\media\game.exe")
     assert _private_lan_unc(r"\\nas\media\game.exe")
     assert not _private_lan_unc(r"\\8.8.8.8\share\game.exe")
@@ -22,10 +23,14 @@ def test_private_unc_host_classification():
 
 
 def test_owner_scope_covers_steam_and_local_shares(tmp_path):
-    if os.name != "nt":
-        pytest.skip("Windows drive and UNC authorization")
     allowed = default_allowed_directories()
     assert LOCAL_NETWORK_SCOPE in allowed
+    if os.name != "nt":
+        share = r"\\nas.local\games\steam.exe"
+        assert "nas.local" in str(resolve_allowed_path(share, allowed)).lower()
+        with pytest.raises(PermissionError):
+            resolve_allowed_path(r"\\8.8.8.8\share\game.exe", allowed)
+        return
     steam = Path(Path.home().anchor) / "Program Files (x86)" / "Steam" / "steam.exe"
     assert resolve_allowed_path(str(steam), allowed) == steam.resolve()
     share = r"\\nas.local\games\steam.exe"
@@ -60,9 +65,25 @@ def test_local_network_default_is_allowed_but_explicit_deny_wins(tmp_path, monke
     assert evaluate_tool_permissions("web_fetch", {"url": "http://nas.local/status"}).status == "allow"
     assert evaluate_tool_permissions("web_fetch", {"url": "http://nas/status"}).status == "allow"
     assert evaluate_permission("network.internet").status == "allow"
+    assert evaluate_tool_permissions("hexstrike_defensive", {"action": "lan_inventory"}).status == "allow"
     assert evaluate_tool_permissions("filesystem", {"path": r"\\nas.local\share\x"}).status == "allow"
     # A WAN URL that merely mentions a LAN name is still internet use.
     assert permission_ids_for_tool("web_fetch", {"url": "https://example.com/?next=nas.local"}) == ["network.internet"]
     apply_grant("network.local", "deny")
     assert evaluate_permission("network.local").status == "deny"
     assert evaluate_tool_permissions("filesystem", {"path": r"\\nas.local\share\x"}).status == "deny"
+
+
+def test_browser_follow_on_actions_keep_local_network_permission():
+    from app.tools.browser import browser_permission_url
+
+    assert browser_permission_url("open", {"url": "http://nas.local/status"}) == "http://nas.local/status"
+    assert browser_permission_url("snapshot", {}, "http://nas.local/status") == "http://nas.local/status"
+    assert permission_ids_for_tool(
+        "browser",
+        {"url": browser_permission_url("snapshot", {}, "http://nas.local/status"), "action": "snapshot"},
+    ) == ["network.local"]
+    assert permission_ids_for_tool(
+        "browser",
+        {"url": browser_permission_url("snapshot", {}, "https://example.com/"), "action": "snapshot"},
+    ) == ["network.internet"]

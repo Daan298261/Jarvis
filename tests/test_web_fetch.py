@@ -45,6 +45,29 @@ async def test_post_body_and_download(tmp_path, monkeypatch):
     assert failed.error.startswith("HTTP 503")
 
 
+async def test_get_retries_connect_errors_then_succeeds(monkeypatch):
+    tool = WebFetchTool(lambda: {})
+    hits = {"n": 0}
+
+    class Flaky(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            hits["n"] += 1
+            if hits["n"] < 3:
+                raise httpx.ConnectError("temporarily unreachable", request=request)
+            return httpx.Response(200, text="recovered")
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = Flaky()
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.tools.web_fetch.httpx.AsyncClient", Client)
+    result = await tool.execute(url="https://example.test/page")
+    assert result.success, result.error
+    assert hits["n"] == 3
+    assert "recovered" in result.output
+
+
 async def test_download_outside_sandbox_is_blocked(tmp_path, monkeypatch):
     tool = WebFetchTool(lambda: {"allowed_directories": [str(tmp_path)]})
 
@@ -57,3 +80,16 @@ async def test_download_outside_sandbox_is_blocked(tmp_path, monkeypatch):
     result = await tool.execute(url="https://example.test/", path="/etc/passwd")
     assert result.success is False
     assert "outside allowed directories" in result.error
+
+
+async def test_explicit_internet_deny_stops_web_fetch_execute(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    tool = WebFetchTool(lambda: {})
+    result = await tool.execute(url="https://example.test/")
+    assert result.success is False
+    assert result.error
+    assert "example.test" not in (result.output or "")

@@ -22,14 +22,32 @@ function phaseLabel(phase: PresencePhase): string {
 
 export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }: HumanoidPresenceProps) {
   const galaxy = settings.requestedPresence === "galaxy"
-  const [referenceShape, setReferenceShape] = useState<string>()
+  const mythic = settings.requestedPresence === "particle_bust"
+  const portraitUrl = mythic && personaVisual?.portraitUrl
+    ? personaVisual.portraitUrl
+    : "/presence/jarvis-original/humanoid.webp"
+  const portraitId = mythic ? personaVisual?.personaId || "anzu" : "humanoid"
+  const artworkKey = `${portraitId}:${portraitUrl}`
+  const [artwork, setArtwork] = useState<{ key: string; shapeId: string }>()
+  const [failedArtworkKey, setFailedArtworkKey] = useState<string>()
+  const preparing = mythic && artwork?.key !== artworkKey && failedArtworkKey !== artworkKey
+  const prepareError = mythic && failedArtworkKey === artworkKey
   useEffect(() => {
     let cancelled = false
-    if (!galaxy) preparePortraitCloud("/presence/jarvis-original/humanoid.webp", "humanoid")
-      .then(id => { if (!cancelled) setReferenceShape(id) })
-      .catch(error => console.warn("Humanoid artwork unavailable; retaining procedural figure", error))
+    if (galaxy) return () => { cancelled = true }
+    preparePortraitCloud(portraitUrl, portraitId)
+      .then(shapeId => {
+        if (cancelled) return
+        setArtwork({ key: artworkKey, shapeId })
+        setFailedArtworkKey(undefined)
+      })
+      .catch(error => {
+        if (cancelled) return
+        setFailedArtworkKey(artworkKey)
+        console.warn("Presence artwork unavailable; retaining the current particle figure", error)
+      })
     return () => { cancelled = true }
-  }, [galaxy])
+  }, [artworkKey, galaxy, portraitId, portraitUrl])
   const [meter, setMeter] = useState({ level: 0, attached: false })
 
   useEffect(() => {
@@ -57,13 +75,23 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
     <MorphablePresenceStage
       snapshot={snapshot}
       settings={settings}
-      shapeId={!galaxy && (!shapeId || shapeId === "humanoid_bust") ? referenceShape || "humanoid_bust" : shapeId}
+      shapeId={galaxy ? shapeId : artwork?.shapeId || shapeId || "humanoid_bust"}
       personaVisual={personaVisual}
-      className={`jarvis-presence jarvis-presence-stage jarvis-presence-humanoid${galaxy ? " galaxy" : ""}`}
-      ariaLabel={`ANZU particle presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
+      className={`jarvis-presence jarvis-presence-stage jarvis-presence-humanoid${mythic ? " jarvis-presence-particle" : ""}${galaxy ? " galaxy" : ""}`}
+      ariaLabel={`${mythic ? personaVisual?.personaLabel || "ANZU mythic" : "ANZU particle"} presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
     >
       {snapshot.phase === "offline" && <span className="jarvis-presence-broken-ring" aria-hidden="true" />}
       {snapshot.phase === "approval" && <span className="jarvis-presence-lock-ring" aria-hidden="true" />}
+      {preparing && (
+        <span className="jarvis-presence-fallback-note" role="status">
+          Forming {personaVisual?.personaLabel || "avatar"}…
+        </span>
+      )}
+      {prepareError && mythic && (
+        <span className="jarvis-presence-fallback-note" role="status">
+          Avatar artwork unavailable · retaining particle silhouette
+        </span>
+      )}
       {galaxy ? (
         <p
           className="jarvis-galaxy-status"
@@ -88,7 +116,9 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
             <span className="jarvis-humanoid-hud-bl" />
           </div>
           <div className="jarvis-humanoid-label" aria-hidden="true">
-            <span>ANZU</span><i /><span>NEURAL PRESENCE</span>
+            <span>{(mythic ? personaVisual?.personaLabel || "ANZU" : "ANZU").toUpperCase()}</span>
+            <i />
+            <span>{mythic ? "MYTHIC PRESENCE" : "NEURAL PRESENCE"}</span>
           </div>
         </>
       )}
