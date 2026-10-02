@@ -1110,3 +1110,44 @@ def test_supermemory_data_uses_extra_when_data_volume_is_full(tmp_path, monkeypa
     dest = supermemory_runtime.data_path()
     assert dest == extra / "Jarvis" / "runtime" / "supermemory-data"
     assert dest.is_dir()
+
+
+def test_logs_dir_uses_extra_when_os_volume_is_full(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    extra = tmp_path / "USB"
+    repo.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    _patch_runtime_disk(monkeypatch, extra)
+    dest = config.logs_dir()
+    assert dest == extra / "Jarvis" / "runtime" / "logs"
+    assert dest.is_dir()
+
+
+def test_logs_dir_discovers_existing_extra_jarvis_log(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    extra = tmp_path / "USB"
+    found = extra / "Jarvis" / "runtime" / "logs"
+    found.mkdir(parents=True)
+    (found / "jarvis.log").write_text("ok\n", encoding="utf-8")
+    monkeypatch.setattr(config, "repo_root", lambda: repo)
+    monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
+    monkeypatch.setattr(config.shutil, "disk_usage", _plenty_usage)
+    assert config.logs_dir() == found
+
+
+def test_intake_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
+    from app.agent.intake import _chains_root, _save_original
+
+    data = tmp_path / "data"
+    extra = tmp_path / "USB"
+    data.mkdir()
+    extra.mkdir()
+    monkeypatch.setattr("app.agent.intake.data_dir", lambda: data)
+    _patch_runtime_disk(monkeypatch, extra)
+    saved = _save_original("owner paste")
+    assert saved.parent == extra / "Jarvis" / "runtime" / "intake"
+    assert saved.is_file()
+    dest = _chains_root()
+    assert dest == extra / "Jarvis" / "runtime" / "intake-chains"
+    assert dest.is_dir()

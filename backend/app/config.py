@@ -20,7 +20,12 @@ def data_dir() -> Path:
 
 
 def logs_dir() -> Path:
-    path = repo_root() / "logs"
+    path = resolved_data_sidecar_dir(
+        "logs",
+        local=repo_root() / "logs",
+        markers=("jarvis.log", "llama-server.log"),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
