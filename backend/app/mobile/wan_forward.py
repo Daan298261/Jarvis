@@ -9,6 +9,7 @@ import asyncio
 import ipaddress
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -113,11 +114,136 @@ def ssh_executable() -> str:
     raise RuntimeError("OpenSSH client is not installed; cannot create an SSH reverse tunnel")
 
 
+def parse_proc_net_route(text: str) -> str:
+    """First private IPv4 default gateway from /proc/net/route."""
+    lines = (text or "").splitlines()
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) < 3 or parts[1] != "00000000":
+            continue
+        raw = int(parts[2], 16)
+        address = ipaddress.IPv4Address(raw.to_bytes(4, "little"))
+        if address.is_private and not address.is_loopback:
+            return str(address)
+    raise ValueError("No private default gateway")
+
+
+def parse_windows_route_print(text: str) -> str:
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        if parts[0] != "0.0.0.0" or parts[1] != "0.0.0.0":
+            continue
+        try:
+            address = ipaddress.ip_address(parts[2])
+        except ValueError:
+            continue
+        if address.version == 4 and address.is_private and not address.is_loopback:
+            return str(address)
+    raise ValueError("No private default gateway")
+
+
+def default_gateway_ipv4() -> str:
+    """LAN router this PC already uses — used when the owner leaves gateway host blank."""
+    if os.name == "nt":
+        import subprocess
+
+        printed = subprocess.run(
+            ["route", "print", "-4"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        return parse_windows_route_print((printed.stdout or "") + "\n" + (printed.stderr or ""))
+    route = Path("/proc/net/route")
+    if route.is_file():
+        return parse_proc_net_route(route.read_text(encoding="utf-8", errors="replace"))
+    raise ValueError("No private default gateway")
+
+
+def resolved_gateway_host(settings: dict[str, Any]) -> str:
+    host = str(settings.get("gateway_host") or "").strip()
+    return host or default_gateway_ipv4()
+
+
+def resolved_gateway_user(settings: dict[str, Any]) -> str:
+    user = str(settings.get("gateway_user") or settings.get("gateway_username") or "").strip()
+    if user:
+        return user
+    if str(settings.get("gateway_profile") or "openwrt_uci").strip() == "openwrt_uci":
+        return "root"
+    raise ValueError("Gateway SSH needs a username")
+
+
+def gateway_ssh_configured(settings: dict[str, Any]) -> bool:
+    has_key = bool(str(settings.get("gateway_identity_file") or "").strip())
+    has_password = bool(str(settings.get("gateway_password") or "").strip())
+    return has_key or has_password
+
+
 def _identity_args(identity_file: str) -> list[str]:
     path = Path(identity_file or "").expanduser()
     if not str(path) or not path.is_file():
         raise ValueError("SSH identity file is required and must exist")
     return ["-i", str(path)]
+
+
+_ASKPASS_SOURCE = """import os
+import sys
+
+path = os.environ.get("JARVIS_SSH_ASKPASS_FILE", "")
+if not path:
+    sys.exit(1)
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        sys.stdout.write(handle.read())
+finally:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+"""
+
+
+def ssh_askpass_executable() -> str:
+    """Small OpenSSH askpass helper. Never receives the secret on argv."""
+    from .store import root as mobile_root
+
+    folder = mobile_root()
+    folder.mkdir(parents=True, exist_ok=True)
+    script = folder / "ssh-askpass.py"
+    body = f"#!{os.path.abspath(sys.executable)}\n{_ASKPASS_SOURCE}"
+    if not script.exists() or script.read_text(encoding="utf-8") != body:
+        script.write_text(body, encoding="utf-8")
+    script.chmod(0o700)
+    if os.name == "nt":
+        cmd = folder / "ssh-askpass.cmd"
+        cmd.write_text(f'@echo off\r\n"{os.path.abspath(sys.executable)}" "{script}"\r\n', encoding="utf-8")
+        return str(cmd)
+    return str(script)
+
+
+def prepare_ssh_password_env(password: str) -> tuple[dict[str, str], str]:
+    secret = (password or "")
+    if not secret:
+        raise ValueError("Gateway password is empty")
+    import tempfile
+
+    handle, path = tempfile.mkstemp(prefix="jarvis-ssh-askpass-")
+    try:
+        os.write(handle, secret.encode("utf-8"))
+    finally:
+        os.close(handle)
+    os.chmod(path, 0o600)
+    env = os.environ.copy()
+    env["DISPLAY"] = env.get("DISPLAY") or "jarvis:0"
+    env["SSH_ASKPASS"] = ssh_askpass_executable()
+    env["SSH_ASKPASS_REQUIRE"] = "force"
+    env["JARVIS_SSH_ASKPASS_FILE"] = path
+    env.pop("SSH_AUTH_SOCK", None)
+    return env, path
 
 
 def reverse_tunnel_argv(
@@ -185,10 +311,11 @@ def gateway_ssh_argv(
     *,
     host: str,
     user: str,
-    identity_file: str,
+    identity_file: str = "",
     lan_ip: str,
     port: int = 22,
     profile: str = "openwrt_uci",
+    password: str = "",
 ) -> list[str]:
     if (profile or "").strip() not in GATEWAY_PROFILES:
         raise ValueError("Unsupported gateway profile; only openwrt_uci is implemented")
@@ -196,14 +323,25 @@ def gateway_ssh_argv(
     user = (user or "").strip()
     if not host or not user:
         raise ValueError("Gateway SSH needs host and user")
+    auth = _identity_args(identity_file) if (identity_file or "").strip() else []
+    if not auth and not (password or "").strip():
+        raise ValueError("Gateway SSH needs an identity file or the owner router password")
     script = openwrt_redirect_script(lan_ip)
+    options = ["-o", "StrictHostKeyChecking=accept-new"]
+    if auth:
+        options = ["-o", "BatchMode=yes", *options, *auth]
+    else:
+        options += [
+            "-o",
+            "BatchMode=no",
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+        ]
     return [
         ssh_executable(),
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        *_identity_args(identity_file),
+        *options,
         "-p",
         str(int(port)),
         f"{user}@{host}",
@@ -294,22 +432,38 @@ REVERSE_TUNNEL = ReverseTunnel()
 
 
 async def apply_gateway_ssh(settings: dict[str, Any], lan_ip: str, public_host: str = "") -> tuple[str | None, str]:
+    password = str(settings.get("gateway_password") or "")
     argv = gateway_ssh_argv(
-        host=settings["gateway_host"],
-        user=settings["gateway_user"],
-        identity_file=settings["gateway_identity_file"],
+        host=resolved_gateway_host(settings),
+        user=resolved_gateway_user(settings),
+        identity_file=str(settings.get("gateway_identity_file") or ""),
         lan_ip=lan_ip,
         port=int(settings.get("gateway_port") or 22),
-        profile=settings["gateway_profile"],
+        profile=str(settings.get("gateway_profile") or "openwrt_uci"),
+        password=password,
     )
-    proc = await asyncio.create_subprocess_exec(
-        *argv[:-1],
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _stdout, stderr = await asyncio.wait_for(proc.communicate(argv[-1].encode("utf-8")), timeout=45)
-    if proc.returncode != 0:
+    env: dict[str, str] | None = None
+    secret_path = ""
+    if not str(settings.get("gateway_identity_file") or "").strip() and password:
+        env, secret_path = prepare_ssh_password_env(password)
+    proc: asyncio.subprocess.Process | None = None
+    stderr = b""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv[:-1],
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(argv[-1].encode("utf-8")), timeout=45)
+    finally:
+        if secret_path:
+            try:
+                os.remove(secret_path)
+            except OSError:
+                pass
+    if proc is None or proc.returncode != 0:
         detail = (stderr or b"").decode("utf-8", errors="replace").strip()[:240]
         raise RuntimeError(detail or "Gateway SSH port-forward failed")
     host = (settings.get("wan_public_host") or public_host or "").strip()

@@ -46,6 +46,18 @@ describe("companion WAN prepare body", () => {
     assert.equal(body.ssh_port, 2222)
   })
 
+  test("gateway ssh prepare includes password and omits blank host", () => {
+    const body = wan.connectionPrepareBody(true, true, {
+      ...wan.EMPTY_WAN_FORM,
+      wan_method: "gateway_ssh",
+      gateway_user: "root",
+      gateway_password: "secret",
+    })
+    assert.equal(body.wan_method, "gateway_ssh")
+    assert.equal(body.gateway_password, "secret")
+    assert.equal("gateway_host" in body, false)
+  })
+
   test("snapshot hydrate never copies a stored password", () => {
     const form = wan.wanFormFromSnapshot({
       wan: { wan_method: "gateway_ssh", gateway_host: "192.168.1.1", gateway_password: "nope" },

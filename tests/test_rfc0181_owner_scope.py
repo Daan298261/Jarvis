@@ -15,6 +15,7 @@ from app.tools.safety import _private_lan_unc, resolve_allowed_path
 
 def test_private_unc_host_classification():
     assert _private_lan_unc(r"\\nas.local\share\game.exe")
+    assert _private_lan_unc(r"\\nas.lan\share\game.exe")
     assert _private_lan_unc(r"\\192.168.1.12\media\game.exe")
     assert _private_lan_unc(r"\\nas\media\game.exe")
     assert not _private_lan_unc(r"\\8.8.8.8\share\game.exe")

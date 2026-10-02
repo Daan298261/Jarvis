@@ -133,7 +133,7 @@ def _private_lan_unc(path: str) -> bool:
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        return host == "localhost" or host.endswith((".local", ".home.arpa")) or "." not in host
+        return host == "localhost" or host.endswith((".local", ".home.arpa", ".lan")) or "." not in host
     return (
         ip.is_loopback
         or ip.is_link_local
