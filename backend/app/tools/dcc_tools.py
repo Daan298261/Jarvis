@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..projects.paths import project_media_dir
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import resolve_owner_file_path
 from .safety import resolve_allowed_path
@@ -26,7 +27,7 @@ _FREECAD_INSTALL = (
 
 
 def _allowed(context: dict[str, Any]) -> list[str]:
-    return list(context.get("allowed_directories") or [])
+    return live_workspace_roots_from_context(context)
 
 
 def _resolve(raw: str, allowed: list[str]) -> Path:

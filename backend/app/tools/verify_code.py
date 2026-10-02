@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..agent.verify_code import format_report, verify_software
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import resolve_project_dir
 
@@ -33,7 +34,7 @@ class VerifyCodeTool(Tool):
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         try:
-            allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
+            allowed = live_workspace_roots_from_context(self.context_getter() or {})
             root = resolve_project_dir(kwargs.get("path"), allowed)
         except PermissionError as exc:
             return ToolResult(False, "", error=str(exc))

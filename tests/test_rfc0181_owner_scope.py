@@ -194,6 +194,7 @@ def test_lta_and_hexstrike_accept_plugged_in_drive_without_settings_save(monkeyp
 
     assert str(extra) in live_workspace_roots_from_context({"allowed_directories": saved})
     assert str(extra) in live_workspace_roots_from_context(AppSettings(allowed_directories=saved))
+    assert live_workspace_roots_from_context({}) == []
 
 
 def test_extra_volume_roots_expand_media_and_skip_os_volume(monkeypatch, tmp_path):
@@ -279,3 +280,152 @@ async def test_system_info_unions_plugged_in_drive_without_save(monkeypatch, tmp
     payload = await system_info()
     assert str(home) in payload["allowed_directories"]
     assert str(extra) in payload["allowed_directories"]
+
+
+def _stale_usb_context(monkeypatch, tmp_path):
+    """Saved allowlist is only home; extra is a sibling volume that just appeared."""
+    home = tmp_path / "home"
+    extra = tmp_path / "E"
+    home.mkdir()
+    extra.mkdir()
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: [str(home), str(extra)])
+    return home, extra, {"allowed_directories": [str(home)]}
+
+
+async def test_filesystem_writes_plugged_in_drive_without_settings_save(monkeypatch, tmp_path):
+    from app.tools.filesystem import FilesystemTool
+
+    _home, extra, stale = _stale_usb_context(monkeypatch, tmp_path)
+    dest = extra / "Notes"
+    dest.mkdir()
+    tool = FilesystemTool(lambda: stale)
+    result = await tool.execute(action="write", path=str(dest), content="on-usb", create_backup=False)
+    assert result.success, result.error
+    assert (dest / "note.txt").read_text(encoding="utf-8") == "on-usb"
+
+
+async def test_git_status_on_plugged_in_drive_without_settings_save(monkeypatch, tmp_path):
+    import subprocess
+
+    from app.tools.git_tools import GitTool
+
+    _home, extra, stale = _stale_usb_context(monkeypatch, tmp_path)
+    repo = extra / "proj"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "jarvis@example.test"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Jarvis"], cwd=repo, check=True, capture_output=True)
+    (repo / "readme.txt").write_text("usb\n", encoding="utf-8")
+    subprocess.run(["git", "add", "readme.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+    tool = GitTool(lambda: stale)
+    result = await tool.execute(action="status", path=str(repo))
+    assert result.success, result.error
+
+
+async def test_python_and_terminal_use_plugged_in_drive_without_settings_save(monkeypatch, tmp_path):
+    from app.tools.python_exec import PythonTool
+    from app.tools.terminal import TerminalTool
+
+    _home, extra, stale = _stale_usb_context(monkeypatch, tmp_path)
+    script = extra / "hello.py"
+    script.write_text("print('from-usb')\n", encoding="utf-8")
+    (extra / "here.txt").write_text("ok", encoding="utf-8")
+    py = PythonTool(lambda: stale)
+    ran = await py.execute(action="run_file", path=str(script))
+    assert ran.success, ran.error
+    assert "from-usb" in ran.output
+    sh = TerminalTool(lambda: stale)
+    listed = await sh.execute(command="cat here.txt", shell="bash", working_directory=str(extra))
+    assert listed.success, listed.error
+    assert "ok" in listed.output
+
+
+async def test_office_docker_screenshot_desktop_dcc_use_plugged_in_drive(monkeypatch, tmp_path):
+    from app.tools.dcc_tools import _allowed as dcc_allowed
+    from app.tools.dcc_tools import _resolve as dcc_resolve
+    from app.tools.desktop import DesktopTool
+    from app.tools.docker_tools import DockerTool
+    from app.tools.office import OfficeTool
+    from app.tools.screenshot import ScreenshotTool, screenshot_dest
+    from app.tools.safety import resolve_allowed_path
+
+    _home, extra, stale = _stale_usb_context(monkeypatch, tmp_path)
+    sheets = extra / "Sheets"
+    sheets.mkdir()
+    office = OfficeTool(lambda: stale)
+    created = await office.execute(
+        app="excel",
+        action="create",
+        path=str(sheets),
+        content="a\tb\n1\t2",
+        backend="library",
+    )
+    assert created.success, created.error
+    dest = sheets / "Jarvis-excel.xlsx"
+    assert dest.exists()
+
+    docker = DockerTool(lambda: stale)
+    (extra / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    assert Path(docker._build_path(str(extra))).resolve() == extra.resolve()
+
+    shot = ScreenshotTool(lambda: stale)
+    assert str(extra) in shot._allowed()
+    image = extra / "screen.png"
+    image.write_bytes(b"png")
+    described = await shot.execute(action="describe_path", path=str(image))
+    assert described.success, described.error
+    capture_dest = screenshot_dest(str(extra), allowed=shot._allowed())
+    assert capture_dest.parent == extra
+
+    desktop = DesktopTool(lambda: stale)
+    assert str(extra) in desktop._allowed()
+    assert resolve_allowed_path(str(extra), desktop._allowed()).resolve() == extra.resolve()
+
+    assert str(extra) in dcc_allowed(stale)
+    blend = extra / "widget.blend"
+    blend.write_bytes(b"x")
+    assert dcc_resolve(str(blend), dcc_allowed(stale)).resolve() == blend.resolve()
+
+
+async def test_verify_and_workers_use_plugged_in_drive_without_settings_save(monkeypatch, tmp_path):
+    import subprocess
+
+    from app.tools.base import ToolResult
+    from app.tools.code_worker import CodeWorkerTool
+    from app.tools.interpreter import OpenInterpreterTool
+    from app.tools.verify_code import VerifyCodeTool
+
+    _home, extra, stale = _stale_usb_context(monkeypatch, tmp_path)
+    repo = extra / "code"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "jarvis@example.test"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Jarvis"], cwd=repo, check=True, capture_output=True)
+    (repo / "readme.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "readme.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+
+    verify = VerifyCodeTool(lambda: stale)
+    checked = await verify.execute(path=str(repo), run_tests=False)
+    assert checked.success, checked.error
+    assert checked.data.get("ok") is True
+
+    seen: list[Path] = []
+
+    async def fake_run(goal, path, settings):
+        seen.append(Path(path).resolve())
+        return ToolResult(True, f"ok {path}", data={"path": str(path)})
+
+    monkeypatch.setattr("app.tools.code_worker._BACKEND.run", fake_run)
+    monkeypatch.setattr("app.tools.interpreter._BACKEND.run", fake_run)
+    worker = CodeWorkerTool(lambda: stale)
+    delegated = await worker.execute(action="delegate", goal="fix tests", path=str(repo))
+    assert delegated.success, delegated.error
+    assert seen[-1] == repo.resolve()
+    interp = OpenInterpreterTool(lambda: stale)
+    interpreted = await interp.execute(action="delegate", goal="fix tests", path=str(repo))
+    assert interpreted.success, interpreted.error
+    assert seen[-1] == repo.resolve()

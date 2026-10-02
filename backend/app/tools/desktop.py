@@ -5,6 +5,7 @@ import re
 import time
 from typing import Any
 
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
 from .semantic_ui import UiControl, click_backend, format_control_list, resolve_control
 
@@ -217,10 +218,7 @@ class DesktopTool(Tool):
         self.context_getter = context_getter or (lambda: {})
 
     def _allowed(self) -> list[str]:
-        raw = self.context_getter() if callable(self.context_getter) else {}
-        if isinstance(raw, dict):
-            return list(raw.get("allowed_directories") or [])
-        return list(getattr(raw, "allowed_directories", None) or [])
+        return live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")

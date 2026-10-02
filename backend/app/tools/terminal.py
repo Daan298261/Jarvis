@@ -12,6 +12,7 @@ from typing import Any
 
 import psutil
 
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import workspace_cwd
 from .safety import classify_command, is_protected_process
@@ -230,7 +231,7 @@ class TerminalTool(Tool):
             return ToolResult(False, "", error=denied)
         shell = adapt_shell(command, (kwargs.get("shell") or default_shell()).lower())
         raw_cwd = kwargs.get("working_directory")
-        allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
+        allowed = live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
         try:
             cwd = workspace_cwd(raw_cwd, allowed)
         except PermissionError as exc:

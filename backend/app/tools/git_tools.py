@@ -14,6 +14,7 @@ from ..agent.worktrees import (
     list_worktrees,
     worktree_status,
 )
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import resolve_owner_file_path, workspace_cwd
 from .safety import resolve_allowed_path
@@ -94,7 +95,7 @@ class GitTool(Tool):
         self.context_getter = context_getter or (lambda: {})
 
     def _allowed(self) -> list[str]:
-        return list((self.context_getter() or {}).get("allowed_directories") or [])
+        return live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
 
     def _cwd(self, path: str | None) -> str:
         allowed = self._allowed()

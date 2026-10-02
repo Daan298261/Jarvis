@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import resolve_owner_file_path
 from .safety import resolve_allowed_path
@@ -179,10 +180,7 @@ class OfficeTool(Tool):
         self._app = "word"
 
     def _allowed(self) -> list[str]:
-        ctx = self.context_getter() if callable(self.context_getter) else {}
-        if isinstance(ctx, dict):
-            return list(ctx.get("allowed_directories") or [])
-        return []
+        return live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
 
     def _info(self, app: str, path: str | None) -> ToolResult:
         windows = platform.system() == "Windows"
@@ -238,8 +236,7 @@ class OfficeTool(Tool):
             return ToolResult(False, "", error="Office COM is not available on this machine")
         if action == "info" and not (kwargs.get("path") or "").strip():
             return self._info(app, None)
-        ctx = self.context_getter() if callable(self.context_getter) else {}
-        allowed = list((ctx or {}).get("allowed_directories") or [])
+        allowed = self._allowed()
         if action in {"create", "write", "append", "save_as"} and not allowed:
             return ToolResult(False, "", error="Office write target is unavailable without allowed directories")
         try:

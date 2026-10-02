@@ -998,15 +998,17 @@ def live_workspace_roots_from_context(raw: Any = None) -> list[str]:
     """Tool context or AppSettings → live owner workspace (USB / D: / /media union).
 
     Browser file:// gates and tools that skip ToolRegistry._live_context still need
-    a plugged-in volume without a settings save.
+    a plugged-in volume without a settings save. A dict with no allowed_directories
+    key stays unbound (empty list) so unit tests that construct tools without a
+    registry keep the historical unrestricted cwd; pass None to load settings.
     """
     if raw is None:
         return live_allowed_directories()
     if isinstance(raw, AppSettings):
         return live_allowed_directories(list(raw.allowed_directories or []))
     if isinstance(raw, dict):
-        if "allowed_directories" in raw:
-            return live_allowed_directories(list(raw.get("allowed_directories") or []))
-        return live_allowed_directories()
+        if "allowed_directories" not in raw:
+            return []
+        return live_allowed_directories(list(raw.get("allowed_directories") or []))
     existing = list(getattr(raw, "allowed_directories", None) or [])
     return live_allowed_directories(existing if existing else None)

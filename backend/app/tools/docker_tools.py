@@ -4,6 +4,7 @@ import asyncio
 import shutil
 from typing import Any
 
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import default_workspace_dir, resolve_workspace_dir
 
@@ -159,7 +160,7 @@ class DockerTool(Tool):
         self.context_getter = context_getter or (lambda: {})
 
     def _allowed(self) -> list[str]:
-        return list((self.context_getter() or {}).get("allowed_directories") or [])
+        return live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
 
     def _build_path(self, raw: str | None) -> str:
         allowed = self._allowed()

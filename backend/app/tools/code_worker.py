@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..config import load_settings
+from ..config import live_workspace_roots_from_context, load_settings
 from ..workers.code import OpenHandsBackend
 from .base import RiskLevel, Tool, ToolResult
 from .owner_paths import resolve_project_dir
@@ -46,7 +46,7 @@ class CodeWorkerTool(Tool):
         if not goal:
             return ToolResult(False, "", error="goal is required")
         context = self.context_getter() if self.context_getter else {}
-        allowed = list(context.get("allowed_directories") or [])
+        allowed = live_workspace_roots_from_context(context)
         try:
             path = resolve_project_dir(kwargs.get("path"), allowed)
         except PermissionError as exc:
