@@ -822,6 +822,50 @@ async def test_lan_refresh_rebuilds_natpmp_when_public_ip_changes(tmp_path, monk
     assert "https://203.0.113.8:4781" not in connection.state["endpoints"]
 
 
+def test_igd_mapping_dest_never_uses_an_address_this_pc_does_not_hold(monkeypatch):
+    from app.mobile import connectivity
+    from tests.test_mobile_connectivity import Router
+
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["10.8.0.2"])
+    router = Router()
+    router.lanaddr = "192.168.1.12"
+    assert connectivity.igd_mapping_dest(router) == ""
+    with pytest.raises(RuntimeError, match="No RFC1918 address"):
+        connectivity.map_router(router, "Jarvis-owned")
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.40"])
+    assert connectivity.igd_mapping_dest(router) == "192.168.1.40"
+
+
+@pytest.mark.asyncio
+async def test_lan_refresh_rebuilds_when_mapped_dest_leaves_this_pc(tmp_path, monkeypatch):
+    import time
+
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection, Router
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    hosts = ["192.168.1.12"]
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: list(hosts))
+    router = Router()
+    router.wan_ip = "203.0.113.8"
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (router, "203.0.113.8"))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    connection = FakeConnection()
+    result = await connection.configure(True, True)
+    assert result.get("mapped_lan_ip") == "192.168.1.12"
+    assert result.get("wan_path") == "upnp"
+    held = time.time() + 1190
+    connection.report(next_renewal_at=held)
+    hosts[:] = ["10.8.0.2"]
+    await connection._refresh_lan_dial_endpoints()
+    assert "https://10.8.0.2:4781" in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" not in connection.state["endpoints"]
+    assert connection.state.get("mapped_lan_ip") in {"", None}
+    assert connection.state.get("wan_path") in {"", None}
+    assert connection.router is None
+
+
 @pytest.mark.asyncio
 async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     from app.mobile import connectivity, store

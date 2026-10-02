@@ -221,6 +221,7 @@ def test_stdlib_igd_maps_4781_and_treats_soap_fault_as_empty(monkeypatch):
             raise AssertionError(action)
 
     monkeypatch.setattr("app.mobile.igd.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.mobile.connectivity.lan_hosts", lambda: ["192.168.1.12"])
     router = StdlibIGD(
         "http://192.168.1.1:5000/upnp/control/WANIPConn1",
         "urn:schemas-upnp-org:service:WANIPConnection:1",

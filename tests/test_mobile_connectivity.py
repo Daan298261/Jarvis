@@ -38,7 +38,8 @@ class Router:
         return self.wan_ip
 
 
-def test_router_mapping_never_overwrites_or_removes_foreign_entry():
+def test_router_mapping_never_overwrites_or_removes_foreign_entry(monkeypatch):
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
     router = Router(("192.168.1.99", 4781, "Other app"))
     with pytest.raises(ValueError):
         connectivity.map_router(router, "Jarvis-owned")
@@ -46,7 +47,8 @@ def test_router_mapping_never_overwrites_or_removes_foreign_entry():
     assert router.added == router.deleted == []
 
 
-def test_router_mapping_uses_only_tls_port_and_finite_lease():
+def test_router_mapping_uses_only_tls_port_and_finite_lease(monkeypatch):
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
     router = Router()
     connectivity.map_router(router, "Jarvis-owned")
     assert router.added == [(4781, "TCP", router.lanaddr, 4781, "Jarvis-owned", "", 3600)]

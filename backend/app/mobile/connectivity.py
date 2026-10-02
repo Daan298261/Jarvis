@@ -102,18 +102,20 @@ def owned_mapping(mapping, host, marker):
 
 
 def igd_mapping_dest(router) -> str:
-    """Internal client for UPnP: RFC1918 on the IGD subnet, never CGNAT."""
+    """Internal client for UPnP: an RFC1918 address this PC currently holds on the IGD subnet."""
     advertised = str(getattr(router, "lanaddr", "") or "").strip()
     from .wan_forward import is_rfc1918_ipv4, mapping_lan_ipv4
 
     hosts = lan_hosts()
     if is_rfc1918_ipv4(advertised):
-        return mapping_lan_ipv4(hosts, advertised) or advertised
-    return preferred_lan_ipv4() or advertised
+        return mapping_lan_ipv4(hosts, advertised)
+    return preferred_lan_ipv4()
 
 
 def map_router(router, marker):
     dest = igd_mapping_dest(router)
+    if not dest:
+        raise RuntimeError("No RFC1918 address on this PC to map TCP 4781 to")
     mapping = router.getspecificportmapping(PORT, "TCP")
     if mapping and not owned_mapping(mapping, dest, marker):
         raise ValueError("Router port 4781 is already used by another mapping; existing mapping preserved")
@@ -251,7 +253,7 @@ class Connectivity:
             self.natpmp_gateway = None
             self.pcp_nonce = None
         self.public_ip = None
-        self.report(mapped_lan_ip="")
+        self.report(mapped_lan_ip="", wan_path="")
         await REVERSE_TUNNEL.stop()
 
     async def on_security_cooldown(self):
@@ -735,6 +737,14 @@ class Connectivity:
         dest = self._live_wan_dest_ip()
         return bool(previous and dest and dest != previous)
 
+    def _wan_mapping_dest_left_this_pc(self, live_hosts: set[str] | None = None) -> bool:
+        """True when the mapped internal client is no longer an address on this machine."""
+        previous = str(self.state.get("mapped_lan_ip") or "")
+        if not previous:
+            return False
+        hosts = live_hosts if live_hosts is not None else set(lan_hosts())
+        return previous not in hosts
+
     async def _live_wan_public_ip(self) -> str:
         """Public IPv4 the live WAN method currently advertises — query only, no remap."""
         if self.router:
@@ -767,6 +777,10 @@ class Connectivity:
         if merged != current:
             self.report(endpoints=merged)
         if not remap_wan:
+            return
+        live_hosts = set(hosts)
+        if self._wan_mapping_dest_left_this_pc(live_hosts):
+            await self.apply_remote(self.config())
             return
         if self._wan_mapping_dest_changed():
             await self._renew_wan_mapping(self.config())
