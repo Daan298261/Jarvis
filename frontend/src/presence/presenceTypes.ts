@@ -27,6 +27,9 @@ export type PresencePhase =
 
 /** Optional named-persona colour, glow, and scale on the existing orb cloud. */
 export type PersonaCloudVisual = {
+  personaId?: string
+  personaLabel?: string
+  portraitUrl?: string
   orbColor?: string
   accentColor?: string
   glow?: number

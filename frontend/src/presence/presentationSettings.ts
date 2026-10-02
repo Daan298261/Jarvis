@@ -112,10 +112,28 @@ export async function updatePresentation(
   if (patch.reducedMotion !== undefined) body.presentation_reduced_motion = requested.reducedMotion
   if (patch.avatarId !== undefined) body.presentation_avatar_id = requested.avatarId
 
-  const response = await api<any>("/api/settings", {
-    method: "PUT",
-    body: JSON.stringify(body),
-  })
+  // Appearance changes are visual controls, so apply them immediately instead
+  // of blocking the renderer on a busy model/backend process.
+  cachePresentation(requested)
+  announce(requested)
+
+  const controller = new AbortController()
+  const deadline = window.setTimeout(() => controller.abort(), 2500)
+  let response: any
+  try {
+    response = await api<any>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Appearance changed locally; Jarvis did not confirm the saved setting in time.")
+    }
+    throw error
+  } finally {
+    window.clearTimeout(deadline)
+  }
   const settings = normalizePresentation(response?.presentation ?? requested)
   cachePresentation(settings)
   announce(settings)
@@ -123,14 +141,12 @@ export async function updatePresentation(
 }
 
 export async function initializePresentation(): Promise<PresentationSettings> {
-  if (!hasPresentationCache()) {
-    const migrated = readPresentationBootstrap()
-    return updatePresentation({
-      shell: migrated.shell,
-      requestedPresence: migrated.requestedPresence,
-    })
-  }
-  return refreshPresentationFromBackend()
+  if (hasPresentationCache()) return readPresentationBootstrap()
+  const migrated = readPresentationBootstrap()
+  return updatePresentation({
+    shell: migrated.shell,
+    requestedPresence: migrated.requestedPresence,
+  })
 }
 
 export function usePresentationSettings(): PresentationSettings {

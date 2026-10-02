@@ -412,7 +412,34 @@ def test_terminal_front_completes_turn_actions():
 def test_clamp_front_max_tokens():
     assert clamp_front_max_tokens(12) == FRONT_MAX_TOKENS_MIN
     assert clamp_front_max_tokens(2000) == FRONT_MAX_TOKENS_MAX
-    assert clamp_front_max_tokens(384) == 384
+    assert clamp_front_max_tokens(384) == 160
+    assert clamp_front_max_tokens(128) == 128
+
+
+@pytest.mark.asyncio
+async def test_front_deadline_includes_wait_for_first_token(jarvis_env):
+    import asyncio
+    import time
+
+    closed = []
+
+    class SilentProvider:
+        async def chat_stream(self, messages, **kwargs):
+            try:
+                await asyncio.sleep(10)
+                yield "too late"
+            finally:
+                closed.append(True)
+
+    started = time.perf_counter()
+    reply = await generate_front_reply(
+        "open steam", provider=SilentProvider(),
+        settings=AppSettings(front_responder=FrontResponderSettings(timeout_ms=250)),
+    )
+    assert time.perf_counter() - started < 0.8
+    assert closed == [True]
+    assert "too late" not in reply.text
+    assert reply.text
 
 
 def test_managed_route_is_not_final_authority():

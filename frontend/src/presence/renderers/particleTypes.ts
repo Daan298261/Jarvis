@@ -9,6 +9,8 @@ export type ParticleOrb = {
   /** 0 solid contour, ~0.4 dissolve, ~1 field drift, ~2 core pulse */
   flow: number
   size: number
+  /** Linear RGB and authored-colour weight; absent uses the persona palette. */
+  color?: readonly [number, number, number, number]
 }
 
 export type PresenceShapeId = string

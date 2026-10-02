@@ -94,7 +94,11 @@ def decide(
     for question in questions:
         qid = question.id
         if question.type == "choice":
-            if qid in {"tool_select", "tool_shortlist"} or decision_class in {
+            if qid == "request_route":
+                baseline = str(state.get("baseline_route") or "managed_task")
+                pick = baseline if baseline in question.choices else question.choices[-1]
+                answers[qid] = _answer_choice(qid, pick, 0.9)
+            elif qid in {"tool_select", "tool_shortlist"} or decision_class in {
                 "tool_selection",
                 "tool_shortlist",
             }:

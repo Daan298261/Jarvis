@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from ..inference.hotswap import activate_runtime_profile, parse_runtime_endpoint
@@ -104,7 +104,7 @@ async def get_named_personas() -> dict:
 
 
 @router.put("")
-async def put_named_personas(body: NamedPersonaPut) -> dict:
+async def put_named_personas(body: NamedPersonaPut, background_tasks: BackgroundTasks) -> dict:
     patch = body.appearance.model_dump(exclude_none=True) if body.appearance is not None else None
     try:
         if body.as_specialist:
@@ -124,7 +124,9 @@ async def put_named_personas(body: NamedPersonaPut) -> dict:
             if patch:
                 update_appearance(body.id, patch, reset=False)
             if body.activate_brain:
-                await _maybe_activate_persona_brain(body.id)
+                # Shape, palette and neural voice are the visible persona switch.
+                # Optional model hotswap must not hold that response (or the HUD) hostage.
+                background_tasks.add_task(_maybe_activate_persona_brain, body.id)
         elif patch:
             update_appearance(body.id, patch, reset=body.reset)
         return public_state()

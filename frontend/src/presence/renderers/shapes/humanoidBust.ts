@@ -16,18 +16,17 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
   ) => {
     orbs.push({ x, y, z, gold, light, flow, size: size / Math.sqrt(density) })
   }
-
   // Explicit front-view landmarks make a human cranium with cheekbones, jaw
   // and chin. Sampling the old spline by curve length bunched rings into a
   // rounded capsule and lost the reference silhouette.
   const profile = [
-    { t: 0, x: 0.05, y: 0.18, z: 0.16 },
-    { t: 0.12, x: 0.34, y: 0.35, z: 0.29 },
-    { t: 0.3, x: 0.51, y: 0.63, z: 0.38 },
-    { t: 0.56, x: 0.59, y: 1.02, z: 0.42 },
-    { t: 0.78, x: 0.55, y: 1.34, z: 0.39 },
-    { t: 0.93, x: 0.37, y: 1.56, z: 0.29 },
-    { t: 1, x: 0.08, y: 1.65, z: 0.1 },
+    { t: 0, x: 0.04, y: 0.12, z: 0.14 },
+    { t: 0.12, x: 0.28, y: 0.3, z: 0.26 },
+    { t: 0.3, x: 0.43, y: 0.61, z: 0.34 },
+    { t: 0.56, x: 0.49, y: 1.03, z: 0.38 },
+    { t: 0.78, x: 0.45, y: 1.4, z: 0.35 },
+    { t: 0.93, x: 0.3, y: 1.66, z: 0.26 },
+    { t: 1, x: 0.06, y: 1.76, z: 0.09 },
   ]
   const profileCurve = new THREE.CatmullRomCurve3(
     profile.map((point) => new THREE.Vector3(point.x, point.y, point.z)),
@@ -49,11 +48,11 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
       const mask = gauss(x, 0.43) * gauss(ring.y - 0.88, 0.46) * THREE.MathUtils.smoothstep(front, 0.28, 0.86)
       const rim = Math.pow(Math.abs(Math.sin(angle)), 8.5)
       const shell = THREE.MathUtils.smoothstep(rim, 0.55, 0.98)
-      const light = front < 0 ? 0.08 + rim * 0.35 : 0.28 + rim * 3.8 + mask * 1.65 + shell * 1.25
+      const light = front < 0 ? 0.08 + rim * 0.3 : 0.22 + rim * 2.35 + mask * 0.8 + shell * 0.62
       if (random() < 0.018 && rim < 0.55) continue
       const jitter = (random() - 0.5) * 0.012 * (1 + shell * 0.8)
       emit(x + jitter, ring.y + Math.sin(angle * 3 + ring.y * 5) * 0.005 + jitter, z,
-        mask * 0.85, light * (0.72 + random() * 0.48), 0, 1.55 + random() * 0.75 + shell * 0.35)
+        mask * 0.055, light * (0.72 + random() * 0.48), 0, 1.55 + random() * 0.75 + shell * 0.35)
     }
   }
   for (let row = 0; row < Math.round(52 * density); row++) {
@@ -69,15 +68,18 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
         0.55 + rim * 4.8, 0, 1.35 + random() * 0.55)
     }
   }
+  // A faceless stack of warm scan lines sits inside the cool cranial shell.
+  // This is deliberately not a conventional wireframe face: the original
+  // Jarvis presence read as an energy aperture inside a human silhouette.
   for (let row = 0; row < 34 * density; row++) {
     const v = row / (34 * density) * 2 - 1
-    const width = Math.sqrt(1 - v * v) * 0.48
+    const width = Math.sqrt(1 - v * v) * 0.405
     for (let i = 0; i < 190 * density; i++) {
       const u = i / (190 * density) * 2 - 1
       const heat = (1 - Math.pow(Math.abs(u), 3)) * (1 - v * v)
-      emit(u * width, 0.88 + v * 0.5 + Math.cos(u * Math.PI) * 0.012,
-        0.48 - Math.abs(u) * 0.028, heat * 0.92, 0.42 + heat * 1.02,
-        0, 1.15 + random() * 0.3)
+      emit(u * width, 0.94 + v * 0.58 + Math.cos(u * Math.PI) * 0.012,
+        0.48 - Math.abs(u) * 0.028, 0.72 + heat * 0.28, 0.62 + heat * 1.24,
+        0, 1.25 + random() * 0.35)
     }
   }
   // A diffuse amber volume behind the scan bands. It reads as neural heat, not
@@ -90,7 +92,7 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
       Math.sin(b) * Math.cos(a) * r * 0.42,
       0.9 + Math.sin(b) * Math.sin(a) * r * 0.51,
       0.19 + Math.cos(b) * r * 0.15,
-      0.78 + random() * 0.16, 0.34 + (1 - r) * 1.02, 0, 0.95 + random() * 0.5,
+      0.7 + random() * 0.2, 0.28 + (1 - r) * 0.72, 0, 0.95 + random() * 0.5,
     )
   }
   const coreY = 0.9, coreZ = 0.45
@@ -187,6 +189,23 @@ export function buildHumanoidBustFigure(density: number): ParticleOrb[] {
           fade * (0.44 + random() * 0.42), 0, 1.35)
       }
     }
+  }
+
+  // Blue-white sternum node and branching gold conduits mirror the reference
+  // without reintroducing the detached ring/orb motif.
+  for (let i = 0; i < Math.round(780 * density); i++) {
+    const angle = random() * Math.PI * 2
+    const radius = Math.pow(random(), 1.8) * 0.115
+    const hot = 1 - radius / 0.115
+    emit(
+      Math.cos(angle) * radius,
+      -1.12 + Math.sin(angle) * radius * 1.15,
+      0.38 + (random() - 0.5) * 0.04,
+      hot * 0.18,
+      1.1 + hot * 3.2,
+      2,
+      1.3 + hot * 1.25,
+    )
   }
   for (let row = 0; row < 27 * density; row++) {
     const t = row / (27 * density)

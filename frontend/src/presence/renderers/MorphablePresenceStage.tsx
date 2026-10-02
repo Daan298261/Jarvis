@@ -7,6 +7,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { createPresenceAttentionController, type AttentionVector } from "../presenceAttention"
 import {
   LIFECYCLE_MORPH_SECONDS,
+  PERSONA_MORPH_SECONDS,
   isRestPresencePhase,
   lifecycleMorphBlend,
   lifecycleMorphTarget,
@@ -123,7 +124,7 @@ export function MorphablePresenceStage({
       canvas, alpha: true, antialias: false,
       powerPreference: efficient ? "low-power" : "high-performance",
     })
-    renderer.setClearColor(0x03070b, 1)
+    renderer.setClearColor(0x000000, 1)
     renderer.toneMapping = THREE.ReinhardToneMapping
     renderer.toneMappingExposure = 0.82
     const scene = new THREE.Scene()
@@ -265,9 +266,6 @@ export function MorphablePresenceStage({
       frame = window.requestAnimationFrame(render)
       const current = stateRef.current
       const frameMs = lastFrameSample === undefined ? 16.67 : time - lastFrameSample
-      averageFrameInterval += (frameMs - averageFrameInterval) * 0.08
-      stage.dataset.presenceFrameMs = averageFrameInterval.toFixed(1)
-      stage.dataset.presenceFps = (1000 / Math.max(1, averageFrameInterval)).toFixed(0)
       if (current.settings.performancePreset === "auto") {
         const tier = autoQuality.sample(time, frameMs)
         const targetDensity = PRESENCE_QUALITY_DENSITIES[tier]
@@ -283,8 +281,11 @@ export function MorphablePresenceStage({
       lastFrameSample = time
       const reduced = current.settings.reducedMotion === "reduce"
         || (current.settings.reducedMotion === "system" && motionQuery.matches)
-      const interval = reduced ? 100 : efficient ? 33 : 16
+      const interval = reduced ? 100 : efficient ? 33 : 0
       if (time - lastRender < interval) return
+      if (lastRender) averageFrameInterval += (time - lastRender - averageFrameInterval) * 0.08
+      stage.dataset.presenceFrameMs = averageFrameInterval.toFixed(1)
+      stage.dataset.presenceFps = (1000 / Math.max(1, averageFrameInterval)).toFixed(0)
       const delta = Math.min((time - lastRender) / 1000, 0.05)
       lastRender = time
       if (!reduced) animationTime += delta
@@ -298,7 +299,7 @@ export function MorphablePresenceStage({
       })
       if (desiredShape !== system.currentShapeId) {
         system.morphTo(desiredShape, {
-          duration: reduced ? 0 : LIFECYCLE_MORPH_SECONDS,
+          duration: reduced ? 0 : PERSONA_MORPH_SECONDS,
           immediate: reduced,
         })
         setActiveShapeId(system.currentShapeId)
@@ -339,7 +340,7 @@ export function MorphablePresenceStage({
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)
         * (reduced ? 1 : Math.min(1, delta * 3))
       const galaxyOn = current.settings.requestedPresence === "galaxy"
-      const bustShape = system.currentShapeId === "humanoid_bust"
+      const bustShape = system.currentShapeId === "humanoid_bust" || system.currentShapeId === "portrait_humanoid"
       const rest = isRestPresencePhase(phase)
       const alive = phaseIsEngaged(phase)
       uniforms.uGalaxy.value = galaxyOn ? 1 : 0
@@ -349,7 +350,7 @@ export function MorphablePresenceStage({
       system.setGalaxy(galaxyOn)
       system.syncStars(animationTime, reduced ? 0 : 1)
       const clear = galaxyOn || current.transparentBackdrop
-      renderer.setClearColor(clear ? 0x000000 : 0x03070b, clear ? 0 : 1)
+      renderer.setClearColor(0x000000, clear ? 0 : 1)
       const meterNow = galaxyOn && (phase === "speaking" || phase === "listening") ? readVoiceMeter() : null
       const speechLevel = !reduced && meterNow && meterNow.attached && meterNow.kind === "tts" && phase === "speaking"
         ? THREE.MathUtils.clamp(meterNow.level, 0, 1)
@@ -375,6 +376,12 @@ export function MorphablePresenceStage({
         color.setHex(alive ? 0x6fd0ff : 0x8ec4de)
         uniforms.uGold.value.setHex(alive ? 0xff8a1a : 0x24303a)
         uniforms.uAccent.value.set(visual?.accentColor || "#9fd4ea")
+      } else if (!warning && bustShape) {
+        // The restored Jarvis humanoid has its own art direction. Persona
+        // colours belong to mythic shapes and must not recolour this shell.
+        color.setHex(0x1ec8ff)
+        uniforms.uGold.value.setHex(0xff951f)
+        uniforms.uAccent.value.setHex(0x8ceaff)
       } else if (!warning && visual?.orbColor) {
         color.set(visual.orbColor)
         uniforms.uGold.value.set(safeAccent)

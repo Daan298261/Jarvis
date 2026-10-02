@@ -123,12 +123,30 @@ export async function loadNamedPersonas(): Promise<NamedPersonaState> {
 }
 
 export async function selectNamedPersona(id: string): Promise<NamedPersonaState> {
-  const state = await api<NamedPersonaState>("/api/named-personas", {
-    method: "PUT",
-    body: JSON.stringify({ id }),
-  })
-  publish(state)
-  return state
+  const previous = cache
+  const canonicalId = canonicalizePersonaId(id)
+  const selected = previous?.personas.find((persona) => persona.id === canonicalId)
+  if (previous && selected) publish({ ...previous, active: selected })
+  const controller = new AbortController()
+  const deadline = window.setTimeout(() => controller.abort(), 2500)
+  try {
+    const state = await api<NamedPersonaState>("/api/named-personas", {
+      method: "PUT",
+      body: JSON.stringify({ id: canonicalId }),
+      signal: controller.signal,
+    })
+    publish(state)
+    return state
+  } catch (error) {
+    // Keep the optimistic visual selection. A slow backend must not make the
+    // avatar snap back or leave the whole appearance panel locked.
+    if (controller.signal.aborted) {
+      throw new Error(`${PERSONA_LABELS[canonicalId] || canonicalId} is active locally; Jarvis did not confirm the saved persona in time.`)
+    }
+    throw error
+  } finally {
+    window.clearTimeout(deadline)
+  }
 }
 
 export async function updateNamedPersonaPrefs(

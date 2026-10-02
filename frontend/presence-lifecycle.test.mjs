@@ -12,6 +12,54 @@ const shapes = await import("./src/presence/renderers/shapes/catalog.ts")
 const quality = await import("./src/presence/presenceQuality.ts")
 const personas = await import("./src/persona/namedPersonas.ts")
 const THREE = await import("three")
+const portraits = await import("./src/presence/renderers/shapes/portraitCloud.ts")
+
+test("portrait particles preserve colour and aspect, discard black, and cache decoding", async () => {
+  const previousImage = globalThis.Image
+  const previousDocument = globalThis.document
+  let decodes = 0
+  globalThis.Image = class {
+    width = 100
+    height = 200
+    async decode() { decodes++ }
+  }
+  globalThis.document = { createElement: () => ({ getContext: () => ({
+    drawImage() {},
+    getImageData(_x, _y, w, h) {
+      const data = new Uint8ClampedArray(w * h * 4)
+      data.set([0, 0, 0, 255], 0)
+      data.set([255, 128, 0, 255], 4)
+      return { data }
+    },
+  }) }) }
+  try {
+    const first = portraits.preparePortraitCloud("test-avatar", "sample_test")
+    assert.equal(first, portraits.preparePortraitCloud("test-avatar", "sample_test"))
+    const id = await first
+    const points = shapes.resolvePresenceShape(id).buildFigure(1)
+    assert.equal(decodes, 1)
+    assert.equal(points.length, 1)
+    assert.equal(points[0].color[0], 1)
+    assert.equal(points[0].color[3], 1)
+    assert.ok(points[0].color[1] > 0.21 && points[0].color[1] < 0.22)
+    assert.equal(points[0].y, 3.1)
+  } finally {
+    globalThis.Image = previousImage
+    globalThis.document = previousDocument
+    shapes.unregisterPresenceShape("portrait_sample_test")
+  }
+})
+
+test("avatar decoding failures are retryable", async () => {
+  const previousImage = globalThis.Image
+  let decodes = 0
+  globalThis.Image = class { async decode() { decodes++; throw new Error("unavailable") } }
+  try {
+    await assert.rejects(portraits.preparePortraitCloud("missing-avatar", "retry_test"), /unavailable/)
+    await assert.rejects(portraits.preparePortraitCloud("missing-avatar", "retry_test"), /unavailable/)
+    assert.equal(decodes, 2)
+  } finally { globalThis.Image = previousImage }
+})
 
 function meanAxis(attribute, axis) {
   let sum = 0
@@ -146,6 +194,15 @@ test("all named personas expose their own registered visual avatar", async () =>
   const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
   assert.match(controls, /Named persona avatars/)
   assert.match(controls, /SpecialistShapeMark/)
+})
+
+test("humanoid and mythic persona modes keep distinct visual contracts", async () => {
+  const home = await readFile(new URL("./src/hud/HudChatHome.tsx", import.meta.url), "utf8")
+  const settings = await readFile(new URL("./src/settings/AppearanceSettingsPane.tsx", import.meta.url), "utf8")
+  assert.match(home, /presentation\.requestedPresence === "humanoid"/)
+  assert.match(home, /\? "humanoid_bust"/)
+  assert.match(settings, /Mythic persona · live/)
+  assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.42)
 })
 
 test("camera-unavailable attract stays on the pointer and does not invent a face", () => {

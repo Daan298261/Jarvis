@@ -31,7 +31,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       await updatePresentation(patch)
       setMessage(note)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save presentation settings.")
+      setMessage(error instanceof Error ? error.message : "Appearance changed locally; the saved setting could not be confirmed.")
     } finally {
       setBusy(false)
     }
@@ -112,12 +112,12 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "particle_bust" },
-              "Particle bust profile active on the shared presence stage. Jarvis falls back to APEX UI · orb + graph if WebGL is unavailable.",
+              "Live mythic persona figure active. Persona selections morph immediately on the shared particle stage.",
             )
           }
         >
           <PresenceModePreview mode="particle_bust" />
-          Particle bust · experimental
+          Mythic persona · live
         </button>
         <button
           type="button"

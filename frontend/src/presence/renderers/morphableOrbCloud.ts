@@ -27,6 +27,9 @@ export const particleVertexShader = `
   attribute float aFlow;
   attribute float bFlow;
   attribute float aSeed;
+  attribute vec4 aColor;
+  attribute vec4 bColor;
+  varying vec4 vPortraitColor;
   uniform float uTime;
   uniform float uMotion;
   uniform float uActivity;
@@ -60,6 +63,10 @@ export const particleVertexShader = `
     float lifecycle01 = smoothstep(restT, 1.0, clamp(uMorph, restT, 1.0));
     float m = mix(morph01, lifecycle01, step(0.5, uRestRemap));
     vec3 p = mix(aPos, bPos, m);
+    vPortraitColor = mix(aColor, bColor, m);
+    float flight = sin(m * 3.14159265);
+    p.x += sin(aSeed * 19.0 + m * 4.0) * flight * 0.22 * uMotion;
+    p.z += cos(aSeed * 23.0 + m * 3.0) * flight * 0.3 * uMotion;
     p.y += uBreath * smoothstep(-1.0, 0.15, p.y);
     float flow = mix(aFlow, bFlow, m);
     float size = mix(aSize, bSize, m);
@@ -157,6 +164,7 @@ export const particleVertexShader = `
 `
 
 export const particleFragmentShader = `
+  varying vec4 vPortraitColor;
   uniform vec3 uColor;
   uniform vec3 uGold;
   uniform vec3 uAccent;
@@ -232,7 +240,8 @@ export const particleFragmentShader = `
     // RFC-0195: keep edge contrast — a white-hot additive core must not blow
     // the silhouette into a slab even when glow/bloom are high.
     float coreHot = core * (0.18 + hot * 0.42) * mix(1.0, 0.62, smoothstep(1.15, 1.9, vLight) * uGlow);
-    gl_FragColor = vec4(color + vec3(coreHot), alpha);
+    color = mix(color + vec3(coreHot), vPortraitColor.rgb * 1.5, vPortraitColor.a);
+    gl_FragColor = vec4(color, alpha);
   }
 `
 
@@ -354,6 +363,8 @@ function geometryFromOrbs(
   geometry.setAttribute("aFlow", new THREE.BufferAttribute(aFlow, 1))
   geometry.setAttribute("bFlow", new THREE.BufferAttribute(bFlow, 1))
   geometry.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1))
+  geometry.setAttribute("aColor", new THREE.BufferAttribute(new Float32Array(orbs.flatMap((orb) => [...(orb.color ?? [0, 0, 0, 0])])), 4))
+  geometry.setAttribute("bColor", new THREE.BufferAttribute(new Float32Array(bOrbs.flatMap((orb) => [...(orb.color ?? [0, 0, 0, 0])])), 4))
   return new THREE.Points(geometry, material)
 }
 
@@ -518,6 +529,8 @@ export function createMorphablePresenceSystem(
 
   const copyCurrentToA = (points: THREE.Points) => {
     const geo = points.geometry
+    const aColor = geo.getAttribute("aColor") as THREE.BufferAttribute
+    const bColor = geo.getAttribute("bColor") as THREE.BufferAttribute
     const aPos = geo.getAttribute("aPos") as THREE.BufferAttribute
     const bPos = geo.getAttribute("bPos") as THREE.BufferAttribute
     const aSize = geo.getAttribute("aSize") as THREE.BufferAttribute
@@ -529,6 +542,8 @@ export function createMorphablePresenceSystem(
     const aFlow = geo.getAttribute("aFlow") as THREE.BufferAttribute
     const bFlow = geo.getAttribute("bFlow") as THREE.BufferAttribute
     const m = displayedMixFactor()
+    for (let j = 0; j < aColor.array.length; j++) aColor.array[j] += (bColor.array[j] - aColor.array[j]) * m
+    aColor.needsUpdate = true
     for (let i = 0; i < aPos.count; i++) {
       const i3 = i * 3
       aPos.array[i3] = aPos.array[i3] * (1 - m) + bPos.array[i3] * m
@@ -548,6 +563,7 @@ export function createMorphablePresenceSystem(
 
   const writeSlotAttr = (points: THREE.Points, orbs: ParticleOrb[], slot: "a" | "b") => {
     const geo = points.geometry
+    const colors = geo.getAttribute(`${slot}Color`) as THREE.BufferAttribute
     const pos = geo.getAttribute(`${slot}Pos`) as THREE.BufferAttribute
     const size = geo.getAttribute(`${slot}Size`) as THREE.BufferAttribute
     const gold = geo.getAttribute(`${slot}Gold`) as THREE.BufferAttribute
@@ -556,6 +572,7 @@ export function createMorphablePresenceSystem(
     const n = Math.min(orbs.length, pos.count)
     for (let i = 0; i < n; i++) {
       const orb = orbs[i]
+      for (let j = 0; j < 4; j++) colors.array[i * 4 + j] = orb.color?.[j] ?? 0
       const i3 = i * 3
       pos.array[i3] = orb.x
       pos.array[i3 + 1] = orb.y
@@ -566,6 +583,7 @@ export function createMorphablePresenceSystem(
       flow.array[i] = orb.flow
     }
     pos.needsUpdate = true
+    colors.needsUpdate = true
     size.needsUpdate = true
     gold.needsUpdate = true
     light.needsUpdate = true
@@ -584,6 +602,8 @@ export function createMorphablePresenceSystem(
 
   const captureDisplayed = (): ParticleOrb[] => {
     const geo = figure.geometry
+    const aColor = geo.getAttribute("aColor") as THREE.BufferAttribute
+    const bColor = geo.getAttribute("bColor") as THREE.BufferAttribute
     const aPos = geo.getAttribute("aPos") as THREE.BufferAttribute
     const bPos = geo.getAttribute("bPos") as THREE.BufferAttribute
     const aSize = geo.getAttribute("aSize") as THREE.BufferAttribute
@@ -599,6 +619,7 @@ export function createMorphablePresenceSystem(
     for (let i = 0; i < aPos.count; i++) {
       const i3 = i * 3
       out.push({
+        color: [0, 1, 2, 3].map((j) => aColor.array[i * 4 + j] * (1 - m) + bColor.array[i * 4 + j] * m) as [number, number, number, number],
         x: aPos.array[i3] * (1 - m) + bPos.array[i3] * m,
         y: aPos.array[i3 + 1] * (1 - m) + bPos.array[i3 + 1] * m,
         z: aPos.array[i3 + 2] * (1 - m) + bPos.array[i3 + 2] * m,

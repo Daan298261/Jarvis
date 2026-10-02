@@ -65,6 +65,8 @@ def test_resolve_falls_back_to_installed_weights(tmp_path, monkeypatch):
 def test_resolve_mmproj_prefers_existing_model_paths(tmp_path, monkeypatch):
     from app.inference import profiles as profiles_mod
 
+    # Do not let real desktop installations take precedence over this fixture.
+    monkeypatch.setattr(profiles_mod, "models_dir", lambda: tmp_path / "models")
     projector = tmp_path / "mmproj-f16.gguf"
     projector.write_bytes(b"gguf")
     monkeypatch.setattr(
