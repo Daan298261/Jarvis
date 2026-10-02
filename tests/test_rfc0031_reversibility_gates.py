@@ -127,10 +127,13 @@ def test_reversible_filesystem_write_auto_exec_and_undo(monkeypatch, tmp_path):
     assert prior["snapshot_path"]
     target.write_text("hello", encoding="utf-8")
 
+    import hashlib
+
+    post_digest = hashlib.sha256(b"hello").hexdigest()
     record = register_post_success_undo(
         decision,
         prior_state=prior,
-        post_state={"expected_digest": "abc", "current_digest": "abc"},
+        post_state={"digest_path": str(target), "expected_digest": post_digest},
         task_id="task-1",
         run_id="run-1",
         step_id="step-1",
@@ -172,7 +175,7 @@ def test_settings_path_reversible_restores_previous(monkeypatch):
     record = register_post_success_undo(
         decision,
         prior_state=prior,
-        post_state={"expected_digest": "v1", "current_digest": "v1"},
+        post_state={},
         task_id="t-settings",
     )
     assert record["undo_operation"]
@@ -191,7 +194,7 @@ def test_apply_undo_refuses_without_restorable_prior():
         undo_operation="filesystem.undo_write",
         preconditions=[],
         prior_state={"kind": "metadata_only", "restorable": False, "target": "/tmp/fake.txt"},
-        post_state={"expected_digest": "x", "current_digest": "x"},
+        post_state={},
     )
     result = apply_undo(record["id"])
     assert result["status"] == "not_implemented"
@@ -295,6 +298,7 @@ def test_credential_and_external_gates(monkeypatch):
     assert cred.requires_approval is True
     assert cred.effect.credential_effect is True
 
+    # Financial hint in URL still gates even for GET.
     external = evaluate_side_effect(
         "web_fetch",
         action="get",
@@ -302,7 +306,18 @@ def test_credential_and_external_gates(monkeypatch):
         park_if_needed=True,
     )
     assert external.requires_approval is True
-    assert external.effect.external_side_effect is True or external.effect.high_consequence
+    assert external.effect.financial_effect is True or external.effect.high_consequence
+
+    # Plain observational GET must auto-permit (no approval).
+    observe = evaluate_side_effect(
+        "web_fetch",
+        action="get",
+        arguments={"url": "https://example.com/docs"},
+        park_if_needed=True,
+    )
+    assert observe.allowed is True
+    assert observe.requires_approval is False
+    assert observe.effect.side_effecting is False
 
 
 def test_timeout_and_reject(monkeypatch):
@@ -340,24 +355,30 @@ def test_timeout_and_reject(monkeypatch):
         )
 
 
-def test_stale_undo_preconditions_conflict():
+def test_stale_undo_preconditions_conflict(tmp_path):
+    target = tmp_path / "x.txt"
+    target.write_text("post-action", encoding="utf-8")
+    import hashlib
+
+    expected = hashlib.sha256(b"post-action").hexdigest()
     record = register_undo_record(
         tool_name="filesystem",
         action="write",
-        target="/tmp/x.txt",
+        target=str(target),
         reversibility="REVERSIBLE",
         undo_operation="filesystem.undo_write",
         preconditions=["post_state_matches"],
-        prior_state={"text": "old"},
-        post_state={"expected_digest": "aaa", "current_digest": "aaa"},
+        prior_state={"kind": "filesystem_bytes", "path": str(target), "existed": True},
+        post_state={"digest_path": str(target), "expected_digest": expected},
         task_id="t1",
         run_id="r1",
         step_id="s1",
     )
-    mark_post_state_stale(record["id"], current_digest="bbb")
+    # Diverged live state must refuse undo (not a stored-identical digest pair).
+    target.write_text("changed-after-action", encoding="utf-8")
     result = apply_undo(record["id"])
     assert result["status"] == "conflict"
-    assert "stale" in result["reason"].lower() or "digest" in result["reason"].lower()
+    assert "digest" in result["reason"].lower() or "diverg" in result["reason"].lower()
 
 
 def test_composite_rollback_reverse_order():
@@ -374,21 +395,21 @@ def test_composite_rollback_reverse_order():
                 "undo_operation": "restore_a",
                 "order": 1,
                 "summary": "child a",
-                "post_state": {"expected_digest": "1", "current_digest": "1"},
+                "post_state": {},
             },
             {
                 "target": "/workspace/b.txt",
                 "undo_operation": "restore_b",
                 "order": 2,
                 "summary": "child b",
-                "post_state": {"expected_digest": "2", "current_digest": "2"},
+                "post_state": {},
             },
             {
                 "target": "/workspace/c.txt",
                 "undo_operation": "restore_c",
                 "order": 3,
                 "summary": "child c",
-                "post_state": {"expected_digest": "3", "current_digest": "3"},
+                "post_state": {},
             },
         ],
     )

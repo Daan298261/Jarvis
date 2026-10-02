@@ -60,6 +60,10 @@ async def _resume_task_with_grant(task_id: str, grant: dict[str, Any]) -> dict[s
     from ..db.models import Task
     from ..db.session import SessionLocal
 
+    decision = str((grant or {}).get("decision") or "allow_once").strip().lower()
+    # Preserve durable scoped "always"; only single-use modes become allow_once.
+    grant_mode = "always" if decision == "always" else "allow_once"
+
     async with SessionLocal() as session:
         task = await session.get(Task, task_id)
         if not task:
@@ -71,14 +75,15 @@ async def _resume_task_with_grant(task_id: str, grant: dict[str, Any]) -> dict[s
         payload["grant_id"] = grant.get("id")
         payload["action_id"] = grant.get("action_id")
         payload["pending_approval_id"] = grant.get("pending_id")
+        payload["grant_decision"] = decision
         if not payload.get("name"):
             payload["name"] = grant.get("tool_name")
         if "arguments" not in payload:
             payload["arguments"] = {}
         task.confirmation_payload = json.dumps(payload)
         await session.commit()
-    await AGENT.confirm_task(task_id, True, grant_mode="allow_once")
-    return {"resumed": True}
+    await AGENT.confirm_task(task_id, True, grant_mode=grant_mode)
+    return {"resumed": True, "grant_mode": grant_mode}
 
 
 @router.post("/pending/{pending_id}/decide")

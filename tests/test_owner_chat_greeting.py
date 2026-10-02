@@ -213,8 +213,10 @@ async def test_owner_chat_streams_without_confirmation(jarvis_env, monkeypatch):
 
     assert events[0]["type"] == "start"
     deltas = [e for e in events if e["type"] == "delta"]
-    assert len(deltas) == 2
-    assert all(e.get("lane") == "front" for e in deltas)
+    # Emit ONLY validated sanitized front text (never raw model chunk envelopes).
+    assert len(deltas) == 1
+    assert deltas[0].get("lane") == "front"
+    assert deltas[0]["text"] == "Certainly. One moment."
     done = events[-1]
     assert done["type"] == "done"
     assert done["text"] == "Certainly. One moment."

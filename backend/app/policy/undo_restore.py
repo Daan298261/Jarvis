@@ -165,7 +165,26 @@ def capture_prior_for_effect(
     act = (action or str(args.get("action") or "")).strip().lower()
     target = str(args.get("path") or args.get("destination") or args.get("target") or "").strip()
 
-    if name == "filesystem" and act in {"write", "edit", "mkdir", "copy", "move", "rename", "delete"}:
+    if name == "filesystem" and act in {"copy", "move", "rename"}:
+        source = str(args.get("path") or args.get("source") or target or "").strip()
+        destination = str(args.get("destination") or args.get("to") or "").strip()
+        if not source or not destination:
+            raise ValueError(f"filesystem.{act} undo capture requires path and destination")
+        source_prior = capture_filesystem_prior(source)
+        dest_prior = capture_filesystem_prior(destination)
+        return {
+            "kind": "filesystem_copy_move",
+            "action": act,
+            "path": source_prior.get("path"),
+            "source_path": source_prior.get("path"),
+            "destination_path": dest_prior.get("path"),
+            "source": source_prior,
+            "destination": dest_prior,
+            "existed": source_prior.get("existed"),
+            "restorable": True,
+        }
+
+    if name == "filesystem" and act in {"write", "edit", "mkdir", "delete"}:
         path = target or str(args.get("path") or "")
         return capture_filesystem_prior(path)
 
@@ -231,6 +250,57 @@ def _restore_filesystem(prior: dict[str, Any], *, target_hint: str = "") -> dict
     return {"restored": "file", "path": str(path), "bytes": len(data), "from": str(snap_path)}
 
 
+def _remove_path(path: Path) -> None:
+    if not path.exists():
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def _restore_copy_move(prior: dict[str, Any]) -> dict[str, Any]:
+    """Operation-specific inverses for copy / move / rename.
+
+    - copy: restore destination prior (delete if it did not exist); leave source alone
+    - move/rename: restore source from snapshot; restore destination prior (delete if new)
+    """
+    action = str(prior.get("action") or "").strip().lower()
+    source = dict(prior.get("source") or {})
+    destination = dict(prior.get("destination") or {})
+    source_path = Path(str(prior.get("source_path") or source.get("path") or ""))
+    dest_path = Path(str(prior.get("destination_path") or destination.get("path") or ""))
+    if not source_path or not dest_path:
+        raise UndoNotImplementedError("copy/move undo requires source and destination paths")
+
+    details: dict[str, Any] = {"action": action, "source": str(source_path), "destination": str(dest_path)}
+
+    if action == "copy":
+        # Inverse of copy is removing/restoring only the destination.
+        if destination.get("existed"):
+            details["destination_restore"] = _restore_filesystem(destination)
+        else:
+            _remove_path(dest_path)
+            details["destination_restore"] = {"restored": "deleted_created_path", "path": str(dest_path)}
+        details["source_untouched"] = True
+        return details
+
+    if action in {"move", "rename"}:
+        # Put source back from its pre-move snapshot, then restore destination prior.
+        if source.get("existed"):
+            details["source_restore"] = _restore_filesystem(source)
+        else:
+            raise UndoNotImplementedError("move/rename undo missing source snapshot")
+        if destination.get("existed"):
+            details["destination_restore"] = _restore_filesystem(destination)
+        else:
+            _remove_path(dest_path)
+            details["destination_restore"] = {"restored": "deleted_created_path", "path": str(dest_path)}
+        return details
+
+    raise UndoNotImplementedError(f"unsupported copy/move action for undo: {action!r}")
+
+
 def _restore_settings(prior: dict[str, Any]) -> dict[str, Any]:
     from ..config import load_settings, save_settings
 
@@ -267,6 +337,10 @@ def execute_reverse(record: dict[str, Any]) -> dict[str, Any]:
 
         if kind == "filesystem_bytes":
             detail = _restore_filesystem(prior, target_hint=str(record.get("target") or ""))
+            return {"status": "undone", "detail": detail, "undo_operation": op}
+
+        if kind == "filesystem_copy_move":
+            detail = _restore_copy_move(prior)
             return {"status": "undone", "detail": detail, "undo_operation": op}
 
         if kind == "settings_value":

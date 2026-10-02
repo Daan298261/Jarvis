@@ -51,6 +51,13 @@ _RESTORE_SAFE_KEYS = frozenset(
         "tool_name",
         "action",
         "target",
+        "source",
+        "destination",
+        "source_path",
+        "destination_path",
+        "expected_digest",
+        "digest_path",
+        "digest_paths",
     }
 )
 
@@ -373,6 +380,48 @@ def describe_undo(record_id: str) -> dict[str, Any]:
     }
 
 
+def _digest_path(path: Path) -> str | None:
+    """Live digest of a filesystem target. None when the path cannot be read."""
+    try:
+        if not path.exists():
+            return "missing"
+        if path.is_dir():
+            hasher = hashlib.sha256()
+            for item in sorted(path.rglob("*")):
+                if item.is_file():
+                    rel = item.relative_to(path).as_posix()
+                    hasher.update(f"{rel}:{item.stat().st_size}".encode())
+            return hasher.hexdigest()
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def live_target_digest(record: dict[str, Any]) -> str | None:
+    """Recalculate digest of the live post-action target immediately before undo."""
+    post = record.get("post_state") or {}
+    prior = record.get("prior_state") or {}
+    action = str(record.get("action") or prior.get("action") or "").lower()
+    digest_path = post.get("digest_path")
+    if not digest_path and action in {"copy", "move", "rename"}:
+        dest = prior.get("destination") if isinstance(prior.get("destination"), dict) else {}
+        digest_path = (
+            post.get("destination_path")
+            or prior.get("destination_path")
+            or dest.get("path")
+        )
+    if not digest_path:
+        digest_path = (
+            post.get("target")
+            or prior.get("path")
+            or record.get("target")
+        )
+    raw = str(digest_path or "").strip()
+    if not raw:
+        return None
+    return _digest_path(Path(raw).expanduser())
+
+
 def _precondition_ok(
     record: dict[str, Any],
     *,
@@ -383,7 +432,17 @@ def _precondition_ok(
     post = record.get("post_state") or {}
     if post.get("stale") is True:
         return False, "postcondition marked stale; world changed since action"
-    if "expected_digest" in post and "current_digest" in post:
+    expected = post.get("expected_digest")
+    if expected:
+        # Always recalculate live state — never trust a stored current_digest pair
+        # that was written identical at registration time.
+        live = live_target_digest(record)
+        if live is None:
+            return False, "unable to read live target state for undo precondition"
+        if live != expected:
+            return False, "current digest diverges from expected postcondition"
+    elif "expected_digest" in post and "current_digest" in post:
+        # Legacy rows: still refuse explicit divergence, but prefer live when possible.
         if post["expected_digest"] != post["current_digest"]:
             return False, "current digest diverges from expected postcondition"
     if world_checker is not None:

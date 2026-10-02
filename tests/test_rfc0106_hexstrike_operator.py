@@ -232,6 +232,18 @@ async def test_operate_rejects_dependency_catalog_rows(operator_store, monkeypat
 
     monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
     monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    # Guaranteed-missing host tool — do not assume the CI/dev machine lacks nmap.
+    import shutil as _shutil
+
+    real_which = _shutil.which
+
+    def _which_missing_nmap(name):
+        if str(name).lower() == "nmap":
+            return None
+        return real_which(name)
+
+    monkeypatch.setattr("app.security.hexstrike_operator.shutil.which", _which_missing_nmap)
+    monkeypatch.setattr("app.security.hexstrike_tools.shutil.which", _which_missing_nmap)
     await refresh_discovered_catalog(force=True)
     with pytest.raises(ValueError, match="install via POST"):
         await operate("dep:nmap", {})
