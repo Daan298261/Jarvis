@@ -199,4 +199,17 @@ class TransportPolicyTest {
         assertTrue(wan in keptName)
         assertFalse(stale in keptName)
     }
+
+    @Test fun absorbMatchingLanBeaconReplacesStaleLanAndKeepsWan() {
+        val pin = "a".repeat(64)
+        val stale = "https://192.168.1.12:4781"
+        val live = "https://192.168.1.40:4781"
+        val wan = "https://203.0.113.4:4781"
+        val absorbed = TransportPolicy.absorbMatchingLanOrigin(listOf(stale, wan), pin, live, pin)
+        assertEquals(listOf(wan, live), absorbed)
+        assertNull(TransportPolicy.absorbMatchingLanOrigin(listOf(stale, wan), pin, live, "b".repeat(64)))
+        assertNull(TransportPolicy.absorbMatchingLanOrigin(listOf(stale), "short", live, "short"))
+        val cellular = TransportPolicy.absorbMatchingLanOrigin(listOf(wan), pin, live, pin)
+        assertEquals(listOf(wan, live), cellular)
+    }
 }
