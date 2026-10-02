@@ -32,6 +32,8 @@ def is_public_dial_host(host: str) -> bool:
         ip = ipaddress.ip_address(text)
     except ValueError:
         return "." in text
+    if ip.version == 4:
+        return is_literal_public_ipv4(text)
     return bool(ip.is_global)
 
 
@@ -617,7 +619,10 @@ async def apply_gateway_ssh(settings: dict[str, Any], lan_ip: str, public_host: 
     if proc is None or proc.returncode != 0:
         detail = (stderr or b"").decode("utf-8", errors="replace").strip()[:240]
         raise RuntimeError(detail or "Gateway SSH port-forward failed")
-    host = (settings.get("wan_public_host") or public_host or "").strip()
+    host = public_dial_host_for_gateway(
+        str(settings.get("wan_public_host") or ""),
+        public_host,
+    )
     if not is_public_dial_host(host):
         return (
             None,

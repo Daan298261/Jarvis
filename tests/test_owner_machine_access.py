@@ -203,15 +203,51 @@ def test_default_gateway_parsers_and_openwrt_user_fallback():
 def test_wan_origin_rejects_lan_and_accepts_public_hosts():
     assert is_public_dial_host("vpn.example.test")
     assert is_public_dial_host("8.8.8.8")
+    assert is_public_dial_host("203.0.113.9")
     assert not is_public_dial_host("192.168.1.1")
+    assert not is_public_dial_host("100.64.1.8")
     assert not is_public_dial_host("router.local")
     with pytest.raises(ValueError):
         companion_wan_origin("192.168.1.1")
     assert companion_wan_origin("home.example.test") == "https://home.example.test:4781"
+    assert companion_wan_origin("203.0.113.9") == "https://203.0.113.9:4781"
     public = redact_wan_config({"gateway_password": "secret", "ssh_host": "vpn.example.test"})
     assert "secret" not in str(public)
     assert public["gateway_password_set"] is True
     assert public["ssh_host"] == "vpn.example.test"
+
+
+@pytest.mark.asyncio
+async def test_apply_gateway_ssh_prefers_live_egress_over_stale_literal(tmp_path, monkeypatch):
+    from app.mobile.wan_forward import apply_gateway_ssh
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self, _data):
+            return b"", b""
+
+    async def fake_exec(*_argv, **_kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr("app.mobile.wan_forward.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("app.mobile.wan_forward.ssh_executable", lambda: "ssh")
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+    settings = {
+        "gateway_host": "192.168.1.1",
+        "gateway_user": "root",
+        "gateway_identity_file": str(key),
+        "wan_public_host": "203.0.113.8",
+    }
+    mapped, _detail = await apply_gateway_ssh(settings, "192.168.1.12", public_host="203.0.113.9")
+    assert mapped == "https://203.0.113.9:4781"
+    settings["wan_public_host"] = "home.example.test"
+    mapped, _detail = await apply_gateway_ssh(settings, "192.168.1.12", public_host="203.0.113.9")
+    assert mapped == "https://home.example.test:4781"
+    settings["wan_public_host"] = ""
+    mapped, _detail = await apply_gateway_ssh(settings, "192.168.1.12", public_host="203.0.113.9")
+    assert mapped == "https://203.0.113.9:4781"
 
 
 def test_public_dial_host_for_gateway_keeps_ddns_and_prefers_live_ipv4():
@@ -598,6 +634,52 @@ async def test_lan_refresh_rebuilds_gateway_ssh_when_egress_ipv4_changes(tmp_pat
     assert "https://203.0.113.9:4781" in connection.state["endpoints"]
     assert "https://203.0.113.8:4781" not in connection.state["endpoints"]
     assert seen_hosts == ["203.0.113.8", "203.0.113.9"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_ssh_drops_stale_typed_ipv4_when_egress_moves(tmp_path, monkeypatch):
+    """Owner typed last week's public IPv4; live egress must win in the real SSH helper."""
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    monkeypatch.setattr("app.mobile.wan_forward.lookup_egress_ipv4", lambda: "203.0.113.9")
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self, _data):
+            return b"", b""
+
+    async def fake_exec(*_argv, **_kwargs):
+        return FakeProc()
+
+    monkeypatch.setattr("app.mobile.wan_forward.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("app.mobile.wan_forward.ssh_executable", lambda: "ssh")
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+    connection = FakeConnection()
+    result = await connection.configure(
+        True,
+        True,
+        {
+            "wan_method": "gateway_ssh",
+            "gateway_host": "192.168.1.1",
+            "gateway_user": "root",
+            "gateway_identity_file": str(key),
+            "wan_public_host": "203.0.113.8",
+        },
+    )
+    assert result.get("wan_path") == "gateway_ssh"
+    assert "https://203.0.113.9:4781" in result["endpoints"]
+    assert "https://203.0.113.8:4781" not in result["endpoints"]
+    from app.mobile.gateway import identity_covers
+
+    assert identity_covers(connection.identity, ["203.0.113.9", "192.168.1.12"])
 
 
 @pytest.mark.asyncio

@@ -611,12 +611,17 @@ class Connectivity:
                     except Exception as exc:
                         self.report(router="unavailable", limitation=str(exc)[:240])
             if config.get("remote"):
-                from .wan_forward import companion_wan_origin, is_public_dial_host
+                from .wan_forward import companion_wan_origin, is_literal_public_ipv4, is_public_dial_host
 
                 named = str(config.get("wan_public_host") or "").strip()
                 if is_public_dial_host(named):
                     origin_name = companion_wan_origin(named)
-                    if origin_name not in endpoints:
+                    stale_literal = (
+                        bool(wan_path)
+                        and is_literal_public_ipv4(named)
+                        and origin_name not in endpoints
+                    )
+                    if origin_name not in endpoints and not stale_literal:
                         endpoints.append(origin_name)
             await self.cover_phone_dial_hosts(
                 *endpoints,
@@ -699,6 +704,8 @@ class Connectivity:
         endpoints = list(self.state.get("endpoints") or [])
         if previous_pub:
             endpoints = [item for item in endpoints if dial_host(item) != previous_pub]
+        if named and is_literal_public_ipv4(named) and mapped and dial_host(mapped) != named:
+            endpoints = [item for item in endpoints if dial_host(item) != named]
         if mapped and mapped not in endpoints:
             endpoints.append(mapped)
         self._remember_mapped_public_ip(mapped)
