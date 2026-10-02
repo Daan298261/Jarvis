@@ -1,5 +1,6 @@
 export const SETTINGS_SUBMENUS = [
-  "appearance-voice",
+  "appearance",
+  "voice",
   "phone-pairing",
   "models",
   "network",
@@ -9,13 +10,14 @@ export const SETTINGS_SUBMENUS = [
 
 export type SettingsSubmenu = (typeof SETTINGS_SUBMENUS)[number]
 
-/** RFC-0094 route ids kept as redirect aliases only (not primary nav). */
-export const LEGACY_SETTINGS_SUBMENU_IDS = ["voice", "appearance"] as const
+/** RFC-0113 composed id — redirect only, not primary nav (RFC-0094 amend). */
+export const LEGACY_SETTINGS_SUBMENU_IDS = ["appearance-voice"] as const
 
 export type LegacySettingsSubmenu = (typeof LEGACY_SETTINGS_SUBMENU_IDS)[number]
 
 export const SETTINGS_SUBMENU_LABELS: Record<SettingsSubmenu, string> = {
-  "appearance-voice": "Appearance & Voice",
+  appearance: "Appearance",
+  voice: "Voice",
   "phone-pairing": "Phone Pairing",
   models: "Models & Inference",
   network: "Network & Swarm",
@@ -25,7 +27,8 @@ export const SETTINGS_SUBMENU_LABELS: Record<SettingsSubmenu, string> = {
 
 export const LAST_SETTINGS_SUBMENU_KEY = "jarvis.settings.last_submenu"
 
-export const DEFAULT_SETTINGS_SUBMENU: SettingsSubmenu = "appearance-voice"
+/** RFC-0094: first visit with no stored submenu opens Voice. */
+export const DEFAULT_SETTINGS_SUBMENU: SettingsSubmenu = "voice"
 
 export function isSettingsSubmenu(value: string | null | undefined): value is SettingsSubmenu {
   if (!value) return false
@@ -37,10 +40,10 @@ export function isLegacySettingsSubmenu(value: string | null | undefined): value
   return (LEGACY_SETTINGS_SUBMENU_IDS as readonly string[]).includes(value)
 }
 
-/** Map stored or alias ids to a canonical submenu (RFC-0113 migration). */
+/** Map stored or alias ids to a canonical submenu (RFC-0094 migration). */
 export function normalizeSettingsSubmenuId(value: string | null | undefined): SettingsSubmenu | null {
   if (!value) return null
-  if (value === "voice" || value === "appearance") return "appearance-voice"
+  if (value === "appearance-voice") return "appearance"
   if (isSettingsSubmenu(value)) return value
   return null
 }
@@ -48,13 +51,12 @@ export function normalizeSettingsSubmenuId(value: string | null | undefined): Se
 export function readLastSettingsSubmenu(): SettingsSubmenu {
   try {
     const stored = localStorage.getItem(LAST_SETTINGS_SUBMENU_KEY)
-    const normalized = normalizeSettingsSubmenuId(stored)
-    if (normalized) {
-      if (stored === "voice" || stored === "appearance") {
-        persistLastSettingsSubmenu(normalized)
-      }
-      return normalized
+    if (stored === "appearance-voice") {
+      persistLastSettingsSubmenu("appearance")
+      return "appearance"
     }
+    const normalized = normalizeSettingsSubmenuId(stored)
+    if (normalized) return normalized
   } catch {
     /* ignore */
   }
@@ -69,20 +71,18 @@ export function persistLastSettingsSubmenu(submenu: SettingsSubmenu): void {
   }
 }
 
-/** Redirect legacy `/settings/voice` and `/settings/appearance` paths. */
-export function resolveLegacySettingsSubmenuRedirect(
+/** Redirect `/settings/appearance-voice` to canonical Appearance or Voice. */
+export function resolveAppearanceVoiceSubmenuRedirect(
   param: string | undefined,
+  search: string,
   hash: string,
-): { submenu: SettingsSubmenu; hash: string } | null {
-  if (param === "voice") {
-    const focus = hash.replace(/^#/, "").trim()
-    return { submenu: "appearance-voice", hash: focus ? hash : "#voice" }
-  }
-  if (param === "appearance") {
-    const focus = hash.replace(/^#/, "").trim()
-    return { submenu: "appearance-voice", hash: focus ? hash : "#appearance" }
-  }
-  return null
+): SettingsSubmenu | null {
+  if (param !== "appearance-voice") return null
+  const section = new URLSearchParams(search).get("section")
+  if (section === "voice") return "voice"
+  const hashId = hash.replace(/^#/, "").trim()
+  if (hashId === "voice") return "voice"
+  return "appearance"
 }
 
 /** Resolve submenu from route param, `?section=`, or `#hash` (aliases). */
@@ -122,6 +122,10 @@ export function settingsSubmenuPath(submenu: SettingsSubmenu, hash?: string): st
   return hash.startsWith("#") ? `${base}${hash}` : `${base}#${hash}`
 }
 
-export function appearanceVoiceSettingsPath(focus?: "voice" | "appearance"): string {
-  return settingsSubmenuPath("appearance-voice", focus ? `#${focus}` : undefined)
+export function appearanceSettingsPath(hash?: string): string {
+  return settingsSubmenuPath("appearance", hash)
+}
+
+export function voiceSettingsPath(hash?: string): string {
+  return settingsSubmenuPath("voice", hash)
 }

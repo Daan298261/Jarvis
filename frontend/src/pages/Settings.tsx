@@ -3,19 +3,20 @@ import { Navigate, useLocation, useParams } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 import { usePresentationSettings } from "../presence/presentationSettings"
 import { AdvancedSettingsPane } from "../settings/AdvancedSettingsPane"
-import { AppearanceVoiceSettingsPane } from "../settings/AppearanceVoiceSettingsPane"
+import { AppearanceSettingsPane } from "../settings/AppearanceSettingsPane"
 import { IntegrationsSettingsPane } from "../settings/IntegrationsSettingsPane"
 import { ModelsSettingsPane } from "../settings/ModelsSettingsPane"
 import { NetworkSettingsPane } from "../settings/NetworkSettingsPane"
 import { PhonePairingSettingsPane } from "../settings/PhonePairingSettingsPane"
 import { SettingsNav } from "../settings/SettingsNav"
+import { VoiceSettingsPane } from "../settings/VoiceSettingsPane"
 import {
   DEFAULT_SETTINGS_SUBMENU,
   isSettingsSubmenu,
   legacyFocusHashFromLocation,
   persistLastSettingsSubmenu,
   readLastSettingsSubmenu,
-  resolveLegacySettingsSubmenuRedirect,
+  resolveAppearanceVoiceSubmenuRedirect,
   resolveSettingsSubmenuFromLocation,
   settingsSubmenuPath,
   SETTINGS_SUBMENU_LABELS,
@@ -36,7 +37,11 @@ export function SettingsPage() {
   const [inferenceKeyDraft, setInferenceKeyDraft] = useState("")
   const [msg, setMsg] = useState("")
 
-  const legacyRedirect = resolveLegacySettingsSubmenuRedirect(routeSubmenu, location.hash)
+  const appearanceVoiceRedirect = resolveAppearanceVoiceSubmenuRedirect(
+    routeSubmenu,
+    location.search,
+    location.hash,
+  )
   const activeSubmenu: SettingsSubmenu | null = isSettingsSubmenu(routeSubmenu) ? routeSubmenu : null
 
   useEffect(() => {
@@ -84,18 +89,13 @@ export function SettingsPage() {
     setMsg("Private key saved to this browser session.")
   }
 
-  if (legacyRedirect) {
-    return (
-      <Navigate
-        to={`${settingsSubmenuPath(legacyRedirect.submenu)}${legacyRedirect.hash}`}
-        replace
-      />
-    )
+  if (appearanceVoiceRedirect) {
+    return <Navigate to={settingsSubmenuPath(appearanceVoiceRedirect)} replace />
   }
 
   if (location.pathname === "/settings" && !routeSubmenu) {
     const alias = resolveSettingsSubmenuFromLocation(undefined, location.search, location.hash)
-    const focusHash = legacyFocusHashFromLocation(location.search, location.hash)
+    const focusHash = alias ? "" : legacyFocusHashFromLocation(location.search, location.hash)
     const target = alias ?? readLastSettingsSubmenu()
     return <Navigate to={`${settingsSubmenuPath(target)}${focusHash}`} replace />
   }
@@ -108,8 +108,21 @@ export function SettingsPage() {
 
   function renderPane() {
     switch (activeSubmenu) {
-      case "appearance-voice":
-        return <AppearanceVoiceSettingsPane settings={presentation} />
+      case "appearance":
+        return (
+          <div className="card grid settings-pane-card">
+            <p className="lede" style={{ margin: "0 0 12px" }}>
+              Theme, shell, presence, rendering, attention, and motion — shared with the Daybreak HUD.
+            </p>
+            <AppearanceSettingsPane settings={presentation} />
+          </div>
+        )
+      case "voice":
+        return (
+          <section className="settings-section" aria-labelledby="settings-voice-heading">
+            <VoiceSettingsPane />
+          </section>
+        )
       case "phone-pairing":
         return <PhonePairingSettingsPane />
       case "integrations":
