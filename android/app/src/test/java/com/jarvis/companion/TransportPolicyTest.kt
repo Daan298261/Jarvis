@@ -105,4 +105,47 @@ class TransportPolicyTest {
         assertEquals(1500L, TransportPolicy.connectTimeoutMs(2))
         assertEquals(4000L, TransportPolicy.connectTimeoutMs(1))
     }
+
+    @Test fun doesNotRaceGetsWhenHomeLanIsFirst() {
+        val lan = "https://10.2.0.2:4781"
+        val wan = "https://203.0.113.4:4781"
+        val locals = listOf("10.2.0.5")
+        val order = TransportPolicy.dialOrder(wan, listOf(lan, wan), locals)
+        assertEquals(lan, order[0])
+        assertFalse(TransportPolicy.mayRaceOrigins("GET", "/connection", order, locals))
+        assertTrue(TransportPolicy.mayRaceOrigins("GET", "/connection", listOf(wan, lan), listOf("100.64.1.8")))
+    }
+
+    @Test fun mDnsNameIsLanWhenWifiRfc1918IsPresent() {
+        val mdns = "https://jarvis.local:4781"
+        val wan = "https://home.example.test:4781"
+        val home = TransportPolicy.dialOrder(wan, listOf(mdns, wan), listOf("10.2.0.5"))
+        assertEquals(mdns, home[0])
+        val away = TransportPolicy.dialOrder(mdns, listOf(mdns, wan), listOf("100.64.1.8"))
+        assertEquals(wan, away[0])
+        assertEquals(mdns, away.last())
+    }
+
+    @Test fun lanMatchUsesInterfacePrefixNotHardcodedSlash24() {
+        val lan = "https://10.2.9.12:4781"
+        val wan = "https://203.0.113.4:4781"
+        val wide = TransportPolicy.dialOrder(null, listOf(lan, wan), listOf("10.2.0.5/16"))
+        assertEquals(lan, wide[0])
+        val narrow = TransportPolicy.dialOrder(null, listOf(lan, wan), listOf("10.2.0.5"))
+        assertEquals(wan, narrow[0])
+        assertEquals(lan, narrow.last())
+    }
+
+    @Test fun pointToPointNicsAreNotLanDialSources() {
+        assertTrue(TransportPolicy.nicIsLanDialSource(true, false, false, false))
+        assertFalse(TransportPolicy.nicIsLanDialSource(true, false, false, true))
+        assertFalse(TransportPolicy.nicIsLanDialSource(true, false, true, false))
+        assertFalse(TransportPolicy.nicIsLanDialSource(true, true, false, false))
+    }
+
+    @Test fun lanHostnamesRankWithPrivateAddresses() {
+        assertEquals(2, TransportPolicy.reachabilityRank("https://jarvis.local:4781"))
+        assertEquals(2, TransportPolicy.reachabilityRank("https://nas.lan:4781"))
+        assertEquals(0, TransportPolicy.reachabilityRank("https://home.example.test:4781"))
+    }
 }

@@ -58,6 +58,13 @@ class WebFetchTool(Tool):
         method = (kwargs.get("method") or "GET").upper()
         if method not in {"GET", "POST", "HEAD"}:
             return ToolResult(False, "", error=f"Unsupported method {method}")
+        from ..policy.computer_permissions import evaluate_tool_permissions
+
+        gate = evaluate_tool_permissions("web_fetch", {"url": url, "method": method})
+        if gate.status == "deny":
+            return ToolResult(False, "", error=gate.reason)
+        if gate.status == "ask":
+            return ToolResult(False, "", error=gate.reason or "Permission required before fetching from the network.")
         limit = int(kwargs.get("max_chars") or 12000)
         timeout = float(kwargs.get("timeout_seconds") or 30)
         headers = {"User-Agent": "JarvisLocal/1.0"}

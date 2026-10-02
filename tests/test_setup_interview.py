@@ -102,4 +102,9 @@ def test_mobile_plan_prefers_private_overlay_not_public_forwarding():
     script = render_mobile_script(plan)
     assert "Tailscale" in script
     assert "UseRouterPortForward" in script
-    assert "profile=private" in script
+    assert "$Port = 4781" in script
+    assert "profile=any" in script
+    assert "Prepare connection" in script
+    assert "upnpc" not in script
+    assert "localport=$Port" in script
+    assert "profile=private" not in script

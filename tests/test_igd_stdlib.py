@@ -94,6 +94,51 @@ def test_windows_firewall_helper_skips_on_linux():
     assert ensure_private_firewall_4781() == "skipped"
 
 
+def test_windows_firewall_rule_covers_every_profile():
+    from app.mobile.wan_forward import (
+        FIREWALL_RULE_NAME,
+        PORT,
+        firewall_4781_add_argv,
+        firewall_4781_covers_all_profiles,
+        firewall_4781_upgrade_argv,
+    )
+
+    added = " ".join(firewall_4781_add_argv())
+    assert FIREWALL_RULE_NAME in added
+    assert f"localport={PORT}" in added
+    assert "profile=any" in added
+    assert "4780" not in added
+    assert "profile=any" in " ".join(firewall_4781_upgrade_argv())
+    assert firewall_4781_covers_all_profiles("Profiles: Domain,Private,Public")
+    assert firewall_4781_covers_all_profiles("Profiles: Any")
+    assert not firewall_4781_covers_all_profiles("Profiles: Private")
+
+
+def test_windows_firewall_upgrades_private_only_rule(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    from app.mobile.wan_forward import FIREWALL_RULE_NAME, ensure_private_firewall_4781
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if "show" in argv:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=f"Rule Name:                            {FIREWALL_RULE_NAME}\nProfiles:                             Private\n",
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="Ok.\n", stderr="")
+
+    monkeypatch.setattr("app.mobile.wan_forward.os.name", "nt")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert ensure_private_firewall_4781() == "upgraded"
+    joined = [" ".join(item) for item in calls]
+    assert any(" set " in row and "profile=any" in row for row in joined)
+
+
 def test_stdlib_igd_maps_4781_and_treats_soap_fault_as_empty(monkeypatch):
     from types import SimpleNamespace
 

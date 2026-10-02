@@ -213,16 +213,17 @@ class JarvisApi(context: Context) {
         if (authenticated) session()
         require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
         val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }
+        val locals = TransportPolicy.localIpv4Addresses()
         val addresses = TransportPolicy.dialOrder(
             recent,
             endpoints + endpoint,
-            TransportPolicy.localIpv4Addresses(),
+            locals,
             recentFailures(),
         )
         val client = pinnedClient().newBuilder()
             .connectTimeout(TransportPolicy.connectTimeoutMs(addresses.size), TimeUnit.MILLISECONDS)
             .build()
-        if (TransportPolicy.mayRaceOrigins(method, path) && addresses.size > 1) {
+        if (TransportPolicy.mayRaceOrigins(method, path, addresses, locals) && addresses.size > 1) {
             return@withContext raceOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
         }
         sequentialOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)

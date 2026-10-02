@@ -80,3 +80,16 @@ async def test_download_outside_sandbox_is_blocked(tmp_path, monkeypatch):
     result = await tool.execute(url="https://example.test/", path="/etc/passwd")
     assert result.success is False
     assert "outside allowed directories" in result.error
+
+
+async def test_explicit_internet_deny_stops_web_fetch_execute(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    tool = WebFetchTool(lambda: {})
+    result = await tool.execute(url="https://example.test/")
+    assert result.success is False
+    assert result.error
+    assert "example.test" not in (result.output or "")

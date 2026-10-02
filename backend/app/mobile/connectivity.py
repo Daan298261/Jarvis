@@ -267,7 +267,7 @@ class Connectivity:
                 fw = await asyncio.to_thread(ensure_private_firewall_4781)
                 self.report(firewall_4781=fw)
                 if str(fw).startswith("failed"):
-                    self.report(limitation=f"Windows private-profile firewall did not allow inbound TCP 4781 ({fw})")
+                    self.report(limitation=f"Windows firewall did not allow inbound TCP 4781 ({fw})")
             except Exception as exc:
                 self.report(firewall_4781="error", limitation=f"Windows firewall helper failed: {exc}"[:240])
             settings = load_settings()

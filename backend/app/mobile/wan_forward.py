@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 PORT = 4781
+FIREWALL_RULE_NAME = "Jarvis companion TLS 4781"
 
 WAN_METHODS = frozenset({"auto", "upnp", "ssh_reverse", "gateway_ssh"})
 GATEWAY_PROFILES = frozenset({"openwrt_uci"})
@@ -42,36 +43,71 @@ def companion_wan_origin(host: str) -> str:
     return f"https://{host.strip()}:{PORT}"
 
 
+def firewall_4781_show_argv() -> list[str]:
+    return ["netsh", "advfirewall", "firewall", "show", "rule", f"name={FIREWALL_RULE_NAME}"]
+
+
+def firewall_4781_add_argv() -> list[str]:
+    """Inbound TCP 4781 on every Windows profile.
+
+    Home Wi-Fi is often classified Public on first join. Companion TLS still
+    requires device auth; the phone talks only to 4781, never portal 4780.
+    """
+    return [
+        "netsh",
+        "advfirewall",
+        "firewall",
+        "add",
+        "rule",
+        f"name={FIREWALL_RULE_NAME}",
+        "dir=in",
+        "action=allow",
+        "protocol=TCP",
+        f"localport={PORT}",
+        "profile=any",
+    ]
+
+
+def firewall_4781_upgrade_argv() -> list[str]:
+    return ["netsh", "advfirewall", "firewall", "set", "rule", f"name={FIREWALL_RULE_NAME}", "new", "profile=any"]
+
+
+def firewall_4781_covers_all_profiles(show_stdout: str) -> bool:
+    text = (show_stdout or "").lower()
+    if "any" in text:
+        return True
+    return "domain" in text and "private" in text and "public" in text
+
+
 def ensure_private_firewall_4781() -> str:
-    """Allow inbound TCP 4781 on the Windows private profile only."""
+    """Allow inbound TCP 4781 on every Windows firewall profile."""
     if os.name != "nt":
         return "skipped"
     import subprocess
 
-    name = "Jarvis companion TLS 4781"
     check = subprocess.run(
-        ["netsh", "advfirewall", "firewall", "show", "rule", f"name={name}"],
+        firewall_4781_show_argv(),
         capture_output=True,
         text=True,
         timeout=8,
         check=False,
     )
-    if check.returncode == 0 and name.lower() in (check.stdout or "").lower():
-        return "present"
+    stdout = check.stdout or ""
+    if check.returncode == 0 and FIREWALL_RULE_NAME.lower() in stdout.lower():
+        if firewall_4781_covers_all_profiles(stdout):
+            return "present"
+        upgraded = subprocess.run(
+            firewall_4781_upgrade_argv(),
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        if upgraded.returncode == 0:
+            return "upgraded"
+        return f"failed:{(upgraded.stderr or upgraded.stdout or '').strip()[:160]}"
     added = subprocess.run(
-        [
-            "netsh",
-            "advfirewall",
-            "firewall",
-            "add",
-            "rule",
-            f"name={name}",
-            "dir=in",
-            "action=allow",
-            "protocol=TCP",
-            f"localport={PORT}",
-            "profile=private",
-        ],
+        firewall_4781_add_argv(),
         capture_output=True,
         text=True,
         timeout=8,

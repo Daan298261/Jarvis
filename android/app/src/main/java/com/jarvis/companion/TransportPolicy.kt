@@ -20,8 +20,16 @@ object TransportPolicy {
     fun pairingFailover(path: String): Boolean =
         path == "/enroll" || path == "/lan-enroll" || path == "/session" || path.startsWith("/challenge/")
 
-    fun mayRaceOrigins(method: String, path: String): Boolean =
-        method == "GET" && !pairingFailover(path)
+    fun mayRaceOrigins(
+        method: String,
+        path: String,
+        addresses: List<String> = emptyList(),
+        localIpv4: Iterable<String> = emptyList(),
+    ): Boolean {
+        if (method != "GET" || pairingFailover(path)) return false
+        val first = addresses.firstOrNull() ?: return true
+        return !onAttachedLan(first, localIpv4)
+    }
 
     fun connectTimeoutMs(originCount: Int): Long = if (originCount > 1) 1_500L else 4_000L
 
@@ -32,11 +40,19 @@ object TransportPolicy {
 
     fun localIpv4Addresses(): List<String> = runCatching {
         NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
-            .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
-            .flatMap { nic -> nic.inetAddresses.toList() }
-            .mapNotNull { addr -> (addr as? Inet4Address)?.hostAddress }
-            .map { it.substringBefore('%') }
-            .filter { it.isNotBlank() && it != "127.0.0.1" }
+            .filter { nic ->
+                runCatching { nicIsLanDialSource(nic.isUp, nic.isLoopback, nic.isVirtual, nic.isPointToPoint) }
+                    .getOrDefault(false)
+            }
+            .flatMap { nic -> nic.interfaceAddresses }
+            .mapNotNull { ia ->
+                val addr = ia.address as? Inet4Address ?: return@mapNotNull null
+                val host = addr.hostAddress?.substringBefore('%').orEmpty()
+                val octets = parseV4(host) ?: return@mapNotNull null
+                if (!isRfc1918(octets)) return@mapNotNull null
+                val prefix = ia.networkPrefixLength.toInt().coerceIn(8, 30)
+                "$host/$prefix"
+            }
             .distinct()
     }.getOrDefault(emptyList())
 
@@ -66,14 +82,38 @@ object TransportPolicy {
         return (listOfNotNull(head) + usable.filter { it != head } + deferred).distinct()
     }
 
+    internal fun nicIsLanDialSource(up: Boolean, loopback: Boolean, virtual: Boolean, pointToPoint: Boolean): Boolean =
+        up && !loopback && !virtual && !pointToPoint
+
+    internal fun isLanHostname(host: String): Boolean {
+        val value = host.trim().lowercase().trimEnd('.')
+        if (value.isEmpty()) return false
+        if (value in setOf("localhost", "router", "gateway")) return true
+        return value.endsWith(".local") || value.endsWith(".lan") || value.endsWith(".home.arpa")
+    }
+
     internal fun onAttachedLan(endpoint: String, localIpv4: Iterable<String>): Boolean {
         val host = runCatching { URI(endpoint).host?.trim().orEmpty() }.getOrDefault("")
+        val locals = localIpv4.mapNotNull { parseLocal(it) }
+        if (locals.isEmpty()) return false
+        if (isLanHostname(host)) return true
         val target = parseV4(host) ?: return false
         if (!isRfc1918(target)) return false
-        return localIpv4.any { local ->
-            val ip = parseV4(local) ?: return@any false
-            sameSlash24(ip, target)
+        return locals.any { (ip, prefix) -> sameNetwork(ip, target, prefix) }
+    }
+
+    internal fun parseLocal(raw: String): Pair<IntArray, Int>? {
+        val text = raw.trim()
+        val slash = text.indexOf('/')
+        val ipPart = if (slash >= 0) text.substring(0, slash) else text
+        val prefix = if (slash >= 0) {
+            text.substring(slash + 1).toIntOrNull()?.coerceIn(8, 30) ?: return null
+        } else {
+            24
         }
+        val ip = parseV4(ipPart) ?: return null
+        if (!isRfc1918(ip)) return null
+        return ip to prefix
     }
 
     internal fun parseV4(host: String): IntArray? {
@@ -94,12 +134,26 @@ object TransportPolicy {
         return a == 10 || (a == 172 && b in 16..31) || (a == 192 && b == 168)
     }
 
-    internal fun sameSlash24(a: IntArray, b: IntArray): Boolean =
-        a.size == 4 && b.size == 4 && a[0] == b[0] && a[1] == b[1] && a[2] == b[2]
+    internal fun sameNetwork(a: IntArray, b: IntArray, prefix: Int): Boolean {
+        if (a.size != 4 || b.size != 4) return false
+        var remaining = prefix.coerceIn(8, 32)
+        for (i in 0..3) {
+            if (remaining <= 0) return true
+            val take = minOf(8, remaining)
+            val shift = 8 - take
+            val mask = (0xFF shl shift) and 0xFF
+            if ((a[i] and mask) != (b[i] and mask)) return false
+            remaining -= take
+        }
+        return true
+    }
+
+    internal fun sameSlash24(a: IntArray, b: IntArray): Boolean = sameNetwork(a, b, 24)
 
     internal fun reachabilityRank(value: String): Int {
         val host = runCatching { URI(value).host?.trim()?.lowercase().orEmpty() }.getOrDefault("")
         if (host.isEmpty()) return 2
+        if (isLanHostname(host)) return 2
         val numeric = host.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$""")) || host.contains(':')
         if (!numeric) return 0
         val ip = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return 1
