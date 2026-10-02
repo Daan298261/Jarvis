@@ -735,6 +735,27 @@ class Connectivity:
         dest = self._live_wan_dest_ip()
         return bool(previous and dest and dest != previous)
 
+    async def _live_wan_public_ip(self) -> str:
+        """Public IPv4 the live WAN method currently advertises — query only, no remap."""
+        if self.router:
+            try:
+                return str(await asyncio.to_thread(self.router.externalipaddress) or "")
+            except Exception:
+                return ""
+        if self.natpmp_gateway and not self.pcp_nonce:
+            from .natpmp import query_public_ip
+
+            lan = preferred_lan_ipv4(self.natpmp_gateway)
+            try:
+                return str(await asyncio.to_thread(query_public_ip, self.natpmp_gateway, lan) or "")
+            except Exception:
+                return ""
+        return ""
+
+    def _wan_public_ip_changed(self, live: str) -> bool:
+        previous = str(self.public_ip or "")
+        return bool(previous and live and live != previous)
+
     async def _refresh_lan_dial_endpoints(self, *, remap_wan: bool = True) -> None:
         hosts = await asyncio.to_thread(lan_hosts)
         live = self._lan_endpoints(hosts)
@@ -745,8 +766,14 @@ class Connectivity:
         await self.cover_phone_dial_hosts(*merged)
         if merged != current:
             self.report(endpoints=merged)
-        if remap_wan and self._wan_mapping_dest_changed():
+        if not remap_wan:
+            return
+        if self._wan_mapping_dest_changed():
             await self._renew_wan_mapping(self.config())
+            return
+        live_pub = await self._live_wan_public_ip()
+        if self._wan_public_ip_changed(live_pub):
+            await self.apply_remote(self.config())
 
     async def _renew_wan_mapping(self, config) -> None:
         """Keep the one-hour UPnP/NAT-PMP/PCP lease and the OpenWrt redirect alive."""

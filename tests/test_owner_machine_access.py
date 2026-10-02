@@ -755,6 +755,74 @@ async def test_lan_refresh_remaps_natpmp_dest_without_waiting_for_wan_renew(tmp_
 
 
 @pytest.mark.asyncio
+async def test_lan_refresh_rebuilds_upnp_when_public_ip_changes(tmp_path, monkeypatch):
+    import time
+
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection, Router
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    router = Router()
+    router.wan_ip = "203.0.113.8"
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (router, router.wan_ip))
+    connection = FakeConnection()
+    result = await connection.configure(True, True)
+    assert result.get("wan_path") == "upnp"
+    assert "https://203.0.113.8:4781" in result["endpoints"]
+    held = time.time() + 1190
+    connection.report(next_renewal_at=held)
+    maps_before = len(router.added)
+    await connection._refresh_lan_dial_endpoints()
+    assert len(router.added) == maps_before
+    assert connection.state.get("next_renewal_at") == held
+    router.wan_ip = "203.0.113.9"
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.public_ip == "203.0.113.9"
+    assert "https://203.0.113.9:4781" in connection.state["endpoints"]
+    assert "https://203.0.113.8:4781" not in connection.state["endpoints"]
+    assert "https://192.168.1.12:4781" in connection.state["endpoints"]
+
+
+@pytest.mark.asyncio
+async def test_lan_refresh_rebuilds_natpmp_when_public_ip_changes(tmp_path, monkeypatch):
+    import time
+
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    public = {"ip": "203.0.113.8"}
+
+    def fake_natpmp(gw, lan):
+        del gw, lan
+        return public["ip"]
+
+    def fake_query(gw, lan=""):
+        del gw, lan
+        return public["ip"]
+
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", fake_natpmp)
+    monkeypatch.setattr("app.mobile.natpmp.query_public_ip", fake_query)
+    connection = FakeConnection()
+    result = await connection.configure(True, True, {"wan_method": "auto"})
+    assert result.get("wan_path") == "natpmp"
+    assert "https://203.0.113.8:4781" in result["endpoints"]
+    held = time.time() + 1190
+    connection.report(next_renewal_at=held)
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.state.get("next_renewal_at") == held
+    public["ip"] = "203.0.113.9"
+    await connection._refresh_lan_dial_endpoints()
+    assert connection.public_ip == "203.0.113.9"
+    assert "https://203.0.113.9:4781" in connection.state["endpoints"]
+    assert "https://203.0.113.8:4781" not in connection.state["endpoints"]
+
+
+@pytest.mark.asyncio
 async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     from app.mobile import connectivity, store
     from tests.test_mobile_connectivity import FakeConnection

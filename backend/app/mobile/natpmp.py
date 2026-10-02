@@ -105,6 +105,12 @@ def _exchange(gateway: str, packet: bytes, expected: int, lan_ip: str = "") -> b
     return udp_exchange(gateway, packet, expected, lan_ip)
 
 
+def query_public_ip(gateway: str = "", lan_ip: str = "") -> str:
+    """Read the gateway's public IPv4 without creating or renewing a mapping."""
+    gw = require_private_gateway(gateway or default_gateway_ipv4())
+    return decode_public_ip(udp_exchange(gw, encode_public_ip_request(), 12, lan_ip, attempts=1))
+
+
 def apply_natpmp(gateway: str = "", lan_ip: str = "") -> str:
     """Map TCP 4781 for one hour. Returns the gateway's public IPv4."""
     gw = require_private_gateway(gateway or default_gateway_ipv4())

@@ -231,6 +231,54 @@ def get_scope(scope_id: str) -> dict[str, Any]:
     return scope
 
 
+def preferred_lan_cidrs() -> list[str]:
+    """RFC1918 interface CIDRs with the default-gateway subnet first (home LAN before VPN)."""
+    cidrs = discover_private_lan_cidrs()
+    if not cidrs:
+        return []
+    gw = ""
+    try:
+        from ..mobile.wan_forward import default_gateway_ipv4
+
+        gw = default_gateway_ipv4()
+    except Exception:
+        gw = ""
+    try:
+        gateway = ipaddress.ip_address((gw or "").strip())
+    except ValueError:
+        return list(cidrs)
+    preferred: list[str] = []
+    rest: list[str] = []
+    for cidr in cidrs:
+        try:
+            network = ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            continue
+        if gateway in network:
+            preferred.append(cidr)
+        else:
+            rest.append(cidr)
+    return preferred + rest
+
+
+def extra_lan_scope_id(cidr: str) -> str:
+    return "lan-" + str(cidr).replace(".", "-").replace("/", "-")
+
+
+def _upsert_additional_lan_scopes(cidrs: list[str]) -> None:
+    for cidr in cidrs:
+        ident = extra_lan_scope_id(cidr)
+        if ident == DEFAULT_LAN_SCOPE_ID:
+            continue
+        upsert_scope(
+            ident,
+            kind="private_cidr",
+            value=cidr,
+            label=f"This PC's LAN {cidr}",
+            attested_owned=True,
+        )
+
+
 def discover_private_lan_cidrs() -> list[str]:
     """RFC1918 CIDRs from this PC's interfaces — owner LAN only, never CGNAT or public."""
     try:
@@ -270,7 +318,7 @@ def ensure_default_lan_scope() -> dict[str, Any]:
         ),
         None,
     )
-    cidrs = discover_private_lan_cidrs()
+    cidrs = preferred_lan_cidrs()
     if existing and existing.get("kind") in {"private_host", "private_cidr"}:
         value = str(existing.get("value") or "")
         kind = str(existing.get("kind") or "")
@@ -279,19 +327,22 @@ def ensure_default_lan_scope() -> dict[str, Any]:
         except ValueError:
             existing = None
         else:
-            if kind == "private_cidr" and cidrs and value not in cidrs:
+            if kind == "private_cidr" and (not cidrs or value != cidrs[0]):
                 existing = None
             elif existing is not None:
+                _upsert_additional_lan_scopes(cidrs[1:])
                 return existing
     if not cidrs:
         raise ValueError("No RFC1918 interface found; register a private LAN scope first")
-    return upsert_scope(
+    row = upsert_scope(
         DEFAULT_LAN_SCOPE_ID,
         kind="private_cidr",
         value=cidrs[0],
         label="This PC's LAN",
         attested_owned=True,
     )
+    _upsert_additional_lan_scopes(cidrs[1:])
+    return row
 
 
 def resolve_lan_inventory_scope(scope_id: str) -> str:
@@ -418,17 +469,76 @@ async def _host_nmap_ping_scan(target: str) -> dict[str, Any]:
     }
 
 
+def lan_inventory_targets(scope: dict[str, Any], payload: dict[str, Any] | None = None) -> list[str]:
+    """Default `lan` inventory covers every live RFC1918 NIC CIDR, home subnet first."""
+    primary = str((scope or {}).get("value") or (payload or {}).get("target") or "").strip()
+    extras: list[str] = []
+    if str((scope or {}).get("id") or "") == DEFAULT_LAN_SCOPE_ID:
+        extras = preferred_lan_cidrs()
+    ordered: list[str] = []
+    for item in [primary, *extras]:
+        if item and item not in ordered:
+            ordered.append(item)
+    return ordered
+
+
+def _merge_lan_inventory_results(results: list[dict[str, Any]], targets: list[str]) -> dict[str, Any]:
+    hosts: list[dict[str, str]] = []
+    seen: set[str] = set()
+    stdout_parts: list[str] = []
+    source = ""
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        source = str(item.get("source") or source)
+        stdout_parts.append(str(item.get("stdout") or "")[:4000])
+        for host in item.get("hosts") or []:
+            if not isinstance(host, dict):
+                continue
+            address = str(host.get("address") or "")
+            if not address or address in seen:
+                continue
+            seen.add(address)
+            hosts.append({"address": address, "hostname": str(host.get("hostname") or "")})
+    merged: dict[str, Any] = dict(results[0]) if len(results) == 1 and isinstance(results[0], dict) else {}
+    merged.update(
+        {
+            "source": source or merged.get("source") or "host-nmap",
+            "target": targets[0] if len(targets) == 1 else ",".join(targets),
+            "targets": targets,
+            "hosts": hosts if hosts or len(results) > 1 else list(merged.get("hosts") or hosts),
+            "stdout": "\n".join(part for part in stdout_parts if part)[:4000] or merged.get("stdout") or "",
+        }
+    )
+    return merged
+
+
 async def _run_lan_inventory(scope: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    targets = lan_inventory_targets(scope, payload)
+    if not targets:
+        raise ValueError("LAN inventory target is required")
     snapshot = await HEXSTRIKE.status(enrich=False)
     if not snapshot.running:
         snapshot = await HEXSTRIKE.ensure_started()
-    if snapshot.running:
-        return await HEXSTRIKE.post_defensive("api/tools/nmap", payload)
-    try:
-        return await _host_nmap_ping_scan(str(scope.get("value") or payload.get("target") or ""))
-    except RuntimeError as host_exc:
+    results: list[dict[str, Any]] = []
+    last_error: Exception | None = None
+    for target in targets:
+        item_payload = {**payload, "target": target}
+        try:
+            if snapshot.running:
+                results.append(await HEXSTRIKE.post_defensive("api/tools/nmap", item_payload))
+            else:
+                results.append(await _host_nmap_ping_scan(target))
+        except Exception as exc:
+            last_error = exc
+    if not results:
+        if last_error is None:
+            raise RuntimeError("LAN inventory failed")
+        if snapshot.running:
+            raise last_error
         suite_err = (snapshot.last_error or "HexStrike is not running").strip()
-        raise RuntimeError(f"{suite_err} Host nmap fallback: {host_exc}") from host_exc
+        raise RuntimeError(f"{suite_err} Host nmap fallback: {last_error}") from last_error
+    return _merge_lan_inventory_results(results, targets)
 
 
 async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] | None = None) -> dict[str, Any]:

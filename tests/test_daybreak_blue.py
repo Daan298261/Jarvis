@@ -322,6 +322,40 @@ def test_discover_private_lan_cidrs_skips_cgnat_and_public(monkeypatch):
     assert discover_private_lan_cidrs() == ["192.168.20.0/24"]
 
 
+def test_preferred_lan_cidrs_put_gateway_subnet_before_vpn(monkeypatch):
+    from app.security.hexstrike_defensive import preferred_lan_cidrs
+
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["10.8.0.0/24", "192.168.1.0/24"],
+    )
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    assert preferred_lan_cidrs() == ["192.168.1.0/24", "10.8.0.0/24"]
+
+
+def test_default_lan_scope_prefers_home_lan_and_registers_vpn_cidr(blue_store, monkeypatch):
+    from app.security.hexstrike_defensive import (
+        extra_lan_scope_id,
+        ensure_default_lan_scope,
+        lan_inventory_targets,
+        list_scopes,
+        upsert_scope,
+    )
+
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["10.8.0.0/24", "192.168.1.0/24"],
+    )
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    upsert_scope("lan", kind="private_cidr", value="10.8.0.0/24", label="VPN", attested_owned=True)
+    refreshed = ensure_default_lan_scope()
+    assert refreshed["value"] == "192.168.1.0/24"
+    extra_id = extra_lan_scope_id("10.8.0.0/24")
+    extras = {row["id"]: row["value"] for row in list_scopes()}
+    assert extras[extra_id] == "10.8.0.0/24"
+    assert lan_inventory_targets(refreshed) == ["192.168.1.0/24", "10.8.0.0/24"]
+
+
 @pytest.mark.asyncio
 async def test_lan_inventory_uses_nic_cidr_when_scope_missing(blue_store, monkeypatch):
     from types import SimpleNamespace
