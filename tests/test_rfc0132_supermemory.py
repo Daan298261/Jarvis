@@ -299,3 +299,30 @@ def test_worker_probe_advertises_private_node_local_memory(monkeypatch, tmp_path
     assert probe["kind"] == "memory"
     assert probe["status"] == "missing"
     assert "mediated" in probe["detail"]
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    monkeypatch.setattr(supermemory_runtime, "_windows_install", lambda: True)
+    monkeypatch.setattr(supermemory_runtime.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/powershell")
+    ran = {"n": 0}
+
+    async def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not launch bootstrap when internet is denied")
+
+    monkeypatch.setattr(supermemory_runtime.asyncio, "create_subprocess_exec", boom)
+    try:
+        await supermemory_runtime._run_bootstrap()
+        assert ran["n"] == 0
+        assert supermemory_runtime._INSTALL_STATUS == "error"
+        assert supermemory_runtime._INSTALL_ERROR
+    finally:
+        supermemory_runtime._INSTALL_STATUS = "idle"
+        supermemory_runtime._INSTALL_DETAIL = ""
+        supermemory_runtime._INSTALL_ERROR = ""

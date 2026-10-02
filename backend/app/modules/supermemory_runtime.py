@@ -163,9 +163,13 @@ async def set_enabled(enabled: bool, *, auto_start: bool | None = None) -> dict[
     return await module_status()
 
 
+def _windows_install() -> bool:
+    return os.name == "nt"
+
+
 async def _run_bootstrap() -> None:
     global _INSTALL_STATUS, _INSTALL_DETAIL, _INSTALL_ERROR
-    if os.name != "nt":
+    if not _windows_install():
         _INSTALL_STATUS = "error"
         _INSTALL_ERROR = "The pinned automatic installer currently supports Windows x64."
         return
@@ -174,6 +178,18 @@ async def _run_bootstrap() -> None:
     if not powershell or not script.is_file():
         _INSTALL_STATUS = "error"
         _INSTALL_ERROR = "PowerShell or the Supermemory bootstrap script is unavailable."
+        return
+    from ..policy.network_http import require_http_url_allowed
+
+    try:
+        require_http_url_allowed(
+            f"https://github.com/supermemoryai/supermemory/releases/download/{UPSTREAM_RELEASE}/supermemory-server-windows-x64.exe",
+            tool="web_fetch",
+        )
+    except PermissionError as exc:
+        _INSTALL_STATUS = "error"
+        _INSTALL_DETAIL = "Internet access is denied."
+        _INSTALL_ERROR = str(exc)
         return
     _INSTALL_STATUS = "installing"
     _INSTALL_DETAIL = "Downloading and verifying the pinned official release."
