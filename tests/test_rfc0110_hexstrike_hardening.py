@@ -246,3 +246,30 @@ def test_tool_install_parks_instead_of_auto_session(hardened_env):
     response = client.post("/api/hexstrike/tools/nmap/install")
     assert response.status_code == 428
     assert response.json()["detail"]["action_kind"] == "hexstrike.tool.install"
+
+
+def test_private_lan_scope_put_does_not_require_suite_grant(hardened_env):
+    client = TestClient(app)
+    lan = client.put(
+        "/api/hexstrike/scopes/home-lan",
+        json={
+            "kind": "private_cidr",
+            "value": "192.168.20.0/24",
+            "label": "Home",
+            "attested_owned": True,
+        },
+    )
+    assert lan.status_code == 200, lan.text
+    assert lan.json()["kind"] == "private_cidr"
+    parked = client.put(
+        "/api/hexstrike/scopes/host-path",
+        json={
+            "kind": "local_path",
+            "value": str(hardened_env["tmp"]),
+            "label": "Evidence",
+            "attested_owned": True,
+        },
+    )
+    assert parked.status_code == 428
+    detail = parked.json()["detail"]
+    assert "cyber.hexstrike" in detail.get("permission_ids", [detail.get("permission_id")])

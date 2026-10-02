@@ -460,17 +460,27 @@ async def hexstrike_scopes():
 
 @router.put("/scopes/{scope_id}")
 async def hexstrike_scope_put(scope_id: str, body: HexStrikeScopeIn):
-    _require_operator_grant(
-        "blue.static_rules",
-        action_kind="hexstrike.scope.put",
-        context={
-            "scope_id": scope_id,
-            "kind": body.kind,
-            "value": body.value,
-            "label": body.label,
-            "attested_owned": body.attested_owned,
-        },
-    )
+    kind = (body.kind or "").strip().lower()
+    context = {
+        "scope_id": scope_id,
+        "kind": body.kind,
+        "value": body.value,
+        "label": body.label,
+        "attested_owned": body.attested_owned,
+    }
+    if kind in {"private_host", "private_cidr"}:
+        _require_hexstrike_module_entitlement()
+        _require_permissions_grant(
+            ["network.local"],
+            action_kind="hexstrike.scope.put",
+            context=context,
+        )
+    else:
+        _require_operator_grant(
+            "blue.static_rules",
+            action_kind="hexstrike.scope.put",
+            context=context,
+        )
     try:
         return upsert_scope(
             scope_id,

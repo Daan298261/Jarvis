@@ -125,14 +125,18 @@ class TransportPolicyTest {
         assertTrue(TransportPolicy.mayRaceOrigins("GET", "/connection", listOf(wan, lan), listOf("100.64.1.8")))
     }
 
-    @Test fun mDnsNameIsLanWhenWifiRfc1918IsPresent() {
+    @Test fun mDnsNameIsNotHomeOnForeignRfc1918Wifi() {
         val mdns = "https://jarvis.local:4781"
         val wan = "https://home.example.test:4781"
-        val home = TransportPolicy.dialOrder(wan, listOf(mdns, wan), listOf("10.2.0.5"))
-        assertEquals(mdns, home[0])
-        val away = TransportPolicy.dialOrder(mdns, listOf(mdns, wan), listOf("100.64.1.8"))
-        assertEquals(wan, away[0])
-        assertEquals(mdns, away.last())
+        val lan = "https://10.2.0.2:4781"
+        val home = TransportPolicy.dialOrder(wan, listOf(mdns, wan, lan), listOf("10.2.0.5"))
+        assertEquals(lan, home[0])
+        val guest = TransportPolicy.dialOrder(mdns, listOf(mdns, wan), listOf("192.168.2.40"))
+        assertEquals(wan, guest[0])
+        assertEquals(mdns, guest.last())
+        val homeNameOnly = TransportPolicy.dialOrder(wan, listOf(mdns, wan), listOf("10.2.0.5"))
+        assertEquals(wan, homeNameOnly[0])
+        assertEquals(mdns, homeNameOnly.last())
     }
 
     @Test fun lanMatchUsesInterfacePrefixNotHardcodedSlash24() {
@@ -169,5 +173,9 @@ class TransportPolicyTest {
         val unchanged = TransportPolicy.mergeConnectionEndpoints(listOf(lan, wan), emptyList())
         assertEquals(lan, unchanged.last())
         assertTrue(wan in unchanged)
+        val crowded = (1..8).map { "https://relay$it.example.test:4781" }
+        val kept = TransportPolicy.mergeConnectionEndpoints(listOf(lan), crowded)
+        assertEquals(8, kept.size)
+        assertEquals(lan, kept.last())
     }
 }

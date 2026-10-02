@@ -38,10 +38,16 @@ object TransportPolicy {
         return distinct.sortedWith(compareBy({ reachabilityRank(it) }, { it }))
     }
 
-    fun mergeConnectionEndpoints(existing: Iterable<String>, incoming: Iterable<String>): List<String> =
-        orderedForReachability(
+    fun mergeConnectionEndpoints(existing: Iterable<String>, incoming: Iterable<String>): List<String> {
+        val ranked = orderedForReachability(
             (incoming + existing).mapNotNull { runCatching { origin(it) }.getOrNull() },
-        ).take(8)
+        )
+        if (ranked.size <= 8) return ranked
+        val privateOrigins = ranked.filter { reachabilityRank(it) >= 2 }
+        val keptPrivate = privateOrigins.takeLast(2)
+        val publicOrigins = ranked.filter { it !in keptPrivate }
+        return publicOrigins.take(8 - keptPrivate.size) + keptPrivate
+    }
 
     fun localIpv4Addresses(): List<String> = runCatching {
         NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
@@ -98,7 +104,6 @@ object TransportPolicy {
         val host = runCatching { URI(endpoint).host?.trim().orEmpty() }.getOrDefault("")
         val locals = localIpv4.mapNotNull { parseLocal(it) }
         if (locals.isEmpty()) return false
-        if (isLanHostname(host)) return true
         val target = parseV4(host) ?: return false
         if (!isRfc1918(target)) return false
         return locals.any { (ip, prefix) -> sameNetwork(ip, target, prefix) }

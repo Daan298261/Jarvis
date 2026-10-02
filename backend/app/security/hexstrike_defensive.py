@@ -327,6 +327,12 @@ async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] 
         if capability.id == "threat_intel_lookup":
             result = await _lookup_cve(str(payload["cve_id"]))
         else:
+            if capability.id == "lan_inventory":
+                snapshot = await HEXSTRIKE.status(enrich=False)
+                if not snapshot.running:
+                    snapshot = await HEXSTRIKE.ensure_started()
+                if not snapshot.running:
+                    raise RuntimeError(snapshot.last_error or "HexStrike is not running")
             result = await HEXSTRIKE.post_defensive(capability.upstream_path, payload)
         if isinstance(result, dict):
             raw_pid = result.get("pid") or result.get("process_id")

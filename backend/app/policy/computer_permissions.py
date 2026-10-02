@@ -439,7 +439,12 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
     ):
         pending.append("network.local")
     if name in {"hexstrike", "hexstrike_suite", "hexstrike_operator"}:
-        pending.append("cyber.hexstrike")
+        operation = str((arguments or {}).get("operation") or "").strip().lower()
+        capability_id = str((arguments or {}).get("capability_id") or "")
+        if name == "hexstrike_operator" and operation == "operate" and capability_id == "defensive:lan_inventory":
+            pending.append("network.local")
+        else:
+            pending.append("cyber.hexstrike")
     if name == "hexstrike_defensive":
         action = str((arguments or {}).get("action") or "")
         if action != "lan_inventory":

@@ -87,3 +87,36 @@ def test_browser_follow_on_actions_keep_local_network_permission():
         "browser",
         {"url": browser_permission_url("snapshot", {}, "https://example.com/"), "action": "snapshot"},
     ) == ["network.internet"]
+
+
+def test_hexstrike_operator_lan_inventory_is_local_network_only():
+    assert permission_ids_for_tool(
+        "hexstrike_operator",
+        {"operation": "operate", "capability_id": "defensive:lan_inventory"},
+    ) == ["network.local"]
+    assert permission_ids_for_tool(
+        "hexstrike_operator",
+        {"operation": "start"},
+    ) == ["cyber.hexstrike"]
+
+
+def test_apply_settings_unions_newly_mounted_drives(monkeypatch, tmp_path):
+    from app.config import AppSettings
+    from app.tools.registry import ToolRegistry
+
+    first = tmp_path / "vol-a"
+    second = tmp_path / "vol-b"
+    first.mkdir()
+    second.mkdir()
+    roots = {"now": [str(first)]}
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: list(roots["now"]))
+    registry = ToolRegistry()
+    settings = AppSettings(allowed_directories=[str(first)])
+    registry.apply_settings(settings)
+    assert str(first) in registry._context["allowed_directories"]
+    assert str(second) not in registry._context["allowed_directories"]
+    roots["now"] = [str(first), str(second)]
+    registry.apply_settings(settings)
+    assert str(second) in registry._context["allowed_directories"]

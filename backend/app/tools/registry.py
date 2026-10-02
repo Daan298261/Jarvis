@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from ..config import AppSettings, default_allowed_directories
+from ..config import AppSettings, default_allowed_directories, sanitize_allowed_directories
 from .apps import AppsTool
 from .base import Tool, ToolResult
 from .browser import BrowserTool
@@ -88,7 +88,7 @@ class ToolRegistry:
         self._context["exposure"] = exposure
 
     def apply_settings(self, settings: AppSettings) -> None:
-        allowed = settings.allowed_directories or default_allowed_directories()
+        allowed = sanitize_allowed_directories(settings.allowed_directories or default_allowed_directories())
         exposure = self._context.get("exposure")
         security_role = self._context.get("security_role")
         self._context = {

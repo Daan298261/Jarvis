@@ -208,6 +208,60 @@ async def test_lan_inventory_does_not_require_hexstrike_suite_grant(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_lan_inventory_starts_suite_without_hexstrike_grant(blue_store, monkeypatch):
+    upsert_scope("lan", kind="private_cidr", value="192.168.20.0/24", label="Home", attested_owned=True)
+    started = {"count": 0}
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=False, last_error="")
+
+    async def fake_start():
+        started["count"] += 1
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        assert payload["target"] == "192.168.20.0/24"
+        return {"hosts": []}
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "ensure_started", fake_start)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    job = await execute_defensive("lan_inventory", "lan")
+    assert job["status"] == "completed"
+    assert started["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_operator_tool_lan_inventory_skips_suite_grant(monkeypatch):
+    from app.tools.hexstrike_operator import HexStrikeOperatorTool
+
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
+
+    def eval_perm(permission):
+        if permission == "cyber.hexstrike":
+            return SimpleNamespace(status="ask")
+        return SimpleNamespace(status="allow")
+
+    monkeypatch.setattr("app.tools.hexstrike_operator.evaluate_permission", eval_perm)
+
+    async def fake_operate(capability_id, arguments):
+        return {"id": "job", "capability_id": capability_id, "status": "completed"}
+
+    monkeypatch.setattr("app.tools.hexstrike_operator.operate", fake_operate)
+    tool = HexStrikeOperatorTool(lambda: {})
+    allowed = await tool.execute(
+        operation="operate",
+        capability_id="defensive:lan_inventory",
+        arguments={"scope_id": "lan"},
+    )
+    assert allowed.success is True
+    blocked = await tool.execute(operation="start")
+    assert blocked.success is False
+    assert blocked.error == "pending_approval"
+
+
+@pytest.mark.asyncio
 async def test_security_role_persists_and_is_returned(jarvis_env, monkeypatch):
     task = Task(
         id="blue-task",
