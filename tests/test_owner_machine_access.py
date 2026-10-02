@@ -496,6 +496,87 @@ async def test_password_only_gateway_ssh_uses_default_gateway(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_gateway_ssh_renews_when_lan_ip_changes(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    hosts = ["192.168.1.12"]
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: list(hosts))
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+    seen: list[str] = []
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        del settings, public_host
+        seen.append(lan_ip)
+        return "https://home.example.test:4781", "Gateway SSH mapping applied; verify from outside this network"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    connection = FakeConnection()
+    result = await connection.configure(
+        True,
+        True,
+        {
+            "wan_method": "gateway_ssh",
+            "gateway_host": "192.168.1.1",
+            "gateway_user": "root",
+            "gateway_identity_file": str(key),
+            "wan_public_host": "home.example.test",
+        },
+    )
+    assert result["state"] == "ready"
+    assert result.get("wan_path") == "gateway_ssh"
+    assert result.get("mapped_lan_ip") == "192.168.1.12"
+    assert seen == ["192.168.1.12"]
+    hosts[:] = ["192.168.1.40"]
+    await connection._renew_wan_mapping(connection.config())
+    assert seen == ["192.168.1.12", "192.168.1.40"]
+    assert connection.state.get("mapped_lan_ip") == "192.168.1.40"
+    assert any(endpoint == "https://home.example.test:4781" for endpoint in connection.state["endpoints"])
+
+
+@pytest.mark.asyncio
+async def test_gateway_ssh_renew_raises_when_dest_leaves_router_subnet(tmp_path, monkeypatch):
+    from app.mobile import connectivity, store
+    from tests.test_mobile_connectivity import FakeConnection
+
+    monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
+    hosts = ["192.168.1.12"]
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: list(hosts))
+    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
+    key = tmp_path / "id_ed25519"
+    key.write_text("dummy", encoding="utf-8")
+
+    async def fake_gateway(settings, lan_ip, public_host=""):
+        del settings, public_host
+        return "https://home.example.test:4781", f"mapped {lan_ip}"
+
+    monkeypatch.setattr("app.mobile.wan_forward.apply_gateway_ssh", fake_gateway)
+    connection = FakeConnection()
+    result = await connection.configure(
+        True,
+        True,
+        {
+            "wan_method": "gateway_ssh",
+            "gateway_host": "192.168.1.1",
+            "gateway_user": "root",
+            "gateway_identity_file": str(key),
+            "wan_public_host": "home.example.test",
+        },
+    )
+    assert result.get("wan_path") == "gateway_ssh"
+    hosts[:] = ["10.8.0.2"]
+    with pytest.raises(RuntimeError, match="not on the router subnet"):
+        await connection._renew_wan_mapping(connection.config())
+
+
+@pytest.mark.asyncio
 async def test_natpmp_is_used_when_upnp_unavailable(tmp_path, monkeypatch):
     from app.mobile import connectivity, store
     from tests.test_mobile_connectivity import FakeConnection

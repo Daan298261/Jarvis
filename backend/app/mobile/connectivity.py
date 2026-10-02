@@ -571,7 +571,12 @@ class Connectivity:
                             wan_path = "gateway_ssh"
                             if mapped:
                                 endpoints.append(mapped)
-                            self.report(router="mapped", wan_path=wan_path, limitation=detail)
+                            self.report(
+                                router="mapped",
+                                wan_path=wan_path,
+                                limitation=detail,
+                                mapped_lan_ip=lan_ip,
+                            )
                         except Exception as exc:
                             self.report(router="unavailable", limitation=str(exc)[:240])
                 if not wan_path and method in {"auto", "ssh_reverse"} and wan["ssh_host"] and wan["ssh_user"]:
@@ -640,6 +645,69 @@ class Connectivity:
         """Backward-compatible entry: refresh remote access without stopping LAN listen."""
         await self.apply_remote(config)
 
+    async def _renew_gateway_ssh(self, config) -> None:
+        """Re-apply the OpenWrt TCP 4781 redirect so DHCP / router reboot cannot drop WAN."""
+        from .wan_forward import (
+            apply_gateway_ssh,
+            default_gateway_ipv4,
+            gateway_ssh_configured,
+            mapping_lan_ipv4,
+            wan_settings_from_config,
+        )
+
+        wan = wan_settings_from_config(config)
+        if not gateway_ssh_configured(wan):
+            raise RuntimeError("Gateway SSH credentials are no longer configured")
+        gw = str(wan.get("gateway_host") or "")
+        if not gw:
+            try:
+                gw = default_gateway_ipv4()
+            except Exception:
+                gw = ""
+        lan_ip = mapping_lan_ipv4(lan_hosts(), gw)
+        if not lan_ip:
+            raise RuntimeError("Gateway SSH dest IP is not on the router subnet")
+        public_host = str(wan.get("wan_public_host") or self.public_ip or "")
+        mapped, detail = await apply_gateway_ssh(wan, lan_ip, public_host=public_host)
+        endpoints = list(self.state.get("endpoints") or [])
+        if mapped and mapped not in endpoints:
+            endpoints.append(mapped)
+        self.report(
+            router="mapped",
+            wan_path="gateway_ssh",
+            limitation=detail,
+            endpoints=endpoints,
+            mapped_lan_ip=lan_ip,
+        )
+
+    async def _renew_wan_mapping(self, config) -> None:
+        """Keep the one-hour UPnP/NAT-PMP/PCP lease and the OpenWrt redirect alive."""
+        await self.probe(f"https://127.0.0.1:{PORT}", self.identity)
+        path = str(self.state.get("wan_path") or "")
+        if self.router:
+            if await asyncio.to_thread(self.router.externalipaddress) != self.public_ip:
+                raise RuntimeError("Router address changed")
+            await asyncio.to_thread(map_router, self.router, self.marker)
+        elif self.natpmp_gateway:
+            lan = preferred_lan_ipv4(self.natpmp_gateway)
+            if self.pcp_nonce:
+                from .pcp import apply_pcp
+
+                public_ip, nonce = await asyncio.to_thread(
+                    apply_pcp, self.natpmp_gateway, lan, self.pcp_nonce
+                )
+                self.pcp_nonce = nonce
+            else:
+                from .natpmp import apply_natpmp
+
+                public_ip = await asyncio.to_thread(apply_natpmp, self.natpmp_gateway, lan)
+            if public_ip != self.public_ip:
+                raise RuntimeError("Mapped public address changed")
+            self.public_ip = public_ip
+        elif path == "gateway_ssh":
+            await self._renew_gateway_ssh(config)
+        self.report(next_renewal_at=time.time() + 1200)
+
     async def run(self):
         GUARD.bind_connectivity(self)
         try:
@@ -685,28 +753,7 @@ class Connectivity:
                                     await self.apply_remote(config)
                             elif time.time() >= self.state.get("next_renewal_at", 0):
                                 try:
-                                    await self.probe(f"https://127.0.0.1:{PORT}", self.identity)
-                                    if self.router:
-                                        if await asyncio.to_thread(self.router.externalipaddress) != self.public_ip:
-                                            raise RuntimeError("Router address changed")
-                                        await asyncio.to_thread(map_router, self.router, self.marker)
-                                    elif self.natpmp_gateway:
-                                        lan = preferred_lan_ipv4(self.natpmp_gateway)
-                                        if self.pcp_nonce:
-                                            from .pcp import apply_pcp
-
-                                            public_ip, nonce = await asyncio.to_thread(
-                                                apply_pcp, self.natpmp_gateway, lan, self.pcp_nonce
-                                            )
-                                            self.pcp_nonce = nonce
-                                        else:
-                                            from .natpmp import apply_natpmp
-
-                                            public_ip = await asyncio.to_thread(apply_natpmp, self.natpmp_gateway, lan)
-                                        if public_ip != self.public_ip:
-                                            raise RuntimeError("Mapped public address changed")
-                                        self.public_ip = public_ip
-                                    self.report(next_renewal_at=time.time() + 1200)
+                                    await self._renew_wan_mapping(config)
                                 except Exception:
                                     await self.apply_remote(config)
                 await asyncio.sleep(30)
