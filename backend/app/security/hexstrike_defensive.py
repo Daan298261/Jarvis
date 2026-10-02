@@ -18,8 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from ..config import data_dir, default_allowed_directories, load_settings
 from .hexstrike import HEXSTRIKE, audit_hexstrike
 
@@ -340,11 +338,14 @@ def _payload(capability: DefensiveCapability, scope: dict[str, Any], options: di
 
 
 async def _lookup_cve(cve_id: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
-        response = await client.get(
-            "https://services.nvd.nist.gov/rest/json/cves/2.0",
-            params={"cveId": cve_id},
-        )
+    from ..policy.network_http import gated_get
+
+    response = await gated_get(
+        "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        tool="web_fetch",
+        timeout=30.0,
+        params={"cveId": cve_id},
+    )
     if response.status_code >= 400:
         raise RuntimeError(f"NVD returned HTTP {response.status_code}")
     body = response.json()

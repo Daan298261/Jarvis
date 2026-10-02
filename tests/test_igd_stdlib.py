@@ -79,20 +79,47 @@ def test_lookup_egress_ipv4_accepts_global_and_rejects_private(monkeypatch):
     class FakeClient:
         def __init__(self, *args, **kwargs):
             pass
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def get(self, url):
+
+        def close(self):
+            return None
+
+        def get(self, url, **kwargs):
             from types import SimpleNamespace
 
             if "ipify" in url:
-                return SimpleNamespace(text="8.8.4.4")
-            return SimpleNamespace(text="10.0.0.1")
+                return SimpleNamespace(status_code=200, headers={}, url=url, text="8.8.4.4")
+            return SimpleNamespace(status_code=200, headers={}, url=url, text="10.0.0.1")
 
-    monkeypatch.setattr("app.mobile.wan_forward.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.policy.network_http.httpx.Client", FakeClient)
     assert lookup_egress_ipv4() == "8.8.4.4"
     assert ipaddress.ip_address("8.8.4.4").is_global
+
+
+def test_lookup_egress_ipv4_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def close(self):
+            return None
+
+        def get(self, url, **kwargs):
+            seen["n"] += 1
+            from types import SimpleNamespace
+
+            return SimpleNamespace(status_code=200, headers={}, url=url, text="8.8.4.4")
+
+    monkeypatch.setattr("app.policy.network_http.httpx.Client", FakeClient)
+    with pytest.raises(ValueError):
+        lookup_egress_ipv4()
+    assert seen["n"] == 0
 
 
 def test_mapped_address_is_egress_detects_double_nat(monkeypatch):

@@ -13,8 +13,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 PORT = 4781
 FIREWALL_RULE_NAME = "Jarvis companion TLS 4781"
 
@@ -120,12 +118,13 @@ def ensure_private_firewall_4781() -> str:
 
 def lookup_egress_ipv4() -> str:
     """Best-effort public IPv4 of this network after a mapping already exists."""
+    from ..policy.network_http import gated_get_sync
+
     urls = ("https://api.ipify.org", "https://ipv4.icanhazip.com")
     last_error: Exception | None = None
     for url in urls:
         try:
-            with httpx.Client(timeout=3, trust_env=False, follow_redirects=True) as client:
-                text = client.get(url).text.strip()
+            text = gated_get_sync(url, tool="web_fetch", timeout=3.0, trust_env=False).text.strip()
             address = ipaddress.ip_address(text.split()[0])
             if address.version == 4 and address.is_global:
                 return str(address)

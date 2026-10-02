@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import uuid
 
+import httpx
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -82,6 +83,34 @@ async def test_leader_pack_cache_ready_when_hash_matches(mobile_env, monkeypatch
     assert status["state"] == "ready"
     assert status["bytes_done"] == pack["size_bytes"]
     target.unlink(missing_ok=True)
+
+
+async def test_companion_pack_download_honors_internet_deny(mobile_env, monkeypatch):
+    from app.mobile import companion_offline
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: mobile_env)
+    monkeypatch.setattr(companion_offline, "data_dir", lambda: mobile_env)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    companion_offline._CACHE.update(state="idle", pack_id="", bytes_done=0, size_bytes=0, last_error="")
+    seen = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["n"] += 1
+        return httpx.Response(200, content=b"gguf-bytes")
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    await companion_offline._download_recommended()
+    assert seen["n"] == 0
+    assert companion_offline._CACHE["state"] == "error"
+    err = (companion_offline._CACHE.get("last_error") or "").lower()
+    assert "permission" in err or "internet" in err or "don't allow" in err or "not allow" in err
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ import base64
 import hashlib
 from pathlib import Path
 
+import httpx
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -213,3 +214,29 @@ def test_voice_routing_preference_table():
     )
     assert d["tts"] == "host_neural"
     assert d["stt"] == "gateway"
+
+
+async def test_voice_pack_download_honors_internet_deny(mobile_env, monkeypatch):
+    from app.mobile import companion_voice_packs
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: mobile_env)
+    monkeypatch.setattr(companion_voice_packs, "data_dir", lambda: mobile_env)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    companion_voice_packs._CACHE.update(state="idle", pack_id="", bytes_done=0, size_bytes=0, last_error="")
+    seen = {"n": 0}
+
+    def handler(request):
+        seen["n"] += 1
+        return httpx.Response(200, content=b"voice-bytes")
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    await companion_voice_packs._download_recommended_voice_packs()
+    assert seen["n"] == 0
+    assert companion_voice_packs._CACHE["state"] == "error"

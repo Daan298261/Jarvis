@@ -1,6 +1,8 @@
 """HTTP GET that re-checks computer-permissions on each redirect hop."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -9,6 +11,13 @@ import httpx
 from .computer_permissions import evaluate_tool_permissions
 
 _REDIRECT = {301, 302, 303, 307, 308}
+
+
+def _redirect_target(response: httpx.Response) -> str | None:
+    location = (response.headers.get("location") or "").strip()
+    if response.status_code not in _REDIRECT or not location:
+        return None
+    return urljoin(str(response.url), location)
 
 
 def require_http_url_allowed(url: str, *, tool: str) -> None:
@@ -45,11 +54,82 @@ async def gated_get(
                 follow_redirects=False,
             )
             query = None
-            location = (response.headers.get("location") or "").strip()
-            if response.status_code not in _REDIRECT or not location:
+            nxt = _redirect_target(response)
+            if nxt is None:
                 return response
-            current = urljoin(str(response.url), location)
+            current = nxt
         raise PermissionError("Too many redirects")
     finally:
         if own:
             await http.aclose()
+
+
+def gated_get_sync(
+    url: str,
+    *,
+    tool: str,
+    timeout: float = 12.0,
+    headers: dict[str, str] | None = None,
+    params: dict[str, Any] | None = None,
+    max_hops: int = 8,
+    trust_env: bool = False,
+    client: httpx.Client | None = None,
+) -> httpx.Response:
+    current = url
+    query = params
+    own = client is None
+    http = client or httpx.Client(
+        follow_redirects=False,
+        timeout=timeout,
+        headers=headers or {},
+        trust_env=trust_env,
+    )
+    try:
+        for _ in range(max(1, int(max_hops))):
+            require_http_url_allowed(current, tool=tool)
+            request_headers = headers if (headers and not own) else None
+            response = http.get(
+                current,
+                params=query,
+                headers=request_headers,
+                follow_redirects=False,
+            )
+            query = None
+            nxt = _redirect_target(response)
+            if nxt is None:
+                return response
+            current = nxt
+        raise PermissionError("Too many redirects")
+    finally:
+        if own:
+            http.close()
+
+
+@asynccontextmanager
+async def gated_stream(
+    url: str,
+    *,
+    tool: str,
+    timeout: float | httpx.Timeout = 30.0,
+    headers: dict[str, str] | None = None,
+    max_hops: int = 8,
+) -> AsyncIterator[httpx.Response]:
+    current = url
+    response: httpx.Response | None = None
+    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, headers=headers or {}) as http:
+        try:
+            for _ in range(max(1, int(max_hops))):
+                require_http_url_allowed(current, tool=tool)
+                request = http.build_request("GET", current)
+                response = await http.send(request, stream=True)
+                nxt = _redirect_target(response)
+                if nxt is None:
+                    yield response
+                    return
+                await response.aclose()
+                response = None
+                current = nxt
+            raise PermissionError("Too many redirects")
+        finally:
+            if response is not None:
+                await response.aclose()

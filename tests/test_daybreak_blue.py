@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect
@@ -181,6 +182,30 @@ def test_defensive_permission_mapping_requires_cyber_and_blue():
         "cyber.hexstrike",
         "blue.static_rules",
     ]
+
+
+async def test_threat_intel_lookup_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.security.hexstrike_defensive import _lookup_cve
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["n"] += 1
+        return httpx.Response(200, json={"vulnerabilities": [{"cve": {"id": "CVE-2024-0001"}}]})
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    with pytest.raises(PermissionError):
+        await _lookup_cve("CVE-2024-0001")
+    assert seen["n"] == 0
 
 
 @pytest.mark.asyncio

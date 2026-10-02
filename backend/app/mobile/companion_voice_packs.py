@@ -368,7 +368,7 @@ def resolve_voice_pack_artifact(pack_id: str, filename: str | None = None) -> Pa
     return path
 
 
-async def _download_artifact(client: httpx.AsyncClient, pack: dict[str, Any], artifact: dict[str, Any]) -> None:
+async def _download_artifact(pack: dict[str, Any], artifact: dict[str, Any]) -> None:
     target = artifact_cache_path(pack, artifact)
     partial = artifact_partial_path(pack, artifact)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -378,7 +378,14 @@ async def _download_artifact(client: httpx.AsyncClient, pack: dict[str, Any], ar
     resume_at = partial.stat().st_size if partial.is_file() else 0
     if resume_at > 0:
         headers["Range"] = f"bytes={resume_at}-"
-    async with client.stream("GET", artifact["url"], headers=headers) as response:
+    from ..policy.network_http import gated_stream
+
+    async with gated_stream(
+        artifact["url"],
+        tool="web_fetch",
+        timeout=httpx.Timeout(30.0, read=300.0),
+        headers=headers,
+    ) as response:
         if response.status_code not in {200, 206}:
             raise RuntimeError(f"Download failed with status {response.status_code} for {artifact['filename']}")
         mode = "ab" if resume_at > 0 and response.status_code == 206 else "wb"
@@ -407,28 +414,27 @@ async def _download_recommended_voice_packs() -> None:
             last_error=f"Recommended voice packs ({combined} bytes) exceed auto-download hard cap",
         )
         return
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0), follow_redirects=True) as client:
-        for pack in packs:
-            if _cache_ready(pack):
-                continue
-            size_bytes = int(pack["size_bytes"])
-            _CACHE.update(
-                state="downloading",
-                pack_id=pack["id"],
-                bytes_done=0,
-                size_bytes=size_bytes,
-                last_error="",
-            )
-            try:
-                for art in pack_artifacts(pack):
-                    await _download_artifact(client, pack, art)
-                if not _cache_ready(pack):
-                    raise RuntimeError("Voice pack incomplete after download")
-                _CACHE.update(state="ready", bytes_done=size_bytes, last_error="")
-            except Exception as exc:
-                log.warning("Companion voice pack cache download failed for %s: %s", pack["id"], exc)
-                _CACHE.update(state="error", pack_id=pack["id"], last_error=str(exc)[:500])
-                return
+    for pack in packs:
+        if _cache_ready(pack):
+            continue
+        size_bytes = int(pack["size_bytes"])
+        _CACHE.update(
+            state="downloading",
+            pack_id=pack["id"],
+            bytes_done=0,
+            size_bytes=size_bytes,
+            last_error="",
+        )
+        try:
+            for art in pack_artifacts(pack):
+                await _download_artifact(pack, art)
+            if not _cache_ready(pack):
+                raise RuntimeError("Voice pack incomplete after download")
+            _CACHE.update(state="ready", bytes_done=size_bytes, last_error="")
+        except Exception as exc:
+            log.warning("Companion voice pack cache download failed for %s: %s", pack["id"], exc)
+            _CACHE.update(state="error", pack_id=pack["id"], last_error=str(exc)[:500])
+            return
 
 
 async def ensure_recommended_voice_pack_cache() -> None:

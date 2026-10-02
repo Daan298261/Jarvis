@@ -186,19 +186,25 @@ async def _download_recommended() -> None:
     if resume_at > 0:
         headers["Range"] = f"bytes={resume_at}-"
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=300.0), follow_redirects=True) as client:
-            async with client.stream("GET", pack["url"], headers=headers) as response:
-                if response.status_code not in {200, 206}:
-                    raise RuntimeError(f"Download failed with status {response.status_code}")
-                mode = "ab" if resume_at > 0 and response.status_code == 206 else "wb"
-                if mode == "wb":
-                    resume_at = 0
-                    partial.unlink(missing_ok=True)
-                with partial.open(mode) as handle:
-                    async for chunk in response.aiter_bytes(1024 * 1024):
-                        handle.write(chunk)
-                        resume_at += len(chunk)
-                        _CACHE["bytes_done"] = resume_at
+        from ..policy.network_http import gated_stream
+
+        async with gated_stream(
+            pack["url"],
+            tool="web_fetch",
+            timeout=httpx.Timeout(30.0, read=300.0),
+            headers=headers,
+        ) as response:
+            if response.status_code not in {200, 206}:
+                raise RuntimeError(f"Download failed with status {response.status_code}")
+            mode = "ab" if resume_at > 0 and response.status_code == 206 else "wb"
+            if mode == "wb":
+                resume_at = 0
+                partial.unlink(missing_ok=True)
+            with partial.open(mode) as handle:
+                async for chunk in response.aiter_bytes(1024 * 1024):
+                    handle.write(chunk)
+                    resume_at += len(chunk)
+                    _CACHE["bytes_done"] = resume_at
         digest = _sha256_file(partial).lower()
         if digest != pack["sha256"].lower():
             partial.unlink(missing_ok=True)
