@@ -10,6 +10,7 @@
     "test:projects-rail": "node --experimental-strip-types --import ./projects-test-register.mjs --test projects-rail-migration.test.mjs",
     "test:automation-breaker": "node --experimental-strip-types --test automation-breaker-view.test.mjs",
     "test:task-status": "node --experimental-strip-types --test task-status.test.mjs",
+    "test:settings-submenus": "node --experimental-strip-types --test settings-submenus.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
