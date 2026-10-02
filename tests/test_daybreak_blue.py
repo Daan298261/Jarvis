@@ -333,6 +333,41 @@ def test_preferred_lan_cidrs_put_gateway_subnet_before_vpn(monkeypatch):
     assert preferred_lan_cidrs() == ["192.168.1.0/24", "10.8.0.0/24"]
 
 
+def _home_vpn_addrs():
+    import socket
+
+    return {
+        "eth0": [
+            SimpleNamespace(family=socket.AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+        ],
+        "wg0": [
+            SimpleNamespace(family=socket.AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+        ],
+        "wwan0": [
+            SimpleNamespace(family=socket.AF_INET, address="100.64.1.8", netmask="255.192.0.0"),
+        ],
+        "Wi-Fi": [
+            SimpleNamespace(family=socket.AF_INET, address="192.168.50.8", netmask="255.255.255.0"),
+        ],
+    }
+
+
+def test_lan_scan_bind_pins_home_nic_not_vpn_or_cgnat(monkeypatch):
+    from app.security.hexstrike_defensive import lan_scan_bind, nmap_lan_additional_args, nmap_lan_bind_args
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    assert lan_scan_bind("192.168.1.0/24") == ("eth0", "192.168.1.12")
+    assert lan_scan_bind("192.168.1.50") == ("eth0", "192.168.1.12")
+    assert lan_scan_bind("10.8.0.0/24") == ("wg0", "10.8.0.2")
+    assert lan_scan_bind("8.8.8.0/24") == ("", "")
+    assert lan_scan_bind("100.64.0.0/10") == ("", "")
+    assert nmap_lan_bind_args("192.168.1.0/24") == ["-S", "192.168.1.12", "-e", "eth0"]
+    assert nmap_lan_additional_args("192.168.1.0/24") == "-T3 -S 192.168.1.12 -e eth0"
+    # Wi-Fi has a space: host argv keeps -e; suite string omits it so HexStrike cannot split the name.
+    assert nmap_lan_bind_args("192.168.50.0/24") == ["-S", "192.168.50.8", "-e", "Wi-Fi"]
+    assert nmap_lan_additional_args("192.168.50.0/24") == "-T3 -S 192.168.50.8"
+
+
 def test_default_lan_scope_prefers_home_lan_and_registers_vpn_cidr(blue_store, monkeypatch):
     from app.security.hexstrike_defensive import (
         extra_lan_scope_id,
@@ -520,13 +555,52 @@ async def test_lan_inventory_uses_host_nmap_when_suite_unavailable(blue_store, m
         assert "-sn" in args
         assert args[-1] == "192.168.20.0/24"
         assert "--" in args
+        assert args[args.index("-S") + 1] == "192.168.20.5"
+        assert args[args.index("-e") + 1] == "wlan0"
         return FakeProc()
 
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "wlan0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.20.5", netmask="255.255.255.0"),
+            ],
+            "wg0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+            ],
+        },
+    )
     monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
     job = await execute_defensive("lan_inventory", "lan")
     assert job["status"] == "completed"
     assert job["result"]["source"] == "host-nmap"
     assert job["result"]["hosts"][0]["address"] == "192.168.20.12"
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_suite_nmap_binds_home_nic(blue_store, monkeypatch):
+    upsert_scope("lan", kind="private_cidr", value="192.168.1.0/24", label="Home", attested_owned=True)
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=True, last_error="")
+
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        seen.append(payload)
+        return {"hosts": []}
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.discover_private_lan_cidrs", lambda: ["192.168.1.0/24", "10.8.0.0/24"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    job = await execute_defensive("lan_inventory", "lan")
+    assert job["status"] == "completed"
+    assert [item["target"] for item in seen] == ["192.168.1.0/24", "10.8.0.0/24"]
+    assert seen[0]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    assert seen[1]["additional_args"] == "-T3 -S 10.8.0.2 -e wg0"
 
 
 @pytest.mark.asyncio

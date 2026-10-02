@@ -279,15 +279,18 @@ def _upsert_additional_lan_scopes(cidrs: list[str]) -> None:
         )
 
 
-def discover_private_lan_cidrs() -> list[str]:
-    """RFC1918 CIDRs from this PC's interfaces — owner LAN only, never CGNAT or public."""
+def rfc1918_nic_addrs() -> list[tuple[str, ipaddress.IPv4Interface]]:
+    """(interface name, IPv4Interface) for every RFC1918 NIC this PC currently holds."""
     try:
         import psutil
     except ImportError:
         return []
-    found: list[str] = []
-    seen: set[str] = set()
-    for _name, addrs in psutil.net_if_addrs().items():
+    found: list[tuple[str, ipaddress.IPv4Interface]] = []
+    try:
+        nics = psutil.net_if_addrs().items()
+    except Exception:
+        return []
+    for name, addrs in nics:
         for addr in addrs:
             if getattr(addr, "family", None) != socket.AF_INET:
                 continue
@@ -301,12 +304,83 @@ def discover_private_lan_cidrs() -> list[str]:
                 continue
             if interface.network.prefixlen < 8 or interface.network.prefixlen > 30:
                 continue
-            cidr = str(interface.network)
-            if cidr in seen:
-                continue
-            seen.add(cidr)
-            found.append(cidr)
+            found.append((str(name or ""), interface))
     return found
+
+
+def discover_private_lan_cidrs() -> list[str]:
+    """RFC1918 CIDRs from this PC's interfaces — owner LAN only, never CGNAT or public."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for _name, interface in rfc1918_nic_addrs():
+        cidr = str(interface.network)
+        if cidr in seen:
+            continue
+        seen.add(cidr)
+        found.append(cidr)
+    return found
+
+
+def lan_scan_bind(target: str) -> tuple[str, str]:
+    """This PC's (interface name, IPv4) on the same RFC1918 network as *target*.
+
+    LAN inventory must send from that NIC. A VPN default route would otherwise
+    make nmap probe the tunnel instead of the owner's LAN.
+    """
+    cleaned = (target or "").strip()
+    if not cleaned:
+        return ("", "")
+    try:
+        if "/" in cleaned:
+            needle: ipaddress.IPv4Address | ipaddress.IPv4Network = ipaddress.ip_network(
+                cleaned, strict=False
+            )
+            host_mode = False
+        else:
+            needle = ipaddress.ip_address(cleaned)
+            host_mode = True
+    except ValueError:
+        return ("", "")
+    if getattr(needle, "version", 4) != 4:
+        return ("", "")
+    matches: list[tuple[int, str, str]] = []
+    for name, interface in rfc1918_nic_addrs():
+        if host_mode:
+            if needle not in interface.network and needle != interface.ip:
+                continue
+        elif interface.ip not in needle and not needle.overlaps(interface.network):
+            continue
+        matches.append((interface.network.prefixlen, name, str(interface.ip)))
+    if not matches:
+        return ("", "")
+    matches.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return (matches[0][1], matches[0][2])
+
+
+def nmap_lan_bind_args(target: str) -> list[str]:
+    """nmap argv that pins the scan to the on-link RFC1918 NIC for *target*."""
+    iface, source = lan_scan_bind(target)
+    args: list[str] = []
+    if source:
+        args.extend(["-S", source])
+    if iface:
+        args.extend(["-e", iface])
+    return args
+
+
+def nmap_lan_additional_args(target: str, base: str = "-T3") -> str:
+    """HexStrike nmap additional_args: timing plus source bind.
+
+    Interface names with whitespace are omitted from the string payload (HexStrike
+    splits additional_args); ``-S`` still pins the source address.
+    """
+    iface, source = lan_scan_bind(target)
+    parts = [str(base or "").strip()]
+    if source:
+        parts.extend(["-S", source])
+    if iface and not any(ch.isspace() for ch in iface):
+        parts.extend(["-e", iface])
+    return " ".join(part for part in parts if part)
 
 
 def ensure_default_lan_scope() -> dict[str, Any]:
@@ -373,7 +447,13 @@ def _save_job(job: dict[str, Any]) -> None:
 def _payload(capability: DefensiveCapability, scope: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     value = str(scope["value"])
     if capability.id == "lan_inventory":
-        return {"target": value, "scan_type": "-sn", "ports": "", "additional_args": "-T3", "use_recovery": False}
+        return {
+            "target": value,
+            "scan_type": "-sn",
+            "ports": "",
+            "additional_args": nmap_lan_additional_args(value),
+            "use_recovery": False,
+        }
     if capability.id == "container_scan":
         return {"target": value, "scan_type": "fs" if scope.get("kind") == "local_path" else "image", "output_format": "json"}
     if capability.id == "iac_scan":
@@ -446,6 +526,7 @@ async def _host_nmap_ping_scan(target: str) -> dict[str, Any]:
         "-T3",
         "--max-retries",
         "1",
+        *nmap_lan_bind_args(cleaned),
         "--",
         cleaned,
         stdout=asyncio.subprocess.PIPE,
@@ -523,7 +604,11 @@ async def _run_lan_inventory(scope: dict[str, Any], payload: dict[str, Any]) -> 
     results: list[dict[str, Any]] = []
     last_error: Exception | None = None
     for target in targets:
-        item_payload = {**payload, "target": target}
+        item_payload = {
+            **payload,
+            "target": target,
+            "additional_args": nmap_lan_additional_args(target),
+        }
         try:
             if snapshot.running:
                 results.append(await HEXSTRIKE.post_defensive("api/tools/nmap", item_payload))

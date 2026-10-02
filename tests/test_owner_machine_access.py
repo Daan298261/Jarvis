@@ -344,6 +344,29 @@ def test_preferred_lan_ipv4_picks_home_lan_over_vpn(monkeypatch):
     assert connectivity.preferred_lan_ipv4("10.8.0.1") == "10.8.0.2"
 
 
+def test_lan_inventory_nmap_binds_home_nic_not_vpn(monkeypatch):
+    from types import SimpleNamespace
+
+    import socket
+
+    from app.security.hexstrike_defensive import lan_scan_bind, nmap_lan_bind_args
+
+    def fake_addrs():
+        return {
+            "eth0": [
+                SimpleNamespace(family=socket.AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+            "wg0": [
+                SimpleNamespace(family=socket.AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+            ],
+        }
+
+    monkeypatch.setattr("psutil.net_if_addrs", fake_addrs)
+    assert lan_scan_bind("192.168.1.0/24") == ("eth0", "192.168.1.12")
+    assert nmap_lan_bind_args("192.168.1.0/24") == ["-S", "192.168.1.12", "-e", "eth0"]
+    assert nmap_lan_bind_args("10.8.0.0/24") == ["-S", "10.8.0.2", "-e", "wg0"]
+
+
 def test_udp_lan_ipv4_ignores_cgnat(monkeypatch):
     from app.mobile import igd
 
