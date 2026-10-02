@@ -55,6 +55,19 @@ object TransportPolicy {
         return publicOrigins.take(8 - keptPrivate.size) + keptPrivate
     }
 
+    fun absorbMatchingLanOrigin(
+        existing: Iterable<String>,
+        currentPin: String,
+        discoveredOrigin: String,
+        discoveredPin: String,
+    ): List<String>? {
+        val expected = currentPin.trim().lowercase()
+        val advertised = discoveredPin.trim().lowercase()
+        if (expected.length != 64 || advertised != expected) return null
+        val live = runCatching { origin(discoveredOrigin) }.getOrNull() ?: return null
+        return mergeConnectionEndpoints(existing, listOf(live))
+    }
+
     fun localIpv4Addresses(): List<String> = runCatching {
         NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
             .filter { nic ->
@@ -169,7 +182,7 @@ object TransportPolicy {
         val host = runCatching { URI(value).host?.trim()?.lowercase().orEmpty() }.getOrDefault("")
         if (host.isEmpty()) return 2
         if (isLanHostname(host)) return 2
-        val numeric = host.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$""")) || host.contains(':')
+        val numeric = host.matches(Regex("""^\\d{1,3}(\\.\\d{1,3}){3}$""")) || host.contains(':')
         if (!numeric) return 0
         val ip = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return 1
         return if (ip.isLoopbackAddress || ip.isLinkLocalAddress || ip.isSiteLocalAddress) 2 else 1
