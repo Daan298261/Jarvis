@@ -99,6 +99,11 @@ def _audit(event: str, **fields: Any) -> None:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+def audit_ato_event(event: str, **fields: Any) -> None:
+    """Append a cyber-ato audit record (e.g. RFC-0199 license_auto_applied)."""
+    _audit(event, **fields)
+
+
 def _canonical(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 

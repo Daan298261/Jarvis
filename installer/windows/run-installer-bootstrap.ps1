@@ -31,7 +31,11 @@ param(
 
     [switch]$InstallUmiBrain,
 
-    [string]$VoiceProfiles = ""
+    [string]$VoiceProfiles = "",
+
+    [string]$InstallerDir = "",
+
+    [string]$AppRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -97,4 +101,17 @@ if ($proc.ExitCode -ne 0) {
 }
 
 Write-BootstrapLog "bootstrap completed successfully"
+
+if ($InstallerDir.Trim() -and $AppRoot.Trim()) {
+    $stageScript = Join-Path $ScriptDir "stage-license-sidecar.ps1"
+    if (Test-Path $stageScript) {
+        Write-BootstrapLog "RFC-0199 staging license sidecar from $InstallerDir"
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $stageScript `
+            -InstallerDir $InstallerDir.Trim() -AppRoot $AppRoot.Trim()
+        if ($LASTEXITCODE -ne 0) {
+            Write-BootstrapLog "License sidecar staging failed (exit $LASTEXITCODE); see logs\installer-sidecar.log"
+        }
+    }
+}
+
 exit 0

@@ -240,6 +240,12 @@ async def startup() -> None:
     except Exception:
         logging.debug("Decision-tier hook registration skipped", exc_info=True)
     logs_dir().mkdir(exist_ok=True)
+    try:
+        from .installer.license_sidecar import apply_pending_sidecar_license
+
+        apply_pending_sidecar_license()
+    except Exception:
+        logging.exception("License sidecar pending apply failed")
     install_rolling_log(loop=asyncio.get_running_loop())
     record_event("startup", message="Jarvis backend started", startup_id=app.state.startup_id)
     Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")

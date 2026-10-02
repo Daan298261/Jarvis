@@ -250,3 +250,18 @@ def test_vendor_sealed_file_verifies(ato_store, tmp_path, monkeypatch):
     assert "computer-use" in status.modules
     assert role_allowed("red-team") is True
 
+
+def test_license_sidecar_status_api(ato_store, monkeypatch):
+    from app.installer import license_sidecar as sidecar
+
+    monkeypatch.setattr("app.installer.license_sidecar.data_dir", lambda: ato_store)
+    client = TestClient(app)
+    idle = client.get("/api/installer/license-sidecar/status")
+    assert idle.status_code == 200
+    assert idle.json()["failure"] is None
+
+    sidecar.record_sidecar_failure("Sidecar license invalid: forged", source="x.jarvis-license")
+    failed = client.get("/api/installer/license-sidecar/status")
+    assert failed.status_code == 200
+    assert "invalid" in failed.json()["failure"]["message"].lower()
+

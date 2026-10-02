@@ -120,6 +120,8 @@ def test_installer_offers_voice_model_checkboxes():
     assert "$VoiceProfiles" in bootstrap
     assert "none selected" in bootstrap.lower()
     assert "$VoiceProfiles" in wrapper
+    assert "stage-license-sidecar.ps1" in wrapper
+    assert "$InstallerDir" in wrapper
     assert "checkboxes" in _read(README).lower()
     assert "neural voice" in _read(README).lower()
 
@@ -153,6 +155,10 @@ def test_jarvis_iss_wiring():
     text = _read(ISS)
     assert "bootstrap.ps1" in text
     assert "run-installer-bootstrap.ps1" in text
+    assert "stage-license-sidecar.ps1" in text
+    assert "StageLicenseSidecar" in text
+    assert "-InstallerDir" in text
+    assert "-AppRoot" in text
     assert "force-stop-jarvis.ps1" in text
     assert "Start Jarvis" in text
     assert "Stop Jarvis" in text
@@ -253,6 +259,7 @@ def test_vendor_license_manager_is_excluded_from_inno_payload():
     assert "tools\\license_manager" in iss
     assert "JarvisLicenseManager.exe" in iss
     assert "manager_app.py" in iss
+    assert "stage-license-sidecar.ps1" in iss
     for line in iss.splitlines():
         stripped = line.strip()
         if stripped.startswith("Source:") and "JarvisLicenseManager" in stripped and "Excludes:" not in stripped:
