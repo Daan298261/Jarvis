@@ -65,6 +65,7 @@ def test_local_network_default_is_allowed_but_explicit_deny_wins(tmp_path, monke
     assert evaluate_tool_permissions("web_fetch", {"url": "http://nas.local/status"}).status == "allow"
     assert evaluate_tool_permissions("web_fetch", {"url": "http://nas/status"}).status == "allow"
     assert evaluate_permission("network.internet").status == "allow"
+    assert evaluate_tool_permissions("hexstrike_defensive", {"action": "lan_inventory"}).status == "allow"
     assert evaluate_tool_permissions("filesystem", {"path": r"\\nas.local\share\x"}).status == "allow"
     # A WAN URL that merely mentions a LAN name is still internet use.
     assert permission_ids_for_tool("web_fetch", {"url": "https://example.com/?next=nas.local"}) == ["network.internet"]

@@ -314,11 +314,18 @@ async def hexstrike_operate(body: HexStrikeOperateIn):
     mode = _require_hexstrike_access(HEXSTRIKE_ACCESS_BLUE, HEXSTRIKE_ACCESS_FULL)
     if mode == HEXSTRIKE_ACCESS_BLUE and not str(body.capability_id).startswith("defensive:"):
         _require_full_operator()
-    _require_operator_grant(
-        "cyber.hexstrike",
-        action_kind="hexstrike.operate",
-        context={"capability_id": body.capability_id, "arguments": body.arguments},
-    )
+    if str(body.capability_id) == "defensive:lan_inventory":
+        _require_permissions_grant(
+            ["network.local"],
+            action_kind="hexstrike.operate",
+            context={"capability_id": body.capability_id, "arguments": body.arguments},
+        )
+    else:
+        _require_operator_grant(
+            "cyber.hexstrike",
+            action_kind="hexstrike.operate",
+            context={"capability_id": body.capability_id, "arguments": body.arguments},
+        )
     snapshot = await HEXSTRIKE.status(enrich=False)
     if snapshot.running:
         surface = await sync_operator_surface(register_mcp=False)
