@@ -346,7 +346,7 @@ def _home_vpn_addrs():
         "wwan0": [
             SimpleNamespace(family=socket.AF_INET, address="100.64.1.8", netmask="255.192.0.0"),
         ],
-        "Wi-Fi": [
+        "Ethernet 2": [
             SimpleNamespace(family=socket.AF_INET, address="192.168.50.8", netmask="255.255.255.0"),
         ],
     }
@@ -363,8 +363,8 @@ def test_lan_scan_bind_pins_home_nic_not_vpn_or_cgnat(monkeypatch):
     assert lan_scan_bind("100.64.0.0/10") == ("", "")
     assert nmap_lan_bind_args("192.168.1.0/24") == ["-S", "192.168.1.12", "-e", "eth0"]
     assert nmap_lan_additional_args("192.168.1.0/24") == "-T3 -S 192.168.1.12 -e eth0"
-    # Wi-Fi has a space: host argv keeps -e; suite string omits it so HexStrike cannot split the name.
-    assert nmap_lan_bind_args("192.168.50.0/24") == ["-S", "192.168.50.8", "-e", "Wi-Fi"]
+    # Windows "Ethernet 2" has a space: host argv keeps -e; suite string omits it so HexStrike cannot split the name.
+    assert nmap_lan_bind_args("192.168.50.0/24") == ["-S", "192.168.50.8", "-e", "Ethernet 2"]
     assert nmap_lan_additional_args("192.168.50.0/24") == "-T3 -S 192.168.50.8"
 
 
