@@ -109,6 +109,8 @@ async def test_router_failure_keeps_lan_available(network_env, monkeypatch):
     def unavailable():
         raise ValueError("No public IPv4; carrier NAT")
     monkeypatch.setattr(connectivity, "router_candidate", unavailable)
+    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
+    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
     result = await FakeConnection().configure(True, True)
     assert result["state"] == "ready" and result["local_verified"]
     assert "carrier NAT" in result["limitation"]

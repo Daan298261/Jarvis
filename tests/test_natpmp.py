@@ -44,3 +44,43 @@ def test_natpmp_map_reply_must_be_4781():
     refused = struct.pack("!BBHIHHI", 0, 130, 3, 1, 4781, 4781, 0)
     with pytest.raises(RuntimeError, match="refused"):
         decode_map_response(refused)
+    unsupported = struct.pack("!BBHII", 0, 128, 1, 1, 0)
+    with pytest.raises(ValueError, match="unsupported version"):
+        decode_public_ip(unsupported)
+
+
+def test_natpmp_retries_udp_timeout_then_succeeds(monkeypatch):
+    import socket as socket_mod
+
+    from app.mobile.natpmp import encode_public_ip_request, udp_exchange
+
+    packed = int.from_bytes(bytes(int(p) for p in "203.0.113.4".split(".")), "big")
+    reply = struct.pack("!BBHII", 0, 128, 0, 1, packed)
+    state = {"calls": 0}
+
+    class Flaky:
+        def __init__(self, *args, **kwargs):
+            self.timeout = None
+
+        def settimeout(self, value):
+            self.timeout = value
+
+        def bind(self, addr):
+            return None
+
+        def sendto(self, data, addr):
+            return len(data)
+
+        def recvfrom(self, size):
+            state["calls"] += 1
+            if state["calls"] < 2:
+                raise socket_mod.timeout("timed out")
+            return reply, ("192.168.1.1", 5351)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("app.mobile.natpmp.socket.socket", lambda *a, **k: Flaky())
+    data = udp_exchange("192.168.1.1", encode_public_ip_request(), 12, attempts=3)
+    assert data == reply
+    assert state["calls"] == 2

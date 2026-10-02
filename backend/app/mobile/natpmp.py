@@ -15,6 +15,7 @@ NATPMP_PORT = 5351
 LEASE_SECONDS = 3600
 _OPCODE_PUBLIC = 0
 _OPCODE_TCP = 2
+_UNSUPPORTED_VERSION = 1
 
 
 def require_private_gateway(host: str) -> str:
@@ -38,6 +39,8 @@ def decode_public_ip(payload: bytes) -> str:
     version, opcode, result, _epoch, raw_ip = struct.unpack("!BBHII", payload[:12])
     if version != 0 or opcode != (_OPCODE_PUBLIC | 0x80):
         raise ValueError("Not a NAT-PMP public-IP reply")
+    if result == _UNSUPPORTED_VERSION:
+        raise ValueError("NAT-PMP unsupported version")
     if result != 0:
         raise RuntimeError(f"NAT-PMP public IP refused ({result})")
     address = ipaddress.IPv4Address(raw_ip)
@@ -52,6 +55,8 @@ def decode_map_response(payload: bytes) -> tuple[int, int]:
     version, opcode, result, _epoch, internal, external, lifetime = struct.unpack("!BBHIHHI", payload[:16])
     if version != 0 or opcode != (_OPCODE_TCP | 0x80):
         raise ValueError("Not a NAT-PMP TCP map reply")
+    if result == _UNSUPPORTED_VERSION:
+        raise ValueError("NAT-PMP unsupported version")
     if result != 0:
         raise RuntimeError(f"NAT-PMP TCP map refused ({result})")
     if int(internal) != PORT or int(external) != PORT:
@@ -59,38 +64,60 @@ def decode_map_response(payload: bytes) -> tuple[int, int]:
     return int(external), int(lifetime)
 
 
-def _exchange(gateway: str, packet: bytes, expected: int, lan_ip: str = "") -> bytes:
+def udp_exchange(
+    gateway: str,
+    packet: bytes,
+    expected: int,
+    lan_ip: str = "",
+    attempts: int = 3,
+) -> bytes:
+    """RFC 6886 retries: 250 ms, then double, talking only to the owner gateway."""
     gw = require_private_gateway(gateway)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(1.2)
-    try:
-        if lan_ip:
-            dest = ipaddress.ip_address(lan_ip)
-            if dest.version == 4 and dest.is_private and not dest.is_loopback:
-                sock.bind((str(dest), 0))
-        sock.sendto(packet, (gw, NATPMP_PORT))
-        data, addr = sock.recvfrom(64)
-        peer = ipaddress.ip_address(addr[0])
-        if str(peer) != gw:
-            raise ValueError("NAT-PMP reply was not from the owner gateway")
-        if len(data) < expected:
-            raise ValueError("NAT-PMP reply was truncated")
-        return data
-    finally:
-        sock.close()
+    delay = 0.25
+    last_error: Exception | None = None
+    for _ in range(max(1, int(attempts))):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(delay)
+        try:
+            if lan_ip:
+                dest = ipaddress.ip_address(lan_ip)
+                if dest.version == 4 and dest.is_private and not dest.is_loopback:
+                    sock.bind((str(dest), 0))
+            sock.sendto(packet, (gw, NATPMP_PORT))
+            data, addr = sock.recvfrom(512)
+            peer = ipaddress.ip_address(addr[0])
+            if str(peer) != gw:
+                last_error = ValueError("NAT-PMP reply was not from the owner gateway")
+                delay = min(delay * 2, 1.0)
+                continue
+            if len(data) < expected:
+                last_error = ValueError("NAT-PMP reply was truncated")
+                delay = min(delay * 2, 1.0)
+                continue
+            return data
+        except (TimeoutError, socket.timeout, OSError) as exc:
+            last_error = exc
+            delay = min(delay * 2, 1.0)
+        finally:
+            sock.close()
+    raise TimeoutError(str(last_error) if last_error else "No NAT-PMP reply")
+
+
+def _exchange(gateway: str, packet: bytes, expected: int, lan_ip: str = "") -> bytes:
+    return udp_exchange(gateway, packet, expected, lan_ip)
 
 
 def apply_natpmp(gateway: str = "", lan_ip: str = "") -> str:
     """Map TCP 4781 for one hour. Returns the gateway's public IPv4."""
     gw = require_private_gateway(gateway or default_gateway_ipv4())
-    public = decode_public_ip(_exchange(gw, encode_public_ip_request(), 12, lan_ip))
-    decode_map_response(_exchange(gw, encode_map_request(LEASE_SECONDS), 16, lan_ip))
+    public = decode_public_ip(udp_exchange(gw, encode_public_ip_request(), 12, lan_ip))
+    decode_map_response(udp_exchange(gw, encode_map_request(LEASE_SECONDS), 16, lan_ip))
     return public
 
 
 def delete_natpmp(gateway: str, lan_ip: str = "") -> None:
     gw = require_private_gateway(gateway)
     try:
-        _exchange(gw, encode_map_request(0), 16, lan_ip)
+        udp_exchange(gw, encode_map_request(0), 16, lan_ip, attempts=2)
     except (OSError, ValueError, RuntimeError, TimeoutError, socket.timeout):
         return
