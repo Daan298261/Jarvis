@@ -356,12 +356,16 @@ class MCPRuntime:
             bind_hexstrike_lan_payload,
             looks_like_nmap_tool,
             looks_like_snmp_tool,
+            looks_like_iface_host_tool,
             lan_inventory_uses_host_nmap,
+            lan_uses_host_iface_argv,
             nmap_target_from_payload,
             lan_bind_target,
             lan_bind_nic,
             _host_nmap_lan_scan,
             _host_snmp_lan,
+            _host_iface_lan,
+            _iface_lan_target,
         )
 
         args = bind_hexstrike_lan_payload(str(tool_key or name), args)
@@ -374,6 +378,11 @@ class MCPRuntime:
             target = lan_bind_target(args) or nmap_target_from_payload(args)
             if lan_bind_nic(target)[1]:
                 data = await _host_snmp_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+        if looks_like_iface_host_tool(tool_key) or looks_like_iface_host_tool(str(name)):
+            target = _iface_lan_target(args)
+            if lan_uses_host_iface_argv(target):
+                data = await _host_iface_lan(str(tool_key or name), args)
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
         server_id = self._server_id(server)
         last_error = ""

@@ -487,6 +487,17 @@ def test_lan_tcpdump_and_tshark_bind_home_nic_not_vpn(monkeypatch):
     bash = _command_args("tcpdump host 192.168.1.1", "bash")
     assert bash[0] == "/usr/bin/tcpdump"
     assert bash[1:3] == ["-i", "eth0"]
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"tcpdump", "tshark", "dumpcap", "hping3", "hping"} else None,
+    )
+    hping = lan_bound_scan_argv("hping3 -S -p 80 192.168.1.50")
+    assert hping is not None
+    assert hping[0] == "/usr/bin/hping3"
+    assert hping[1:3] == ["-I", "eth0"]
+    assert hping[-1] == "192.168.1.50"
+    assert lan_bound_scan_argv("hping3 -I wg0 192.168.1.50") is None
+    assert lan_bound_scan_argv("hping3 8.8.8.8") is None
 
 
 def test_cifs_host_from_token_unc():

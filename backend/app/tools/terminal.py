@@ -249,6 +249,8 @@ _SCAN_NAMES = frozenset(
         "tcpdump",
         "tshark",
         "dumpcap",
+        "hping",
+        "hping3",
     }
 )
 _IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
@@ -294,6 +296,8 @@ def _scan_already_bound(name: str, parts: list[str]) -> bool:
         return bool(flags & {"-i", "-B", "--broadcast"})
     if name in {"tcpdump", "tshark", "dumpcap"}:
         return bool(flags & {"-i", "--interface"})
+    if name in {"hping", "hping3"}:
+        return bool(flags & {"-I", "--interface"})
     return True
 
 
@@ -357,6 +361,13 @@ def _scan_bind_flags(name: str, target: str) -> list[str] | None:
         if not iface:
             return None
         return ["-i", iface]
+    if name in {"hping", "hping3"}:
+        from ..security.hexstrike_defensive import lan_nic_detail
+
+        iface, _source, _broadcast = lan_nic_detail(target)
+        if not iface:
+            return None
+        return ["-I", iface]
     return None
 
 
@@ -367,8 +378,8 @@ def lan_bound_scan_argv(command: str) -> list[str] | None:
     still follow the OS default route, so a VPN steals (or black-holes) the hop
     to the LAN. mtr uses ``-a``; nmblookup uses ``-B``/``-i`` so NetBIOS to a NAS
     is not sent on the VPN. tcpdump/tshark/dumpcap use ``-i`` when the filter
-    names an on-link RFC1918 host. Skip pipes and explicit source-bind flags.
-    Public targets are unchanged.
+    names an on-link RFC1918 host. hping3 uses ``-I``. Skip pipes and explicit
+    source-bind flags. Public targets are unchanged.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):

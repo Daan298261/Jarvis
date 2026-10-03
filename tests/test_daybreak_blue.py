@@ -387,6 +387,24 @@ def test_lan_bind_nic_resolves_mdns_host_to_home_nic(monkeypatch):
     assert lan_bind_nic("192.168.1.50") == ("eth0", "192.168.1.12")
 
 
+def test_lan_uses_host_iface_argv_for_mdns_on_spaced_windows_nic(monkeypatch):
+    import socket
+
+    from app.security.hexstrike_defensive import lan_inventory_uses_host_nmap, lan_uses_host_iface_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "cam.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.50.12", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    assert lan_uses_host_iface_argv("cam.local") is True
+    assert lan_inventory_uses_host_nmap("cam.local") is True
+    assert lan_uses_host_iface_argv("192.168.1.50") is False
+
+
 @pytest.mark.asyncio
 async def test_lan_inventory_uses_host_nmap_when_windows_nic_name_has_space(blue_store, monkeypatch):
     from app.security.hexstrike_defensive import lan_inventory_uses_host_nmap
@@ -780,6 +798,10 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     assert public_cap.get("additional_args", "") == ""
     snmp = bind_hexstrike_lan_payload("snmpwalk", {"target": "192.168.1.1"})
     assert snmp.get("additional_args", "") == ""
+    hping = bind_hexstrike_lan_payload("hping3", {"target": "192.168.1.50", "additional_args": "-S -p 80"})
+    assert hping["additional_args"] == "-S -p 80 -I eth0"
+    spaced_hping = bind_hexstrike_lan_payload("hping3", {"target": "192.168.50.12"})
+    assert spaced_hping.get("additional_args", "") == ""
 
 
 def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
@@ -797,6 +819,13 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert looks_like_snmp_tool("api/tools/snmpbulkwalk")
     assert not looks_like_snmp_tool("mcp_hexstrike_ai_nmap")
     assert not looks_like_snmp_tool("nuclei")
+    from app.security.hexstrike_defensive import looks_like_iface_host_tool
+
+    assert looks_like_iface_host_tool("tcpdump")
+    assert looks_like_iface_host_tool("http:tshark")
+    assert looks_like_iface_host_tool("mcp_hexstrike_ai_dumpcap")
+    assert looks_like_iface_host_tool("hping3")
+    assert not looks_like_iface_host_tool("nmap")
 
 
 def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch):
@@ -1083,6 +1112,120 @@ async def test_mcp_snmpwalk_hosts_lan_with_clientaddr(monkeypatch):
         assert "192.168.1.40" in argv
         env = seen[0][1]
         assert "clientaddr 192.168.1.12" in (Path(env["SNMPCONFPATH"]) / "snmp.conf").read_text(encoding="utf-8")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_tcpdump_hosts_spaced_windows_nic(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool, iface_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"tcpdump", "tshark", "hping3"}
+        else None,
+    )
+    argv = iface_host_argv(
+        "http:tcpdump",
+        {"target": "192.168.50.12", "additional_args": "-n -c 20"},
+    )
+    assert argv[0] == "/usr/bin/tcpdump"
+    assert argv[1:3] == ["-i", "Ethernet 2"]
+    assert argv[-2:] == ["host", "192.168.50.12"]
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"20 packets captured\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_iface_tool(
+        "api/tools/tcpdump",
+        {"target": "192.168.50.12", "additional_args": "-n -c 20"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-iface"
+    assert seen[0][seen[0].index("-i") + 1] == "Ethernet 2"
+    simple = await execute_operator_iface_tool(
+        "api/tools/tcpdump",
+        {"target": "192.168.1.50", "additional_args": "-n"},
+    )
+    assert simple == {"ok": True}
+    assert posted[0][0] == "api/tools/tcpdump"
+    assert "-i eth0" in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tcpdump_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN tcpdump must not go through HexStrike MCP when -i would split")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_tcpdump"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "tcpdump"},
+        "remote_name": "tcpdump",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/tcpdump" if str(name).lower() == "tcpdump" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"captured\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_tcpdump",
+            {"target": "192.168.50.0/24", "additional_args": "-c 5"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-iface"
+        argv = seen[0]
+        assert argv[argv.index("-i") + 1] == "Ethernet 2"
+        assert argv[-2:] == ("net", "192.168.50.0/24")
     finally:
         MCP.reset_for_tests()
 

@@ -828,7 +828,9 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
                 bind_hexstrike_lan_payload,
                 execute_operator_nmap,
                 execute_operator_snmp,
+                execute_operator_iface_tool,
                 looks_like_snmp_tool,
+                looks_like_iface_host_tool,
             )
 
             path = str(capability.get("upstream_path") or "")
@@ -837,6 +839,8 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
                 result = await execute_operator_nmap(payload)
             elif looks_like_snmp_tool(path):
                 result = await execute_operator_snmp(path, payload)
+            elif looks_like_iface_host_tool(path):
+                result = await execute_operator_iface_tool(path, payload)
             else:
                 result = await HEXSTRIKE.post_operator(path, bind_hexstrike_lan_payload(path, payload))
             job["result"] = result if isinstance(result, dict) else {"value": result}
