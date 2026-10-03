@@ -3895,10 +3895,11 @@ def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
     """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``wget2`` /
-    ``curl`` / ``aria2c`` / ``axel`` / ``RUN python -c urlretrieve|urlopen-write|urlopen|requests.get|httpx.get``
+    ``curl`` / ``aria2c`` / ``axel`` / ``RUN python -c urlretrieve|urlopen-write|urlopen|requests.get|httpx.get|aiohttp``
     (including ``&&`` / ``;`` chains and ``sh -c`` / ``bash -lc``) of those
     URLs into ``COPY --from=jarvisaddN``. Dest-less ``urlopen`` / ``requests.get``
-    / ``httpx.get`` uses the URL filename (same as dest-less ``urlretrieve``).
+    / ``httpx.get`` / ``aiohttp`` GET uses the URL filename (same as dest-less
+    ``urlretrieve``).
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
     text and an empty list when there is no on-link RFC1918 fetch.
@@ -3940,8 +3941,17 @@ _PATH_WRITE_BYTES = re.compile(
     (?:urllib\.request\.)?urlopen\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)\s*\)\.read\(\s*\)\s*\)
     """
 )
-_PYTHON_OTHER_HTTP = re.compile(r"\baiohttp\b")
 _PYTHON_URLOPEN = re.compile(r"\burlopen\s*\(")
+_AIOHTTP_GET = re.compile(
+    r"""(?xs)
+    (?:
+        \.request\(\s*(?P<q0>['"])(?:GET|get)(?P=q0)\s*,\s*
+        |
+        \.get\(\s*
+    )
+    (?P<q2>['"])(?P<url>https?://.*?)(?P=q2)
+    """
+)
 _URLOPEN_CALL = re.compile(
     r"""(?xs)
     \burlopen\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)
@@ -4022,18 +4032,27 @@ def _python_urlretrieve_url_dest(
     argv: list[str], declared: dict[str, str]
 ) -> tuple[str, str] | None:
     """Return ``(url, dest)`` for ``python -c`` LAN ``urlretrieve``, ``urlopen``,
-    ``requests.get``, or ``httpx.get``. Skip ``aiohttp`` and mixed fetch APIs.
+    ``requests.get``, ``httpx.get``, or dest-less ``aiohttp`` GET. Skip mixed
+    fetch APIs.
     """
     script = _python_c_script(argv)
     if script is None:
-        return None
-    if _PYTHON_OTHER_HTTP.search(script):
         return None
     retrieves = list(_URLRETRIEVE_CALL.finditer(script))
     writes = [*_URLOPEN_WRITE.finditer(script), *_PATH_WRITE_BYTES.finditer(script)]
     urlopens = list(_PYTHON_URLOPEN.finditer(script))
     request_gets = list(_REQUESTS_GET.finditer(script))
     request_writes = [*_REQUESTS_WRITE.finditer(script), *_REQUESTS_PATH_WRITE.finditer(script)]
+    has_aiohttp = bool(re.search(r"\baiohttp\b", script))
+    has_stdlib = bool(retrieves or writes or urlopens)
+    has_requests = bool(request_gets or request_writes)
+    if has_aiohttp and (has_stdlib or has_requests):
+        return None
+    if has_aiohttp:
+        aiohttp_gets = list(_AIOHTTP_GET.finditer(script))
+        if len(aiohttp_gets) != 1:
+            return None
+        return _expand_lan_url_dest(aiohttp_gets[0].group("url"), "", declared)
     if request_gets or request_writes:
         if retrieves or writes or urlopens:
             return None
@@ -4287,8 +4306,8 @@ def _rewrite_lan_run_fetch(
     line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
 ) -> list[str] | None:
     """Replace LAN ``RUN wget`` / ``wget2`` / ``curl`` / ``aria2c`` / ``axel`` /
-    ``python -c urlretrieve|urlopen-write|urlopen|requests.get|httpx.get`` (including
-    ``&&`` / ``;`` chains and ``sh -c``) with ``COPY --from=``.
+    ``python -c urlretrieve|urlopen-write|urlopen|requests.get|httpx.get|aiohttp``
+    (including ``&&`` / ``;`` chains and ``sh -c``) with ``COPY --from=``.
     """
     match = _RUN_LINE.match(str(line or ""))
     if match is None:

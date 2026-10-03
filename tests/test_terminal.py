@@ -2837,6 +2837,36 @@ def test_lan_run_python_urlretrieve(tmp_path, monkeypatch):
         "'http://192.168.1.50:8000/x')\"\n",
         encoding="utf-8",
     )
+    aio = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert aio is not None
+    follow = aio[aio.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x x" in text
+    assert "aiohttp" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import aiohttp; session.get("
+        "'http://192.168.1.50:8000/x')\"\n",
+        encoding="utf-8",
+    )
+    sess = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert sess is not None
+    follow = sess[sess.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x x" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import aiohttp, requests; requests.get("
+        "'http://192.168.1.50:8000/x')\"\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import aiohttp; aiohttp.request('GET', "
+        "'https://example.com/x')\"\n",
+        encoding="utf-8",
+    )
     assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
 
 
