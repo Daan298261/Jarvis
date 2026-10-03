@@ -8,6 +8,7 @@ import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { PresenceModePreview } from "../presence/PresenceModePreview"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
+import { MUSCULAR_HUMANOID_AVATAR_ID } from "../presence/renderers/HumanoidPresence"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
@@ -58,7 +59,9 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       ? "classic"
       : hexStrikeActive
         ? "hexstrike"
-        : settings.requestedPresence
+        : settings.requestedPresence === "humanoid" && settings.avatarId === MUSCULAR_HUMANOID_AVATAR_ID
+          ? "muscular_humanoid"
+          : settings.requestedPresence
 
   return (
     <div className="settings-appearance-pane">
@@ -97,13 +100,27 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
           className={selected === "humanoid" ? "active" : ""}
           onClick={() =>
             apply(
-              { shell: "hud", requestedPresence: "humanoid" },
+              { shell: "hud", requestedPresence: "humanoid", avatarId: "jarvis_base" },
               "Humanoid profile active on the shared presence stage. Jarvis falls back to APEX UI · orb + graph if WebGL is unavailable.",
             )
           }
         >
           <PresenceModePreview mode="humanoid" />
           Humanoid HUD · built in
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          className={selected === "muscular_humanoid" ? "active" : ""}
+          onClick={() =>
+            apply(
+              { shell: "hud", requestedPresence: "humanoid", avatarId: MUSCULAR_HUMANOID_AVATAR_ID },
+              "Muscular humanoid restored from the original Jarvis showcase artwork.",
+            )
+          }
+        >
+          <PresenceModePreview mode="muscular_humanoid" />
+          Muscular humanoid · showcase
         </button>
         <button
           type="button"

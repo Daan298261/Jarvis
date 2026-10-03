@@ -2,6 +2,7 @@ export type PresenceModePreviewId =
   | "classic"
   | "neural"
   | "humanoid"
+  | "muscular_humanoid"
   | "particle_bust"
   | "galaxy"
   | "hexstrike"
