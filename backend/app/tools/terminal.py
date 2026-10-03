@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import platform
 import re
 import shlex
 import shutil
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import psutil
 
@@ -1810,6 +1813,8 @@ def skopeo_copy_lan_images_argv(
     then: list[str] | None = None,
     all_tags: bool = False,
     platform_flags: list[str] | None = None,
+    fetches: list[tuple[str, str]] | None = None,
+    cleanup: str | None = None,
 ) -> list[str] | None:
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
     tagged = (
@@ -1821,9 +1826,13 @@ def skopeo_copy_lan_images_argv(
     follow_cmd = list(follow or [])
     then_cmd = list(then or [])
     overrides = list(platform_flags or [])
-    if not exe or (not tagged and not after):
+    fetch_pairs = [(str(url), str(path)) for url, path in (fetches or []) if url and path]
+    needs_copy = bool(tagged or after)
+    if needs_copy and not exe:
         return None
-    if len(tagged) == 1 and not follow_cmd and not after and not then_cmd and not all_tags:
+    if not needs_copy and not (fetch_pairs and follow_cmd):
+        return None
+    if not fetch_pairs and len(tagged) == 1 and not follow_cmd and not after and not then_cmd and not all_tags:
         argv = [exe, "copy", *overrides]
         if quiet:
             argv.append("--quiet")
@@ -1832,7 +1841,7 @@ def skopeo_copy_lan_images_argv(
         else:
             argv.extend(["--src-tls-verify=false", f"docker://{tagged[0]}", f"docker-daemon:{tagged[0]}"])
         return argv
-    if len(after) == 1 and not tagged and not follow_cmd and not then_cmd and not overrides:
+    if not fetch_pairs and len(after) == 1 and not tagged and not follow_cmd and not then_cmd and not overrides:
         argv = [exe, "copy"]
         if quiet:
             argv.append("--quiet")
@@ -1850,7 +1859,12 @@ def skopeo_copy_lan_images_argv(
     argv.extend(overrides)
     for image in after:
         argv.extend(["--push-after", image])
-    argv.extend([exe, *tagged])
+    if cleanup:
+        argv.extend(["--cleanup", cleanup])
+    for url, path in fetch_pairs:
+        argv.extend(["--fetch", f"{url}={path}"])
+    if needs_copy:
+        argv.extend([exe, *tagged])
     if follow_cmd or then_cmd:
         argv.append("--")
         argv.extend(follow_cmd)
@@ -2798,6 +2812,219 @@ def dockerfile_from_images(path: Path, build_args: dict[str, str] | None = None)
     return images
 
 
+_DOCKERFILE_ADD = re.compile(r"^\s*ADD\b(.*)$", re.I)
+_ADD_HTTP_SCHEMES = ("http://", "https://", "ftp://", "ftps://")
+_ADD_VALUE_FLAGS = frozenset(
+    {"--checksum", "--chown", "--chmod", "--keep-git-dir", "--exclude"}
+)
+_ADD_DROP_FLAGS = frozenset({"--checksum", "--keep-git-dir"})
+
+
+def _dockerfile_logical_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    buf = ""
+    for raw in str(text or "").splitlines():
+        stripped = raw.rstrip()
+        if stripped.endswith("\\") and not stripped.lstrip().startswith("#"):
+            buf += stripped[:-1] + " "
+            continue
+        lines.append(buf + raw)
+        buf = ""
+    if buf:
+        lines.append(buf.rstrip())
+    return lines
+
+
+def _is_http_add_url(token: str) -> bool:
+    text = str(token or "").strip().strip("'\"")
+    lower = text.lower()
+    if not lower.startswith(_ADD_HTTP_SCHEMES):
+        return False
+    path = (urlparse(text).path or "").lower()
+    if path.endswith(".git") or lower.rstrip("/").endswith(".git"):
+        return False
+    return True
+
+
+def _add_url_filename(url: str) -> str:
+    path = unquote(urlparse(str(url) or "").path or "")
+    name = Path(path).name
+    if not name or name in {".", ".."}:
+        return "download"
+    return name.replace("\x00", "")[:180]
+
+
+def _parse_add_instruction(line: str) -> tuple[list[str], list[str], str] | None:
+    match = _DOCKERFILE_ADD.match(str(line or "").split("#", 1)[0].strip())
+    if not match:
+        return None
+    rest = match.group(1).strip()
+    if not rest:
+        return None
+    if rest.startswith("["):
+        try:
+            items = json.loads(rest)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(items, list) or len(items) < 2:
+            return None
+        sources = [str(item).strip() for item in items[:-1] if str(item).strip()]
+        dest = str(items[-1]).strip()
+        if not sources or not dest:
+            return None
+        return [], sources, dest
+    try:
+        tokens = shlex.split(rest, posix=True)
+    except ValueError:
+        return None
+    flags: list[str] = []
+    index = 0
+    while index < len(tokens):
+        tok = str(tokens[index])
+        if not tok.startswith("--"):
+            break
+        key = tok.split("=", 1)[0].lower()
+        if key.startswith("--from"):
+            return None
+        flags.append(tok)
+        index += 1
+        if "=" not in tok and key in _ADD_VALUE_FLAGS and index < len(tokens):
+            flags.append(str(tokens[index]))
+            index += 1
+    positional = [str(item) for item in tokens[index:] if str(item)]
+    if len(positional) < 2:
+        return None
+    return flags, positional[:-1], positional[-1]
+
+
+def _copy_flags_from_add(flags: list[str]) -> list[str]:
+    kept: list[str] = []
+    skip_value = False
+    for flag in flags:
+        if skip_value:
+            skip_value = False
+            continue
+        key = str(flag).split("=", 1)[0].lower()
+        if key in _ADD_DROP_FLAGS:
+            if "=" not in str(flag):
+                skip_value = True
+            continue
+        kept.append(flag)
+    return kept
+
+
+def rewrite_dockerfile_lan_add(
+    path: Path, build_args: dict[str, str] | None = None
+) -> tuple[str, list[tuple[str, str, str]]]:
+    """Rewrite LAN ``ADD http(s)|ftp(s)://`` into ``COPY --from=jarvisaddN``.
+
+    Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
+    text and an empty list when there is no on-link RFC1918 ADD URL.
+    """
+    try:
+        original = path.read_text(encoding="utf-8")
+    except OSError:
+        return "", []
+    declared = dict(build_args or {})
+    fetches: list[tuple[str, str, str]] = []
+    out: list[str] = []
+    changed = False
+    for raw in _dockerfile_logical_lines(original):
+        line = raw.split("#", 1)[0]
+        arg_match = _ARG_DECL.match(line)
+        if arg_match:
+            name = arg_match.group(1)
+            if name not in declared:
+                default = arg_match.group(2)
+                if default is not None:
+                    declared[name] = default.strip().strip("'\"")
+            out.append(raw)
+            continue
+        parsed = _parse_add_instruction(line)
+        if parsed is None:
+            out.append(raw)
+            continue
+        flags, sources, dest = parsed
+        lan_sources: list[tuple[str, str]] = []
+        public_sources: list[str] = []
+        for source in sources:
+            expanded = expand_image_vars(source, declared)
+            if expanded is None:
+                public_sources.append(source)
+                continue
+            if not _is_http_add_url(expanded):
+                public_sources.append(source)
+                continue
+            if not _lan_bind_for_http_target(expanded):
+                public_sources.append(source)
+                continue
+            lan_sources.append((expanded, _add_url_filename(expanded)))
+        if not lan_sources:
+            out.append(raw)
+            continue
+        changed = True
+        copy_flags = _copy_flags_from_add(flags)
+        for url, filename in lan_sources:
+            context = f"jarvisadd{len(fetches)}"
+            fetches.append((url, context, filename))
+            pieces = ["COPY", f"--from={context}", *copy_flags, filename, dest]
+            out.append(" ".join(pieces))
+        if public_sources:
+            pieces = ["ADD", *flags, *public_sources, dest]
+            out.append(" ".join(pieces))
+    if not changed:
+        return original, []
+    return "\n".join(out) + ("\n" if original.endswith("\n") else ""), fetches
+
+
+def _materialize_lan_add(
+    dockerfile: Path, build_args: dict[str, str] | None = None
+) -> tuple[Path, list[tuple[str, str]], list[tuple[str, str]], str] | None:
+    rewritten, plan = rewrite_dockerfile_lan_add(dockerfile, build_args)
+    if not plan:
+        return None
+    root = Path(tempfile.mkdtemp(prefix="jarvis-lan-add-"))
+    df = root / "Dockerfile"
+    df.write_text(rewritten, encoding="utf-8")
+    fetches: list[tuple[str, str]] = []
+    contexts: list[tuple[str, str]] = []
+    for url, context, filename in plan:
+        ctx_dir = root / context
+        ctx_dir.mkdir(parents=True, exist_ok=True)
+        fetches.append((url, str(ctx_dir / filename)))
+        contexts.append((context, str(ctx_dir)))
+    return df, fetches, contexts, str(root)
+
+
+def _docker_build_with_add_contexts(
+    parts: list[str], dockerfile: str, contexts: list[tuple[str, str]]
+) -> list[str]:
+    out: list[str] = []
+    skip_value = False
+    inserted = False
+    for item in parts:
+        if skip_value:
+            skip_value = False
+            continue
+        text = str(item)
+        if text in {"-f", "--file"}:
+            skip_value = True
+            continue
+        if text.startswith("--file="):
+            continue
+        out.append(text)
+        if not inserted and text == "build":
+            out.extend(["-f", dockerfile])
+            for name, directory in contexts:
+                out.extend(["--build-context", f"{name}={directory}"])
+            inserted = True
+    if not inserted:
+        out.extend(["-f", dockerfile])
+        for name, directory in contexts:
+            out.extend(["--build-context", f"{name}={directory}"])
+    return out
+
+
 def _docker_build_without_pull(parts: list[str]) -> list[str]:
     out: list[str] = []
     inserted = False
@@ -3078,28 +3305,52 @@ def lan_bound_docker_build_from_parts(parts: list[str], cwd: str | None = None) 
         if _lan_bind_ip_for_host(docker_registry_host_from_image(tag))
     ]
     wants_push = _docker_build_wants_push(parts)
-    if not lan and not (wants_push and lan_tags):
-        return None
     docker = shutil.which("docker") or shutil.which("docker.exe")
     if not docker:
         return None
+    add_spec = _materialize_lan_add(dockerfile, _docker_build_args(parts))
+    if not lan and not (wants_push and lan_tags) and add_spec is None:
+        return None
     follow_src = [docker, *parts[1:]]
     buildx = any(_tool_basename(item) == "buildx" for item in parts[1:3])
+    fetches: list[tuple[str, str]] = []
+    cleanup = ""
     if wants_push and lan_tags:
         follow = _docker_build_for_local_load(follow_src, buildx=buildx)
-        return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow, push_after=lan_tags)
-    follow = _docker_build_without_pull(follow_src)
-    return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
+        push_after = lan_tags
+    else:
+        follow = _docker_build_without_pull(follow_src)
+        push_after = None
+    if add_spec is not None:
+        rewritten, fetches, contexts, cleanup = add_spec
+        follow = _docker_build_with_add_contexts(follow, str(rewritten), contexts)
+    if not lan and not fetches and not push_after:
+        if cleanup:
+            shutil.rmtree(cleanup, ignore_errors=True)
+        return None
+    argv = skopeo_copy_lan_images_argv(
+        lan,
+        quiet=quiet,
+        follow=follow,
+        push_after=push_after,
+        fetches=fetches,
+        cleanup=cleanup or None,
+    )
+    if argv is None and cleanup:
+        shutil.rmtree(cleanup, ignore_errors=True)
+    return argv
 
 
 def lan_bound_docker_build_argv(command: str, cwd: str | None = None) -> list[str] | None:
-    """``docker build`` / ``docker buildx build`` of a Dockerfile whose ``FROM`` is on-link RFC1918.
+    """``docker build`` / ``docker buildx build`` of a LAN ``FROM`` or ``ADD`` URL.
 
     Dockerd / BuildKit cannot source-bind. Skopeo loads LAN bases through the
     loopback proxy, then ``docker build --pull=false`` / ``docker buildx build --pull=false``
-    uses the local daemon copies. ``--push`` of a LAN tag becomes ``--load``
-    plus skopeo upload. Skip pipes, stdin context, interpolations, and missing
-    skopeo.
+    uses the local daemon copies. ``ADD http(s)|ftp(s)://`` of an on-link RFC1918
+    URL is prefetched into ``--build-context`` and rewritten to ``COPY --from=``.
+    ``--push`` of a LAN tag becomes ``--load`` plus skopeo upload. Skip pipes,
+    stdin context, interpolations, and missing skopeo when a LAN image copy is
+    required.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):

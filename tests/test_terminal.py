@@ -23,6 +23,7 @@ from app.tools.terminal import (
     lan_bound_dns_argv,
     lan_bound_docker_bake_argv,
     lan_bound_docker_build_argv,
+    rewrite_dockerfile_lan_add,
     lan_bound_docker_login_argv,
     lan_bound_docker_pull_argv,
     lan_bound_docker_push_argv,
@@ -1554,6 +1555,215 @@ def test_lan_docker_buildx_push_skopeo_uploads_tag(tmp_path, monkeypatch):
     assert "--output" not in follow
     assert not any(item.startswith("--output=") or item.startswith("-o=") for item in follow)
     assert "type=registry" not in follow
+
+
+def test_lan_skopeo_load_fetches_add_http_before_follow(tmp_path, monkeypatch):
+    from pathlib import Path
+    from app.tools.lan_skopeo_load import main
+
+    seen: list[list[str]] = []
+    fetched: list[tuple[str, str]] = []
+
+    def fake_run(cmd, check=False, **kwargs):
+        seen.append(list(cmd))
+        return type("R", (), {"returncode": 0, "stdout": ""})()
+
+    def fake_retrieve(url, filename, **kwargs):
+        fetched.append((url, filename))
+        dest = Path(filename)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"pkg")
+        return filename, None
+
+    monkeypatch.setattr("app.tools.lan_skopeo_load.subprocess.run", fake_run)
+    monkeypatch.setattr("app.tools.lan_skopeo_load.urllib.request.urlretrieve", fake_retrieve)
+    dest = tmp_path / "jarvisadd0" / "pkg.tgz"
+    assert (
+        main(
+            [
+                "--fetch",
+                f"http://192.168.1.50:8000/pkg.tgz={dest}",
+                "--",
+                "/usr/bin/docker",
+                "build",
+                "--pull=false",
+                ".",
+            ]
+        )
+        == 0
+    )
+    assert fetched == [("http://192.168.1.50:8000/pkg.tgz", str(dest))]
+    assert dest.read_bytes() == b"pkg"
+    assert seen == [["/usr/bin/docker", "build", "--pull=false", "."]]
+    seen.clear()
+    fetched.clear()
+
+    def boom(url, filename, **kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr("app.tools.lan_skopeo_load.urllib.request.urlretrieve", boom)
+    assert (
+        main(
+            [
+                "--fetch",
+                f"http://192.168.1.50:8000/pkg.tgz={tmp_path / 'missing.tgz'}",
+                "--",
+                "/usr/bin/docker",
+                "build",
+                ".",
+            ]
+        )
+        == 1
+    )
+    assert seen == []
+    monkeypatch.setattr("app.tools.lan_skopeo_load.urllib.request.urlretrieve", fake_retrieve)
+    root = tmp_path / "jarvis-lan-add-xyz"
+    root.mkdir()
+    nested = root / "jarvisadd0" / "pkg.tgz"
+    assert (
+        main(
+            [
+                "--cleanup",
+                str(root),
+                "--fetch",
+                f"http://192.168.1.50:8000/pkg.tgz={nested}",
+                "--",
+                "/usr/bin/docker",
+                "build",
+                ".",
+            ]
+        )
+        == 0
+    )
+    assert not root.exists()
+    assert main(["--fetch", "not-a-spec", "--", "/usr/bin/docker", "build", "."]) == 2
+
+
+def test_lan_docker_build_prefetches_add_http(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+
+    def fake_mkdtemp(prefix=""):
+        root = tmp_path / f"{prefix or 'jarvis-lan-add-'}work"
+        root.mkdir(exist_ok=True)
+        return str(root)
+
+    monkeypatch.setattr("app.tools.terminal.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"docker", "docker.exe"} else None,
+    )
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    df = ctx / "Dockerfile"
+    df.write_text(
+        "FROM alpine:3.20\n"
+        "ADD --chown=1000:1000 --checksum=sha256:abc "
+        "http://192.168.1.50:8000/pkg.tgz /opt/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    built = lan_bound_docker_build_argv(f"docker build -t mine {ctx}")
+    assert built is not None
+    assert built[1].endswith("lan_skopeo_load.py")
+    assert "/usr/bin/skopeo" not in built
+    assert "--fetch" in built
+    spec = built[built.index("--fetch") + 1]
+    assert spec.startswith("http://192.168.1.50:8000/pkg.tgz=")
+    assert spec.endswith("pkg.tgz")
+    assert "--cleanup" in built
+    follow = built[built.index("--") + 1 :]
+    assert follow[0] == "/usr/bin/docker"
+    assert "build" in follow
+    assert "--pull=false" in follow
+    assert "-f" in follow
+    rewritten = Path(follow[follow.index("-f") + 1])
+    text = rewritten.read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 --chown=1000:1000 pkg.tgz /opt/pkg.tgz" in text
+    assert "ADD " not in text
+    assert "--checksum" not in text
+    assert "--build-context" in follow
+    ctx_flag = follow[follow.index("--build-context") + 1]
+    assert ctx_flag.startswith("jarvisadd0=")
+    env = _child_env(built)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+    json_df = tmp_path / "Json.Dockerfile"
+    json_df.write_text(
+        'FROM alpine:3.20\nADD ["http://192.168.1.50:8000/a.bin", "/a.bin"]\n',
+        encoding="utf-8",
+    )
+    json_built = lan_bound_docker_build_argv(f"docker build -f {json_df} {ctx}")
+    assert json_built is not None
+    json_follow = json_built[json_built.index("--") + 1 :]
+    json_text = Path(json_follow[json_follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 a.bin /a.bin" in json_text
+    assert str(json_df) not in json_follow
+    continued = tmp_path / "Cont.Dockerfile"
+    continued.write_text(
+        "FROM alpine:3.20\n"
+        "ADD ftp://192.168.1.50/backup.tar \\\n"
+        "    /backup.tar\n",
+        encoding="utf-8",
+    )
+    ftp_built = lan_bound_docker_build_argv(f"docker build -f {continued} {ctx}")
+    assert ftp_built is not None
+    assert any(
+        item.startswith("ftp://192.168.1.50/backup.tar=")
+        for item in ftp_built
+        if isinstance(item, str)
+    )
+    arged = tmp_path / "Arg.Dockerfile"
+    arged.write_text(
+        "ARG HOST=192.168.1.50:8000\n"
+        "FROM alpine:3.20\n"
+        "ADD http://${HOST}/pkg.tgz /opt/\n",
+        encoding="utf-8",
+    )
+    arg_built = lan_bound_docker_build_argv(f"docker build -f {arged} {ctx}")
+    assert arg_built is not None
+    assert any("http://192.168.1.50:8000/pkg.tgz=" in item for item in arg_built)
+    override = lan_bound_docker_build_argv(
+        f"docker build -f {arged} --build-arg HOST=192.168.1.40:8000 {ctx}"
+    )
+    assert override is not None
+    assert any("http://192.168.1.40:8000/pkg.tgz=" in item for item in override)
+    df.write_text("FROM alpine:3.20\nADD https://example.com/pkg.tgz /opt/pkg.tgz\n", encoding="utf-8")
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    df.write_text("FROM alpine:3.20\nADD pkg.tgz /opt/\n", encoding="utf-8")
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"}
+        else None,
+    )
+    df.write_text(
+        "FROM 192.168.1.50:5000/base:latest\n"
+        "ADD http://192.168.1.50:8000/pkg.tgz /opt/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    both = lan_bound_docker_build_argv(f"docker buildx build --push -t 192.168.1.50:5000/app:1 {ctx}")
+    assert both is not None
+    assert "192.168.1.50:5000/base:latest" in both
+    assert "--fetch" in both
+    assert "--push-after" in both
+    follow = both[both.index("--") + 1 :]
+    assert "buildx" in follow
+    assert "--load" in follow
+    assert "--push" not in follow
+    assert "-f" in follow
+    assert "COPY --from=jarvisadd0" in Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    df.write_text(
+        "FROM alpine:3.20\n"
+        "ADD http://192.168.1.50:8000/a.bin https://example.com/b.bin /data/\n",
+        encoding="utf-8",
+    )
+    mixed_text, mixed_plan = rewrite_dockerfile_lan_add(df)
+    assert mixed_plan == [("http://192.168.1.50:8000/a.bin", "jarvisadd0", "a.bin")]
+    assert "COPY --from=jarvisadd0 a.bin /data/" in mixed_text
+    assert "ADD https://example.com/b.bin /data/" in mixed_text
 
 
 def test_lan_docker_bake_skopeo_loads_from_and_push(tmp_path, monkeypatch):
