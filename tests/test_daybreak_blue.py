@@ -750,6 +750,10 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     assert spaced["additional_args"] == "--arpspa 192.168.50.8"
     public_arp = bind_hexstrike_lan_payload("arp-scan", {"target": "8.8.8.8"})
     assert public_arp.get("additional_args", "") == ""
+    iperf = bind_hexstrike_lan_payload("iperf3", {"target": "192.168.1.50", "additional_args": "-c 192.168.1.50"})
+    assert iperf["additional_args"] == "-c 192.168.1.50 -B 192.168.1.12"
+    public_iperf = bind_hexstrike_lan_payload("iperf3", {"target": "8.8.8.8"})
+    assert public_iperf.get("additional_args", "") == ""
 
 
 def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():

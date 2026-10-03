@@ -232,7 +232,9 @@ def lan_bound_ssh_argv(command: str) -> list[str] | None:
     return bound
 
 
-_SCAN_NAMES = frozenset({"nmap", "nping", "ping", "traceroute", "masscan", "arp-scan", "arping", "fping"})
+_SCAN_NAMES = frozenset(
+    {"nmap", "nping", "ping", "traceroute", "masscan", "arp-scan", "arping", "fping", "iperf", "iperf3"}
+)
 _IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
 
 
@@ -268,6 +270,8 @@ def _scan_already_bound(name: str, parts: list[str]) -> bool:
         return bool(flags & {"-I", "-i", "-s"})
     if name == "fping":
         return bool(flags & {"-I", "-S"})
+    if name in {"iperf", "iperf3"}:
+        return bool(flags & {"-B", "--bind"})
     return True
 
 
@@ -308,6 +312,8 @@ def _scan_bind_flags(name: str, target: str) -> list[str] | None:
         if iface:
             flags.extend(["-I", iface])
         return flags
+    if name in {"iperf", "iperf3"}:
+        return ["-B", source]
     return None
 
 
@@ -510,6 +516,33 @@ def lan_bound_dns_argv(command: str) -> list[str] | None:
     return [exe, "-b", bind, *parts[1:]]
 
 
+def lan_bound_snmp_argv(command: str) -> list[str] | None:
+    """snmpwalk of on-link RFC1918 as argv so SNMPCONFPATH can pin clientaddr.
+
+    net-snmp has no source-bind flag. The child env writes ``snmp.conf``
+    ``clientaddr``. Skip pipes and public targets.
+    """
+    from .lan_snmp import is_snmp_tool, snmp_target_from_argv
+
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or not is_snmp_tool(parts[0]):
+        return None
+    name = _tool_basename(parts[0])
+    host = snmp_target_from_argv(parts)
+    if not _lan_bind_ip_for_host(host):
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return [exe, *parts[1:]]
+
+
 def adapt_shell(command: str, shell: str) -> str:
     """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
     chosen = (shell or default_shell()).strip().lower()
@@ -587,6 +620,10 @@ def _python_args(command: str) -> list[str]:
 def _child_env(args: list[str]) -> dict[str, str]:
     if args and (args[0] == sys.executable or _python_interpreter_name(args[0])):
         return python_child_env()
+    from .lan_snmp import is_snmp_tool, snmp_lan_child_env
+
+    if args and is_snmp_tool(args[0]):
+        return snmp_lan_child_env(args)
     return direct_child_env()
 
 
@@ -598,6 +635,7 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         or lan_bound_rsync_argv(command)
         or lan_bound_netcat_argv(command)
         or lan_bound_dns_argv(command)
+        or lan_bound_snmp_argv(command)
     )
     if bound:
         return bound

@@ -2,6 +2,7 @@ from app.tools.python_exec import PythonTool
 from app.tools.terminal import (
     TerminalTool,
     _command_args,
+    _child_env,
     _python_args,
     default_shell,
     lan_bound_dns_argv,
@@ -9,6 +10,7 @@ from app.tools.terminal import (
     lan_bound_netcat_argv,
     lan_bound_rsync_argv,
     lan_bound_scan_argv,
+    lan_bound_snmp_argv,
     lan_bound_ssh_argv,
     python_direct_argv,
     rsync_host_from_token,
@@ -373,7 +375,7 @@ def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
         lambda name: f"/usr/bin/{name}"
-        if name in {"nmap", "ping", "traceroute", "masscan", "nping", "arp-scan", "arping", "fping"}
+        if name in {"nmap", "ping", "traceroute", "masscan", "nping", "arp-scan", "arping", "fping", "iperf3", "iperf"}
         else None,
     )
 
@@ -414,6 +416,10 @@ def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):
     fping = lan_bound_scan_argv("fping -c 1 192.168.1.50")
     assert fping is not None
     assert fping[1:5] == ["-S", "192.168.1.12", "-I", "eth0"]
+    iperf = lan_bound_scan_argv("iperf3 -c 192.168.1.50")
+    assert iperf is not None
+    assert iperf[1:3] == ["-B", "192.168.1.12"]
+    assert lan_bound_scan_argv("iperf3 -B 10.8.0.2 -c 192.168.1.50") is None
     assert lan_bound_scan_argv("arp-scan -I eth0 192.168.1.0/24") is None
     vpn = lan_bound_scan_argv("nmap 10.8.0.2")
     assert vpn is not None
@@ -526,3 +532,26 @@ def test_lan_dig_binds_home_nic_not_vpn(monkeypatch):
     bash = _command_args("dig @192.168.1.50 MX taco.lan", "bash")
     assert bash[0] == "/usr/bin/dig"
     assert bash[1:3] == ["-b", "192.168.1.12"]
+
+
+def test_lan_snmpwalk_sets_clientaddr_not_vpn(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"snmpwalk", "snmpget"} else None,
+    )
+    argv = lan_bound_snmp_argv("snmpwalk -v2c -c public 192.168.1.1")
+    assert argv is not None
+    assert argv[0] == "/usr/bin/snmpwalk"
+    assert argv[-1] == "192.168.1.1"
+    env = _child_env(argv)
+    conf = Path(env["SNMPCONFPATH"]) / "snmp.conf"
+    assert "clientaddr 192.168.1.12" in conf.read_text(encoding="utf-8")
+    assert lan_bound_snmp_argv("snmpwalk -v2c -c public 8.8.8.8") is None
+    bash = _command_args("snmpget -v2c -c public 192.168.1.50 sysName.0", "bash")
+    assert bash[0] == "/usr/bin/snmpget"
+    assert "clientaddr 192.168.1.12" in (Path(_child_env(bash)["SNMPCONFPATH"]) / "snmp.conf").read_text(
+        encoding="utf-8"
+    )

@@ -4,7 +4,7 @@ from __future__ import annotations
 import socket
 from types import SimpleNamespace
 
-from app.tools.lan_socket_bind import _sendto, _source_bind, sendto_address
+from app.tools.lan_socket_bind import _sendmsg, _sendto, _source_bind, sendmsg_address, sendto_address
 
 
 def test_source_bind_pins_lan_and_skips_public_and_loopback(monkeypatch):
@@ -74,4 +74,38 @@ def test_sendto_binds_lan_datagram_and_skips_public(monkeypatch):
     tcp = Sock()
     tcp.type = socket.SOCK_STREAM
     _sendto(tcp, b"x", ("192.168.1.40", 80))
+    assert recorded == []
+
+
+def test_sendmsg_address_fourth_arg():
+    assert sendmsg_address(([], 0, ("192.168.1.40", 161)), {}) == ("192.168.1.40", 161)
+    assert sendmsg_address((), {"address": ("10.0.0.1", 161)}) == ("10.0.0.1", 161)
+    assert sendmsg_address(([],), {}) is None
+
+
+def test_sendmsg_binds_lan_datagram(monkeypatch):
+    monkeypatch.setattr(
+        "app.mobile.wan_forward.lan_source_ipv4_for_peer",
+        lambda peer: "192.168.1.12" if str(peer).startswith("192.168.") else "",
+    )
+    recorded: list[tuple[str, int]] = []
+
+    class Sock:
+        family = socket.AF_INET
+        type = socket.SOCK_DGRAM
+
+        def getsockname(self):
+            return ("0.0.0.0", 0)
+
+        def bind(self, address):
+            recorded.append(address)
+
+    def fake_sendmsg(self, buffers, *args, **kwargs):
+        return 4
+
+    monkeypatch.setattr("app.tools.lan_socket_bind._orig_sendmsg", fake_sendmsg)
+    assert _sendmsg(Sock(), [b"ping"], [], 0, ("192.168.1.40", 161)) == 4
+    assert recorded == [("192.168.1.12", 0)]
+    recorded.clear()
+    assert _sendmsg(Sock(), [b"ping"], [], 0, ("8.8.8.8", 53)) == 4
     assert recorded == []

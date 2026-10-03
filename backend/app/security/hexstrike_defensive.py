@@ -580,6 +580,7 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     / ``-interface``. masscan uses ``--source-ip``/``-e``. curl uses ``--interface``.
     wget uses ``--bind-address``. rustscan forwards nmap ``-S``/``-e`` after ``--``.
     arp-scan uses ``--arpspa``/``-I``; arping ``-s``/``-I``; fping ``-S``/``-I``.
+    iperf/iperf3 use ``-B``.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
     wfuzz/arjun/gau/dalfox have no source-bind CLI; they get a loopback LAN proxy
     flag. Public internet targets are left unchanged. Spaced Windows NIC names
@@ -657,6 +658,10 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         flags.extend(["-S", source])
         if hexstrike_nmap_can_bind_interface(iface) and "-I" not in tokens:
             flags.extend(["-I", iface])
+    elif stem in {"iperf", "iperf3"}:
+        if _tokens_have_flag(tokens, frozenset({"-B", "--bind"})):
+            return bound
+        flags.extend(["-B", source])
     elif stem in _HTTP_PROXY_FLAG:
         skip = _HTTP_PROXY_SKIP.get(stem, frozenset({"--proxy", "-x"}))
         if _tokens_have_flag(tokens, skip):

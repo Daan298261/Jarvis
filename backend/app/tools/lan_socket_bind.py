@@ -21,6 +21,7 @@ _installed = False
 _orig_connect = socket.socket.connect
 _orig_connect_ex = socket.socket.connect_ex
 _orig_sendto = socket.socket.sendto
+_orig_sendmsg = getattr(socket.socket, "sendmsg", None)
 
 
 def _peer_ipv4(address: Any) -> str:
@@ -112,12 +113,31 @@ def _sendto(self: socket.socket, data: Any, *args: Any, **kwargs: Any) -> int:
     return _orig_sendto(self, data, *args, **kwargs)
 
 
+def sendmsg_address(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    """Peer from ``sendmsg(buffers, ancdata, flags, address)``."""
+    if "address" in kwargs:
+        return kwargs["address"]
+    if len(args) >= 3:
+        return args[2]
+    return None
+
+
+def _sendmsg(self: socket.socket, buffers: Any, *args: Any, **kwargs: Any) -> Any:
+    if _orig_sendmsg is None:
+        raise OSError("sendmsg is not available on this platform")
+    if _datagram(self):
+        _source_bind(self, sendmsg_address(args, kwargs))
+    return _orig_sendmsg(self, buffers, *args, **kwargs)
+
+
 def install_lan_bind() -> None:
-    """Idempotent wrap of ``connect`` / ``connect_ex`` / ``sendto``."""
+    """Idempotent wrap of ``connect`` / ``connect_ex`` / ``sendto`` / ``sendmsg``."""
     global _installed
     if _installed:
         return
     socket.socket.connect = _connect  # type: ignore[method-assign]
     socket.socket.connect_ex = _connect_ex  # type: ignore[method-assign]
     socket.socket.sendto = _sendto  # type: ignore[method-assign]
+    if _orig_sendmsg is not None:
+        socket.socket.sendmsg = _sendmsg  # type: ignore[method-assign]
     _installed = True
