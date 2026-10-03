@@ -1766,6 +1766,91 @@ def test_lan_docker_build_prefetches_add_http(tmp_path, monkeypatch):
     assert "ADD https://example.com/b.bin /data/" in mixed_text
 
 
+def test_lan_compose_and_bake_prefetches_add_http(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+
+    def fake_mkdtemp(prefix=""):
+        root = tmp_path / f"{prefix or 'jarvis-lan-add-'}work"
+        root.mkdir(exist_ok=True)
+        return str(root)
+
+    monkeypatch.setattr("app.tools.terminal.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"docker", "docker.exe"} else None,
+    )
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "Dockerfile").write_text(
+        "FROM alpine:3.20\nADD http://192.168.1.50:8000/pkg.tgz /opt/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    stack = tmp_path / "compose.yaml"
+    stack.write_text("services:\n  app:\n    build: ./app\n", encoding="utf-8")
+    built = lan_bound_compose_build_argv(f"docker compose -f {stack} build")
+    assert built is not None
+    assert built[1].endswith("lan_skopeo_load.py")
+    assert "/usr/bin/skopeo" not in built
+    assert "--fetch" in built
+    assert any(item.startswith("http://192.168.1.50:8000/pkg.tgz=") for item in built)
+    follow = built[built.index("--") + 1 :]
+    overlays = [
+        follow[i + 1]
+        for i, item in enumerate(follow)
+        if item in {"-f", "--file"} and i + 1 < len(follow) and "compose.jarvis-lan.yaml" in follow[i + 1]
+    ]
+    assert overlays
+    import yaml
+
+    payload = yaml.safe_load(Path(overlays[0]).read_text(encoding="utf-8"))
+    rewritten = Path(payload["services"]["app"]["build"]["dockerfile"])
+    assert "COPY --from=jarvisadd0 pkg.tgz /opt/pkg.tgz" in rewritten.read_text(encoding="utf-8")
+    assert "jarvisadd0" in payload["services"]["app"]["build"]["additional_contexts"]
+    up = lan_bound_compose_up_argv(f"docker compose -f {stack} up --build")
+    assert up is not None
+    assert "--fetch" in up
+    ran = lan_bound_compose_run_argv(f"docker compose -f {stack} run --build app")
+    assert ran is not None
+    assert "--fetch" in ran
+    hcl = tmp_path / "docker-bake.hcl"
+    hcl.write_text(
+        'target "app" {\n  context = "./app"\n  dockerfile = "Dockerfile"\n}\n',
+        encoding="utf-8",
+    )
+    baked = lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}", cwd=str(tmp_path))
+    assert baked is not None
+    assert "--fetch" in baked
+    bake_follow = baked[baked.index("--") + 1 :]
+    assert "--set" in bake_follow
+    sets = [bake_follow[i + 1] for i, item in enumerate(bake_follow) if item == "--set" and i + 1 < len(bake_follow)]
+    assert any(item.startswith("app.dockerfile=") for item in sets)
+    assert any(item.startswith("app.contexts.jarvisadd0=") for item in sets)
+    (app / "Dockerfile").write_text(
+        "FROM alpine:3.20\nADD https://example.com/pkg.tgz /opt/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_compose_build_argv(f"docker compose -f {stack} build") is None
+    assert lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}", cwd=str(tmp_path)) is None
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"}
+        else None,
+    )
+    (app / "Dockerfile").write_text(
+        "FROM 192.168.1.50:5000/base:latest\n"
+        "ADD http://192.168.1.50:8000/pkg.tgz /opt/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    both = lan_bound_compose_build_argv(f"docker compose -f {stack} build")
+    assert both is not None
+    assert "192.168.1.50:5000/base:latest" in both
+    assert "--fetch" in both
+
+
 def test_lan_docker_bake_skopeo_loads_from_and_push(tmp_path, monkeypatch):
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
     monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
