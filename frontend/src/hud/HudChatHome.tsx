@@ -72,14 +72,15 @@ export function HudChatHome() {
   const customPresence = useCustomPresence()
   const { hexSuiteExpanded, setHexSuiteExpanded } = useHudOverlay()
   const wasHexStrike = useRef(false)
-  const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null }>({
+  const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }>({
     recording: false,
     speaking: false,
     task: null,
+    backendUnavailable: false,
   })
 
   const onMoodChange = useCallback(
-    (opts: { recording: boolean; speaking: boolean; task: Task | null }) => setMoodState(opts),
+    (opts: { recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }) => setMoodState(opts),
     [],
   )
 
@@ -96,7 +97,7 @@ export function HudChatHome() {
   const mood = deriveOrbMood(moodState.task, {
     recording: moodState.recording,
     speaking: moodState.speaking,
-    systemDegraded: moodState.task?.status === "failed" || approvalWaiting,
+    systemDegraded: moodState.backendUnavailable || moodState.task?.status === "failed" || approvalWaiting,
     pendingApproval: approvalWaiting,
   })
   const snapshot = derivePresenceSnapshot({
@@ -104,7 +105,7 @@ export function HudChatHome() {
     recording: moodState.recording,
     speaking: moodState.speaking,
     pendingApproval: approvalWaiting,
-    systemDegraded: false,
+    systemDegraded: moodState.backendUnavailable,
   })
   const activePersona = namedPersonas?.active
   const personaShape = activePersona?.presence_shape_id || undefined
@@ -186,12 +187,14 @@ export function HudChatHome() {
         />
         <div className="hud-orb-caption" aria-live="polite">
           <span className={`hud-orb-state${snapshot.phase === "alert" || snapshot.phase === "error" || snapshot.phase === "approval" ? " alert" : ""}`}>
-            {presenceLabel(snapshot.phase, copy.label, hexStrikeActive)}
+            {moodState.backendUnavailable ? "Offline" : presenceLabel(snapshot.phase, copy.label, hexStrikeActive)}
           </span>
           <span className="hud-orb-detail">
             {hexStrikeActive
               ? "HexStrike cybersecurity suite"
-              : taskDetail(moodState.task, mood, threadActive, approvalWaiting)}
+              : moodState.backendUnavailable
+                ? "Reconnecting to the local backend"
+                : taskDetail(moodState.task, mood, threadActive, approvalWaiting)}
           </span>
           {cardSentence && <span className="hud-orb-detail hud-persona-sentence">{cardSentence}</span>}
         </div>

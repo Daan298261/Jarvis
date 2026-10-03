@@ -19,7 +19,17 @@ import { TaskStatusMeta } from "../components/TaskStatusMeta"
 import { useMediaUploads } from "../chat/useMediaUploads"
 
 type HudChatProps = {
-  onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null }) => void
+  onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }) => void
+}
+
+const CHAT_REQUEST_TIMEOUT_MS = 15_000
+const BACKEND_PROBE_TIMEOUT_MS = 4_000
+
+function isConnectionFailure(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === "AbortError") return true
+  if (error instanceof TypeError) return true
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  return message.includes("failed to fetch") || message.includes("network") || message.includes("aborted")
 }
 
 export function HudChat({ onMoodChange }: HudChatProps) {
@@ -31,6 +41,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [pending, setPending] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [showSetupProblem, setShowSetupProblem] = useState(false)
+  const [backendUnavailable, setBackendUnavailable] = useState(false)
+  const [connectionMessage, setConnectionMessage] = useState("")
   const [speaking, setSpeaking] = useState(false)
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
@@ -52,7 +64,35 @@ export function HudChat({ onMoodChange }: HudChatProps) {
     },
     onError: (message) => alert(message),
   })
-  const composerLocked = busy || voiceSwitching || media.hasUploading
+  const composerLocked = busy || voiceSwitching || media.hasUploading || backendUnavailable
+
+  useEffect(() => {
+    let cancelled = false
+    const checkBackend = async () => {
+      const request = new AbortController()
+      const timeout = window.setTimeout(() => request.abort(), BACKEND_PROBE_TIMEOUT_MS)
+      try {
+        await api("/api/health", { signal: request.signal })
+        if (!cancelled) {
+          setBackendUnavailable(false)
+          setConnectionMessage("")
+        }
+      } catch (error: unknown) {
+        if (!cancelled && isConnectionFailure(error)) {
+          setBackendUnavailable(true)
+          setConnectionMessage("ANZU is reconnecting to its local service. Your message may not have been sent.")
+        }
+      } finally {
+        window.clearTimeout(timeout)
+      }
+    }
+    void checkBackend()
+    const timer = window.setInterval(() => { void checkBackend() }, 5_000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [])
 
   useTaskSpeech(id && task?.id === id ? task : null, speakChatReplies, setSpeaking)
 
@@ -97,8 +137,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   }, [id])
 
   useEffect(() => {
-    onMoodChange?.({ recording, speaking, task: id && task?.id === id ? task : null })
-  }, [recording, speaking, task, id, onMoodChange])
+    onMoodChange?.({ recording, speaking, task: id && task?.id === id ? task : null, backendUnavailable })
+  }, [recording, speaking, task, id, backendUnavailable, onMoodChange])
 
   useEffect(() => {
     const node = threadRef.current
@@ -130,12 +170,16 @@ export function HudChat({ onMoodChange }: HudChatProps) {
     if (voiceSwitching) return
     stopChatTts()
     setSpeaking(false)
+    setConnectionMessage("")
     setBusy(true)
+    const request = new AbortController()
+    const timeout = window.setTimeout(() => request.abort(), CHAT_REQUEST_TIMEOUT_MS)
     try {
       if (id) {
         if (text) setPending((current) => (current.includes(text) ? current : [...current, text]))
         await api(`/api/tasks/${id}/continue`, {
           method: "POST",
+          signal: request.signal,
           body: JSON.stringify({
             prompt: text || (mediaIds.length ? "Review the attached media." : "Continue this."),
             media_ids: mediaIds,
@@ -143,7 +187,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         })
         setPrompt("")
         media.clear()
-        const data = await api<Task>(`/api/tasks/${id}`)
+        const data = await api<Task>(`/api/tasks/${id}`, { signal: request.signal })
         setTask(data)
       } else {
         const body: { prompt: string; security_role?: string; media_ids?: string[] } = {
@@ -151,21 +195,26 @@ export function HudChat({ onMoodChange }: HudChatProps) {
           media_ids: mediaIds,
         }
         if (hexStrikeActive) body.security_role = "blue-team"
-        const created = await api<Task>("/api/tasks", { method: "POST", body: JSON.stringify(body) })
+        const created = await api<Task>("/api/tasks", { method: "POST", signal: request.signal, body: JSON.stringify(body) })
         setPrompt("")
         media.clear()
         navigate(`/tasks/${created.id}`)
       }
+      setBackendUnavailable(false)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       if (isAuthFailureMessage(message)) {
         setShowSetupProblem(true)
         const recovered = await ensureDesktopSession()
         if (recovered) setShowSetupProblem(false)
+      } else if (isConnectionFailure(err)) {
+        setBackendUnavailable(true)
+        setConnectionMessage("ANZU is reconnecting to its local service. Your message may not have been sent; try again when it is back online.")
       } else {
         alert(message)
       }
     } finally {
+      window.clearTimeout(timeout)
       setBusy(false)
     }
   }
@@ -187,6 +236,12 @@ export function HudChat({ onMoodChange }: HudChatProps) {
         <div className="hud-auth-card" role="status">
           <strong>Setup problem</strong>
           <p className="lede" style={{ marginTop: 8 }}>{SETUP_PROBLEM_WORKING}</p>
+        </div>
+      )}
+      {connectionMessage && (
+        <div className="hud-auth-card" role="status">
+          <strong>ANZU is offline</strong>
+          <p className="lede" style={{ marginTop: 8 }}>{connectionMessage}</p>
         </div>
       )}
 
