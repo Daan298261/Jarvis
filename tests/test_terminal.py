@@ -10,12 +10,16 @@ from app.tools.terminal import (
     lan_bound_dns_argv,
     lan_bound_http_argv,
     lan_bound_netcat_argv,
+    lan_bound_nfs_argv,
+    lan_bound_rclone_argv,
     lan_bound_rsync_argv,
     lan_bound_scan_argv,
     lan_bound_smb_argv,
     lan_bound_snmp_argv,
     lan_bound_ssh_argv,
+    nfs_host_from_token,
     python_direct_argv,
+    rclone_host_from_token,
     rsync_host_from_token,
 )
 
@@ -542,6 +546,89 @@ def test_lan_cifs_mount_binds_home_nic_not_vpn(monkeypatch):
     bash = _command_args("mount -t cifs //192.168.1.50/share /mnt/nas", "bash")
     assert bash[0] == "/usr/sbin/mount"
     assert bash[1:3] == ["-o", "srcaddr=192.168.1.12"]
+
+
+def test_nfs_host_from_token():
+    assert nfs_host_from_token("192.168.1.50:/export") == "192.168.1.50"
+    assert nfs_host_from_token("nas.local:/share") == "nas.local"
+    assert nfs_host_from_token("/mnt/nas") == ""
+    assert nfs_host_from_token("C:/Windows") == ""
+
+
+def test_lan_nfs_mount_binds_home_nic_not_vpn(monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/sbin/{name}" if name in {"mount", "mount.nfs", "mount.nfs4"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "nas.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    mount = lan_bound_nfs_argv("mount -t nfs 192.168.1.50:/export /mnt/nas")
+    assert mount is not None
+    assert mount[0] == "/usr/sbin/mount"
+    assert mount[1:3] == ["-o", "clientaddr=192.168.1.12"]
+    assert mount[-2:] == ["192.168.1.50:/export", "/mnt/nas"]
+    named = lan_bound_nfs_argv("mount -t nfs nas.local:/media /mnt -o rw,vers=4")
+    assert named is not None
+    assert named[named.index("-o") + 1] == "rw,vers=4,clientaddr=192.168.1.12"
+    helper = lan_bound_nfs_argv("mount.nfs 192.168.1.1:/backup /mnt/backup")
+    assert helper is not None
+    assert helper[0] == "/usr/sbin/mount.nfs"
+    assert helper[1:3] == ["-o", "clientaddr=192.168.1.12"]
+    assert lan_bound_nfs_argv("mount -t ext4 /dev/sdb1 /mnt") is None
+    assert lan_bound_nfs_argv("mount -t nfs 8.8.8.8:/export /mnt") is None
+    assert lan_bound_nfs_argv("mount -t nfs 192.168.1.50:/export /mnt -o clientaddr=10.8.0.2") is None
+    assert lan_bound_nfs_argv("mount -t nfs 192.168.1.50:/export /mnt | cat") is None
+    bash = _command_args("mount -t nfs 192.168.1.50:/export /mnt/nas", "bash")
+    assert bash[0] == "/usr/sbin/mount"
+    assert bash[1:3] == ["-o", "clientaddr=192.168.1.12"]
+
+
+def test_rclone_host_from_token():
+    assert rclone_host_from_token("sftp://me@192.168.1.50/share") == "192.168.1.50"
+    assert rclone_host_from_token(":sftp,host=192.168.1.50,user=me:/home") == "192.168.1.50"
+    assert rclone_host_from_token(":smb,host=nas.local:media") == "nas.local"
+    assert rclone_host_from_token("local/path") == ""
+
+
+def test_lan_rclone_binds_home_nic_not_vpn(monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"rclone", "rclone.exe"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "nas.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    listed = lan_bound_rclone_argv("rclone ls sftp://me@192.168.1.50/share")
+    assert listed is not None
+    assert listed[0] == "/usr/bin/rclone"
+    assert listed[1:3] == ["--bind", "192.168.1.12"]
+    conn = lan_bound_rclone_argv("rclone copy :sftp,host=nas.local,user=me:/media /tmp/out")
+    assert conn is not None
+    assert conn[1:3] == ["--bind", "192.168.1.12"]
+    flag = lan_bound_rclone_argv("rclone ls --sftp-host 192.168.1.1 remote:")
+    assert flag is not None
+    assert flag[1:3] == ["--bind", "192.168.1.12"]
+    assert lan_bound_rclone_argv("rclone ls sftp://me@8.8.8.8/share") is None
+    assert lan_bound_rclone_argv("rclone --bind 10.8.0.2 ls sftp://me@192.168.1.50/share") is None
+    assert lan_bound_rclone_argv("rclone ls sftp://me@192.168.1.50/share | cat") is None
+    bash = _command_args("rclone ls sftp://me@192.168.1.50/share", "bash")
+    assert bash[0] == "/usr/bin/rclone"
+    assert bash[1:3] == ["--bind", "192.168.1.12"]
 
 
 def test_lan_smbclient_binds_home_nic_not_vpn(monkeypatch):

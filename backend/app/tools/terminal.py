@@ -506,6 +506,94 @@ def lan_bound_rsync_argv(command: str) -> list[str] | None:
     return [exe, "-e", git_ssh_command(), *parts[1:]]
 
 
+_RCLONE_HOST_FLAGS = frozenset(
+    {
+        "--sftp-host",
+        "--smb-host",
+        "--ftp-host",
+        "--nfs-host",
+        "--ssh-host",
+        "--webdav-url",
+        "--http-url",
+    }
+)
+_RCLONE_HOST_PARAM = re.compile(r"(?:^|,)host=([^,:]+)")
+
+
+def rclone_host_from_token(token: str) -> str:
+    """Host in an rclone URL or ``:sftp,host=192.168.1.50:path`` connection string."""
+    from urllib.parse import urlparse
+
+    text = str(token or "").strip().strip("'\"")
+    if not text or text.startswith("-"):
+        return ""
+    if "://" in text:
+        return (urlparse(text).hostname or "").strip()
+    if text.startswith(":"):
+        match = _RCLONE_HOST_PARAM.search(text[1:])
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _rclone_host_from_argv(parts: list[str]) -> str:
+    from urllib.parse import urlparse
+
+    for index, item in enumerate(parts[1:], start=1):
+        text = str(item or "").strip().strip("'\"")
+        key = text.split("=", 1)[0]
+        if key in _RCLONE_HOST_FLAGS:
+            if "=" in text:
+                raw = text.split("=", 1)[1]
+            elif index + 1 < len(parts):
+                raw = str(parts[index + 1] or "").strip().strip("'\"")
+            else:
+                raw = ""
+            if "://" in raw:
+                return (urlparse(raw).hostname or "").strip()
+            return raw.split("/")[0]
+        host = rclone_host_from_token(text)
+        if host:
+            return host
+        if not text or text.startswith("-"):
+            continue
+        host = text.split("%", 1)[0]
+        if _IPV4_OR_CIDR.fullmatch(host):
+            return host.split(":", 1)[0]
+        lowered = host.lower().rstrip(".")
+        if lowered.endswith((".local", ".lan", ".home.arpa")):
+            return host.split(":", 1)[0] if host.count(":") == 1 and host.rsplit(":", 1)[-1].isdigit() else host
+    return ""
+
+
+def lan_bound_rclone_argv(command: str) -> list[str] | None:
+    """rclone of an on-link RFC1918 NAS, sourced from that NIC.
+
+    ``--bind`` is a source IPv4, so a spaced Windows NIC name is not required.
+    Skip pipes, existing ``--bind``, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or _tool_basename(parts[0]) != "rclone":
+        return None
+    flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if "--bind" in flags:
+        return None
+    host = _rclone_host_from_argv(parts)
+    bind = _lan_bind_ip_for_host(host)
+    if not bind:
+        return None
+    exe = shutil.which("rclone") or shutil.which("rclone.exe")
+    if not exe:
+        return None
+    return [exe, "--bind", bind, *parts[1:]]
+
+
 def lan_bound_netcat_argv(command: str) -> list[str] | None:
     """nc/ncat/netcat of an on-link RFC1918 host, sourced from that NIC.
 
@@ -667,8 +755,7 @@ def _cifs_options_text(parts: list[str]) -> str:
     return ",".join(bits).lower()
 
 
-def _cifs_with_srcaddr(parts: list[str], bind: str) -> list[str]:
-    extra = f"srcaddr={bind}"
+def _mount_append_option(parts: list[str], extra: str) -> list[str]:
     out = list(parts)
     index = 1
     while index < len(out):
@@ -684,6 +771,10 @@ def _cifs_with_srcaddr(parts: list[str], bind: str) -> list[str]:
             return out
         index += 1
     return [out[0], "-o", extra, *out[1:]]
+
+
+def _cifs_with_srcaddr(parts: list[str], bind: str) -> list[str]:
+    return _mount_append_option(parts, f"srcaddr={bind}")
 
 
 def lan_bound_cifs_argv(command: str) -> list[str] | None:
@@ -715,6 +806,85 @@ def lan_bound_cifs_argv(command: str) -> list[str] | None:
     if not exe:
         return None
     return _cifs_with_srcaddr([exe, *parts[1:]], bind)
+
+
+_NFS_FS_TYPES = frozenset({"nfs", "nfs4"})
+_NFS_SRC_KEYS = ("clientaddr=",)
+
+
+def nfs_host_from_token(token: str) -> str:
+    """Host in an NFS source (``192.168.1.50:/export`` or ``nas.local:/share``)."""
+    text = str(token or "").strip().strip("'\"")
+    if not text or text.startswith("-"):
+        return ""
+    if text.startswith("[") and "]:" in text:
+        return text[1 : text.index("]")]
+    if "://" in text:
+        from urllib.parse import urlparse
+
+        return (urlparse(text).hostname or "").strip()
+    if ":" not in text:
+        return ""
+    host, _rest = text.split(":", 1)
+    if len(host) == 1 and host.isalpha():
+        return ""
+    return host
+
+
+def _nfs_host_from_argv(parts: list[str]) -> str:
+    for item in parts[1:]:
+        host = nfs_host_from_token(str(item))
+        if host:
+            return host
+    return ""
+
+
+def _is_nfs_mount(parts: list[str]) -> bool:
+    name = _tool_basename(parts[0])
+    if name in {"mount.nfs", "mount.nfs4"}:
+        return True
+    if name != "mount":
+        return False
+    index = 1
+    while index < len(parts):
+        token = str(parts[index])
+        if token in {"-t", "--types"} and index + 1 < len(parts):
+            return str(parts[index + 1]).lower() in _NFS_FS_TYPES
+        if token.startswith("-t") and len(token) > 2 and not token.startswith("--"):
+            return token[2:].lower() in _NFS_FS_TYPES
+        if token.startswith("--types="):
+            return token.split("=", 1)[1].lower() in _NFS_FS_TYPES
+        index += 1
+    return False
+
+
+def lan_bound_nfs_argv(command: str) -> list[str] | None:
+    """mount.nfs of an on-link RFC1918 NAS, sourced from that NIC.
+
+    ``clientaddr=`` is the NFSv4 client address so a VPN default route cannot
+    steal the NAS. Skip pipes, existing ``clientaddr``, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or not _is_nfs_mount(parts):
+        return None
+    options = _cifs_options_text(parts)
+    if any(key in options for key in _NFS_SRC_KEYS):
+        return None
+    host = _nfs_host_from_argv(parts)
+    bind = _lan_bind_ip_for_host(host)
+    if not bind:
+        return None
+    name = _tool_basename(parts[0])
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return _mount_append_option([exe, *parts[1:]], f"clientaddr={bind}")
 
 
 _SMB_NAMES = frozenset({"smbclient", "smbget", "rpcclient", "smbtree"})
@@ -886,10 +1056,12 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         or lan_bound_ssh_argv(command)
         or lan_bound_scan_argv(command)
         or lan_bound_rsync_argv(command)
+        or lan_bound_rclone_argv(command)
         or lan_bound_netcat_argv(command)
         or lan_bound_dns_argv(command)
         or lan_bound_snmp_argv(command)
         or lan_bound_cifs_argv(command)
+        or lan_bound_nfs_argv(command)
         or lan_bound_smb_argv(command)
     )
     if bound:
