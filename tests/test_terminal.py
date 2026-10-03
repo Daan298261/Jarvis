@@ -10,6 +10,7 @@ from app.tools.terminal import (
     docker_registry_host_from_image,
     git_direct_argv,
     lan_bound_cifs_argv,
+    lan_bound_compose_pull_argv,
     lan_bound_dns_argv,
     lan_bound_docker_pull_argv,
     lan_bound_http_argv,
@@ -903,3 +904,75 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     assert _child_env(uv)["HTTP_PROXY"].startswith("http://127.0.0.1:")
     assert git_direct_argv("git clone http://192.168.1.50/repo.git | cat") is None
     assert container_direct_argv("pip install pkg && rm -rf /") is None
+
+
+def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+    stack = tmp_path / "compose.yaml"
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    image: 192.168.1.50:5000/app:latest\n"
+        "  cache:\n"
+        "    image: 192.168.1.50:5000/redis:7\n"
+        "  web:\n"
+        "    image: nginx:alpine\n",
+        encoding="utf-8",
+    )
+    one = tmp_path / "lan.yml"
+    one.write_text("services:\n  app:\n    image: 192.168.1.50:5000/app\n", encoding="utf-8")
+    single = lan_bound_compose_pull_argv(f"docker compose -f {one} pull")
+    assert single is not None
+    assert single[0] == "/usr/bin/skopeo"
+    assert "docker://192.168.1.50:5000/app:latest" in single
+    mixed = lan_bound_compose_pull_argv(f"docker compose -f {stack} pull")
+    assert mixed is not None
+    assert mixed[0] in {__import__("sys").executable, "python3"}
+    assert mixed[1].endswith("lan_skopeo_load.py")
+    assert "/usr/bin/skopeo" in mixed
+    assert "192.168.1.50:5000/app:latest" in mixed
+    assert "192.168.1.50:5000/redis:7" in mixed
+    assert "--" in mixed
+    follow = mixed[mixed.index("--") + 1 :]
+    assert follow[:2] == ["/usr/bin/docker", "compose"]
+    assert "-f" in follow and str(stack) in follow
+    assert follow[-1] == "web"
+    only_app = lan_bound_compose_pull_argv(f"docker compose -f {stack} pull app")
+    assert only_app is not None
+    assert only_app[0] == "/usr/bin/skopeo"
+    assert lan_bound_compose_pull_argv(f"docker compose -f {stack} pull web") is None
+    assert lan_bound_compose_pull_argv(f"docker compose -f {stack} pull | cat") is None
+    nest = tmp_path / "only-lan"
+    nest.mkdir()
+    (nest / "compose.yml").write_text("services:\n  app:\n    image: 192.168.1.50:5000/app:v1\n", encoding="utf-8")
+    from_cwd = lan_bound_compose_pull_argv("docker compose pull", cwd=str(nest))
+    assert from_cwd is not None
+    assert "docker://192.168.1.50:5000/app:v1" in from_cwd
+    bash = _command_args(f"docker compose -f {one} pull", "bash", cwd=str(tmp_path))
+    assert bash[0] == "/usr/bin/skopeo"
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+
+
+def test_lan_skopeo_load_runs_copies_then_follow(monkeypatch):
+    from app.tools.lan_skopeo_load import main
+
+    seen: list[list[str]] = []
+
+    def fake_run(cmd, check=False):
+        seen.append(list(cmd))
+        return type("R", (), {"returncode": 0})()
+
+    monkeypatch.setattr("app.tools.lan_skopeo_load.subprocess.run", fake_run)
+    assert (
+        main(["/usr/bin/skopeo", "192.168.1.50:5000/app:latest", "--", "/usr/bin/docker", "compose", "pull", "web"]) == 0
+    )
+    assert seen[0][:2] == ["/usr/bin/skopeo", "copy"]
+    assert seen[0][-1] == "docker-daemon:192.168.1.50:5000/app:latest"
+    assert seen[1] == ["/usr/bin/docker", "compose", "pull", "web"]

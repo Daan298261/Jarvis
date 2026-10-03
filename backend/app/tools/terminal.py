@@ -996,6 +996,8 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "helm",
         "go",
         "gh",
+        "apt",
+        "apt-get",
     }
 )
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
@@ -1121,6 +1123,182 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     return argv
 
 
+_COMPOSE_FILENAMES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
+_COMPOSE_FILE_FLAGS = frozenset({"-f", "--file"})
+_COMPOSE_PULL_QUIET = frozenset({"-q", "--quiet"})
+
+
+def compose_service_images(path: Path) -> dict[str, str]:
+    """Map compose service name → image ref. Skip build-only services and interpolations."""
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return {}
+    services = payload.get("services") if isinstance(payload, dict) else None
+    if not isinstance(services, dict):
+        return {}
+    images: dict[str, str] = {}
+    for name, spec in services.items():
+        if not isinstance(spec, dict):
+            continue
+        image = str(spec.get("image") or "").strip()
+        if not image or "${" in image or "$" in image:
+            continue
+        images[str(name)] = image
+    return images
+
+
+def _default_compose_files(cwd: str | None) -> list[Path]:
+    root = Path(cwd or os.getcwd())
+    found = [root / name for name in _COMPOSE_FILENAMES if (root / name).is_file()]
+    return found[:1]
+
+
+def _compose_pull_spec(parts: list[str]) -> tuple[list[str], list[str], bool] | None:
+    if not parts:
+        return None
+    stem = _tool_basename(parts[0])
+    rest = parts[1:]
+    if stem == "docker":
+        if not rest or _tool_basename(rest[0]) != "compose":
+            return None
+        rest = rest[1:]
+    elif stem not in {"docker-compose", "docker_compose"}:
+        return None
+    files: list[str] = []
+    quiet = False
+    index = 0
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text in _COMPOSE_PULL_QUIET:
+            quiet = True
+            continue
+        if text.startswith("--file="):
+            files.append(text.split("=", 1)[1].strip())
+            continue
+        if text in _COMPOSE_FILE_FLAGS:
+            if index >= len(rest):
+                return None
+            files.append(str(rest[index] or "").strip().strip("'\""))
+            index += 1
+            continue
+        if text == "pull":
+            break
+        if text.startswith("-"):
+            return None
+        return None
+    else:
+        return None
+    services: list[str] = []
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text in _COMPOSE_PULL_QUIET:
+            quiet = True
+            continue
+        if text.startswith("-"):
+            return None
+        services.append(text)
+    return files, services, quiet
+
+
+def skopeo_copy_lan_images_argv(images: list[str], *, quiet: bool = False, follow: list[str] | None = None) -> list[str] | None:
+    exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
+    if not exe or not images:
+        return None
+    tagged = [_docker_image_with_tag(image) for image in images]
+    if len(tagged) == 1 and not follow:
+        argv = [exe, "copy"]
+        if quiet:
+            argv.append("--quiet")
+        argv.extend(["--src-tls-verify=false", f"docker://{tagged[0]}", f"docker-daemon:{tagged[0]}"])
+        return argv
+    python = sys.executable or shutil.which("python3") or "python3"
+    helper = str(Path(__file__).resolve().parent / "lan_skopeo_load.py")
+    argv = [python, helper]
+    if quiet:
+        argv.append("--quiet")
+    argv.extend([exe, *tagged])
+    if follow:
+        argv.extend(["--", *follow])
+    return argv
+
+
+def lan_bound_compose_pull_argv(command: str, cwd: str | None = None) -> list[str] | None:
+    """``docker compose pull`` of on-link RFC1918 images via skopeo + LAN HTTP proxy.
+
+    Dockerd cannot source-bind. Skip pipes, interpolations, unknown flags, and
+    stacks whose pull set has no LAN image. Public Hub services still use
+    ``docker compose pull`` after the LAN images load.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    spec = _compose_pull_spec(parts)
+    if spec is None:
+        return None
+    files, services, quiet = spec
+    root = Path(cwd or os.getcwd())
+    paths: list[Path] = []
+    for item in files:
+        if not item:
+            continue
+        candidate = Path(item)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        paths.append(candidate)
+    if not paths:
+        paths = _default_compose_files(str(root))
+    if not paths:
+        return None
+    images: dict[str, str] = {}
+    for path in paths:
+        if not path.is_file():
+            return None
+        images.update(compose_service_images(path))
+    if not images:
+        return None
+    chosen = {name: images[name] for name in services if name in images} if services else dict(images)
+    if services and not chosen:
+        return None
+    lan: list[str] = []
+    public: list[str] = []
+    for name, image in chosen.items():
+        host = docker_registry_host_from_image(image)
+        if _lan_bind_ip_for_host(host):
+            lan.append(image)
+        else:
+            public.append(name)
+    if not lan:
+        return None
+    follow: list[str] | None = None
+    if public:
+        compose_bin = shutil.which("docker") or shutil.which("docker.exe")
+        if not compose_bin:
+            return None
+        follow = [compose_bin, "compose"]
+        for path in paths:
+            follow.extend(["-f", str(path)])
+        follow.append("pull")
+        if quiet:
+            follow.append("--quiet")
+        follow.extend(public)
+    return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
+
+
 def container_direct_argv(command: str) -> list[str] | None:
     """Run registry/package-manager CLIs as argv so LAN HTTP_PROXY reaches a NAS."""
     return _direct_stem_argv(command, _LAN_HTTP_TOOL_STEMS)
@@ -1239,7 +1417,7 @@ def _child_env(args: list[str]) -> dict[str, str]:
     return direct_child_env()
 
 
-def _command_args(command: str, shell: str) -> list[str] | ToolResult:
+def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str] | ToolResult:
     bound = (
         lan_bound_http_argv(command)
         or lan_bound_ssh_argv(command)
@@ -1253,6 +1431,7 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         or lan_bound_nfs_argv(command)
         or lan_bound_smb_argv(command)
         or lan_bound_docker_pull_argv(command)
+        or lan_bound_compose_pull_argv(command, cwd=cwd)
     )
     if bound:
         return bound
@@ -1284,7 +1463,7 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         if shutil.which("bash"):
             return ["bash", "-lc", command]
         return ToolResult(False, "", error="WSL/bash is not available on this machine")
-    return _command_args(command, default_shell())
+    return _command_args(command, default_shell(), cwd=cwd)
 
 
 async def _pump(job: BackgroundJob) -> None:
@@ -1410,7 +1589,7 @@ class TerminalTool(Tool):
         approved = bool(kwargs.get("_approved")) or _approved_from_context()
         if risk == RiskLevel.IRREVERSIBLE and not approved:
             return ToolResult(False, "", error="Blocked irreversible command. Ask the user explicitly if this is required.")
-        args = _command_args(command, shell)
+        args = _command_args(command, shell, cwd=cwd)
         if isinstance(args, ToolResult):
             return args
         if action == "start":
