@@ -1024,6 +1024,8 @@ def test_lan_db_clients_bind_home_nic_not_vpn(monkeypatch, tmp_path):
             "redis-cli",
             "psql",
             "mongosh",
+            "ldapsearch",
+            "ldapwhoami",
         }
         else None,
     )
@@ -1060,6 +1062,45 @@ def test_lan_db_clients_bind_home_nic_not_vpn(monkeypatch, tmp_path):
     assert rewritten[rewritten.index("-h") + 1] == "127.0.0.1"
     assert rewritten[rewritten.index("-p") + 1] == "6380"
     assert "ping" in rewritten
+    ldap = lan_bound_db_argv("ldapsearch -h 192.168.1.50 -x -b dc=corp,dc=local")
+    assert ldap is not None
+    assert ldap[1].endswith("lan_tcp_bind.py")
+    assert ldap[2:6] == ["ldap", "192.168.1.12", "192.168.1.50", "389"]
+    assert ldap[ldap.index("--") + 1] == "/usr/bin/ldapsearch"
+    uri = lan_bound_db_argv(
+        "ldapsearch -H ldap://192.168.1.40:3268 -x -b dc=corp,dc=local '(objectClass=*)'"
+    )
+    assert uri is not None
+    assert uri[2:6] == ["ldap", "192.168.1.12", "192.168.1.40", "3268"]
+    tls = lan_bound_db_argv("ldapsearch -H ldaps://192.168.1.50 -x")
+    assert tls is not None
+    assert tls[2:6] == ["ldap", "192.168.1.12", "192.168.1.50", "636"]
+    who = lan_bound_db_argv("ldapwhoami -h 192.168.1.40 -x")
+    assert who is not None
+    assert who[who.index("--") + 1] == "/usr/bin/ldapwhoami"
+    assert lan_bound_db_argv("ldapsearch -h 8.8.8.8 -x") is None
+    assert lan_bound_db_argv("ldapsearch -H ldapi://%2fvar%2frun%2fslapd/ldapi -x") is None
+    assert lan_bound_db_argv("ldapsearch -h 192.168.1.50 -x | cat") is None
+    bash_ldap = _command_args("ldapsearch -h 192.168.1.50 -x", "bash")
+    assert bash_ldap[1].endswith("lan_tcp_bind.py")
+    assert bash_ldap[2:6] == ["ldap", "192.168.1.12", "192.168.1.50", "389"]
+    ldap_loop = loopback_client_argv(
+        "ldap",
+        ["/usr/bin/ldapsearch", "-H", "ldap://192.168.1.50", "-x"],
+        "127.0.0.1",
+        1389,
+    )
+    assert ldap_loop[0] == "/usr/bin/ldapsearch"
+    assert ldap_loop[ldap_loop.index("-H") + 1] == "ldap://127.0.0.1:1389"
+    assert "-x" in ldap_loop
+    ldap_h = loopback_client_argv(
+        "ldap",
+        ["/usr/bin/ldapsearch", "-h", "192.168.1.50", "-x"],
+        "127.0.0.1",
+        1389,
+    )
+    assert ldap_h[ldap_h.index("-h") + 1] == "127.0.0.1"
+    assert ldap_h[ldap_h.index("-p") + 1] == "1389"
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", 0))

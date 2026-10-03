@@ -884,6 +884,14 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert looks_like_hydra_tool("api/tools/thc-hydra")
     assert not looks_like_hydra_tool("nmap")
     assert not looks_like_hydra_tool("smbclient")
+    from app.security.hexstrike_defensive import looks_like_ldap_tool
+
+    assert looks_like_ldap_tool("ldapsearch")
+    assert looks_like_ldap_tool("http:ldapwhoami")
+    assert looks_like_ldap_tool("mcp_hexstrike_ai_ldapsearch")
+    assert looks_like_ldap_tool("api/tools/ldapmodify")
+    assert not looks_like_ldap_tool("nmap")
+    assert not looks_like_ldap_tool("hydra")
     from app.security.hexstrike_defensive import looks_like_smb_python_tool
 
     assert looks_like_smb_python_tool("smbmap")
@@ -1990,6 +1998,175 @@ async def test_mcp_hydra_uses_host_argv_for_lan(monkeypatch):
         assert seen[0][0][0] == "/usr/bin/hydra"
         assert seen[0][0][-2:] == ("192.168.1.50", "http-get")
         assert seen[0][1]["HYDRA_PROXY"].startswith("http://127.0.0.1:")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_ldapsearch_hosts_lan_with_tcp_bind(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_ldap, ldap_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"ldapsearch", "ldapwhoami"}
+        else None,
+    )
+    argv = ldap_host_argv(
+        "http:ldapsearch",
+        {"target": "192.168.1.50", "additional_args": "-x -b dc=corp,dc=local"},
+    )
+    assert argv[1].endswith("lan_tcp_bind.py")
+    assert argv[2:6] == ["ldap", "192.168.1.12", "192.168.1.50", "389"]
+    child = argv[argv.index("--") + 1 :]
+    assert child[0] == "/usr/bin/ldapsearch"
+    assert child[1:] == ["-x", "-b", "dc=corp,dc=local", "-h", "192.168.1.50"]
+    uri = ldap_host_argv(
+        "api/tools/ldapsearch",
+        {"additional_args": "-H ldap://192.168.1.40:3268 -x"},
+    )
+    assert uri[2:6] == ["ldap", "192.168.1.12", "192.168.1.40", "3268"]
+    assert "-h" not in uri[uri.index("--") + 1 :]
+    tls = ldap_host_argv("ldapwhoami", {"url": "ldaps://192.168.1.50"})
+    assert tls[2:6] == ["ldap", "192.168.1.12", "192.168.1.50", "636"]
+    assert tls[tls.index("--") + 1] == "/usr/bin/ldapwhoami"
+    assert tls[tls.index("-H") + 1] == "ldaps://192.168.1.50"
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"dn: dc=corp,dc=local\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_ldap(
+        "api/tools/ldapsearch",
+        {"target": "192.168.1.50", "additional_args": "-x -b dc=corp,dc=local"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-ldap"
+    assert hosted["target"] == "192.168.1.50"
+    assert seen[0][0][1].endswith("lan_tcp_bind.py")
+    assert seen[0][0][2:6] == ("ldap", "192.168.1.12", "192.168.1.50", "389")
+    assert "HTTP_PROXY" not in seen[0][1]
+    public = await execute_operator_ldap("api/tools/ldapsearch", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/ldapsearch"
+
+
+@pytest.mark.asyncio
+async def test_operator_ldapsearch_fails_closed_when_not_on_path(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_ldap
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        await execute_operator_ldap("api/tools/ldapsearch", {"target": "192.168.1.50"})
+    assert posted == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_ldapsearch_uses_host_argv_for_lan(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN ldapsearch must not go through HexStrike MCP; VPN would steal LDAP")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_ldapsearch"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "ldapsearch"},
+        "remote_name": "ldapsearch",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/ldapsearch"
+        if str(name).lower() == "ldapsearch"
+        else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"dn: dc=corp,dc=local\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_ldapsearch",
+            {"target": "192.168.1.50", "additional_args": "-x -b dc=corp,dc=local"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-ldap"
+        assert seen[0][1].endswith("lan_tcp_bind.py")
+        assert seen[0][2:6] == ("ldap", "192.168.1.12", "192.168.1.50", "389")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_ldapsearch_fails_closed_when_not_on_path(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN ldapsearch must not fall back to HexStrike MCP when ldapsearch is missing")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_ldapsearch"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "ldapsearch"},
+        "remote_name": "ldapsearch",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_ldapsearch", {"target": "192.168.1.50"})
+        assert not result.success
+        assert "not on PATH" in (result.error or "")
     finally:
         MCP.reset_for_tests()
 

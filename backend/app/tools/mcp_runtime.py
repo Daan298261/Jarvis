@@ -360,6 +360,7 @@ class MCPRuntime:
             looks_like_smb_tool,
             looks_like_smb_python_tool,
             looks_like_hydra_tool,
+            looks_like_ldap_tool,
             lan_inventory_uses_host_nmap,
             nmap_target_from_payload,
             lan_bind_target,
@@ -372,11 +373,13 @@ class MCPRuntime:
             _host_smb_lan,
             _host_smb_python_lan,
             _host_hydra_lan,
+            _host_ldap_lan,
             _smb_host_binary,
             _smb_payload_host,
             _smb_python_binary,
             _smb_lan_python_fallback_stem,
             _hydra_host_binary,
+            _ldap_host_binary,
             _iface_lan_target,
             should_host_exec_iface,
             should_host_exec_nmap_scan_fallback,
@@ -419,6 +422,21 @@ class MCPRuntime:
             if lan_bind_nic(target)[1] and _hydra_host_binary():
                 data = await _host_hydra_lan(str(tool_key or name), args)
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
+        if looks_like_ldap_tool(tool_key) or looks_like_ldap_tool(str(name)):
+            target = lan_bind_target(args) or nmap_target_from_payload(args)
+            ident = hexstrike_lan_tool_id(str(tool_key or name))
+            if lan_bind_nic(target)[1] and _ldap_host_binary(ident):
+                data = await _host_ldap_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if lan_bind_nic(target)[1]:
+                return ToolResult(
+                    False,
+                    "",
+                    error=(
+                        f"{ident or 'ldapsearch'} is not on PATH. Install OpenLDAP clients "
+                        "so HexStrike LAN LDAP can bind the home NIC."
+                    ),
+                )
         if looks_like_iface_host_tool(tool_key) or looks_like_iface_host_tool(str(name)):
             target = _iface_lan_target(args)
             if should_host_exec_iface(str(tool_key or name), target):

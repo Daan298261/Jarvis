@@ -1121,20 +1121,33 @@ def _cli_uri_host_port(raw: str, default_port: int) -> tuple[str, int]:
 
 _MYSQL_NAMES = frozenset({"mysql", "mariadb"})
 _MQTT_NAMES = frozenset({"mosquitto_pub", "mosquitto_sub", "mosquitto_rr"})
+_LDAP_NAMES = frozenset(
+    {
+        "ldapsearch",
+        "ldapwhoami",
+        "ldapmodify",
+        "ldapadd",
+        "ldapdelete",
+        "ldapcompare",
+        "ldapmodrdn",
+        "ldappasswd",
+    }
+)
 _TCP_HELPER_TOOLS = {
     "redis-cli": ("redis", 6379, frozenset({"-h", "--host"}), frozenset({"-p", "--port"})),
     "psql": ("psql", 5432, frozenset({"-h", "--host"}), frozenset({"-p", "--port"})),
     "mongosh": ("mongosh", 27017, frozenset({"--host"}), frozenset({"--port"})),
+    **{name: ("ldap", 389, frozenset({"-h"}), frozenset({"-p"})) for name in _LDAP_NAMES},
 }
 
 
 def lan_bound_db_argv(command: str) -> list[str] | None:
-    """mysql/mosquitto/redis-cli/psql/mongosh of on-link RFC1918, sourced from that NIC.
+    """mysql/mosquitto/redis-cli/psql/mongosh/ldapsearch of on-link RFC1918.
 
     mysql/mariadb ``--bind-address`` and mosquitto ``-A`` pin the home NIC.
-    redis-cli/psql/mongosh have no source-bind flag, so a loopback TCP helper
-    connects out with ``bind(SOURCE)``. Skip pipes, existing bind flags, and
-    public hosts.
+    redis-cli/psql/mongosh/ldapsearch have no source-bind flag, so a loopback
+    TCP helper connects out with ``bind(SOURCE)``. Skip pipes, existing bind
+    flags, public hosts, and ``ldapi://`` (unix socket).
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1194,16 +1207,27 @@ def lan_bound_db_argv(command: str) -> list[str] | None:
             if tok.lower().startswith("mongodb://"):
                 host, port = _cli_uri_host_port(tok, 27017)
                 break
+    elif kind == "ldap":
+        uri = _cli_opt(parts, {"-H"})
+        if uri:
+            lowered = uri.strip().lower()
+            if lowered.startswith("ldapi:"):
+                return None
+            parsed = urlparse(uri.strip())
+            host = (parsed.hostname or "").strip()
+            if parsed.port:
+                port = int(parsed.port)
+            elif not (port_text and str(port_text).isdigit()):
+                port = 636 if lowered.startswith("ldaps:") else 389
     bind = _lan_bind_ip_for_host(host)
     if not bind or port < 1 or port > 65535:
         return None
     exe = shutil.which(name) or shutil.which(f"{name}.exe")
     if not exe:
         return None
-    python = sys.executable or shutil.which("python3") or "python3"
-    helper = str(Path(__file__).resolve().parent / "lan_tcp_bind.py")
-    child = [exe, *parts[1:]]
-    return [python, helper, kind, bind, host, str(port), "--", *child]
+    from .lan_tcp_bind import wrap_argv
+
+    return wrap_argv(kind, bind, host, port, [exe, *parts[1:]])
 
 
 def _ncrack_target_from_argv(parts: list[str]) -> str:

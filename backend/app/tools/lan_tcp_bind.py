@@ -1,4 +1,4 @@
-"""Source-bind a TCP client that has no bind flag (redis-cli, psql, mongosh).
+"""Source-bind a TCP client that has no bind flag (redis-cli, psql, mongosh, ldapsearch).
 
 Listen on loopback, connect to the on-link RFC1918 peer from ``SOURCE``, and
 rewrite the child ``-h``/``-p`` (or URI) to the loopback port so a VPN default
@@ -10,7 +10,15 @@ import socket
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from urllib.parse import urlparse, urlunparse
+
+
+def wrap_argv(kind: str, source: str, host: str, port: int | str, child: list[str]) -> list[str]:
+    """``python lan_tcp_bind.py KIND SOURCE HOST PORT -- CHILD…``."""
+    python = sys.executable or "python3"
+    helper = str(Path(__file__).resolve())
+    return [python, helper, str(kind), str(source), str(host), str(port), "--", *child]
 
 
 def loopback_client_argv(kind: str, argv: list[str], loop_host: str, loop_port: int) -> list[str]:
@@ -27,6 +35,10 @@ def loopback_client_argv(kind: str, argv: list[str], loop_host: str, loop_port: 
         host_flags = {"--host"}
         port_flags = {"--port"}
         uri_flags = set()
+    if mode == "ldap":
+        host_flags = {"-h"}
+        port_flags = {"-p"}
+        uri_flags = {"-H"}
     out: list[str] = [argv[0]]
     index = 1
     have_host = False

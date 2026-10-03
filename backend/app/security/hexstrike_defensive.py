@@ -535,6 +535,25 @@ def looks_like_hydra_tool(name: str) -> bool:
     return hexstrike_lan_tool_id(name) in _HYDRA_TOOL_STEMS
 
 
+_LDAP_TOOL_STEMS = frozenset(
+    {
+        "ldapsearch",
+        "ldapwhoami",
+        "ldapmodify",
+        "ldapadd",
+        "ldapdelete",
+        "ldapcompare",
+        "ldapmodrdn",
+        "ldappasswd",
+    }
+)
+
+
+def looks_like_ldap_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_ldapsearch`` or ``http:ldapwhoami``."""
+    return hexstrike_lan_tool_id(name) in _LDAP_TOOL_STEMS
+
+
 def looks_like_iface_host_tool(name: str) -> bool:
     """LAN scanners whose iface flags cannot round-trip a spaced Windows NIC name."""
     return hexstrike_lan_tool_id(name) in _IFACE_HOST_STEMS
@@ -1389,6 +1408,162 @@ async def execute_operator_hydra(path: str, payload: dict[str, Any] | None) -> d
     if not lan_bind_nic(target)[1] or not _hydra_host_binary():
         return await HEXSTRIKE.post_operator(cleaned, bound)
     return await _host_hydra_lan(path, bound)
+
+
+def _ldap_host_binary(stem: str) -> str | None:
+    name = str(stem or "ldapsearch").replace("_", "-")
+    return shutil.which(name) or shutil.which(f"{name}.exe")
+
+
+def _ldap_payload_host_port(payload: dict[str, Any] | None) -> tuple[str, int]:
+    """Host/port for OpenLDAP clients: ``-H ldap(s)://``, ``-h``/``-p``, or payload target."""
+    row = payload if isinstance(payload, dict) else {}
+    extra = _nmap_flag_tokens(
+        str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")
+    )
+    host = ""
+    port = 389
+    have_uri = False
+    index = 0
+    while index < len(extra):
+        tok = str(extra[index])
+        if tok == "-H" and index + 1 < len(extra):
+            raw = str(extra[index + 1] or "").strip()
+            lowered = raw.lower()
+            parsed = urlparse(raw)
+            have_uri = True
+            if parsed.hostname and not lowered.startswith("ldapi:"):
+                host = parsed.hostname
+                if parsed.port:
+                    port = int(parsed.port)
+                elif lowered.startswith("ldaps:"):
+                    port = 636
+            index += 2
+            continue
+        if tok == "-h" and index + 1 < len(extra):
+            if not host:
+                host = str(extra[index + 1] or "").strip()
+            index += 2
+            continue
+        if tok == "-p" and index + 1 < len(extra):
+            text = str(extra[index + 1] or "").strip()
+            if text.isdigit():
+                port = int(text)
+            index += 2
+            continue
+        index += 1
+    if not host:
+        host = lan_bind_target(row) or nmap_target_from_payload(row)
+    if not have_uri:
+        for key in ("url", "uri", "endpoint"):
+            text = str(row.get(key) or "").strip()
+            lowered = text.lower()
+            if not lowered.startswith(("ldap://", "ldaps://")):
+                continue
+            parsed = urlparse(text)
+            if parsed.hostname:
+                host = host or parsed.hostname
+                if parsed.port:
+                    port = int(parsed.port)
+                elif lowered.startswith("ldaps:") and port == 389:
+                    port = 636
+            break
+    return host, port
+
+
+def ldap_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host ldapsearch argv via the loopback TCP helper (no OpenLDAP source-bind flag)."""
+    from ..tools.lan_tcp_bind import wrap_argv
+
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _LDAP_TOOL_STEMS:
+        stem = "ldapsearch"
+    binary = _ldap_host_binary(stem)
+    if not binary:
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install OpenLDAP clients so HexStrike LAN LDAP can bind the home NIC."
+        )
+    host, port = _ldap_payload_host_port(row)
+    _iface, source = lan_bind_nic(host)
+    if not source:
+        raise ValueError("ldap LAN target is required")
+    extra = _nmap_flag_tokens(
+        str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")
+    )
+    blob = " ".join(extra)
+    display = ""
+    for key in ("url", "uri", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            display = text
+            break
+    if not display:
+        display = host
+    child = [binary, *extra]
+    if display and display not in extra and display not in blob:
+        if "-h" not in extra and "-H" not in extra:
+            if str(display).lower().startswith(("ldap://", "ldaps://")):
+                child.extend(["-H", display])
+            else:
+                child.extend(["-h", bindable_lan_host(display) or host])
+    return wrap_argv("ldap", source, host, port, child)
+
+
+async def _host_ldap_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host ldapsearch of on-link RFC1918 with bind(SOURCE) via the loopback helper."""
+    from ..tools.owner_paths import direct_child_env
+
+    argv = ldap_host_argv(tool, payload)
+    env = direct_child_env()
+    target = lan_bind_target(payload) or nmap_target_from_payload(payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host LDAP LAN probe timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "ldapsearch failed").strip()[:400])
+    return {
+        "source": "host-ldap",
+        "target": target,
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_ldap(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator ldapsearch of on-link RFC1918: host argv + bind helper, not the suite VPN."""
+    bound = dict(payload or {})
+    stem = hexstrike_lan_tool_id(path) or "ldapsearch"
+    if stem not in _LDAP_TOOL_STEMS:
+        stem = "ldapsearch"
+    target = lan_bind_target(bound) or nmap_target_from_payload(bound)
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = f"api/tools/{stem}"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = f"api/tools/{stem}"
+    if not lan_bind_nic(target)[1]:
+        return await HEXSTRIKE.post_operator(cleaned, bound)
+    if not _ldap_host_binary(stem):
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install OpenLDAP clients so HexStrike LAN LDAP can bind the home NIC."
+        )
+    return await _host_ldap_lan(path, bound)
 
 
 def _smb_python_binary(stem: str) -> str | None:
