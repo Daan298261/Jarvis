@@ -1051,7 +1051,9 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     monkeypatch.setenv("https_proxy", "http://10.8.0.1:8080")
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
-        lambda name: f"/usr/bin/{name}" if name in {"git", "git.exe", "pip", "pip3", "npm", "uv"} else None,
+        lambda name: f"/usr/bin/{name}"
+        if name in {"git", "git.exe", "pip", "pip3", "npm", "uv", "aws", "aws.exe", "s3cmd", "mc", "mcli"}
+        else None,
     )
     cloned = git_direct_argv("git clone http://192.168.1.50/repo.git")
     assert cloned is not None
@@ -1075,6 +1077,20 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     assert _child_env(uv)["HTTP_PROXY"].startswith("http://127.0.0.1:")
     assert git_direct_argv("git clone http://192.168.1.50/repo.git | cat") is None
     assert container_direct_argv("pip install pkg && rm -rf /") is None
+    aws = container_direct_argv(
+        "aws --endpoint-url http://192.168.1.50:9000 s3 ls s3://media"
+    )
+    assert aws is not None
+    assert aws[0] == "/usr/bin/aws"
+    assert "--endpoint-url" in aws
+    assert _child_env(aws)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in _child_env(aws)["HTTP_PROXY"]
+    mc = _command_args("mc cp myminio/bucket/file.bin .", "bash")
+    assert mc[0] == "/usr/bin/mc"
+    assert _child_env(mc)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    s3cmd = container_direct_argv("s3cmd ls s3://backup --host=192.168.1.50:9000")
+    assert s3cmd is not None
+    assert _child_env(s3cmd)["HTTPS_PROXY"] == _child_env(s3cmd)["HTTP_PROXY"]
 
 
 def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):

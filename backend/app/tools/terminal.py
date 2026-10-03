@@ -1018,6 +1018,10 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "wget2",
         "httpie",
         "axel",
+        "aws",
+        "s3cmd",
+        "mc",
+        "mcli",
     }
 )
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
@@ -4752,7 +4756,7 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
 
 
 def container_direct_argv(command: str) -> list[str] | None:
-    """Run registry/package-manager CLIs as argv so LAN HTTP_PROXY reaches a NAS."""
+    """Run registry/package-manager/S3 CLIs as argv so LAN HTTP_PROXY reaches a NAS."""
     return _direct_stem_argv(command, _LAN_HTTP_TOOL_STEMS)
 
 
