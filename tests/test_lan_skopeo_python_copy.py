@@ -255,3 +255,27 @@ def test_python_login_password_stdin(registry, tmp_path, monkeypatch):
     )
     payload = json.loads(authfile.read_text(encoding="utf-8"))
     assert payload["auths"][registry]["auth"] == token
+
+
+def test_python_login_prompts_when_creds_missing(registry, tmp_path, monkeypatch):
+    import base64
+
+    token = base64.b64encode(b"taco:secret").decode("ascii")
+    _Registry.basic = f"Basic {token}"
+    authfile = tmp_path / "config.json"
+    answers = iter(["taco"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    monkeypatch.setattr(helper.getpass, "getpass", lambda _prompt="": "secret")
+    assert helper.main(["--login", "--authfile", str(authfile), registry]) == 0
+    payload = json.loads(authfile.read_text(encoding="utf-8"))
+    assert payload["auths"][registry]["auth"] == token
+    user_only = tmp_path / "user-only.json"
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda _prompt="": (_ for _ in ()).throw(AssertionError("username already set")),
+    )
+    monkeypatch.setattr(helper.getpass, "getpass", lambda _prompt="": "secret")
+    assert helper.main(["--login", "--authfile", str(user_only), "-u", "taco", registry]) == 0
+    assert json.loads(user_only.read_text(encoding="utf-8"))["auths"][registry]["auth"] == token
+    monkeypatch.setattr("builtins.input", lambda _prompt="": (_ for _ in ()).throw(EOFError()))
+    assert helper.main(["--login", "--authfile", str(tmp_path / "eof.json"), registry]) == 2

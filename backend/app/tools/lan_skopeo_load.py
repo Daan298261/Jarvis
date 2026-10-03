@@ -15,6 +15,7 @@ the same proxy (and sitecustomize bind) before the follow ``docker build``.
 """
 from __future__ import annotations
 
+import getpass
 import gzip
 import hashlib
 import io
@@ -557,9 +558,23 @@ def _login_creds(flags: list[str]) -> tuple[str, str, bool] | None:
         if text == "--password-stdin":
             stdin = True
             continue
-    if stdin or (user and password):
+    if stdin or user or password:
         return user, password, stdin
     return None
+
+
+def _prompt_login_creds(user: str, password: str) -> tuple[str, str] | None:
+    """Prompt for missing docker-login username/password on a TTY."""
+    try:
+        if not user:
+            user = input("Username: ").strip()
+        if not password:
+            password = getpass.getpass("Password: ")
+    except (EOFError, KeyboardInterrupt, OSError):
+        return None
+    if not user or not password:
+        return None
+    return user, password
 
 
 def _write_docker_auth(authfile: str, registry: str, user: str, password: str) -> None:
@@ -637,11 +652,14 @@ def _python_login_from_args(args: list[str], authfile: str) -> int:
             return 2
         registry = text
     creds = _login_creds(flags)
-    if creds is None:
-        return 2
-    user, password, stdin = creds
+    user, password, stdin = creds if creds else ("", "", False)
     if stdin:
         password = sys.stdin.readline().rstrip("\r\n")
+    if not user or not password:
+        prompted = _prompt_login_creds(user, password)
+        if prompted is None:
+            return 2
+        user, password = prompted
     if not user or not password:
         return 1
     path = authfile or str(Path.home() / ".docker" / "config.json")
