@@ -86,6 +86,8 @@ def test_direct_child_env_drops_proxy_keeps_path(monkeypatch):
     assert "http_proxy" not in kept
     assert kept["PATH"] == "/usr/bin"
     assert kept["HOME"] == "/home/taco"
+    assert "lan_ssh.py" in (env.get("RSYNC_RSH") or "")
+    assert env["RSYNC_RSH"] == kept["RSYNC_RSH"]
 
 
 def test_python_child_env_uses_lan_proxy_not_vpn(monkeypatch):

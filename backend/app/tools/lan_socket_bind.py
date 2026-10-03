@@ -1,9 +1,10 @@
-"""Bind Python TCP connects to this PC's on-link RFC1918 NIC.
+"""Bind Python TCP connects and UDP sendto to this PC's on-link RFC1918 NIC.
 
 ``HTTP_PROXY`` only covers urllib/requests/httpx. A scanner that uses
 ``socket.connect`` (or httpx with ``trust_env=False``) still follows the VPN
-default route. Patching ``socket.socket.connect`` pins LAN peers to the home
-NIC; public and loopback destinations are unchanged.
+default route. UDP probes (SNMP, mDNS, DNS to the LAN resolver) use
+``sendto`` and never call ``connect``. Patching both pins LAN peers to the
+home NIC; public and loopback destinations are unchanged.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ _RFC1918 = (
 _installed = False
 _orig_connect = socket.socket.connect
 _orig_connect_ex = socket.socket.connect_ex
+_orig_sendto = socket.socket.sendto
 
 
 def _peer_ipv4(address: Any) -> str:
@@ -88,11 +90,34 @@ def _connect_ex(self: socket.socket, address: Any) -> int:
     return _orig_connect_ex(self, address)
 
 
+def sendto_address(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    """Peer tuple from ``sendto(data, address)`` or ``sendto(data, flags, address)``."""
+    if "address" in kwargs:
+        return kwargs["address"]
+    if not args:
+        return None
+    if len(args) == 1:
+        return args[0]
+    return args[-1]
+
+
+def _datagram(sock: Any) -> bool:
+    sock_type = int(getattr(sock, "type", 0) or 0)
+    return (sock_type & socket.SOCK_DGRAM) == socket.SOCK_DGRAM
+
+
+def _sendto(self: socket.socket, data: Any, *args: Any, **kwargs: Any) -> int:
+    if _datagram(self):
+        _source_bind(self, sendto_address(args, kwargs))
+    return _orig_sendto(self, data, *args, **kwargs)
+
+
 def install_lan_bind() -> None:
-    """Idempotent wrap of ``socket.socket.connect`` / ``connect_ex``."""
+    """Idempotent wrap of ``connect`` / ``connect_ex`` / ``sendto``."""
     global _installed
     if _installed:
         return
     socket.socket.connect = _connect  # type: ignore[method-assign]
     socket.socket.connect_ex = _connect_ex  # type: ignore[method-assign]
+    socket.socket.sendto = _sendto  # type: ignore[method-assign]
     _installed = True

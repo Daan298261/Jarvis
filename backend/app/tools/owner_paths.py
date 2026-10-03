@@ -24,6 +24,14 @@ def direct_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     for key in list(env):
         if key.upper() in _PROXY_ENV_NAMES:
             env.pop(key, None)
+    try:
+        from .lan_ssh import git_ssh_command
+
+        # rsync SSH of a NAS otherwise follows the VPN default route. lan_ssh.py
+        # only inserts BindAddress for on-link RFC1918; public hosts are unchanged.
+        env["RSYNC_RSH"] = git_ssh_command()
+    except Exception:
+        pass
     return env
 
 

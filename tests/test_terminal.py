@@ -5,9 +5,12 @@ from app.tools.terminal import (
     _python_args,
     default_shell,
     lan_bound_http_argv,
+    lan_bound_netcat_argv,
+    lan_bound_rsync_argv,
     lan_bound_scan_argv,
     lan_bound_ssh_argv,
     python_direct_argv,
+    rsync_host_from_token,
 )
 
 
@@ -419,3 +422,68 @@ def test_lan_ping_windows_uses_source_flag(monkeypatch):
     assert ping is not None
     assert ping[1:3] == ["-S", "192.168.1.12"]
     assert lan_bound_scan_argv("ping -S 192.168.1.12 192.168.1.50") is None
+
+
+def test_rsync_host_from_token_ssh_and_daemon():
+    assert rsync_host_from_token("taco@192.168.1.50:/share/") == "192.168.1.50"
+    assert rsync_host_from_token("192.168.1.1:/volume1/media") == "192.168.1.1"
+    assert rsync_host_from_token("rsync://nas.local/backup") == "nas.local"
+    assert rsync_host_from_token("192.168.1.40::module") == "192.168.1.40"
+    assert rsync_host_from_token("C:\\Users\\taco\\file") == ""
+    assert rsync_host_from_token("./local") == ""
+
+
+def test_lan_rsync_binds_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: "/usr/bin/rsync" if name in {"rsync", "rsync.exe"} else None,
+    )
+    ssh = lan_bound_rsync_argv("rsync -a taco@192.168.1.50:/share/ ./")
+    assert ssh is not None
+    assert ssh[0] == "/usr/bin/rsync"
+    assert ssh[1] == "-e"
+    assert "lan_ssh.py" in ssh[2]
+    daemon = lan_bound_rsync_argv("rsync rsync://192.168.1.50/backup ./")
+    assert daemon is not None
+    assert daemon[1] == "--address=192.168.1.12"
+    colon = lan_bound_rsync_argv("rsync 192.168.1.1::media /tmp/media")
+    assert colon is not None
+    assert colon[1] == "--address=192.168.1.12"
+    assert lan_bound_rsync_argv("rsync rsync://example.com/mod ./") is None
+    assert lan_bound_rsync_argv("rsync --address=10.8.0.2 rsync://192.168.1.1/m ./") is None
+    assert lan_bound_rsync_argv("rsync taco@192.168.1.1:/a ./ | cat") is None
+    bash = _command_args("rsync rsync://192.168.1.50/backup ./", "bash")
+    assert bash[0] == "/usr/bin/rsync"
+    assert bash[1] == "--address=192.168.1.12"
+
+
+def test_lan_netcat_binds_home_nic_not_vpn(monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"nc", "ncat", "netcat"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "nas.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    nc = lan_bound_netcat_argv("nc -zv 192.168.1.1 22")
+    assert nc is not None
+    assert nc[0] == "/usr/bin/nc"
+    assert nc[1:3] == ["-s", "192.168.1.12"]
+    assert nc[-2:] == ["192.168.1.1", "22"]
+    mdns = lan_bound_netcat_argv("ncat nas.local 80")
+    assert mdns is not None
+    assert mdns[1:3] == ["-s", "192.168.1.12"]
+    assert lan_bound_netcat_argv("nc 8.8.8.8 53") is None
+    assert lan_bound_netcat_argv("nc -s 192.168.1.12 192.168.1.1 22") is None
+    assert lan_bound_netcat_argv("nc 192.168.1.1 22 | cat") is None
+    bash = _command_args("nc -zv 192.168.1.50 80", "bash")
+    assert bash[0] == "/usr/bin/nc"
+    assert bash[1:3] == ["-s", "192.168.1.12"]

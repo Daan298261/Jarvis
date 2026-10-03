@@ -323,6 +323,128 @@ def lan_bound_scan_argv(command: str) -> list[str] | None:
     return [exe, *flags, *parts[1:]]
 
 
+_NETCAT_NAMES = frozenset({"nc", "ncat", "netcat"})
+_RSYNC_BIND_FLAGS = frozenset({"-e", "--rsh", "--address"})
+
+
+def _tool_basename(argv0: str) -> str:
+    name = Path(argv0 or "").name.lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    return name
+
+
+def rsync_host_from_token(token: str) -> str:
+    """Remote host in an rsync source/dest token (SSH, ``host::mod``, ``rsync://``)."""
+    text = str(token or "").strip().strip("'\"")
+    if not text or text.startswith("-"):
+        return ""
+    if "://" in text:
+        from urllib.parse import urlparse
+
+        return (urlparse(text).hostname or "").strip()
+    if len(text) >= 2 and text[1] == ":" and text[0].isalpha() and (len(text) == 2 or text[2] in "\\/"):
+        return ""
+    if "@" in text or ":" in text or "::" in text:
+        from .lan_ssh import ssh_host_from_token
+
+        return ssh_host_from_token(text)
+    return ""
+
+
+def _rsync_host_from_argv(parts: list[str]) -> str:
+    for item in parts[1:]:
+        host = rsync_host_from_token(item)
+        if host:
+            return host
+    return ""
+
+
+def _rsync_is_daemon(parts: list[str]) -> bool:
+    for item in parts[1:]:
+        text = str(item or "")
+        if text.startswith("-"):
+            continue
+        if "://" in text or "::" in text:
+            return True
+    return False
+
+
+def _lan_bind_ip_for_host(host: str) -> str:
+    from ..security.hexstrike_defensive import lan_bind_nic
+    from .lan_ssh import lan_ssh_bind_ip
+
+    bind = lan_ssh_bind_ip(host)
+    if bind:
+        return bind
+    _iface, source = lan_bind_nic(host)
+    return source
+
+
+def lan_bound_rsync_argv(command: str) -> list[str] | None:
+    """rsync of an on-link RFC1918 NAS, sourced from that NIC.
+
+    SSH transport uses ``RSYNC_RSH`` (``lan_ssh.py`` BindAddress). The daemon
+    protocol (``rsync://`` / ``host::module``) has no rsh, so pin ``--address``.
+    Skip pipes, ``-e`` / ``--rsh`` / ``--address``, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or _tool_basename(parts[0]) != "rsync":
+        return None
+    flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if flags & _RSYNC_BIND_FLAGS or "--daemon" in flags:
+        return None
+    host = _rsync_host_from_argv(parts)
+    bind = _lan_bind_ip_for_host(host)
+    if not bind:
+        return None
+    exe = shutil.which("rsync") or shutil.which("rsync.exe")
+    if not exe:
+        return None
+    if _rsync_is_daemon(parts):
+        return [exe, f"--address={bind}", *parts[1:]]
+    from .lan_ssh import git_ssh_command
+
+    return [exe, "-e", git_ssh_command(), *parts[1:]]
+
+
+def lan_bound_netcat_argv(command: str) -> list[str] | None:
+    """nc/ncat/netcat of an on-link RFC1918 host, sourced from that NIC.
+
+    ``-s`` is source address on OpenBSD nc, GNU netcat, and nmap ncat. Skip
+    pipes, explicit ``-s`` / ``--source``, and public targets.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    if name not in _NETCAT_NAMES:
+        return None
+    flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if flags & {"-s", "--source"}:
+        return None
+    target = _scan_target_from_argv(parts)
+    bind = _lan_bind_ip_for_host(target)
+    if not bind:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return [exe, "-s", bind, *parts[1:]]
+
+
 def adapt_shell(command: str, shell: str) -> str:
     """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
     chosen = (shell or default_shell()).strip().lower()
@@ -404,7 +526,13 @@ def _child_env(args: list[str]) -> dict[str, str]:
 
 
 def _command_args(command: str, shell: str) -> list[str] | ToolResult:
-    bound = lan_bound_http_argv(command) or lan_bound_ssh_argv(command) or lan_bound_scan_argv(command)
+    bound = (
+        lan_bound_http_argv(command)
+        or lan_bound_ssh_argv(command)
+        or lan_bound_scan_argv(command)
+        or lan_bound_rsync_argv(command)
+        or lan_bound_netcat_argv(command)
+    )
     if bound:
         return bound
     py = python_direct_argv(command)
