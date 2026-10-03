@@ -464,7 +464,7 @@ def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
         lambda name: f"/usr/bin/{name}"
-        if name in {"nmap", "ping", "traceroute", "masscan", "nping", "arp-scan", "arping", "fping", "iperf3", "iperf"}
+        if name in {"nmap", "ping", "traceroute", "masscan", "nping", "arp-scan", "arping", "fping", "iperf3", "iperf", "nuclei", "httpx", "naabu", "rustscan"}
         else None,
     )
 
@@ -521,6 +521,31 @@ def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):
     bash = _command_args("nmap -sn 192.168.1.0/24", "bash")
     assert bash[0] == "/usr/bin/nmap"
     assert bash[1:5] == ["-S", "192.168.1.12", "-e", "eth0"]
+    nuclei = lan_bound_scan_argv("nuclei -u http://192.168.1.50:8080/login -t http/")
+    assert nuclei is not None
+    assert nuclei[0] == "/usr/bin/nuclei"
+    assert nuclei[1:5] == ["-source-ip", "192.168.1.12", "-interface", "eth0"]
+    assert "-u" in nuclei and "http://192.168.1.50:8080/login" in nuclei
+    httpx = lan_bound_scan_argv("httpx -u http://192.168.1.40:8080")
+    assert httpx is not None
+    assert httpx[1:5] == ["-source-ip", "192.168.1.12", "-interface", "eth0"]
+    naabu = lan_bound_scan_argv("naabu -host 192.168.1.50 -p 80")
+    assert naabu is not None
+    assert naabu[1:5] == ["-source-ip", "192.168.1.12", "-interface", "eth0"]
+    rust = lan_bound_scan_argv("rustscan -a 192.168.1.0/24")
+    assert rust is not None
+    assert rust[0] == "/usr/bin/rustscan"
+    assert rust[1:3] == ["-a", "192.168.1.0/24"]
+    assert rust[-5:] == ["--", "-S", "192.168.1.12", "-e", "eth0"]
+    rust_nmap = lan_bound_scan_argv("rustscan -a 192.168.1.50 -- -sV")
+    assert rust_nmap is not None
+    assert rust_nmap[1:] == ["-a", "192.168.1.50", "--", "-sV", "-S", "192.168.1.12", "-e", "eth0"]
+    assert lan_bound_scan_argv("nuclei -u https://example.com") is None
+    assert lan_bound_scan_argv("httpx -source-ip 10.8.0.2 -u http://192.168.1.50") is None
+    assert lan_bound_scan_argv("nuclei -u http://192.168.1.50 | cat") is None
+    bash_nuclei = _command_args("nuclei -u http://192.168.1.50:8080/", "bash")
+    assert bash_nuclei[0] == "/usr/bin/nuclei"
+    assert bash_nuclei[1:5] == ["-source-ip", "192.168.1.12", "-interface", "eth0"]
 
 
 def test_lan_mtr_and_nmblookup_bind_home_nic_not_vpn(monkeypatch):

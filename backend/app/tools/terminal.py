@@ -402,6 +402,10 @@ _SCAN_NAMES = frozenset(
         "dumpcap",
         "hping",
         "hping3",
+        "nuclei",
+        "httpx",
+        "naabu",
+        "rustscan",
     }
 )
 _IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
@@ -410,7 +414,14 @@ _IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
 def _scan_target_from_argv(parts: list[str]) -> str:
     for item in parts[1:]:
         text = str(item or "").strip().strip("'\"")
-        if not text or text.startswith("-"):
+        if text.startswith("-") and "=" in text:
+            text = text.split("=", 1)[1].strip().strip("'\"")
+        elif not text or text.startswith("-"):
+            continue
+        if "://" in text:
+            host = (urlparse(text).hostname or "").strip()
+            if host:
+                return host
             continue
         host = text.split("%", 1)[0]
         if _IPV4_OR_CIDR.fullmatch(host):
@@ -449,6 +460,10 @@ def _scan_already_bound(name: str, parts: list[str]) -> bool:
         return bool(flags & {"-i", "--interface"})
     if name in {"hping", "hping3"}:
         return bool(flags & {"-I", "--interface"})
+    if name in {"nuclei", "httpx", "naabu"}:
+        return bool(flags & {"-source-ip", "-interface", "--interface"})
+    if name == "rustscan":
+        return bool(flags & {"-S", "-e", "-interface", "--interface"})
     return True
 
 
@@ -519,18 +534,30 @@ def _scan_bind_flags(name: str, target: str) -> list[str] | None:
         if not iface:
             return None
         return ["-I", iface]
+    if name in {"nuclei", "httpx", "naabu"}:
+        flags = ["-source-ip", source]
+        if iface:
+            flags.extend(["-interface", iface])
+        return flags
+    if name == "rustscan":
+        flags = ["-S", source]
+        if iface:
+            flags.extend(["-e", iface])
+        return flags
     return None
 
 
 def lan_bound_scan_argv(command: str) -> list[str] | None:
-    """nmap/ping/mtr/nmblookup of on-link RFC1918, sourced from that NIC.
+    """nmap/ping/mtr/nmblookup/nuclei/httpx/naabu/rustscan of on-link RFC1918, sourced from that NIC.
 
     HexStrike nmap already pins ``-S``/``-e``. Terminal nmap/ping plus ARP/fping
     still follow the OS default route, so a VPN steals (or black-holes) the hop
     to the LAN. mtr uses ``-a``; nmblookup uses ``-B``/``-i`` so NetBIOS to a NAS
     is not sent on the VPN. tcpdump/tshark/dumpcap use ``-i`` when the filter
-    names an on-link RFC1918 host. hping3 uses ``-I``. Skip pipes and explicit
-    source-bind flags. Public targets are unchanged.
+    names an on-link RFC1918 host. hping3 uses ``-I``. ProjectDiscovery
+    nuclei/httpx/naabu use ``-source-ip``/``-interface``; rustscan forwards
+    nmap ``-S``/``-e`` after ``--``. Skip pipes and explicit source-bind flags.
+    Public targets are unchanged.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -563,6 +590,11 @@ def lan_bound_scan_argv(command: str) -> list[str] | None:
     exe = shutil.which(name) or shutil.which(f"{name}.exe")
     if not exe:
         return None
+    if name == "rustscan":
+        rest = list(parts[1:])
+        if "--" not in rest:
+            rest.append("--")
+        return [exe, *rest, *flags]
     return [exe, *flags, *parts[1:]]
 
 
