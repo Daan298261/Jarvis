@@ -272,12 +272,14 @@ def _ffmpeg_urls_from_argv(parts: list[str]) -> list[str]:
 
 
 def lan_bound_ffmpeg_argv(command: str) -> list[str] | None:
-    """ffmpeg/ffprobe/ffplay/mpv of an on-link RFC1918 RTSP/RTMP/UDP camera, sourced from that NIC.
+    """ffmpeg/ffprobe/ffplay/mpv/vlc of an on-link RFC1918 RTSP/RTMP/UDP camera, sourced from that NIC.
 
     HTTP_PROXY does not cover RTSP. ``-local_addr`` (TCP) and ``-localaddr`` (UDP)
     pin libavformat so a VPN default route cannot steal the camera. mpv forwards
-    the same via ``--stream-lavf-o``. HTTP/HTTPS NAS streams use the loopback LAN
-    proxy (``_LAN_HTTP_TOOL_STEMS``). Skip pipes, existing binds, and public hosts.
+    the same via ``--stream-lavf-o``. vlc/cvlc force ``--demux=avformat`` with
+    ``--avformat-options=local_addr=`` (live555 has no source bind). HTTP/HTTPS
+    NAS streams use the loopback LAN proxy (``_LAN_HTTP_TOOL_STEMS``). Skip pipes,
+    existing binds, and public hosts.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -289,13 +291,18 @@ def lan_bound_ffmpeg_argv(command: str) -> list[str] | None:
     if not parts:
         return None
     name = _tool_basename(parts[0])
-    if name not in _FFMPEG_NAMES and name != "mpv":
+    if name not in _FFMPEG_NAMES and name not in {"mpv", "vlc", "cvlc"}:
         return None
     flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
     if flags & _FFMPEG_BIND_FLAGS:
         return None
     if name == "mpv" and any(
         str(part).startswith("--stream-lavf-o") or str(part).startswith("--demuxer-lavf-o")
+        for part in parts[1:]
+    ):
+        return None
+    if name in {"vlc", "cvlc"} and any(
+        str(part).startswith("--avformat-options") or str(part).startswith("--demux=")
         for part in parts[1:]
     ):
         return None
@@ -328,6 +335,14 @@ def lan_bound_ffmpeg_argv(command: str) -> list[str] | None:
         if need_udp:
             lavf.append(f"localaddr={bind}")
         extra.append("--stream-lavf-o=" + ",".join(lavf))
+    elif name in {"vlc", "cvlc"}:
+        extra.append("--demux=avformat")
+        opts: list[str] = []
+        if need_tcp:
+            opts.append(f"local_addr={bind}")
+        if need_udp:
+            opts.append(f"localaddr={bind}")
+        extra.append("--avformat-options=" + ",".join(opts))
     else:
         if need_tcp:
             extra.extend(["-local_addr", bind])

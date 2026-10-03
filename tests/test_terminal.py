@@ -879,6 +879,9 @@ def test_lan_ffmpeg_rtsp_binds_home_nic_not_vpn(monkeypatch):
             "ffplay.exe",
             "mpv",
             "mpv.exe",
+            "vlc",
+            "vlc.exe",
+            "cvlc",
         }
         else None,
     )
@@ -906,18 +909,33 @@ def test_lan_ffmpeg_rtsp_binds_home_nic_not_vpn(monkeypatch):
     assert player is not None
     assert player[0] == "/usr/bin/mpv"
     assert player[1] == "--stream-lavf-o=local_addr=192.168.1.12"
+    viewer = lan_bound_ffmpeg_argv("vlc rtsp://192.168.1.20:554/Streaming/Channels/101")
+    assert viewer is not None
+    assert viewer[0] == "/usr/bin/vlc"
+    assert viewer[1:3] == ["--demux=avformat", "--avformat-options=local_addr=192.168.1.12"]
+    headless = lan_bound_ffmpeg_argv("cvlc rtsp://192.168.1.20/live")
+    assert headless is not None
+    assert headless[0] == "/usr/bin/cvlc"
+    assert headless[1] == "--demux=avformat"
+    assert "--avformat-options=local_addr=192.168.1.12" in headless
     assert lan_bound_ffmpeg_argv("ffmpeg -i http://192.168.1.50:8096/video.mp4") is None
     assert lan_bound_ffmpeg_argv("ffmpeg -i rtsp://8.8.8.8/stream") is None
     assert lan_bound_ffmpeg_argv(
         "ffmpeg -local_addr 10.8.0.2 -i rtsp://192.168.1.20/stream"
     ) is None
     assert lan_bound_ffmpeg_argv("mpv --stream-lavf-o=local_addr=10.8.0.2 rtsp://192.168.1.20/s") is None
+    assert lan_bound_ffmpeg_argv(
+        "vlc --avformat-options=local_addr=10.8.0.2 rtsp://192.168.1.20/s"
+    ) is None
     assert lan_bound_ffmpeg_argv("ffmpeg -i rtsp://192.168.1.20/stream | cat") is None
     bash = _command_args("ffmpeg -i rtsp://192.168.1.20/stream -c copy cam.mp4", "bash")
     assert bash[0] == "/usr/bin/ffmpeg"
     assert bash[1:3] == ["-local_addr", "192.168.1.12"]
     env = _child_env(bash)
     assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    vlc_bash = _command_args("vlc rtsp://192.168.1.20/stream", "bash")
+    assert vlc_bash[0] == "/usr/bin/vlc"
+    assert vlc_bash[1:3] == ["--demux=avformat", "--avformat-options=local_addr=192.168.1.12"]
 
 
 def test_lan_smbclient_binds_home_nic_not_vpn(monkeypatch):
