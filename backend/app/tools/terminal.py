@@ -4102,7 +4102,8 @@ def rewrite_dockerfile_lan_add(
     (including ``&&`` / ``;`` chains and ``sh -c`` / ``bash -lc``) of those
     URLs into ``COPY --from=jarvisaddN``. Dest-less ``urlopen`` / ``requests.get``
     / ``httpx.get`` / ``aiohttp`` GET uses the URL filename (same as dest-less
-    ``urlretrieve``).
+    ``urlretrieve``). Mixed fetch APIs of the **same** on-link URL still rewrite;
+    different URLs or a non-GET ``aiohttp.request`` stay unre-written.
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
     text and an empty list when there is no on-link RFC1918 fetch.
@@ -4231,59 +4232,83 @@ def _expand_lan_url_dest(
     return expanded, _add_url_filename(expanded)
 
 
+def _span_covered(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
+    return any(left <= start and end <= right for left, right in spans)
+
+
+def _python_c_fetch_pairs(script: str) -> list[tuple[str, str]] | None:
+    """Literal ``(url, dest)`` fetches in ``python -c``. Empty dest means dest-less.
+
+    Skip when ``urlopen(`` cannot be parsed, or ``aiohttp.request`` is not GET.
+    """
+    for match in re.finditer(r"\.request\(\s*(?P<q>['\"])(?P<method>[^'\"]+)(?P=q)", script):
+        if str(match.group("method") or "").upper() != "GET":
+            return None
+    pairs: list[tuple[str, str]] = []
+    urlopen_spans: list[tuple[int, int]] = []
+    request_spans: list[tuple[int, int]] = []
+    for found in _URLRETRIEVE_CALL.finditer(script):
+        pairs.append((found.group("url"), found.group("dest") or ""))
+    for found in (*_URLOPEN_WRITE.finditer(script), *_PATH_WRITE_BYTES.finditer(script)):
+        pairs.append((found.group("url"), found.group("dest") or ""))
+        inner = _URLOPEN_CALL.search(found.group(0) or "")
+        if inner is not None:
+            urlopen_spans.append((found.start() + inner.start(), found.start() + inner.end()))
+        else:
+            urlopen_spans.append((found.start(), found.end()))
+    for found in (*_REQUESTS_WRITE.finditer(script), *_REQUESTS_PATH_WRITE.finditer(script)):
+        pairs.append((found.group("url"), found.group("dest") or ""))
+        inner = _REQUESTS_GET.search(found.group(0) or "")
+        if inner is not None:
+            request_spans.append((found.start() + inner.start(), found.start() + inner.end()))
+        else:
+            request_spans.append((found.start(), found.end()))
+    for found in _URLOPEN_CALL.finditer(script):
+        if _span_covered(found.start(), found.end(), urlopen_spans):
+            continue
+        pairs.append((found.group("url"), ""))
+        urlopen_spans.append((found.start(), found.end()))
+    for found in _REQUESTS_GET.finditer(script):
+        if _span_covered(found.start(), found.end(), request_spans):
+            continue
+        pairs.append((found.group("url"), ""))
+        request_spans.append((found.start(), found.end()))
+    for found in _AIOHTTP_GET.finditer(script):
+        pairs.append((found.group("url"), ""))
+    if len(list(_PYTHON_URLOPEN.finditer(script))) != len(urlopen_spans):
+        return None
+    return pairs
+
+
 def _python_urlretrieve_url_dest(
     argv: list[str], declared: dict[str, str]
 ) -> tuple[str, str] | None:
-    """Return ``(url, dest)`` for ``python -c`` LAN ``urlretrieve``, ``urlopen``,
-    ``requests.get``, ``httpx.get``, or dest-less ``aiohttp`` GET. Skip mixed
-    fetch APIs.
+    """Return ``(url, dest)`` for ``python -c`` LAN fetches, including mixed APIs
+    of the same on-link URL. Skip public hosts, conflicting dests, and mixed URLs.
     """
     script = _python_c_script(argv)
     if script is None:
         return None
-    retrieves = list(_URLRETRIEVE_CALL.finditer(script))
-    writes = [*_URLOPEN_WRITE.finditer(script), *_PATH_WRITE_BYTES.finditer(script)]
-    urlopens = list(_PYTHON_URLOPEN.finditer(script))
-    request_gets = list(_REQUESTS_GET.finditer(script))
-    request_writes = [*_REQUESTS_WRITE.finditer(script), *_REQUESTS_PATH_WRITE.finditer(script)]
-    has_aiohttp = bool(re.search(r"\baiohttp\b", script))
-    has_stdlib = bool(retrieves or writes or urlopens)
-    has_requests = bool(request_gets or request_writes)
-    if has_aiohttp and (has_stdlib or has_requests):
+    pairs = _python_c_fetch_pairs(script)
+    if not pairs:
         return None
-    if has_aiohttp:
-        aiohttp_gets = list(_AIOHTTP_GET.finditer(script))
-        if len(aiohttp_gets) != 1:
-            return None
-        return _expand_lan_url_dest(aiohttp_gets[0].group("url"), "", declared)
-    if request_gets or request_writes:
-        if retrieves or writes or urlopens:
-            return None
-        if len(request_writes) == 1 and len(request_gets) == 1:
-            found = request_writes[0]
-            dest = (found.group("dest") or "").strip()
-            if not dest:
-                return None
-            return _expand_lan_url_dest(found.group("url"), dest, declared)
-        if len(request_gets) == 1 and not request_writes:
-            found = request_gets[0]
-            return _expand_lan_url_dest(found.group("url"), "", declared)
-        return None
-    if len(retrieves) == 1 and not writes and not urlopens:
-        found = retrieves[0]
-        return _expand_lan_url_dest(found.group("url"), found.group("dest") or "", declared)
-    if len(writes) == 1 and not retrieves and len(urlopens) == 1:
-        found = writes[0]
-        dest = (found.group("dest") or "").strip()
-        if not dest:
-            return None
-        return _expand_lan_url_dest(found.group("url"), dest, declared)
-    if len(urlopens) == 1 and not retrieves and not writes:
-        found = _URLOPEN_CALL.search(script)
+    expanded_urls: list[str] = []
+    explicit_dests: list[str] = []
+    for raw_url, raw_dest in pairs:
+        found = _expand_lan_url_dest(raw_url, raw_dest, declared)
         if found is None:
             return None
-        return _expand_lan_url_dest(found.group("url"), "", declared)
-    return None
+        expanded_urls.append(found[0])
+        if str(raw_dest or "").strip():
+            explicit_dests.append(found[1])
+    if len(set(expanded_urls)) != 1:
+        return None
+    url = expanded_urls[0]
+    if not explicit_dests:
+        return url, _add_url_filename(url)
+    if len(set(explicit_dests)) != 1:
+        return None
+    return url, explicit_dests[0]
 
 
 def _run_fetch_url_dest(
