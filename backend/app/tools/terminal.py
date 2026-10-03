@@ -1512,6 +1512,95 @@ def compose_service_context_images(path: Path) -> dict[str, list[str]]:
     return result
 
 
+_CACHE_SKIP_TYPES = frozenset({"local", "gha", "s3", "azblob", "inline", "gcs", "oss"})
+
+
+def _image_from_cache_source(raw: str, env: dict[str, str] | None = None) -> str | None:
+    """Image ref in ``--cache-from`` / compose ``cache_from`` / bake cache-from."""
+    text = str(raw or "").strip().strip("'\"")
+    if not text:
+        return None
+    if "$" in text:
+        text = expand_image_vars(text, env if env is not None else os.environ) or ""
+        text = text.strip().strip("'\"")
+        if not text:
+            return None
+    lowered = text.lower()
+    if "type=" in lowered and ("," in text or lowered.startswith("type=")):
+        fields: dict[str, str] = {}
+        for part in text.split(","):
+            key, sep, val = part.partition("=")
+            if sep:
+                fields[key.strip().lower()] = val.strip().strip("'\"")
+        if fields.get("type", "").lower() in _CACHE_SKIP_TYPES:
+            return None
+        ref = fields.get("ref") or fields.get("image") or ""
+        if not ref:
+            return None
+        named = _image_from_named_context(ref, env)
+        if named:
+            return named
+        if "://" in ref:
+            return None
+        return ref
+    named = _image_from_named_context(text, env)
+    if named:
+        return named
+    if "://" in text:
+        return None
+    return text
+
+
+def _parse_cache_images(raw: object, env: dict[str, str] | None = None) -> list[str]:
+    items: list[object] = []
+    if isinstance(raw, list):
+        items = list(raw)
+    elif raw not in (None, ""):
+        items = [raw]
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if isinstance(item, dict):
+            kind = str(item.get("type") or "").strip().lower()
+            if kind in _CACHE_SKIP_TYPES:
+                continue
+            ref = str(item.get("ref") or item.get("image") or "").strip()
+            image = _image_from_cache_source(ref, env) if ref else None
+        else:
+            image = _image_from_cache_source(str(item), env)
+        if not image or image in seen:
+            continue
+        seen.add(image)
+        out.append(image)
+    return out
+
+
+def compose_service_cache_images(path: Path) -> dict[str, list[str]]:
+    """Map compose service name → ``build.cache_from`` image refs."""
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return {}
+    services = payload.get("services") if isinstance(payload, dict) else None
+    if not isinstance(services, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for name, spec in services.items():
+        if not isinstance(spec, dict):
+            continue
+        build = spec.get("build")
+        if not isinstance(build, dict):
+            continue
+        images = _parse_cache_images(build.get("cache_from"))
+        if images:
+            result[str(name)] = images
+    return result
+
+
 def compose_service_build_args(path: Path) -> dict[str, dict[str, str]]:
     """Map compose service name → ``build.args`` used as Dockerfile ARG values."""
     try:
@@ -1905,6 +1994,8 @@ _COMPOSE_BUILD_VALUE_FLAGS = frozenset(
         "--build-arg",
         "--build-context",
         "--builder",
+        "--cache-from",
+        "--cache-to",
         "--memory",
         "-m",
         "--ssh",
@@ -2058,6 +2149,11 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
             for image in extras:
                 if image not in file_contexts[name]:
                     file_contexts[name].append(image)
+        for name, extras in compose_service_cache_images(path).items():
+            file_contexts.setdefault(name, [])
+            for image in extras:
+                if image not in file_contexts[name]:
+                    file_contexts[name].append(image)
     if not dockerfiles:
         return None
     if services and not with_deps:
@@ -2085,7 +2181,7 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
                 continue
             seen.add(image)
             lan.append(image)
-    for image in _docker_build_context_images(parts):
+    for image in (*_docker_build_context_images(parts), *_docker_build_cache_images(parts)):
         if image in seen:
             continue
         if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
@@ -2299,6 +2395,11 @@ def _compose_lan_copy_images(
             for name, args in compose_service_build_args(path).items():
                 file_args.setdefault(name, {}).update(args)
             for name, extras in compose_service_context_images(path).items():
+                file_contexts.setdefault(name, [])
+                for image in extras:
+                    if image not in file_contexts[name]:
+                        file_contexts[name].append(image)
+            for name, extras in compose_service_cache_images(path).items():
                 file_contexts.setdefault(name, [])
                 for image in extras:
                     if image not in file_contexts[name]:
@@ -2558,6 +2659,8 @@ _DOCKERFILE_COPY_FROM = re.compile(
     r"^\s*(?:COPY|ADD)\b(?:\s+\S+)*?\s--from=(\S+)",
     re.I,
 )
+_DOCKERFILE_RUN = re.compile(r"^\s*RUN\b", re.I)
+_DOCKERFILE_MOUNT = re.compile(r"--mount=(\S+)", re.I)
 _DOCKER_BUILD_VALUE_FLAGS = frozenset(
     {
         "-f",
@@ -2600,7 +2703,7 @@ _DOCKER_BUILD_VALUE_FLAGS = frozenset(
 
 
 def dockerfile_from_images(path: Path, build_args: dict[str, str] | None = None) -> list[str]:
-    """Image refs in Dockerfile ``FROM`` / ``COPY --from=`` lines, resolving ARG defaults.
+    """Image refs in Dockerfile ``FROM`` / ``COPY --from=`` / ``RUN --mount=from=``.
 
     Skip scratch and interpolations that still have no value after ARG /
     ``${VAR:-default}`` / ``--build-arg`` substitution.
@@ -2624,16 +2727,27 @@ def dockerfile_from_images(path: Path, build_args: dict[str, str] | None = None)
                 continue
             declared[name] = default.strip().strip("'\"")
             continue
+        candidates: list[str] = []
         match = _DOCKERFILE_FROM.match(line) or _DOCKERFILE_COPY_FROM.search(line)
-        if not match:
-            continue
-        image = expand_image_vars(match.group(1).strip().strip("'\""), declared)
-        if not image or image.lower() == "scratch":
-            continue
-        if image in seen:
-            continue
-        seen.add(image)
-        images.append(image)
+        if match:
+            candidates.append(match.group(1).strip().strip("'\""))
+        if _DOCKERFILE_RUN.match(line):
+            for mount in _DOCKERFILE_MOUNT.finditer(line):
+                for part in mount.group(1).split(","):
+                    key, sep, val = part.partition("=")
+                    if not sep or key.strip().lower() != "from":
+                        continue
+                    text_val = val.strip().strip("'\"")
+                    if text_val:
+                        candidates.append(text_val)
+        for raw_image in candidates:
+            image = expand_image_vars(raw_image, declared)
+            if not image or image.lower() == "scratch":
+                continue
+            if image in seen:
+                continue
+            seen.add(image)
+            images.append(image)
     return images
 
 
@@ -2734,6 +2848,32 @@ def _docker_build_context_images(parts: list[str]) -> list[str]:
             continue
         _, _, rhs = raw.partition("=")
         image = _image_from_named_context(rhs)
+        if not image or image in seen:
+            continue
+        seen.add(image)
+        out.append(image)
+    return out
+
+
+def _docker_build_cache_images(parts: list[str]) -> list[str]:
+    """Image refs from ``--cache-from IMAGE`` / ``type=registry,ref=IMAGE``."""
+    out: list[str] = []
+    seen: set[str] = set()
+    index = 0
+    while index < len(parts):
+        text = str(parts[index] or "").strip()
+        index += 1
+        raw = ""
+        if text in {"--cache-from"}:
+            if index >= len(parts):
+                break
+            raw = str(parts[index] or "").strip().strip("'\"")
+            index += 1
+        elif text.startswith("--cache-from="):
+            raw = text.split("=", 1)[1].strip().strip("'\"")
+        else:
+            continue
+        image = _image_from_cache_source(raw)
         if not image or image in seen:
             continue
         seen.add(image)
@@ -2877,7 +3017,7 @@ def lan_bound_docker_build_from_parts(parts: list[str], cwd: str | None = None) 
         if _lan_bind_ip_for_host(docker_registry_host_from_image(image))
     ]
     seen = set(lan)
-    for image in _docker_build_context_images(parts):
+    for image in (*_docker_build_context_images(parts), *_docker_build_cache_images(parts)):
         if image in seen:
             continue
         if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
@@ -2992,6 +3132,13 @@ def _hcl_args(block: str) -> dict[str, str]:
     return _hcl_named_map(block, "args")
 
 
+def _hcl_quoted_list(block: str, key: str) -> list[str]:
+    match = re.search(rf"{re.escape(key)}\s*=\s*\[([^\]]*)\]", block, re.I)
+    if not match:
+        return []
+    return [item.group(1) for item in re.finditer(r"\"([^\"]*)\"", match.group(1)) if item.group(1)]
+
+
 def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile: str) -> Path | None:
     if "$" in context or "$" in dockerfile:
         return None
@@ -3034,6 +3181,8 @@ def bake_file_dockerfiles_and_tags(
         tags.extend(compose_service_images(path).values())
         for extras in compose_service_context_images(path).values():
             _add_extra(extras)
+        for extras in compose_service_cache_images(path).values():
+            _add_extra(extras)
         return dockerfiles, tags, extra
     try:
         text = path.read_text(encoding="utf-8")
@@ -3064,6 +3213,7 @@ def bake_file_dockerfiles_and_tags(
             if isinstance(raw_tags, list):
                 tags.extend(str(item).strip() for item in raw_tags if str(item).strip() and "$" not in str(item))
             _add_extra(_parse_named_context_images(spec.get("contexts")))
+            _add_extra(_parse_cache_images(spec.get("cache-from") or spec.get("cache_from")))
         return dockerfiles, tags, extra
     for block in _hcl_target_blocks(text):
         if "dockerfile-inline" in block:
@@ -3083,6 +3233,7 @@ def bake_file_dockerfiles_and_tags(
                 if item.strip().strip("'\"") and "$" not in item
             )
         _add_extra(_parse_named_context_images(_hcl_named_map(block, "contexts")))
+        _add_extra(_parse_cache_images(_hcl_quoted_list(block, "cache-from")))
     return dockerfiles, tags, extra
 
 

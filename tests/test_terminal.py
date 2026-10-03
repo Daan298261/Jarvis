@@ -1326,6 +1326,24 @@ def test_dockerfile_from_images_skips_scratch_and_args(tmp_path):
         "192.168.1.50:5000/custom:9",
         "runtime",
     ]
+    mounted = tmp_path / "Mount.Dockerfile"
+    mounted.write_text(
+        "FROM alpine:3.20\n"
+        "RUN --mount=type=bind,from=192.168.1.50:5000/sdk:1,source=/opt,target=/sdk true\n"
+        "RUN --mount=type=cache,id=go,from=${CACHE:-192.168.1.50:5000/gocache:1} go build\n"
+        "RUN echo hi\n",
+        encoding="utf-8",
+    )
+    assert dockerfile_from_images(mounted) == [
+        "alpine:3.20",
+        "192.168.1.50:5000/sdk:1",
+        "192.168.1.50:5000/gocache:1",
+    ]
+    assert dockerfile_from_images(mounted, {"CACHE": "192.168.1.50:5000/other-cache:2"}) == [
+        "alpine:3.20",
+        "192.168.1.50:5000/sdk:1",
+        "192.168.1.50:5000/other-cache:2",
+    ]
     arged = tmp_path / "Arg.Dockerfile"
     arged.write_text(
         "ARG BASE=192.168.1.50:5000/base:latest\n"
@@ -1431,6 +1449,28 @@ def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
     assert "192.168.1.50:5000/assets:1" in named
     assert lan_bound_docker_build_argv(
         f"docker build --build-context assets=docker-image://nginx:alpine {ctx}"
+    ) is None
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN --mount=type=bind,from=192.168.1.50:5000/sdk:1,target=/sdk true\n",
+        encoding="utf-8",
+    )
+    mounted = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert mounted is not None
+    assert "192.168.1.50:5000/sdk:1" in mounted
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    cached = lan_bound_docker_build_argv(
+        f"docker build --cache-from 192.168.1.50:5000/app:cache {ctx}"
+    )
+    assert cached is not None
+    assert "192.168.1.50:5000/app:cache" in cached
+    typed = lan_bound_docker_build_argv(
+        f"docker build --cache-from type=registry,ref=192.168.1.50:5000/app:typed {ctx}"
+    )
+    assert typed is not None
+    assert "192.168.1.50:5000/app:typed" in typed
+    assert lan_bound_docker_build_argv(
+        f"docker build --cache-from type=local,src=/tmp/cache {ctx}"
     ) is None
 
 
@@ -1644,6 +1684,26 @@ def test_lan_docker_bake_skopeo_loads_from_and_push(tmp_path, monkeypatch):
     )
     assert set_ctx is not None
     assert "192.168.1.50:5000/from-set-ctx:1" in set_ctx
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    hcl.write_text(
+        'target "app" {\n'
+        '  context = "./app"\n'
+        '  dockerfile = "Dockerfile"\n'
+        '  cache-from = ["type=registry,ref=192.168.1.50:5000/from-bake-cache:1"]\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    from_bake_cache = lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}")
+    assert from_bake_cache is not None
+    assert "192.168.1.50:5000/from-bake-cache:1" in from_bake_cache
+    json_bake.write_text(
+        '{"target":{"app":{"context":"./app","dockerfile":"Dockerfile",'
+        '"cache-from":[{"type":"registry","ref":"192.168.1.50:5000/from-json-cache:1"}]}}}',
+        encoding="utf-8",
+    )
+    from_json_cache = lan_bound_docker_bake_argv(f"docker buildx bake -f {json_bake}", cwd=str(tmp_path))
+    assert from_json_cache is not None
+    assert "192.168.1.50:5000/from-json-cache:1" in from_json_cache
 
 
 def test_compose_service_dockerfiles_resolves_context(tmp_path):
@@ -1878,6 +1938,33 @@ def test_lan_compose_build_skopeo_loads_from_before_build(tmp_path, monkeypatch)
     assert cli_ctx is not None
     assert "192.168.1.50:5000/from-cli-ctx:1" in cli_ctx
     assert "192.168.1.50:5000/from-compose-ctx:1" in cli_ctx
+    (app / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      cache_from:\n"
+        "        - 192.168.1.50:5000/from-compose-cache:1\n"
+        "  typed:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      cache_from:\n"
+        "        - type=registry,ref=192.168.1.50:5000/from-typed-cache:1\n",
+        encoding="utf-8",
+    )
+    from_cache = lan_bound_compose_build_argv(f"docker compose -f {stack} build app")
+    assert from_cache is not None
+    assert "192.168.1.50:5000/from-compose-cache:1" in from_cache
+    from_typed = lan_bound_compose_build_argv(f"docker compose -f {stack} build typed")
+    assert from_typed is not None
+    assert "192.168.1.50:5000/from-typed-cache:1" in from_typed
+    cli_cache = lan_bound_compose_build_argv(
+        f"docker compose -f {stack} build --cache-from 192.168.1.50:5000/from-cli-cache:1 app"
+    )
+    assert cli_cache is not None
+    assert "192.168.1.50:5000/from-cli-cache:1" in cli_cache
+    assert "192.168.1.50:5000/from-compose-cache:1" in cli_cache
 
 
 def test_lan_compose_up_skopeo_loads_images_and_from(tmp_path, monkeypatch):
@@ -1981,6 +2068,20 @@ def test_lan_compose_up_skopeo_loads_images_and_from(tmp_path, monkeypatch):
     rebuilt_ctx = lan_bound_compose_up_argv(f"docker compose -f {stack} up --build app")
     assert rebuilt_ctx is not None
     assert "192.168.1.50:5000/from-up-ctx:1" in rebuilt_ctx
+    assert lan_bound_compose_up_argv(f"docker compose -f {stack} up app") is None
+    (app / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      cache_from:\n"
+        "        - 192.168.1.50:5000/from-up-cache:1\n",
+        encoding="utf-8",
+    )
+    rebuilt_cache = lan_bound_compose_up_argv(f"docker compose -f {stack} up --build app")
+    assert rebuilt_cache is not None
+    assert "192.168.1.50:5000/from-up-cache:1" in rebuilt_cache
     assert lan_bound_compose_up_argv(f"docker compose -f {stack} up app") is None
 
 
