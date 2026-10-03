@@ -16,6 +16,21 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
+$startupMutex = New-Object System.Threading.Mutex($false, 'Local\JarvisStartup')
+$startupLockAcquired = $false
+try {
+    $startupLockAcquired = $startupMutex.WaitOne([TimeSpan]::FromMinutes(8))
+} catch [System.Threading.AbandonedMutexException] {
+    $startupLockAcquired = $true
+}
+if (-not $startupLockAcquired) { throw 'Another Jarvis startup is still in progress.' }
+
+function Release-StartupLock {
+    if ($script:startupLockAcquired) {
+        $script:startupMutex.ReleaseMutex()
+        $script:startupLockAcquired = $false
+    }
+}
 
 function Write-Step($message) { Write-Host "`n==> $message" -ForegroundColor Cyan }
 
@@ -54,22 +69,26 @@ function Test-LogonTaskRegistered {
 }
 
 function Start-ElevatedJarvisCopy {
-    if ($env:JARVIS_SKIP_ELEVATION_PROMPT -eq "1") { return }
+    if ($env:JARVIS_SKIP_ELEVATION_PROMPT -eq "1") { return $false }
+    # Task/prompt launches keep their own arguments and run in this process.
+    if ($Prompt -or $PromptFile -or $PrivateKey) { return $false }
     $script = Join-Path $Root "start-jarvis.ps1"
     $launchArgs = @(
         "-NoProfile"
         "-ExecutionPolicy"
         "Bypass"
         "-File"
-        $script
+        "`"$script`""
         "-RegisterLogonTask"
-        "-NoBrowser"
     )
+    if ($NoBrowser) { $launchArgs += "-NoBrowser" }
+    $launchArgs += @("-OpenPath", "`"$OpenPath`"")
     if ($Wait) { $launchArgs += "-Wait" }
     if ($LanAccess) { $launchArgs += "-LanAccess" }
     if ($Desktop) { $launchArgs += "-Desktop" }
     Write-Host "Windows will ask once so Jarvis can run with full control of this PC." -ForegroundColor Yellow
     Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList $launchArgs -WorkingDirectory $Root | Out-Null
+    return $true
 }
 
 function Test-CurrentProcessElevated {
@@ -156,7 +175,11 @@ if ($RegisterLogonTask) {
 $elevated = Test-CurrentProcessElevated
 if (-not $elevated -and -not $RegisterLogonTask) {
     try {
-        Start-ElevatedJarvisCopy
+        if (Start-ElevatedJarvisCopy) {
+            Write-Host "Jarvis startup handed to the elevated process."
+            Release-StartupLock
+            exit 0
+        }
     } catch {
         Write-Host "Jarvis will keep running with standard permissions until Windows grants administrator." -ForegroundColor Yellow
     }
@@ -270,10 +293,13 @@ if ($adoptExistingBackend) {
     if (-not (Test-Path -LiteralPath $forceScript)) {
         throw "force-stop-jarvis.ps1 not found at $forceScript (cannot clear hung listeners before bind)."
     }
-    Write-Host "Clearing hung or stale Jarvis processes before binding port 4780..."
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $forceScript -InstallRoot $Root -IncludeTray -MaxWaitSeconds 90
-    if ($LASTEXITCODE -ne 0) {
-        throw "force-stop-jarvis.ps1 failed with exit code $LASTEXITCODE; port 4780 is not clear for a new backend."
+    $portOccupied = @(Get-NetTCPConnection -LocalPort 4780 -State Listen -ErrorAction SilentlyContinue).Count -gt 0
+    if ($portOccupied) {
+        Write-Host "Port 4780 is occupied by an unhealthy Jarvis backend; clearing it..."
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $forceScript -InstallRoot $Root -IncludeTray -StartupCleanup -MaxWaitSeconds 90
+        if ($LASTEXITCODE -ne 0) {
+            throw "force-stop-jarvis.ps1 failed with exit code $LASTEXITCODE; port 4780 is not clear for a new backend."
+        }
     }
     $backend = Start-Process -FilePath $python -ArgumentList "-m","uvicorn","app.main:app","--host",$bindHost,"--port","4780","--app-dir","backend" -WorkingDirectory $Root -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Root "logs\backend.err.log")
     "$($backend.Id)" | Set-Content $pidFile
@@ -329,6 +355,7 @@ function Start-TrayHelper {
 }
 
 Start-TrayHelper
+Release-StartupLock
 
 if ($Wait -and ($Prompt -or $PromptFile)) {
     Write-Step "Waiting for launch task completion..."
@@ -378,6 +405,7 @@ elseif (-not $NoBrowser) {
 Write-Host "Stop with .\stop-jarvis.ps1 or use the system tray icon (Stop / Quit)."
 
 } catch {
+    Release-StartupLock
     Show-StartupFailure $_
     exit 1
 }

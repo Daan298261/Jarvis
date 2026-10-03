@@ -12,12 +12,12 @@ from pathlib import Path
 
 
 def _resolve_root() -> Path:
-    if getattr(sys, "frozen", False):
-        # one-folder: jarvis-backend.exe lives in sidecars/jarvis-backend/
-        return Path(sys.executable).resolve().parent.parent.parent
     env = os.environ.get("JARVIS_ROOT")
     if env:
         return Path(env)
+    if getattr(sys, "frozen", False):
+        # Inno layout: {app}/desktop/sidecars/jarvis-backend/jarvis-backend.exe
+        return Path(sys.executable).resolve().parents[3]
     return Path(__file__).resolve().parents[1]
 
 

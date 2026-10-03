@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import json
 import re
 import tomllib
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INSTALLER_DIR = REPO_ROOT / "installer" / "windows"
@@ -188,6 +189,53 @@ def test_jarvis_iss_wiring():
     assert "function DesktopShellInstalled" in text
 
 
+def test_release_installer_includes_launch_module_and_current_portal():
+    """1.5.0 excluded app.runtime and reused an old frontend/dist on upgrade."""
+    iss = _read(ISS)
+    assert 'Source: "..\\..\\backend\\app\\runtime\\*"; DestDir: "{app}\\backend\\app\\runtime"' in iss
+    assert 'Source: "..\\..\\frontend\\dist\\*"; DestDir: "{app}\\frontend\\dist"' in iss
+    assert (REPO_ROOT / "backend" / "app" / "runtime" / "elevation.py").is_file()
+    build = _read(BUILD_SCRIPT)
+    assert 'frontend\\dist\\index.html' in build
+    assert 'Portal asset missing:' in build
+
+
+def test_installer_retries_elevated_stop_and_blocks_failed_uninstall():
+    iss = _read(ISS)
+    assert "ShellExec('runas', 'powershell.exe'" in iss
+    assert "function InitializeUninstall: Boolean;" in iss
+    assert "Result := ForceStopJarvisUnder(ExpandConstant('{app}'));" in iss
+
+
+def test_startup_does_not_kill_its_launcher_before_backend_is_ready():
+    start = _read(REPO_ROOT / "start-jarvis.ps1")
+    stop = _read(INSTALLER_DIR / "force-stop-jarvis.ps1")
+    assert "Local\\JarvisStartup" in start
+    assert "if ($portOccupied)" in start
+    assert "-StartupCleanup" in start
+    assert "Release-StartupLock" in start
+    assert "if ($StartupCleanup -and ([string]$Proc.CommandLine) -match 'start-jarvis\\.ps1')" in stop
+
+
+def test_desktop_sidecar_resolves_installed_root(monkeypatch, tmp_path):
+    from app.config import repo_root
+    from jarvis_sidecar import _resolve_root
+
+    install_root = tmp_path / "Jarvis"
+    sidecar = install_root / "desktop" / "sidecars" / "jarvis-backend" / "jarvis-backend.exe"
+    monkeypatch.delenv("JARVIS_ROOT", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(sidecar))
+    assert _resolve_root() == install_root
+    monkeypatch.setenv("JARVIS_ROOT", str(install_root))
+    assert _resolve_root() == install_root
+    assert repo_root() == install_root
+
+    shell = _read(REPO_ROOT / "frontend" / "src-tauri" / "src" / "lib.rs")
+    assert 'root.join("desktop").join("sidecars").join("jarvis-backend")' in shell
+    assert shell.index('let prepared_python = root.join(".venv")') < shell.index("let candidates = [")
+
+
 def test_jarvis_iss_code_uses_supported_registry_apis_only():
     """Inno [Code] has RegWriteStringValue but not Win32-style RegCreateKey (iscc fails)."""
     text = _read(ISS)
@@ -306,6 +354,9 @@ def test_optional_tauri_shell_sources():
     sidecar_text = _read(sidecar).lower()
     assert "pyinstaller" in sidecar_text
     assert "onedir" in sidecar_text or "one-folder" in sidecar_text or "--onedir" in sidecar_text
+    assert "--hidden-import app.main" in sidecar_text
+    assert "--collect-submodules app" in sidecar_text
+    assert "--hidden-import aiosqlite" in sidecar_text
     conf = _read(tauri_conf)
     assert "ANZU" in conf or "Jarvis" in conf
     assert "nsis" in conf.lower()
