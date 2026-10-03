@@ -1006,6 +1006,40 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
 
 
+def resolve_skopeo() -> str | None:
+    """skopeo on PATH, or ``runtime/skopeo`` next to the install / extra drives."""
+    found = shutil.which("skopeo") or shutil.which("skopeo.exe")
+    if found:
+        return found
+    roots: list[Path] = []
+    try:
+        from ..config import extra_volume_named_runtime_dirs, extra_volume_roots, repo_root
+
+        roots.append(repo_root() / "runtime")
+        roots.extend(extra_volume_named_runtime_dirs("skopeo"))
+        for volume in extra_volume_roots():
+            roots.append(volume / "Jarvis" / "runtime")
+            roots.append(volume / "runtime")
+    except Exception:
+        pass
+    seen: set[str] = set()
+    for root in roots:
+        for candidate in (root, root / "skopeo.exe", root / "skopeo"):
+            try:
+                if not candidate.is_file():
+                    continue
+            except OSError:
+                continue
+            key = str(candidate).replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            name = candidate.name.lower()
+            if name in {"skopeo", "skopeo.exe"}:
+                return str(candidate)
+    return None
+
+
 def docker_registry_host_from_image(ref: str) -> str:
     """Registry host in a docker image ref (``192.168.1.50:5000/app:tag``).
 
@@ -1122,9 +1156,10 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     Dockerd fetches the registry itself and cannot source-bind the home NIC.
     ``skopeo copy`` honors HTTP_PROXY, so the loopback LAN proxy sources the
     registry from that NIC and loads the image into the local docker daemon.
-    Skip pipes, public Hub names, and missing skopeo. ``-a`` / ``--all-tags``
-    lists tags through skopeo and copies each. Optional ``-q`` / ``--quiet``
-    and ``--platform os/arch[/variant]`` (including with ``--all-tags``).
+    Skip pipes, public Hub names, and missing docker. ``-a`` / ``--all-tags``
+    lists tags through skopeo (or the registry API) and copies each. Optional
+    ``-q`` / ``--quiet`` and ``--platform os/arch[/variant]``. When skopeo is
+    missing, the helper uses the OCI API plus ``docker load`` on the LAN proxy.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1143,19 +1178,21 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     overrides = _skopeo_platform_flags(platform)
     if overrides is None:
         return None
+    exe = resolve_skopeo()
     if all_tags:
         return skopeo_copy_lan_images_argv(
             [_docker_repo_name(image)], quiet=quiet, all_tags=True, platform_flags=overrides
         )
-    exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
-    if not exe:
-        return None
-    tagged = _docker_image_with_tag(image)
-    argv = [exe, "copy", *overrides]
-    if quiet:
-        argv.append("--quiet")
-    argv.extend(["--src-tls-verify=false", f"docker://{tagged}", f"docker-daemon:{tagged}"])
-    return argv
+    if exe:
+        tagged = _docker_image_with_tag(image)
+        argv = [exe, "copy", *overrides]
+        if quiet:
+            argv.append("--quiet")
+        argv.extend(["--src-tls-verify=false", f"docker://{tagged}", f"docker-daemon:{tagged}"])
+        return argv
+    return skopeo_copy_lan_images_argv(
+        [image], quiet=quiet, platform_flags=overrides
+    )
 
 
 def lan_bound_docker_push_argv(command: str) -> list[str] | None:
@@ -1164,8 +1201,9 @@ def lan_bound_docker_push_argv(command: str) -> list[str] | None:
     Dockerd uploads the registry itself and cannot source-bind the home NIC.
     ``skopeo copy`` honors HTTP_PROXY, so the loopback LAN proxy sources the
     daemon image from this PC and pushes to the NAS. Skip pipes, public Hub
-    names, and missing skopeo. ``-a`` / ``--all-tags`` lists local daemon tags
-    and uploads each.
+    names, and missing docker. ``-a`` / ``--all-tags`` lists local daemon tags
+    and uploads each. When skopeo is missing, the helper uses ``docker save``
+    plus the OCI API on the LAN proxy.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1188,15 +1226,17 @@ def lan_bound_docker_push_argv(command: str) -> list[str] | None:
         return skopeo_copy_lan_images_argv(
             [_docker_repo_name(image)], quiet=quiet, push=True, all_tags=True, platform_flags=overrides
         )
-    exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
-    if not exe:
-        return None
-    tagged = _docker_image_with_tag(image)
-    argv = [exe, "copy", *overrides]
-    if quiet:
-        argv.append("--quiet")
-    argv.extend(["--dest-tls-verify=false", f"docker-daemon:{tagged}", f"docker://{tagged}"])
-    return argv
+    exe = resolve_skopeo()
+    if exe:
+        tagged = _docker_image_with_tag(image)
+        argv = [exe, "copy", *overrides]
+        if quiet:
+            argv.append("--quiet")
+        argv.extend(["--dest-tls-verify=false", f"docker-daemon:{tagged}", f"docker://{tagged}"])
+        return argv
+    return skopeo_copy_lan_images_argv(
+        [image], quiet=quiet, push=True, platform_flags=overrides
+    )
 
 
 _DOCKER_LOGIN_VALUE_FLAGS = frozenset({"-u", "--username", "-p", "--password"})
@@ -1287,7 +1327,7 @@ def lan_bound_docker_login_argv(command: str) -> list[str] | None:
     host = bindable_lan_host(registry)
     if not _lan_bind_ip_for_host(host):
         return None
-    exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
+    exe = resolve_skopeo()
     if not exe:
         return None
     authfile = Path(_docker_config_authfile())
@@ -1842,7 +1882,8 @@ def skopeo_copy_lan_images_argv(
     fetches: list[tuple[str, str]] | None = None,
     cleanup: str | None = None,
 ) -> list[str] | None:
-    exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
+    exe = resolve_skopeo()
+    docker = shutil.which("docker") or shutil.which("docker.exe")
     tagged = (
         [_docker_repo_name(image) for image in images]
         if all_tags
@@ -1854,11 +1895,12 @@ def skopeo_copy_lan_images_argv(
     overrides = list(platform_flags or [])
     fetch_pairs = [(str(url), str(path)) for url, path in (fetches or []) if url and path]
     needs_copy = bool(tagged or after)
-    if needs_copy and not exe:
+    python_copy = needs_copy and not exe
+    if python_copy and not docker:
         return None
     if not needs_copy and not (fetch_pairs and follow_cmd):
         return None
-    if not fetch_pairs and len(tagged) == 1 and not follow_cmd and not after and not then_cmd and not all_tags:
+    if not python_copy and not fetch_pairs and len(tagged) == 1 and not follow_cmd and not after and not then_cmd and not all_tags:
         argv = [exe, "copy", *overrides]
         if quiet:
             argv.append("--quiet")
@@ -1867,7 +1909,7 @@ def skopeo_copy_lan_images_argv(
         else:
             argv.extend(["--src-tls-verify=false", f"docker://{tagged[0]}", f"docker-daemon:{tagged[0]}"])
         return argv
-    if not fetch_pairs and len(after) == 1 and not tagged and not follow_cmd and not then_cmd and not overrides:
+    if not python_copy and not fetch_pairs and len(after) == 1 and not tagged and not follow_cmd and not then_cmd and not overrides:
         argv = [exe, "copy"]
         if quiet:
             argv.append("--quiet")
@@ -1880,6 +1922,8 @@ def skopeo_copy_lan_images_argv(
         argv.append("--quiet")
     if push:
         argv.append("--push")
+    if python_copy:
+        argv.append("--python-copy")
     if all_tags:
         argv.append("--all-tags")
     argv.extend(overrides)
@@ -1890,7 +1934,10 @@ def skopeo_copy_lan_images_argv(
     for url, path in fetch_pairs:
         argv.extend(["--fetch", f"{url}={path}"])
     if needs_copy:
-        argv.extend([exe, *tagged])
+        if python_copy:
+            argv.extend(tagged)
+        else:
+            argv.extend([exe, *tagged])
     if follow_cmd or then_cmd:
         argv.append("--")
         argv.extend(follow_cmd)

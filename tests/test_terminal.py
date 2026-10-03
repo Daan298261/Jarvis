@@ -38,6 +38,7 @@ from app.tools.terminal import (
     lan_bound_snmp_argv,
     lan_bound_ssh_argv,
     nfs_host_from_token,
+    resolve_skopeo,
     python_direct_argv,
     rclone_host_from_token,
     rsync_host_from_token,
@@ -991,6 +992,29 @@ def test_lan_docker_login_rewrites_to_skopeo(tmp_path, monkeypatch):
     monkeypatch.setattr("app.tools.terminal.shutil.which", lambda name: None)
     assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app") is None
     assert container_direct_argv("podman pull 192.168.1.50:5000/app") is None
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"docker", "docker.exe"} else None,
+    )
+    fallback = lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app")
+    assert fallback is not None
+    assert fallback[1].endswith("lan_skopeo_load.py")
+    assert "--python-copy" in fallback
+    assert "192.168.1.50:5000/app:latest" in fallback
+    pushed = lan_bound_docker_push_argv("docker push 192.168.1.50:5000/app:v1")
+    assert pushed is not None
+    assert "--python-copy" in pushed
+    assert "--push" in pushed
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    skopeo = runtime / "skopeo"
+    skopeo.write_text("", encoding="utf-8")
+    skopeo.chmod(0o755)
+    monkeypatch.setattr("app.tools.terminal.shutil.which", lambda name: None)
+    monkeypatch.setattr("app.config.repo_root", lambda: tmp_path)
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [])
+    monkeypatch.setattr("app.config.extra_volume_named_runtime_dirs", lambda name: [])
+    assert resolve_skopeo() == str(skopeo)
 
 
 def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
