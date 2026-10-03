@@ -55,6 +55,10 @@ def lan_http_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     env["HTTPS_PROXY"] = origin
     env["http_proxy"] = origin
     env["https_proxy"] = origin
+    env["FTP_PROXY"] = origin
+    env["ftp_proxy"] = origin
+    env["ALL_PROXY"] = origin
+    env["all_proxy"] = origin
     return env
 
 

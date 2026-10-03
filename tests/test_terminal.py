@@ -12,6 +12,8 @@ from app.tools.terminal import (
     expand_image_vars,
     git_direct_argv,
     lan_bound_cifs_argv,
+    lan_bound_curlftpfs_argv,
+    lan_bound_davfs_argv,
     compose_service_depends,
     compose_service_dockerfiles,
     compose_service_images,
@@ -667,6 +669,41 @@ def test_lan_nfs_mount_binds_home_nic_not_vpn(monkeypatch):
     assert bash[1:3] == ["-o", "clientaddr=192.168.1.12"]
 
 
+def test_lan_davfs_and_curlftpfs_use_lan_http_proxy_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/sbin/{name}"
+        if name in {"mount", "mount.davfs", "curlftpfs", "curlftpfs.exe"}
+        else None,
+    )
+    dav = lan_bound_davfs_argv("mount -t davfs http://192.168.1.50/webdav /mnt/nas")
+    assert dav is not None
+    assert dav[0] == "/usr/sbin/mount"
+    assert dav[1:] == ["-t", "davfs", "http://192.168.1.50/webdav", "/mnt/nas"]
+    env = _child_env(dav)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert env["FTP_PROXY"] == env["HTTP_PROXY"]
+    assert env["ALL_PROXY"] == env["HTTP_PROXY"]
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+    helper = lan_bound_davfs_argv("mount.davfs https://192.168.1.1/dav /mnt/dav")
+    assert helper is not None
+    assert helper[0] == "/usr/sbin/mount.davfs"
+    assert lan_bound_davfs_argv("mount -t davfs https://example.com/dav /mnt") is None
+    assert lan_bound_davfs_argv("mount -t ext4 /dev/sdb1 /mnt") is None
+    assert lan_bound_davfs_argv("mount -t davfs http://192.168.1.50/webdav /mnt | cat") is None
+    ftpfs = lan_bound_curlftpfs_argv("curlftpfs ftp://me@192.168.1.50/share /mnt/ftp")
+    assert ftpfs is not None
+    assert ftpfs[0] == "/usr/sbin/curlftpfs"
+    assert ftpfs[-2:] == ["ftp://me@192.168.1.50/share", "/mnt/ftp"]
+    assert _child_env(ftpfs)["ftp_proxy"] == _child_env(ftpfs)["HTTP_PROXY"]
+    assert lan_bound_curlftpfs_argv("curlftpfs ftp://me@8.8.8.8/share /mnt") is None
+    bash = _command_args("mount -t davfs http://192.168.1.50/webdav /mnt/nas", "bash")
+    assert bash[0] == "/usr/sbin/mount"
+    assert _child_env(bash)["HTTPS_PROXY"] == _child_env(bash)["HTTP_PROXY"]
+
+
 def test_rclone_host_from_token():
     assert rclone_host_from_token("sftp://me@192.168.1.50/share") == "192.168.1.50"
     assert rclone_host_from_token(":sftp,host=192.168.1.50,user=me:/home") == "192.168.1.50"
@@ -1136,6 +1173,7 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
             "http",
             "https",
             "httpie",
+            "cadaver",
         }
         else None,
     )
@@ -1193,6 +1231,10 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     https = container_direct_argv("https -d http://192.168.1.50/pkg.tgz")
     assert https is not None
     assert https[0] == "/usr/bin/https"
+    cadaver = container_direct_argv("cadaver http://192.168.1.50/webdav/")
+    assert cadaver is not None
+    assert cadaver[0] == "/usr/bin/cadaver"
+    assert _child_env(cadaver)["ALL_PROXY"] == _child_env(cadaver)["HTTP_PROXY"]
 
 
 def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):

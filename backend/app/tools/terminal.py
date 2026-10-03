@@ -974,6 +974,100 @@ def lan_bound_nfs_argv(command: str) -> list[str] | None:
     return _mount_append_option([exe, *parts[1:]], f"clientaddr={bind}")
 
 
+_DAVFS_FS_TYPES = frozenset({"davfs", "davfs2"})
+_DAVFS_HELPERS = frozenset({"mount.davfs", "mount.davfs2"})
+
+
+def _is_davfs_mount(parts: list[str]) -> bool:
+    name = _tool_basename(parts[0])
+    if name in _DAVFS_HELPERS:
+        return True
+    if name != "mount":
+        return False
+    index = 1
+    while index < len(parts):
+        token = str(parts[index])
+        if token in {"-t", "--types"} and index + 1 < len(parts):
+            return str(parts[index + 1]).lower() in _DAVFS_FS_TYPES
+        if token.startswith("-t") and len(token) > 2 and not token.startswith("--"):
+            return token[2:].lower() in _DAVFS_FS_TYPES
+        if token.startswith("--types="):
+            return token.split("=", 1)[1].lower() in _DAVFS_FS_TYPES
+        index += 1
+    return False
+
+
+def _davfs_host_from_argv(parts: list[str]) -> str:
+    for item in parts[1:]:
+        text = str(item or "").strip().strip("'\"")
+        if not text or text.startswith("-"):
+            continue
+        if "://" in text:
+            return (urlparse(text).hostname or "").strip()
+        lowered = text.lower().rstrip(".")
+        if lowered.endswith((".local", ".lan", ".home.arpa")):
+            return text.split("/", 1)[0]
+        host = text.split("/", 1)[0]
+        if _IPV4_OR_CIDR.fullmatch(host.split("%", 1)[0]):
+            return host.split("%", 1)[0].split(":", 1)[0]
+    return ""
+
+
+def lan_bound_davfs_argv(command: str) -> list[str] | None:
+    """mount.davfs of an on-link RFC1918 WebDAV NAS as argv so HTTP_PROXY binds the NIC.
+
+    davfs2/neon has no source-bind flag. The child env points HTTP_PROXY at the
+    loopback LAN proxy. Skip pipes and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or not _is_davfs_mount(parts):
+        return None
+    host = _davfs_host_from_argv(parts)
+    if not _lan_bind_ip_for_host(host):
+        return None
+    name = _tool_basename(parts[0])
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return [exe, *parts[1:]]
+
+
+def lan_bound_curlftpfs_argv(command: str) -> list[str] | None:
+    """curlftpfs of an on-link RFC1918 NAS as argv so FTP_PROXY binds the NIC.
+
+    curlftpfs/libcurl has no fuse source-bind. The child env points FTP_PROXY at
+    the loopback LAN proxy. Skip pipes and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or _tool_basename(parts[0]) != "curlftpfs":
+        return None
+    host = _davfs_host_from_argv(parts)
+    if not host:
+        target = _http_target_from_argv(parts)
+        if "://" in target:
+            host = (urlparse(target).hostname or "").strip()
+        else:
+            host = target.split("/", 1)[0]
+    if not _lan_bind_ip_for_host(host):
+        return None
+    exe = shutil.which("curlftpfs") or shutil.which("curlftpfs.exe")
+    if not exe:
+        return None
+    return [exe, *parts[1:]]
+
+
 _SMB_NAMES = frozenset({"smbclient", "smbget", "rpcclient", "smbtree"})
 
 
@@ -1098,6 +1192,7 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "mcli",
         "restic",
         "azcopy",
+        "cadaver",
     }
 )
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
@@ -5077,7 +5172,7 @@ def _child_env(args: list[str]) -> dict[str, str]:
     stem = _tool_basename(args[0]) if args else ""
     if stem == "git":
         return git_child_env()
-    if stem in _LAN_HTTP_TOOL_STEMS:
+    if stem in _LAN_HTTP_TOOL_STEMS or stem == "curlftpfs" or (args and _is_davfs_mount(args)):
         return lan_http_child_env()
     return direct_child_env()
 
@@ -5095,6 +5190,8 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_snmp_argv(command)
         or lan_bound_cifs_argv(command)
         or lan_bound_nfs_argv(command)
+        or lan_bound_davfs_argv(command)
+        or lan_bound_curlftpfs_argv(command)
         or lan_bound_smb_argv(command)
         or lan_bound_docker_pull_argv(command)
         or lan_bound_docker_push_argv(command)
