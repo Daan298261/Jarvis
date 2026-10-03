@@ -1469,12 +1469,14 @@ def skopeo_copy_lan_images_argv(
     quiet: bool = False,
     follow: list[str] | None = None,
     push: bool = False,
+    push_after: list[str] | None = None,
 ) -> list[str] | None:
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
-    if not exe or not images:
-        return None
     tagged = [_docker_image_with_tag(image) for image in images]
-    if len(tagged) == 1 and not follow:
+    after = [_docker_image_with_tag(image) for image in (push_after or [])]
+    if not exe or (not tagged and not after):
+        return None
+    if len(tagged) == 1 and not follow and not after:
         argv = [exe, "copy"]
         if quiet:
             argv.append("--quiet")
@@ -1483,6 +1485,12 @@ def skopeo_copy_lan_images_argv(
         else:
             argv.extend(["--src-tls-verify=false", f"docker://{tagged[0]}", f"docker-daemon:{tagged[0]}"])
         return argv
+    if len(after) == 1 and not tagged and not follow:
+        argv = [exe, "copy"]
+        if quiet:
+            argv.append("--quiet")
+        argv.extend(["--dest-tls-verify=false", f"docker-daemon:{after[0]}", f"docker://{after[0]}"])
+        return argv
     python = sys.executable or shutil.which("python3") or "python3"
     helper = str(Path(__file__).resolve().parent / "lan_skopeo_load.py")
     argv = [python, helper]
@@ -1490,6 +1498,8 @@ def skopeo_copy_lan_images_argv(
         argv.append("--quiet")
     if push:
         argv.append("--push")
+    for image in after:
+        argv.extend(["--push-after", image])
     argv.extend([exe, *tagged])
     if follow:
         argv.extend(["--", *follow])
@@ -2320,6 +2330,102 @@ def _docker_build_without_pull(parts: list[str]) -> list[str]:
     return out
 
 
+def _docker_build_tags(parts: list[str]) -> list[str]:
+    tags: list[str] = []
+    index = 0
+    while index < len(parts):
+        text = str(parts[index] or "").strip().strip("'\"")
+        index += 1
+        if text in {"-t", "--tag"}:
+            if index >= len(parts):
+                break
+            tags.append(str(parts[index] or "").strip().strip("'\""))
+            index += 1
+            continue
+        if text.startswith("--tag="):
+            tags.append(text.split("=", 1)[1].strip().strip("'\""))
+            continue
+        if text.startswith("--output=") or text.startswith("-o="):
+            value = text.split("=", 1)[1]
+        elif text in {"-o", "--output"}:
+            if index >= len(parts):
+                break
+            value = str(parts[index] or "")
+            index += 1
+        else:
+            continue
+        for piece in value.split(","):
+            piece = piece.strip()
+            if piece.startswith("name="):
+                tags.append(piece.split("=", 1)[1].strip())
+    return [tag for tag in tags if tag]
+
+
+def _docker_build_wants_push(parts: list[str]) -> bool:
+    skip = False
+    for item in parts:
+        if skip:
+            skip = False
+            text = str(item)
+            if "type=registry" in text or text.startswith("type=registry"):
+                return True
+            continue
+        text = str(item)
+        if text == "--push":
+            return True
+        if text.startswith("--output=") or text.startswith("-o="):
+            if "type=registry" in text:
+                return True
+            continue
+        if text in {"-o", "--output"}:
+            skip = True
+    return False
+
+
+def _docker_build_for_local_load(parts: list[str], *, buildx: bool) -> list[str]:
+    out: list[str] = []
+    pending_output = ""
+    has_load = False
+    inserted = False
+    for item in parts:
+        text = str(item)
+        if pending_output:
+            flag = pending_output
+            pending_output = ""
+            if "type=registry" in text:
+                continue
+            out.extend([flag, text])
+            continue
+        if text == "--push":
+            continue
+        if text.startswith("--output=") or text.startswith("-o="):
+            if "type=registry" in text:
+                continue
+            out.append(text)
+            continue
+        if text in {"-o", "--output"}:
+            pending_output = text
+            continue
+        if text in {"--pull", "--pull=true"} or text.startswith("--pull="):
+            continue
+        if text == "--load":
+            has_load = True
+        out.append(text)
+        if not inserted and text == "build":
+            out.append("--pull=false")
+            inserted = True
+    if buildx and not has_load:
+        rebuilt: list[str] = []
+        placed = False
+        for item in out:
+            rebuilt.append(item)
+            if not placed and item == "build":
+                rebuilt.append("--load")
+                placed = True
+        return rebuilt
+    return out
+
+
 def _docker_build_spec(parts: list[str], cwd: str | None) -> tuple[Path, bool] | None:
     if not parts or _tool_basename(parts[0]) != "docker":
         return None
@@ -2390,12 +2496,24 @@ def lan_bound_docker_build_from_parts(parts: list[str], cwd: str | None = None) 
         for image in dockerfile_from_images(dockerfile)
         if _lan_bind_ip_for_host(docker_registry_host_from_image(image))
     ]
-    if not lan:
+    tags = _docker_build_tags(parts)
+    lan_tags = [
+        tag
+        for tag in tags
+        if _lan_bind_ip_for_host(docker_registry_host_from_image(tag))
+    ]
+    wants_push = _docker_build_wants_push(parts)
+    if not lan and not (wants_push and lan_tags):
         return None
     docker = shutil.which("docker") or shutil.which("docker.exe")
     if not docker:
         return None
-    follow = _docker_build_without_pull([docker, *parts[1:]])
+    follow_src = [docker, *parts[1:]]
+    buildx = any(_tool_basename(item) == "buildx" for item in parts[1:3])
+    if wants_push and lan_tags:
+        follow = _docker_build_for_local_load(follow_src, buildx=buildx)
+        return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow, push_after=lan_tags)
+    follow = _docker_build_without_pull(follow_src)
     return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
 
 
@@ -2403,9 +2521,10 @@ def lan_bound_docker_build_argv(command: str, cwd: str | None = None) -> list[st
     """``docker build`` / ``docker buildx build`` of a Dockerfile whose ``FROM`` is on-link RFC1918.
 
     Dockerd / BuildKit cannot source-bind. Skopeo loads LAN bases through the
-    loopback proxy, then ``docker build --pull=false`` / ``docker buildx build
-    --pull=false`` uses the local daemon copies. Skip pipes, stdin context,
-    bake, interpolations, and missing skopeo.
+    loopback proxy, then ``docker build --pull=false`` / ``docker buildx build --pull=false``
+    uses the local daemon copies. ``--push`` of a LAN tag becomes ``--load``
+    plus skopeo upload. Skip pipes, stdin context, interpolations, and missing
+    skopeo.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -2415,6 +2534,283 @@ def lan_bound_docker_build_argv(command: str, cwd: str | None = None) -> list[st
     except ValueError:
         return None
     return lan_bound_docker_build_from_parts(parts, cwd=cwd)
+
+
+_BAKE_FILENAMES = (
+    "docker-bake.json",
+    "docker-bake.hcl",
+    "docker-bake.override.json",
+    "docker-bake.override.hcl",
+)
+_BAKE_VALUE_FLAGS = frozenset(
+    {
+        "-f",
+        "--file",
+        "--builder",
+        "--set",
+        "--progress",
+        "--metadata-file",
+        "--allow",
+        "--sbom",
+        "--provenance",
+        "--attest",
+    }
+)
+_HCL_TARGET = re.compile(r"target\s+\"[^\"]+\"\s*\{([^{}]*)\}", re.I)
+_HCL_DOCKERFILE = re.compile(r"dockerfile\s*=\s*\"([^\"]+)\"", re.I)
+_HCL_CONTEXT = re.compile(r"context\s*=\s*\"([^\"]+)\"", re.I)
+_HCL_TAGS = re.compile(r"tags\s*=\s*\[([^\]]*)\]", re.I)
+
+
+def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile: str) -> Path | None:
+    if "$" in context or "$" in dockerfile:
+        return None
+    ctx = Path(context or ".")
+    df_name = dockerfile or "Dockerfile"
+    df = Path(df_name)
+    roots = []
+    if ctx.is_absolute():
+        roots.append(ctx)
+    else:
+        roots.extend([file_dir / ctx, cwd / ctx])
+    for root in roots:
+        candidate = df if df.is_absolute() else root / df_name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[Path], list[str]]:
+    """Dockerfile paths and image tags declared in a bake JSON/HCL or compose file."""
+    suffix = path.suffix.lower()
+    dockerfiles: list[Path] = []
+    tags: list[str] = []
+    if suffix in {".yaml", ".yml"}:
+        files = compose_service_dockerfiles(path)
+        dockerfiles.extend(files.values())
+        tags.extend(compose_service_images(path).values())
+        return dockerfiles, tags
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return [], []
+    file_dir = path.parent
+    if suffix == ".json":
+        import json
+
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return [], []
+        targets = payload.get("target") if isinstance(payload, dict) else None
+        if not isinstance(targets, dict):
+            return [], []
+        for spec in targets.values():
+            if not isinstance(spec, dict):
+                continue
+            if spec.get("dockerfile-inline"):
+                continue
+            context = str(spec.get("context") or ".").strip()
+            dockerfile = str(spec.get("dockerfile") or "").strip()
+            resolved = _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
+            if resolved:
+                dockerfiles.append(resolved)
+            raw_tags = spec.get("tags")
+            if isinstance(raw_tags, list):
+                tags.extend(str(item).strip() for item in raw_tags if str(item).strip() and "$" not in str(item))
+        return dockerfiles, tags
+    for block in _HCL_TARGET.findall(text):
+        if "dockerfile-inline" in block:
+            continue
+        context_match = _HCL_CONTEXT.search(block)
+        df_match = _HCL_DOCKERFILE.search(block)
+        context = context_match.group(1).strip() if context_match else "."
+        dockerfile = df_match.group(1).strip() if df_match else ""
+        resolved = _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
+        if resolved:
+            dockerfiles.append(resolved)
+        tags_match = _HCL_TAGS.search(block)
+        if tags_match:
+            tags.extend(
+                item.strip().strip("'\"")
+                for item in tags_match.group(1).split(",")
+                if item.strip().strip("'\"") and "$" not in item
+            )
+    return dockerfiles, tags
+
+
+def _bake_set_tags(value: str) -> list[str]:
+    text = str(value or "").strip().strip("'\"")
+    if not text or "$" in text:
+        return []
+    lowered = text.lower()
+    if ".tags=" not in lowered and not lowered.startswith("tags="):
+        return []
+    _, _, rhs = text.partition("=")
+    return [
+        item.strip().strip("'\"")
+        for item in rhs.split(",")
+        if item.strip().strip("'\"") and "$" not in item
+    ]
+
+
+def _docker_bake_spec(parts: list[str], cwd: str | None) -> tuple[list[Path], bool, bool, list[str]] | None:
+    if not parts or _tool_basename(parts[0]) != "docker":
+        return None
+    rest = parts[1:]
+    if rest and _tool_basename(rest[0]) == "buildx":
+        rest = rest[1:]
+    if not rest or rest[0] != "bake":
+        return None
+    files: list[str] = []
+    extra_tags: list[str] = []
+    quiet = False
+    wants_push = False
+    index = 1
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text == "--print":
+            return None
+        if text in _DOCKER_PULL_QUIET:
+            quiet = True
+            continue
+        if text == "--push":
+            wants_push = True
+            continue
+        if text in {"--load", "--no-cache", "--pull"} or text.startswith("--pull="):
+            continue
+        if text.startswith("--file="):
+            files.append(text.split("=", 1)[1].strip())
+            continue
+        if text in {"-f", "--file"}:
+            if index >= len(rest):
+                return None
+            files.append(str(rest[index] or "").strip().strip("'\""))
+            index += 1
+            continue
+        if text.startswith("--set="):
+            extra_tags.extend(_bake_set_tags(text.split("=", 1)[1]))
+            continue
+        if text == "--set":
+            if index >= len(rest):
+                return None
+            extra_tags.extend(_bake_set_tags(str(rest[index] or "").strip().strip("'\"")))
+            index += 1
+            continue
+        if text.startswith("--") and "=" in text:
+            continue
+        if text in _BAKE_VALUE_FLAGS:
+            if index >= len(rest):
+                return None
+            index += 1
+            continue
+        if text.startswith("-"):
+            return None
+        continue
+    root = Path(cwd or os.getcwd())
+    paths: list[Path] = []
+    for item in files:
+        candidate = Path(item)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        paths.append(candidate)
+    if not paths:
+        paths = [root / name for name in (*_BAKE_FILENAMES, *_COMPOSE_FILENAMES) if (root / name).is_file()]
+    if not paths:
+        return None
+    for path in paths:
+        if not path.is_file():
+            return None
+    return paths, quiet, wants_push, extra_tags
+
+
+def _docker_bake_for_local_load(parts: list[str], *, drop_push: bool) -> list[str]:
+    out: list[str] = []
+    has_load = False
+    is_buildx = False
+    for item in parts:
+        text = str(item)
+        if _tool_basename(text) == "buildx":
+            is_buildx = True
+        if drop_push and text == "--push":
+            continue
+        if text in {"--pull", "--pull=true"} or text.startswith("--pull="):
+            continue
+        if text == "--load":
+            has_load = True
+        out.append(text)
+    if drop_push and is_buildx and not has_load:
+        rebuilt: list[str] = []
+        placed = False
+        for item in out:
+            rebuilt.append(item)
+            if not placed and item == "bake":
+                rebuilt.append("--load")
+                placed = True
+        return rebuilt
+    return out
+
+
+def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str] | None:
+    """``docker buildx bake`` of a target whose Dockerfile ``FROM`` or tag is on-link RFC1918.
+
+    Skopeo loads LAN bases, bake runs with ``--load`` instead of ``--push``, then
+    LAN tags upload through skopeo. Skip ``--print``, interpolations, pipes, and
+    missing skopeo.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    spec = _docker_bake_spec(parts, cwd)
+    if spec is None:
+        return None
+    paths, quiet, wants_push, extra_tags = spec
+    root = Path(cwd or os.getcwd())
+    dockerfiles: list[Path] = []
+    tags: list[str] = []
+    seen_df: set[str] = set()
+    for path in paths:
+        files, found_tags = bake_file_dockerfiles_and_tags(path, root)
+        for df in files:
+            key = str(df)
+            if key in seen_df:
+                continue
+            seen_df.add(key)
+            dockerfiles.append(df)
+        tags.extend(found_tags)
+    if extra_tags:
+        tags = list(extra_tags)
+    lan: list[str] = []
+    seen: set[str] = set()
+    for dockerfile in dockerfiles:
+        for image in dockerfile_from_images(dockerfile):
+            if image in seen:
+                continue
+            if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+                continue
+            seen.add(image)
+            lan.append(image)
+    lan_tags = [
+        tag
+        for tag in tags
+        if _lan_bind_ip_for_host(docker_registry_host_from_image(tag))
+    ]
+    if not lan and not (wants_push and lan_tags):
+        return None
+    follow = _compose_follow_argv(parts)
+    if not follow:
+        return None
+    follow = _docker_bake_for_local_load(follow, drop_push=bool(wants_push and lan_tags))
+    if wants_push and lan_tags:
+        return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow, push_after=lan_tags)
+    return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
 
 
 def container_direct_argv(command: str) -> list[str] | None:
@@ -2557,6 +2953,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_compose_up_argv(command, cwd=cwd)
         or lan_bound_compose_run_argv(command, cwd=cwd)
         or lan_bound_docker_build_argv(command, cwd=cwd)
+        or lan_bound_docker_bake_argv(command, cwd=cwd)
     )
     if bound:
         return bound

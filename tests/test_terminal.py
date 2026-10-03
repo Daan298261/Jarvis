@@ -19,6 +19,7 @@ from app.tools.terminal import (
     lan_bound_compose_run_argv,
     lan_bound_compose_up_argv,
     lan_bound_dns_argv,
+    lan_bound_docker_bake_argv,
     lan_bound_docker_build_argv,
     lan_bound_docker_login_argv,
     lan_bound_docker_pull_argv,
@@ -1129,6 +1130,51 @@ def test_lan_skopeo_load_runs_copies_then_follow(monkeypatch):
         "docker://192.168.1.50:5000/app:latest",
     ]
     assert "--dest-tls-verify=false" in seen[0]
+    seen.clear()
+    assert (
+        main(
+            [
+                "--push-after",
+                "192.168.1.50:5000/app:latest",
+                "/usr/bin/skopeo",
+                "192.168.1.50:5000/base:latest",
+                "--",
+                "/usr/bin/docker",
+                "buildx",
+                "build",
+                "--load",
+                ".",
+            ]
+        )
+        == 0
+    )
+    assert seen[0][-1] == "docker-daemon:192.168.1.50:5000/base:latest"
+    assert seen[1] == ["/usr/bin/docker", "buildx", "build", "--load", "."]
+    assert seen[2][-2:] == [
+        "docker-daemon:192.168.1.50:5000/app:latest",
+        "docker://192.168.1.50:5000/app:latest",
+    ]
+    seen.clear()
+    assert (
+        main(
+            [
+                "--push-after",
+                "192.168.1.50:5000/app:v1",
+                "/usr/bin/skopeo",
+                "--",
+                "/usr/bin/docker",
+                "buildx",
+                "bake",
+                "--load",
+            ]
+        )
+        == 0
+    )
+    assert seen[0] == ["/usr/bin/docker", "buildx", "bake", "--load"]
+    assert seen[1][-2:] == [
+        "docker-daemon:192.168.1.50:5000/app:v1",
+        "docker://192.168.1.50:5000/app:v1",
+    ]
 
 
 def test_dockerfile_from_images_skips_scratch_and_args(tmp_path):
@@ -1219,7 +1265,6 @@ def test_lan_docker_buildx_skopeo_loads_from_before_build(tmp_path, monkeypatch)
     assert "--pull" not in follow
     assert "--builder" in follow and "default" in follow
     assert str(ctx) in follow
-    assert lan_bound_docker_build_argv(f"docker buildx bake -f {ctx}/docker-bake.hcl") is None
     (ctx / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
     assert lan_bound_docker_build_argv(f"docker buildx build {ctx}") is None
     (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base\n", encoding="utf-8")
@@ -1230,6 +1275,125 @@ def test_lan_docker_buildx_skopeo_loads_from_before_build(tmp_path, monkeypatch)
     env = _child_env(bash)
     assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
     assert "10.8.0.1" not in env["HTTP_PROXY"]
+
+
+def test_lan_docker_buildx_push_skopeo_uploads_tag(tmp_path, monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\nCOPY . .\n", encoding="utf-8")
+    pushed = lan_bound_docker_build_argv(
+        f"docker buildx build --push -t 192.168.1.50:5000/app:latest {ctx}"
+    )
+    assert pushed is not None
+    assert pushed[1].endswith("lan_skopeo_load.py")
+    assert "--push-after" in pushed
+    assert "192.168.1.50:5000/app:latest" in pushed
+    follow = pushed[pushed.index("--") + 1 :]
+    assert "buildx" in follow
+    assert "--load" in follow
+    assert "--push" not in follow
+    assert "--pull=false" in follow
+    (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\nCOPY . .\n", encoding="utf-8")
+    both = lan_bound_docker_build_argv(
+        f"docker buildx build --push -t 192.168.1.50:5000/app:v1 {ctx}"
+    )
+    assert both is not None
+    assert "192.168.1.50:5000/base:latest" in both
+    assert "--push-after" in both
+    assert "192.168.1.50:5000/app:v1" in both
+    hub = lan_bound_docker_build_argv(f"docker buildx build --push -t docker.io/library/app:1 {ctx}")
+    assert hub is not None
+    follow = hub[hub.index("--") + 1 :]
+    assert "--push" in follow
+    assert "--push-after" not in hub
+    output = lan_bound_docker_build_argv(
+        f"docker buildx build -o type=registry,name=192.168.1.50:5000/app:out {ctx}"
+    )
+    assert output is not None
+    assert "--push-after" in output
+    assert "192.168.1.50:5000/app:out" in output
+    follow = output[output.index("--") + 1 :]
+    assert "--load" in follow
+    assert "-o" not in follow
+    assert "--output" not in follow
+    assert not any(item.startswith("--output=") or item.startswith("-o=") for item in follow)
+    assert "type=registry" not in follow
+
+
+def test_lan_docker_bake_skopeo_loads_from_and_push(tmp_path, monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\nCOPY . .\n", encoding="utf-8")
+    hcl = tmp_path / "docker-bake.hcl"
+    hcl.write_text(
+        'target "app" {\n'
+        '  context = "./app"\n'
+        '  dockerfile = "Dockerfile"\n'
+        '  tags = ["192.168.1.50:5000/app:latest"]\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    baked = lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}")
+    assert baked is not None
+    assert "192.168.1.50:5000/base:latest" in baked
+    follow = baked[baked.index("--") + 1 :]
+    assert follow[:2] == ["/usr/bin/docker", "buildx"]
+    assert "bake" in follow
+    json_bake = tmp_path / "bake.json"
+    json_bake.write_text(
+        '{"target":{"app":{"context":"./app","dockerfile":"Dockerfile",'
+        '"tags":["192.168.1.50:5000/app:v1"]}}}',
+        encoding="utf-8",
+    )
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    pushed = lan_bound_docker_bake_argv(f"docker buildx bake --push -f {json_bake}", cwd=str(tmp_path))
+    assert pushed is not None
+    assert "--push-after" in pushed
+    assert "192.168.1.50:5000/app:v1" in pushed
+    follow = pushed[pushed.index("--") + 1 :]
+    assert "--load" in follow
+    assert "--push" not in follow
+    assert lan_bound_docker_bake_argv(f"docker buildx bake --print -f {hcl}") is None
+    (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\n", encoding="utf-8")
+    bash = _command_args(f"docker buildx bake -f {hcl}", "bash", cwd=str(tmp_path))
+    assert bash[1].endswith("lan_skopeo_load.py")
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+    (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\nCOPY . .\n", encoding="utf-8")
+    both = lan_bound_docker_bake_argv(f"docker buildx bake --push --pull -f {hcl}", cwd=str(tmp_path))
+    assert both is not None
+    assert "192.168.1.50:5000/base:latest" in both
+    assert "--push-after" in both
+    assert "192.168.1.50:5000/app:latest" in both
+    follow = both[both.index("--") + 1 :]
+    assert "--load" in follow
+    assert "--push" not in follow
+    assert "--pull" not in follow
+    default_hcl = tmp_path / "docker-bake.hcl"
+    default_hcl.write_text(hcl.read_text(encoding="utf-8"), encoding="utf-8")
+    defaulted = lan_bound_docker_bake_argv("docker buildx bake", cwd=str(tmp_path))
+    assert defaulted is not None
+    assert "192.168.1.50:5000/base:latest" in defaulted
+    set_tags = lan_bound_docker_bake_argv(
+        f"docker buildx bake --push -f {json_bake} --set app.tags=192.168.1.50:5000/app:set",
+        cwd=str(tmp_path),
+    )
+    assert set_tags is not None
+    assert "--push-after" in set_tags
+    assert "192.168.1.50:5000/app:set" in set_tags
 
 
 def test_compose_service_dockerfiles_resolves_context(tmp_path):
