@@ -775,10 +775,14 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         flags.extend(
             ["--interface", iface if hexstrike_nmap_can_bind_interface(iface) else source]
         )
-    elif stem == "wget":
+    elif stem in {"wget", "wget2"}:
         if _tokens_have_flag(tokens, frozenset({"--bind-address", "--bindaddress"})):
             return bound
         flags.append(f"--bind-address={source}")
+    elif stem in {"aria2c", "aria2"}:
+        if _tokens_have_flag(tokens, frozenset({"--interface", "--all-proxy", "--http-proxy", "--ftp-proxy"})):
+            return bound
+        flags.append(f"--interface={source}")
     elif stem == "rustscan":
         if "-S" in tokens:
             return bound

@@ -360,6 +360,23 @@ def test_lan_curl_binds_home_nic_not_vpn(monkeypatch):
     assert "-o" in irm and "page.html" in irm
     assert lan_bound_http_argv("iwr https://example.com/") is None
     assert lan_bound_http_argv("Invoke-WebRequest -Uri http://192.168.1.1/ -Headers @{a=1}") is None
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"curl", "wget", "wget2", "aria2c", "aria2"}
+        else None,
+    )
+    aria = lan_bound_http_argv("aria2c -x 16 -o pkg.tgz http://192.168.1.50/pkg.tgz")
+    assert aria is not None
+    assert aria[0] == "/usr/bin/aria2c"
+    assert aria[1] == "--interface=192.168.1.12"
+    assert "-x" in aria and "16" in aria
+    assert lan_bound_http_argv("aria2c --interface eth0 http://192.168.1.50/") is None
+    wget2 = lan_bound_http_argv("wget2 -q http://192.168.1.50/status")
+    assert wget2 is not None
+    assert wget2[0] == "/usr/bin/wget2"
+    assert wget2[1] == "--bind-address=192.168.1.12"
+    assert lan_bound_http_argv("aria2c https://example.com/pkg.tgz") is None
 
 
 def test_wget_without_binary_falls_back_to_curl_on_lan(monkeypatch):
@@ -373,6 +390,12 @@ def test_wget_without_binary_falls_back_to_curl_on_lan(monkeypatch):
     assert argv[0] == "/usr/bin/curl"
     assert argv[1:3] == ["--interface", "192.168.1.12"]
     assert argv[-1] == "http://192.168.1.50/status"
+    aria = lan_bound_http_argv("aria2c -x 8 http://192.168.1.50/pkg.tgz")
+    assert aria is not None
+    assert aria[0] == "/usr/bin/curl"
+    wget2 = lan_bound_http_argv("wget2 http://192.168.1.50/status")
+    assert wget2 is not None
+    assert wget2[0] == "/usr/bin/curl"
 
 
 def test_lan_ssh_binds_home_nic_not_vpn(monkeypatch):

@@ -56,6 +56,14 @@ _CMD_IDIOMS = re.compile(
 )
 _UNSAFE_SHELL = re.compile(r"[;&|`$<>\n]")
 _PROXY_FLAGS = frozenset({"-x", "--proxy", "--interface", "--local-addr", "--bind-address"})
+_HTTP_BIND_NAMES = frozenset({"curl", "wget", "wget2", "aria2c", "aria2"})
+_HTTP_SKIP_FLAGS = {
+    "curl": frozenset({"-x", "--proxy", "--interface", "--local-addr"}),
+    "wget": frozenset({"--bind-address", "--interface"}),
+    "wget2": frozenset({"--bind-address", "--interface"}),
+    "aria2c": frozenset({"--interface", "--all-proxy", "--http-proxy", "--ftp-proxy", "--no-proxy"}),
+    "aria2": frozenset({"--interface", "--all-proxy", "--http-proxy", "--ftp-proxy", "--no-proxy"}),
+}
 _IWR_NAMES = frozenset({"invoke-webrequest", "iwr", "invoke-restmethod", "irm"})
 _IWR_URI_FLAGS = frozenset({"-uri", "-url"})
 _IWR_OUT_FLAGS = frozenset({"-outfile"})
@@ -163,11 +171,11 @@ def _iwr_lan_argv(command: str) -> list[str] | None:
 
 
 def lan_bound_http_argv(command: str) -> list[str] | None:
-    """Real curl/wget/IWR of an on-link RFC1918 URL, sourced from that NIC.
+    """Real curl/wget/wget2/aria2c/IWR of an on-link RFC1918 URL, sourced from that NIC.
 
     PowerShell aliases ``curl``/``wget`` to Invoke-WebRequest, which cannot bind
     a source IP. A VPN default route would steal the hop to the home gateway.
-    Skip pipes and explicit proxies.
+    Skip pipes and explicit proxies. ``aria2c -x`` is max-connections, not proxy.
     """
     iwr = _iwr_lan_argv(command)
     if iwr:
@@ -184,10 +192,10 @@ def lan_bound_http_argv(command: str) -> list[str] | None:
     name = Path(parts[0]).name.lower()
     if name.endswith(".exe"):
         name = name[:-4]
-    if name not in {"curl", "wget"}:
+    if name not in _HTTP_BIND_NAMES:
         return None
     flags = {part.split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
-    if flags & _PROXY_FLAGS:
+    if flags & _HTTP_SKIP_FLAGS.get(name, _PROXY_FLAGS):
         return None
     url = _http_target_from_argv(parts)
     bind = _lan_bind_for_http_target(url)
@@ -195,9 +203,13 @@ def lan_bound_http_argv(command: str) -> list[str] | None:
         return None
     exe = shutil.which(name) or shutil.which(f"{name}.exe")
     rest = parts[1:]
-    if name == "wget":
+    if name in {"wget", "wget2"}:
         if exe:
             return [exe, f"--bind-address={bind}", *rest]
+        return _curl_lan_argv(url)
+    if name in {"aria2c", "aria2"}:
+        if exe:
+            return [exe, f"--interface={bind}", *rest]
         return _curl_lan_argv(url)
     if not exe:
         return None
@@ -1001,6 +1013,11 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "gh",
         "apt",
         "apt-get",
+        "aria2c",
+        "aria2",
+        "wget2",
+        "httpie",
+        "axel",
     }
 )
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
