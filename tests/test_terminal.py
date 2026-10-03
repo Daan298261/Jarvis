@@ -1523,7 +1523,31 @@ def test_lan_compose_build_skopeo_loads_from_before_build(tmp_path, monkeypatch)
     env = _child_env(bash)
     assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
     assert "10.8.0.1" not in env["HTTP_PROXY"]
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    image: 192.168.1.50:5000/app:latest\n"
+        "    build: ./app\n"
+        "  web:\n"
+        "    image: nginx:alpine\n"
+        "    build: ./web\n",
+        encoding="utf-8",
+    )
+    pushed = lan_bound_compose_build_argv(f"docker compose -f {stack} build --push")
+    assert pushed is not None
+    assert "--push-after" in pushed
+    assert "192.168.1.50:5000/base:latest" in pushed
+    assert "192.168.1.50:5000/app:latest" in pushed
+    follow = pushed[pushed.index("--") + 1 :]
+    assert "build" in follow
+    assert "--push" not in follow
     (app / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    alpine_push = lan_bound_compose_build_argv(f"docker compose -f {stack} build --push app")
+    assert alpine_push is not None
+    assert "--push-after" in alpine_push
+    assert "192.168.1.50:5000/app:latest" in alpine_push
+    assert "192.168.1.50:5000/base:latest" not in alpine_push
+    assert lan_bound_compose_build_argv(f"docker compose -f {stack} build --push web") is None
     assert lan_bound_compose_build_argv(f"docker compose -f {stack} build") is None
 
 

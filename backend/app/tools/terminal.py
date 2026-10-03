@@ -1703,7 +1703,7 @@ _COMPOSE_BUILD_BOOL_FLAGS = frozenset(
 _COMPOSE_BUILD_PULL_KEEP = frozenset({"--pull=never", "--pull=false", "--pull=missing"})
 
 
-def _compose_build_spec(parts: list[str]) -> tuple[list[str], list[str], bool, bool] | None:
+def _compose_build_spec(parts: list[str]) -> tuple[list[str], list[str], bool, bool, bool] | None:
     if not parts:
         return None
     stem = _tool_basename(parts[0])
@@ -1743,6 +1743,7 @@ def _compose_build_spec(parts: list[str]) -> tuple[list[str], list[str], bool, b
         return None
     services: list[str] = []
     with_deps = False
+    wants_push = False
     while index < len(rest):
         text = str(rest[index] or "").strip().strip("'\"")
         index += 1
@@ -1753,6 +1754,9 @@ def _compose_build_spec(parts: list[str]) -> tuple[list[str], list[str], bool, b
             continue
         if text == "--with-dependencies":
             with_deps = True
+            continue
+        if text == "--push":
+            wants_push = True
             continue
         if text in _COMPOSE_BUILD_BOOL_FLAGS or text in {"--pull"}:
             continue
@@ -1771,7 +1775,7 @@ def _compose_build_spec(parts: list[str]) -> tuple[list[str], list[str], bool, b
         if text.startswith("-"):
             return None
         services.append(text)
-    return files, services, quiet, with_deps
+    return files, services, quiet, with_deps, wants_push
 
 
 def _compose_build_without_pull(parts: list[str]) -> list[str]:
@@ -1786,6 +1790,10 @@ def _compose_build_without_pull(parts: list[str]) -> list[str]:
     return out
 
 
+def _compose_build_without_push(parts: list[str]) -> list[str]:
+    return [item for item in parts if str(item) != "--push"]
+
+
 def _compose_follow_argv(parts: list[str]) -> list[str] | None:
     if not parts:
         return None
@@ -1797,10 +1805,11 @@ def _compose_follow_argv(parts: list[str]) -> list[str] | None:
 
 
 def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[str] | None:
-    """``docker compose build`` of a service whose Dockerfile ``FROM`` is on-link RFC1918.
+    """``docker compose build`` of a service whose Dockerfile ``FROM`` or ``image:`` is on-link RFC1918.
 
     Dockerd cannot source-bind. Skopeo loads LAN bases through the loopback proxy,
-    then compose build (without ``--pull``) uses the local daemon copies. Skip pipes,
+    then compose build (without ``--pull``) uses the local daemon copies. ``--push``
+    of a LAN ``image:`` becomes a local build plus skopeo upload. Skip pipes,
     interpolations, inline Dockerfiles, git contexts, unknown flags, and missing skopeo.
     """
     text = str(command or "").strip()
@@ -1813,13 +1822,15 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
     spec = _compose_build_spec(parts)
     if spec is None:
         return None
-    files, services, quiet, with_deps = spec
+    files, services, quiet, with_deps, wants_push = spec
     paths = _resolved_compose_paths(files, cwd)
     if not paths:
         return None
     dockerfiles: dict[str, Path] = {}
+    images: dict[str, str] = {}
     for path in paths:
         dockerfiles.update(compose_service_dockerfiles(path))
+        images.update(compose_service_images(path))
     if not dockerfiles:
         return None
     if services and not with_deps:
@@ -1838,12 +1849,26 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
                 continue
             seen.add(image)
             lan.append(image)
-    if not lan:
+    lan_tags: list[str] = []
+    seen_tags: set[str] = set()
+    for name in chosen:
+        image = images.get(name) or ""
+        if not image or image in seen_tags:
+            continue
+        if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+            continue
+        seen_tags.add(image)
+        lan_tags.append(image)
+    if not lan and not (wants_push and lan_tags):
         return None
     follow = _compose_follow_argv(parts)
     if not follow:
         return None
-    return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=_compose_build_without_pull(follow))
+    follow = _compose_build_without_pull(follow)
+    if wants_push and lan_tags:
+        follow = _compose_build_without_push(follow)
+        return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow, push_after=lan_tags)
+    return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
 
 
 _COMPOSE_UP_BOOL_FLAGS = frozenset(
