@@ -363,7 +363,7 @@ def test_lan_curl_binds_home_nic_not_vpn(monkeypatch):
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
         lambda name: f"/usr/bin/{name}"
-        if name in {"curl", "wget", "wget2", "aria2c", "aria2"}
+        if name in {"curl", "wget", "wget2", "aria2c", "aria2", "axel"}
         else None,
     )
     aria = lan_bound_http_argv("aria2c -x 16 -o pkg.tgz http://192.168.1.50/pkg.tgz")
@@ -376,6 +376,12 @@ def test_lan_curl_binds_home_nic_not_vpn(monkeypatch):
     assert wget2 is not None
     assert wget2[0] == "/usr/bin/wget2"
     assert wget2[1] == "--bind-address=192.168.1.12"
+    axel = lan_bound_http_argv("axel -n 4 -o pkg.tgz http://192.168.1.50/pkg.tgz")
+    assert axel is not None
+    assert axel[0] == "/usr/bin/axel"
+    assert axel[1] == "--bind-address=192.168.1.12"
+    assert "-n" in axel and "4" in axel
+    assert lan_bound_http_argv("axel --bind-address 10.8.0.2 http://192.168.1.50/") is None
     assert lan_bound_http_argv("aria2c https://example.com/pkg.tgz") is None
 
 
@@ -396,6 +402,9 @@ def test_wget_without_binary_falls_back_to_curl_on_lan(monkeypatch):
     wget2 = lan_bound_http_argv("wget2 http://192.168.1.50/status")
     assert wget2 is not None
     assert wget2[0] == "/usr/bin/curl"
+    axel = lan_bound_http_argv("axel http://192.168.1.50/pkg.tgz")
+    assert axel is not None
+    assert axel[0] == "/usr/bin/curl"
 
 
 def test_lan_ssh_binds_home_nic_not_vpn(monkeypatch):
@@ -1052,7 +1061,24 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
         lambda name: f"/usr/bin/{name}"
-        if name in {"git", "git.exe", "pip", "pip3", "npm", "uv", "aws", "aws.exe", "s3cmd", "mc", "mcli"}
+        if name in {
+            "git",
+            "git.exe",
+            "pip",
+            "pip3",
+            "npm",
+            "uv",
+            "aws",
+            "aws.exe",
+            "s3cmd",
+            "mc",
+            "mcli",
+            "restic",
+            "azcopy",
+            "http",
+            "https",
+            "httpie",
+        }
         else None,
     )
     cloned = git_direct_argv("git clone http://192.168.1.50/repo.git")
@@ -1091,6 +1117,24 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     s3cmd = container_direct_argv("s3cmd ls s3://backup --host=192.168.1.50:9000")
     assert s3cmd is not None
     assert _child_env(s3cmd)["HTTPS_PROXY"] == _child_env(s3cmd)["HTTP_PROXY"]
+    restic = container_direct_argv("restic -r rest:http://192.168.1.50:8000/repo snapshots")
+    assert restic is not None
+    assert restic[0] == "/usr/bin/restic"
+    assert _child_env(restic)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in _child_env(restic)["HTTP_PROXY"]
+    azcopy = _command_args(
+        "azcopy copy http://192.168.1.50:10000/devstoreaccount1/media /tmp/out --recursive",
+        "bash",
+    )
+    assert azcopy[0] == "/usr/bin/azcopy"
+    assert _child_env(azcopy)["http_proxy"] == _child_env(azcopy)["HTTP_PROXY"]
+    httpie = container_direct_argv("http GET http://192.168.1.50:8000/status")
+    assert httpie is not None
+    assert httpie[0] == "/usr/bin/http"
+    assert _child_env(httpie)["HTTPS_PROXY"] == _child_env(httpie)["HTTP_PROXY"]
+    https = container_direct_argv("https -d http://192.168.1.50/pkg.tgz")
+    assert https is not None
+    assert https[0] == "/usr/bin/https"
 
 
 def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):
@@ -2300,7 +2344,18 @@ def test_lan_run_wget2_aria2c(tmp_path, monkeypatch):
     )
     assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
     (ctx / "Dockerfile").write_text(
-        "FROM alpine:3.20\nRUN aria2c -o /x https://example.com/x\n",
+        "FROM alpine:3.20\n"
+        "RUN axel -n 4 -o /opt/pkg.tgz http://192.168.1.50:8000/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    axel = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert axel is not None
+    follow = axel[axel.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 pkg.tgz /opt/pkg.tgz" in text
+    assert "axel" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\nRUN axel -o /x https://example.com/x\n",
         encoding="utf-8",
     )
     assert lan_bound_docker_build_argv(f"docker build {ctx}") is None

@@ -56,13 +56,14 @@ _CMD_IDIOMS = re.compile(
 )
 _UNSAFE_SHELL = re.compile(r"[;&|`$<>\n]")
 _PROXY_FLAGS = frozenset({"-x", "--proxy", "--interface", "--local-addr", "--bind-address"})
-_HTTP_BIND_NAMES = frozenset({"curl", "wget", "wget2", "aria2c", "aria2"})
+_HTTP_BIND_NAMES = frozenset({"curl", "wget", "wget2", "aria2c", "aria2", "axel"})
 _HTTP_SKIP_FLAGS = {
     "curl": frozenset({"-x", "--proxy", "--interface", "--local-addr"}),
     "wget": frozenset({"--bind-address", "--interface"}),
     "wget2": frozenset({"--bind-address", "--interface"}),
     "aria2c": frozenset({"--interface", "--all-proxy", "--http-proxy", "--ftp-proxy", "--no-proxy"}),
     "aria2": frozenset({"--interface", "--all-proxy", "--http-proxy", "--ftp-proxy", "--no-proxy"}),
+    "axel": frozenset({"--bind-address", "--interface"}),
 }
 _IWR_NAMES = frozenset({"invoke-webrequest", "iwr", "invoke-restmethod", "irm"})
 _IWR_URI_FLAGS = frozenset({"-uri", "-url"})
@@ -171,11 +172,12 @@ def _iwr_lan_argv(command: str) -> list[str] | None:
 
 
 def lan_bound_http_argv(command: str) -> list[str] | None:
-    """Real curl/wget/wget2/aria2c/IWR of an on-link RFC1918 URL, sourced from that NIC.
+    """Real curl/wget/wget2/aria2c/axel/IWR of an on-link RFC1918 URL, sourced from that NIC.
 
     PowerShell aliases ``curl``/``wget`` to Invoke-WebRequest, which cannot bind
     a source IP. A VPN default route would steal the hop to the home gateway.
     Skip pipes and explicit proxies. ``aria2c -x`` is max-connections, not proxy.
+    ``axel`` ignores HTTP_PROXY; bind the home NIC instead.
     """
     iwr = _iwr_lan_argv(command)
     if iwr:
@@ -203,7 +205,7 @@ def lan_bound_http_argv(command: str) -> list[str] | None:
         return None
     exe = shutil.which(name) or shutil.which(f"{name}.exe")
     rest = parts[1:]
-    if name in {"wget", "wget2"}:
+    if name in {"wget", "wget2", "axel"}:
         if exe:
             return [exe, f"--bind-address={bind}", *rest]
         return _curl_lan_argv(url)
@@ -1017,11 +1019,15 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "aria2",
         "wget2",
         "httpie",
+        "http",
+        "https",
         "axel",
         "aws",
         "s3cmd",
         "mc",
         "mcli",
+        "restic",
+        "azcopy",
     }
 )
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
@@ -3137,7 +3143,7 @@ def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
     """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``wget2`` /
-    ``curl`` / ``aria2c`` / ``RUN python -c urlretrieve|urlopen-write``
+    ``curl`` / ``aria2c`` / ``axel`` / ``RUN python -c urlretrieve|urlopen-write``
     (including ``&&`` / ``;`` chains and ``sh -c`` / ``bash -lc``) of those
     URLs into ``COPY --from=jarvisaddN``.
 
@@ -3157,6 +3163,7 @@ _WGET_OUTPUT_FLAGS = frozenset({"-O", "--output-document"})
 _WGET_STEMS = frozenset({"wget", "wget2"})
 _CURL_OUTPUT_FLAGS = frozenset({"-o", "--output"})
 _CURL_REMOTE_FLAGS = frozenset({"-O", "--remote-name"})
+_CURL_OUT_STEMS = frozenset({"curl", "axel"})
 _ARIA_STEMS = frozenset({"aria2c", "aria2"})
 _ARIA_OUT_FLAGS = frozenset({"-o", "--out"})
 _ARIA_DIR_FLAGS = frozenset({"-d", "--dir"})
@@ -3261,14 +3268,14 @@ def _python_urlretrieve_url_dest(
 def _run_fetch_url_dest(
     argv: list[str], declared: dict[str, str]
 ) -> tuple[str, str] | None:
-    """Return ``(url, dest)`` for wget/wget2/curl/aria2c/python LAN fetch argv.
+    """Return ``(url, dest)`` for wget/wget2/curl/aria2c/axel/python LAN fetch argv.
     dest ``-`` means stdout."""
     if not argv:
         return None
     if _python_interpreter_name(argv[0]):
         return _python_urlretrieve_url_dest(argv, declared)
     stem = _tool_basename(argv[0]).lower().removesuffix(".exe")
-    if stem not in _WGET_STEMS | {"curl"} | _ARIA_STEMS:
+    if stem not in _WGET_STEMS | _CURL_OUT_STEMS | _ARIA_STEMS:
         return None
     dest = ""
     aria_dir = ""
@@ -3286,13 +3293,13 @@ def _run_fetch_url_dest(
         if stem in _WGET_STEMS and tok.startswith("--output-document="):
             dest = tok.split("=", 1)[1]
             continue
-        if stem == "curl" and tok in _CURL_OUTPUT_FLAGS:
+        if stem in _CURL_OUT_STEMS and tok in _CURL_OUTPUT_FLAGS:
             if index >= len(argv):
                 return None
             dest = str(argv[index])
             index += 1
             continue
-        if stem == "curl" and tok.startswith("--output="):
+        if stem in _CURL_OUT_STEMS and tok.startswith("--output="):
             dest = tok.split("=", 1)[1]
             continue
         if stem == "curl" and tok in _CURL_REMOTE_FLAGS:
@@ -3327,7 +3334,7 @@ def _run_fetch_url_dest(
                     dest = str(argv[index])
                     index += 1
                     continue
-            if stem == "curl" and cluster.endswith("o") and "o" in cluster:
+            if stem in _CURL_OUT_STEMS and cluster.endswith("o") and "o" in cluster:
                 if index >= len(argv):
                     return None
                 dest = str(argv[index])
@@ -3480,7 +3487,7 @@ def _unwrap_run_shell_c(argv: list[str]) -> list[str] | None:
 def _rewrite_lan_run_fetch(
     line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
 ) -> list[str] | None:
-    """Replace LAN ``RUN wget`` / ``wget2`` / ``curl`` / ``aria2c`` /
+    """Replace LAN ``RUN wget`` / ``wget2`` / ``curl`` / ``aria2c`` / ``axel`` /
     ``python -c urlretrieve|urlopen-write`` (including ``&&`` / ``;`` chains
     and ``sh -c``) with ``COPY --from=``.
     """
@@ -4888,7 +4895,7 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
 
 
 def container_direct_argv(command: str) -> list[str] | None:
-    """Run registry/package-manager/S3 CLIs as argv so LAN HTTP_PROXY reaches a NAS."""
+    """Run registry/package-manager/S3/restic/azcopy/HTTPie CLIs as argv so LAN HTTP_PROXY reaches a NAS."""
     return _direct_stem_argv(command, _LAN_HTTP_TOOL_STEMS)
 
 

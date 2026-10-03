@@ -700,7 +700,7 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
 
     nmap uses ``-S``/``-e``. ProjectDiscovery nuclei/httpx/naabu use ``-source-ip``
     / ``-interface``. masscan uses ``--source-ip``/``-e``. curl uses ``--interface``.
-    wget uses ``--bind-address``. rustscan forwards nmap ``-S``/``-e`` after ``--``.
+    wget/wget2/axel use ``--bind-address``. rustscan forwards nmap ``-S``/``-e`` after ``--``.
     arp-scan uses ``--arpspa``/``-I``; arping ``-s``/``-I``; fping ``-S``/``-I``.
     iperf/iperf3 use ``-B``. mtr uses ``-a``. nmblookup uses ``-B``/``-i``.
     tcpdump/tshark/dumpcap use ``-i``. hping3 uses ``-I``. When the Windows NIC
@@ -775,7 +775,7 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         flags.extend(
             ["--interface", iface if hexstrike_nmap_can_bind_interface(iface) else source]
         )
-    elif stem in {"wget", "wget2"}:
+    elif stem in {"wget", "wget2", "axel"}:
         if _tokens_have_flag(tokens, frozenset({"--bind-address", "--bindaddress"})):
             return bound
         flags.append(f"--bind-address={source}")

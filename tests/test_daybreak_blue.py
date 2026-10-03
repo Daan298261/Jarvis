@@ -759,6 +759,8 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     assert wget2["additional_args"] == "--bind-address=192.168.1.12"
     aria = bind_hexstrike_lan_payload("aria2c", {"url": "http://192.168.1.40/pkg.tgz", "additional_args": "-x 16"})
     assert aria["additional_args"] == "-x 16 --interface=192.168.1.12"
+    axel = bind_hexstrike_lan_payload("axel", {"url": "http://192.168.1.40/pkg.tgz", "additional_args": "-n 4"})
+    assert axel["additional_args"] == "-n 4 --bind-address=192.168.1.12"
     rustscan = bind_hexstrike_lan_payload("rustscan", {"target": "192.168.1.0/24", "additional_args": "-a 192.168.1.0/24"})
     assert rustscan["additional_args"] == "-a 192.168.1.0/24 -- -S 192.168.1.12 -e eth0"
     katana = bind_hexstrike_lan_payload("http:katana", {"url": "http://192.168.1.40/", "additional_args": "-jc"})
