@@ -1756,7 +1756,7 @@ async def test_operator_smbclient_hosts_lan_client_addr(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_operator_smbclient_falls_back_to_suite_when_not_on_path(monkeypatch):
+async def test_operator_smbclient_fails_closed_when_not_on_path(monkeypatch):
     from app.security.hexstrike_defensive import execute_operator_smb
 
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
@@ -1768,8 +1768,11 @@ async def test_operator_smbclient_falls_back_to_suite_when_not_on_path(monkeypat
         return {"ok": True}
 
     monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
-    result = await execute_operator_smb("api/tools/smbclient", {"target": "192.168.1.50"})
-    assert result == {"ok": True}
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        await execute_operator_smb("api/tools/smbclient", {"target": "192.168.1.50"})
+    assert posted == []
+    public = await execute_operator_smb("api/tools/smbclient", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
     assert posted[0][0] == "api/tools/smbclient"
 
 
@@ -1947,7 +1950,7 @@ async def test_operator_smbmap_hosts_lan_with_sitecustomize(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_operator_smbmap_falls_back_to_suite_when_not_on_path(monkeypatch):
+async def test_operator_smbmap_fails_closed_when_not_on_path(monkeypatch):
     from app.security.hexstrike_defensive import execute_operator_smb_python
 
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
@@ -1959,8 +1962,11 @@ async def test_operator_smbmap_falls_back_to_suite_when_not_on_path(monkeypatch)
         return {"ok": True}
 
     monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
-    result = await execute_operator_smb_python("api/tools/smbmap", {"target": "192.168.1.50"})
-    assert result == {"ok": True}
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        await execute_operator_smb_python("api/tools/smbmap", {"target": "192.168.1.50"})
+    assert posted == []
+    public = await execute_operator_smb_python("api/tools/smbmap", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
     assert posted[0][0] == "api/tools/smbmap"
 
 
@@ -2342,6 +2348,54 @@ async def test_mcp_smbclient_uses_impacket_when_samba_missing(monkeypatch):
         assert "192.168.1.50" in argv
         assert "lan_python_site" in (env.get("PYTHONPATH") or "")
         assert "HTTP_PROXY" not in env
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_smbclient_fails_closed_when_not_on_path(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN smbclient must not go through HexStrike MCP when no SMB client can bind")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_smbclient"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "smbclient"},
+        "remote_name": "smbclient",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_smbclient", {"target": "192.168.1.50"})
+        assert not result.success
+        assert "not on PATH" in (result.error or "")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_smbmap_fails_closed_when_not_on_path(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN smbmap must not go through HexStrike MCP; sitecustomize would be unset")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_smbmap"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "smbmap"},
+        "remote_name": "smbmap",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_smbmap", {"target": "192.168.1.50"})
+        assert not result.success
+        assert "not on PATH" in (result.error or "")
     finally:
         MCP.reset_for_tests()
 

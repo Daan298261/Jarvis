@@ -413,12 +413,33 @@ class MCPRuntime:
                 if fallback:
                     data = await _host_smb_python_lan(fallback, args)
                     return ToolResult(True, str(data.get("stdout") or data), data=data)
+                return ToolResult(
+                    False,
+                    "",
+                    error=(
+                        f"{ident} is not on PATH (and no smbmap/netexec/impacket-smbclient fallback). "
+                        "Install Samba or a Python SMB client so HexStrike LAN SMB can bind the home NIC."
+                    ),
+                )
         if looks_like_smb_python_tool(tool_key) or looks_like_smb_python_tool(str(name)):
             target = lan_bind_target(args) or nmap_target_from_payload(args)
             ident = hexstrike_lan_tool_id(str(tool_key or name))
             if lan_bind_nic(target)[1] and _smb_python_binary(ident):
                 data = await _host_smb_python_lan(str(tool_key or name), args)
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if lan_bind_nic(target)[1]:
+                fallback = _smb_lan_python_fallback_stem()
+                if fallback:
+                    data = await _host_smb_python_lan(fallback, args)
+                    return ToolResult(True, str(data.get("stdout") or data), data=data)
+                return ToolResult(
+                    False,
+                    "",
+                    error=(
+                        f"{ident} is not on PATH (and no smbmap/netexec/impacket-smbclient fallback). "
+                        "Install a Python SMB client so HexStrike LAN SMB can bind the home NIC."
+                    ),
+                )
         if looks_like_hydra_tool(tool_key) or looks_like_hydra_tool(str(name)):
             target = lan_bind_target(args) or nmap_target_from_payload(args)
             if lan_bind_nic(target)[1] and _hydra_host_binary():

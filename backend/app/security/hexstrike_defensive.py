@@ -1338,7 +1338,10 @@ async def execute_operator_smb(path: str, payload: dict[str, Any] | None) -> dic
     fallback = _smb_lan_python_fallback_stem()
     if fallback:
         return await _host_smb_python_lan(fallback, bound)
-    return await HEXSTRIKE.post_operator(cleaned, bound)
+    raise RuntimeError(
+        f"{stem} is not on PATH (and no smbmap/netexec/impacket-smbclient fallback). "
+        "Install Samba or a Python SMB client so HexStrike LAN SMB can bind the home NIC."
+    )
 
 
 def _hydra_host_binary() -> str | None:
@@ -1692,9 +1695,17 @@ async def execute_operator_smb_python(path: str, payload: dict[str, Any] | None)
         cleaned = f"api/tools/{stem}"
     if not str(cleaned).startswith("api/tools/"):
         cleaned = f"api/tools/{stem}"
-    if not lan_bind_nic(target)[1] or not _smb_python_binary(stem):
+    if not lan_bind_nic(target)[1]:
         return await HEXSTRIKE.post_operator(cleaned, bound)
-    return await _host_smb_python_lan(path, bound)
+    if _smb_python_binary(stem):
+        return await _host_smb_python_lan(path, bound)
+    fallback = _smb_lan_python_fallback_stem()
+    if fallback:
+        return await _host_smb_python_lan(fallback, bound)
+    raise RuntimeError(
+        f"{stem} is not on PATH (and no smbmap/netexec/impacket-smbclient fallback). "
+        "Install a Python SMB client so HexStrike LAN SMB can bind the home NIC."
+    )
 
 
 def _iface_lan_target(payload: dict[str, Any] | None) -> str:
