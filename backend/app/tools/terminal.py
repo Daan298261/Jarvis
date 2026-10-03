@@ -3060,16 +3060,156 @@ def _copy_flags_from_add(flags: list[str]) -> list[str]:
 def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
-    """Rewrite LAN ``ADD http(s)|ftp(s)://`` into ``COPY --from=jarvisaddN``.
+    """Rewrite LAN ``ADD http(s)|ftp(s)://`` and whole-instruction ``RUN wget`` /
+    ``RUN curl`` of those URLs into ``COPY --from=jarvisaddN``.
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
-    text and an empty list when there is no on-link RFC1918 ADD URL.
+    text and an empty list when there is no on-link RFC1918 fetch.
     """
     try:
         original = path.read_text(encoding="utf-8")
     except OSError:
         return "", []
     return rewrite_dockerfile_lan_add_text(original, build_args)
+
+
+_RUN_LINE = re.compile(r"^(\s*RUN)((?:\s+--\S+)*)\s+(\S.*)$", re.I | re.S)
+_RUN_PIPE_SHELLS = frozenset({"sh", "bash", "ash", "dash"})
+_WGET_OUTPUT_FLAGS = frozenset({"-O", "--output-document"})
+_CURL_OUTPUT_FLAGS = frozenset({"-o", "--output"})
+_CURL_REMOTE_FLAGS = frozenset({"-O", "--remote-name"})
+
+
+def _run_fetch_url_dest(
+    argv: list[str], declared: dict[str, str]
+) -> tuple[str, str] | None:
+    """Return ``(url, dest)`` for a wget/curl argv. dest ``-`` means stdout."""
+    if not argv:
+        return None
+    stem = _tool_basename(argv[0]).lower().removesuffix(".exe")
+    if stem not in {"wget", "curl"}:
+        return None
+    dest = ""
+    urls: list[str] = []
+    index = 1
+    while index < len(argv):
+        tok = str(argv[index])
+        index += 1
+        if stem == "wget" and tok in _WGET_OUTPUT_FLAGS:
+            if index >= len(argv):
+                return None
+            dest = str(argv[index])
+            index += 1
+            continue
+        if stem == "wget" and tok.startswith("--output-document="):
+            dest = tok.split("=", 1)[1]
+            continue
+        if stem == "curl" and tok in _CURL_OUTPUT_FLAGS:
+            if index >= len(argv):
+                return None
+            dest = str(argv[index])
+            index += 1
+            continue
+        if stem == "curl" and tok.startswith("--output="):
+            dest = tok.split("=", 1)[1]
+            continue
+        if stem == "curl" and tok in _CURL_REMOTE_FLAGS:
+            continue
+        if tok.startswith("-") and not tok.startswith("--") and len(tok) > 2:
+            cluster = tok[1:]
+            if stem == "wget" and "O" in cluster:
+                if cluster.endswith("O-") or tok.endswith("O-"):
+                    dest = "-"
+                    continue
+                if cluster.endswith("O"):
+                    if index >= len(argv):
+                        return None
+                    dest = str(argv[index])
+                    index += 1
+                    continue
+            if stem == "curl" and cluster.endswith("o") and "o" in cluster:
+                if index >= len(argv):
+                    return None
+                dest = str(argv[index])
+                index += 1
+                continue
+            continue
+        if tok.startswith("-"):
+            continue
+        expanded = expand_image_vars(tok.strip("'\""), declared)
+        if expanded and _is_http_add_url(expanded):
+            urls.append(expanded)
+    if len(urls) != 1:
+        return None
+    url = urls[0]
+    if not _lan_bind_for_http_target(url):
+        return None
+    if dest == "-":
+        return url, "-"
+    if dest:
+        expanded_dest = expand_image_vars(dest.strip("'\""), declared)
+        return url, expanded_dest or dest
+    return url, _add_url_filename(url)
+
+
+def _rewrite_lan_run_fetch(
+    line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
+) -> list[str] | None:
+    """Replace a whole-instruction LAN ``RUN wget`` / ``RUN curl`` with ``COPY --from=``."""
+    match = _RUN_LINE.match(str(line or ""))
+    if match is None:
+        return None
+    indent = re.match(r"^(\s*)", str(line or "")).group(1)
+    body = match.group(3).strip()
+    pipe_shell = ""
+    argv: list[str] = []
+    if body.startswith("["):
+        try:
+            loaded = json.loads(body)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(loaded, list) or not all(isinstance(item, str) for item in loaded):
+            return None
+        argv = list(loaded)
+    else:
+        try:
+            argv = shlex.split(body, posix=True)
+        except ValueError:
+            return None
+        if argv.count("|") == 1:
+            cut = argv.index("|")
+            right = argv[cut + 1 :]
+            if (
+                len(right) == 1
+                and _tool_basename(right[0]).lower().removesuffix(".exe") in _RUN_PIPE_SHELLS
+            ):
+                pipe_shell = _tool_basename(right[0]).lower().removesuffix(".exe")
+                argv = argv[:cut]
+            else:
+                return None
+        elif "|" in argv:
+            return None
+    spec = _run_fetch_url_dest(argv, declared)
+    if spec is None:
+        return None
+    url, dest = spec
+    if dest == "-" and not pipe_shell:
+        return None
+    if dest == "-":
+        dest = ""
+    if pipe_shell and dest and dest != _add_url_filename(url):
+        return None
+    filename = _add_url_filename(url)
+    context = f"jarvisadd{len(fetches)}"
+    fetches.append((url, context, filename))
+    if pipe_shell:
+        staged = f"/tmp/{context}-{filename}"
+        return [
+            f"{indent}COPY --from={context} {filename} {staged}",
+            f"{indent}RUN {pipe_shell} {staged}",
+        ]
+    copy_dest = dest or filename
+    return [f"{indent}COPY --from={context} {filename} {copy_dest}"]
 
 
 def rewrite_dockerfile_lan_add_text(
@@ -3092,7 +3232,12 @@ def rewrite_dockerfile_lan_add_text(
             continue
         parsed = _parse_add_instruction(line)
         if parsed is None:
-            out.append(raw)
+            run_lines = _rewrite_lan_run_fetch(raw, declared, fetches)
+            if run_lines is None:
+                out.append(raw)
+                continue
+            changed = True
+            out.extend(run_lines)
             continue
         flags, sources, dest = parsed
         lan_sources: list[tuple[str, str]] = []
@@ -3857,6 +4002,10 @@ _HCL_DOCKERFILE = re.compile(r"dockerfile\s*=\s*\"([^\"]+)\"", re.I)
 _HCL_DOCKERFILE_INLINE = re.compile(
     r"dockerfile-inline\s*=\s*\"((?:\\.|[^\"])*)\"", re.I
 )
+_HCL_HEREDOC_INLINE = re.compile(
+    r"dockerfile-inline\s*=\s*<<([-~]?)([A-Za-z_][A-Za-z0-9_]*)\s*\n",
+    re.I,
+)
 _HCL_CONTEXT = re.compile(r"context\s*=\s*\"([^\"]+)\"", re.I)
 _HCL_TAGS = re.compile(r"tags\s*=\s*\[([^\]]*)\]", re.I)
 _HCL_ARG_ITEM = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\"([^\"]*)\"")
@@ -3914,6 +4063,35 @@ def _hcl_quoted_list(block: str, key: str) -> list[str]:
     if not match:
         return []
     return [item.group(1) for item in re.finditer(r"\"([^\"]*)\"", match.group(1)) if item.group(1)]
+
+
+def _hcl_dockerfile_inline(block: str) -> str | None:
+    """Quoted ``dockerfile-inline = "…"`` or heredoc ``<<EOF`` / ``<<-EOF`` / ``<<~EOF``."""
+    quoted = _HCL_DOCKERFILE_INLINE.search(block)
+    if quoted:
+        return (
+            quoted.group(1)
+            .replace("\\\\", "\0")
+            .replace("\\n", "\n")
+            .replace('\\"', '"')
+            .replace("\0", "\\")
+        )
+    match = _HCL_HEREDOC_INLINE.search(block)
+    if not match:
+        return None
+    strip, marker = match.group(1), match.group(2)
+    lines: list[str] = []
+    for raw in block[match.end() :].splitlines():
+        if raw.strip() == marker:
+            break
+        if strip == "-":
+            raw = raw.lstrip("\t")
+        elif strip == "~":
+            raw = raw.lstrip(" \t")
+        lines.append(raw)
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
 
 
 def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile: str) -> Path | None:
@@ -4019,18 +4197,10 @@ def bake_file_dockerfiles_and_tags(
             _add_extra(_parse_cache_images(spec.get("cache-from") or spec.get("cache_from")))
         return dockerfiles, tags, extra, inlines
     for name, block in _hcl_named_targets(text):
-        inline_match = _HCL_DOCKERFILE_INLINE.search(block)
-        if "dockerfile-inline" in block and not inline_match:
+        inline = _hcl_dockerfile_inline(block)
+        if inline is None and "dockerfile-inline" in block:
             continue
-        inline = ""
-        if inline_match:
-            inline = (
-                inline_match.group(1)
-                .replace("\\\\", "\0")
-                .replace("\\n", "\n")
-                .replace('\\"', '"')
-                .replace("\0", "\\")
-            )
+        inline = inline or ""
         context_match = _HCL_CONTEXT.search(block)
         df_match = _HCL_DOCKERFILE.search(block)
         context = context_match.group(1).strip() if context_match else "."

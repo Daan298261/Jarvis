@@ -1810,6 +1810,103 @@ def test_lan_compose_and_bake_inline_dockerfile(tmp_path, monkeypatch):
     assert "192.168.1.50:5000/from-hcl:1" in hcl_bake
 
 
+def test_lan_run_wget_curl_and_hcl_heredoc(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+
+    def fake_mkdtemp(prefix=""):
+        root = tmp_path / f"{prefix or 'jarvis-lan-add-'}run"
+        root.mkdir(exist_ok=True)
+        return str(root)
+
+    monkeypatch.setattr("app.tools.terminal.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"docker", "docker.exe"} else None,
+    )
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN wget -q -O /opt/pkg.tgz http://192.168.1.50:8000/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    wget = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert wget is not None
+    assert "--fetch" in wget
+    assert any(item.startswith("http://192.168.1.50:8000/pkg.tgz=") for item in wget)
+    follow = wget[wget.index("--") + 1 :]
+    rewritten = Path(follow[follow.index("-f") + 1])
+    text = rewritten.read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 pkg.tgz /opt/pkg.tgz" in text
+    assert "RUN wget" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN curl -fsSL -o /usr/local/bin/tool http://192.168.1.50:8000/tool\n",
+        encoding="utf-8",
+    )
+    curled = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert curled is not None
+    follow = curled[curled.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 tool /usr/local/bin/tool" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN curl -fsSL http://192.168.1.50:8000/install.sh | sh\n",
+        encoding="utf-8",
+    )
+    piped = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert piped is not None
+    follow = piped[piped.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 install.sh /tmp/jarvisadd0-install.sh" in text
+    assert "RUN sh /tmp/jarvisadd0-install.sh" in text
+    (ctx / "Dockerfile").write_text(
+        'FROM alpine:3.20\nRUN ["wget", "-O", "/opt/a.bin", "http://192.168.1.50:8000/a.bin"]\n',
+        encoding="utf-8",
+    )
+    exec_form = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert exec_form is not None
+    follow = exec_form[exec_form.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 a.bin /opt/a.bin" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\nRUN curl -fsSL https://example.com/install.sh | sh\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\nRUN apk add curl && wget -O /x http://192.168.1.50:8000/x\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"}
+        else None,
+    )
+    hcl = tmp_path / "docker-bake.hcl"
+    hcl.write_text(
+        "target \"app\" {\n"
+        "  dockerfile-inline = <<EOF\n"
+        "FROM 192.168.1.50:5000/from-heredoc:1\n"
+        "ADD http://192.168.1.50:8000/pkg.tgz /opt/pkg.tgz\n"
+        "EOF\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    baked = lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}")
+    assert baked is not None
+    assert "192.168.1.50:5000/from-heredoc:1" in baked
+    assert "--fetch" in baked
+    follow = baked[baked.index("--") + 1 :]
+    assert "app.dockerfile-inline=" in follow
+    assert any(item.startswith("app.dockerfile=") for item in follow)
+
+
 def test_lan_skopeo_load_fetches_add_http_before_follow(tmp_path, monkeypatch):
     from pathlib import Path
     from app.tools.lan_skopeo_load import main
