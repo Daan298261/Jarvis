@@ -106,7 +106,7 @@ def _lan_bind_for_http_target(target: str) -> str:
     return lan_http_bind_for_url(f"http://{text}")
 
 
-def _curl_lan_argv(url: str, *, outfile: str = "") -> list[str] | None:
+def _curl_lan_argv(url: str, *, outfile: str = "", upload: str = "") -> list[str] | None:
     bind = _lan_bind_for_http_target(url)
     if not bind:
         return None
@@ -114,7 +114,9 @@ def _curl_lan_argv(url: str, *, outfile: str = "") -> list[str] | None:
     if not exe:
         return None
     argv = [exe, "--interface", bind, "-sL"]
-    if outfile:
+    if upload:
+        argv.extend(["-T", upload])
+    elif outfile:
         argv.extend(["-o", outfile])
     argv.append(url)
     return argv
@@ -647,11 +649,12 @@ def _lftp_with_bind(exe: str, rest: list[str], bind: str) -> list[str] | None:
 
 
 def lan_bound_lftp_argv(command: str) -> list[str] | None:
-    """lftp of an on-link RFC1918 NAS, sourced from that NIC.
+    """lftp/ncftp of an on-link RFC1918 NAS, sourced from that NIC.
 
     ``net:socket-bind-ipv4`` pins the FTP/SFTP TCP source so a VPN default
-    route cannot steal the NAS. ``lftpget URL`` becomes curl ``--interface``.
-    Skip pipes, existing bind sets, and public hosts.
+    route cannot steal the NAS. ``lftpget`` / ``ncftpget URL`` become curl
+    ``--interface``; ``ncftpput URL local`` becomes curl ``-T``. Skip pipes,
+    existing bind sets, and public hosts.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -663,15 +666,29 @@ def lan_bound_lftp_argv(command: str) -> list[str] | None:
     if not parts:
         return None
     name = _tool_basename(parts[0])
-    if name not in {"lftp", "lftpget"}:
+    if name not in {"lftp", "lftpget", "ncftpget", "ncftpput"}:
         return None
     host = _lftp_host_from_argv(parts)
     bind = _lan_bind_ip_for_host(host)
     if not bind:
         return None
-    if name == "lftpget":
+    if name in {"lftpget", "ncftpget"}:
         url = _http_target_from_argv(parts)
         return _curl_lan_argv(url, outfile=_add_url_filename(url) if url else "")
+    if name == "ncftpput":
+        url = _http_target_from_argv(parts)
+        if not url:
+            return None
+        local = ""
+        for item in reversed(parts[1:]):
+            token = str(item or "").strip().strip("'\"")
+            if not token or token.startswith("-") or "://" in token:
+                continue
+            local = token
+            break
+        if not local:
+            return None
+        return _curl_lan_argv(url, upload=local)
     exe = shutil.which("lftp") or shutil.which("lftp.exe")
     if not exe:
         url = _http_target_from_argv(parts)
@@ -1193,6 +1210,10 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "restic",
         "azcopy",
         "cadaver",
+        "yt-dlp",
+        "youtube-dl",
+        "gallery-dl",
+        "you-get",
     }
 )
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})

@@ -774,6 +774,17 @@ def test_lan_lftp_binds_home_nic_not_vpn(monkeypatch):
     assert got[0] == "/usr/bin/curl"
     assert got[1:3] == ["--interface", "192.168.1.12"]
     assert "-o" in got and "backup.tar" in got
+    ncget = lan_bound_lftp_argv("ncftpget ftp://192.168.1.50/backup.tar")
+    assert ncget is not None
+    assert ncget[0] == "/usr/bin/curl"
+    assert ncget[1:3] == ["--interface", "192.168.1.12"]
+    assert "-o" in ncget and "backup.tar" in ncget
+    ncput = lan_bound_lftp_argv("ncftpput ftp://192.168.1.50/incoming /tmp/clip.mp4")
+    assert ncput is not None
+    assert ncput[0] == "/usr/bin/curl"
+    assert "-T" in ncput and "/tmp/clip.mp4" in ncput
+    assert ncput[-1] == "ftp://192.168.1.50/incoming"
+    assert lan_bound_lftp_argv("ncftpget ftp://8.8.8.8/file") is None
     bash = _command_args("lftp ftp://taco@192.168.1.50/media", "bash")
     assert bash[0] == "/usr/bin/lftp"
     assert bash[1:3] == ["-e", "set net:socket-bind-ipv4 192.168.1.12"]
@@ -1174,6 +1185,9 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
             "https",
             "httpie",
             "cadaver",
+            "yt-dlp",
+            "youtube-dl",
+            "gallery-dl",
         }
         else None,
     )
@@ -1235,6 +1249,16 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     assert cadaver is not None
     assert cadaver[0] == "/usr/bin/cadaver"
     assert _child_env(cadaver)["ALL_PROXY"] == _child_env(cadaver)["HTTP_PROXY"]
+    ytdlp = container_direct_argv(
+        "yt-dlp -o clip.mp4 http://192.168.1.50:8096/Items/abc/Download"
+    )
+    assert ytdlp is not None
+    assert ytdlp[0] == "/usr/bin/yt-dlp"
+    assert _child_env(ytdlp)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in _child_env(ytdlp)["HTTP_PROXY"]
+    gallery = _command_args("gallery-dl http://192.168.1.50:3000/album/1", "bash")
+    assert gallery[0] == "/usr/bin/gallery-dl"
+    assert _child_env(gallery)["ftp_proxy"] == _child_env(gallery)["HTTP_PROXY"]
 
 
 def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):
