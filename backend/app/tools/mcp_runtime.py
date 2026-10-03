@@ -358,6 +358,7 @@ class MCPRuntime:
             looks_like_snmp_tool,
             looks_like_iface_host_tool,
             looks_like_smb_tool,
+            looks_like_smb_python_tool,
             looks_like_hydra_tool,
             lan_inventory_uses_host_nmap,
             nmap_target_from_payload,
@@ -369,9 +370,11 @@ class MCPRuntime:
             _host_snmp_lan,
             _host_iface_lan,
             _host_smb_lan,
+            _host_smb_python_lan,
             _host_hydra_lan,
             _smb_host_binary,
             _smb_payload_host,
+            _smb_python_binary,
             _hydra_host_binary,
             _iface_lan_target,
             should_host_exec_iface,
@@ -396,6 +399,12 @@ class MCPRuntime:
                 args = {**args, "target": target}
             if lan_bind_nic(target)[1] and _smb_host_binary(ident):
                 data = await _host_smb_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+        if looks_like_smb_python_tool(tool_key) or looks_like_smb_python_tool(str(name)):
+            target = lan_bind_target(args) or nmap_target_from_payload(args)
+            ident = hexstrike_lan_tool_id(str(tool_key or name))
+            if lan_bind_nic(target)[1] and _smb_python_binary(ident):
+                data = await _host_smb_python_lan(str(tool_key or name), args)
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
         if looks_like_hydra_tool(tool_key) or looks_like_hydra_tool(str(name)):
             target = lan_bind_target(args) or nmap_target_from_payload(args)

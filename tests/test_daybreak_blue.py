@@ -884,6 +884,14 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert looks_like_hydra_tool("api/tools/thc-hydra")
     assert not looks_like_hydra_tool("nmap")
     assert not looks_like_hydra_tool("smbclient")
+    from app.security.hexstrike_defensive import looks_like_smb_python_tool
+
+    assert looks_like_smb_python_tool("smbmap")
+    assert looks_like_smb_python_tool("http:nxc")
+    assert looks_like_smb_python_tool("mcp_hexstrike_ai_netexec")
+    assert looks_like_smb_python_tool("api/tools/enum4linux-ng")
+    assert not looks_like_smb_python_tool("smbclient")
+    assert not looks_like_smb_python_tool("nuclei")
 
 
 def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch):
@@ -1669,6 +1677,84 @@ async def test_operator_hydra_hosts_lan_with_hydra_proxy(monkeypatch):
     public = await execute_operator_hydra("api/tools/hydra", {"target": "8.8.8.8", "service": "ssh"})
     assert public == {"ok": True}
     assert posted[0][0] == "api/tools/hydra"
+
+
+@pytest.mark.asyncio
+async def test_operator_smbmap_hosts_lan_with_sitecustomize(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_smb_python, smb_python_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"smbmap", "nxc", "enum4linux-ng"}
+        else None,
+    )
+    argv = smb_python_host_argv("http:smbmap", {"target": "192.168.1.50", "additional_args": "-u guest"})
+    assert argv[0] == "/usr/bin/smbmap"
+    assert argv[1:] == ["-u", "guest", "-H", "192.168.1.50"]
+    nxc = smb_python_host_argv("api/tools/nxc", {"target": "192.168.1.40"})
+    assert nxc[0] == "/usr/bin/nxc"
+    assert nxc[1:] == ["smb", "192.168.1.40"]
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"[+] 192.168.1.50:445 guest\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_smb_python(
+        "api/tools/smbmap",
+        {"target": "192.168.1.50", "additional_args": "-u guest"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-smb-python"
+    assert hosted["target"] == "192.168.1.50"
+    env = seen[0][1]
+    assert "lan_python_site" in (env.get("PYTHONPATH") or "")
+    assert "HTTP_PROXY" not in env
+    public = await execute_operator_smb_python("api/tools/smbmap", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/smbmap"
+
+
+@pytest.mark.asyncio
+async def test_operator_smbmap_falls_back_to_suite_when_not_on_path(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_smb_python
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    result = await execute_operator_smb_python("api/tools/smbmap", {"target": "192.168.1.50"})
+    assert result == {"ok": True}
+    assert posted[0][0] == "api/tools/smbmap"
 
 
 @pytest.mark.asyncio

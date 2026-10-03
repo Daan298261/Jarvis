@@ -830,10 +830,12 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
                 execute_operator_snmp,
                 execute_operator_iface_tool,
                 execute_operator_smb,
+                execute_operator_smb_python,
                 execute_operator_hydra,
                 looks_like_snmp_tool,
                 looks_like_iface_host_tool,
                 looks_like_smb_tool,
+                looks_like_smb_python_tool,
                 looks_like_hydra_tool,
             )
 
@@ -845,6 +847,8 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
                 result = await execute_operator_snmp(path, payload)
             elif looks_like_smb_tool(path):
                 result = await execute_operator_smb(path, payload)
+            elif looks_like_smb_python_tool(path):
+                result = await execute_operator_smb_python(path, payload)
             elif looks_like_hydra_tool(path):
                 result = await execute_operator_hydra(path, payload)
             elif looks_like_iface_host_tool(path):

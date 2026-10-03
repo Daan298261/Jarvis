@@ -481,7 +481,7 @@ def hexstrike_lan_tool_id(tool: str) -> str:
         text = text.rsplit(":", 1)[-1]
     from ..tools.lan_snmp import SNMP_TOOL_STEMS
 
-    for ident in ("arp_scan", *sorted(SNMP_TOOL_STEMS)):
+    for ident in ("arp_scan", "enum4linux_ng", *sorted(SNMP_TOOL_STEMS)):
         if text == ident or text.endswith(f"_{ident}"):
             return ident
     return hexstrike_tool_stem(tool)
@@ -500,6 +500,19 @@ _SMB_TOOL_STEMS = frozenset({"smbclient", "smbget", "rpcclient", "smbtree"})
 def looks_like_smb_tool(name: str) -> bool:
     """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_smbclient`` or ``http:smbget``."""
     return hexstrike_lan_tool_id(name) in _SMB_TOOL_STEMS
+
+
+_SMB_PYTHON_STEMS = frozenset(
+    {"smbmap", "enum4linux", "enum4linux_ng", "netexec", "nxc", "crackmapexec", "cme"}
+)
+_SMB_PYTHON_BINARY = {
+    "enum4linux_ng": "enum4linux-ng",
+}
+
+
+def looks_like_smb_python_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_smbmap`` or ``http:nxc``."""
+    return hexstrike_lan_tool_id(name) in _SMB_PYTHON_STEMS
 
 
 _HYDRA_TOOL_STEMS = frozenset({"hydra"})
@@ -1323,6 +1336,104 @@ async def execute_operator_hydra(path: str, payload: dict[str, Any] | None) -> d
     if not lan_bind_nic(target)[1] or not _hydra_host_binary():
         return await HEXSTRIKE.post_operator(cleaned, bound)
     return await _host_hydra_lan(path, bound)
+
+
+def _smb_python_binary(stem: str) -> str | None:
+    name = _SMB_PYTHON_BINARY.get(stem, stem)
+    return shutil.which(name) or shutil.which(f"{name}.exe")
+
+
+def smb_python_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host smbmap/netexec argv so sitecustomize can bind LAN sockets."""
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _SMB_PYTHON_STEMS:
+        stem = "smbmap"
+    binary = _smb_python_binary(stem)
+    if not binary:
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install it so HexStrike LAN SMB Python tools can bind the home NIC."
+        )
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if not lan_bind_nic(target)[1]:
+        raise ValueError("smb python LAN target is required")
+    extra = _nmap_flag_tokens(
+        str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")
+    )
+    blob = " ".join(extra)
+    display = ""
+    for key in ("url", "share", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            display = text
+            break
+    if not display:
+        display = target
+    argv = [binary, *extra]
+    if display and display not in extra and display not in blob:
+        if stem == "smbmap":
+            argv.extend(["-H", display])
+        elif stem in {"enum4linux", "enum4linux_ng"}:
+            argv.extend(["-t", display])
+        elif stem in {"netexec", "nxc", "crackmapexec", "cme"}:
+            proto = str(row.get("service") or row.get("protocol") or row.get("module") or "smb").strip() or "smb"
+            if extra and extra[0] in {"smb", "winrm", "ldap", "ftp", "rdp", "vnc", "ssh", "wmi"}:
+                argv.insert(2, display)
+            else:
+                argv.extend([proto, display])
+        else:
+            argv.append(display)
+    return argv
+
+
+async def _host_smb_python_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host smbmap/netexec of on-link RFC1918 with sitecustomize (no HTTP_PROXY)."""
+    from ..tools.owner_paths import direct_child_env, with_lan_socket_pythonpath
+
+    argv = smb_python_host_argv(tool, payload)
+    env = with_lan_socket_pythonpath(direct_child_env())
+    target = lan_bind_target(payload) or nmap_target_from_payload(payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host LAN SMB python tool timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "smb python tool failed").strip()[:400])
+    return {
+        "source": "host-smb-python",
+        "target": target,
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_smb_python(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator smbmap/netexec of on-link RFC1918: host argv + sitecustomize, not leftover VPN HTTP_PROXY."""
+    bound = dict(payload or {})
+    stem = hexstrike_lan_tool_id(path)
+    target = lan_bind_target(bound) or nmap_target_from_payload(bound)
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = f"api/tools/{stem}"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = f"api/tools/{stem}"
+    if not lan_bind_nic(target)[1] or not _smb_python_binary(stem):
+        return await HEXSTRIKE.post_operator(cleaned, bound)
+    return await _host_smb_python_lan(path, bound)
 
 
 def _iface_lan_target(payload: dict[str, Any] | None) -> str:

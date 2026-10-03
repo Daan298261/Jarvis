@@ -25,6 +25,7 @@ from .owner_paths import (
     hydra_lan_child_env,
     lan_http_child_env,
     python_child_env,
+    with_lan_socket_pythonpath,
     workspace_cwd,
 )
 from .safety import classify_command, is_protected_process
@@ -5573,6 +5574,44 @@ def hydra_direct_argv(command: str) -> list[str] | None:
     return _direct_stem_argv(command, frozenset({"hydra", "thc-hydra"}))
 
 
+_SMB_PYTHON_STEMS = frozenset(
+    {
+        "smbmap",
+        "enum4linux",
+        "enum4linux-ng",
+        "netexec",
+        "nxc",
+        "crackmapexec",
+        "cme",
+    }
+)
+
+
+def _is_smb_python_stem(stem: str) -> bool:
+    return stem in _SMB_PYTHON_STEMS or stem.startswith("impacket-")
+
+
+def smb_python_direct_argv(command: str) -> list[str] | None:
+    """Run smbmap/enum4linux-ng/netexec as argv so sitecustomize binds LAN sockets.
+
+    These CLIs have no source-bind flag. HTTP_PROXY plus sitecustomize would
+    bind the NIC then CONNECT loopback. Skip pipes.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    if not _is_smb_python_stem(name):
+        return None
+    return _direct_stem_argv(command, frozenset({name}))
+
+
 def _direct_stem_argv(command: str, stems: frozenset[str]) -> list[str] | None:
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -5678,6 +5717,8 @@ def _child_env(args: list[str]) -> dict[str, str]:
         return git_child_env()
     if stem in {"hydra", "thc-hydra"}:
         return hydra_lan_child_env()
+    if _is_smb_python_stem(stem):
+        return with_lan_socket_pythonpath(direct_child_env())
     if stem in _LAN_HTTP_TOOL_STEMS or stem == "curlftpfs" or (args and _is_davfs_mount(args)):
         return lan_http_child_env()
     return direct_child_env()
@@ -5724,6 +5765,9 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
     hydra = hydra_direct_argv(command)
     if hydra:
         return hydra
+    smb_py = smb_python_direct_argv(command)
+    if smb_py:
+        return smb_py
     container = container_direct_argv(command)
     if container:
         return container

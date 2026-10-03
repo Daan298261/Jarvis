@@ -12,6 +12,7 @@ from app.tools.terminal import (
     expand_image_vars,
     git_direct_argv,
     hydra_direct_argv,
+    smb_python_direct_argv,
     lan_bound_cifs_argv,
     lan_bound_curlftpfs_argv,
     lan_bound_davfs_argv,
@@ -1521,6 +1522,44 @@ def test_terminal_hydra_uses_lan_connect_proxy_not_vpn(monkeypatch):
     assert bash[0] == "/usr/bin/hydra"
     assert _child_env(bash)["HYDRA_PROXY"].startswith("http://127.0.0.1:")
     assert hydra_direct_argv("hydra -l admin -P p.txt 192.168.1.50 ssh | cat") is None
+
+
+def test_terminal_smbmap_and_netexec_use_sitecustomize_not_vpn(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name
+        in {
+            "smbmap",
+            "smbmap.exe",
+            "enum4linux-ng",
+            "netexec",
+            "nxc",
+            "nxc.exe",
+            "impacket-smbclient",
+        }
+        else None,
+    )
+    mapped = smb_python_direct_argv("smbmap -H 192.168.1.50 -u guest")
+    assert mapped is not None
+    assert mapped[0] == "/usr/bin/smbmap"
+    assert mapped[1:] == ["-H", "192.168.1.50", "-u", "guest"]
+    env = _child_env(mapped)
+    assert "lan_python_site" in (env.get("PYTHONPATH") or "")
+    assert "HTTP_PROXY" not in env
+    assert "10.8.0.1" not in (env.get("HTTPS_PROXY") or "")
+    nxc = _command_args("nxc smb 192.168.1.40", "bash")
+    assert nxc[0] == "/usr/bin/nxc"
+    assert "lan_python_site" in (_child_env(nxc).get("PYTHONPATH") or "")
+    assert "HTTP_PROXY" not in _child_env(nxc)
+    enumed = smb_python_direct_argv("enum4linux-ng -t 192.168.1.50")
+    assert enumed is not None
+    assert enumed[0] == "/usr/bin/enum4linux-ng"
+    dumped = smb_python_direct_argv("impacket-smbclient 192.168.1.50")
+    assert dumped is not None
+    assert dumped[0] == "/usr/bin/impacket-smbclient"
+    assert smb_python_direct_argv("smbmap -H 192.168.1.50 | cat") is None
 
 
 def test_terminal_gobuster_and_ncrack_use_lan_proxy_not_vpn(monkeypatch):
