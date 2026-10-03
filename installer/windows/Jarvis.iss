@@ -174,6 +174,9 @@ begin
 
   if ExistingInstallDir = '' then
     ExistingInstallDir := ExpandConstant('{localappdata}\Jarvis');
+  { The ARP InstallLocation ends in a backslash. If quoted as a PowerShell
+    argument, that trailing slash escapes the quote and swallows later flags. }
+  ExistingInstallDir := RemoveBackslashUnlessRoot(ExistingInstallDir);
   if (not Result) and FileExists(AddBackslash(ExistingInstallDir) + 'unins000.exe') then
     Result := True;
   { Half-dead leftover tree: unins000.exe /VERYSILENT can exit 0 after deleting }
@@ -287,10 +290,12 @@ var
   ForceScript: String;
   Params: String;
   WorkDir: String;
+  NormalizedAppDir: String;
 begin
   Result := True;
   if AppDir = '' then
     Exit;
+  NormalizedAppDir := RemoveBackslashUnlessRoot(AppDir);
   ForceScript := ResolveForceStopScript(AppDir);
   if ForceScript = '' then
   begin
@@ -301,7 +306,7 @@ begin
 
   WorkDir := ExpandConstant('{tmp}');
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ForceScript +
-    '" -InstallRoot "' + AppDir + '" -IncludeTray -MaxWaitSeconds 90 -LogPath "' +
+    '" -InstallRoot "' + NormalizedAppDir + '" -IncludeTray -MaxWaitSeconds 90 -LogPath "' +
     ExpandConstant('{tmp}\installer-stop.log') + '"';
   if Exec('powershell.exe', Params, WorkDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
@@ -410,7 +415,7 @@ end;
 function GetUninstallForceStopParameters(Param: String): String;
 begin
   Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\installer\windows\force-stop-jarvis.ps1') +
-    '" -InstallRoot "' + ExpandConstant('{app}') + '" -IncludeTray -MaxWaitSeconds 90';
+    '" -InstallRoot "' + RemoveBackslashUnlessRoot(ExpandConstant('{app}')) + '" -IncludeTray -MaxWaitSeconds 90';
 end;
 
 function InitializeUninstall: Boolean;
