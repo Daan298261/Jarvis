@@ -12,7 +12,7 @@ import shutil
 import sys
 from pathlib import Path
 
-_SSH_NAMES = frozenset({"ssh", "scp", "sftp"})
+_SSH_NAMES = frozenset({"ssh", "scp", "sftp", "sshfs"})
 _VALUE_FLAGS = frozenset(
     {
         "-b",
@@ -130,6 +130,10 @@ def with_lan_ssh_bind(argv: list[str]) -> list[str]:
     if "-b" in parts or "BindAddress=" in joined:
         return parts
     if "-J" in parts or "ProxyJump" in joined or "ProxyCommand" in joined:
+        return parts
+    if _tool_name(parts[0]) == "sshfs" and (
+        "directport=" in joined.lower() or "ssh_command=" in joined.lower()
+    ):
         return parts
     host = ssh_destination_host(parts)
     bind = lan_ssh_bind_ip(host)

@@ -412,7 +412,7 @@ def test_lan_ssh_binds_home_nic_not_vpn(monkeypatch):
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
-        lambda name: f"/usr/bin/{name}" if name in {"ssh", "scp", "sftp"} else None,
+        lambda name: f"/usr/bin/{name}" if name in {"ssh", "scp", "sftp", "sshfs"} else None,
     )
     ssh = lan_bound_ssh_argv("ssh -p 22 taco@192.168.1.50")
     assert ssh is not None
@@ -422,11 +422,33 @@ def test_lan_ssh_binds_home_nic_not_vpn(monkeypatch):
     scp = lan_bound_ssh_argv("scp a.txt user@192.168.1.1:/tmp/a.txt")
     assert scp is not None
     assert scp[1:3] == ["-o", "BindAddress=192.168.1.12"]
+    mounted = lan_bound_ssh_argv("sshfs taco@192.168.1.50:/media /mnt/nas")
+    assert mounted is not None
+    assert mounted[0] == "/usr/bin/sshfs"
+    assert mounted[1:3] == ["-o", "BindAddress=192.168.1.12"]
+    assert mounted[-2:] == ["taco@192.168.1.50:/media", "/mnt/nas"]
+    fused = lan_bound_ssh_argv("sshfs -o follow_symlinks,allow_other taco@192.168.1.1:/ /mnt")
+    assert fused is not None
+    assert fused[1:3] == ["-o", "BindAddress=192.168.1.12"]
+    assert lan_bound_ssh_argv("sshfs taco@8.8.8.8:/share /mnt") is None
+    already = lan_bound_ssh_argv(
+        "sshfs -o BindAddress=10.8.0.2 taco@192.168.1.50:/ /mnt"
+    )
+    assert already is not None
+    assert already[2] == "BindAddress=10.8.0.2"
+    assert "BindAddress=192.168.1.12" not in already
+    assert lan_bound_ssh_argv(
+        "sshfs -o directport=22 taco@192.168.1.50:/ /mnt"
+    ) is None
+    assert lan_bound_ssh_argv("sshfs taco@192.168.1.50:/ /mnt | cat") is None
     assert lan_bound_ssh_argv("ssh git@github.com") is None
     assert lan_bound_ssh_argv("ssh taco@192.168.1.1 | cat") is None
     powershell = _command_args("ssh taco@192.168.1.50", "powershell")
     assert powershell[0] == "/usr/bin/ssh"
     assert "BindAddress=192.168.1.12" in powershell
+    bash = _command_args("sshfs taco@192.168.1.50:/media /mnt/nas", "bash")
+    assert bash[0] == "/usr/bin/sshfs"
+    assert bash[1:3] == ["-o", "BindAddress=192.168.1.12"]
 
 
 def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):

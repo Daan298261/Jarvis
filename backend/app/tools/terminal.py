@@ -219,10 +219,11 @@ def lan_bound_http_argv(command: str) -> list[str] | None:
 
 
 def lan_bound_ssh_argv(command: str) -> list[str] | None:
-    """OpenSSH of an on-link RFC1918 host, sourced from that NIC.
+    """OpenSSH / sshfs of an on-link RFC1918 host, sourced from that NIC.
 
     ``ssh -b`` is bind-address; scp/sftp ``-b`` is not. Use ``BindAddress`` for
-    ssh/scp/sftp. Skip pipes, ProxyJump, and explicit binds.
+    ssh/scp/sftp/sshfs (sshfs forwards unknown ``-o`` to ssh). Skip pipes,
+    ProxyJump, ``ssh_command``, ``directport``, and explicit binds.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -236,7 +237,7 @@ def lan_bound_ssh_argv(command: str) -> list[str] | None:
     name = Path(parts[0]).name.lower()
     if name.endswith(".exe"):
         name = name[:-4]
-    if name not in {"ssh", "scp", "sftp"}:
+    if name not in {"ssh", "scp", "sftp", "sshfs"}:
         return None
     exe = shutil.which(name) or shutil.which(f"{name}.exe")
     if not exe:
