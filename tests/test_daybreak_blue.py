@@ -738,6 +738,18 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     assert wpscan["additional_args"].startswith("--proxy http://127.0.0.1:")
     public_katana = bind_hexstrike_lan_payload("katana", {"url": "https://example.com/"})
     assert public_katana.get("additional_args", "") == ""
+    arp = bind_hexstrike_lan_payload("http:arp-scan", {"target": "192.168.1.0/24"})
+    assert arp["additional_args"] == "--arpspa 192.168.1.12 -I eth0"
+    mcp_arp = bind_hexstrike_lan_payload("mcp_hexstrike_ai_arp_scan", {"target": "192.168.1.0/24"})
+    assert mcp_arp["additional_args"] == "--arpspa 192.168.1.12 -I eth0"
+    arping = bind_hexstrike_lan_payload("arping", {"host": "192.168.1.40"})
+    assert arping["additional_args"] == "-s 192.168.1.12 -I eth0"
+    fping = bind_hexstrike_lan_payload("api/tools/fping", {"target": "192.168.1.0/24"})
+    assert fping["additional_args"] == "-S 192.168.1.12 -I eth0"
+    spaced = bind_hexstrike_lan_payload("arp-scan", {"target": "192.168.50.12"})
+    assert spaced["additional_args"] == "--arpspa 192.168.50.8"
+    public_arp = bind_hexstrike_lan_payload("arp-scan", {"target": "8.8.8.8"})
+    assert public_arp.get("additional_args", "") == ""
 
 
 def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():

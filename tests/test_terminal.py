@@ -372,7 +372,9 @@ def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
-        lambda name: f"/usr/bin/{name}" if name in {"nmap", "ping", "traceroute", "masscan", "nping"} else None,
+        lambda name: f"/usr/bin/{name}"
+        if name in {"nmap", "ping", "traceroute", "masscan", "nping", "arp-scan", "arping", "fping"}
+        else None,
     )
 
     def fake_getaddrinfo(host, *args, **kwargs):
@@ -403,6 +405,16 @@ def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):
     masscan = lan_bound_scan_argv("masscan 192.168.1.0/24 -p80")
     assert masscan is not None
     assert masscan[1:5] == ["--source-ip", "192.168.1.12", "-e", "eth0"]
+    arp = lan_bound_scan_argv("arp-scan 192.168.1.0/24")
+    assert arp is not None
+    assert arp[1:5] == ["--arpspa", "192.168.1.12", "-I", "eth0"]
+    arping = lan_bound_scan_argv("arping 192.168.1.1")
+    assert arping is not None
+    assert arping[1:5] == ["-s", "192.168.1.12", "-I", "eth0"]
+    fping = lan_bound_scan_argv("fping -c 1 192.168.1.50")
+    assert fping is not None
+    assert fping[1:5] == ["-S", "192.168.1.12", "-I", "eth0"]
+    assert lan_bound_scan_argv("arp-scan -I eth0 192.168.1.0/24") is None
     vpn = lan_bound_scan_argv("nmap 10.8.0.2")
     assert vpn is not None
     assert vpn[1:5] == ["-S", "10.8.0.2", "-e", "wg0"]

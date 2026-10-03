@@ -443,6 +443,19 @@ def hexstrike_tool_stem(name: str) -> str:
     return text
 
 
+def hexstrike_lan_tool_id(tool: str) -> str:
+    """Stem that keeps hyphenated LAN tools such as ``arp-scan`` (not last token ``scan``)."""
+    text = str(tool or "").strip().lower().replace("-", "_")
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1]
+    for ident in ("arp_scan",):
+        if text == ident or text.endswith(f"_{ident}"):
+            return ident
+    return hexstrike_tool_stem(tool)
+
+
 def nmap_target_from_payload(payload: dict[str, Any] | None) -> str:
     row = payload if isinstance(payload, dict) else {}
     for key in ("target", "host", "ip", "address"):
@@ -566,13 +579,14 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     nmap uses ``-S``/``-e``. ProjectDiscovery nuclei/httpx/naabu use ``-source-ip``
     / ``-interface``. masscan uses ``--source-ip``/``-e``. curl uses ``--interface``.
     wget uses ``--bind-address``. rustscan forwards nmap ``-S``/``-e`` after ``--``.
+    arp-scan uses ``--arpspa``/``-I``; arping ``-s``/``-I``; fping ``-S``/``-I``.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
     wfuzz/arjun/gau/dalfox have no source-bind CLI; they get a loopback LAN proxy
     flag. Public internet targets are left unchanged. Spaced Windows NIC names
-    omit ``-interface``/``-e`` (HexStrike ``additional_args.split()``).
+    omit ``-interface``/``-e``/``-I`` (HexStrike ``additional_args.split()``).
     """
     bound = dict(payload or {})
-    stem = hexstrike_tool_stem(tool)
+    stem = hexstrike_lan_tool_id(tool)
     if stem == "nmap" or looks_like_nmap_tool(tool):
         target = nmap_target_from_payload(bound)
         if not lan_scan_bind(target)[1]:
@@ -625,6 +639,24 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
             extra.extend(["-e", iface])
         if extra:
             flags.extend(["--", *extra] if "--" not in tokens else extra)
+    elif stem == "arp_scan":
+        if _tokens_have_flag(tokens, frozenset({"-I", "--interface", "--arpspa", "--localip"})):
+            return bound
+        flags.extend(["--arpspa", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-I" not in tokens:
+            flags.extend(["-I", iface])
+    elif stem == "arping":
+        if _tokens_have_flag(tokens, frozenset({"-I", "-i", "-s"})):
+            return bound
+        flags.extend(["-s", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-I" not in tokens:
+            flags.extend(["-I", iface])
+    elif stem == "fping":
+        if _tokens_have_flag(tokens, frozenset({"-I", "-S"})):
+            return bound
+        flags.extend(["-S", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-I" not in tokens:
+            flags.extend(["-I", iface])
     elif stem in _HTTP_PROXY_FLAG:
         skip = _HTTP_PROXY_SKIP.get(stem, frozenset({"--proxy", "-x"}))
         if _tokens_have_flag(tokens, skip):

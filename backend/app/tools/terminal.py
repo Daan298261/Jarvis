@@ -232,7 +232,7 @@ def lan_bound_ssh_argv(command: str) -> list[str] | None:
     return bound
 
 
-_SCAN_NAMES = frozenset({"nmap", "nping", "ping", "traceroute", "masscan"})
+_SCAN_NAMES = frozenset({"nmap", "nping", "ping", "traceroute", "masscan", "arp-scan", "arping", "fping"})
 _IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
 
 
@@ -262,6 +262,12 @@ def _scan_already_bound(name: str, parts: list[str]) -> bool:
         return "-s" in flags
     if name == "masscan":
         return bool(flags & {"--source-ip", "-e", "-S"})
+    if name == "arp-scan":
+        return bool(flags & {"-I", "--interface", "--arpspa", "--localip"})
+    if name == "arping":
+        return bool(flags & {"-I", "-i", "-s"})
+    if name == "fping":
+        return bool(flags & {"-I", "-S"})
     return True
 
 
@@ -287,15 +293,31 @@ def _scan_bind_flags(name: str, target: str) -> list[str] | None:
         if iface:
             flags.extend(["-e", iface])
         return flags
+    if name == "arp-scan":
+        flags = ["--arpspa", source]
+        if iface:
+            flags.extend(["-I", iface])
+        return flags
+    if name == "arping":
+        flags = ["-s", source]
+        if iface:
+            flags.extend(["-I", iface])
+        return flags
+    if name == "fping":
+        flags = ["-S", source]
+        if iface:
+            flags.extend(["-I", iface])
+        return flags
     return None
 
 
 def lan_bound_scan_argv(command: str) -> list[str] | None:
-    """nmap/ping/traceroute/masscan of on-link RFC1918, sourced from that NIC.
+    """nmap/ping/traceroute/masscan/arp-scan of on-link RFC1918, sourced from that NIC.
 
-    HexStrike nmap already pins ``-S``/``-e``. The same probes via the terminal
-    tool still follow the OS default route, so a VPN steals the hop to the LAN.
-    Skip pipes and explicit source-bind flags. Public targets are unchanged.
+    HexStrike nmap already pins ``-S``/``-e``. Terminal nmap/ping plus ARP/fping
+    still follow the OS default route, so a VPN steals (or black-holes) the hop
+    to the LAN. Skip pipes and explicit source-bind flags. Public targets are
+    unchanged.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
