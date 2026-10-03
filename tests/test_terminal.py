@@ -8,6 +8,7 @@ from app.tools.terminal import (
     default_shell,
     container_direct_argv,
     docker_registry_host_from_image,
+    git_direct_argv,
     lan_bound_cifs_argv,
     lan_bound_dns_argv,
     lan_bound_docker_pull_argv,
@@ -871,3 +872,34 @@ def test_lan_docker_pull_skips_when_skopeo_missing(monkeypatch):
     monkeypatch.setattr("app.tools.terminal.shutil.which", lambda name: None)
     assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app") is None
     assert container_direct_argv("podman pull 192.168.1.50:5000/app") is None
+
+
+def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"git", "git.exe", "pip", "pip3", "npm", "uv"} else None,
+    )
+    cloned = git_direct_argv("git clone http://192.168.1.50/repo.git")
+    assert cloned is not None
+    assert cloned[0] == "/usr/bin/git"
+    assert cloned[1:] == ["clone", "http://192.168.1.50/repo.git"]
+    bash = _command_args("git clone taco@192.168.1.50:media.git", "bash")
+    assert bash[0] == "/usr/bin/git"
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+    assert "lan_ssh.py" in (env.get("GIT_SSH_COMMAND") or "")
+    pip = container_direct_argv("pip install --index-url http://192.168.1.50:3141/simple pkg")
+    assert pip is not None
+    assert pip[0] == "/usr/bin/pip"
+    assert _child_env(pip)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    npm = _command_args("npm install --registry http://192.168.1.40:4873", "bash")
+    assert npm[0] == "/usr/bin/npm"
+    assert _child_env(npm)["HTTPS_PROXY"] == _child_env(npm)["HTTP_PROXY"]
+    uv = container_direct_argv("uv pip install httpx")
+    assert uv is not None
+    assert _child_env(uv)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert git_direct_argv("git clone http://192.168.1.50/repo.git | cat") is None
+    assert container_direct_argv("pip install pkg && rm -rf /") is None
