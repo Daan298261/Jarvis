@@ -1121,7 +1121,7 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     registry from that NIC and loads the image into the local docker daemon.
     Skip pipes, public Hub names, and missing skopeo. ``-a`` / ``--all-tags``
     lists tags through skopeo and copies each. Optional ``-q`` / ``--quiet``
-    and ``--platform os/arch[/variant]`` (platform is ignored with ``--all-tags``).
+    and ``--platform os/arch[/variant]`` (including with ``--all-tags``).
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1137,11 +1137,13 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     if not _lan_bind_ip_for_host(host):
         return None
     quiet = any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:])
-    if all_tags:
-        return skopeo_copy_lan_images_argv([_docker_repo_name(image)], quiet=quiet, all_tags=True)
     overrides = _skopeo_platform_flags(platform)
     if overrides is None:
         return None
+    if all_tags:
+        return skopeo_copy_lan_images_argv(
+            [_docker_repo_name(image)], quiet=quiet, all_tags=True, platform_flags=overrides
+        )
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
     if not exe:
         return None
@@ -1176,13 +1178,13 @@ def lan_bound_docker_push_argv(command: str) -> list[str] | None:
     if not _lan_bind_ip_for_host(host):
         return None
     quiet = any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:])
-    if all_tags:
-        return skopeo_copy_lan_images_argv(
-            [_docker_repo_name(image)], quiet=quiet, push=True, all_tags=True
-        )
     overrides = _skopeo_platform_flags(platform)
     if overrides is None:
         return None
+    if all_tags:
+        return skopeo_copy_lan_images_argv(
+            [_docker_repo_name(image)], quiet=quiet, push=True, all_tags=True, platform_flags=overrides
+        )
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
     if not exe:
         return None
@@ -1296,10 +1298,61 @@ def lan_bound_docker_login_argv(command: str) -> list[str] | None:
 _COMPOSE_FILENAMES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
 _COMPOSE_FILE_FLAGS = frozenset({"-f", "--file"})
 _COMPOSE_PULL_QUIET = frozenset({"-q", "--quiet"})
+_BRACE_VAR = re.compile(
+    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-)|-)([^}]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}"
+)
+_SIMPLE_VAR = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+_ARG_DECL = re.compile(r"^\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*(.*))?\s*$", re.I)
+
+
+def expand_image_vars(text: str, args: dict[str, str] | None = None) -> str | None:
+    """Expand ``${VAR}``, ``${VAR:-default}``, ``${VAR-default}``, and ``$VAR``.
+
+    Returns None when a required variable is unset so callers skip interpolations
+    that docker would still leave unresolved.
+    """
+    source = str(text or "").strip()
+    if "$" not in source:
+        return source
+    values = dict(args or {})
+    missing = False
+
+    def brace(match: re.Match[str]) -> str:
+        nonlocal missing
+        bare = match.group(4)
+        if bare:
+            if bare not in values:
+                missing = True
+                return match.group(0)
+            return values[bare]
+        name = match.group(1)
+        colon = match.group(2)
+        default = match.group(3) if match.group(3) is not None else ""
+        if colon:
+            val = values.get(name, "")
+            return val if val else default
+        if name in values:
+            return values[name]
+        return default
+
+    out = _BRACE_VAR.sub(brace, source)
+
+    def simple(match: re.Match[str]) -> str:
+        nonlocal missing
+        name = match.group(1)
+        if name not in values:
+            missing = True
+            return match.group(0)
+        return values[name]
+
+    out = _SIMPLE_VAR.sub(simple, out)
+    if missing or "$" in out:
+        return None
+    return out.strip().strip("'\"")
 
 
 def compose_service_images(path: Path) -> dict[str, str]:
-    """Map compose service name → image ref. Skip build-only services and interpolations."""
+    """Map compose service name → image ref. Skip build-only services and unresolved interpolations."""
     try:
         import yaml
     except ImportError:
@@ -1316,7 +1369,8 @@ def compose_service_images(path: Path) -> dict[str, str]:
         if not isinstance(spec, dict):
             continue
         image = str(spec.get("image") or "").strip()
-        if not image or "${" in image or "$" in image:
+        image = expand_image_vars(image, dict(os.environ)) or ""
+        if not image:
             continue
         images[str(name)] = image
     return images
@@ -1500,6 +1554,7 @@ def skopeo_copy_lan_images_argv(
     push_after: list[str] | None = None,
     then: list[str] | None = None,
     all_tags: bool = False,
+    platform_flags: list[str] | None = None,
 ) -> list[str] | None:
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
     tagged = (
@@ -1510,10 +1565,11 @@ def skopeo_copy_lan_images_argv(
     after = [_docker_image_with_tag(image) for image in (push_after or [])]
     follow_cmd = list(follow or [])
     then_cmd = list(then or [])
+    overrides = list(platform_flags or [])
     if not exe or (not tagged and not after):
         return None
     if len(tagged) == 1 and not follow_cmd and not after and not then_cmd and not all_tags:
-        argv = [exe, "copy"]
+        argv = [exe, "copy", *overrides]
         if quiet:
             argv.append("--quiet")
         if push:
@@ -1521,7 +1577,7 @@ def skopeo_copy_lan_images_argv(
         else:
             argv.extend(["--src-tls-verify=false", f"docker://{tagged[0]}", f"docker-daemon:{tagged[0]}"])
         return argv
-    if len(after) == 1 and not tagged and not follow_cmd and not then_cmd:
+    if len(after) == 1 and not tagged and not follow_cmd and not then_cmd and not overrides:
         argv = [exe, "copy"]
         if quiet:
             argv.append("--quiet")
@@ -1536,6 +1592,7 @@ def skopeo_copy_lan_images_argv(
         argv.append("--push")
     if all_tags:
         argv.append("--all-tags")
+    argv.extend(overrides)
     for image in after:
         argv.extend(["--push-after", image])
     argv.extend([exe, *tagged])
@@ -2375,21 +2432,36 @@ _DOCKER_BUILD_VALUE_FLAGS = frozenset(
 )
 
 
-def dockerfile_from_images(path: Path) -> list[str]:
-    """Image refs in Dockerfile ``FROM`` lines, skipping scratch and interpolations."""
+def dockerfile_from_images(path: Path, build_args: dict[str, str] | None = None) -> list[str]:
+    """Image refs in Dockerfile ``FROM`` lines, resolving ARG defaults.
+
+    Skip scratch and interpolations that still have no value after ARG /
+    ``${VAR:-default}`` / ``--build-arg`` substitution.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return []
+    declared = dict(build_args or {})
     images: list[str] = []
     seen: set[str] = set()
     for raw in text.splitlines():
         line = raw.split("#", 1)[0]
+        arg_match = _ARG_DECL.match(line)
+        if arg_match:
+            name = arg_match.group(1)
+            if name in declared:
+                continue
+            default = arg_match.group(2)
+            if default is None:
+                continue
+            declared[name] = default.strip().strip("'\"")
+            continue
         match = _DOCKERFILE_FROM.match(line)
         if not match:
             continue
-        image = match.group(1).strip().strip("'\"")
-        if not image or image.lower() == "scratch" or "$" in image:
+        image = expand_image_vars(match.group(1).strip().strip("'\""), declared)
+        if not image or image.lower() == "scratch":
             continue
         if image in seen:
             continue
@@ -2443,6 +2515,31 @@ def _docker_build_tags(parts: list[str]) -> list[str]:
             if piece.startswith("name="):
                 tags.append(piece.split("=", 1)[1].strip())
     return [tag for tag in tags if tag]
+
+
+def _docker_build_args(parts: list[str]) -> dict[str, str]:
+    args: dict[str, str] = {}
+    index = 0
+    while index < len(parts):
+        text = str(parts[index] or "").strip()
+        index += 1
+        raw = ""
+        if text in {"--build-arg"}:
+            if index >= len(parts):
+                break
+            raw = str(parts[index] or "").strip().strip("'\"")
+            index += 1
+        elif text.startswith("--build-arg="):
+            raw = text.split("=", 1)[1].strip().strip("'\"")
+        else:
+            continue
+        if "=" not in raw:
+            continue
+        key, _, value = raw.partition("=")
+        key = key.strip()
+        if key:
+            args[key] = value
+    return args
 
 
 def _docker_build_wants_push(parts: list[str]) -> bool:
@@ -2577,7 +2674,7 @@ def lan_bound_docker_build_from_parts(parts: list[str], cwd: str | None = None) 
     dockerfile, quiet = spec
     lan = [
         image
-        for image in dockerfile_from_images(dockerfile)
+        for image in dockerfile_from_images(dockerfile, _docker_build_args(parts))
         if _lan_bind_ip_for_host(docker_registry_host_from_image(image))
     ]
     tags = _docker_build_tags(parts)

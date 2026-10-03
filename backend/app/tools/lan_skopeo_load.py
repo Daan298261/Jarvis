@@ -70,8 +70,10 @@ def _expand_all_tags(exe: str, repo: str, *, push: bool) -> list[str] | None:
     return [f"{name}:{item}" for item in raw if str(item).strip() and "<none>" not in str(item)]
 
 
-def _copy(exe: str, image: str, *, quiet: bool, push: bool) -> int:
+def _copy(exe: str, image: str, *, quiet: bool, push: bool, extra: list[str] | None = None) -> int:
     cmd = [exe, "copy"]
+    if extra:
+        cmd.extend(extra)
     if quiet:
         cmd.append("--quiet")
     if push:
@@ -86,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     quiet = False
     push = False
     all_tags = False
+    extra: list[str] = []
     push_after: list[str] = []
     while args:
         if args[0] in {"-q", "--quiet"}:
@@ -99,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:
         if args[0] in {"-a", "--all-tags"}:
             all_tags = True
             args = args[1:]
+            continue
+        if args[0] in {"--override-os", "--override-arch", "--override-variant"} and len(args) > 1:
+            extra.extend([args[0], args[1]])
+            args = args[2:]
             continue
         if args[0] == "--push-after" and len(args) > 1:
             push_after.append(args[1])
@@ -137,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         if not images and not push_after:
             return 1
     for image in images:
-        code = _copy(exe, image, quiet=quiet, push=push)
+        code = _copy(exe, image, quiet=quiet, push=push, extra=extra)
         if code:
             return code
     if follow:
@@ -145,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
         if proc.returncode:
             return int(proc.returncode)
     for image in push_after:
-        code = _copy(exe, image, quiet=quiet, push=True)
+        code = _copy(exe, image, quiet=quiet, push=True, extra=extra)
         if code:
             return code
     if then:

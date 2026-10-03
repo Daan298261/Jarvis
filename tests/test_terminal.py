@@ -9,10 +9,12 @@ from app.tools.terminal import (
     container_direct_argv,
     dockerfile_from_images,
     docker_registry_host_from_image,
+    expand_image_vars,
     git_direct_argv,
     lan_bound_cifs_argv,
     compose_service_depends,
     compose_service_dockerfiles,
+    compose_service_images,
     lan_bound_compose_build_argv,
     lan_bound_compose_pull_argv,
     lan_bound_compose_push_argv,
@@ -865,6 +867,17 @@ def test_lan_docker_pull_rewrites_to_skopeo_not_dockerd(monkeypatch):
     assert "--all-tags" in all_tags
     assert "192.168.1.50:5000/app" in all_tags
     assert "192.168.1.50:5000/app:v1" not in all_tags
+    plat_all = lan_bound_docker_pull_argv(
+        "docker pull --all-tags --platform linux/arm64 192.168.1.50:5000/app"
+    )
+    assert plat_all is not None
+    assert "--all-tags" in plat_all
+    assert plat_all[plat_all.index("--override-os") : plat_all.index("--override-os") + 4] == [
+        "--override-os",
+        "linux",
+        "--override-arch",
+        "arm64",
+    ]
     assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app | cat") is None
     assert lan_bound_docker_pull_argv("docker pull 8.8.8.8:5000/app") is None
     bash = _command_args("docker pull 192.168.1.50:5000/app:stable", "bash")
@@ -1061,6 +1074,19 @@ def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):
     env = _child_env(bash)
     assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
     assert "10.8.0.1" not in env["HTTP_PROXY"]
+    interp = tmp_path / "interp.yaml"
+    interp.write_text(
+        "services:\n"
+        "  app:\n"
+        "    image: ${REGISTRY:-192.168.1.50:5000}/app:latest\n"
+        "  skip:\n"
+        "    image: ${MISSING}/app\n",
+        encoding="utf-8",
+    )
+    defaulted = lan_bound_compose_pull_argv(f"docker compose -f {interp} pull")
+    assert defaulted is not None
+    assert "docker://192.168.1.50:5000/app:latest" in defaulted
+    assert compose_service_images(interp) == {"app": "192.168.1.50:5000/app:latest"}
 
 
 def test_lan_compose_push_rewrites_to_skopeo(tmp_path, monkeypatch):
@@ -1218,6 +1244,22 @@ def test_lan_skopeo_load_runs_copies_then_follow(monkeypatch):
     assert (
         main(
             [
+                "--all-tags",
+                "--override-os",
+                "linux",
+                "--override-arch",
+                "arm64",
+                "/usr/bin/skopeo",
+                "192.168.1.50:5000/app",
+            ]
+        )
+        == 0
+    )
+    assert seen[0][1:6] == ["copy", "--override-os", "linux", "--override-arch", "arm64"]
+    seen.clear()
+    assert (
+        main(
+            [
                 "--push-after",
                 "192.168.1.50:5000/app:latest",
                 "/usr/bin/skopeo",
@@ -1260,6 +1302,26 @@ def test_dockerfile_from_images_skips_scratch_and_args(tmp_path):
         "nas.local/org/runtime",
         "alpine:3.20",
     ]
+    arged = tmp_path / "Arg.Dockerfile"
+    arged.write_text(
+        "ARG BASE=192.168.1.50:5000/base:latest\n"
+        "FROM ${BASE}\n"
+        "FROM ${OTHER:-nas.local/runtime}\n"
+        "FROM ${MISSING}\n"
+        "ARG EMPTY\n"
+        "FROM $EMPTY\n",
+        encoding="utf-8",
+    )
+    assert dockerfile_from_images(arged) == [
+        "192.168.1.50:5000/base:latest",
+        "nas.local/runtime",
+    ]
+    assert dockerfile_from_images(arged, {"BASE": "192.168.1.50:5000/custom:1"}) == [
+        "192.168.1.50:5000/custom:1",
+        "nas.local/runtime",
+    ]
+    assert expand_image_vars("${REGISTRY:-192.168.1.50:5000}/app:latest") == "192.168.1.50:5000/app:latest"
+    assert expand_image_vars("${MISSING}/app") is None
 
 
 def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
@@ -1309,6 +1371,19 @@ def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
     env = _child_env(bash)
     assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
     assert "10.8.0.1" not in env["HTTP_PROXY"]
+    (ctx / "Dockerfile").write_text(
+        "ARG BASE=192.168.1.50:5000/base:latest\nFROM ${BASE}\nCOPY . .\n",
+        encoding="utf-8",
+    )
+    arged = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert arged is not None
+    assert "192.168.1.50:5000/base:latest" in arged
+    override = lan_bound_docker_build_argv(
+        f"docker build --build-arg BASE=192.168.1.50:5000/other:1 {ctx}"
+    )
+    assert override is not None
+    assert "192.168.1.50:5000/other:1" in override
+    assert "192.168.1.50:5000/base:latest" not in override
 
 
 def test_lan_docker_buildx_skopeo_loads_from_before_build(tmp_path, monkeypatch):
