@@ -890,8 +890,10 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert looks_like_smb_python_tool("http:nxc")
     assert looks_like_smb_python_tool("mcp_hexstrike_ai_netexec")
     assert looks_like_smb_python_tool("api/tools/enum4linux-ng")
+    assert looks_like_smb_python_tool("impacket-smbclient")
     assert not looks_like_smb_python_tool("smbclient")
     assert not looks_like_smb_python_tool("nuclei")
+    assert not looks_like_smb_tool("impacket-smbclient")
 
 
 def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch):
@@ -1619,6 +1621,58 @@ async def test_operator_smbclient_falls_back_to_suite_when_not_on_path(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_operator_smbclient_uses_impacket_when_samba_missing(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_smb
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/impacket-smbclient"
+        if str(name).lower() in {"impacket-smbclient", "impacket-smbclient.exe"}
+        else None,
+    )
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"# shares\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_smb(
+        "api/tools/smbclient",
+        {"target": "192.168.1.50", "additional_args": "-L -N"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-smb-python"
+    assert seen[0][0][0] == "/usr/bin/impacket-smbclient"
+    assert "192.168.1.50" in seen[0][0]
+    env = seen[0][1]
+    assert "lan_python_site" in (env.get("PYTHONPATH") or "")
+    assert "HTTP_PROXY" not in env
+    assert "10.8.0.1" not in (env.get("HTTPS_PROXY") or "")
+
+
+@pytest.mark.asyncio
 async def test_operator_hydra_hosts_lan_with_hydra_proxy(monkeypatch):
     from app.security.hexstrike_defensive import execute_operator_hydra, hydra_host_argv
 
@@ -1878,6 +1932,64 @@ async def test_mcp_smbclient_uses_host_argv_for_lan(monkeypatch):
         assert argv[0] == "/usr/bin/smbclient"
         assert argv[1] == "--option=client addr=192.168.1.12"
         assert argv[argv.index("-L") + 1] == "192.168.1.50"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_smbclient_uses_impacket_when_samba_missing(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN smbclient must not go through HexStrike MCP when Samba is missing")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_smbclient"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "smbclient"},
+        "remote_name": "smbclient",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/impacket-smbclient"
+        if str(name).lower() in {"impacket-smbclient", "impacket-smbclient.exe"}
+        else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"# shares\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_smbclient",
+            {"target": "192.168.1.50", "additional_args": "-L -N"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-smb-python"
+        argv, env = seen[0]
+        assert argv[0] == "/usr/bin/impacket-smbclient"
+        assert "192.168.1.50" in argv
+        assert "lan_python_site" in (env.get("PYTHONPATH") or "")
+        assert "HTTP_PROXY" not in env
     finally:
         MCP.reset_for_tests()
 

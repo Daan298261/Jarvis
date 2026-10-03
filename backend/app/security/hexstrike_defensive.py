@@ -481,7 +481,7 @@ def hexstrike_lan_tool_id(tool: str) -> str:
         text = text.rsplit(":", 1)[-1]
     from ..tools.lan_snmp import SNMP_TOOL_STEMS
 
-    for ident in ("arp_scan", "enum4linux_ng", *sorted(SNMP_TOOL_STEMS)):
+    for ident in ("arp_scan", "enum4linux_ng", "impacket_smbclient", *sorted(SNMP_TOOL_STEMS)):
         if text == ident or text.endswith(f"_{ident}"):
             return ident
     return hexstrike_tool_stem(tool)
@@ -503,11 +503,22 @@ def looks_like_smb_tool(name: str) -> bool:
 
 
 _SMB_PYTHON_STEMS = frozenset(
-    {"smbmap", "enum4linux", "enum4linux_ng", "netexec", "nxc", "crackmapexec", "cme"}
+    {
+        "smbmap",
+        "enum4linux",
+        "enum4linux_ng",
+        "netexec",
+        "nxc",
+        "crackmapexec",
+        "cme",
+        "impacket_smbclient",
+    }
 )
 _SMB_PYTHON_BINARY = {
     "enum4linux_ng": "enum4linux-ng",
+    "impacket_smbclient": "impacket-smbclient",
 }
+_SMB_PYTHON_FALLBACK_STEMS = ("smbmap", "netexec", "nxc", "impacket_smbclient")
 
 
 def looks_like_smb_python_tool(name: str) -> bool:
@@ -1227,7 +1238,11 @@ async def _host_smb_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, 
 
 
 async def execute_operator_smb(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Operator smbclient of on-link RFC1918: host argv so ``client addr`` stays one token."""
+    """Operator smbclient of on-link RFC1918: host argv so ``client addr`` stays one token.
+
+    When Samba is missing, ``impacket-smbclient`` / ``smbmap`` / ``nxc`` run with
+    sitecustomize instead of the HexStrike suite (which would follow the VPN).
+    """
     bound = dict(payload or {})
     stem = hexstrike_lan_tool_id(path)
     target = _smb_payload_host(bound)
@@ -1243,9 +1258,14 @@ async def execute_operator_smb(path: str, payload: dict[str, Any] | None) -> dic
         cleaned = f"api/tools/{stem}"
     if not str(cleaned).startswith("api/tools/"):
         cleaned = f"api/tools/{stem}"
-    if not lan_bind_nic(target)[1] or not _smb_host_binary(stem):
+    if not lan_bind_nic(target)[1]:
         return await HEXSTRIKE.post_operator(cleaned, bound)
-    return await _host_smb_lan(path, bound)
+    if _smb_host_binary(stem):
+        return await _host_smb_lan(path, bound)
+    fallback = _smb_lan_python_fallback_stem()
+    if fallback:
+        return await _host_smb_python_lan(fallback, bound)
+    return await HEXSTRIKE.post_operator(cleaned, bound)
 
 
 def _hydra_host_binary() -> str | None:
@@ -1341,6 +1361,14 @@ async def execute_operator_hydra(path: str, payload: dict[str, Any] | None) -> d
 def _smb_python_binary(stem: str) -> str | None:
     name = _SMB_PYTHON_BINARY.get(stem, stem)
     return shutil.which(name) or shutil.which(f"{name}.exe")
+
+
+def _smb_lan_python_fallback_stem() -> str | None:
+    """When Samba smbclient is missing, bind LAN via sitecustomize Python SMB tools."""
+    for stem in _SMB_PYTHON_FALLBACK_STEMS:
+        if _smb_python_binary(stem):
+            return stem
+    return None
 
 
 def smb_python_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:

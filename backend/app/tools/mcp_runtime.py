@@ -375,6 +375,7 @@ class MCPRuntime:
             _smb_host_binary,
             _smb_payload_host,
             _smb_python_binary,
+            _smb_lan_python_fallback_stem,
             _hydra_host_binary,
             _iface_lan_target,
             should_host_exec_iface,
@@ -400,6 +401,11 @@ class MCPRuntime:
             if lan_bind_nic(target)[1] and _smb_host_binary(ident):
                 data = await _host_smb_lan(str(tool_key or name), args)
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if lan_bind_nic(target)[1]:
+                fallback = _smb_lan_python_fallback_stem()
+                if fallback:
+                    data = await _host_smb_python_lan(fallback, args)
+                    return ToolResult(True, str(data.get("stdout") or data), data=data)
         if looks_like_smb_python_tool(tool_key) or looks_like_smb_python_tool(str(name)):
             target = lan_bind_target(args) or nmap_target_from_payload(args)
             ident = hexstrike_lan_tool_id(str(tool_key or name))
