@@ -2601,7 +2601,23 @@ def test_lan_run_python_urlretrieve(tmp_path, monkeypatch):
         "'http://192.168.1.50:8000/x')\"\n",
         encoding="utf-8",
     )
-    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    destless = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert destless is not None
+    follow = destless[destless.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x x" in text
+    assert "urlopen" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import urllib.request; urllib.request.urlopen("
+        "'http://192.168.1.50:8000/x').read()\"\n",
+        encoding="utf-8",
+    )
+    probed = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert probed is not None
+    follow = probed[probed.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x x" in text
     (ctx / "Dockerfile").write_text(
         "FROM alpine:3.20\n"
         "RUN python -c \"import urllib.request; open('/opt/x','wb').write("

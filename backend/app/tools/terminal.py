@@ -3645,9 +3645,10 @@ def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
     """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``wget2`` /
-    ``curl`` / ``aria2c`` / ``axel`` / ``RUN python -c urlretrieve|urlopen-write``
+    ``curl`` / ``aria2c`` / ``axel`` / ``RUN python -c urlretrieve|urlopen-write|urlopen``
     (including ``&&`` / ``;`` chains and ``sh -c`` / ``bash -lc``) of those
-    URLs into ``COPY --from=jarvisaddN``.
+    URLs into ``COPY --from=jarvisaddN``. Dest-less ``urlopen`` uses the URL
+    filename (same as dest-less ``urlretrieve``).
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
     text and an empty list when there is no on-link RFC1918 fetch.
@@ -3691,6 +3692,11 @@ _PATH_WRITE_BYTES = re.compile(
 )
 _PYTHON_OTHER_HTTP = re.compile(r"\b(?:requests\.|httpx\.|aiohttp)\b")
 _PYTHON_URLOPEN = re.compile(r"\burlopen\s*\(")
+_URLOPEN_CALL = re.compile(
+    r"""(?xs)
+    \burlopen\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)
+    """
+)
 _PYTHON_C_CLUSTER = re.compile(r"^-[bBdEIiOqsSuRvVW]*c$")
 
 
@@ -3746,7 +3752,7 @@ def _expand_lan_url_dest(
 def _python_urlretrieve_url_dest(
     argv: list[str], declared: dict[str, str]
 ) -> tuple[str, str] | None:
-    """Return ``(url, dest)`` for ``python -c`` LAN ``urlretrieve`` or ``urlopen`` write."""
+    """Return ``(url, dest)`` for ``python -c`` LAN ``urlretrieve`` or ``urlopen``."""
     script = _python_c_script(argv)
     if script is None:
         return None
@@ -3764,6 +3770,11 @@ def _python_urlretrieve_url_dest(
         if not dest:
             return None
         return _expand_lan_url_dest(found.group("url"), dest, declared)
+    if len(urlopens) == 1 and not retrieves and not writes:
+        found = _URLOPEN_CALL.search(script)
+        if found is None:
+            return None
+        return _expand_lan_url_dest(found.group("url"), "", declared)
     return None
 
 
@@ -3990,7 +4001,7 @@ def _rewrite_lan_run_fetch(
     line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
 ) -> list[str] | None:
     """Replace LAN ``RUN wget`` / ``wget2`` / ``curl`` / ``aria2c`` / ``axel`` /
-    ``python -c urlretrieve|urlopen-write`` (including ``&&`` / ``;`` chains
+    ``python -c urlretrieve|urlopen-write|urlopen`` (including ``&&`` / ``;`` chains
     and ``sh -c``) with ``COPY --from=``.
     """
     match = _RUN_LINE.match(str(line or ""))
