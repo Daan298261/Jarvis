@@ -20,6 +20,7 @@ from app.tools.terminal import (
     lan_bound_compose_up_argv,
     lan_bound_dns_argv,
     lan_bound_docker_build_argv,
+    lan_bound_docker_login_argv,
     lan_bound_docker_pull_argv,
     lan_bound_docker_push_argv,
     lan_bound_http_argv,
@@ -915,7 +916,47 @@ def test_lan_docker_push_rewrites_to_skopeo_not_dockerd(monkeypatch):
     assert "10.8.0.1" not in env["HTTP_PROXY"]
 
 
-def test_lan_docker_pull_skips_when_skopeo_missing(monkeypatch):
+def test_lan_docker_login_rewrites_to_skopeo(tmp_path, monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe"} else None,
+    )
+    authfile = tmp_path / ".docker" / "config.json"
+    monkeypatch.setattr("app.tools.terminal._docker_config_authfile", lambda: str(authfile))
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "nas.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    logged = lan_bound_docker_login_argv("docker login -u taco -p secret 192.168.1.50:5000")
+    assert logged is not None
+    assert logged[0] == "/usr/bin/skopeo"
+    assert logged[1:4] == ["login", "--tls-verify=false", "--authfile"]
+    assert logged[4] == str(authfile)
+    assert logged[-5:] == ["-u", "taco", "-p", "secret", "192.168.1.50:5000"]
+    assert authfile.parent.is_dir()
+    named = lan_bound_docker_login_argv("docker login --username=taco --password-stdin nas.local:5000")
+    assert named is not None
+    assert "--username=taco" in named
+    assert "--password-stdin" in named
+    assert named[-1] == "nas.local:5000"
+    https = lan_bound_docker_login_argv("docker login https://192.168.1.50:5000")
+    assert https is not None
+    assert https[-1] == "192.168.1.50:5000"
+    assert lan_bound_docker_login_argv("docker login") is None
+    assert lan_bound_docker_login_argv("docker login docker.io") is None
+    assert lan_bound_docker_login_argv("docker login -u taco -p secret 192.168.1.50:5000 | cat") is None
+    bash = _command_args("docker login -u taco 192.168.1.50:5000", "bash")
+    assert bash[0] == "/usr/bin/skopeo"
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
     monkeypatch.setattr("app.tools.terminal.shutil.which", lambda name: None)
     assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app") is None

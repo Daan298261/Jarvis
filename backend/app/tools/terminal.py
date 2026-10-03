@@ -1166,6 +1166,105 @@ def lan_bound_docker_push_argv(command: str) -> list[str] | None:
     return argv
 
 
+_DOCKER_LOGIN_VALUE_FLAGS = frozenset({"-u", "--username", "-p", "--password"})
+_DOCKER_LOGIN_BOOL_FLAGS = frozenset({"--password-stdin"})
+
+
+def _docker_config_authfile() -> str:
+    return str(Path.home() / ".docker" / "config.json")
+
+
+def _skopeo_login_registry(server: str) -> str:
+    from urllib.parse import urlparse
+
+    text = str(server or "").strip().strip("'\"")
+    if not text:
+        return ""
+    if "://" in text:
+        parsed = urlparse(text)
+        host = (parsed.hostname or "").strip()
+        if not host:
+            return ""
+        if parsed.port:
+            return f"{host}:{parsed.port}"
+        return host
+    return text.rstrip("/")
+
+
+def _docker_login_spec(parts: list[str]) -> tuple[str, list[str]] | None:
+    if not parts or _tool_basename(parts[0]) != "docker":
+        return None
+    rest = parts[1:]
+    if not rest or _tool_basename(rest[0]) != "login":
+        return None
+    flags: list[str] = []
+    server = ""
+    index = 1
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text in _DOCKER_LOGIN_BOOL_FLAGS:
+            flags.append(text)
+            continue
+        if text.startswith("--username=") or text.startswith("--password="):
+            flags.append(text)
+            continue
+        if text in _DOCKER_LOGIN_VALUE_FLAGS:
+            if index >= len(rest):
+                return None
+            flags.extend([text, str(rest[index] or "").strip().strip("'\"")])
+            index += 1
+            continue
+        if text.startswith("-"):
+            return None
+        if server:
+            return None
+        server = text
+    if not server:
+        return None
+    return server, flags
+
+
+def lan_bound_docker_login_argv(command: str) -> list[str] | None:
+    """``docker login`` of an on-link RFC1918 registry via skopeo + LAN HTTP proxy.
+
+    Dockerd authenticates through the engine and cannot source-bind the home NIC.
+    ``skopeo login --tls-verify=false`` honors HTTP_PROXY and writes
+    ``~/.docker/config.json`` so later skopeo pull/push reuse the same creds.
+    Skip pipes, Docker Hub, and missing skopeo.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    spec = _docker_login_spec(parts)
+    if spec is None:
+        return None
+    server, flags = spec
+    registry = _skopeo_login_registry(server)
+    if not registry:
+        return None
+    from ..security.hexstrike_defensive import bindable_lan_host
+
+    host = bindable_lan_host(registry)
+    if not _lan_bind_ip_for_host(host):
+        return None
+    exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
+    if not exe:
+        return None
+    authfile = Path(_docker_config_authfile())
+    try:
+        authfile.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return [exe, "login", "--tls-verify=false", "--authfile", str(authfile), *flags, registry]
+
+
 _COMPOSE_FILENAMES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
 _COMPOSE_FILE_FLAGS = frozenset({"-f", "--file"})
 _COMPOSE_PULL_QUIET = frozenset({"-q", "--quiet"})
@@ -2444,6 +2543,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_smb_argv(command)
         or lan_bound_docker_pull_argv(command)
         or lan_bound_docker_push_argv(command)
+        or lan_bound_docker_login_argv(command)
         or lan_bound_compose_pull_argv(command, cwd=cwd)
         or lan_bound_compose_push_argv(command, cwd=cwd)
         or lan_bound_compose_build_argv(command, cwd=cwd)
