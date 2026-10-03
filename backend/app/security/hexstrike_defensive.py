@@ -1012,6 +1012,27 @@ def should_host_exec_nmap_scan_fallback(tool: str, target: str) -> bool:
     return bool(shutil.which("nmap") or shutil.which("nmap.exe"))
 
 
+def should_fail_closed_scan_host(tool: str, target: str) -> bool:
+    """Spaced NIC scan when neither the scanner nor nmap can host-bind (suite would leak VPN)."""
+    if not lan_uses_host_iface_argv(target):
+        return False
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _SCAN_HOST_STEMS:
+        return False
+    if _iface_host_binary(stem):
+        return False
+    return not (shutil.which("nmap") or shutil.which("nmap.exe"))
+
+
+def scan_host_unavailable_error(tool: str) -> str:
+    stem = hexstrike_lan_tool_id(tool) or "scanner"
+    return (
+        f"{stem} is not on PATH and nmap is not on PATH. "
+        "HexStrike cannot bind this Windows NIC name through additional_args.split(). "
+        "Install nmap or the scanner to scan the private LAN."
+    )
+
+
 def nmap_scan_fallback_payload(payload: dict[str, Any] | None, target: str) -> dict[str, Any]:
     """nmap argv for a LAN URL/host without forwarding nuclei template flags."""
     row = payload if isinstance(payload, dict) else {}
@@ -1405,8 +1426,12 @@ async def execute_operator_hydra(path: str, payload: dict[str, Any] | None) -> d
         cleaned = "api/tools/hydra"
     if not str(cleaned).startswith("api/tools/"):
         cleaned = "api/tools/hydra"
-    if not lan_bind_nic(target)[1] or not _hydra_host_binary():
+    if not lan_bind_nic(target)[1]:
         return await HEXSTRIKE.post_operator(cleaned, bound)
+    if not _hydra_host_binary():
+        raise RuntimeError(
+            "hydra is not on PATH. Install THC-Hydra so HexStrike LAN hydra can bind the home NIC."
+        )
     return await _host_hydra_lan(path, bound)
 
 
@@ -1756,7 +1781,9 @@ async def execute_operator_iface_tool(path: str, payload: dict[str, Any] | None)
     """Operator iface tools: host argv when HexStrike would split ``-i``/``-I``/``-e``.
 
     When nuclei/httpx/naabu/masscan/rustscan is missing, host nmap still binds a
-    spaced Windows NIC name instead of posting to the suite (VPN).
+    spaced Windows NIC name instead of posting to the suite (VPN). When both the
+    scanner and nmap are missing, fail closed — HexStrike ``additional_args.split()``
+    cannot round-trip the NIC name.
     """
     bound = bind_hexstrike_lan_payload(path, payload)
     target = _iface_lan_target(bound)
@@ -1764,6 +1791,8 @@ async def execute_operator_iface_tool(path: str, payload: dict[str, Any] | None)
         return await _host_iface_lan(path, bound)
     if should_host_exec_nmap_scan_fallback(path, target):
         return await _host_nmap_lan_scan(nmap_scan_fallback_payload(bound, target))
+    if should_fail_closed_scan_host(path, target):
+        raise RuntimeError(scan_host_unavailable_error(path))
     from .hexstrike import normalize_upstream_path
 
     cleaned = path

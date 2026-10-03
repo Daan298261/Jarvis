@@ -1477,7 +1477,7 @@ async def test_operator_nuclei_hosts_spaced_windows_nic(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_operator_nuclei_falls_back_to_suite_when_not_on_path(monkeypatch):
+async def test_operator_nuclei_fails_closed_when_scanner_and_nmap_missing(monkeypatch):
     from app.security.hexstrike_defensive import execute_operator_iface_tool
 
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
@@ -1490,14 +1490,19 @@ async def test_operator_nuclei_falls_back_to_suite_when_not_on_path(monkeypatch)
         return {"ok": True}
 
     monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
-    result = await execute_operator_iface_tool(
+    with pytest.raises(RuntimeError, match="nmap is not on PATH"):
+        await execute_operator_iface_tool(
+            "api/tools/nuclei",
+            {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+        )
+    assert posted == []
+    simple = await execute_operator_iface_tool(
         "api/tools/nuclei",
-        {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+        {"url": "http://192.168.1.40:8080/", "additional_args": "-t http/"},
     )
-    assert result == {"ok": True}
+    assert simple == {"ok": True}
     assert posted[0][0] == "api/tools/nuclei"
-    assert "-source-ip 192.168.50.8" in posted[0][1]["additional_args"]
-    assert "Ethernet" not in posted[0][1]["additional_args"]
+    assert "-interface eth0" in posted[0][1]["additional_args"]
 
 
 @pytest.mark.asyncio
@@ -1663,6 +1668,34 @@ async def test_mcp_nuclei_uses_nmap_when_nuclei_missing(monkeypatch):
         assert argv[argv.index("-e") + 1] == "Ethernet 2"
         assert argv[argv.index("-p") + 1] == "8080"
         assert argv[-1] == "192.168.50.12"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_nuclei_fails_closed_when_scanner_and_nmap_missing(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN nuclei must not go through HexStrike MCP when nmap cannot bind the NIC")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nuclei"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nuclei"},
+        "remote_name": "nuclei",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_nuclei",
+            {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+        )
+        assert not result.success
+        assert "nmap is not on PATH" in (result.error or "")
     finally:
         MCP.reset_for_tests()
 
@@ -1932,7 +1965,7 @@ async def test_operator_smbmap_falls_back_to_suite_when_not_on_path(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_operator_hydra_falls_back_to_suite_when_not_on_path(monkeypatch):
+async def test_operator_hydra_fails_closed_when_not_on_path(monkeypatch):
     from app.security.hexstrike_defensive import execute_operator_hydra
 
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
@@ -1944,8 +1977,11 @@ async def test_operator_hydra_falls_back_to_suite_when_not_on_path(monkeypatch):
         return {"ok": True}
 
     monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
-    result = await execute_operator_hydra("api/tools/hydra", {"target": "192.168.1.50", "service": "ssh"})
-    assert result == {"ok": True}
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        await execute_operator_hydra("api/tools/hydra", {"target": "192.168.1.50", "service": "ssh"})
+    assert posted == []
+    public = await execute_operator_hydra("api/tools/hydra", {"target": "8.8.8.8", "service": "ssh"})
+    assert public == {"ok": True}
     assert posted[0][0] == "api/tools/hydra"
 
 
@@ -1998,6 +2034,33 @@ async def test_mcp_hydra_uses_host_argv_for_lan(monkeypatch):
         assert seen[0][0][0] == "/usr/bin/hydra"
         assert seen[0][0][-2:] == ("192.168.1.50", "http-get")
         assert seen[0][1]["HYDRA_PROXY"].startswith("http://127.0.0.1:")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_hydra_fails_closed_when_not_on_path(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN hydra must not go through HexStrike MCP; HYDRA_PROXY would be unset")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_hydra"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "hydra"},
+        "remote_name": "hydra",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_hydra",
+            {"target": "192.168.1.50", "service": "ssh"},
+        )
+        assert not result.success
+        assert "not on PATH" in (result.error or "")
     finally:
         MCP.reset_for_tests()
 

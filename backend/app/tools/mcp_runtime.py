@@ -383,6 +383,8 @@ class MCPRuntime:
             _iface_lan_target,
             should_host_exec_iface,
             should_host_exec_nmap_scan_fallback,
+            should_fail_closed_scan_host,
+            scan_host_unavailable_error,
             nmap_scan_fallback_payload,
         )
 
@@ -422,6 +424,12 @@ class MCPRuntime:
             if lan_bind_nic(target)[1] and _hydra_host_binary():
                 data = await _host_hydra_lan(str(tool_key or name), args)
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if lan_bind_nic(target)[1]:
+                return ToolResult(
+                    False,
+                    "",
+                    error="hydra is not on PATH. Install THC-Hydra so HexStrike LAN hydra can bind the home NIC.",
+                )
         if looks_like_ldap_tool(tool_key) or looks_like_ldap_tool(str(name)):
             target = lan_bind_target(args) or nmap_target_from_payload(args)
             ident = hexstrike_lan_tool_id(str(tool_key or name))
@@ -445,6 +453,12 @@ class MCPRuntime:
             if should_host_exec_nmap_scan_fallback(str(tool_key or name), target):
                 data = await _host_nmap_lan_scan(nmap_scan_fallback_payload(args, target))
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if should_fail_closed_scan_host(str(tool_key or name), target):
+                return ToolResult(
+                    False,
+                    "",
+                    error=scan_host_unavailable_error(str(tool_key or name)),
+                )
         server_id = self._server_id(server)
         last_error = ""
         for attempt in range(2):
