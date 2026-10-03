@@ -513,6 +513,14 @@ _HTTP_PROXY_FLAG = {
     "feroxbuster": "--proxy",
     "sqlmap": "--proxy",
     "nikto": "-useproxy",
+    "katana": "-proxy",
+    "whatweb": "--proxy",
+    "wpscan": "--proxy",
+    "wafw00f": "--proxy",
+    "wfuzz": "-p",
+    "arjun": "--proxy",
+    "gau": "--proxy",
+    "dalfox": "--proxy",
 }
 _HTTP_PROXY_SKIP = {
     "gobuster": frozenset({"-p", "--proxy"}),
@@ -521,7 +529,27 @@ _HTTP_PROXY_SKIP = {
     "feroxbuster": frozenset({"-p", "--proxy", "--replay-proxy"}),
     "sqlmap": frozenset({"--proxy"}),
     "nikto": frozenset({"-useproxy", "--useproxy"}),
+    "katana": frozenset({"-proxy", "-p"}),
+    "whatweb": frozenset({"--proxy"}),
+    "wpscan": frozenset({"--proxy"}),
+    "wafw00f": frozenset({"-p", "--proxy"}),
+    "wfuzz": frozenset({"-p"}),
+    "arjun": frozenset({"-p", "--proxy"}),
+    "gau": frozenset({"--proxy"}),
+    "dalfox": frozenset({"--proxy"}),
 }
+_PROXY_HOST_PORT = frozenset({"whatweb", "wfuzz"})
+
+
+def _proxy_arg_value(stem: str, origin: str) -> str:
+    if stem not in _PROXY_HOST_PORT:
+        return origin
+    from urllib.parse import urlparse
+
+    parsed = urlparse(origin)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 80
+    return f"{host}:{port}"
 
 
 def _tokens_have_flag(tokens: list[str], names: frozenset[str]) -> bool:
@@ -537,11 +565,11 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
 
     nmap uses ``-S``/``-e``. ProjectDiscovery nuclei/httpx/naabu use ``-source-ip``
     / ``-interface``. masscan uses ``--source-ip``/``-e``. curl uses ``--interface``.
-    gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto have no source-bind flag; they
-    get ``--proxy`` (or ``-x`` / ``-useproxy``) pointing at the loopback LAN proxy
-    which binds outbound to the home NIC. Public internet targets are left
-    unchanged. Spaced Windows NIC names omit ``-interface``/``-e`` (HexStrike
-    ``additional_args.split()``).
+    wget uses ``--bind-address``. rustscan forwards nmap ``-S``/``-e`` after ``--``.
+    gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
+    wfuzz/arjun/gau/dalfox have no source-bind CLI; they get a loopback LAN proxy
+    flag. Public internet targets are left unchanged. Spaced Windows NIC names
+    omit ``-interface``/``-e`` (HexStrike ``additional_args.split()``).
     """
     bound = dict(payload or {})
     stem = hexstrike_tool_stem(tool)
@@ -583,6 +611,20 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         flags.extend(
             ["--interface", iface if hexstrike_nmap_can_bind_interface(iface) else source]
         )
+    elif stem == "wget":
+        if _tokens_have_flag(tokens, frozenset({"--bind-address", "--bindaddress"})):
+            return bound
+        flags.append(f"--bind-address={source}")
+    elif stem == "rustscan":
+        if "-S" in tokens:
+            return bound
+        extra: list[str] = []
+        if source:
+            extra.extend(["-S", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-e" not in tokens:
+            extra.extend(["-e", iface])
+        if extra:
+            flags.extend(["--", *extra] if "--" not in tokens else extra)
     elif stem in _HTTP_PROXY_FLAG:
         skip = _HTTP_PROXY_SKIP.get(stem, frozenset({"--proxy", "-x"}))
         if _tokens_have_flag(tokens, skip):
@@ -590,7 +632,7 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         from .lan_http_proxy import ensure_lan_http_proxy
 
         origin = ensure_lan_http_proxy()
-        flags.extend([_HTTP_PROXY_FLAG[stem], origin])
+        flags.extend([_HTTP_PROXY_FLAG[stem], _proxy_arg_value(stem, origin)])
     else:
         return bound
     bound[key] = " ".join([*tokens, *flags]).strip()

@@ -726,6 +726,18 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
         {"target": "192.168.1.40", "additional_args": "-source-ip 192.168.1.12"},
     )
     assert already["additional_args"] == "-source-ip 192.168.1.12"
+    wget = bind_hexstrike_lan_payload("wget", {"url": "ftp://192.168.1.40/backup.tar"})
+    assert wget["additional_args"] == "--bind-address=192.168.1.12"
+    rustscan = bind_hexstrike_lan_payload("rustscan", {"target": "192.168.1.0/24", "additional_args": "-a 192.168.1.0/24"})
+    assert rustscan["additional_args"] == "-a 192.168.1.0/24 -- -S 192.168.1.12 -e eth0"
+    katana = bind_hexstrike_lan_payload("http:katana", {"url": "http://192.168.1.40/", "additional_args": "-jc"})
+    assert katana["additional_args"].startswith("-jc -proxy http://127.0.0.1:")
+    whatweb = bind_hexstrike_lan_payload("whatweb", {"url": "http://192.168.1.1/"})
+    assert whatweb["additional_args"].startswith("--proxy 127.0.0.1:")
+    wpscan = bind_hexstrike_lan_payload("wpscan", {"url": "http://192.168.1.40/"})
+    assert wpscan["additional_args"].startswith("--proxy http://127.0.0.1:")
+    public_katana = bind_hexstrike_lan_payload("katana", {"url": "https://example.com/"})
+    assert public_katana.get("additional_args", "") == ""
 
 
 def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():

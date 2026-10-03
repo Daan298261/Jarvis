@@ -69,7 +69,7 @@ def _http_target_from_argv(parts: list[str]) -> str:
         text = str(item or "").strip().strip("'\"")
         if not text or text.startswith("-"):
             continue
-        if text.lower().startswith(("http://", "https://")):
+        if text.lower().startswith(("http://", "https://", "ftp://", "ftps://")):
             return text
         host = text.split("/", 1)[0]
         if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?", host):
@@ -445,6 +445,49 @@ def lan_bound_netcat_argv(command: str) -> list[str] | None:
     return [exe, "-s", bind, *parts[1:]]
 
 
+_DNS_NAMES = frozenset({"dig", "drill"})
+
+
+def _dns_nameserver_from_argv(parts: list[str]) -> str:
+    for item in parts[1:]:
+        text = str(item or "").strip().strip("'\"")
+        if text.startswith("@") and len(text) > 1:
+            return text[1:].split("#", 1)[0]
+    return ""
+
+
+def lan_bound_dns_argv(command: str) -> list[str] | None:
+    """dig/drill of an on-link RFC1918 nameserver, sourced from that NIC.
+
+    ``dig @192.168.1.1`` follows the OS default route. ``-b`` pins the source
+    so a VPN cannot steal DNS to the home resolver. Skip pipes, ``-b``, and
+    public nameservers. Bare ``dig example.com`` (system resolver) is unchanged.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    if name not in _DNS_NAMES:
+        return None
+    flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if "-b" in flags:
+        return None
+    host = _dns_nameserver_from_argv(parts)
+    bind = _lan_bind_ip_for_host(host)
+    if not bind:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return [exe, "-b", bind, *parts[1:]]
+
+
 def adapt_shell(command: str, shell: str) -> str:
     """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
     chosen = (shell or default_shell()).strip().lower()
@@ -532,6 +575,7 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         or lan_bound_scan_argv(command)
         or lan_bound_rsync_argv(command)
         or lan_bound_netcat_argv(command)
+        or lan_bound_dns_argv(command)
     )
     if bound:
         return bound

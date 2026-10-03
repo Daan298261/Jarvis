@@ -4,6 +4,7 @@ from app.tools.terminal import (
     _command_args,
     _python_args,
     default_shell,
+    lan_bound_dns_argv,
     lan_bound_http_argv,
     lan_bound_netcat_argv,
     lan_bound_rsync_argv,
@@ -310,6 +311,10 @@ def test_lan_curl_binds_home_nic_not_vpn(monkeypatch):
     assert header is not None
     assert header[1:3] == ["--interface", "192.168.1.12"]
     assert lan_bound_http_argv("curl https://example.com/") is None
+    ftp = lan_bound_http_argv("curl -s ftp://192.168.1.50/backup.tar")
+    assert ftp is not None
+    assert ftp[1:3] == ["--interface", "192.168.1.12"]
+    assert ftp[-1] == "ftp://192.168.1.50/backup.tar"
     assert lan_bound_http_argv("curl --interface eth0 http://192.168.1.50/") is None
     assert lan_bound_http_argv("curl http://192.168.1.50/ | cat") is None
     powershell = _command_args("curl -s http://192.168.1.50/", "powershell")
@@ -487,3 +492,25 @@ def test_lan_netcat_binds_home_nic_not_vpn(monkeypatch):
     bash = _command_args("nc -zv 192.168.1.50 80", "bash")
     assert bash[0] == "/usr/bin/nc"
     assert bash[1:3] == ["-s", "192.168.1.12"]
+
+
+def test_lan_dig_binds_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"dig", "drill"} else None,
+    )
+    dig = lan_bound_dns_argv("dig @192.168.1.1 taco.lan")
+    assert dig is not None
+    assert dig[0] == "/usr/bin/dig"
+    assert dig[1:3] == ["-b", "192.168.1.12"]
+    assert dig[-2:] == ["@192.168.1.1", "taco.lan"]
+    drill = lan_bound_dns_argv("drill @192.168.1.1 nas.local")
+    assert drill is not None
+    assert drill[1:3] == ["-b", "192.168.1.12"]
+    assert lan_bound_dns_argv("dig @8.8.8.8 example.com") is None
+    assert lan_bound_dns_argv("dig example.com") is None
+    assert lan_bound_dns_argv("dig -b 192.168.1.12 @192.168.1.1 taco.lan") is None
+    bash = _command_args("dig @192.168.1.50 MX taco.lan", "bash")
+    assert bash[0] == "/usr/bin/dig"
+    assert bash[1:3] == ["-b", "192.168.1.12"]
