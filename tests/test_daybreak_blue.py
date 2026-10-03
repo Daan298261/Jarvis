@@ -825,6 +825,11 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert looks_like_iface_host_tool("http:tshark")
     assert looks_like_iface_host_tool("mcp_hexstrike_ai_dumpcap")
     assert looks_like_iface_host_tool("hping3")
+    assert looks_like_iface_host_tool("http:arp-scan")
+    assert looks_like_iface_host_tool("mcp_hexstrike_ai_arp_scan")
+    assert looks_like_iface_host_tool("arping")
+    assert looks_like_iface_host_tool("api/tools/fping")
+    assert looks_like_iface_host_tool("mcp_hexstrike_ai_nmblookup")
     assert not looks_like_iface_host_tool("nmap")
 
 
@@ -1175,6 +1180,138 @@ async def test_operator_tcpdump_hosts_spaced_windows_nic(monkeypatch):
     assert simple == {"ok": True}
     assert posted[0][0] == "api/tools/tcpdump"
     assert "-i eth0" in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_operator_arp_scan_hosts_spaced_windows_nic(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool, iface_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"arp-scan", "arping", "fping", "nmblookup"}
+        else None,
+    )
+    arp = iface_host_argv(
+        "http:arp-scan",
+        {"target": "192.168.50.0/24", "additional_args": "--arpspa 192.168.50.8 --retry=2"},
+    )
+    assert arp[0] == "/usr/bin/arp-scan"
+    assert arp[1:5] == ["--arpspa", "192.168.50.8", "-I", "Ethernet 2"]
+    assert "--retry=2" in arp
+    assert arp[-1] == "192.168.50.0/24"
+    arping = iface_host_argv("arping", {"host": "192.168.50.12", "additional_args": "-s 192.168.50.8 -c 3"})
+    assert arping[0] == "/usr/bin/arping"
+    assert arping[1:5] == ["-s", "192.168.50.8", "-I", "Ethernet 2"]
+    assert "-c" in arping and "3" in arping
+    assert arping[-1] == "192.168.50.12"
+    fping = iface_host_argv("api/tools/fping", {"target": "192.168.50.0/24"})
+    assert fping[0] == "/usr/bin/fping"
+    assert fping[1:5] == ["-S", "192.168.50.8", "-I", "Ethernet 2"]
+    nmb = iface_host_argv("mcp_hexstrike_ai_nmblookup", {"target": "192.168.50.12"})
+    assert nmb[0] == "/usr/bin/nmblookup"
+    assert nmb[1:5] == ["-B", "192.168.50.255", "-i", "Ethernet 2"]
+    assert nmb[-1] == "192.168.50.12"
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"192.168.50.12 printer\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_iface_tool(
+        "api/tools/arp-scan",
+        {"target": "192.168.50.0/24"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-iface"
+    argv = seen[0]
+    assert argv[0] == "/usr/bin/arp-scan"
+    assert argv[argv.index("-I") + 1] == "Ethernet 2"
+    assert argv[argv.index("--arpspa") + 1] == "192.168.50.8"
+    assert argv[-1] == "192.168.50.0/24"
+    simple = await execute_operator_iface_tool(
+        "api/tools/arp-scan",
+        {"target": "192.168.1.0/24"},
+    )
+    assert simple == {"ok": True}
+    assert posted[0][0] == "api/tools/arp-scan"
+    assert "--arpspa 192.168.1.12 -I eth0" in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_arp_scan_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN arp-scan must not go through HexStrike MCP when -I would split")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_arp_scan"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "arp_scan"},
+        "remote_name": "arp_scan",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/arp-scan" if str(name).lower() == "arp-scan" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"192.168.50.20 printer\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_arp_scan",
+            {"target": "192.168.50.0/24"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-iface"
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/arp-scan"
+        assert argv[argv.index("-I") + 1] == "Ethernet 2"
+        assert argv[-1] == "192.168.50.0/24"
+    finally:
+        MCP.reset_for_tests()
 
 
 @pytest.mark.asyncio

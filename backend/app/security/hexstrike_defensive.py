@@ -488,7 +488,7 @@ def looks_like_snmp_tool(name: str) -> bool:
 
 
 def looks_like_iface_host_tool(name: str) -> bool:
-    """tcpdump/tshark/dumpcap/hping3: ``-i``/``-I`` cannot round-trip a spaced Windows NIC."""
+    """tcpdump/hping3/arp-scan/arping/fping/nmblookup: iface flags cannot round-trip a spaced NIC."""
     return hexstrike_lan_tool_id(name) in _IFACE_HOST_STEMS
 
 
@@ -611,7 +611,15 @@ _HTTP_PROXY_SKIP = {
 _PROXY_HOST_PORT = frozenset({"whatweb", "wfuzz"})
 _CAPTURE_STEMS = frozenset({"tcpdump", "tshark", "dumpcap"})
 _HPING_STEMS = frozenset({"hping", "hping3"})
-_IFACE_HOST_STEMS = _CAPTURE_STEMS | _HPING_STEMS
+_ARP_HOST_STEMS = frozenset({"arp_scan", "arping", "fping", "nmblookup"})
+_IFACE_HOST_STEMS = _CAPTURE_STEMS | _HPING_STEMS | _ARP_HOST_STEMS
+_IFACE_HOST_BINARY = {"arp_scan": "arp-scan"}
+_IFACE_STRIP_FLAGS = {
+    "arp_scan": frozenset({"-i", "--interface", "-I", "--arpspa", "--localip"}),
+    "arping": frozenset({"-i", "--interface", "-I", "-s"}),
+    "fping": frozenset({"-i", "--interface", "-I", "-S"}),
+    "nmblookup": frozenset({"-i", "--interface", "-I", "-B", "--broadcast"}),
+}
 
 
 def _proxy_arg_value(stem: str, origin: str) -> str:
@@ -643,7 +651,8 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     iperf/iperf3 use ``-B``. mtr uses ``-a``. nmblookup uses ``-B``/``-i``.
     tcpdump/tshark/dumpcap use ``-i``. hping3 uses ``-I``. When the Windows NIC
     name has a space, HexStrike ``additional_args.split()`` cannot round-trip
-    ``-i``/``-I``; operator/MCP host-executes argv instead.
+    ``-i``/``-I``; operator/MCP host-executes argv for capture, hping3, arp-scan,
+    arping, fping, and nmblookup.
     snmpwalk has no bind flag; LAN operator/MCP calls host-execute with
     ``SNMPCONFPATH`` ``clientaddr``.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
@@ -809,8 +818,8 @@ def _strip_nmap_bind_tokens(parts: list[str]) -> list[str]:
     return out
 
 
-def _strip_iface_tokens(parts: list[str]) -> list[str]:
-    skip = {"-i", "--interface", "-I"}
+def _strip_iface_tokens(parts: list[str], stem: str = "") -> list[str]:
+    skip = _IFACE_STRIP_FLAGS.get(stem, frozenset({"-i", "--interface", "-I"}))
     out: list[str] = []
     index = 0
     while index < len(parts):
@@ -825,6 +834,30 @@ def _strip_iface_tokens(parts: list[str]) -> list[str]:
         out.append(parts[index])
         index += 1
     return out
+
+
+def _iface_host_binary(stem: str) -> str | None:
+    name = _IFACE_HOST_BINARY.get(stem, stem)
+    return shutil.which(name) or shutil.which(f"{name}.exe")
+
+
+def _iface_host_bind_flags(stem: str, target: str, iface: str, source: str) -> list[str]:
+    if stem == "arp_scan":
+        return ["--arpspa", source, "-I", iface]
+    if stem == "arping":
+        return ["-s", source, "-I", iface]
+    if stem == "fping":
+        return ["-S", source, "-I", iface]
+    if stem == "nmblookup":
+        _iface, _source, broadcast = lan_nic_detail(target)
+        flags: list[str] = []
+        if broadcast:
+            flags.extend(["-B", broadcast])
+        flags.extend(["-i", iface])
+        return flags
+    if stem in _HPING_STEMS:
+        return ["-I", iface]
+    return ["-i", iface]
 
 
 async def _host_nmap_lan_scan(payload: dict[str, Any]) -> dict[str, Any]:
@@ -965,15 +998,16 @@ def _iface_lan_target(payload: dict[str, Any] | None) -> str:
 
 
 def iface_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
-    """Host tcpdump/hping3 argv that can pass a spaced Windows NIC name as one token."""
+    """Host LAN argv that can pass a spaced Windows NIC name as one token."""
     row = payload if isinstance(payload, dict) else {}
     stem = hexstrike_lan_tool_id(tool)
     if stem not in _IFACE_HOST_STEMS:
         stem = "tcpdump"
-    binary = shutil.which(stem) or shutil.which(f"{stem}.exe")
+    binary = _iface_host_binary(stem)
     if not binary:
+        display = _IFACE_HOST_BINARY.get(stem, stem)
         raise RuntimeError(
-            f"{stem} is not on PATH. Install it so HexStrike can bind a Windows NIC name "
+            f"{display} is not on PATH. Install it so HexStrike can bind a Windows NIC name "
             "that additional_args.split() would break."
         )
     target = _iface_lan_target(row)
@@ -981,10 +1015,10 @@ def iface_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
     if not iface or not source:
         raise ValueError("LAN capture/hping target is required")
     extra = _strip_iface_tokens(
-        _nmap_flag_tokens(str(row.get("additional_args") or row.get("extra_args") or row.get("args") or ""))
+        _nmap_flag_tokens(str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")),
+        stem=stem,
     )
-    flag = "-I" if stem in _HPING_STEMS else "-i"
-    argv = [binary, flag, iface, *extra]
+    argv = [binary, *_iface_host_bind_flags(stem, target, iface, source), *extra]
     blob = " ".join(extra)
     if target and target not in blob:
         if stem in _CAPTURE_STEMS:
@@ -995,7 +1029,7 @@ def iface_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
 
 
 async def _host_iface_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Host argv for LAN tcpdump/hping3 when HexStrike would split a spaced NIC name."""
+    """Host argv for LAN iface tools when HexStrike would split a spaced NIC name."""
     argv = iface_host_argv(tool, payload)
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -1021,7 +1055,7 @@ async def _host_iface_lan(tool: str, payload: dict[str, Any] | None) -> dict[str
 
 
 async def execute_operator_iface_tool(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Operator tcpdump/hping3: host argv when HexStrike would split ``-i``/``-I``."""
+    """Operator iface tools: host argv when HexStrike would split ``-i``/``-I``."""
     bound = bind_hexstrike_lan_payload(path, payload)
     target = _iface_lan_target(bound)
     if lan_uses_host_iface_argv(target):
