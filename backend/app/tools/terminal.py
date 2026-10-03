@@ -817,7 +817,8 @@ def lan_bound_lftp_argv(command: str) -> list[str] | None:
 
     ``net:socket-bind-ipv4`` pins the FTP/SFTP TCP source so a VPN default
     route cannot steal the NAS. ``lftpget`` / ``ncftpget URL`` become curl
-    ``--interface``; ``ncftpput URL local`` becomes curl ``-T``. Skip pipes,
+    ``--interface``;     ``ncftpput URL local`` becomes curl ``-T``. Classic ``ftp HOST`` becomes
+    lftp with the same bind (``ftp ftp://NAS/file`` becomes curl). Skip pipes,
     existing bind sets, and public hosts.
     """
     text = str(command or "").strip()
@@ -830,12 +831,24 @@ def lan_bound_lftp_argv(command: str) -> list[str] | None:
     if not parts:
         return None
     name = _tool_basename(parts[0])
-    if name not in {"lftp", "lftpget", "ncftpget", "ncftpput"}:
+    if name not in {"lftp", "lftpget", "ncftpget", "ncftpput", "ftp"}:
         return None
     host = _lftp_host_from_argv(parts)
     bind = _lan_bind_ip_for_host(host)
     if not bind:
         return None
+    if name == "ftp":
+        url = _http_target_from_argv(parts)
+        lowered = (url or "").lower()
+        if lowered.startswith(("ftp://", "ftps://")):
+            parsed = urlparse(url)
+            if (parsed.path or "").rstrip("/") not in {"", "/"}:
+                return _curl_lan_argv(url, outfile=_add_url_filename(url))
+        exe = shutil.which("lftp") or shutil.which("lftp.exe")
+        if not exe:
+            return None
+        dest = url if lowered.startswith(("ftp://", "ftps://", "http://", "https://")) else f"ftp://{host}"
+        return _lftp_with_bind(exe, [dest], bind)
     if name in {"lftpget", "ncftpget"}:
         url = _http_target_from_argv(parts)
         return _curl_lan_argv(url, outfile=_add_url_filename(url) if url else "")
@@ -891,6 +904,127 @@ def lan_bound_netcat_argv(command: str) -> list[str] | None:
     if not exe:
         return None
     return [exe, "-s", bind, *parts[1:]]
+
+
+def _openssl_connect_host(parts: list[str]) -> str:
+    index = 1
+    while index < len(parts):
+        tok = str(parts[index] or "")
+        raw = ""
+        if tok in {"-connect", "-proxy"} and index + 1 < len(parts):
+            if tok == "-connect":
+                raw = str(parts[index + 1] or "").strip().strip("'\"")
+            index += 2
+        elif tok.startswith("-connect="):
+            raw = tok.split("=", 1)[1].strip().strip("'\"")
+            index += 1
+        else:
+            index += 1
+            continue
+        if not raw:
+            continue
+        if "://" in raw:
+            host = (urlparse(raw).hostname or "").strip()
+            if host:
+                return host
+            continue
+        if raw.count(":") == 1 and raw.rsplit(":", 1)[-1].isdigit():
+            return raw.rsplit(":", 1)[0]
+        return raw.split("%", 1)[0]
+    return ""
+
+
+def lan_bound_openssl_argv(command: str) -> list[str] | None:
+    """openssl s_client of an on-link RFC1918 host, sourced from that NIC.
+
+    ``s_client`` follows the OS default route. ``-bind addr:0`` pins the home
+    NIC so a VPN cannot steal TLS to a NAS or router admin port. Skip pipes,
+    existing ``-bind``, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or _tool_basename(parts[0]) != "openssl":
+        return None
+    rest = parts[1:]
+    if "s_client" not in rest and "s_time" not in rest:
+        return None
+    if any(str(tok) == "-bind" or str(tok).startswith("-bind=") for tok in rest):
+        return None
+    host = _openssl_connect_host(parts)
+    bind = _lan_bind_ip_for_host(host)
+    if not bind:
+        return None
+    exe = shutil.which("openssl") or shutil.which("openssl.exe")
+    if not exe:
+        return None
+    out = [exe]
+    for tok in rest:
+        out.append(tok)
+        if tok in {"s_client", "s_time"}:
+            out.extend(["-bind", f"{bind}:0"])
+    return out
+
+
+_SOCAT_REMOTE = re.compile(
+    r"^(?P<kind>TCP(?:4|6)?|UDP(?:4|6)?|OPENSSL|SSL):(?P<rest>.+)$",
+    re.I,
+)
+
+
+def _socat_host_from_addr(addr: str) -> str:
+    text = str(addr or "").strip().strip("'\"")
+    if not text or ",bind=" in text.lower():
+        return ""
+    found = _SOCAT_REMOTE.match(text)
+    if found is None:
+        return ""
+    hostport = found.group("rest").split(",", 1)[0]
+    if hostport.count(":") == 1 and hostport.rsplit(":", 1)[-1].isdigit():
+        return hostport.rsplit(":", 1)[0]
+    if "://" in hostport:
+        return (urlparse(hostport).hostname or "").strip()
+    return ""
+
+
+def lan_bound_socat_argv(command: str) -> list[str] | None:
+    """socat of an on-link RFC1918 host, sourced from that NIC.
+
+    socat follows the OS default route. ``,bind=`` on the remote address pins
+    the home NIC so a VPN cannot steal TCP/TLS to a NAS. Skip pipes, existing
+    ``bind=``, LISTEN-only commands, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or _tool_basename(parts[0]) != "socat":
+        return None
+    if any(",bind=" in str(tok).lower() for tok in parts[1:]):
+        return None
+    rewritten: list[str] = []
+    bound = False
+    for tok in parts[1:]:
+        host = _socat_host_from_addr(tok)
+        bind = _lan_bind_ip_for_host(host) if host else ""
+        if bind:
+            rewritten.append(f"{tok},bind={bind}")
+            bound = True
+        else:
+            rewritten.append(tok)
+    if not bound:
+        return None
+    exe = shutil.which("socat") or shutil.which("socat.exe")
+    if not exe:
+        return None
+    return [exe, *rewritten]
 
 
 def _ncrack_target_from_argv(parts: list[str]) -> str:
@@ -5733,6 +5867,8 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_rsync_argv(command)
         or lan_bound_rclone_argv(command)
         or lan_bound_lftp_argv(command)
+        or lan_bound_openssl_argv(command)
+        or lan_bound_socat_argv(command)
         or lan_bound_netcat_argv(command)
         or lan_bound_ncrack_argv(command)
         or lan_bound_dns_argv(command)

@@ -38,6 +38,8 @@ from app.tools.terminal import (
     lan_bound_lftp_argv,
     lan_bound_netcat_argv,
     lan_bound_ncrack_argv,
+    lan_bound_openssl_argv,
+    lan_bound_socat_argv,
     lan_bound_nfs_argv,
     lan_bound_rclone_argv,
     lan_bound_rsync_argv,
@@ -920,6 +922,54 @@ def test_lan_lftp_binds_home_nic_not_vpn(monkeypatch):
     bash = _command_args("lftp ftp://taco@192.168.1.50/media", "bash")
     assert bash[0] == "/usr/bin/lftp"
     assert bash[1:3] == ["-e", "set net:socket-bind-ipv4 192.168.1.12"]
+    classic = lan_bound_lftp_argv("ftp 192.168.1.50")
+    assert classic is not None
+    assert classic[0] == "/usr/bin/lftp"
+    assert classic[1:3] == ["-e", "set net:socket-bind-ipv4 192.168.1.12"]
+    assert classic[-1] == "ftp://192.168.1.50"
+    fetched_ftp = lan_bound_lftp_argv("ftp ftp://192.168.1.50/backup.tar")
+    assert fetched_ftp is not None
+    assert fetched_ftp[0] == "/usr/bin/curl"
+    assert fetched_ftp[1:3] == ["--interface", "192.168.1.12"]
+    assert fetched_ftp[-1] == "ftp://192.168.1.50/backup.tar"
+    assert lan_bound_lftp_argv("ftp 8.8.8.8") is None
+
+
+def test_lan_openssl_and_socat_bind_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"openssl", "openssl.exe", "socat", "socat.exe"}
+        else None,
+    )
+    tls = lan_bound_openssl_argv("openssl s_client -connect 192.168.1.50:443")
+    assert tls is not None
+    assert tls[0] == "/usr/bin/openssl"
+    assert tls[1:4] == ["s_client", "-bind", "192.168.1.12:0"]
+    assert tls[-2:] == ["-connect", "192.168.1.50:443"]
+    named = lan_bound_openssl_argv("openssl s_client -connect=192.168.1.40:8443 -servername nas.local")
+    assert named is not None
+    assert named[1:4] == ["s_client", "-bind", "192.168.1.12:0"]
+    assert lan_bound_openssl_argv("openssl s_client -connect example.com:443") is None
+    assert lan_bound_openssl_argv("openssl s_client -bind 10.8.0.2:0 -connect 192.168.1.50:443") is None
+    assert lan_bound_openssl_argv("openssl x509 -in cert.pem -text") is None
+    assert lan_bound_openssl_argv("openssl s_client -connect 192.168.1.50:443 | cat") is None
+    bash = _command_args("openssl s_client -connect 192.168.1.1:443 -quiet", "bash")
+    assert bash[0] == "/usr/bin/openssl"
+    assert bash[1:4] == ["s_client", "-bind", "192.168.1.12:0"]
+    tunneled = lan_bound_socat_argv("socat - TCP:192.168.1.50:22")
+    assert tunneled is not None
+    assert tunneled[0] == "/usr/bin/socat"
+    assert tunneled[1:] == ["-", "TCP:192.168.1.50:22,bind=192.168.1.12"]
+    tls_socat = lan_bound_socat_argv("socat STDIO OPENSSL:192.168.1.40:443")
+    assert tls_socat is not None
+    assert tls_socat[-1] == "OPENSSL:192.168.1.40:443,bind=192.168.1.12"
+    assert lan_bound_socat_argv("socat - TCP:8.8.8.8:22") is None
+    assert lan_bound_socat_argv("socat - TCP:192.168.1.50:22,bind=10.8.0.2") is None
+    assert lan_bound_socat_argv("socat TCP-LISTEN:2222,fork TCP:8.8.8.8:22") is None
+    bash_socat = _command_args("socat - UDP:192.168.1.50:53", "bash")
+    assert bash_socat[-1] == "UDP:192.168.1.50:53,bind=192.168.1.12"
 
 
 def test_lan_ffmpeg_rtsp_binds_home_nic_not_vpn(monkeypatch):
