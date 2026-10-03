@@ -2087,6 +2087,125 @@ def test_lan_run_wget_curl_and_hcl_heredoc(tmp_path, monkeypatch):
     assert any(item.startswith("app.dockerfile=") for item in follow)
 
 
+def test_lan_run_python_urlretrieve(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+
+    def fake_mkdtemp(prefix=""):
+        root = tmp_path / f"{prefix or 'jarvis-lan-add-'}py"
+        root.mkdir(exist_ok=True)
+        return str(root)
+
+    monkeypatch.setattr("app.tools.terminal.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"docker", "docker.exe"} else None,
+    )
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import urllib.request; urllib.request.urlretrieve("
+        "'http://192.168.1.50:8000/pkg.tgz', '/opt/pkg.tgz')\"\n",
+        encoding="utf-8",
+    )
+    built = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert built is not None
+    assert "--fetch" in built
+    assert any(item.startswith("http://192.168.1.50:8000/pkg.tgz=") for item in built)
+    follow = built[built.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 pkg.tgz /opt/pkg.tgz" in text
+    assert "urlretrieve" not in text
+    assert "RUN python" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python3 -c 'from urllib.request import urlretrieve; "
+        "urlretrieve(\"http://192.168.1.50:8000/tool\", \"/usr/local/bin/tool\")'\n",
+        encoding="utf-8",
+    )
+    named = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert named is not None
+    follow = named[named.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 tool /usr/local/bin/tool" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"urllib.request.urlretrieve("
+        "'http://192.168.1.50:8000/pkg.tgz')\"\n",
+        encoding="utf-8",
+    )
+    implied = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert implied is not None
+    follow = implied[implied.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 pkg.tgz pkg.tgz" in text
+    (ctx / "Dockerfile").write_text(
+        'FROM alpine:3.20\n'
+        'RUN ["python3", "-c", '
+        '"import urllib.request; urllib.request.urlretrieve('
+        "'http://192.168.1.50:8000/a.bin', '/opt/a.bin')\"]\n",
+        encoding="utf-8",
+    )
+    exec_form = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert exec_form is not None
+    follow = exec_form[exec_form.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 a.bin /opt/a.bin" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN apk add python3 && python -c \"import urllib.request; "
+        "urllib.request.urlretrieve('http://192.168.1.50:8000/x', '/x')\" "
+        "&& chmod 755 /x\n",
+        encoding="utf-8",
+    )
+    chained = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert chained is not None
+    follow = chained[chained.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "RUN apk add python3" in text
+    assert "COPY --from=jarvisadd0 x /x" in text
+    assert "RUN chmod 755 /x" in text
+    assert "urlretrieve" not in text
+    (ctx / "Dockerfile").write_text(
+        "ARG HOST=192.168.1.50:8000\n"
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import urllib.request; urllib.request.urlretrieve("
+        "'http://${HOST}/pkg.tgz', '/opt/pkg.tgz')\"\n",
+        encoding="utf-8",
+    )
+    arged = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert arged is not None
+    assert any("http://192.168.1.50:8000/pkg.tgz=" in item for item in arged)
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import urllib.request; urllib.request.urlretrieve("
+        "'https://example.com/pkg.tgz', '/opt/pkg.tgz')\"\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import urllib.request; urllib.request.urlopen("
+        "'http://192.168.1.50:8000/x')\"\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        'RUN sh -c "python -c \\"import urllib.request; '
+        "urllib.request.urlretrieve('http://192.168.1.50:8000/x', '/x')\\\"\"\n",
+        encoding="utf-8",
+    )
+    sh_c = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert sh_c is not None
+    follow = sh_c[sh_c.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x /x" in text
+
+
 def test_lan_skopeo_load_fetches_add_http_before_follow(tmp_path, monkeypatch):
     from pathlib import Path
     from app.tools.lan_skopeo_load import main

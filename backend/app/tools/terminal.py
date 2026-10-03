@@ -3136,9 +3136,9 @@ def _copy_flags_from_add(flags: list[str]) -> list[str]:
 def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
-    """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``RUN curl``
-    (including ``&&`` / ``;`` chains and ``sh -c`` / ``bash -lc``) of those URLs
-    into ``COPY --from=jarvisaddN``.
+    """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``RUN curl`` /
+    ``RUN python -c urlretrieve`` (including ``&&`` / ``;`` chains and
+    ``sh -c`` / ``bash -lc``) of those URLs into ``COPY --from=jarvisaddN``.
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
     text and an empty list when there is no on-link RFC1918 fetch.
@@ -3155,14 +3155,77 @@ _RUN_PIPE_SHELLS = frozenset({"sh", "bash", "ash", "dash"})
 _WGET_OUTPUT_FLAGS = frozenset({"-O", "--output-document"})
 _CURL_OUTPUT_FLAGS = frozenset({"-o", "--output"})
 _CURL_REMOTE_FLAGS = frozenset({"-O", "--remote-name"})
+_URLRETRIEVE_CALL = re.compile(
+    r"""(?xs)
+    \burlretrieve\(\s*
+    (?P<q1>['"])(?P<url>.*?)(?P=q1)
+    (?:\s*,\s*(?:filename\s*=\s*)?(?P<q2>['"])(?P<dest>.*?)(?P=q2))?
+    \s*\)
+    """
+)
+_PYTHON_OTHER_HTTP = re.compile(
+    r"\b(?:urlopen|requests\.|httpx\.|aiohttp)\b"
+)
+_PYTHON_C_CLUSTER = re.compile(r"^-[bBdEIiOqsSuRvVW]*c$")
+
+
+def _python_c_script(argv: list[str]) -> str | None:
+    """Return the ``-c`` payload of ``python -c CODE`` / ``python3 -uc CODE``."""
+    if not argv or not _python_interpreter_name(argv[0]):
+        return None
+    index = 1
+    while index < len(argv):
+        tok = str(argv[index])
+        if tok == "-c":
+            if index + 1 >= len(argv):
+                return None
+            return str(argv[index + 1])
+        if _PYTHON_C_CLUSTER.fullmatch(tok):
+            if index + 1 >= len(argv):
+                return None
+            return str(argv[index + 1])
+        if tok in {"-m", "--"} or not tok.startswith("-") or tok == "-":
+            return None
+        if tok in {"-W", "-X"} or tok == "--check-hash-based-pycs":
+            index += 2
+            continue
+        index += 1
+    return None
+
+
+def _python_urlretrieve_url_dest(
+    argv: list[str], declared: dict[str, str]
+) -> tuple[str, str] | None:
+    """Return ``(url, dest)`` for ``python -c urllib.request.urlretrieve(LAN, dest)``."""
+    script = _python_c_script(argv)
+    if script is None:
+        return None
+    matches = list(_URLRETRIEVE_CALL.finditer(script))
+    if len(matches) != 1:
+        return None
+    if _PYTHON_OTHER_HTTP.search(script):
+        return None
+    found = matches[0]
+    expanded = expand_image_vars(found.group("url").strip(), declared)
+    if not expanded or not _is_http_add_url(expanded):
+        return None
+    if not _lan_bind_for_http_target(expanded):
+        return None
+    dest = (found.group("dest") or "").strip()
+    if dest:
+        expanded_dest = expand_image_vars(dest, declared)
+        return expanded, expanded_dest or dest
+    return expanded, _add_url_filename(expanded)
 
 
 def _run_fetch_url_dest(
     argv: list[str], declared: dict[str, str]
 ) -> tuple[str, str] | None:
-    """Return ``(url, dest)`` for a wget/curl argv. dest ``-`` means stdout."""
+    """Return ``(url, dest)`` for a wget/curl/python-urlretrieve argv. dest ``-`` means stdout."""
     if not argv:
         return None
+    if _python_interpreter_name(argv[0]):
+        return _python_urlretrieve_url_dest(argv, declared)
     stem = _tool_basename(argv[0]).lower().removesuffix(".exe")
     if stem not in {"wget", "curl"}:
         return None
@@ -3351,7 +3414,9 @@ def _unwrap_run_shell_c(argv: list[str]) -> list[str] | None:
 def _rewrite_lan_run_fetch(
     line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
 ) -> list[str] | None:
-    """Replace LAN ``RUN wget`` / ``RUN curl`` (including ``&&`` / ``;`` chains and ``sh -c``) with ``COPY --from=``."""
+    """Replace LAN ``RUN wget`` / ``RUN curl`` / ``RUN python -c urlretrieve``
+    (including ``&&`` / ``;`` chains and ``sh -c``) with ``COPY --from=``.
+    """
     match = _RUN_LINE.match(str(line or ""))
     if match is None:
         return None
