@@ -1873,12 +1873,60 @@ def test_lan_run_wget_curl_and_hcl_heredoc(tmp_path, monkeypatch):
     text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
     assert "COPY --from=jarvisadd0 a.bin /opt/a.bin" in text
     (ctx / "Dockerfile").write_text(
-        "FROM alpine:3.20\nRUN curl -fsSL https://example.com/install.sh | sh\n",
+        "FROM alpine:3.20\n"
+        "RUN apk add curl && wget -O /x http://192.168.1.50:8000/x && chmod 755 /x\n",
+        encoding="utf-8",
+    )
+    chained = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert chained is not None
+    follow = chained[chained.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "RUN apk add curl" in text
+    assert "COPY --from=jarvisadd0 x /x" in text
+    assert "RUN chmod 755 /x" in text
+    assert "wget" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN wget -O /opt/pkg.tgz http://192.168.1.50:8000/pkg.tgz && tar -tzf /opt/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    leading = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert leading is not None
+    follow = leading[leading.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert text.index("COPY --from=jarvisadd0") < text.index("RUN tar")
+    assert "wget" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN apk add curl && curl -fsSL http://192.168.1.50:8000/install.sh | sh\n",
+        encoding="utf-8",
+    )
+    piped_chain = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert piped_chain is not None
+    follow = piped_chain[piped_chain.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "RUN apk add curl" in text
+    assert "COPY --from=jarvisadd0 install.sh" in text
+    assert "RUN sh /tmp/jarvisadd0-install.sh" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN apk add curl; echo ready && wget -O /x http://192.168.1.50:8000/x\n",
+        encoding="utf-8",
+    )
+    semi = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert semi is not None
+    follow = semi[semi.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "RUN apk add curl ; echo ready" in text
+    assert "COPY --from=jarvisadd0 x /x" in text
+    assert "wget" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\nRUN wget -O /x http://192.168.1.50:8000/x || true\n",
         encoding="utf-8",
     )
     assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
     (ctx / "Dockerfile").write_text(
-        "FROM alpine:3.20\nRUN apk add curl && wget -O /x http://192.168.1.50:8000/x\n",
+        "FROM alpine:3.20\nRUN curl -fsSL https://example.com/install.sh | sh\n",
         encoding="utf-8",
     )
     assert lan_bound_docker_build_argv(f"docker build {ctx}") is None

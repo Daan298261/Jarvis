@@ -3060,8 +3060,8 @@ def _copy_flags_from_add(flags: list[str]) -> list[str]:
 def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
-    """Rewrite LAN ``ADD http(s)|ftp(s)://`` and whole-instruction ``RUN wget`` /
-    ``RUN curl`` of those URLs into ``COPY --from=jarvisaddN``.
+    """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``RUN curl``
+    (including ``&&`` / ``;`` chains) of those URLs into ``COPY --from=jarvisaddN``.
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
     text and an empty list when there is no on-link RFC1918 fetch.
@@ -3152,43 +3152,55 @@ def _run_fetch_url_dest(
     return url, _add_url_filename(url)
 
 
-def _rewrite_lan_run_fetch(
-    line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
-) -> list[str] | None:
-    """Replace a whole-instruction LAN ``RUN wget`` / ``RUN curl`` with ``COPY --from=``."""
-    match = _RUN_LINE.match(str(line or ""))
-    if match is None:
+def _split_run_chain(argv: list[str]) -> tuple[list[list[str]], list[str]] | None:
+    """Split a shell RUN argv on ``&&`` / ``;``. Skip ``||`` / background ``&``."""
+    if any(tok in {"||", "&", "|&"} for tok in argv):
         return None
-    indent = re.match(r"^(\s*)", str(line or "")).group(1)
-    body = match.group(3).strip()
-    pipe_shell = ""
-    argv: list[str] = []
-    if body.startswith("["):
-        try:
-            loaded = json.loads(body)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(loaded, list) or not all(isinstance(item, str) for item in loaded):
-            return None
-        argv = list(loaded)
-    else:
-        try:
-            argv = shlex.split(body, posix=True)
-        except ValueError:
-            return None
-        if argv.count("|") == 1:
-            cut = argv.index("|")
-            right = argv[cut + 1 :]
-            if (
-                len(right) == 1
-                and _tool_basename(right[0]).lower().removesuffix(".exe") in _RUN_PIPE_SHELLS
-            ):
-                pipe_shell = _tool_basename(right[0]).lower().removesuffix(".exe")
-                argv = argv[:cut]
-            else:
+    segments: list[list[str]] = []
+    ops: list[str] = []
+    current: list[str] = []
+    for tok in argv:
+        if tok in {"&&", ";"}:
+            if not current:
                 return None
-        elif "|" in argv:
-            return None
+            segments.append(current)
+            ops.append(tok)
+            current = []
+            continue
+        current.append(tok)
+    if not current:
+        return None
+    segments.append(current)
+    if len(ops) != len(segments) - 1:
+        return None
+    return segments, ops
+
+
+def _run_segment_pipe(argv: list[str]) -> tuple[list[str], str] | None:
+    if argv.count("|") == 1:
+        cut = argv.index("|")
+        right = argv[cut + 1 :]
+        if (
+            len(right) == 1
+            and _tool_basename(right[0]).lower().removesuffix(".exe") in _RUN_PIPE_SHELLS
+        ):
+            return argv[:cut], _tool_basename(right[0]).lower().removesuffix(".exe")
+        return None
+    if "|" in argv:
+        return None
+    return argv, ""
+
+
+def _run_fetch_copy_lines(
+    argv: list[str],
+    declared: dict[str, str],
+    fetches: list[tuple[str, str, str]],
+    indent: str,
+) -> list[str] | None:
+    parsed = _run_segment_pipe(argv)
+    if parsed is None:
+        return None
+    argv, pipe_shell = parsed
     spec = _run_fetch_url_dest(argv, declared)
     if spec is None:
         return None
@@ -3210,6 +3222,69 @@ def _rewrite_lan_run_fetch(
         ]
     copy_dest = dest or filename
     return [f"{indent}COPY --from={context} {filename} {copy_dest}"]
+
+
+def _rewrite_lan_run_fetch(
+    line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
+) -> list[str] | None:
+    """Replace LAN ``RUN wget`` / ``RUN curl`` (including ``&&`` / ``;`` chains) with ``COPY --from=``."""
+    match = _RUN_LINE.match(str(line or ""))
+    if match is None:
+        return None
+    indent = re.match(r"^(\s*)", str(line or "")).group(1)
+    run_flags = match.group(2) or ""
+    body = match.group(3).strip()
+    if body.startswith("["):
+        try:
+            loaded = json.loads(body)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(loaded, list) or not all(isinstance(item, str) for item in loaded):
+            return None
+        return _run_fetch_copy_lines(list(loaded), declared, fetches, indent)
+    try:
+        argv = shlex.split(body, posix=True)
+    except ValueError:
+        return None
+    split = _split_run_chain(argv)
+    if split is None:
+        return None
+    segments, ops = split
+    trial = list(fetches)
+    copies: list[list[str] | None] = []
+    for seg in segments:
+        if not seg:
+            return None
+        if _run_segment_pipe(seg) is None:
+            return None
+        copies.append(_run_fetch_copy_lines(seg, declared, trial, indent))
+    if not any(item is not None for item in copies):
+        return None
+    fetches.extend(trial[len(fetches) :])
+    out: list[str] = []
+    run_buf: list[str] = []
+    run_ops: list[str] = []
+
+    def flush_run() -> None:
+        if not run_buf:
+            return
+        joined = run_buf[0]
+        for op, piece in zip(run_ops, run_buf[1:], strict=True):
+            joined = f"{joined} {op} {piece}"
+        out.append(f"{indent}RUN{run_flags} {joined}")
+        run_buf.clear()
+        run_ops.clear()
+
+    for index, (seg, copy_lines) in enumerate(zip(segments, copies, strict=True)):
+        if copy_lines is not None:
+            flush_run()
+            out.extend(copy_lines)
+            continue
+        if run_buf:
+            run_ops.append(ops[index - 1])
+        run_buf.append(shlex.join(seg))
+    flush_run()
+    return out or None
 
 
 def rewrite_dockerfile_lan_add_text(
