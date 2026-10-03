@@ -3152,6 +3152,21 @@ def _run_fetch_url_dest(
     return url, _add_url_filename(url)
 
 
+_GLUED_SHELL_OP = re.compile(r"(&&|\|\||\|&|;|\|)")
+
+
+def _run_shell_argv(body: str) -> list[str] | None:
+    """Tokenize a shell RUN body, splitting glued ``&&`` / ``;`` / ``|``."""
+    try:
+        tokens = shlex.split(body, posix=True)
+    except ValueError:
+        return None
+    out: list[str] = []
+    for tok in tokens:
+        out.extend(part for part in _GLUED_SHELL_OP.split(tok) if part)
+    return out
+
+
 def _split_run_chain(argv: list[str]) -> tuple[list[list[str]], list[str]] | None:
     """Split a shell RUN argv on ``&&`` / ``;``. Skip ``||`` / background ``&``."""
     if any(tok in {"||", "&", "|&"} for tok in argv):
@@ -3242,9 +3257,8 @@ def _rewrite_lan_run_fetch(
         if not isinstance(loaded, list) or not all(isinstance(item, str) for item in loaded):
             return None
         return _run_fetch_copy_lines(list(loaded), declared, fetches, indent)
-    try:
-        argv = shlex.split(body, posix=True)
-    except ValueError:
+    argv = _run_shell_argv(body)
+    if argv is None:
         return None
     split = _split_run_chain(argv)
     if split is None:

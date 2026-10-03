@@ -1921,6 +1921,29 @@ def test_lan_run_wget_curl_and_hcl_heredoc(tmp_path, monkeypatch):
     assert "COPY --from=jarvisadd0 x /x" in text
     assert "wget" not in text
     (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN wget -O /x http://192.168.1.50:8000/x;chmod 755 /x\n",
+        encoding="utf-8",
+    )
+    glued = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert glued is not None
+    follow = glued[glued.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x /x" in text
+    assert "RUN chmod 755 /x" in text
+    assert "wget" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN curl -fsSL http://192.168.1.50:8000/install.sh|sh\n",
+        encoding="utf-8",
+    )
+    glued_pipe = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert glued_pipe is not None
+    follow = glued_pipe[glued_pipe.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 install.sh /tmp/jarvisadd0-install.sh" in text
+    assert "RUN sh /tmp/jarvisadd0-install.sh" in text
+    (ctx / "Dockerfile").write_text(
         "FROM alpine:3.20\nRUN wget -O /x http://192.168.1.50:8000/x || true\n",
         encoding="utf-8",
     )
