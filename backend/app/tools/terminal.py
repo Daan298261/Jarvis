@@ -1446,6 +1446,72 @@ def _parse_build_arg_mapping(raw: object, env: dict[str, str] | None = None) -> 
     return out
 
 
+def _image_from_named_context(raw: str, env: dict[str, str] | None = None) -> str | None:
+    """Image ref inside ``docker-image://`` / ``container-image://`` named contexts."""
+    text = str(raw or "").strip().strip("'\"")
+    if not text:
+        return None
+    if "$" in text:
+        text = expand_image_vars(text, env if env is not None else os.environ) or ""
+        text = text.strip().strip("'\"")
+        if not text:
+            return None
+    match = re.match(r"^(?:docker-image|container-image)://(.+)$", text, re.I)
+    if not match:
+        return None
+    image = match.group(1).strip().strip("'\"")
+    return image or None
+
+
+def _parse_named_context_images(raw: object, env: dict[str, str] | None = None) -> list[str]:
+    items: list[str] = []
+    if isinstance(raw, dict):
+        items = [str(val if val is not None else "") for val in raw.values()]
+    elif isinstance(raw, list):
+        for item in raw:
+            text = str(item or "").strip()
+            if "=" in text:
+                _, _, rhs = text.partition("=")
+                items.append(rhs)
+            else:
+                items.append(text)
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        image = _image_from_named_context(item, env)
+        if not image or image in seen:
+            continue
+        seen.add(image)
+        out.append(image)
+    return out
+
+
+def compose_service_context_images(path: Path) -> dict[str, list[str]]:
+    """Map compose service name → ``build.additional_contexts`` image refs."""
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return {}
+    services = payload.get("services") if isinstance(payload, dict) else None
+    if not isinstance(services, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for name, spec in services.items():
+        if not isinstance(spec, dict):
+            continue
+        build = spec.get("build")
+        if not isinstance(build, dict):
+            continue
+        images = _parse_named_context_images(build.get("additional_contexts"))
+        if images:
+            result[str(name)] = images
+    return result
+
+
 def compose_service_build_args(path: Path) -> dict[str, dict[str, str]]:
     """Map compose service name → ``build.args`` used as Dockerfile ARG values."""
     try:
@@ -1837,6 +1903,7 @@ def lan_bound_compose_push_argv(command: str, cwd: str | None = None) -> list[st
 _COMPOSE_BUILD_VALUE_FLAGS = frozenset(
     {
         "--build-arg",
+        "--build-context",
         "--builder",
         "--memory",
         "-m",
@@ -1980,11 +2047,17 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
     dockerfiles: dict[str, Path] = {}
     images: dict[str, str] = {}
     file_args: dict[str, dict[str, str]] = {}
+    file_contexts: dict[str, list[str]] = {}
     for path in paths:
         dockerfiles.update(compose_service_dockerfiles(path))
         images.update(compose_service_images(path))
         for name, args in compose_service_build_args(path).items():
             file_args.setdefault(name, {}).update(args)
+        for name, extras in compose_service_context_images(path).items():
+            file_contexts.setdefault(name, [])
+            for image in extras:
+                if image not in file_contexts[name]:
+                    file_contexts[name].append(image)
     if not dockerfiles:
         return None
     if services and not with_deps:
@@ -2005,6 +2078,20 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
                 continue
             seen.add(image)
             lan.append(image)
+        for image in file_contexts.get(name, ()):
+            if image in seen:
+                continue
+            if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+                continue
+            seen.add(image)
+            lan.append(image)
+    for image in _docker_build_context_images(parts):
+        if image in seen:
+            continue
+        if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+            continue
+        seen.add(image)
+        lan.append(image)
     lan_tags: list[str] = []
     seen_tags: set[str] = set()
     public: list[str] = []
@@ -2203,6 +2290,7 @@ def _compose_lan_copy_images(
     images: dict[str, str] = {}
     dockerfiles: dict[str, Path] = {}
     file_args: dict[str, dict[str, str]] = {}
+    file_contexts: dict[str, list[str]] = {}
     deps: dict[str, list[str]] = {}
     for path in paths:
         images.update(compose_service_images(path))
@@ -2210,6 +2298,11 @@ def _compose_lan_copy_images(
             dockerfiles.update(compose_service_dockerfiles(path))
             for name, args in compose_service_build_args(path).items():
                 file_args.setdefault(name, {}).update(args)
+            for name, extras in compose_service_context_images(path).items():
+                file_contexts.setdefault(name, [])
+                for image in extras:
+                    if image not in file_contexts[name]:
+                        file_contexts[name].append(image)
         for name, kids in compose_service_depends(path).items():
             deps.setdefault(name, [])
             for kid in kids:
@@ -2222,6 +2315,7 @@ def _compose_lan_copy_images(
         images = {name: images[name] for name in wanted if name in images}
         build_wanted = list(build_services) if build_services is not None else wanted
         dockerfiles = {name: dockerfiles[name] for name in build_wanted if name in dockerfiles}
+        file_contexts = {name: file_contexts[name] for name in build_wanted if name in file_contexts}
     lan: list[str] = []
     seen: set[str] = set()
     for image in images.values():
@@ -2233,6 +2327,14 @@ def _compose_lan_copy_images(
         lan.append(image)
     for name, dockerfile in dockerfiles.items():
         for image in dockerfile_from_images(dockerfile, file_args.get(name)):
+            if image in seen:
+                continue
+            if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+                continue
+            seen.add(image)
+            lan.append(image)
+    for extras in file_contexts.values():
+        for image in extras:
             if image in seen:
                 continue
             if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
@@ -2610,6 +2712,35 @@ def _docker_build_args(parts: list[str]) -> dict[str, str]:
     return args
 
 
+def _docker_build_context_images(parts: list[str]) -> list[str]:
+    """Image refs from ``--build-context name=docker-image://...``."""
+    out: list[str] = []
+    seen: set[str] = set()
+    index = 0
+    while index < len(parts):
+        text = str(parts[index] or "").strip()
+        index += 1
+        raw = ""
+        if text in {"--build-context"}:
+            if index >= len(parts):
+                break
+            raw = str(parts[index] or "").strip().strip("'\"")
+            index += 1
+        elif text.startswith("--build-context="):
+            raw = text.split("=", 1)[1].strip().strip("'\"")
+        else:
+            continue
+        if "=" not in raw:
+            continue
+        _, _, rhs = raw.partition("=")
+        image = _image_from_named_context(rhs)
+        if not image or image in seen:
+            continue
+        seen.add(image)
+        out.append(image)
+    return out
+
+
 def _docker_build_wants_push(parts: list[str]) -> bool:
     skip = False
     for item in parts:
@@ -2745,6 +2876,14 @@ def lan_bound_docker_build_from_parts(parts: list[str], cwd: str | None = None) 
         for image in dockerfile_from_images(dockerfile, _docker_build_args(parts))
         if _lan_bind_ip_for_host(docker_registry_host_from_image(image))
     ]
+    seen = set(lan)
+    for image in _docker_build_context_images(parts):
+        if image in seen:
+            continue
+        if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+            continue
+        seen.add(image)
+        lan.append(image)
     tags = _docker_build_tags(parts)
     lan_tags = [
         tag
@@ -2830,8 +2969,8 @@ def _hcl_target_blocks(text: str) -> list[str]:
     return blocks
 
 
-def _hcl_args(block: str) -> dict[str, str]:
-    match = re.search(r"args\s*=\s*\{", block, re.I)
+def _hcl_named_map(block: str, key: str) -> dict[str, str]:
+    match = re.search(rf"{re.escape(key)}\s*=\s*\{{", block, re.I)
     if not match:
         return {}
     start = match.end()
@@ -2847,6 +2986,10 @@ def _hcl_args(block: str) -> dict[str, str]:
     if depth != 0:
         return {}
     return {item.group(1): item.group(2) for item in _HCL_ARG_ITEM.finditer(block[start : index - 1])}
+
+
+def _hcl_args(block: str) -> dict[str, str]:
+    return _hcl_named_map(block, "args")
 
 
 def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile: str) -> Path | None:
@@ -2867,21 +3010,35 @@ def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile
     return None
 
 
-def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[tuple[Path, dict[str, str]]], list[str]]:
-    """Dockerfile paths (with bake/compose ARG maps) and image tags in a bake file."""
+def bake_file_dockerfiles_and_tags(
+    path: Path, cwd: Path
+) -> tuple[list[tuple[Path, dict[str, str]]], list[str], list[str]]:
+    """Dockerfile paths (with bake/compose ARG maps), tags, and named-context images."""
     suffix = path.suffix.lower()
     dockerfiles: list[tuple[Path, dict[str, str]]] = []
     tags: list[str] = []
+    extra: list[str] = []
+    seen_extra: set[str] = set()
+
+    def _add_extra(images: list[str]) -> None:
+        for image in images:
+            if not image or image in seen_extra:
+                continue
+            seen_extra.add(image)
+            extra.append(image)
+
     if suffix in {".yaml", ".yml"}:
         files = compose_service_dockerfiles(path)
         args = compose_service_build_args(path)
         dockerfiles.extend((df, dict(args.get(name, {}))) for name, df in files.items())
         tags.extend(compose_service_images(path).values())
-        return dockerfiles, tags
+        for extras in compose_service_context_images(path).values():
+            _add_extra(extras)
+        return dockerfiles, tags, extra
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
-        return [], []
+        return [], [], []
     file_dir = path.parent
     if suffix == ".json":
         import json
@@ -2889,10 +3046,10 @@ def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[tuple[Pa
         try:
             payload = json.loads(text)
         except json.JSONDecodeError:
-            return [], []
+            return [], [], []
         targets = payload.get("target") if isinstance(payload, dict) else None
         if not isinstance(targets, dict):
-            return [], []
+            return [], [], []
         for spec in targets.values():
             if not isinstance(spec, dict):
                 continue
@@ -2906,7 +3063,8 @@ def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[tuple[Pa
             raw_tags = spec.get("tags")
             if isinstance(raw_tags, list):
                 tags.extend(str(item).strip() for item in raw_tags if str(item).strip() and "$" not in str(item))
-        return dockerfiles, tags
+            _add_extra(_parse_named_context_images(spec.get("contexts")))
+        return dockerfiles, tags, extra
     for block in _hcl_target_blocks(text):
         if "dockerfile-inline" in block:
             continue
@@ -2924,7 +3082,8 @@ def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[tuple[Pa
                 for item in tags_match.group(1).split(",")
                 if item.strip().strip("'\"") and "$" not in item
             )
-    return dockerfiles, tags
+        _add_extra(_parse_named_context_images(_hcl_named_map(block, "contexts")))
+    return dockerfiles, tags, extra
 
 
 def _bake_set_tags(value: str) -> list[str]:
@@ -2959,9 +3118,24 @@ def _bake_set_args(value: str) -> dict[str, str]:
     return {name: rhs.strip().strip("'\"")}
 
 
+def _bake_set_context_images(value: str) -> list[str]:
+    """Parse ``--set app.contexts.assets=docker-image://...`` overrides."""
+    text = str(value or "").strip().strip("'\"")
+    if not text:
+        return []
+    key_path, sep, rhs = text.partition("=")
+    if not sep:
+        return []
+    lowered = key_path.lower()
+    if ".contexts." not in lowered and not lowered.startswith("contexts."):
+        return []
+    image = _image_from_named_context(rhs)
+    return [image] if image else []
+
+
 def _docker_bake_spec(
     parts: list[str], cwd: str | None
-) -> tuple[list[Path], bool, bool, list[str], dict[str, str]] | None:
+) -> tuple[list[Path], bool, bool, list[str], dict[str, str], list[str]] | None:
     if not parts or _tool_basename(parts[0]) != "docker":
         return None
     rest = parts[1:]
@@ -2972,6 +3146,7 @@ def _docker_bake_spec(
     files: list[str] = []
     extra_tags: list[str] = []
     extra_args: dict[str, str] = {}
+    extra_contexts: list[str] = []
     quiet = False
     wants_push = False
     index = 1
@@ -3003,6 +3178,7 @@ def _docker_bake_spec(
             raw = text.split("=", 1)[1]
             extra_tags.extend(_bake_set_tags(raw))
             extra_args.update(_bake_set_args(raw))
+            extra_contexts.extend(_bake_set_context_images(raw))
             continue
         if text == "--set":
             if index >= len(rest):
@@ -3010,6 +3186,7 @@ def _docker_bake_spec(
             raw = str(rest[index] or "").strip().strip("'\"")
             extra_tags.extend(_bake_set_tags(raw))
             extra_args.update(_bake_set_args(raw))
+            extra_contexts.extend(_bake_set_context_images(raw))
             index += 1
             continue
         if text.startswith("--") and "=" in text:
@@ -3036,7 +3213,7 @@ def _docker_bake_spec(
     for path in paths:
         if not path.is_file():
             return None
-    return paths, quiet, wants_push, extra_tags, extra_args
+    return paths, quiet, wants_push, extra_tags, extra_args, extra_contexts
 
 
 def _docker_bake_for_local_load(parts: list[str], *, drop_push: bool) -> list[str]:
@@ -3083,13 +3260,14 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
     spec = _docker_bake_spec(parts, cwd)
     if spec is None:
         return None
-    paths, quiet, wants_push, extra_tags, extra_args = spec
+    paths, quiet, wants_push, extra_tags, extra_args, extra_contexts = spec
     root = Path(cwd or os.getcwd())
     dockerfiles: list[tuple[Path, dict[str, str]]] = []
     tags: list[str] = []
+    extra_images: list[str] = []
     seen_df: set[str] = set()
     for path in paths:
-        files, found_tags = bake_file_dockerfiles_and_tags(path, root)
+        files, found_tags, found_contexts = bake_file_dockerfiles_and_tags(path, root)
         for df, args in files:
             key = str(df)
             if key in seen_df:
@@ -3097,6 +3275,7 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
             seen_df.add(key)
             dockerfiles.append((df, args))
         tags.extend(found_tags)
+        extra_images.extend(found_contexts)
     if extra_tags:
         tags = list(extra_tags)
     lan: list[str] = []
@@ -3110,6 +3289,13 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
                 continue
             seen.add(image)
             lan.append(image)
+    for image in [*extra_images, *extra_contexts]:
+        if image in seen:
+            continue
+        if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+            continue
+        seen.add(image)
+        lan.append(image)
     lan_tags = [
         tag
         for tag in tags

@@ -1423,6 +1423,15 @@ def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
     assert "192.168.1.50:5000/assets:1" in copied
     follow = copied[copied.index("--") + 1 :]
     assert "--pull=false" in follow
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\nCOPY --from=assets /data /data\n", encoding="utf-8")
+    named = lan_bound_docker_build_argv(
+        f"docker build --build-context assets=docker-image://192.168.1.50:5000/assets:1 {ctx}"
+    )
+    assert named is not None
+    assert "192.168.1.50:5000/assets:1" in named
+    assert lan_bound_docker_build_argv(
+        f"docker build --build-context assets=docker-image://nginx:alpine {ctx}"
+    ) is None
 
 
 def test_lan_docker_buildx_skopeo_loads_from_before_build(tmp_path, monkeypatch):
@@ -1607,6 +1616,34 @@ def test_lan_docker_bake_skopeo_loads_from_and_push(tmp_path, monkeypatch):
     assert "192.168.1.50:5000/from-set:1" in set_args
     assert "192.168.1.50:5000/from-bake:1" not in set_args
     assert lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl} --set app.args.BASE=alpine:3.20") is None
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\nCOPY --from=assets /data /data\n", encoding="utf-8")
+    hcl.write_text(
+        'target "app" {\n'
+        '  context = "./app"\n'
+        '  dockerfile = "Dockerfile"\n'
+        "  contexts = {\n"
+        '    assets = "docker-image://192.168.1.50:5000/from-ctx:1"\n'
+        "  }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    from_ctx = lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}")
+    assert from_ctx is not None
+    assert "192.168.1.50:5000/from-ctx:1" in from_ctx
+    json_bake.write_text(
+        '{"target":{"app":{"context":"./app","dockerfile":"Dockerfile",'
+        '"contexts":{"assets":"docker-image://192.168.1.50:5000/from-json-ctx:1"}}}}',
+        encoding="utf-8",
+    )
+    from_json_ctx = lan_bound_docker_bake_argv(f"docker buildx bake -f {json_bake}", cwd=str(tmp_path))
+    assert from_json_ctx is not None
+    assert "192.168.1.50:5000/from-json-ctx:1" in from_json_ctx
+    set_ctx = lan_bound_docker_bake_argv(
+        f"docker buildx bake -f {hcl} --set app.contexts.assets=docker-image://192.168.1.50:5000/from-set-ctx:1",
+        cwd=str(tmp_path),
+    )
+    assert set_ctx is not None
+    assert "192.168.1.50:5000/from-set-ctx:1" in set_ctx
 
 
 def test_compose_service_dockerfiles_resolves_context(tmp_path):
@@ -1814,6 +1851,33 @@ def test_lan_compose_build_skopeo_loads_from_before_build(tmp_path, monkeypatch)
     cli_env = lan_bound_compose_build_argv(f"docker compose -f {stack} build --build-arg BASE app")
     assert cli_env is not None
     assert "192.168.1.50:5000/from-env:1" in cli_env
+    (app / "Dockerfile").write_text("FROM alpine:3.20\nCOPY --from=assets /data /data\n", encoding="utf-8")
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      additional_contexts:\n"
+        "        assets: docker-image://192.168.1.50:5000/from-compose-ctx:1\n"
+        "  listed:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      additional_contexts:\n"
+        "        - assets=docker-image://192.168.1.50:5000/from-list-ctx:1\n",
+        encoding="utf-8",
+    )
+    from_ctx = lan_bound_compose_build_argv(f"docker compose -f {stack} build app")
+    assert from_ctx is not None
+    assert "192.168.1.50:5000/from-compose-ctx:1" in from_ctx
+    from_list_ctx = lan_bound_compose_build_argv(f"docker compose -f {stack} build listed")
+    assert from_list_ctx is not None
+    assert "192.168.1.50:5000/from-list-ctx:1" in from_list_ctx
+    cli_ctx = lan_bound_compose_build_argv(
+        f"docker compose -f {stack} build --build-context extra=docker-image://192.168.1.50:5000/from-cli-ctx:1 app"
+    )
+    assert cli_ctx is not None
+    assert "192.168.1.50:5000/from-cli-ctx:1" in cli_ctx
+    assert "192.168.1.50:5000/from-compose-ctx:1" in cli_ctx
 
 
 def test_lan_compose_up_skopeo_loads_images_and_from(tmp_path, monkeypatch):
@@ -1903,6 +1967,20 @@ def test_lan_compose_up_skopeo_loads_images_and_from(tmp_path, monkeypatch):
     rebuilt_args = lan_bound_compose_up_argv(f"docker compose -f {stack} up --build app")
     assert rebuilt_args is not None
     assert "192.168.1.50:5000/from-up:1" in rebuilt_args
+    assert lan_bound_compose_up_argv(f"docker compose -f {stack} up app") is None
+    (app / "Dockerfile").write_text("FROM alpine:3.20\nCOPY --from=assets /data /data\n", encoding="utf-8")
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      additional_contexts:\n"
+        "        assets: docker-image://192.168.1.50:5000/from-up-ctx:1\n",
+        encoding="utf-8",
+    )
+    rebuilt_ctx = lan_bound_compose_up_argv(f"docker compose -f {stack} up --build app")
+    assert rebuilt_ctx is not None
+    assert "192.168.1.50:5000/from-up-ctx:1" in rebuilt_ctx
     assert lan_bound_compose_up_argv(f"docker compose -f {stack} up app") is None
 
 
