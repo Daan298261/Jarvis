@@ -1026,54 +1026,72 @@ def _docker_image_with_tag(ref: str) -> str:
     return f"{text}:latest"
 
 
+def _docker_repo_name(ref: str) -> str:
+    text = str(ref or "").strip().strip("'\"")
+    lowered = text.lower()
+    if lowered.startswith("docker://"):
+        text = text[9:]
+    leaf = text.rsplit("/", 1)[-1]
+    if "@" in leaf:
+        text = text.split("@", 1)[0]
+        leaf = text.rsplit("/", 1)[-1]
+    if ":" in leaf:
+        return text.rsplit(":", 1)[0]
+    return text
+
+
 def _docker_pull_image(parts: list[str]) -> str:
-    image, _platform = _docker_pull_spec(parts)
+    image, _platform, _all_tags = _docker_pull_spec(parts)
     return image
 
 
-def _docker_pull_spec(parts: list[str]) -> tuple[str, str]:
+def _docker_pull_spec(parts: list[str]) -> tuple[str, str, bool]:
     return _docker_image_xfer_spec(parts, "pull")
 
 
-def _docker_push_spec(parts: list[str]) -> tuple[str, str]:
+def _docker_push_spec(parts: list[str]) -> tuple[str, str, bool]:
     return _docker_image_xfer_spec(parts, "push")
 
 
-def _docker_image_xfer_spec(parts: list[str], verb: str) -> tuple[str, str]:
+def _docker_image_xfer_spec(parts: list[str], verb: str) -> tuple[str, str, bool]:
     if not parts or _tool_basename(parts[0]) != "docker":
-        return "", ""
+        return "", "", False
     rest = parts[1:]
     if rest and _tool_basename(rest[0]) == "image":
         rest = rest[1:]
     if not rest or _tool_basename(rest[0]) != verb:
-        return "", ""
+        return "", "", False
     image = ""
     platform = ""
+    all_tags = False
     index = 1
     while index < len(rest):
         text = str(rest[index] or "").strip().strip("'\"")
         index += 1
         if not text or text in _DOCKER_PULL_QUIET or text == "--disable-content-trust":
             continue
+        if text in {"-a", "--all-tags"}:
+            all_tags = True
+            continue
         if text.startswith("--platform="):
             if platform:
-                return "", ""
+                return "", "", False
             platform = text.split("=", 1)[1].strip()
             continue
         if text == "--platform":
             if platform or index >= len(rest):
-                return "", ""
+                return "", "", False
             platform = str(rest[index] or "").strip().strip("'\"")
             index += 1
             if not platform or platform.startswith("-"):
-                return "", ""
+                return "", "", False
             continue
         if text.startswith("-"):
-            return "", ""
+            return "", "", False
         if image:
-            return "", ""
+            return "", "", False
         image = text
-    return image, platform
+    return image, platform, all_tags
 
 
 def _skopeo_platform_flags(platform: str) -> list[str] | None:
@@ -1101,8 +1119,9 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     Dockerd fetches the registry itself and cannot source-bind the home NIC.
     ``skopeo copy`` honors HTTP_PROXY, so the loopback LAN proxy sources the
     registry from that NIC and loads the image into the local docker daemon.
-    Skip pipes, ``-a`` / ``--all-tags``, public Hub names, and missing skopeo.
-    Optional ``-q`` / ``--quiet`` and ``--platform os/arch[/variant]``.
+    Skip pipes, public Hub names, and missing skopeo. ``-a`` / ``--all-tags``
+    lists tags through skopeo and copies each. Optional ``-q`` / ``--quiet``
+    and ``--platform os/arch[/variant]`` (platform is ignored with ``--all-tags``).
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1111,21 +1130,24 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
         parts = shlex.split(text, posix=os.name != "nt")
     except ValueError:
         return None
-    image, platform = _docker_pull_spec(parts)
+    image, platform, all_tags = _docker_pull_spec(parts)
     if not image:
-        return None
-    overrides = _skopeo_platform_flags(platform)
-    if overrides is None:
         return None
     host = docker_registry_host_from_image(image)
     if not _lan_bind_ip_for_host(host):
+        return None
+    quiet = any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:])
+    if all_tags:
+        return skopeo_copy_lan_images_argv([_docker_repo_name(image)], quiet=quiet, all_tags=True)
+    overrides = _skopeo_platform_flags(platform)
+    if overrides is None:
         return None
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
     if not exe:
         return None
     tagged = _docker_image_with_tag(image)
     argv = [exe, "copy", *overrides]
-    if any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:]):
+    if quiet:
         argv.append("--quiet")
     argv.extend(["--src-tls-verify=false", f"docker://{tagged}", f"docker-daemon:{tagged}"])
     return argv
@@ -1136,8 +1158,9 @@ def lan_bound_docker_push_argv(command: str) -> list[str] | None:
 
     Dockerd uploads the registry itself and cannot source-bind the home NIC.
     ``skopeo copy`` honors HTTP_PROXY, so the loopback LAN proxy sources the
-    daemon image from this PC and pushes to the NAS. Skip pipes, ``-a`` /
-    ``--all-tags``, public Hub names, and missing skopeo.
+    daemon image from this PC and pushes to the NAS. Skip pipes, public Hub
+    names, and missing skopeo. ``-a`` / ``--all-tags`` lists local daemon tags
+    and uploads each.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1146,21 +1169,26 @@ def lan_bound_docker_push_argv(command: str) -> list[str] | None:
         parts = shlex.split(text, posix=os.name != "nt")
     except ValueError:
         return None
-    image, platform = _docker_push_spec(parts)
+    image, platform, all_tags = _docker_push_spec(parts)
     if not image:
-        return None
-    overrides = _skopeo_platform_flags(platform)
-    if overrides is None:
         return None
     host = docker_registry_host_from_image(image)
     if not _lan_bind_ip_for_host(host):
+        return None
+    quiet = any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:])
+    if all_tags:
+        return skopeo_copy_lan_images_argv(
+            [_docker_repo_name(image)], quiet=quiet, push=True, all_tags=True
+        )
+    overrides = _skopeo_platform_flags(platform)
+    if overrides is None:
         return None
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
     if not exe:
         return None
     tagged = _docker_image_with_tag(image)
     argv = [exe, "copy", *overrides]
-    if any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:]):
+    if quiet:
         argv.append("--quiet")
     argv.extend(["--dest-tls-verify=false", f"docker-daemon:{tagged}", f"docker://{tagged}"])
     return argv
@@ -1470,13 +1498,21 @@ def skopeo_copy_lan_images_argv(
     follow: list[str] | None = None,
     push: bool = False,
     push_after: list[str] | None = None,
+    then: list[str] | None = None,
+    all_tags: bool = False,
 ) -> list[str] | None:
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
-    tagged = [_docker_image_with_tag(image) for image in images]
+    tagged = (
+        [_docker_repo_name(image) for image in images]
+        if all_tags
+        else [_docker_image_with_tag(image) for image in images]
+    )
     after = [_docker_image_with_tag(image) for image in (push_after or [])]
+    follow_cmd = list(follow or [])
+    then_cmd = list(then or [])
     if not exe or (not tagged and not after):
         return None
-    if len(tagged) == 1 and not follow and not after:
+    if len(tagged) == 1 and not follow_cmd and not after and not then_cmd and not all_tags:
         argv = [exe, "copy"]
         if quiet:
             argv.append("--quiet")
@@ -1485,7 +1521,7 @@ def skopeo_copy_lan_images_argv(
         else:
             argv.extend(["--src-tls-verify=false", f"docker://{tagged[0]}", f"docker-daemon:{tagged[0]}"])
         return argv
-    if len(after) == 1 and not tagged and not follow:
+    if len(after) == 1 and not tagged and not follow_cmd and not then_cmd:
         argv = [exe, "copy"]
         if quiet:
             argv.append("--quiet")
@@ -1498,11 +1534,16 @@ def skopeo_copy_lan_images_argv(
         argv.append("--quiet")
     if push:
         argv.append("--push")
+    if all_tags:
+        argv.append("--all-tags")
     for image in after:
         argv.extend(["--push-after", image])
     argv.extend([exe, *tagged])
-    if follow:
-        argv.extend(["--", *follow])
+    if follow_cmd or then_cmd:
+        argv.append("--")
+        argv.extend(follow_cmd)
+        if then_cmd:
+            argv.extend(["--", *then_cmd])
     return argv
 
 
@@ -1851,11 +1892,15 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
             lan.append(image)
     lan_tags: list[str] = []
     seen_tags: set[str] = set()
+    public: list[str] = []
     for name in chosen:
         image = images.get(name) or ""
-        if not image or image in seen_tags:
+        if not image:
             continue
         if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+            public.append(name)
+            continue
+        if image in seen_tags:
             continue
         seen_tags.add(image)
         lan_tags.append(image)
@@ -1865,9 +1910,23 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
     if not follow:
         return None
     follow = _compose_build_without_pull(follow)
+    then: list[str] | None = None
     if wants_push and lan_tags:
         follow = _compose_build_without_push(follow)
-        return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow, push_after=lan_tags)
+        if public:
+            stem = _tool_basename(parts[0])
+            then = [follow[0]]
+            if stem == "docker":
+                then.append("compose")
+            for path in paths:
+                then.extend(["-f", str(path)])
+            then.append("push")
+            if quiet:
+                then.append("--quiet")
+            then.extend(public)
+        return skopeo_copy_lan_images_argv(
+            lan, quiet=quiet, follow=follow, push_after=lan_tags, then=then
+        )
     return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
 
 

@@ -858,7 +858,13 @@ def test_lan_docker_pull_rewrites_to_skopeo_not_dockerd(monkeypatch):
     assert equals is not None
     assert equals[1:7] == ["copy", "--override-os", "linux", "--override-arch", "arm64", "--override-variant"]
     assert equals[7] == "v8"
-    assert lan_bound_docker_pull_argv("docker pull -a 192.168.1.50:5000/app") is None
+    assert lan_bound_docker_pull_argv("docker pull -a 192.168.1.50:5000/app") is not None
+    all_tags = lan_bound_docker_pull_argv("docker pull --all-tags 192.168.1.50:5000/app:v1")
+    assert all_tags is not None
+    assert all_tags[1].endswith("lan_skopeo_load.py")
+    assert "--all-tags" in all_tags
+    assert "192.168.1.50:5000/app" in all_tags
+    assert "192.168.1.50:5000/app:v1" not in all_tags
     assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app | cat") is None
     assert lan_bound_docker_pull_argv("docker pull 8.8.8.8:5000/app") is None
     bash = _command_args("docker pull 192.168.1.50:5000/app:stable", "bash")
@@ -907,7 +913,15 @@ def test_lan_docker_push_rewrites_to_skopeo_not_dockerd(monkeypatch):
     assert "docker-daemon:nas.local/org/img:v1" in quiet
     assert lan_bound_docker_push_argv("docker push nginx") is None
     assert lan_bound_docker_push_argv("docker push docker.io/library/nginx") is None
-    assert lan_bound_docker_push_argv("docker push -a 192.168.1.50:5000/app") is None
+    all_tags = lan_bound_docker_push_argv("docker push -a 192.168.1.50:5000/app")
+    assert all_tags is not None
+    assert all_tags[1].endswith("lan_skopeo_load.py")
+    assert "--all-tags" in all_tags
+    assert "--push" in all_tags
+    assert "192.168.1.50:5000/app" in all_tags
+    named = lan_bound_docker_push_argv("docker push --all-tags 192.168.1.50:5000/app:v1")
+    assert named is not None
+    assert "192.168.1.50:5000/app" in named
     assert lan_bound_docker_push_argv("docker push 192.168.1.50:5000/app | cat") is None
     bash = _command_args("docker push 192.168.1.50:5000/app:stable", "bash")
     assert bash[0] == "/usr/bin/skopeo"
@@ -1108,12 +1122,24 @@ def test_lan_compose_push_rewrites_to_skopeo(tmp_path, monkeypatch):
 
 def test_lan_skopeo_load_runs_copies_then_follow(monkeypatch):
     from app.tools.lan_skopeo_load import main
+    import json
 
     seen: list[list[str]] = []
 
-    def fake_run(cmd, check=False):
+    def fake_run(cmd, check=False, **kwargs):
+        if kwargs.get("capture_output") and "list-tags" in cmd:
+            return type("R", (), {"returncode": 0, "stdout": json.dumps({"Tags": ["latest", "v1"]})})()
+        if kwargs.get("capture_output") and cmd[:3] == ["/usr/bin/docker", "image", "ls"]:
+            return type(
+                "R",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": "192.168.1.50:5000/app:latest\n192.168.1.50:5000/app:v1\n",
+                },
+            )()
         seen.append(list(cmd))
-        return type("R", (), {"returncode": 0})()
+        return type("R", (), {"returncode": 0, "stdout": ""})()
 
     monkeypatch.setattr("app.tools.lan_skopeo_load.subprocess.run", fake_run)
     assert (
@@ -1175,6 +1201,47 @@ def test_lan_skopeo_load_runs_copies_then_follow(monkeypatch):
         "docker-daemon:192.168.1.50:5000/app:v1",
         "docker://192.168.1.50:5000/app:v1",
     ]
+    seen.clear()
+    monkeypatch.setattr("app.tools.lan_skopeo_load.shutil.which", lambda name: "/usr/bin/docker" if name in {"docker", "docker.exe"} else None)
+    assert main(["--all-tags", "--push", "/usr/bin/skopeo", "192.168.1.50:5000/app"]) == 0
+    assert [item[-1] for item in seen] == [
+        "docker://192.168.1.50:5000/app:latest",
+        "docker://192.168.1.50:5000/app:v1",
+    ]
+    seen.clear()
+    assert main(["--all-tags", "/usr/bin/skopeo", "192.168.1.50:5000/app"]) == 0
+    assert [item[-1] for item in seen] == [
+        "docker-daemon:192.168.1.50:5000/app:latest",
+        "docker-daemon:192.168.1.50:5000/app:v1",
+    ]
+    seen.clear()
+    assert (
+        main(
+            [
+                "--push-after",
+                "192.168.1.50:5000/app:latest",
+                "/usr/bin/skopeo",
+                "192.168.1.50:5000/base:latest",
+                "--",
+                "/usr/bin/docker",
+                "compose",
+                "build",
+                "--",
+                "/usr/bin/docker",
+                "compose",
+                "push",
+                "web",
+            ]
+        )
+        == 0
+    )
+    assert seen[0][-1] == "docker-daemon:192.168.1.50:5000/base:latest"
+    assert seen[1] == ["/usr/bin/docker", "compose", "build"]
+    assert seen[2][-2:] == [
+        "docker-daemon:192.168.1.50:5000/app:latest",
+        "docker://192.168.1.50:5000/app:latest",
+    ]
+    assert seen[3] == ["/usr/bin/docker", "compose", "push", "web"]
 
 
 def test_dockerfile_from_images_skips_scratch_and_args(tmp_path):
@@ -1538,9 +1605,15 @@ def test_lan_compose_build_skopeo_loads_from_before_build(tmp_path, monkeypatch)
     assert "--push-after" in pushed
     assert "192.168.1.50:5000/base:latest" in pushed
     assert "192.168.1.50:5000/app:latest" in pushed
-    follow = pushed[pushed.index("--") + 1 :]
+    rest = pushed[pushed.index("--") + 1 :]
+    cut = rest.index("--")
+    follow = rest[:cut]
+    then = rest[cut + 1 :]
     assert "build" in follow
     assert "--push" not in follow
+    assert then[:2] == ["/usr/bin/docker", "compose"]
+    assert "push" in then
+    assert then[-1] == "web"
     (app / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
     alpine_push = lan_bound_compose_build_argv(f"docker compose -f {stack} build --push app")
     assert alpine_push is not None
