@@ -29,6 +29,7 @@ from app.tools.terminal import (
     lan_bound_docker_pull_argv,
     lan_bound_docker_push_argv,
     lan_bound_http_argv,
+    lan_bound_lftp_argv,
     lan_bound_netcat_argv,
     lan_bound_nfs_argv,
     lan_bound_rclone_argv,
@@ -682,6 +683,41 @@ def test_lan_rclone_binds_home_nic_not_vpn(monkeypatch):
     bash = _command_args("rclone ls sftp://me@192.168.1.50/share", "bash")
     assert bash[0] == "/usr/bin/rclone"
     assert bash[1:3] == ["--bind", "192.168.1.12"]
+
+
+def test_lan_lftp_binds_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"lftp", "lftp.exe", "curl", "curl.exe"}
+        else None,
+    )
+    listed = lan_bound_lftp_argv("lftp ftp://me@192.168.1.50/share")
+    assert listed is not None
+    assert listed[0] == "/usr/bin/lftp"
+    assert listed[1:3] == ["-e", "set net:socket-bind-ipv4 192.168.1.12"]
+    assert listed[-1] == "ftp://me@192.168.1.50/share"
+    fetched = lan_bound_lftp_argv(
+        'lftp -c "get backup.tar" ftp://192.168.1.40/media'
+    )
+    assert fetched is not None
+    assert fetched[1] == "-c"
+    assert fetched[2].startswith("set net:socket-bind-ipv4 192.168.1.12;")
+    assert "get backup.tar" in fetched[2]
+    assert lan_bound_lftp_argv("lftp ftp://me@8.8.8.8/share") is None
+    assert lan_bound_lftp_argv(
+        'lftp -e "set net:socket-bind-ipv4 10.8.0.2" ftp://192.168.1.50/'
+    ) is None
+    assert lan_bound_lftp_argv("lftp ftp://192.168.1.50/share | cat") is None
+    got = lan_bound_lftp_argv("lftpget ftp://192.168.1.50/backup.tar")
+    assert got is not None
+    assert got[0] == "/usr/bin/curl"
+    assert got[1:3] == ["--interface", "192.168.1.12"]
+    assert "-o" in got and "backup.tar" in got
+    bash = _command_args("lftp ftp://taco@192.168.1.50/media", "bash")
+    assert bash[0] == "/usr/bin/lftp"
+    assert bash[1:3] == ["-e", "set net:socket-bind-ipv4 192.168.1.12"]
 
 
 def test_lan_smbclient_binds_home_nic_not_vpn(monkeypatch):

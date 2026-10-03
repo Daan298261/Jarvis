@@ -611,6 +611,75 @@ def lan_bound_rclone_argv(command: str) -> list[str] | None:
     return [exe, "--bind", bind, *parts[1:]]
 
 
+def _lftp_host_from_argv(parts: list[str]) -> str:
+    target = _http_target_from_argv(parts)
+    if not target:
+        return ""
+    if "://" in target:
+        return (urlparse(target).hostname or "").strip()
+    host = target.split("/", 1)[0]
+    if host.count(":") == 1 and host.rsplit(":", 1)[-1].isdigit():
+        return host.split(":", 1)[0]
+    return host
+
+
+def _lftp_with_bind(exe: str, rest: list[str], bind: str) -> list[str] | None:
+    setcmd = f"set net:socket-bind-ipv4 {bind}"
+    out: list[str] = [exe]
+    index = 0
+    injected = False
+    while index < len(rest):
+        tok = str(rest[index])
+        if tok in {"-c", "-e"} and index + 1 < len(rest):
+            script = str(rest[index + 1])
+            if "net:socket-bind-ipv4" in script or "net:socket-bind-ipv6" in script:
+                return None
+            out.extend([tok, f"{setcmd}; {script}"])
+            injected = True
+            index += 2
+            continue
+        out.append(tok)
+        index += 1
+    if not injected:
+        return [exe, "-e", setcmd, *rest]
+    return out
+
+
+def lan_bound_lftp_argv(command: str) -> list[str] | None:
+    """lftp of an on-link RFC1918 NAS, sourced from that NIC.
+
+    ``net:socket-bind-ipv4`` pins the FTP/SFTP TCP source so a VPN default
+    route cannot steal the NAS. ``lftpget URL`` becomes curl ``--interface``.
+    Skip pipes, existing bind sets, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    if name not in {"lftp", "lftpget"}:
+        return None
+    host = _lftp_host_from_argv(parts)
+    bind = _lan_bind_ip_for_host(host)
+    if not bind:
+        return None
+    if name == "lftpget":
+        url = _http_target_from_argv(parts)
+        return _curl_lan_argv(url, outfile=_add_url_filename(url) if url else "")
+    exe = shutil.which("lftp") or shutil.which("lftp.exe")
+    if not exe:
+        url = _http_target_from_argv(parts)
+        if url.lower().startswith(("ftp://", "ftps://", "http://", "https://")):
+            return _curl_lan_argv(url)
+        return None
+    return _lftp_with_bind(exe, parts[1:], bind)
+
+
 def lan_bound_netcat_argv(command: str) -> list[str] | None:
     """nc/ncat/netcat of an on-link RFC1918 host, sourced from that NIC.
 
@@ -5019,6 +5088,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_scan_argv(command)
         or lan_bound_rsync_argv(command)
         or lan_bound_rclone_argv(command)
+        or lan_bound_lftp_argv(command)
         or lan_bound_netcat_argv(command)
         or lan_bound_dns_argv(command)
         or lan_bound_snmp_argv(command)
