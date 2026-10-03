@@ -1460,7 +1460,7 @@ def _compose_follow_argv(parts: list[str]) -> list[str] | None:
     exe = shutil.which(stem) or shutil.which(f"{stem}.exe")
     if not exe:
         return None
-    return _compose_build_without_pull([exe, *parts[1:]])
+    return [exe, *parts[1:]]
 
 
 def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[str] | None:
@@ -1510,6 +1510,208 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
     follow = _compose_follow_argv(parts)
     if not follow:
         return None
+    return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=_compose_build_without_pull(follow))
+
+
+_COMPOSE_UP_BOOL_FLAGS = frozenset(
+    {
+        "-d",
+        "--detach",
+        "--build",
+        "--no-build",
+        "--force-recreate",
+        "--no-recreate",
+        "--no-deps",
+        "--remove-orphans",
+        "--wait",
+        "--abort-on-container-exit",
+        "--renew-anon-volumes",
+        "-V",
+        "--no-color",
+        "--no-log-prefix",
+        "--attach-dependencies",
+        "--quiet-pull",
+        "-y",
+        "--yes",
+        "--always-recreate-deps",
+        "--no-start",
+        "--watch",
+    }
+)
+_COMPOSE_UP_VALUE_FLAGS = frozenset(
+    {
+        "--pull",
+        "--wait-timeout",
+        "--exit-code-from",
+        "--scale",
+        "--timeout",
+        "-t",
+        "--attach",
+        "--no-attach",
+        "--menu",
+    }
+)
+
+
+def _compose_up_spec(parts: list[str]) -> tuple[list[str], list[str], bool, bool] | None:
+    if not parts:
+        return None
+    stem = _tool_basename(parts[0])
+    rest = parts[1:]
+    if stem == "docker":
+        if not rest or _tool_basename(rest[0]) != "compose":
+            return None
+        rest = rest[1:]
+    elif stem not in {"docker-compose", "docker_compose"}:
+        return None
+    files: list[str] = []
+    quiet = False
+    index = 0
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text in _COMPOSE_PULL_QUIET:
+            quiet = True
+            continue
+        if text.startswith("--file="):
+            files.append(text.split("=", 1)[1].strip())
+            continue
+        if text in _COMPOSE_FILE_FLAGS:
+            if index >= len(rest):
+                return None
+            files.append(str(rest[index] or "").strip().strip("'\""))
+            index += 1
+            continue
+        if text == "up":
+            break
+        if text.startswith("-"):
+            return None
+        return None
+    else:
+        return None
+    services: list[str] = []
+    do_build = False
+    no_build = False
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text in _COMPOSE_PULL_QUIET:
+            quiet = True
+            continue
+        if text == "--build":
+            do_build = True
+            continue
+        if text == "--no-build":
+            no_build = True
+            continue
+        if text in _COMPOSE_UP_BOOL_FLAGS:
+            continue
+        if text.startswith("--pull="):
+            continue
+        if text.startswith("--") and "=" in text:
+            key = text.split("=", 1)[0]
+            if key in _COMPOSE_UP_VALUE_FLAGS:
+                continue
+            return None
+        if text in _COMPOSE_UP_VALUE_FLAGS:
+            if index >= len(rest):
+                return None
+            index += 1
+            continue
+        if text.startswith("-"):
+            return None
+        services.append(text)
+    if no_build:
+        do_build = False
+    return files, services, quiet, do_build
+
+
+def _compose_up_without_always_pull(parts: list[str]) -> list[str]:
+    out: list[str] = []
+    skip_value = False
+    for item in parts:
+        if skip_value:
+            skip_value = False
+            text = str(item).strip().lower()
+            if text == "always":
+                out.append("missing")
+            else:
+                out.append(str(item))
+            continue
+        text = str(item)
+        if text == "--pull":
+            out.append(text)
+            skip_value = True
+            continue
+        if text == "--pull=always":
+            out.append("--pull=missing")
+            continue
+        out.append(text)
+    if skip_value:
+        out.append("missing")
+    return out
+
+
+def lan_bound_compose_up_argv(command: str, cwd: str | None = None) -> list[str] | None:
+    """``docker compose up`` of on-link RFC1918 images / ``FROM`` via skopeo.
+
+    Dockerd cannot source-bind. Skopeo loads LAN ``image:`` refs and, when
+    ``--build`` is set, LAN Dockerfile bases, then compose up uses the local
+    copies (``--pull always`` becomes ``missing``). Skip pipes, interpolations,
+    unknown flags, and missing skopeo.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    spec = _compose_up_spec(parts)
+    if spec is None:
+        return None
+    files, services, quiet, do_build = spec
+    paths = _resolved_compose_paths(files, cwd)
+    if not paths:
+        return None
+    images: dict[str, str] = {}
+    dockerfiles: dict[str, Path] = {}
+    for path in paths:
+        images.update(compose_service_images(path))
+        if do_build:
+            dockerfiles.update(compose_service_dockerfiles(path))
+    if services:
+        images = {name: images[name] for name in services if name in images}
+        dockerfiles = {name: dockerfiles[name] for name in services if name in dockerfiles}
+        if not images and not dockerfiles:
+            return None
+    lan: list[str] = []
+    seen: set[str] = set()
+    for image in images.values():
+        if image in seen:
+            continue
+        if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+            continue
+        seen.add(image)
+        lan.append(image)
+    for dockerfile in dockerfiles.values():
+        for image in dockerfile_from_images(dockerfile):
+            if image in seen:
+                continue
+            if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+                continue
+            seen.add(image)
+            lan.append(image)
+    if not lan:
+        return None
+    follow = _compose_follow_argv(parts)
+    if not follow:
+        return None
+    follow = _compose_up_without_always_pull(follow)
     return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
 
 
@@ -1821,6 +2023,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_docker_pull_argv(command)
         or lan_bound_compose_pull_argv(command, cwd=cwd)
         or lan_bound_compose_build_argv(command, cwd=cwd)
+        or lan_bound_compose_up_argv(command, cwd=cwd)
         or lan_bound_docker_build_argv(command, cwd=cwd)
     )
     if bound:
