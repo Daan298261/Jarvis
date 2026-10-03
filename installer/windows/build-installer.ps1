@@ -36,6 +36,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 $Iss = Join-Path $ScriptDir "Jarvis.iss"
 $OutDir = Join-Path $ScriptDir "dist"
 $BootstrapModel = Join-Path $ScriptDir "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"
@@ -101,6 +102,19 @@ if (-not $SkipDesktopShell) {
     throw "Release cuts cannot use -SkipDesktopShell. The installer must ship Jarvis Desktop."
 } else {
     Write-Warning "Building without Jarvis Desktop (-SkipDesktopShell). Obsidian embed requires the desktop shell."
+}
+
+# Inno's broad runtime/dist exclusions also match nested first-party paths.
+# Fail the build before compilation if the explicitly included launch files are absent.
+$backendRuntime = Join-Path $Root "backend\app\runtime\elevation.py"
+$portalIndex = Join-Path $Root "frontend\dist\index.html"
+if (-not (Test-Path $backendRuntime)) { throw "Backend launch module missing: $backendRuntime" }
+if (-not (Test-Path $portalIndex)) { throw "Portal build missing: $portalIndex" }
+$portalHtml = Get-Content -LiteralPath $portalIndex -Raw
+if ($portalHtml -notmatch '/assets/[^" ]+\.js') { throw "Portal index has no built JavaScript asset: $portalIndex" }
+foreach ($asset in [regex]::Matches($portalHtml, '/assets/[^" ]+\.(?:js|css)')) {
+    $assetPath = Join-Path (Join-Path $Root "frontend\dist") ($asset.Value.TrimStart('/') -replace '/', '\')
+    if (-not (Test-Path $assetPath)) { throw "Portal asset missing: $assetPath" }
 }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null

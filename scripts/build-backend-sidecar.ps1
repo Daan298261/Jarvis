@@ -59,6 +59,9 @@ $name = "jarvis-backend"
     --hidden-import uvicorn.protocols.websockets.auto `
     --hidden-import uvicorn.lifespan `
     --hidden-import uvicorn.lifespan.on `
+    --hidden-import app.main `
+    --hidden-import aiosqlite `
+    --collect-submodules app `
     --collect-all app `
     $entry
 

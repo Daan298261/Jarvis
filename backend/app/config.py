@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def repo_root() -> Path:
+    configured = os.environ.get("JARVIS_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
     return Path(__file__).resolve().parents[2]
 
 

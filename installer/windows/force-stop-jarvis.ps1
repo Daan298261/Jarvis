@@ -19,6 +19,8 @@ param(
 
     [switch]$IncludeTray,
 
+    [switch]$StartupCleanup,
+
     [switch]$CheckOnly,
 
     [int]$MaxWaitSeconds = 90,
@@ -255,6 +257,9 @@ function Invoke-ForceStopSingleRoot {
     function Test-IsJarvisIdentityProcess {
         param($Proc, [string]$RootNorm)
         if (Test-IsProtectedInstallerProcess $Proc) { return $false }
+        # A startup cleanup must never terminate a second launcher while it is
+        # starting the backend. Full installer/uninstall stops still kill it.
+        if ($StartupCleanup -and ([string]$Proc.CommandLine) -match 'start-jarvis\.ps1') { return $false }
         if (Test-ProcessUnderInstall $Proc $RootNorm) { return $true }
         if (Test-IsJarvisUvicornBackend $Proc) { return $true }
         if (Test-IsJarvisMobileGateway $Proc) { return $true }
