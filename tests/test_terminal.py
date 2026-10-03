@@ -464,6 +464,31 @@ def test_lan_mtr_and_nmblookup_bind_home_nic_not_vpn(monkeypatch):
     assert bash[1:3] == ["-a", "192.168.1.12"]
 
 
+def test_lan_tcpdump_and_tshark_bind_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"tcpdump", "tshark", "dumpcap"} else None,
+    )
+    dump = lan_bound_scan_argv("tcpdump -n host 192.168.1.50")
+    assert dump is not None
+    assert dump[0] == "/usr/bin/tcpdump"
+    assert dump[1:3] == ["-i", "eth0"]
+    assert dump[-1] == "192.168.1.50"
+    tshark = lan_bound_scan_argv("tshark -Y ip.addr==192.168.1.1")
+    assert tshark is not None
+    assert tshark[1:3] == ["-i", "eth0"]
+    cap = lan_bound_scan_argv("dumpcap net 192.168.1.0/24")
+    assert cap is not None
+    assert cap[1:3] == ["-i", "eth0"]
+    assert lan_bound_scan_argv("tcpdump -i wg0 host 192.168.1.50") is None
+    assert lan_bound_scan_argv("tcpdump host 8.8.8.8") is None
+    assert lan_bound_scan_argv("tcpdump -n") is None
+    bash = _command_args("tcpdump host 192.168.1.1", "bash")
+    assert bash[0] == "/usr/bin/tcpdump"
+    assert bash[1:3] == ["-i", "eth0"]
+
+
 def test_cifs_host_from_token_unc():
     assert cifs_host_from_token("//192.168.1.50/share") == "192.168.1.50"
     assert cifs_host_from_token("//nas.local/media") == "nas.local"

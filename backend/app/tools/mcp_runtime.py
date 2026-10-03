@@ -355,9 +355,13 @@ class MCPRuntime:
         from ..security.hexstrike_defensive import (
             bind_hexstrike_lan_payload,
             looks_like_nmap_tool,
+            looks_like_snmp_tool,
             lan_inventory_uses_host_nmap,
             nmap_target_from_payload,
+            lan_bind_target,
+            lan_bind_nic,
             _host_nmap_lan_scan,
+            _host_snmp_lan,
         )
 
         args = bind_hexstrike_lan_payload(str(tool_key or name), args)
@@ -365,6 +369,11 @@ class MCPRuntime:
             target = nmap_target_from_payload(args)
             if lan_inventory_uses_host_nmap(target):
                 data = await _host_nmap_lan_scan({**args, "target": target})
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+        if looks_like_snmp_tool(tool_key) or looks_like_snmp_tool(str(name)):
+            target = lan_bind_target(args) or nmap_target_from_payload(args)
+            if lan_bind_nic(target)[1]:
+                data = await _host_snmp_lan(str(tool_key or name), args)
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
         server_id = self._server_id(server)
         last_error = ""

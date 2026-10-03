@@ -770,10 +770,20 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     assert public_nmb.get("additional_args", "") == ""
     star = bind_hexstrike_lan_payload("nmblookup", {"target": "*"})
     assert star["additional_args"] == "-B 192.168.1.255 -i eth0"
+    tcpdump = bind_hexstrike_lan_payload("tcpdump", {"target": "192.168.1.50", "additional_args": "-n -c 20"})
+    assert tcpdump["additional_args"] == "-n -c 20 -i eth0"
+    tshark = bind_hexstrike_lan_payload("http:tshark", {"additional_args": "host 192.168.1.1"})
+    assert tshark["additional_args"] == "host 192.168.1.1 -i eth0"
+    spaced_cap = bind_hexstrike_lan_payload("dumpcap", {"target": "192.168.50.12"})
+    assert spaced_cap.get("additional_args", "") == ""
+    public_cap = bind_hexstrike_lan_payload("tcpdump", {"target": "8.8.8.8"})
+    assert public_cap.get("additional_args", "") == ""
+    snmp = bind_hexstrike_lan_payload("snmpwalk", {"target": "192.168.1.1"})
+    assert snmp.get("additional_args", "") == ""
 
 
 def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
-    from app.security.hexstrike_defensive import looks_like_nmap_tool
+    from app.security.hexstrike_defensive import looks_like_nmap_tool, looks_like_snmp_tool
 
     assert looks_like_nmap_tool("nmap")
     assert looks_like_nmap_tool("http:nmap")
@@ -781,6 +791,12 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert looks_like_nmap_tool("mcp_hexstrike-ai_nmap")
     assert not looks_like_nmap_tool("mcp_hexstrike_ai_trivy")
     assert not looks_like_nmap_tool("container_scan")
+    assert looks_like_snmp_tool("snmpwalk")
+    assert looks_like_snmp_tool("http:snmpget")
+    assert looks_like_snmp_tool("mcp_hexstrike_ai_snmpwalk")
+    assert looks_like_snmp_tool("api/tools/snmpbulkwalk")
+    assert not looks_like_snmp_tool("mcp_hexstrike_ai_nmap")
+    assert not looks_like_snmp_tool("nuclei")
 
 
 def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch):
@@ -954,6 +970,121 @@ async def test_operator_nmap_binds_home_nic(monkeypatch):
     assert seen[0]["target"] == "192.168.1.40"
     assert seen[0]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
     assert seen[0]["scan_type"] == "-sV"
+
+
+@pytest.mark.asyncio
+async def test_operator_snmpwalk_hosts_lan_with_clientaddr(monkeypatch):
+    from pathlib import Path
+
+    from app.security.hexstrike_defensive import execute_operator_snmp, snmp_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}" if str(name).lower() in {"snmpwalk", "snmpget"} else None,
+    )
+    argv = snmp_host_argv("http:snmpwalk", {"target": "192.168.1.1", "community": "public", "additional_args": "-v2c"})
+    assert argv[0] == "/usr/bin/snmpwalk"
+    assert argv[1:] == ["-v2c", "-c", "public", "192.168.1.1"]
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"SNMPv2-MIB::sysName.0 = STRING: gateway\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    result = await execute_operator_snmp(
+        "api/tools/snmpwalk",
+        {"target": "192.168.1.1", "community": "public", "additional_args": "-v2c"},
+    )
+    assert posted == []
+    assert result["source"] == "host-snmp"
+    assert result["target"] == "192.168.1.1"
+    assert "sysName" in result["stdout"]
+    env = seen[0][1]
+    conf = Path(env["SNMPCONFPATH"]) / "snmp.conf"
+    assert "clientaddr 192.168.1.12" in conf.read_text(encoding="utf-8")
+    public = await execute_operator_snmp("api/tools/snmpwalk", {"target": "8.8.8.8", "community": "public"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/snmpwalk"
+    assert posted[0][1]["target"] == "8.8.8.8"
+
+
+@pytest.mark.asyncio
+async def test_mcp_snmpwalk_hosts_lan_with_clientaddr(monkeypatch):
+    from pathlib import Path
+
+    from app.tools.mcp_runtime import MCP
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/snmpwalk" if str(name).lower() == "snmpwalk" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"iso.3.6.1.2.1.1.5.0 = STRING: nas\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    async def fake_connect(server):
+        raise AssertionError("LAN snmpwalk must not go through HexStrike MCP")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_snmpwalk"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "snmpwalk"},
+        "remote_name": "snmpwalk",
+    }
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_snmpwalk",
+            {"target": "192.168.1.40", "community": "public", "additional_args": "-v2c"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-snmp"
+        argv = seen[0][0]
+        assert argv[0] == "/usr/bin/snmpwalk"
+        assert "192.168.1.40" in argv
+        env = seen[0][1]
+        assert "clientaddr 192.168.1.12" in (Path(env["SNMPCONFPATH"]) / "snmp.conf").read_text(encoding="utf-8")
+    finally:
+        MCP.reset_for_tests()
 
 
 @pytest.mark.asyncio

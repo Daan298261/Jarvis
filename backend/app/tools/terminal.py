@@ -246,6 +246,9 @@ _SCAN_NAMES = frozenset(
         "iperf3",
         "mtr",
         "nmblookup",
+        "tcpdump",
+        "tshark",
+        "dumpcap",
     }
 )
 _IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
@@ -289,6 +292,8 @@ def _scan_already_bound(name: str, parts: list[str]) -> bool:
         return bool(flags & {"-a", "--address"})
     if name == "nmblookup":
         return bool(flags & {"-i", "-B", "--broadcast"})
+    if name in {"tcpdump", "tshark", "dumpcap"}:
+        return bool(flags & {"-i", "--interface"})
     return True
 
 
@@ -345,6 +350,13 @@ def _scan_bind_flags(name: str, target: str) -> list[str] | None:
         if iface:
             flags.extend(["-i", iface])
         return flags or None
+    if name in {"tcpdump", "tshark", "dumpcap"}:
+        from ..security.hexstrike_defensive import lan_nic_detail
+
+        iface, _source, _broadcast = lan_nic_detail(target)
+        if not iface:
+            return None
+        return ["-i", iface]
     return None
 
 
@@ -354,8 +366,9 @@ def lan_bound_scan_argv(command: str) -> list[str] | None:
     HexStrike nmap already pins ``-S``/``-e``. Terminal nmap/ping plus ARP/fping
     still follow the OS default route, so a VPN steals (or black-holes) the hop
     to the LAN. mtr uses ``-a``; nmblookup uses ``-B``/``-i`` so NetBIOS to a NAS
-    is not sent on the VPN. Skip pipes and explicit source-bind flags. Public
-    targets are unchanged.
+    is not sent on the VPN. tcpdump/tshark/dumpcap use ``-i`` when the filter
+    names an on-link RFC1918 host. Skip pipes and explicit source-bind flags.
+    Public targets are unchanged.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -378,6 +391,10 @@ def lan_bound_scan_argv(command: str) -> list[str] | None:
         from ..security.hexstrike_defensive import preferred_lan_bind_target
 
         target = preferred_lan_bind_target()
+    if name in {"tcpdump", "tshark", "dumpcap"} and not target:
+        from ..security.hexstrike_defensive import ipv4_or_lan_host_from_tokens
+
+        target = ipv4_or_lan_host_from_tokens(parts[1:])
     flags = _scan_bind_flags(name, target)
     if not flags:
         return None

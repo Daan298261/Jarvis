@@ -11,7 +11,7 @@ import re
 import tempfile
 from pathlib import Path
 
-_SNMP_NAMES = frozenset(
+SNMP_TOOL_STEMS = frozenset(
     {
         "snmpwalk",
         "snmpget",
@@ -22,6 +22,7 @@ _SNMP_NAMES = frozenset(
         "snmpdf",
     }
 )
+_SNMP_NAMES = SNMP_TOOL_STEMS
 _IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
 
 

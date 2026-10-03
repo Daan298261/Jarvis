@@ -467,10 +467,19 @@ def hexstrike_lan_tool_id(tool: str) -> str:
         text = text.rsplit("/", 1)[-1]
     if ":" in text:
         text = text.rsplit(":", 1)[-1]
-    for ident in ("arp_scan",):
+    from ..tools.lan_snmp import SNMP_TOOL_STEMS
+
+    for ident in ("arp_scan", *sorted(SNMP_TOOL_STEMS)):
         if text == ident or text.endswith(f"_{ident}"):
             return ident
     return hexstrike_tool_stem(tool)
+
+
+def looks_like_snmp_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_snmpwalk`` or ``http:snmpget``."""
+    from ..tools.lan_snmp import SNMP_TOOL_STEMS
+
+    return hexstrike_lan_tool_id(name) in SNMP_TOOL_STEMS
 
 
 def nmap_target_from_payload(payload: dict[str, Any] | None) -> str:
@@ -522,6 +531,27 @@ def lan_bind_target(payload: dict[str, Any] | None) -> str:
     return bindable_lan_host(raw)
 
 
+_IPV4_IN_TEXT = re.compile(r"(?<![\d])(\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?)(?![\d])")
+
+
+def ipv4_or_lan_host_from_tokens(tokens: list[str]) -> str:
+    """First RFC1918-looking IPv4, CIDR, or ``.local``/``.lan`` name in argv tokens."""
+    for item in tokens:
+        text = str(item or "").strip().strip("'\"")
+        if not text:
+            continue
+        host = text.split("%", 1)[0]
+        if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?", host):
+            return host.split(":", 1)[0]
+        lowered = host.lower().rstrip(".")
+        if lowered.endswith((".local", ".lan", ".home.arpa")):
+            return host.split(":", 1)[0] if host.count(":") == 1 and host.rsplit(":", 1)[-1].isdigit() else host
+        match = _IPV4_IN_TEXT.search(text)
+        if match:
+            return match.group(1)
+    return ""
+
+
 def _hexstrike_args_key(payload: dict[str, Any]) -> str:
     for key in ("additional_args", "extra_args", "args"):
         if key in payload:
@@ -569,6 +599,7 @@ _HTTP_PROXY_SKIP = {
     "dalfox": frozenset({"--proxy"}),
 }
 _PROXY_HOST_PORT = frozenset({"whatweb", "wfuzz"})
+_CAPTURE_STEMS = frozenset({"tcpdump", "tshark", "dumpcap"})
 
 
 def _proxy_arg_value(stem: str, origin: str) -> str:
@@ -598,6 +629,8 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     wget uses ``--bind-address``. rustscan forwards nmap ``-S``/``-e`` after ``--``.
     arp-scan uses ``--arpspa``/``-I``; arping ``-s``/``-I``; fping ``-S``/``-I``.
     iperf/iperf3 use ``-B``. mtr uses ``-a``. nmblookup uses ``-B``/``-i``.
+    tcpdump/tshark/dumpcap use ``-i``. snmpwalk has no bind flag; LAN operator/MCP
+    calls host-execute with ``SNMPCONFPATH`` ``clientaddr``.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
     wfuzz/arjun/gau/dalfox have no source-bind CLI; they get a loopback LAN proxy
     flag. Public internet targets are left unchanged. Spaced Windows NIC names
@@ -628,6 +661,12 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
             except ValueError:
                 if "." not in host:
                     target = preferred_lan_bind_target()
+    if stem in _CAPTURE_STEMS and not lan_bind_nic(target)[1]:
+        maybe = ipv4_or_lan_host_from_tokens(
+            str(bound.get(_hexstrike_args_key(bound)) or "").split()
+        )
+        if maybe:
+            target = maybe
     iface, source = lan_bind_nic(target)
     if not source:
         return bound
@@ -703,6 +742,12 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
             flags.extend(["-i", iface])
         if not flags:
             return bound
+    elif stem in _CAPTURE_STEMS:
+        if _tokens_have_flag(tokens, frozenset({"-i", "--interface"})):
+            return bound
+        if not hexstrike_nmap_can_bind_interface(iface):
+            return bound
+        flags.extend(["-i", iface])
     elif stem in _HTTP_PROXY_FLAG:
         skip = _HTTP_PROXY_SKIP.get(stem, frozenset({"--proxy", "-x"}))
         if _tokens_have_flag(tokens, skip):
@@ -793,6 +838,82 @@ async def execute_operator_nmap(payload: dict[str, Any] | None) -> dict[str, Any
     if lan_inventory_uses_host_nmap(target):
         return await _host_nmap_lan_scan({**bound, "target": target})
     return await HEXSTRIKE.post_operator("api/tools/nmap", bound)
+
+
+def snmp_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host snmpwalk argv for an on-link RFC1918 peer (HexStrike cannot set SNMPCONFPATH)."""
+    from ..tools.lan_snmp import SNMP_TOOL_STEMS
+
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in SNMP_TOOL_STEMS:
+        stem = "snmpwalk"
+    binary = shutil.which(stem) or shutil.which(f"{stem}.exe")
+    if not binary:
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install net-snmp so HexStrike LAN SNMP can bind the home NIC."
+        )
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if not lan_bind_nic(target)[1]:
+        raise ValueError("snmp LAN target is required")
+    extra = _nmap_flag_tokens(str(row.get("additional_args") or row.get("extra_args") or row.get("args") or ""))
+    community = str(row.get("community") or "").strip()
+    if community:
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", community):
+            raise ValueError("snmp community is invalid")
+        if "-c" not in extra:
+            extra = [*extra, "-c", community]
+    oid = str(row.get("oid") or row.get("object") or "").strip()
+    if oid and not re.fullmatch(r"[A-Za-z0-9._:-]+", oid):
+        raise ValueError("snmp oid is invalid")
+    argv = [binary, *extra]
+    if target not in extra:
+        argv.append(target)
+    if oid:
+        argv.append(oid)
+    return argv
+
+
+async def _host_snmp_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host net-snmp of an on-link RFC1918 peer with ``clientaddr`` on the home NIC."""
+    from ..tools.lan_snmp import snmp_lan_child_env
+
+    argv = snmp_host_argv(tool, payload)
+    env = snmp_lan_child_env(argv)
+    target = lan_bind_target(payload) or nmap_target_from_payload(payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host snmp LAN walk timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "snmp failed").strip()[:400])
+    return {
+        "source": "host-snmp",
+        "target": target,
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_snmp(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator snmpwalk of on-link RFC1918: host argv + SNMPCONFPATH, not the suite env."""
+    bound = dict(payload or {})
+    target = lan_bind_target(bound) or nmap_target_from_payload(bound)
+    if not lan_bind_nic(target)[1]:
+        from .hexstrike import normalize_upstream_path
+
+        return await HEXSTRIKE.post_operator(normalize_upstream_path(path), bound)
+    return await _host_snmp_lan(path, bound)
 
 
 def ensure_default_lan_scope() -> dict[str, Any]:
