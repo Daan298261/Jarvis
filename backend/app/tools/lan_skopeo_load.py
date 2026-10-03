@@ -1,8 +1,10 @@
-"""Load docker images with skopeo so LAN registries bind the home NIC.
+"""Copy docker images with skopeo so LAN registries bind the home NIC.
 
-Dockerd cannot source-bind. Terminal ``docker compose pull``, ``docker compose build``,
-``docker compose up`` / ``create`` / ``run``, and ``docker build`` of on-link RFC1918
-images inherit the loopback LAN HTTP proxy via this helper.
+Dockerd cannot source-bind. Terminal ``docker compose pull`` / ``push`` /
+``build`` / ``up`` / ``create`` / ``run`` and ``docker pull`` / ``push`` /
+``build`` of on-link RFC1918 images inherit the loopback LAN HTTP proxy
+via this helper. ``--push`` copies docker-daemon → docker://; the default
+loads docker:// → docker-daemon.
 """
 from __future__ import annotations
 
@@ -13,8 +15,12 @@ import sys
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     quiet = False
-    if args and args[0] in {"-q", "--quiet"}:
-        quiet = True
+    push = False
+    while args and args[0] in {"-q", "--quiet", "--push"}:
+        if args[0] in {"-q", "--quiet"}:
+            quiet = True
+        else:
+            push = True
         args = args[1:]
     follow: list[str] = []
     if "--" in args:
@@ -30,7 +36,10 @@ def main(argv: list[str] | None = None) -> int:
         cmd = [exe, "copy"]
         if quiet:
             cmd.append("--quiet")
-        cmd.extend(["--src-tls-verify=false", f"docker://{image}", f"docker-daemon:{image}"])
+        if push:
+            cmd.extend(["--dest-tls-verify=false", f"docker-daemon:{image}", f"docker://{image}"])
+        else:
+            cmd.extend(["--src-tls-verify=false", f"docker://{image}", f"docker-daemon:{image}"])
         proc = subprocess.run(cmd, check=False)
         if proc.returncode:
             return int(proc.returncode)

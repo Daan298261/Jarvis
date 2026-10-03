@@ -15,11 +15,13 @@ from app.tools.terminal import (
     compose_service_dockerfiles,
     lan_bound_compose_build_argv,
     lan_bound_compose_pull_argv,
+    lan_bound_compose_push_argv,
     lan_bound_compose_run_argv,
     lan_bound_compose_up_argv,
     lan_bound_dns_argv,
     lan_bound_docker_build_argv,
     lan_bound_docker_pull_argv,
+    lan_bound_docker_push_argv,
     lan_bound_http_argv,
     lan_bound_netcat_argv,
     lan_bound_nfs_argv,
@@ -875,6 +877,44 @@ def test_lan_docker_pull_rewrites_to_skopeo_not_dockerd(monkeypatch):
     assert _child_env(scan)["HTTP_PROXY"].startswith("http://127.0.0.1:")
 
 
+def test_lan_docker_push_rewrites_to_skopeo_not_dockerd(monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "nas.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    pushed = lan_bound_docker_push_argv("docker push 192.168.1.50:5000/app")
+    assert pushed is not None
+    assert pushed[0] == "/usr/bin/skopeo"
+    assert pushed[1:3] == ["copy", "--dest-tls-verify=false"]
+    assert pushed[3] == "docker-daemon:192.168.1.50:5000/app:latest"
+    assert pushed[4] == "docker://192.168.1.50:5000/app:latest"
+    quiet = lan_bound_docker_push_argv("docker image push -q nas.local/org/img:v1")
+    assert quiet is not None
+    assert "--quiet" in quiet
+    assert "docker-daemon:nas.local/org/img:v1" in quiet
+    assert lan_bound_docker_push_argv("docker push nginx") is None
+    assert lan_bound_docker_push_argv("docker push docker.io/library/nginx") is None
+    assert lan_bound_docker_push_argv("docker push -a 192.168.1.50:5000/app") is None
+    assert lan_bound_docker_push_argv("docker push 192.168.1.50:5000/app | cat") is None
+    bash = _command_args("docker push 192.168.1.50:5000/app:stable", "bash")
+    assert bash[0] == "/usr/bin/skopeo"
+    assert bash[1:3] == ["copy", "--dest-tls-verify=false"]
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+
+
 def test_lan_docker_pull_skips_when_skopeo_missing(monkeypatch):
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
     monkeypatch.setattr("app.tools.terminal.shutil.which", lambda name: None)
@@ -967,6 +1007,63 @@ def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):
     assert "10.8.0.1" not in env["HTTP_PROXY"]
 
 
+def test_lan_compose_push_rewrites_to_skopeo(tmp_path, monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+    stack = tmp_path / "compose.yaml"
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    image: 192.168.1.50:5000/app:latest\n"
+        "    depends_on:\n"
+        "      - cache\n"
+        "  cache:\n"
+        "    image: 192.168.1.50:5000/redis:7\n"
+        "  web:\n"
+        "    image: nginx:alpine\n",
+        encoding="utf-8",
+    )
+    one = tmp_path / "lan.yml"
+    one.write_text("services:\n  app:\n    image: 192.168.1.50:5000/app\n", encoding="utf-8")
+    single = lan_bound_compose_push_argv(f"docker compose -f {one} push")
+    assert single is not None
+    assert single[0] == "/usr/bin/skopeo"
+    assert "--dest-tls-verify=false" in single
+    assert "docker-daemon:192.168.1.50:5000/app:latest" in single
+    assert "docker://192.168.1.50:5000/app:latest" in single
+    mixed = lan_bound_compose_push_argv(f"docker compose -f {stack} push")
+    assert mixed is not None
+    assert mixed[1].endswith("lan_skopeo_load.py")
+    assert "--push" in mixed
+    assert "192.168.1.50:5000/app:latest" in mixed
+    assert "192.168.1.50:5000/redis:7" in mixed
+    follow = mixed[mixed.index("--") + 1 :]
+    assert follow[:2] == ["/usr/bin/docker", "compose"]
+    assert follow[-1] == "web"
+    assert "push" in follow
+    only_app = lan_bound_compose_push_argv(f"docker compose -f {stack} push app")
+    assert only_app is not None
+    assert "docker://192.168.1.50:5000/app:latest" in only_app
+    assert "192.168.1.50:5000/redis:7" not in " ".join(only_app)
+    with_deps = lan_bound_compose_push_argv(f"docker compose -f {stack} push --include-deps app")
+    assert with_deps is not None
+    joined = " ".join(with_deps)
+    assert "192.168.1.50:5000/app:latest" in joined
+    assert "192.168.1.50:5000/redis:7" in joined
+    assert lan_bound_compose_push_argv(f"docker compose -f {stack} push web") is None
+    assert lan_bound_compose_push_argv(f"docker compose -f {stack} push | cat") is None
+    bash = _command_args(f"docker compose -f {one} push", "bash", cwd=str(tmp_path))
+    assert bash[0] == "/usr/bin/skopeo"
+    assert "--dest-tls-verify=false" in bash
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+
+
 def test_lan_skopeo_load_runs_copies_then_follow(monkeypatch):
     from app.tools.lan_skopeo_load import main
 
@@ -983,6 +1080,14 @@ def test_lan_skopeo_load_runs_copies_then_follow(monkeypatch):
     assert seen[0][:2] == ["/usr/bin/skopeo", "copy"]
     assert seen[0][-1] == "docker-daemon:192.168.1.50:5000/app:latest"
     assert seen[1] == ["/usr/bin/docker", "compose", "pull", "web"]
+    seen.clear()
+    assert main(["--push", "/usr/bin/skopeo", "192.168.1.50:5000/app:latest"]) == 0
+    assert seen[0][:2] == ["/usr/bin/skopeo", "copy"]
+    assert seen[0][-2:] == [
+        "docker-daemon:192.168.1.50:5000/app:latest",
+        "docker://192.168.1.50:5000/app:latest",
+    ]
+    assert "--dest-tls-verify=false" in seen[0]
 
 
 def test_dockerfile_from_images_skips_scratch_and_args(tmp_path):

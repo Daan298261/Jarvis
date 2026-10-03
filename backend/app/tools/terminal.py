@@ -1032,12 +1032,20 @@ def _docker_pull_image(parts: list[str]) -> str:
 
 
 def _docker_pull_spec(parts: list[str]) -> tuple[str, str]:
+    return _docker_image_xfer_spec(parts, "pull")
+
+
+def _docker_push_spec(parts: list[str]) -> tuple[str, str]:
+    return _docker_image_xfer_spec(parts, "push")
+
+
+def _docker_image_xfer_spec(parts: list[str], verb: str) -> tuple[str, str]:
     if not parts or _tool_basename(parts[0]) != "docker":
         return "", ""
     rest = parts[1:]
     if rest and _tool_basename(rest[0]) == "image":
         rest = rest[1:]
-    if not rest or _tool_basename(rest[0]) != "pull":
+    if not rest or _tool_basename(rest[0]) != verb:
         return "", ""
     image = ""
     platform = ""
@@ -1045,7 +1053,7 @@ def _docker_pull_spec(parts: list[str]) -> tuple[str, str]:
     while index < len(rest):
         text = str(rest[index] or "").strip().strip("'\"")
         index += 1
-        if not text or text in _DOCKER_PULL_QUIET:
+        if not text or text in _DOCKER_PULL_QUIET or text == "--disable-content-trust":
             continue
         if text.startswith("--platform="):
             if platform:
@@ -1120,6 +1128,41 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     if any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:]):
         argv.append("--quiet")
     argv.extend(["--src-tls-verify=false", f"docker://{tagged}", f"docker-daemon:{tagged}"])
+    return argv
+
+
+def lan_bound_docker_push_argv(command: str) -> list[str] | None:
+    """``docker push`` of an on-link RFC1918 registry via skopeo + LAN HTTP proxy.
+
+    Dockerd uploads the registry itself and cannot source-bind the home NIC.
+    ``skopeo copy`` honors HTTP_PROXY, so the loopback LAN proxy sources the
+    daemon image from this PC and pushes to the NAS. Skip pipes, ``-a`` /
+    ``--all-tags``, public Hub names, and missing skopeo.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    image, platform = _docker_push_spec(parts)
+    if not image:
+        return None
+    overrides = _skopeo_platform_flags(platform)
+    if overrides is None:
+        return None
+    host = docker_registry_host_from_image(image)
+    if not _lan_bind_ip_for_host(host):
+        return None
+    exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
+    if not exe:
+        return None
+    tagged = _docker_image_with_tag(image)
+    argv = [exe, "copy", *overrides]
+    if any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:]):
+        argv.append("--quiet")
+    argv.extend(["--dest-tls-verify=false", f"docker-daemon:{tagged}", f"docker://{tagged}"])
     return argv
 
 
@@ -1321,7 +1364,13 @@ def _compose_pull_spec(parts: list[str]) -> tuple[list[str], list[str], bool] | 
     return files, services, quiet
 
 
-def skopeo_copy_lan_images_argv(images: list[str], *, quiet: bool = False, follow: list[str] | None = None) -> list[str] | None:
+def skopeo_copy_lan_images_argv(
+    images: list[str],
+    *,
+    quiet: bool = False,
+    follow: list[str] | None = None,
+    push: bool = False,
+) -> list[str] | None:
     exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
     if not exe or not images:
         return None
@@ -1330,13 +1379,18 @@ def skopeo_copy_lan_images_argv(images: list[str], *, quiet: bool = False, follo
         argv = [exe, "copy"]
         if quiet:
             argv.append("--quiet")
-        argv.extend(["--src-tls-verify=false", f"docker://{tagged[0]}", f"docker-daemon:{tagged[0]}"])
+        if push:
+            argv.extend(["--dest-tls-verify=false", f"docker-daemon:{tagged[0]}", f"docker://{tagged[0]}"])
+        else:
+            argv.extend(["--src-tls-verify=false", f"docker://{tagged[0]}", f"docker-daemon:{tagged[0]}"])
         return argv
     python = sys.executable or shutil.which("python3") or "python3"
     helper = str(Path(__file__).resolve().parent / "lan_skopeo_load.py")
     argv = [python, helper]
     if quiet:
         argv.append("--quiet")
+    if push:
+        argv.append("--push")
     argv.extend([exe, *tagged])
     if follow:
         argv.extend(["--", *follow])
@@ -1395,6 +1449,129 @@ def lan_bound_compose_pull_argv(command: str, cwd: str | None = None) -> list[st
             follow.append("--quiet")
         follow.extend(public)
     return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
+
+
+def _compose_push_spec(parts: list[str]) -> tuple[list[str], list[str], bool, bool] | None:
+    if not parts:
+        return None
+    stem = _tool_basename(parts[0])
+    rest = parts[1:]
+    if stem == "docker":
+        if not rest or _tool_basename(rest[0]) != "compose":
+            return None
+        rest = rest[1:]
+    elif stem not in {"docker-compose", "docker_compose"}:
+        return None
+    files: list[str] = []
+    quiet = False
+    index = 0
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text in _COMPOSE_PULL_QUIET:
+            quiet = True
+            continue
+        if text.startswith("--file="):
+            files.append(text.split("=", 1)[1].strip())
+            continue
+        if text in _COMPOSE_FILE_FLAGS:
+            if index >= len(rest):
+                return None
+            files.append(str(rest[index] or "").strip().strip("'\""))
+            index += 1
+            continue
+        if text == "push":
+            break
+        if text.startswith("-"):
+            return None
+        return None
+    else:
+        return None
+    services: list[str] = []
+    include_deps = False
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text in _COMPOSE_PULL_QUIET:
+            quiet = True
+            continue
+        if text == "--include-deps":
+            include_deps = True
+            continue
+        if text == "--ignore-push-failures":
+            continue
+        if text.startswith("-"):
+            return None
+        services.append(text)
+    return files, services, quiet, include_deps
+
+
+def lan_bound_compose_push_argv(command: str, cwd: str | None = None) -> list[str] | None:
+    """``docker compose push`` of on-link RFC1918 images via skopeo + LAN HTTP proxy.
+
+    Dockerd cannot source-bind. Skip pipes, interpolations, unknown flags, and
+    stacks whose push set has no LAN image. Public Hub services still use
+    ``docker compose push`` after the LAN images upload. ``--include-deps``
+    walks ``depends_on``.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    spec = _compose_push_spec(parts)
+    if spec is None:
+        return None
+    files, services, quiet, include_deps = spec
+    paths = _resolved_compose_paths(files, cwd)
+    if not paths:
+        return None
+    images: dict[str, str] = {}
+    deps: dict[str, list[str]] = {}
+    for path in paths:
+        images.update(compose_service_images(path))
+        for name, kids in compose_service_depends(path).items():
+            deps.setdefault(name, [])
+            for kid in kids:
+                if kid not in deps[name]:
+                    deps[name].append(kid)
+    if not images:
+        return None
+    wanted = list(services)
+    if wanted and include_deps:
+        wanted = _compose_service_closure(deps, wanted)
+    chosen = {name: images[name] for name in wanted if name in images} if wanted else dict(images)
+    if services and not chosen:
+        return None
+    lan: list[str] = []
+    public: list[str] = []
+    for name, image in chosen.items():
+        host = docker_registry_host_from_image(image)
+        if _lan_bind_ip_for_host(host):
+            lan.append(image)
+        else:
+            public.append(name)
+    if not lan:
+        return None
+    follow: list[str] | None = None
+    if public:
+        compose_bin = shutil.which("docker") or shutil.which("docker.exe")
+        if not compose_bin:
+            return None
+        follow = [compose_bin, "compose"]
+        for path in paths:
+            follow.extend(["-f", str(path)])
+        follow.append("push")
+        if quiet:
+            follow.append("--quiet")
+        follow.extend(public)
+    return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow, push=True)
 
 
 _COMPOSE_BUILD_VALUE_FLAGS = frozenset(
@@ -2266,7 +2443,9 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_nfs_argv(command)
         or lan_bound_smb_argv(command)
         or lan_bound_docker_pull_argv(command)
+        or lan_bound_docker_push_argv(command)
         or lan_bound_compose_pull_argv(command, cwd=cwd)
+        or lan_bound_compose_push_argv(command, cwd=cwd)
         or lan_bound_compose_build_argv(command, cwd=cwd)
         or lan_bound_compose_up_argv(command, cwd=cwd)
         or lan_bound_compose_run_argv(command, cwd=cwd)
