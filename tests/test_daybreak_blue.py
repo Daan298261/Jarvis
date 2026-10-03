@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -691,6 +692,7 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     from app.security.hexstrike_defensive import bind_hexstrike_lan_payload, bindable_lan_host
 
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
     assert bindable_lan_host("http://192.168.1.40:8080/login") == "192.168.1.40"
     nuclei = bind_hexstrike_lan_payload(
         "http:nuclei",
@@ -754,6 +756,20 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     assert iperf["additional_args"] == "-c 192.168.1.50 -B 192.168.1.12"
     public_iperf = bind_hexstrike_lan_payload("iperf3", {"target": "8.8.8.8"})
     assert public_iperf.get("additional_args", "") == ""
+    mtr = bind_hexstrike_lan_payload("mtr", {"target": "192.168.1.1", "additional_args": "-c 3"})
+    assert mtr["additional_args"] == "-c 3 -a 192.168.1.12"
+    public_mtr = bind_hexstrike_lan_payload("mtr", {"target": "8.8.8.8"})
+    assert public_mtr.get("additional_args", "") == ""
+    nmb = bind_hexstrike_lan_payload("http:nmblookup", {"target": "192.168.1.50"})
+    assert nmb["additional_args"] == "-B 192.168.1.255 -i eth0"
+    mcp_nmb = bind_hexstrike_lan_payload("mcp_hexstrike_ai_nmblookup", {"host": "192.168.1.40"})
+    assert mcp_nmb["additional_args"] == "-B 192.168.1.255 -i eth0"
+    spaced_nmb = bind_hexstrike_lan_payload("nmblookup", {"target": "192.168.50.12"})
+    assert spaced_nmb["additional_args"] == "-B 192.168.50.255"
+    public_nmb = bind_hexstrike_lan_payload("nmblookup", {"target": "8.8.8.8"})
+    assert public_nmb.get("additional_args", "") == ""
+    star = bind_hexstrike_lan_payload("nmblookup", {"target": "*"})
+    assert star["additional_args"] == "-B 192.168.1.255 -i eth0"
 
 
 def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
@@ -781,10 +797,15 @@ def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch
     assert "ALL_PROXY" not in env
     assert "NO_PROXY" not in env
     assert env["JARVIS_HEXSTRIKE_HOME"] == "/opt/hexstrike"
+    assert "lan_python_site" in env["PYTHONPATH"]
+    from app.config import repo_root
+
+    assert str(repo_root() / "backend") in env["PYTHONPATH"].split(os.pathsep)
     kept = hexstrike_child_env({"PATH": "/usr/bin", "http_proxy": "http://proxy.example:8080", "HEXSTRIKE_PORT": "8888"})
     assert "http_proxy" not in kept
     assert kept["PATH"] == "/usr/bin"
     assert kept["HEXSTRIKE_PORT"] == "8888"
+    assert "HTTP_PROXY" not in kept
 
 
 def test_is_hexstrike_mcp_server_matches_upstream_and_script():

@@ -70,13 +70,15 @@ _BLOCKED_TOKENS = (
 def hexstrike_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """Environment for the managed HexStrike suite process.
 
-    Same proxy-free child env as terminal/python so nuclei/suite HTTP use the OS
-    default route (not a leftover VPN HTTP_PROXY). nmap binds the home NIC via
-    ``-S``/``-e``. gobuster/ffuf/dirsearch get a loopback LAN proxy instead.
+    Same proxy-free child env as terminal so nuclei/suite HTTP use the OS default
+    route (not a leftover VPN HTTP_PROXY). nmap binds the home NIC via ``-S``/``-e``.
+    gobuster/ffuf/dirsearch get a loopback LAN proxy instead. Python LAN tools
+    (smbmap, enum4linux-ng, netexec, impacket) have no source-bind CLI: sitecustomize
+    pins RFC1918 ``connect``/``sendto`` without setting HTTP_PROXY.
     """
-    from ..tools.owner_paths import direct_child_env
+    from ..tools.owner_paths import direct_child_env, with_lan_socket_pythonpath
 
-    return direct_child_env(base)
+    return with_lan_socket_pythonpath(direct_child_env(base))
 
 
 def is_hexstrike_mcp_server(server: dict[str, Any] | None) -> bool:

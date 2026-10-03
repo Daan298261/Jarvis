@@ -348,6 +348,23 @@ def lan_bind_nic(target: str) -> tuple[str, str]:
     return ("", bind)
 
 
+def lan_nic_detail(target: str) -> tuple[str, str, str]:
+    """On-link RFC1918 (iface, source IP, broadcast) for nmblookup ``-i``/``-B``."""
+    iface, source = lan_bind_nic(target)
+    if not source:
+        return ("", "", "")
+    for name, interface in rfc1918_nic_addrs():
+        if str(interface.ip) == source:
+            return (name or iface, source, str(interface.network.broadcast_address))
+    return (iface, source, "")
+
+
+def preferred_lan_bind_target() -> str:
+    """Home-LAN CIDR for NetBIOS broadcasts that name no host (``nmblookup '*'``)."""
+    cidrs = preferred_lan_cidrs()
+    return cidrs[0] if cidrs else ""
+
+
 def lan_scan_bind(target: str) -> tuple[str, str]:
     """This PC's (interface name, IPv4) on the same RFC1918 network as *target*.
 
@@ -580,11 +597,11 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     / ``-interface``. masscan uses ``--source-ip``/``-e``. curl uses ``--interface``.
     wget uses ``--bind-address``. rustscan forwards nmap ``-S``/``-e`` after ``--``.
     arp-scan uses ``--arpspa``/``-I``; arping ``-s``/``-I``; fping ``-S``/``-I``.
-    iperf/iperf3 use ``-B``.
+    iperf/iperf3 use ``-B``. mtr uses ``-a``. nmblookup uses ``-B``/``-i``.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
     wfuzz/arjun/gau/dalfox have no source-bind CLI; they get a loopback LAN proxy
     flag. Public internet targets are left unchanged. Spaced Windows NIC names
-    omit ``-interface``/``-e``/``-I`` (HexStrike ``additional_args.split()``).
+    omit ``-interface``/``-e``/``-I``/``-i`` (HexStrike ``additional_args.split()``).
     """
     bound = dict(payload or {})
     stem = hexstrike_lan_tool_id(tool)
@@ -601,6 +618,16 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         return bound
 
     target = lan_bind_target(bound)
+    if stem == "nmblookup" and not lan_bind_nic(target)[1]:
+        host = (target or "").strip()
+        if not host or host == "*":
+            target = preferred_lan_bind_target()
+        else:
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                if "." not in host:
+                    target = preferred_lan_bind_target()
     iface, source = lan_bind_nic(target)
     if not source:
         return bound
@@ -662,6 +689,20 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
         if _tokens_have_flag(tokens, frozenset({"-B", "--bind"})):
             return bound
         flags.extend(["-B", source])
+    elif stem == "mtr":
+        if _tokens_have_flag(tokens, frozenset({"-a", "--address"})):
+            return bound
+        flags.extend(["-a", source])
+    elif stem == "nmblookup":
+        if _tokens_have_flag(tokens, frozenset({"-i", "-B", "--broadcast"})):
+            return bound
+        _iface, _source, broadcast = lan_nic_detail(target)
+        if broadcast:
+            flags.extend(["-B", broadcast])
+        if hexstrike_nmap_can_bind_interface(iface) and "-i" not in tokens:
+            flags.extend(["-i", iface])
+        if not flags:
+            return bound
     elif stem in _HTTP_PROXY_FLAG:
         skip = _HTTP_PROXY_SKIP.get(stem, frozenset({"--proxy", "-x"}))
         if _tokens_have_flag(tokens, skip):

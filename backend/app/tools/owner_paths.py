@@ -58,9 +58,13 @@ def lan_http_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def python_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """Python HTTP proxy plus sitecustomize so raw sockets bind the home NIC."""
-    env = lan_http_child_env(base)
+def with_lan_socket_pythonpath(env: dict[str, str]) -> dict[str, str]:
+    """Prepend sitecustomize so child Python RFC1918 sockets bind the home NIC.
+
+    Does not set HTTP_PROXY. HexStrike nuclei ``-source-ip`` plus a process-wide
+    proxy would bind LAN then CONNECT loopback. smbmap / enum4linux-ng / netexec
+    / impacket still need ``connect``/``sendto`` sourced from the on-link NIC.
+    """
     site = Path(__file__).resolve().parent / "lan_python_site"
     backend = repo_root() / "backend"
     parts = [str(site), str(backend)]
@@ -69,6 +73,11 @@ def python_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
         parts.append(existing)
     env["PYTHONPATH"] = os.pathsep.join(parts)
     return env
+
+
+def python_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Python HTTP proxy plus sitecustomize so raw sockets bind the home NIC."""
+    return with_lan_socket_pythonpath(lan_http_child_env(base))
 
 
 def git_child_env(base: dict[str, str] | None = None) -> dict[str, str]:

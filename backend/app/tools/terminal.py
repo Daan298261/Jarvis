@@ -233,7 +233,20 @@ def lan_bound_ssh_argv(command: str) -> list[str] | None:
 
 
 _SCAN_NAMES = frozenset(
-    {"nmap", "nping", "ping", "traceroute", "masscan", "arp-scan", "arping", "fping", "iperf", "iperf3"}
+    {
+        "nmap",
+        "nping",
+        "ping",
+        "traceroute",
+        "masscan",
+        "arp-scan",
+        "arping",
+        "fping",
+        "iperf",
+        "iperf3",
+        "mtr",
+        "nmblookup",
+    }
 )
 _IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
 
@@ -272,6 +285,10 @@ def _scan_already_bound(name: str, parts: list[str]) -> bool:
         return bool(flags & {"-I", "-S"})
     if name in {"iperf", "iperf3"}:
         return bool(flags & {"-B", "--bind"})
+    if name == "mtr":
+        return bool(flags & {"-a", "--address"})
+    if name == "nmblookup":
+        return bool(flags & {"-i", "-B", "--broadcast"})
     return True
 
 
@@ -314,16 +331,31 @@ def _scan_bind_flags(name: str, target: str) -> list[str] | None:
         return flags
     if name in {"iperf", "iperf3"}:
         return ["-B", source]
+    if name == "mtr":
+        return ["-a", source]
+    if name == "nmblookup":
+        from ..security.hexstrike_defensive import lan_nic_detail
+
+        iface, source, broadcast = lan_nic_detail(target)
+        if not source:
+            return None
+        flags: list[str] = []
+        if broadcast:
+            flags.extend(["-B", broadcast])
+        if iface:
+            flags.extend(["-i", iface])
+        return flags or None
     return None
 
 
 def lan_bound_scan_argv(command: str) -> list[str] | None:
-    """nmap/ping/traceroute/masscan/arp-scan of on-link RFC1918, sourced from that NIC.
+    """nmap/ping/mtr/nmblookup of on-link RFC1918, sourced from that NIC.
 
     HexStrike nmap already pins ``-S``/``-e``. Terminal nmap/ping plus ARP/fping
     still follow the OS default route, so a VPN steals (or black-holes) the hop
-    to the LAN. Skip pipes and explicit source-bind flags. Public targets are
-    unchanged.
+    to the LAN. mtr uses ``-a``; nmblookup uses ``-B``/``-i`` so NetBIOS to a NAS
+    is not sent on the VPN. Skip pipes and explicit source-bind flags. Public
+    targets are unchanged.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -342,6 +374,10 @@ def lan_bound_scan_argv(command: str) -> list[str] | None:
     if _scan_already_bound(name, parts):
         return None
     target = _scan_target_from_argv(parts)
+    if name == "nmblookup" and not target:
+        from ..security.hexstrike_defensive import preferred_lan_bind_target
+
+        target = preferred_lan_bind_target()
     flags = _scan_bind_flags(name, target)
     if not flags:
         return None
@@ -543,6 +579,116 @@ def lan_bound_snmp_argv(command: str) -> list[str] | None:
     return [exe, *parts[1:]]
 
 
+_CIFS_FS_TYPES = frozenset({"cifs", "smbfs"})
+_CIFS_SRC_KEYS = ("srcaddr=", "interface=")
+
+
+def cifs_host_from_token(token: str) -> str:
+    """Host in a CIFS UNC (``//nas.local/share`` or ``\\\\192.168.1.50\\media``)."""
+    text = str(token or "").strip().strip("'\"")
+    if text.startswith("//"):
+        rest = text[2:]
+        return rest.split("/", 1)[0].split("\\", 1)[0]
+    if text.startswith("\\\\"):
+        rest = text[2:]
+        return rest.split("\\", 1)[0].split("/", 1)[0]
+    return ""
+
+
+def _cifs_host_from_argv(parts: list[str]) -> str:
+    for item in parts[1:]:
+        host = cifs_host_from_token(item)
+        if host:
+            return host
+    return ""
+
+
+def _is_cifs_mount(parts: list[str]) -> bool:
+    name = _tool_basename(parts[0])
+    if name in {"mount.cifs", "mount.smbfs"}:
+        return True
+    if name != "mount":
+        return False
+    index = 1
+    while index < len(parts):
+        token = str(parts[index])
+        if token in {"-t", "--types"} and index + 1 < len(parts):
+            return str(parts[index + 1]).lower() in _CIFS_FS_TYPES
+        if token.startswith("-t") and len(token) > 2 and not token.startswith("--"):
+            return token[2:].lower() in _CIFS_FS_TYPES
+        if token.startswith("--types="):
+            return token.split("=", 1)[1].lower() in _CIFS_FS_TYPES
+        index += 1
+    return False
+
+
+def _cifs_options_text(parts: list[str]) -> str:
+    bits: list[str] = []
+    index = 1
+    while index < len(parts):
+        token = str(parts[index])
+        if token in {"-o", "--options"} and index + 1 < len(parts):
+            bits.append(str(parts[index + 1]))
+            index += 2
+            continue
+        if token.startswith("-o") and len(token) > 2 and not token.startswith("--"):
+            bits.append(token[2:])
+        elif token.startswith("--options="):
+            bits.append(token.split("=", 1)[1])
+        index += 1
+    return ",".join(bits).lower()
+
+
+def _cifs_with_srcaddr(parts: list[str], bind: str) -> list[str]:
+    extra = f"srcaddr={bind}"
+    out = list(parts)
+    index = 1
+    while index < len(out):
+        token = str(out[index])
+        if token in {"-o", "--options"} and index + 1 < len(out):
+            out[index + 1] = f"{out[index + 1]},{extra}" if out[index + 1] else extra
+            return out
+        if token.startswith("-o") and len(token) > 2 and not token.startswith("--"):
+            out[index] = f"{token},{extra}"
+            return out
+        if token.startswith("--options="):
+            out[index] = f"{token},{extra}"
+            return out
+        index += 1
+    return [out[0], "-o", extra, *out[1:]]
+
+
+def lan_bound_cifs_argv(command: str) -> list[str] | None:
+    """mount.cifs of an on-link RFC1918 NAS, sourced from that NIC.
+
+    Windows ``Path(\\\\nas\\share)`` uses the SMB redirector and cannot
+    source-bind. ``mount -t cifs`` ``srcaddr=`` pins the home NIC so a VPN
+    default route cannot steal the NAS. Skip pipes, existing ``srcaddr`` /
+    ``interface``, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or not _is_cifs_mount(parts):
+        return None
+    options = _cifs_options_text(parts)
+    if any(key in options for key in _CIFS_SRC_KEYS):
+        return None
+    host = _cifs_host_from_argv(parts)
+    bind = _lan_bind_ip_for_host(host)
+    if not bind:
+        return None
+    name = _tool_basename(parts[0])
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return _cifs_with_srcaddr([exe, *parts[1:]], bind)
+
+
 def adapt_shell(command: str, shell: str) -> str:
     """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
     chosen = (shell or default_shell()).strip().lower()
@@ -636,6 +782,7 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         or lan_bound_netcat_argv(command)
         or lan_bound_dns_argv(command)
         or lan_bound_snmp_argv(command)
+        or lan_bound_cifs_argv(command)
     )
     if bound:
         return bound

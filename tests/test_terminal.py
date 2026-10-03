@@ -4,7 +4,9 @@ from app.tools.terminal import (
     _command_args,
     _child_env,
     _python_args,
+    cifs_host_from_token,
     default_shell,
+    lan_bound_cifs_argv,
     lan_bound_dns_argv,
     lan_bound_http_argv,
     lan_bound_netcat_argv,
@@ -432,6 +434,77 @@ def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):
     bash = _command_args("nmap -sn 192.168.1.0/24", "bash")
     assert bash[0] == "/usr/bin/nmap"
     assert bash[1:5] == ["-S", "192.168.1.12", "-e", "eth0"]
+
+
+def test_lan_mtr_and_nmblookup_bind_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"mtr", "nmblookup"} else None,
+    )
+    mtr = lan_bound_scan_argv("mtr -c 3 192.168.1.1")
+    assert mtr is not None
+    assert mtr[0] == "/usr/bin/mtr"
+    assert mtr[1:3] == ["-a", "192.168.1.12"]
+    assert mtr[-1] == "192.168.1.1"
+    assert lan_bound_scan_argv("mtr -a 10.8.0.2 192.168.1.1") is None
+    assert lan_bound_scan_argv("mtr 8.8.8.8") is None
+    nmb = lan_bound_scan_argv("nmblookup -A 192.168.1.50")
+    assert nmb is not None
+    assert nmb[0] == "/usr/bin/nmblookup"
+    assert nmb[1:5] == ["-B", "192.168.1.255", "-i", "eth0"]
+    assert nmb[-1] == "192.168.1.50"
+    star = lan_bound_scan_argv("nmblookup '*'")
+    assert star is not None
+    assert star[1:5] == ["-B", "192.168.1.255", "-i", "eth0"]
+    assert lan_bound_scan_argv("nmblookup -i eth0 -A 192.168.1.50") is None
+    bash = _command_args("mtr 192.168.1.50", "bash")
+    assert bash[0] == "/usr/bin/mtr"
+    assert bash[1:3] == ["-a", "192.168.1.12"]
+
+
+def test_cifs_host_from_token_unc():
+    assert cifs_host_from_token("//192.168.1.50/share") == "192.168.1.50"
+    assert cifs_host_from_token("//nas.local/media") == "nas.local"
+    assert cifs_host_from_token(r"\\nas.lan\backup") == "nas.lan"
+    assert cifs_host_from_token("/mnt/nas") == ""
+
+
+def test_lan_cifs_mount_binds_home_nic_not_vpn(monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/sbin/{name}" if name in {"mount", "mount.cifs"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "nas.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    mount = lan_bound_cifs_argv("mount -t cifs //192.168.1.50/share /mnt/nas")
+    assert mount is not None
+    assert mount[0] == "/usr/sbin/mount"
+    assert mount[1:3] == ["-o", "srcaddr=192.168.1.12"]
+    assert mount[-2:] == ["//192.168.1.50/share", "/mnt/nas"]
+    guest = lan_bound_cifs_argv("mount -t cifs //nas.local/media /mnt -o guest,uid=1000")
+    assert guest is not None
+    assert guest[guest.index("-o") + 1] == "guest,uid=1000,srcaddr=192.168.1.12"
+    helper = lan_bound_cifs_argv("mount.cifs //192.168.1.1/backup /mnt/backup")
+    assert helper is not None
+    assert helper[0] == "/usr/sbin/mount.cifs"
+    assert helper[1:3] == ["-o", "srcaddr=192.168.1.12"]
+    assert lan_bound_cifs_argv("mount -t ext4 /dev/sdb1 /mnt") is None
+    assert lan_bound_cifs_argv("mount -t cifs //8.8.8.8/share /mnt") is None
+    assert lan_bound_cifs_argv("mount -t cifs //192.168.1.50/share /mnt -o srcaddr=10.8.0.2") is None
+    assert lan_bound_cifs_argv("mount -t cifs //192.168.1.50/share /mnt | cat") is None
+    bash = _command_args("mount -t cifs //192.168.1.50/share /mnt/nas", "bash")
+    assert bash[0] == "/usr/sbin/mount"
+    assert bash[1:3] == ["-o", "srcaddr=192.168.1.12"]
 
 
 def test_lan_ping_windows_uses_source_flag(monkeypatch):

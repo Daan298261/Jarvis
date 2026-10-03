@@ -115,6 +115,7 @@ def test_hexstrike_stdio_mcp_drops_proxy_email_keeps_it(monkeypatch):
     assert "ALL_PROXY" not in hex_launch["env"]
     assert hex_launch["env"]["HEXSTRIKE_HOST"] == "127.0.0.1"
     assert hex_launch["env"]["HEXSTRIKE_PORT"] == "8888"
+    assert "lan_python_site" in hex_launch["env"]["PYTHONPATH"]
 
     mail = prepare_stdio_launch(
         {
