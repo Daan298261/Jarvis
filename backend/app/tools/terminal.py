@@ -16,7 +16,7 @@ import psutil
 
 from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import direct_child_env, python_child_env, workspace_cwd
+from .owner_paths import direct_child_env, lan_http_child_env, python_child_env, workspace_cwd
 from .safety import classify_command, is_protected_process
 
 
@@ -966,6 +966,118 @@ def lan_bound_smb_argv(command: str) -> list[str] | None:
     return [exe, f"--option=client addr={bind}", *parts[1:]]
 
 
+_DOCKER_DIGEST = re.compile(r"@[A-Za-z0-9]+:[A-Za-z0-9+._=-]+$")
+_LAN_HTTP_TOOL_STEMS = frozenset({"skopeo", "podman", "buildah"})
+_DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
+
+
+def docker_registry_host_from_image(ref: str) -> str:
+    """Registry host in a docker image ref (``192.168.1.50:5000/app:tag``).
+
+    Official Hub names (``nginx``, ``library/nginx``) have no registry host.
+    """
+    text = str(ref or "").strip().strip("'\"")
+    if not text or text.startswith("-"):
+        return ""
+    lowered = text.lower()
+    if lowered.startswith("docker://"):
+        text = text[9:]
+    text = _DOCKER_DIGEST.sub("", text)
+    first, sep, rest = text.partition("/")
+    if not sep or not rest:
+        return ""
+    if first.lower() == "localhost" or "." in first or ":" in first:
+        return first.split(":", 1)[0]
+    return ""
+
+
+def _docker_image_with_tag(ref: str) -> str:
+    text = str(ref or "").strip().strip("'\"")
+    lowered = text.lower()
+    if lowered.startswith("docker://"):
+        text = text[9:]
+    if "@" in text.split("/", 1)[-1]:
+        return text
+    name = text.rsplit("/", 1)[-1]
+    if ":" in name:
+        return text
+    return f"{text}:latest"
+
+
+def _docker_pull_image(parts: list[str]) -> str:
+    if not parts or _tool_basename(parts[0]) != "docker":
+        return ""
+    rest = parts[1:]
+    if rest and _tool_basename(rest[0]) == "image":
+        rest = rest[1:]
+    if not rest or _tool_basename(rest[0]) != "pull":
+        return ""
+    image = ""
+    for item in rest[1:]:
+        text = str(item or "").strip().strip("'\"")
+        if not text or text in _DOCKER_PULL_QUIET:
+            continue
+        if text.startswith("-"):
+            return ""
+        if image:
+            return ""
+        image = text
+    return image
+
+
+def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
+    """``docker pull`` of an on-link RFC1918 registry via skopeo + LAN HTTP proxy.
+
+    Dockerd fetches the registry itself and cannot source-bind the home NIC.
+    ``skopeo copy`` honors HTTP_PROXY, so the loopback LAN proxy sources the
+    registry from that NIC and loads the image into the local docker daemon.
+    Skip pipes, ``-a`` / ``--all-tags`` / ``--platform``, public Hub names,
+    and missing skopeo. Optional ``-q`` / ``--quiet`` only.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    image = _docker_pull_image(parts)
+    if not image:
+        return None
+    host = docker_registry_host_from_image(image)
+    if not _lan_bind_ip_for_host(host):
+        return None
+    exe = shutil.which("skopeo") or shutil.which("skopeo.exe")
+    if not exe:
+        return None
+    tagged = _docker_image_with_tag(image)
+    argv = [exe, "copy"]
+    if any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:]):
+        argv.append("--quiet")
+    argv.extend(["--src-tls-verify=false", f"docker://{tagged}", f"docker-daemon:{tagged}"])
+    return argv
+
+
+def container_direct_argv(command: str) -> list[str] | None:
+    """Run skopeo/podman/buildah as argv so LAN HTTP_PROXY reaches the registry."""
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    if name not in _LAN_HTTP_TOOL_STEMS:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return [exe, *parts[1:]]
+
+
 def adapt_shell(command: str, shell: str) -> str:
     """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
     chosen = (shell or default_shell()).strip().lower()
@@ -1047,6 +1159,9 @@ def _child_env(args: list[str]) -> dict[str, str]:
 
     if args and is_snmp_tool(args[0]):
         return snmp_lan_child_env(args)
+    stem = _tool_basename(args[0]) if args else ""
+    if stem in _LAN_HTTP_TOOL_STEMS:
+        return lan_http_child_env()
     return direct_child_env()
 
 
@@ -1063,12 +1178,16 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         or lan_bound_cifs_argv(command)
         or lan_bound_nfs_argv(command)
         or lan_bound_smb_argv(command)
+        or lan_bound_docker_pull_argv(command)
     )
     if bound:
         return bound
     py = python_direct_argv(command)
     if py:
         return py
+    container = container_direct_argv(command)
+    if container:
+        return container
     if shell == "powershell":
         exe = shutil.which("powershell") or shutil.which("pwsh")
         if not exe:

@@ -6,8 +6,11 @@ from app.tools.terminal import (
     _python_args,
     cifs_host_from_token,
     default_shell,
+    container_direct_argv,
+    docker_registry_host_from_image,
     lan_bound_cifs_argv,
     lan_bound_dns_argv,
+    lan_bound_docker_pull_argv,
     lan_bound_http_argv,
     lan_bound_netcat_argv,
     lan_bound_nfs_argv,
@@ -791,3 +794,65 @@ def test_lan_snmpwalk_sets_clientaddr_not_vpn(monkeypatch):
     assert "clientaddr 192.168.1.12" in (Path(_child_env(bash)["SNMPCONFPATH"]) / "snmp.conf").read_text(
         encoding="utf-8"
     )
+
+
+def test_docker_registry_host_from_image():
+    assert docker_registry_host_from_image("192.168.1.50:5000/app:latest") == "192.168.1.50"
+    assert docker_registry_host_from_image("nas.local/org/img") == "nas.local"
+    assert docker_registry_host_from_image("registry.lan:5000/app@sha256:abc") == "registry.lan"
+    assert docker_registry_host_from_image("nginx") == ""
+    assert docker_registry_host_from_image("library/nginx") == ""
+    assert docker_registry_host_from_image("docker.io/library/nginx") == "docker.io"
+
+
+def test_lan_docker_pull_rewrites_to_skopeo_not_dockerd(monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "podman", "buildah"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host in {"nas.local", "registry.lan"}:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    pulled = lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app")
+    assert pulled is not None
+    assert pulled[0] == "/usr/bin/skopeo"
+    assert pulled[1:3] == ["copy", "--src-tls-verify=false"]
+    assert pulled[3] == "docker://192.168.1.50:5000/app:latest"
+    assert pulled[4] == "docker-daemon:192.168.1.50:5000/app:latest"
+    tagged = lan_bound_docker_pull_argv("docker image pull -q nas.local/org/img:v1")
+    assert tagged is not None
+    assert tagged[1:3] == ["copy", "--quiet"]
+    assert "docker://nas.local/org/img:v1" in tagged
+    assert lan_bound_docker_pull_argv("docker pull nginx") is None
+    assert lan_bound_docker_pull_argv("docker pull docker.io/library/nginx") is None
+    assert lan_bound_docker_pull_argv("docker pull --platform linux/amd64 192.168.1.50:5000/app") is None
+    assert lan_bound_docker_pull_argv("docker pull -a 192.168.1.50:5000/app") is None
+    assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app | cat") is None
+    assert lan_bound_docker_pull_argv("docker pull 8.8.8.8:5000/app") is None
+    bash = _command_args("docker pull 192.168.1.50:5000/app:stable", "bash")
+    assert bash[0] == "/usr/bin/skopeo"
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+    podman = container_direct_argv("podman pull 192.168.1.50:5000/app")
+    assert podman is not None
+    assert podman[0] == "/usr/bin/podman"
+    assert _child_env(podman)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    buildah = _command_args("buildah pull registry.lan/base:latest", "bash")
+    assert buildah[0] == "/usr/bin/buildah"
+    assert _child_env(buildah)["HTTPS_PROXY"] == _child_env(buildah)["HTTP_PROXY"]
+
+
+def test_lan_docker_pull_skips_when_skopeo_missing(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr("app.tools.terminal.shutil.which", lambda name: None)
+    assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app") is None
+    assert container_direct_argv("podman pull 192.168.1.50:5000/app") is None
