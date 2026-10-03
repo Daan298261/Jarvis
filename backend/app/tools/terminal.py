@@ -2271,6 +2271,12 @@ _DOCKER_BUILD_VALUE_FLAGS = frozenset(
         "--cpuset-cpus",
         "--isolation",
         "--security-opt",
+        "--builder",
+        "--allow",
+        "--attest",
+        "--sbom",
+        "--provenance",
+        "--annotation",
     }
 )
 
@@ -2320,9 +2326,9 @@ def _docker_build_spec(parts: list[str], cwd: str | None) -> tuple[Path, bool] |
     rest = parts[1:]
     if rest and _tool_basename(rest[0]) == "image":
         rest = rest[1:]
+    if rest and _tool_basename(rest[0]) == "buildx":
+        rest = rest[1:]
     if not rest or rest[0] != "build":
-        return None
-    if len(rest) > 1 and rest[1] == "x":
         return None
     dockerfile = ""
     context = ""
@@ -2394,11 +2400,12 @@ def lan_bound_docker_build_from_parts(parts: list[str], cwd: str | None = None) 
 
 
 def lan_bound_docker_build_argv(command: str, cwd: str | None = None) -> list[str] | None:
-    """``docker build`` of a Dockerfile whose ``FROM`` is an on-link RFC1918 registry.
+    """``docker build`` / ``docker buildx build`` of a Dockerfile whose ``FROM`` is on-link RFC1918.
 
-    Dockerd cannot source-bind. Skopeo loads LAN bases through the loopback proxy,
-    then ``docker build --pull=false`` uses the local daemon copies. Skip pipes,
-    stdin context, buildx, interpolations, and missing skopeo.
+    Dockerd / BuildKit cannot source-bind. Skopeo loads LAN bases through the
+    loopback proxy, then ``docker build --pull=false`` / ``docker buildx build
+    --pull=false`` uses the local daemon copies. Skip pipes, stdin context,
+    bake, interpolations, and missing skopeo.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):

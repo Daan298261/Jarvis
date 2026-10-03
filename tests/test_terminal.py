@@ -1198,6 +1198,40 @@ def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
     assert "10.8.0.1" not in env["HTTP_PROXY"]
 
 
+def test_lan_docker_buildx_skopeo_loads_from_before_build(tmp_path, monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\nCOPY . .\n", encoding="utf-8")
+    built = lan_bound_docker_build_argv(f"docker buildx build --pull --builder default -t mine {ctx}")
+    assert built is not None
+    assert built[1].endswith("lan_skopeo_load.py")
+    assert "192.168.1.50:5000/base:latest" in built
+    follow = built[built.index("--") + 1 :]
+    assert follow[:2] == ["/usr/bin/docker", "buildx"]
+    assert "build" in follow
+    assert "--pull=false" in follow
+    assert "--pull" not in follow
+    assert "--builder" in follow and "default" in follow
+    assert str(ctx) in follow
+    assert lan_bound_docker_build_argv(f"docker buildx bake -f {ctx}/docker-bake.hcl") is None
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    assert lan_bound_docker_build_argv(f"docker buildx build {ctx}") is None
+    (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base\n", encoding="utf-8")
+    bash = _command_args(f"docker buildx build --load {ctx}", "bash", cwd=str(tmp_path))
+    assert bash[1].endswith("lan_skopeo_load.py")
+    follow = bash[bash.index("--") + 1 :]
+    assert "--load" in follow
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+
+
 def test_compose_service_dockerfiles_resolves_context(tmp_path):
     app = tmp_path / "app"
     app.mkdir()

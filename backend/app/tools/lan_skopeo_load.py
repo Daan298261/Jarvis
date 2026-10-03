@@ -2,9 +2,9 @@
 
 Dockerd cannot source-bind. Terminal ``docker compose pull`` / ``push`` /
 ``build`` / ``up`` / ``create`` / ``run`` and ``docker pull`` / ``push`` /
-``build`` of on-link RFC1918 images inherit the loopback LAN HTTP proxy
-via this helper. ``--push`` copies docker-daemon → docker://; the default
-loads docker:// → docker-daemon.
+``build`` / ``buildx build`` of on-link RFC1918 images inherit the loopback
+LAN HTTP proxy via this helper. ``--push`` copies docker-daemon → docker://;
+the default loads docker:// → docker-daemon.
 """
 from __future__ import annotations
 
