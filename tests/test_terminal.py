@@ -990,6 +990,12 @@ def test_lan_docker_login_rewrites_to_skopeo(tmp_path, monkeypatch):
     assert "10.8.0.1" not in env["HTTP_PROXY"]
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
     monkeypatch.setattr("app.tools.terminal.shutil.which", lambda name: None)
+    assert lan_bound_docker_login_argv("docker login https://192.168.1.50:5000") is None
+    python_login = lan_bound_docker_login_argv("docker login -u taco -p secret 192.168.1.50:5000")
+    assert python_login is not None
+    assert python_login[1].endswith("lan_skopeo_load.py")
+    assert "--login" in python_login
+    assert python_login[-5:] == ["-u", "taco", "-p", "secret", "192.168.1.50:5000"]
     assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app") is None
     assert container_direct_argv("podman pull 192.168.1.50:5000/app") is None
     monkeypatch.setattr(

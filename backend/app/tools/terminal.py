@@ -1305,8 +1305,10 @@ def lan_bound_docker_login_argv(command: str) -> list[str] | None:
 
     Dockerd authenticates through the engine and cannot source-bind the home NIC.
     ``skopeo login --tls-verify=false`` honors HTTP_PROXY and writes
-    ``~/.docker/config.json`` so later skopeo pull/push reuse the same creds.
-    Skip pipes, Docker Hub, and missing skopeo.
+    ``~/.docker/config.json`` so later pull/push reuse the same creds.
+    When skopeo is missing, the helper authenticates ``GET /v2/`` through the
+    LAN proxy and writes the same auth file. Skip pipes, Docker Hub, and
+    interactive logins with no username/password.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1328,14 +1330,20 @@ def lan_bound_docker_login_argv(command: str) -> list[str] | None:
     if not _lan_bind_ip_for_host(host):
         return None
     exe = resolve_skopeo()
-    if not exe:
-        return None
     authfile = Path(_docker_config_authfile())
     try:
         authfile.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         return None
-    return [exe, "login", "--tls-verify=false", "--authfile", str(authfile), *flags, registry]
+    if exe:
+        return [exe, "login", "--tls-verify=false", "--authfile", str(authfile), *flags, registry]
+    from .lan_skopeo_load import _login_creds
+
+    if _login_creds(flags) is None:
+        return None
+    python = sys.executable or shutil.which("python3") or "python3"
+    helper = str(Path(__file__).resolve().parent / "lan_skopeo_load.py")
+    return [python, helper, "--login", "--authfile", str(authfile), *flags, registry]
 
 
 _COMPOSE_FILENAMES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")

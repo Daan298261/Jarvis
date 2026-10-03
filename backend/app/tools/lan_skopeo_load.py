@@ -532,16 +532,134 @@ def _python_copy(image: str, *, quiet: bool, push: bool, extra: list[str] | None
     return _python_pull(image, extra, quiet)
 
 
+def _login_creds(flags: list[str]) -> tuple[str, str, bool] | None:
+    user = ""
+    password = ""
+    stdin = False
+    index = 0
+    while index < len(flags):
+        text = str(flags[index] or "")
+        index += 1
+        if text in {"-u", "--username"} and index < len(flags):
+            user = str(flags[index] or "")
+            index += 1
+            continue
+        if text.startswith("--username="):
+            user = text.split("=", 1)[1]
+            continue
+        if text in {"-p", "--password"} and index < len(flags):
+            password = str(flags[index] or "")
+            index += 1
+            continue
+        if text.startswith("--password="):
+            password = text.split("=", 1)[1]
+            continue
+        if text == "--password-stdin":
+            stdin = True
+            continue
+    if stdin or (user and password):
+        return user, password, stdin
+    return None
+
+
+def _write_docker_auth(authfile: str, registry: str, user: str, password: str) -> None:
+    import base64
+
+    path = Path(authfile or str(Path.home() / ".docker" / "config.json"))
+    payload: dict = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8") or "{}")
+        except (OSError, json.JSONDecodeError, UnicodeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            payload = loaded
+    auths = payload.get("auths")
+    if not isinstance(auths, dict):
+        auths = {}
+        payload["auths"] = auths
+    token = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+    auths[str(registry)] = {"auth": token}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _python_login(registry: str, user: str, password: str, authfile: str) -> int:
+    host = str(registry or "").strip()
+    if not host or not user:
+        return 1
+    import base64
+
+    token = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+    headers = {"User-Agent": "jarvis-lan-oci/1", "Authorization": f"Basic {token}"}
+    ok = False
+    for scheme in ("https", "http"):
+        try:
+            resp = _urlopen(f"{scheme}://{host}/v2/", headers=headers)
+            resp.read(64)
+            _HOST_SCHEME[host] = scheme
+            ok = True
+            break
+        except urllib.error.HTTPError as exc:
+            if int(exc.code) in {401, 403}:
+                return 1
+            continue
+        except (OSError, urllib.error.URLError, ValueError):
+            continue
+    if not ok:
+        return 1
+    try:
+        _write_docker_auth(authfile, host, user, password)
+    except OSError:
+        return 1
+    return 0
+
+
+def _python_login_from_args(args: list[str], authfile: str) -> int:
+    flags: list[str] = []
+    registry = ""
+    value_flags = {"-u", "--username", "-p", "--password"}
+    index = 0
+    while index < len(args):
+        text = str(args[index] or "")
+        index += 1
+        if text in value_flags:
+            flags.append(text)
+            if index >= len(args):
+                return 2
+            flags.append(str(args[index] or ""))
+            index += 1
+            continue
+        if text.startswith("-"):
+            flags.append(text)
+            continue
+        if registry:
+            return 2
+        registry = text
+    creds = _login_creds(flags)
+    if creds is None:
+        return 2
+    user, password, stdin = creds
+    if stdin:
+        password = sys.stdin.readline().rstrip("\r\n")
+    if not user or not password:
+        return 1
+    path = authfile or str(Path.home() / ".docker" / "config.json")
+    return _python_login(registry, user, password, path)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     quiet = False
     push = False
     all_tags = False
     python_copy = False
+    login = False
     extra: list[str] = []
     push_after: list[str] = []
     fetches: list[tuple[str, str]] = []
     cleanup = ""
+    authfile = ""
     while args:
         if args[0] in {"-q", "--quiet"}:
             quiet = True
@@ -553,6 +671,18 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if args[0] == "--python-copy":
             python_copy = True
+            args = args[1:]
+            continue
+        if args[0] == "--login":
+            login = True
+            args = args[1:]
+            continue
+        if args[0] == "--authfile" and len(args) > 1:
+            authfile = args[1]
+            args = args[2:]
+            continue
+        if args[0].startswith("--authfile="):
+            authfile = args[0].split("=", 1)[1]
             args = args[1:]
             continue
         if args[0] in {"-a", "--all-tags"}:
@@ -599,6 +729,8 @@ def main(argv: list[str] | None = None) -> int:
             then = rest[cut2 + 1 :]
         else:
             follow = rest
+    if login:
+        return _python_login_from_args(args, authfile)
     try:
         if python_copy:
             exe = ""

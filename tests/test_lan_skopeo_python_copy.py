@@ -41,6 +41,7 @@ class _Registry(http.server.BaseHTTPRequestHandler):
     manifests: dict[str, bytes] = {}
     uploads: dict[str, bytes] = {}
     put_manifests: dict[str, bytes] = {}
+    basic: str = ""
 
     def log_message(self, *_args):
         return
@@ -62,6 +63,9 @@ class _Registry(http.server.BaseHTTPRequestHandler):
     def _handle_read(self):
         path = self.path.split("?", 1)[0]
         if path in {"/v2/", "/v2"}:
+            if self.basic and (self.headers.get("Authorization") or "") != self.basic:
+                self._send(401, b"{}")
+                return
             self._send(200, b"{}")
             return
         if path.endswith("/tags/list"):
@@ -124,6 +128,7 @@ def registry():
     _Registry.manifests = {}
     _Registry.uploads = {}
     _Registry.put_manifests = {}
+    _Registry.basic = ""
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Registry)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -220,3 +225,33 @@ def test_python_list_tags(registry):
     tags = helper._python_list_tags(f"{registry}/app")
     assert f"{registry}/app:latest" in tags
     assert f"{registry}/app:v1" in tags
+
+
+def test_python_login_writes_docker_auth(registry, tmp_path):
+    import base64
+
+    token = base64.b64encode(b"taco:secret").decode("ascii")
+    _Registry.basic = f"Basic {token}"
+    authfile = tmp_path / "config.json"
+    assert helper.main(["--login", "--authfile", str(authfile), "-u", "taco", "-p", "secret", registry]) == 0
+    payload = json.loads(authfile.read_text(encoding="utf-8"))
+    assert payload["auths"][registry]["auth"] == token
+    assert helper.main(["--login", "--authfile", str(authfile), "-u", "taco", "-p", "wrong", registry]) == 1
+
+
+def test_python_login_password_stdin(registry, tmp_path, monkeypatch):
+    import base64
+    import io
+
+    token = base64.b64encode(b"taco:from-stdin").decode("ascii")
+    _Registry.basic = f"Basic {token}"
+    authfile = tmp_path / "config.json"
+    monkeypatch.setattr(helper.sys, "stdin", io.StringIO("from-stdin\n"))
+    assert (
+        helper.main(
+            ["--login", "--authfile", str(authfile), "--username=taco", "--password-stdin", registry]
+        )
+        == 0
+    )
+    payload = json.loads(authfile.read_text(encoding="utf-8"))
+    assert payload["auths"][registry]["auth"] == token
