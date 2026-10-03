@@ -966,8 +966,7 @@ def lan_bound_smb_argv(command: str) -> list[str] | None:
     return [exe, f"--option=client addr={bind}", *parts[1:]]
 
 
-_DOCKER_DIGEST = re.compile(r"@[A-Za-z0-9]+:[A-Za-z0-9+._=-]+$")
-_LAN_HTTP_TOOL_STEMS = frozenset({"skopeo", "podman", "buildah"})
+_LAN_HTTP_TOOL_STEMS = frozenset({"skopeo", "podman", "buildah", "trivy", "grype", "crane", "oras"})
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
 
 
@@ -976,19 +975,9 @@ def docker_registry_host_from_image(ref: str) -> str:
 
     Official Hub names (``nginx``, ``library/nginx``) have no registry host.
     """
-    text = str(ref or "").strip().strip("'\"")
-    if not text or text.startswith("-"):
-        return ""
-    lowered = text.lower()
-    if lowered.startswith("docker://"):
-        text = text[9:]
-    text = _DOCKER_DIGEST.sub("", text)
-    first, sep, rest = text.partition("/")
-    if not sep or not rest:
-        return ""
-    if first.lower() == "localhost" or "." in first or ":" in first:
-        return first.split(":", 1)[0]
-    return ""
+    from ..security.hexstrike_defensive import container_registry_host
+
+    return container_registry_host(ref)
 
 
 def _docker_image_with_tag(ref: str) -> str:
@@ -1005,24 +994,64 @@ def _docker_image_with_tag(ref: str) -> str:
 
 
 def _docker_pull_image(parts: list[str]) -> str:
+    image, _platform = _docker_pull_spec(parts)
+    return image
+
+
+def _docker_pull_spec(parts: list[str]) -> tuple[str, str]:
     if not parts or _tool_basename(parts[0]) != "docker":
-        return ""
+        return "", ""
     rest = parts[1:]
     if rest and _tool_basename(rest[0]) == "image":
         rest = rest[1:]
     if not rest or _tool_basename(rest[0]) != "pull":
-        return ""
+        return "", ""
     image = ""
-    for item in rest[1:]:
-        text = str(item or "").strip().strip("'\"")
+    platform = ""
+    index = 1
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
         if not text or text in _DOCKER_PULL_QUIET:
             continue
+        if text.startswith("--platform="):
+            if platform:
+                return "", ""
+            platform = text.split("=", 1)[1].strip()
+            continue
+        if text == "--platform":
+            if platform or index >= len(rest):
+                return "", ""
+            platform = str(rest[index] or "").strip().strip("'\"")
+            index += 1
+            if not platform or platform.startswith("-"):
+                return "", ""
+            continue
         if text.startswith("-"):
-            return ""
+            return "", ""
         if image:
-            return ""
+            return "", ""
         image = text
-    return image
+    return image, platform
+
+
+def _skopeo_platform_flags(platform: str) -> list[str] | None:
+    text = str(platform or "").strip()
+    if not text:
+        return []
+    bits = [part for part in text.split("/") if part]
+    if len(bits) < 2 or len(bits) > 3:
+        return None
+    os_name, arch = bits[0], bits[1]
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", os_name) or not re.fullmatch(r"[A-Za-z0-9._-]+", arch):
+        return None
+    flags = ["--override-os", os_name, "--override-arch", arch]
+    if len(bits) == 3:
+        variant = bits[2]
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", variant):
+            return None
+        flags.extend(["--override-variant", variant])
+    return flags
 
 
 def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
@@ -1031,8 +1060,8 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     Dockerd fetches the registry itself and cannot source-bind the home NIC.
     ``skopeo copy`` honors HTTP_PROXY, so the loopback LAN proxy sources the
     registry from that NIC and loads the image into the local docker daemon.
-    Skip pipes, ``-a`` / ``--all-tags`` / ``--platform``, public Hub names,
-    and missing skopeo. Optional ``-q`` / ``--quiet`` only.
+    Skip pipes, ``-a`` / ``--all-tags``, public Hub names, and missing skopeo.
+    Optional ``-q`` / ``--quiet`` and ``--platform os/arch[/variant]``.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1041,8 +1070,11 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
         parts = shlex.split(text, posix=os.name != "nt")
     except ValueError:
         return None
-    image = _docker_pull_image(parts)
+    image, platform = _docker_pull_spec(parts)
     if not image:
+        return None
+    overrides = _skopeo_platform_flags(platform)
+    if overrides is None:
         return None
     host = docker_registry_host_from_image(image)
     if not _lan_bind_ip_for_host(host):
@@ -1051,7 +1083,7 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
     if not exe:
         return None
     tagged = _docker_image_with_tag(image)
-    argv = [exe, "copy"]
+    argv = [exe, "copy", *overrides]
     if any(str(item) in _DOCKER_PULL_QUIET for item in parts[1:]):
         argv.append("--quiet")
     argv.extend(["--src-tls-verify=false", f"docker://{tagged}", f"docker-daemon:{tagged}"])
@@ -1059,7 +1091,7 @@ def lan_bound_docker_pull_argv(command: str) -> list[str] | None:
 
 
 def container_direct_argv(command: str) -> list[str] | None:
-    """Run skopeo/podman/buildah as argv so LAN HTTP_PROXY reaches the registry."""
+    """Run skopeo/podman/buildah/trivy as argv so LAN HTTP_PROXY reaches the registry."""
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
         return None

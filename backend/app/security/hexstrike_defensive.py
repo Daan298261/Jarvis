@@ -26,7 +26,14 @@ from .hexstrike import HEXSTRIKE, audit_hexstrike
 _SCOPE_FILE = "hexstrike-scopes.json"
 _JOB_FILE = "hexstrike-jobs.json"
 _LOCK = threading.RLock()
-_CONTAINER_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?$")
+# Hub names (`alpine:3.20`) and LAN registries (`192.168.1.50:5000/app:tag`).
+# The repository must contain a letter so a CIDR (`192.168.1.0/24`) is not an image.
+_CONTAINER_RE = re.compile(
+    r"^(?:(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)"
+    r"(?::\d{1,5})?/)?"
+    r"[a-z0-9]*[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?$"
+)
 _CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
 SCOPE_KINDS = frozenset({"private_host", "private_cidr", "local_path", "container_image", "local_infrastructure"})
@@ -509,6 +516,28 @@ def nmap_target_from_payload(payload: dict[str, Any] | None) -> str:
     return ""
 
 
+def container_registry_host(ref: str) -> str:
+    """Registry host in a docker/trivy image ref (``192.168.1.50:5000/app:tag``).
+
+    Official Hub names (``nginx``, ``library/nginx``) and CIDRs have no registry host.
+    """
+    text = str(ref or "").strip().strip("'\"")
+    if not text or text.startswith("-"):
+        return ""
+    lowered = text.lower()
+    if lowered.startswith("docker://"):
+        text = text[9:]
+    text = re.sub(r"@[A-Za-z0-9]+:[A-Za-z0-9+._=-]+$", "", text)
+    first, sep, rest = text.partition("/")
+    if not sep or not rest:
+        return ""
+    if rest.isdigit() and len(rest) <= 2:
+        return ""
+    if first.lower() == "localhost" or "." in first or ":" in first:
+        return first.split(":", 1)[0]
+    return ""
+
+
 def bindable_lan_host(raw: str) -> str:
     """Hostname/CIDR HexStrike can bind: URLs and ``host:port`` become the host."""
     text = str(raw or "").strip()
@@ -516,6 +545,9 @@ def bindable_lan_host(raw: str) -> str:
         return ""
     if "://" in text:
         return (urlparse(text).hostname or "").strip()
+    registry = container_registry_host(text)
+    if registry:
+        return registry
     if text.startswith("[") and "]" in text:
         return text[1 : text.index("]")]
     if "/" in text:
@@ -531,7 +563,7 @@ def lan_bind_target(payload: dict[str, Any] | None) -> str:
     row = payload if isinstance(payload, dict) else {}
     raw = nmap_target_from_payload(row)
     if not raw:
-        for key in ("url", "uri", "endpoint"):
+        for key in ("url", "uri", "endpoint", "image", "container_image"):
             text = str(row.get(key) or "").strip()
             if text:
                 raw = text
@@ -599,6 +631,8 @@ _HTTP_PROXY_FLAG = {
     "arjun": "--proxy",
     "gau": "--proxy",
     "dalfox": "--proxy",
+    "trivy": "--proxy",
+    "grype": "--proxy",
 }
 _HTTP_PROXY_SKIP = {
     "gobuster": frozenset({"-p", "--proxy"}),
@@ -615,6 +649,8 @@ _HTTP_PROXY_SKIP = {
     "arjun": frozenset({"-p", "--proxy"}),
     "gau": frozenset({"--proxy"}),
     "dalfox": frozenset({"--proxy"}),
+    "trivy": frozenset({"--proxy"}),
+    "grype": frozenset({"--proxy", "--http-proxy"}),
 }
 _PROXY_HOST_PORT = frozenset({"whatweb", "wfuzz"})
 _CAPTURE_STEMS = frozenset({"tcpdump", "tshark", "dumpcap"})
@@ -679,7 +715,7 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     token (HexStrike ``additional_args.split()`` cannot round-trip the space);
     operator/MCP host-execute when the binary is on PATH.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
-    wfuzz/arjun/gau/dalfox have no source-bind CLI; they get a loopback LAN proxy
+    wfuzz/arjun/gau/dalfox/trivy/grype have no source-bind CLI; they get a loopback LAN proxy
     flag. Public internet targets are left unchanged. Spaced Windows NIC names
     omit ``-interface``/``-e``/``-I``/``-i`` (HexStrike ``additional_args.split()``).
     """
@@ -1352,7 +1388,14 @@ def _payload(capability: DefensiveCapability, scope: dict[str, Any], options: di
             "use_recovery": False,
         }
     if capability.id == "container_scan":
-        return {"target": value, "scan_type": "fs" if scope.get("kind") == "local_path" else "image", "output_format": "json"}
+        payload = {
+            "target": value,
+            "scan_type": "fs" if scope.get("kind") == "local_path" else "image",
+            "output_format": "json",
+        }
+        if payload["scan_type"] == "image":
+            return bind_hexstrike_lan_payload("trivy", payload)
+        return payload
     if capability.id == "iac_scan":
         return {"directory": value, "framework": "all", "output_format": "json"}
     if capability.id == "host_baseline":

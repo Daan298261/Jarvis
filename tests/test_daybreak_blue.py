@@ -52,6 +52,13 @@ def test_scope_validation_accepts_owner_local_assets_and_rejects_public(blue_sto
     assert local["attested_owned"] is True
     assert normalize_scope("private_cidr", "192.168.20.0/24") == "192.168.20.0/24"
     assert normalize_scope("container_image", "alpine:3.20") == "alpine:3.20"
+    assert normalize_scope("container_image", "192.168.1.50:5000/app:latest") == "192.168.1.50:5000/app:latest"
+    assert normalize_scope("container_image", "nas.local:5000/org/img:v1") == "nas.local:5000/org/img:v1"
+    from app.security.target_registry import normalize_target
+
+    assert normalize_target("container_image", "192.168.1.50:5000/app:latest") == "192.168.1.50:5000/app:latest"
+    with pytest.raises(ValueError, match="invalid container"):
+        normalize_scope("container_image", "192.168.1.0/24")
     with pytest.raises(PermissionError):
         upsert_scope("no-attestation", kind="private_host", value="10.0.0.4", label="", attested_owned=False)
     with pytest.raises(ValueError, match="public"):
@@ -802,6 +809,13 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     assert hping["additional_args"] == "-S -p 80 -I eth0"
     spaced_hping = bind_hexstrike_lan_payload("hping3", {"target": "192.168.50.12"})
     assert spaced_hping.get("additional_args", "") == ""
+    trivy = bind_hexstrike_lan_payload("api/tools/trivy", {"target": "192.168.1.50:5000/app:latest"})
+    assert trivy["additional_args"].startswith("--proxy http://127.0.0.1:")
+    assert trivy["target"] == "192.168.1.50:5000/app:latest"
+    grype = bind_hexstrike_lan_payload("http:grype", {"image": "192.168.1.1/org/img:v1"})
+    assert grype["additional_args"].startswith("--proxy http://127.0.0.1:")
+    public_trivy = bind_hexstrike_lan_payload("trivy", {"target": "alpine:3.20"})
+    assert public_trivy.get("additional_args", "") == ""
 
 
 def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():

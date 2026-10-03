@@ -19,7 +19,15 @@ from .security_audit import audit_security_event
 
 _LOCK = threading.RLock()
 _REGISTRY_NAME = "security-targets.json"
-_CONTAINER_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?$", re.I)
+# Hub names (`alpine:3.20`) and LAN registries (`192.168.1.50:5000/app:tag`).
+# The repository must contain a letter so a CIDR (`192.168.1.0/24`) is not an image.
+_CONTAINER_RE = re.compile(
+    r"^(?:(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)"
+    r"(?::\d{1,5})?/)?"
+    r"[a-z0-9]*[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?$",
+    re.I,
+)
 _HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*$", re.I)
 
 TARGET_KINDS = frozenset({"hostname", "ipv4", "ipv6", "cidr", "local_path", "container_image"})

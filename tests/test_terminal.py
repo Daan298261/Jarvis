@@ -803,6 +803,7 @@ def test_docker_registry_host_from_image():
     assert docker_registry_host_from_image("nginx") == ""
     assert docker_registry_host_from_image("library/nginx") == ""
     assert docker_registry_host_from_image("docker.io/library/nginx") == "docker.io"
+    assert docker_registry_host_from_image("192.168.1.0/24") == ""
 
 
 def test_lan_docker_pull_rewrites_to_skopeo_not_dockerd(monkeypatch):
@@ -812,7 +813,9 @@ def test_lan_docker_pull_rewrites_to_skopeo_not_dockerd(monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
-        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "podman", "buildah"} else None,
+        lambda name: f"/usr/bin/{name}"
+        if name in {"skopeo", "skopeo.exe", "podman", "buildah", "trivy", "grype"}
+        else None,
     )
 
     def fake_getaddrinfo(host, *args, **kwargs):
@@ -833,7 +836,15 @@ def test_lan_docker_pull_rewrites_to_skopeo_not_dockerd(monkeypatch):
     assert "docker://nas.local/org/img:v1" in tagged
     assert lan_bound_docker_pull_argv("docker pull nginx") is None
     assert lan_bound_docker_pull_argv("docker pull docker.io/library/nginx") is None
-    assert lan_bound_docker_pull_argv("docker pull --platform linux/amd64 192.168.1.50:5000/app") is None
+    platform = lan_bound_docker_pull_argv("docker pull --platform linux/amd64 192.168.1.50:5000/app")
+    assert platform is not None
+    assert platform[1:5] == ["copy", "--override-os", "linux", "--override-arch"]
+    assert platform[5] == "amd64"
+    assert "--src-tls-verify=false" in platform
+    equals = lan_bound_docker_pull_argv("docker pull --platform=linux/arm64/v8 192.168.1.50:5000/app:v1")
+    assert equals is not None
+    assert equals[1:7] == ["copy", "--override-os", "linux", "--override-arch", "arm64", "--override-variant"]
+    assert equals[7] == "v8"
     assert lan_bound_docker_pull_argv("docker pull -a 192.168.1.50:5000/app") is None
     assert lan_bound_docker_pull_argv("docker pull 192.168.1.50:5000/app | cat") is None
     assert lan_bound_docker_pull_argv("docker pull 8.8.8.8:5000/app") is None
@@ -849,6 +860,10 @@ def test_lan_docker_pull_rewrites_to_skopeo_not_dockerd(monkeypatch):
     buildah = _command_args("buildah pull registry.lan/base:latest", "bash")
     assert buildah[0] == "/usr/bin/buildah"
     assert _child_env(buildah)["HTTPS_PROXY"] == _child_env(buildah)["HTTP_PROXY"]
+    scan = container_direct_argv("trivy image 192.168.1.50:5000/app")
+    assert scan is not None
+    assert scan[0] == "/usr/bin/trivy"
+    assert _child_env(scan)["HTTP_PROXY"].startswith("http://127.0.0.1:")
 
 
 def test_lan_docker_pull_skips_when_skopeo_missing(monkeypatch):
